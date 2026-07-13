@@ -5,8 +5,8 @@ import { seedDefaultTemplates } from "./db/seed";
 import { createApp } from "./http/app";
 
 const config = loadConfig(process.env);
-const { db } = openDb(config.databaseUrl);
-runMigrations(db);
+const { db, sqlite } = openDb(config.databaseUrl);
+runMigrations(db, sqlite);
 seedDefaultTemplates(db);
 
 const port = Number(process.env.PORT ?? 8080);

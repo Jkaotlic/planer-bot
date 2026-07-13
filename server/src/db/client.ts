@@ -16,6 +16,20 @@ export function openDb(path: string): { db: Db; sqlite: Database.Database } {
   return { db, sqlite };
 }
 
-export function runMigrations(db: Db): void {
-  migrate(db, { migrationsFolder });
+export function runMigrations(db: Db, sqlite: Database.Database): void {
+  // A migration that recreates an FK-referenced table (SQLite can't drop NOT NULL
+  // in place) must run with FK enforcement OFF. The `PRAGMA foreign_keys=OFF` inside
+  // the migration file is a no-op because migrate() runs in a transaction, so toggle
+  // it on the raw connection here, around the whole migrate() call.
+  //
+  // Note: `db.$client` would be the more direct way to reach the raw connection, but
+  // the `Db` alias (`BetterSQLite3Database<typeof schema>`) doesn't carry the `$client`
+  // member — that's only present on the ad-hoc intersection type `drizzle()` returns —
+  // so we thread the raw handle through from `openDb` instead.
+  sqlite.pragma("foreign_keys = OFF");
+  try {
+    migrate(db, { migrationsFolder });
+  } finally {
+    sqlite.pragma("foreign_keys = ON");
+  }
 }

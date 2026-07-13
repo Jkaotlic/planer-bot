@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, listActive } from "./employees";
-import { archiveEmployee, restoreEmployee, listArchived } from "./employees";
+import { createEmployee, linkTelegramAccount, listActive, archiveEmployee, restoreEmployee, listArchived } from "./employees";
 import { createShift, getShift, listUpcomingForEmployee } from "./shifts";
 
 describe("archive / restore employee", () => {
