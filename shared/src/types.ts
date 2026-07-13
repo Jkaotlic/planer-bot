@@ -2,8 +2,15 @@ import { z } from "zod";
 
 /** "HH:MM" 24h wall-clock. */
 export const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "expected HH:MM");
-/** "YYYY-MM-DD". */
-export const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
+/** "YYYY-MM-DD", validated for real calendar dates. */
+export const dateStr = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD")
+  .refine((s) => {
+    const [y, m, d] = s.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }, "invalid calendar date");
 
 export const employeeSchema = z.object({
   id: z.number().int(),
