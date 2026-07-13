@@ -31,3 +31,18 @@ export function getByTelegramId(db: Db, telegramUserId: number): Employee | unde
 export function listActive(db: Db): Employee[] {
   return db.select().from(employees).where(eq(employees.isActive, true)).all();
 }
+
+export function createAdminEmployee(
+  db: Db,
+  data: { telegramUserId: number; tgUsername?: string; displayName: string },
+): Employee {
+  return db
+    .insert(employees)
+    .values({ telegramUserId: data.telegramUserId, tgUsername: data.tgUsername ?? null, displayName: data.displayName, isAdmin: true })
+    .returning()
+    .all()[0]!;
+}
+
+export function getEmployeeById(db: Db, id: number): Employee | undefined {
+  return db.select().from(employees).where(eq(employees.id, id)).get();
+}
