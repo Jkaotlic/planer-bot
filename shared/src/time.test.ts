@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend,
+  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, isLateShift,
 } from "./time";
 import type { ShiftTemplate } from "./types";
 
@@ -23,7 +23,7 @@ describe("time", () => {
 
   it("uses the friday override on fridays only", () => {
     expect(resolveShiftTimes(evening, "2026-07-03")).toEqual({ start: "12:00", end: "20:00" }); // Fri
-    expect(resolveShiftTimes(evening, "2026-07-02")).toEqual({ start: "11:00", end: "20:00" }); // Wed
+    expect(resolveShiftTimes(evening, "2026-07-02")).toEqual({ start: "11:00", end: "20:00" }); // Thu
   });
 
   it("computes duration, handling overnight", () => {
@@ -41,5 +41,14 @@ describe("time", () => {
     expect(isWeekend("2026-07-05")).toBe(true);  // Sun
     expect(isWeekend("2026-07-04")).toBe(true);  // Sat
     expect(isWeekend("2026-07-03")).toBe(false); // Fri
+  });
+
+  it("detects late shifts (evening/night, for fair-distribution balancing)", () => {
+    expect(isLateShift({ start: "08:00", end: "17:00" })).toBe(false); // morning
+    expect(isLateShift({ start: "09:00", end: "18:00" })).toBe(false); // day
+    expect(isLateShift({ start: "11:00", end: "20:00" })).toBe(true);  // evening, ends exactly 20:00
+    expect(isLateShift({ start: "15:00", end: "23:00" })).toBe(true);  // night
+    expect(isLateShift({ start: "23:00", end: "07:00" })).toBe(true);  // overnight
+    expect(isLateShift({ start: "09:00", end: "18:00" }, true)).toBe(true); // template override
   });
 });

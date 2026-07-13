@@ -2,6 +2,7 @@
   "name": "planer-bot",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=20" },
   "workspaces": ["shared"],
   "scripts": {
     "test": "vitest run",

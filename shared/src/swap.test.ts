@@ -15,5 +15,7 @@ describe("nextSwapStatus", () => {
   it("throws when acting on an already-resolved request", () => {
     expect(() => nextSwapStatus("accepted", "accept")).toThrow();
     expect(() => nextSwapStatus("declined", "cancel")).toThrow();
+    expect(() => nextSwapStatus("expired", "expire")).toThrow();
+    expect(() => nextSwapStatus("cancelled", "decline")).toThrow();
   });
 });
