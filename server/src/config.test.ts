@@ -29,4 +29,12 @@ describe("loadConfig", () => {
   it("throws on a non-integer admin id", () => {
     expect(() => loadConfig({ ...base, ADMIN_TELEGRAM_IDS: "111, oops" })).toThrow();
   });
+
+  it("throws when there are no admin ids (empty deploy bootstraps nobody)", () => {
+    expect(() => loadConfig({ ...base, ADMIN_TELEGRAM_IDS: "" })).toThrow();
+  });
+
+  it("throws on an invalid IANA timezone", () => {
+    expect(() => loadConfig({ ...base, TEAM_TZ: "Not/AZone" })).toThrow();
+  });
 });

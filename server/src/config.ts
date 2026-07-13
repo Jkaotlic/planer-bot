@@ -3,12 +3,23 @@ import { z } from "zod";
 const intList = z
   .string()
   .transform((s) => s.split(",").map((p) => p.trim()).filter(Boolean))
-  .pipe(z.array(z.coerce.number().int()));
+  .pipe(z.array(z.coerce.number().int()).min(1));
 
 const schema = z.object({
   BOT_TOKEN: z.string().min(1),
   ADMIN_TELEGRAM_IDS: intList,
-  TEAM_TZ: z.string().min(1).default("Europe/Moscow"),
+  TEAM_TZ: z
+    .string()
+    .min(1)
+    .default("Europe/Moscow")
+    .refine((tz) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "invalid IANA timezone"),
   DATABASE_URL: z.string().min(1).default("./data/planer.db"),
   JWT_SECRET: z.string().min(16),
   PUBLIC_URL: z.string().url(),
