@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# database
+*.sqlite
+*.sqlite-*
+*.db
+
+# logs
+*.log
+logs/
+
+# brainstorming visual companion (local only)
+.superpowers/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
