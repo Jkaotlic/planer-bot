@@ -1,4 +1,4 @@
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, isNotNull } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, type Employee } from "../db/schema";
 
@@ -71,4 +71,12 @@ export function restoreEmployee(db: Db, id: number): Employee | undefined {
 
 export function listArchived(db: Db): Employee[] {
   return db.select().from(employees).where(eq(employees.isActive, false)).all();
+}
+
+export function listAdmins(db: Db): Employee[] {
+  return db
+    .select()
+    .from(employees)
+    .where(and(eq(employees.isAdmin, true), eq(employees.isActive, true), isNotNull(employees.telegramUserId)))
+    .all();
 }
