@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { employees, type Employee } from "../db/schema";
+import { employees, shifts, type Employee } from "../db/schema";
 
 export function createEmployee(
   db: Db,
@@ -45,4 +45,30 @@ export function createAdminEmployee(
 
 export function getEmployeeById(db: Db, id: number): Employee | undefined {
   return db.select().from(employees).where(eq(employees.id, id)).get();
+}
+
+export function archiveEmployee(db: Db, id: number, fromDate: string): Employee | undefined {
+  db.update(shifts)
+    .set({ employeeId: null })
+    .where(and(eq(shifts.employeeId, id), gte(shifts.date, fromDate)))
+    .run();
+  return db
+    .update(employees)
+    .set({ isActive: false, archivedAt: new Date() })
+    .where(eq(employees.id, id))
+    .returning()
+    .all()[0];
+}
+
+export function restoreEmployee(db: Db, id: number): Employee | undefined {
+  return db
+    .update(employees)
+    .set({ isActive: true, archivedAt: null })
+    .where(eq(employees.id, id))
+    .returning()
+    .all()[0];
+}
+
+export function listArchived(db: Db): Employee[] {
+  return db.select().from(employees).where(eq(employees.isActive, false)).all();
 }
