@@ -5,8 +5,9 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { listActiveTemplates } from "../repo/templates";
-import { listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
+import { createShift, updateShift, deleteShift, listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
 import { getByTelegramId, getEmployeeById, createAdminEmployee, listActive } from "../repo/employees";
+import { createEntrySchema, updateEntrySchema } from "./entry-schema";
 
 export interface AppDeps {
   db: Db;
@@ -67,6 +68,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.get("/api/admin/employees", requireAdmin(config.jwtSecret), (c) => c.json({ employees: listActive(db) }));
+
+  app.post("/api/admin/entries", requireAdmin(config.jwtSecret), async (c) => {
+    const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    return c.json({ entry: createShift(db, parsed.data) }, 201);
+  });
+
+  app.patch("/api/admin/entries/:id", requireAdmin(config.jwtSecret), async (c) => {
+    const id = Number(c.req.param("id"));
+    const parsed = updateEntrySchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    const entry = updateShift(db, id, parsed.data);
+    if (!entry) return c.json({ error: "not_found" }, 404);
+    return c.json({ entry });
+  });
+
+  app.delete("/api/admin/entries/:id", requireAdmin(config.jwtSecret), (c) => {
+    const id = Number(c.req.param("id"));
+    if (!deleteShift(db, id)) return c.json({ error: "not_found" }, 404);
+    return c.json({ ok: true });
+  });
 
   return app;
 }
