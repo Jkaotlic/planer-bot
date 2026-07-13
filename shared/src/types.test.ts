@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shiftSchema, shiftTemplateSchema, swapStatusSchema } from "./types";
+import { shiftSchema, shiftTemplateSchema, swapStatusSchema, employeeSchema } from "./types";
 
 describe("schemas", () => {
   it("accepts a valid shift", () => {
@@ -28,5 +28,43 @@ describe("schemas", () => {
   it("enumerates swap statuses", () => {
     expect(swapStatusSchema.parse("pending")).toBe("pending");
     expect(swapStatusSchema.safeParse("bogus").success).toBe(false);
+  });
+
+  it("accepts a valid employee", () => {
+    const employee = {
+      id: 1,
+      telegramUserId: 12345,
+      tgUsername: "john_doe",
+      displayName: "John Doe",
+      phone: "+1234567890",
+      isAdmin: false,
+      isActive: true,
+      remindersEnabled: true,
+      prepBufferMin: 15,
+    };
+    expect(employeeSchema.parse(employee)).toEqual(employee);
+  });
+
+  it("rejects a malformed employee", () => {
+    const bad = {
+      id: 1,
+      telegramUserId: null,
+      tgUsername: null,
+      displayName: "",
+      phone: null,
+      isAdmin: false,
+      isActive: true,
+      remindersEnabled: true,
+      prepBufferMin: 15,
+    };
+    expect(employeeSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("rejects an invalid calendar date", () => {
+    const bad = {
+      id: 1, date: "2026-13-99", start: "09:00", end: "17:00",
+      templateId: null, title: null, employeeId: null, note: null,
+    };
+    expect(shiftSchema.safeParse(bad).success).toBe(false);
   });
 });
