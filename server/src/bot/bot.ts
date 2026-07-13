@@ -40,5 +40,9 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.reply("Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");
   });
 
+  bot.catch((err) => {
+    console.error(`bot handler error (update ${err.ctx?.update?.update_id ?? "?"}):`, err.error);
+  });
+
   return bot;
 }

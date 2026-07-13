@@ -76,4 +76,27 @@ describe("bot /start", () => {
     await bot.handleUpdate(startUpdate(666, "/start"));
     expect(sent[0]?.text.toLowerCase()).toContain("админ");
   });
+
+  it("keeps running when a reply fails (error boundary)", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Игорь", inviteToken: "tok-1" });
+    const bot = createBot({ db, config });
+    bot.botInfo = {
+      id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
+      can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
+    } as unknown as typeof bot.botInfo;
+    // every outgoing call throws (Telegram down / user blocked the bot)
+    bot.api.config.use(() => { throw new Error("telegram down"); });
+    // grammY's public `handleUpdate` (singular) always wraps a middleware throw
+    // into a BotError and rethrows it unconditionally — it never consults
+    // `bot.catch`. Only the batch method the real long-polling loop uses
+    // (`handleUpdates`, private in the type defs, driven by `bot.start`) catches
+    // that BotError and dispatches it to the installed error handler. Reach into
+    // it here so the test proves what actually matters: polling survives a
+    // per-update failure instead of stopping.
+    const pollingEntryPoint = bot as unknown as { handleUpdates(updates: unknown[]): Promise<void> };
+    await expect(
+      pollingEntryPoint.handleUpdates([startUpdate(333, "/start tok-1")])
+    ).resolves.toBeUndefined();
+  });
 });
