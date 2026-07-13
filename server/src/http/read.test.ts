@@ -70,4 +70,27 @@ describe("read endpoints", () => {
     expect(ok.status).toBe(200);
     expect((await ok.json()).employees.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("rejects a protected route without a token (401)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const res = await app.request("/api/templates");
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects /api/team/schedule missing the required 'to' param (400)", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request("/api/team/schedule?from=2026-07-01", bearer(await tokenFor(app, 333)));
+    expect(res.status).toBe(400);
+  });
+
+  it("defaults /api/my/shifts to today (in team tz) when 'from' is omitted", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request("/api/my/shifts", bearer(await tokenFor(app, 333)));
+    expect(res.status).toBe(200);
+  });
 });

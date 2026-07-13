@@ -21,7 +21,7 @@ const schema = z.object({
       }
     }, "invalid IANA timezone"),
   DATABASE_URL: z.string().min(1).default("./data/planer.db"),
-  JWT_SECRET: z.string().min(16),
+  JWT_SECRET: z.string().min(32),
   PUBLIC_URL: z.string().url(),
 });
 

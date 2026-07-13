@@ -36,6 +36,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const allowlisted = config.adminTelegramIds.includes(user.id);
     let employee = getByTelegramId(db, user.id);
+    if (employee && !employee.isActive) return c.json({ error: "not_registered" }, 403);
     if (!employee) {
       if (!allowlisted) return c.json({ error: "not_registered" }, 403);
       employee = createAdminEmployee(db, { telegramUserId: user.id, tgUsername: user.username, displayName: displayNameOf(user) });
@@ -48,13 +49,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/me", requireAuth(config.jwtSecret), (c) => {
     const me = getEmployeeById(db, c.get("auth").employeeId);
     if (!me) return c.json({ error: "not_found" }, 404);
-    return c.json({ id: me.id, displayName: me.displayName, isAdmin: me.isAdmin });
+    return c.json({ id: me.id, displayName: me.displayName, isAdmin: c.get("auth").isAdmin });
   });
 
   app.get("/api/templates", requireAuth(config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));
 
   app.get("/api/my/shifts", requireAuth(config.jwtSecret), (c) => {
-    const from = c.req.query("from") ?? new Date().toISOString().slice(0, 10);
+    const from = c.req.query("from") ?? new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
     return c.json({ shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from) });
   });
 
