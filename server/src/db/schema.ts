@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus } from "@planer/shared";
+import type { SwapStatus, EntryCategory } from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -16,6 +16,7 @@ export const employees = sqliteTable("employees", {
   remindersEnabled: integer({ mode: "boolean" }).notNull().default(true),
   prepBufferMin: integer().notNull().default(60),
   inviteToken: text().unique(),
+  archivedAt: integer({ mode: "timestamp" }),
   createdAt: createdAt(),
 });
 
@@ -35,8 +36,11 @@ export const shiftTemplates = sqliteTable("shift_templates", {
 export const shifts = sqliteTable("shifts", {
   id: integer().primaryKey({ autoIncrement: true }),
   date: text().notNull(),
-  start: text().notNull(),
-  end: text().notNull(),
+  start: text(),
+  end: text(),
+  endDate: text(),
+  category: text().$type<EntryCategory>().notNull().default("shift"),
+  location: text(),
   templateId: integer().references(() => shiftTemplates.id),
   title: text(),
   employeeId: integer().references(() => employees.id),

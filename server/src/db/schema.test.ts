@@ -25,4 +25,18 @@ describe("schema", () => {
   it("declares one index on reminder_log (uniqueness verified in the migration SQL, Task 3)", () => {
     expect(getTableConfig(reminderLog).indexes.length).toBe(1);
   });
+
+  it("shifts carries category, end_date, location, and nullable start/end", () => {
+    const db = drizzle(new Database(":memory:"), { casing: "snake_case" });
+    const sql = db.select().from(shifts).toSQL().sql;
+    expect(sql).toContain("category");
+    expect(sql).toContain("end_date");
+    expect(sql).toContain("location");
+  });
+
+  it("employees carries archived_at", () => {
+    const db = drizzle(new Database(":memory:"), { casing: "snake_case" });
+    const sql = db.select().from(employees).toSQL().sql;
+    expect(sql).toContain("archived_at");
+  });
 });
