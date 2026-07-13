@@ -39,3 +39,7 @@ export function deleteShift(db: Db, id: number): boolean {
     return tx.delete(shifts).where(eq(shifts.id, id)).returning().all().length > 0;
   });
 }
+
+export function listShiftsByEmployee(db: Db, employeeId: number): Shift[] {
+  return db.select().from(shifts).where(eq(shifts.employeeId, employeeId)).all();
+}
