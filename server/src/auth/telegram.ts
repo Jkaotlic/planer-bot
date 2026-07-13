@@ -52,8 +52,10 @@ export function validateInitData(
   const b = Buffer.from(hash, "hex");
   if (a.length !== b.length || !timingSafeEqual(a, b)) throw new Error("initData: bad signature");
 
-  const authDate = Number(params.get("auth_date"));
-  if (!Number.isFinite(authDate)) throw new Error("initData: missing auth_date");
+  const authDateRaw = params.get("auth_date");
+  if (authDateRaw === null) throw new Error("initData: missing auth_date");
+  const authDate = Number(authDateRaw);
+  if (!Number.isFinite(authDate)) throw new Error("initData: invalid auth_date");
   if (nowSec - authDate > maxAge) throw new Error("initData: expired");
 
   const userRaw = params.get("user");

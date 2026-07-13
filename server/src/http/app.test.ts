@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { signInitData } from "../auth/telegram";
+import { employees } from "../db/schema";
 import type { Config } from "../config";
 
 const config: Config = {
@@ -53,6 +55,15 @@ describe("app auth", () => {
     const body = await res.json();
     expect(body.employee.id).toBe(w.id);
     expect(body.employee.isAdmin).toBe(false);
+  });
+
+  it("rejects an inactive (archived) employee at login, even if allowlisted (403)", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "tok-inactive" });
+    linkTelegramAccount(db, "tok-inactive", 444);
+    db.update(employees).set({ isActive: false }).where(eq(employees.id, w.id)).run();
+    const res = await createApp({ db, config }).request(authReq(444));
+    expect(res.status).toBe(403);
   });
 
   it("/api/me needs a token and returns the caller", async () => {

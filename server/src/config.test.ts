@@ -4,7 +4,7 @@ import { loadConfig } from "./config";
 const base = {
   BOT_TOKEN: "123:abc",
   ADMIN_TELEGRAM_IDS: "111, 222",
-  JWT_SECRET: "s3cret-value-long-enough",
+  JWT_SECRET: "test-jwt-secret-that-is-long-enough-0123",
   PUBLIC_URL: "https://planner.example.com",
 };
 
