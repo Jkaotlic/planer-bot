@@ -5,9 +5,9 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { listActiveTemplates } from "../repo/templates";
-import { createShift, updateShift, deleteShift, listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
+import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
 import { getByTelegramId, getEmployeeById, createAdminEmployee, listActive } from "../repo/employees";
-import { createEntrySchema, updateEntrySchema } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-schema";
 
 export interface AppDeps {
   db: Db;
@@ -22,6 +22,13 @@ function displayNameOf(u: TelegramUser): string {
 export function createApp(deps: AppDeps): Hono<Env> {
   const { db, config } = deps;
   const app = new Hono<Env>();
+
+  app.onError((err, c) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/FOREIGN KEY/i.test(msg)) return c.json({ error: "invalid_reference" }, 400);
+    console.error("unhandled error:", err);
+    return c.json({ error: "internal" }, 500);
+  });
 
   app.get("/api/health", (c) => c.json({ ok: true }));
 
@@ -79,7 +86,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = Number(c.req.param("id"));
     const parsed = updateEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
-    const entry = updateShift(db, id, parsed.data);
+    const existing = getShift(db, id);
+    if (!existing) return c.json({ error: "not_found" }, 404);
+    const patch = parsed.data;
+    const merged = {
+      category: patch.category ?? existing.category,
+      start: patch.start !== undefined ? patch.start : existing.start,
+      end: patch.end !== undefined ? patch.end : existing.end,
+    };
+    const err = entryTimesError(merged);
+    if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
+    const entry = updateShift(db, id, patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
     return c.json({ entry });
   });
