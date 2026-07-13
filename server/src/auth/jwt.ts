@@ -23,6 +23,6 @@ export async function issueToken(
 }
 
 export async function verifyToken(token: string, secret: string): Promise<AuthClaims> {
-  const { payload } = await jwtVerify(token, key(secret));
+  const { payload } = await jwtVerify(token, key(secret), { algorithms: ["HS256"] });
   return { employeeId: payload.employeeId as number, isAdmin: payload.isAdmin as boolean };
 }
