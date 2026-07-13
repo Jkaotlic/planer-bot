@@ -42,7 +42,7 @@ export const shifts = sqliteTable("shifts", {
   employeeId: integer().references(() => employees.id),
   note: text(),
   createdAt: createdAt(),
-  updatedAt: createdAt(),
+  updatedAt: createdAt().$onUpdate(() => new Date()),
 });
 
 export const swapRequests = sqliteTable("swap_requests", {
