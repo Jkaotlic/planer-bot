@@ -1,6 +1,6 @@
 import type { SwapStatus, SwapEvent, Shift } from "./types";
 import { shiftsOverlap, shiftInterval } from "./overlap";
-import { dayNumber, toMinutes } from "./time";
+import { absMinutes } from "./time";
 
 const TRANSITIONS: Record<SwapStatus, Partial<Record<SwapEvent, SwapStatus>>> = {
   pending: { accept: "accepted", decline: "declined", cancel: "cancelled", expire: "expired" },
@@ -47,7 +47,7 @@ export function validateSwap(ctx: SwapContext): SwapValidation {
   if (fromShift.employeeId !== fromEmployeeId) return { ok: false, reason: "from-shift-not-owned" };
   if (toShift.employeeId !== toEmployeeId) return { ok: false, reason: "to-shift-not-owned" };
 
-  const nowAbs = dayNumber(now.date) * 24 * 60 + toMinutes(now.time);
+  const nowAbs = absMinutes(now.date, now.time);
   if (shiftInterval(fromShift).start <= nowAbs) return { ok: false, reason: "from-shift-in-past" };
   if (shiftInterval(toShift).start <= nowAbs) return { ok: false, reason: "to-shift-in-past" };
 
