@@ -58,4 +58,29 @@ describe("admin entry endpoints", () => {
     const missing = await app.request("/api/admin/entries/999", authedJson(admin, { note: "x" }, "PATCH"));
     expect(missing.status).toBe(404);
   });
+
+  it("rejects a PATCH that would strand the entry in an incoherent category/times state", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const created = await app.request("/api/admin/entries", authedJson(admin, { date: "2026-07-10", category: "vacation" }));
+    expect(created.status).toBe(201);
+    const id = (await created.json()).entry.id as number;
+
+    const patched = await app.request(`/api/admin/entries/${id}`, authedJson(admin, { category: "shift" }, "PATCH"));
+    expect(patched.status).toBe(400);
+  });
+
+  it("maps an unknown foreign-key reference to 400, not 500", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const created = await app.request(
+      "/api/admin/entries",
+      authedJson(admin, { date: "2026-07-10", start: "08:00", end: "17:00", employeeId: 99999 }),
+    );
+    expect(created.status).toBe(400);
+  });
 });

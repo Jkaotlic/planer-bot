@@ -23,4 +23,25 @@ describe("entry input schema", () => {
   it("update schema makes everything optional", () => {
     expect(updateEntrySchema.parse({ note: "заметка" })).toEqual({ note: "заметка" });
   });
+
+  it("rejects a shift with no times", () => {
+    expect(createEntrySchema.safeParse({ date: "2026-07-10" }).success).toBe(false);
+  });
+
+  it("accepts a shift with times", () => {
+    expect(createEntrySchema.safeParse({ date: "2026-07-10", start: "08:00", end: "17:00" }).success).toBe(true);
+  });
+
+  it("rejects an absence that has times", () => {
+    expect(
+      createEntrySchema.safeParse({ date: "2026-07-10", category: "vacation", start: "08:00", end: "17:00" }).success,
+    ).toBe(false);
+  });
+
+  it("accepts a duty with times", () => {
+    expect(
+      createEntrySchema.safeParse({ date: "2026-07-10", category: "duty", start: "09:00", end: "18:00", location: "Вавилова" })
+        .success,
+    ).toBe(true);
+  });
 });
