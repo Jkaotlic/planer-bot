@@ -7,16 +7,16 @@ const createdAt = () =>
 
 export const employees = sqliteTable("employees", {
   id: integer().primaryKey({ autoIncrement: true }),
-  telegram_user_id: integer().unique(),
-  tg_username: text(),
-  display_name: text().notNull(),
+  telegramUserId: integer().unique(),
+  tgUsername: text(),
+  displayName: text().notNull(),
   phone: text(),
-  is_admin: integer({ mode: "boolean" }).notNull().default(false),
-  is_active: integer({ mode: "boolean" }).notNull().default(true),
-  reminders_enabled: integer({ mode: "boolean" }).notNull().default(true),
-  prep_buffer_min: integer().notNull().default(60),
-  invite_token: text().unique(),
-  created_at: createdAt(),
+  isAdmin: integer({ mode: "boolean" }).notNull().default(false),
+  isActive: integer({ mode: "boolean" }).notNull().default(true),
+  remindersEnabled: integer({ mode: "boolean" }).notNull().default(true),
+  prepBufferMin: integer().notNull().default(60),
+  inviteToken: text().unique(),
+  createdAt: createdAt(),
 });
 
 export const shiftTemplates = sqliteTable("shift_templates", {
@@ -24,12 +24,12 @@ export const shiftTemplates = sqliteTable("shift_templates", {
   name: text().notNull(),
   start: text().notNull(),
   end: text().notNull(),
-  friday_start: text(),
-  friday_end: text(),
-  is_late: integer({ mode: "boolean" }).notNull().default(false),
-  send_reminder: integer({ mode: "boolean" }).notNull().default(false),
-  sort_order: integer().notNull().default(0),
-  is_active: integer({ mode: "boolean" }).notNull().default(true),
+  fridayStart: text(),
+  fridayEnd: text(),
+  isLate: integer({ mode: "boolean" }).notNull().default(false),
+  sendReminder: integer({ mode: "boolean" }).notNull().default(false),
+  sortOrder: integer().notNull().default(0),
+  isActive: integer({ mode: "boolean" }).notNull().default(true),
 });
 
 export const shifts = sqliteTable("shifts", {
@@ -37,43 +37,43 @@ export const shifts = sqliteTable("shifts", {
   date: text().notNull(),
   start: text().notNull(),
   end: text().notNull(),
-  template_id: integer().references(() => shiftTemplates.id),
+  templateId: integer().references(() => shiftTemplates.id),
   title: text(),
-  employee_id: integer().references(() => employees.id),
+  employeeId: integer().references(() => employees.id),
   note: text(),
-  created_at: createdAt(),
-  updated_at: createdAt(),
+  createdAt: createdAt(),
+  updatedAt: createdAt(),
 });
 
 export const swapRequests = sqliteTable("swap_requests", {
   id: integer().primaryKey({ autoIncrement: true }),
-  from_employee_id: integer().notNull().references(() => employees.id),
-  from_shift_id: integer().notNull().references(() => shifts.id),
-  to_employee_id: integer().notNull().references(() => employees.id),
-  to_shift_id: integer().notNull().references(() => shifts.id),
+  fromEmployeeId: integer().notNull().references(() => employees.id),
+  fromShiftId: integer().notNull().references(() => shifts.id),
+  toEmployeeId: integer().notNull().references(() => employees.id),
+  toShiftId: integer().notNull().references(() => shifts.id),
   status: text().$type<SwapStatus>().notNull().default("pending"),
   message: text(),
-  created_at: createdAt(),
-  resolved_at: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+  resolvedAt: integer({ mode: "timestamp" }),
 });
 
 export const reminderLog = sqliteTable(
   "reminder_log",
   {
     id: integer().primaryKey({ autoIncrement: true }),
-    shift_id: integer().notNull().references(() => shifts.id),
+    shiftId: integer().notNull().references(() => shifts.id),
     kind: text().notNull(),
-    sent_at: createdAt(),
+    sentAt: createdAt(),
   },
-  (t) => [uniqueIndex("reminder_shift_kind").on(t.shift_id, t.kind)],
+  (t) => [uniqueIndex("reminder_shift_kind").on(t.shiftId, t.kind)],
 );
 
 export const auditLog = sqliteTable("audit_log", {
   id: integer().primaryKey({ autoIncrement: true }),
   type: text().notNull(),
-  actor_employee_id: integer().references(() => employees.id),
+  actorEmployeeId: integer().references(() => employees.id),
   payload: text({ mode: "json" }).notNull(),
-  created_at: createdAt(),
+  createdAt: createdAt(),
 });
 
 export type Employee = typeof employees.$inferSelect;
