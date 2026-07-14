@@ -25,6 +25,19 @@ import { listRecentAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal } from "../bot/notify";
 import { teamNow } from "../util/team-time";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
+import {
+  postSlot,
+  expressInterest,
+  interestedForSlot,
+  assignSlot,
+  confirmOffer,
+  declineOffer,
+  payrollRows,
+  payrollCsv,
+  openSlotsForWorker,
+  myOffers,
+} from "../weekend/weekend-service";
+import { listOpenSlots } from "../repo/weekend";
 
 export interface AppDeps {
   db: Db;
@@ -260,6 +273,101 @@ export function createApp(deps: AppDeps): Hono<Env> {
       };
     });
     return c.json({ swaps });
+  });
+
+  // --- Weekend-work marketplace ---------------------------------------------
+
+  // Worker: browse open vacant slots (with "am I interested?" flag)
+  app.get("/api/weekend/slots", requireAuth(config.jwtSecret), (c) => {
+    const from = c.req.query("from") ?? teamNow(config.teamTz).date;
+    return c.json({ slots: openSlotsForWorker(db, c.get("auth").employeeId, from) });
+  });
+
+  // Worker: express interest in a slot (idempotent)
+  app.post("/api/weekend/slots/:id/interest", requireAuth(config.jwtSecret), (c) => {
+    const res = expressInterest(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    return c.json({ ok: true }, 201);
+  });
+
+  // Worker: my offered/confirmed weekend assignments
+  app.get("/api/weekend/offers", requireAuth(config.jwtSecret), (c) =>
+    c.json({ offers: myOffers(db, c.get("auth").employeeId) }),
+  );
+
+  // Worker: confirm an offer -> creates a weekend_work shift
+  app.post("/api/weekend/offers/:id/confirm", requireAuth(config.jwtSecret), async (c) => {
+    const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (bot) await notifyAdmins(bot, db, "Работник подтвердил работу в выходной ✅");
+    return c.json({ ok: true });
+  });
+
+  // Worker: decline an offer -> slot reopens
+  app.post("/api/weekend/offers/:id/decline", requireAuth(config.jwtSecret), async (c) => {
+    const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (bot) await notifyAdmins(bot, db, "Работник отказался от работы в выходной.");
+    return c.json({ ok: true });
+  });
+
+  // Admin: post a new vacant slot
+  app.post("/api/admin/weekend/slots", requireAdmin(config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      date?: unknown; start?: unknown; end?: unknown; title?: unknown; location?: unknown; note?: unknown;
+    };
+    if (typeof body.date !== "string" || typeof body.start !== "string" || typeof body.end !== "string") {
+      return c.json({ error: "date, start and end are required" }, 400);
+    }
+    const slot = postSlot(db, {
+      date: body.date,
+      start: body.start,
+      end: body.end,
+      title: typeof body.title === "string" ? body.title : null,
+      location: typeof body.location === "string" ? body.location : null,
+      note: typeof body.note === "string" ? body.note : null,
+    });
+    // TODO(bot): notify all workers about the new vacant slot (Task 3)
+    return c.json({ slot }, 201);
+  });
+
+  // Admin: open slots with their ranked interested list (fairness hint: confirmedThisMonth asc)
+  app.get("/api/admin/weekend/slots", requireAdmin(config.jwtSecret), (c) => {
+    const from = c.req.query("from") ?? teamNow(config.teamTz).date;
+    const slots = listOpenSlots(db, from).map((slot) => ({ slot, interested: interestedForSlot(db, slot.id) }));
+    return c.json({ slots });
+  });
+
+  // Admin: assign a slot to an interested worker -> creates an offered assignment
+  app.post("/api/admin/weekend/slots/:id/assign", requireAdmin(config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { employeeId?: unknown };
+    if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
+    const res = assignSlot(db, Number(c.req.param("id")), body.employeeId);
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (bot) {
+      const tg = tgOf(body.employeeId);
+      if (tg != null) await notifyUser(bot, tg, "Тебе предложили работу в выходной. Загляни в приложение, чтобы подтвердить или отказаться.");
+    }
+    return c.json({ assignment: res.assignment }, 201);
+  });
+
+  // Admin: payroll rows for confirmed weekend work in a date range
+  app.get("/api/admin/weekend/payroll", requireAdmin(config.jwtSecret), (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    if (!from || !to) return c.json({ error: "from and to are required" }, 400);
+    return c.json({ rows: payrollRows(db, from, to) });
+  });
+
+  // Admin: same payroll as a downloadable CSV (BOM-prefixed for Excel/Cyrillic)
+  app.get("/api/admin/weekend/payroll.csv", requireAdmin(config.jwtSecret), (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    if (!from || !to) return c.json({ error: "from and to are required" }, 400);
+    const csv = payrollCsv(payrollRows(db, from, to));
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="weekend-payroll-${from}_${to}.csv"`);
+    return c.body("﻿" + csv);
   });
 
   return app;
