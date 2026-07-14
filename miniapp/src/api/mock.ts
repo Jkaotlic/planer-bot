@@ -1,5 +1,15 @@
 import type { Category } from "../categories";
-import type { Me, Shift, SwapDirection, SwapRequest, SwapShiftSummary, SwapStatus } from "./client";
+import type {
+  Me,
+  Shift,
+  SwapDirection,
+  SwapRequest,
+  SwapShiftSummary,
+  SwapStatus,
+  VacantSlot,
+  WeekendSlotView,
+  WeekendOffer,
+} from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 
 /**
@@ -227,4 +237,71 @@ export async function mockDeclineSwap(id: number): Promise<void> {
 export async function mockCancelSwap(id: number): Promise<void> {
   await delay(250);
   resolveSwap(id, "cancelled");
+}
+
+/**
+ * In-memory "Биржа" (weekend marketplace) store for local development —
+ * open vacant slots the caller (Аня) can raise a hand for, plus offers an
+ * admin already addressed to her. Every mutator updates it in place so the
+ * tab reflects taps live, mirroring the swaps mock above.
+ */
+
+interface SlotSeed {
+  slot: VacantSlot;
+  interestedIds: Set<number>;
+}
+
+const WEEKEND_SLOTS: SlotSeed[] = [
+  {
+    slot: { id: 101, date: dayIso(5), start: "10:00", end: "18:00", title: "Ярмарка выходного дня", location: "ТЦ Авиапарк", note: "Нужен один человек на стенд", status: "open" },
+    interestedIds: new Set([3]),
+  },
+  {
+    slot: { id: 102, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
+    interestedIds: new Set([1, 5]), // Аня уже записалась
+  },
+  {
+    slot: { id: 103, date: dayIso(12), start: "09:00", end: "15:00", title: "Инвентаризация", location: null, note: "Полдня, оплата в двойном размере", status: "open" },
+    interestedIds: new Set(),
+  },
+];
+
+const OFFERS: WeekendOffer[] = [
+  {
+    assignment: { id: 501, status: "offered", hours: 8 },
+    slot: { id: 104, date: dayIso(13), start: "10:00", end: "18:00", title: "Праздничная смена", location: "Главный офис", note: null, status: "assigned" },
+  },
+];
+
+export async function mockGetWeekendSlots(): Promise<WeekendSlotView[]> {
+  await delay(250);
+  return WEEKEND_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
+    slot: s.slot,
+    interested: s.interestedIds.has(MOCK_ME.id),
+  }));
+}
+
+export async function mockExpressInterest(slotId: number): Promise<void> {
+  await delay(250);
+  WEEKEND_SLOTS.find((s) => s.slot.id === slotId)?.interestedIds.add(MOCK_ME.id);
+}
+
+export async function mockGetWeekendOffers(): Promise<WeekendOffer[]> {
+  await delay(200);
+  return OFFERS.filter((o) => o.assignment.status !== "declined");
+}
+
+function setOfferStatus(id: number, status: WeekendOffer["assignment"]["status"]): void {
+  const offer = OFFERS.find((o) => o.assignment.id === id);
+  if (offer) offer.assignment = { ...offer.assignment, status };
+}
+
+export async function mockConfirmOffer(id: number): Promise<void> {
+  await delay(250);
+  setOfferStatus(id, "confirmed");
+}
+
+export async function mockDeclineOffer(id: number): Promise<void> {
+  await delay(250);
+  setOfferStatus(id, "declined");
 }
