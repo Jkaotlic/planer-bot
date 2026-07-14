@@ -1,4 +1,4 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { swapRequests, type SwapRequest } from "../db/schema";
 import type { SwapStatus } from "@planer/shared";
@@ -28,10 +28,21 @@ export function setSwapStatus(db: Db, id: number, status: SwapStatus): void {
   db.update(swapRequests).set({ status, resolvedAt: new Date() }).where(eq(swapRequests.id, id)).run();
 }
 
+export function hasPendingSwap(db: Db, fromShiftId: number, toShiftId: number): boolean {
+  return db
+    .select({ id: swapRequests.id })
+    .from(swapRequests)
+    .where(and(eq(swapRequests.status, "pending"), eq(swapRequests.fromShiftId, fromShiftId), eq(swapRequests.toShiftId, toShiftId)))
+    .limit(1)
+    .all().length > 0;
+}
+
 export function listSwapsForEmployee(db: Db, employeeId: number): SwapRequest[] {
   return db
     .select()
     .from(swapRequests)
-    .where(and(or(eq(swapRequests.fromEmployeeId, employeeId), eq(swapRequests.toEmployeeId, employeeId))))
+    .where(or(eq(swapRequests.fromEmployeeId, employeeId), eq(swapRequests.toEmployeeId, employeeId)))
+    .orderBy(desc(swapRequests.createdAt))
+    .limit(100)
     .all();
 }

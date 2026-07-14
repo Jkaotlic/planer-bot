@@ -1,9 +1,9 @@
 import { and, eq, ne, or } from "drizzle-orm";
 import { isSwappable, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
-import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
+import { shifts, swapRequests, auditLog, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
-import { createSwapRequest, getSwapRequest, setSwapStatus } from "../repo/swaps";
+import { createSwapRequest, getSwapRequest, setSwapStatus, hasPendingSwap } from "../repo/swaps";
 
 export type SwapNow = { date: string; time: string };
 export type SwapOutcome =
@@ -31,6 +31,7 @@ export function createSwap(
   if (toShift.employeeId == null) return { ok: false, reason: "target_unassigned" };
   if (toShift.employeeId === input.fromEmployeeId) return { ok: false, reason: "same_person" };
   if (!isSwappable(fromShift.category) || !isSwappable(toShift.category)) return { ok: false, reason: "not_swappable" };
+  if (hasPendingSwap(db, input.fromShiftId, input.toShiftId)) return { ok: false, reason: "duplicate" };
   const request = createSwapRequest(db, {
     fromEmployeeId: input.fromEmployeeId,
     fromShiftId: input.fromShiftId,
@@ -75,10 +76,16 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
   }
 
   const accepted = nextSwapStatus("pending", "accept");
+  // Safe read-validate-write under single-process better-sqlite3 (spec §11); revisit if horizontally scaled.
   db.transaction((tx) => {
     tx.update(shifts).set({ employeeId: req.toEmployeeId }).where(eq(shifts.id, fromShift.id)).run();
     tx.update(shifts).set({ employeeId: req.fromEmployeeId }).where(eq(shifts.id, toShift.id)).run();
     tx.update(swapRequests).set({ status: accepted, resolvedAt: new Date() }).where(eq(swapRequests.id, requestId)).run();
+    tx.insert(auditLog).values({
+      type: "swap_done",
+      actorEmployeeId: req.toEmployeeId,
+      payload: { requestId, fromEmployeeId: req.fromEmployeeId, toEmployeeId: req.toEmployeeId, fromShiftId: fromShift.id, toShiftId: toShift.id },
+    }).run();
     const siblings = tx
       .select()
       .from(swapRequests)
