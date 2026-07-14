@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, isLateShift,
+  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, isLateShift, nextDate,
 } from "./time";
 import type { ShiftTemplate } from "./types";
 
@@ -50,5 +50,11 @@ describe("time", () => {
     expect(isLateShift({ start: "15:00", end: "23:00" })).toBe(true);  // night
     expect(isLateShift({ start: "23:00", end: "07:00" })).toBe(true);  // overnight
     expect(isLateShift({ start: "09:00", end: "18:00" }, true)).toBe(true); // template override
+  });
+
+  it("computes the next calendar day", () => {
+    expect(nextDate("2026-07-31")).toBe("2026-08-01"); // month rollover
+    expect(nextDate("2026-12-31")).toBe("2027-01-01"); // year rollover
+    expect(nextDate("2026-07-14")).toBe("2026-07-15");
   });
 });
