@@ -26,12 +26,20 @@ bot.start({ onStart: (info) => console.log(`bot @${info.username} started`) }).c
   console.error("bot failed to start (check BOT_TOKEN):", err instanceof Error ? err.message : err);
 });
 
-// Soft evening-before reminders — polled every 5 minutes; a failed tick must not crash the server.
+// Soft evening-before reminders — polled every 5 minutes; a failed tick must not crash the server,
+// and a slow tick must not overlap the next one.
 const REMINDER_TICK_MS = 5 * 60 * 1000;
+let reminderRunning = false;
 setInterval(() => {
-  runReminderTick(db, bot, teamNow(config.teamTz)).catch((err) => {
-    console.error("reminder tick failed:", err instanceof Error ? err.message : err);
-  });
+  if (reminderRunning) return;
+  reminderRunning = true;
+  Promise.resolve(runReminderTick(db, bot, teamNow(config.teamTz)))
+    .catch((err) => {
+      console.error("reminder tick failed:", err instanceof Error ? err.message : err);
+    })
+    .finally(() => {
+      reminderRunning = false;
+    });
 }, REMINDER_TICK_MS);
 
 const app = createApp({ db, config, bot });

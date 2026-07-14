@@ -34,9 +34,10 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
       wake: kind === "morning" ? wakeTime(start, owner.prepBufferMin) : undefined,
     });
 
-    await notifyUser(bot, owner.telegramUserId, text);
-    addReminder(db, shift.id, REMINDER_KIND);
-    count++;
+    if (await notifyUser(bot, owner.telegramUserId, text)) {
+      addReminder(db, shift.id, REMINDER_KIND);
+      count++;
+    }
   }
   return count;
 }

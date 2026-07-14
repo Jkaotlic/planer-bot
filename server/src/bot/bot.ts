@@ -16,6 +16,9 @@ function reasonToRu(reason: string): string {
   if (reason === "not_pending") return "Уже обработано";
   if (reason === "not_yours") return "Это не твоя заявка";
   if (reason.startsWith("double-booking")) return "Пересекается с твоей сменой";
+  if (reason === "not_found") return "Заявка не найдена";
+  if (reason === "unavailable") return "Смена больше недоступна";
+  if (reason === "from-shift-in-past" || reason === "to-shift-in-past") return "Смена уже прошла";
   return "Не получилось";
 }
 

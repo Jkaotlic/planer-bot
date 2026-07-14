@@ -113,6 +113,32 @@ describe("runReminderTick", () => {
     expect(sent[0]?.chat_id).toBe(222);
   });
 
+  it("does not record a reminder when the send fails, and retries on the next tick", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+
+    const failingBot = new Bot("12345:tok");
+    failingBot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
+      can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof failingBot.botInfo;
+    failingBot.api.config.use((_prev, method) => {
+      if (method === "sendMessage") throw new Error("boom");
+      return { ok: true, result: {} } as any;
+    });
+
+    const failedCount = await runReminderTick(db, failingBot, { date: TODAY, time: "20:30" });
+
+    expect(failedCount).toBe(0);
+    expect(hasReminder(db, shift.id, "evening_before")).toBe(false);
+
+    const { bot, sent } = testBot();
+    const retryCount = await runReminderTick(db, bot, { date: TODAY, time: "20:35" });
+
+    expect(retryCount).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
+  });
+
   it("does not remind for a shift happening today (only tomorrow)", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 111);

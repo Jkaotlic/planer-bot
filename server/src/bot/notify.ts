@@ -2,11 +2,13 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins } from "../repo/employees";
 
-export async function notifyUser(bot: Bot, telegramUserId: number, text: string): Promise<void> {
+export async function notifyUser(bot: Bot, telegramUserId: number, text: string): Promise<boolean> {
   try {
     await bot.api.sendMessage(telegramUserId, text);
+    return true;
   } catch (err) {
     console.error(`notifyUser: failed for ${telegramUserId}:`, err);
+    return false;
   }
 }
 
