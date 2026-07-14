@@ -64,6 +64,8 @@ export interface CreateEmployeeResult {
   employee: Employee;
   /** Single-use token embedded in the invite deep-link. */
   inviteToken: string;
+  /** Ready-made `https://t.me/<bot>?start=<token>` deep-link, or `null` if the server has no bot username configured. */
+  inviteLink: string | null;
 }
 
 export interface NewEntryInput {
@@ -102,8 +104,65 @@ interface TemplatesResponse {
   templates: Template[];
 }
 
+/** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
+ * formatted for the "События" feed (see `toFeedEvent` below). */
+interface RawAdminEvent {
+  id: number;
+  type: string;
+  createdAt: string;
+  actorName: string | null;
+  payload: unknown;
+}
+
 interface EventsResponse {
-  events: FeedEvent[];
+  events: RawAdminEvent[];
+}
+
+/** Payload shape for the `"swap_done"` audit type (see `server/src/swap/swap-service.ts`). */
+interface SwapDonePayload {
+  fromEmployeeId: number;
+  toEmployeeId: number;
+}
+
+function isSwapDonePayload(payload: unknown): payload is SwapDonePayload {
+  if (typeof payload !== "object" || payload === null) return false;
+  const p = payload as Record<string, unknown>;
+  return typeof p.fromEmployeeId === "number" && typeof p.toEmployeeId === "number";
+}
+
+/** 1/2/5-style Russian plural picker, e.g. `pluralRu(3, "час", "часа", "часов")` -> "часа". */
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+/** "5 минут назад" / "3 часа назад" / "вчера, 18:40" / "3 дня назад" / "14 июля", relative to now. */
+function formatRelativeRu(iso: string): string {
+  const then = new Date(iso);
+  const diffMin = Math.floor((Date.now() - then.getTime()) / 60_000);
+  if (diffMin < 1) return "только что";
+  if (diffMin < 60) return `${diffMin} ${pluralRu(diffMin, "минуту", "минуты", "минут")} назад`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours} ${pluralRu(diffHours, "час", "часа", "часов")} назад`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return `вчера, ${then.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+  if (diffDays < 7) return `${diffDays} ${pluralRu(diffDays, "день", "дня", "дней")} назад`;
+  return then.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
+/** Formats a raw audit-log row into the "События" feed shape, resolving employee names via `namesById`. */
+function toFeedEvent(raw: RawAdminEvent, namesById: ReadonlyMap<number, string>): FeedEvent {
+  const timeLabel = formatRelativeRu(raw.createdAt);
+  if (raw.type === "swap_done" && isSwapDonePayload(raw.payload)) {
+    const fromName = namesById.get(raw.payload.fromEmployeeId) ?? "Коллега";
+    const toName = namesById.get(raw.payload.toEmployeeId) ?? "Коллега";
+    return { id: raw.id, kind: "success", text: `**${fromName}** ⇄ **${toName}** — обмен состоялся`, timeLabel };
+  }
+  const actor = raw.actorName ?? "Кто-то";
+  return { id: raw.id, kind: "info", text: `**${actor}** — событие: ${raw.type}`, timeLabel };
 }
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
@@ -195,11 +254,12 @@ const realClient: ApiClient = {
   },
 
   async getEvents() {
-    // NOTE: `/api/admin/events` doesn't exist on the server yet — there is no
-    // activity log to read from. Tracked as a follow-up alongside the
-    // employee-management endpoints below; dev uses mock data in the meantime.
-    const { events } = await authorizedGet<EventsResponse>("/api/admin/events");
-    return events;
+    const [{ events }, { employees }] = await Promise.all([
+      authorizedGet<EventsResponse>("/api/admin/events"),
+      authorizedGet<EmployeesResponse>("/api/admin/employees"),
+    ]);
+    const namesById = new Map(employees.map((e) => [e.id, e.displayName]));
+    return events.map((raw) => toFeedEvent(raw, namesById));
   },
 
   async createEntry(input) {
@@ -211,13 +271,6 @@ const realClient: ApiClient = {
     await authorizedDelete(`/api/admin/entries/${id}`);
   },
 
-  // NOTE: none of the three employee-management endpoints below exist on the
-  // server yet. `GET /api/admin/employees` is real (server/src/http/app.ts),
-  // but creating an employee (+ generating an invite deep-link) and
-  // archiving/restoring one are not wired up — only the repo-level helpers
-  // exist (server/src/repo/employees.ts: createEmployee, archiveEmployee,
-  // restoreEmployee). Tracked as a follow-up; these calls are shaped for once
-  // that lands. Until then, only `devClient` (mock, below) is exercised.
   async createEmployee(name) {
     return authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name });
   },

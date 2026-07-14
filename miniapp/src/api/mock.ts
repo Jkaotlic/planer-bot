@@ -135,7 +135,7 @@ function shiftOf(employeeId: number, date: string): Shift {
 }
 
 function toSummary(shift: Shift): SwapShiftSummary {
-  return { date: shift.date, start: shift.start, end: shift.end };
+  return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
 }
 
 let nextSwapId = 1;
@@ -156,7 +156,6 @@ function buildSwapRequest(input: {
     status: input.status,
     message: input.message,
     createdAt: input.createdAt.toISOString(),
-    resolvedAt: input.status === "pending" ? null : input.createdAt.toISOString(),
     counterpartyName: personName(input.counterpartyId),
     yourShift: toSummary(input.yourShift),
     theirShift: toSummary(input.theirShift),
@@ -212,7 +211,7 @@ export async function mockProposeSwap(fromShiftId: number, toShiftId: number, me
 function resolveSwap(id: number, status: SwapStatus): void {
   const index = SWAPS.findIndex((s) => s.id === id);
   if (index === -1) return;
-  SWAPS[index] = { ...SWAPS[index]!, status, resolvedAt: new Date().toISOString() };
+  SWAPS[index] = { ...SWAPS[index]!, status };
 }
 
 export async function mockAcceptSwap(id: number): Promise<void> {

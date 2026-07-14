@@ -25,10 +25,10 @@ export interface Shift {
   title: string | null;
   employeeId: number | null;
   /**
-   * Not part of the real `/api/team/schedule` response yet — the server is
-   * expected to add it later. The dev mock fills it in today so the
-   * Команда screen can render names now; the real client leaves it
-   * `undefined` until the backend catches up.
+   * Not part of the raw `/api/team/schedule` row — the real client joins it
+   * in from `/api/employees` (id -> displayName) after fetching the shifts.
+   * Only `getTeamSchedule` populates this; `getMyShifts` leaves it
+   * `undefined` (every row already belongs to the caller).
    */
   employeeName?: string;
 }
@@ -51,6 +51,7 @@ export interface SwapShiftSummary {
   date: string;
   start: string | null;
   end: string | null;
+  title: string | null;
 }
 
 /**
@@ -58,13 +59,9 @@ export interface SwapShiftSummary {
  * name, framed from the current user's point of view (`yourShift` /
  * `theirShift`) regardless of who initiated it.
  *
- * NOTE: the real `GET /api/swaps` endpoint returns bare rows today —
- * `{id, fromEmployeeId, fromShiftId, toEmployeeId, toShiftId, status,
- * message, createdAt, resolvedAt}`, no shift times or names. Enriching that
- * server-side (join shifts + employees) is tracked as a follow-up and not
- * done here; the dev mock fabricates the enriched shape directly below, and
- * `realClient.getSwaps` does a best-effort map that leaves `yourShift` /
- * `theirShift` / `counterpartyName` blank until the backend catches up.
+ * `GET /api/swaps` returns exactly this enriched shape server-side (it joins
+ * shifts + employees). `yourShift`/`theirShift` are `null` only in the edge
+ * case where the referenced shift row was deleted after the swap was created.
  */
 export interface SwapRequest {
   id: number;
@@ -72,12 +69,11 @@ export interface SwapRequest {
   status: SwapStatus;
   message: string | null;
   createdAt: string;
-  resolvedAt: string | null;
   counterpartyName: string;
   /** The shift the current user gives up in this swap. */
-  yourShift: SwapShiftSummary;
+  yourShift: SwapShiftSummary | null;
   /** The shift the current user receives in exchange. */
-  theirShift: SwapShiftSummary;
+  theirShift: SwapShiftSummary | null;
 }
 
 export interface ApiClient {
@@ -95,21 +91,44 @@ interface ShiftsResponse {
   shifts: Shift[];
 }
 
-/** Raw shape of a swap row as `/api/swaps` actually returns it today (see the `SwapRequest` doc comment above). */
-interface RawSwapRequest {
+interface EmployeesResponse {
+  employees: { id: number; displayName: string }[];
+}
+
+/** Exact shape of a `GET /api/swaps` row (server-enriched). `counterpartyName`
+ * can be `null` if the counterparty employee row is gone; the client falls
+ * back to a generic label so the UI's non-nullable `counterpartyName` holds. */
+interface RawEnrichedSwap {
   id: number;
-  fromEmployeeId: number;
-  fromShiftId: number;
-  toEmployeeId: number;
-  toShiftId: number;
   status: SwapStatus;
   message: string | null;
   createdAt: string;
-  resolvedAt: string | null;
+  direction: SwapDirection;
+  counterpartyName: string | null;
+  yourShift: SwapShiftSummary | null;
+  theirShift: SwapShiftSummary | null;
 }
 
 interface SwapsResponse {
-  swaps: RawSwapRequest[];
+  swaps: RawEnrichedSwap[];
+}
+
+/** `POST /api/swaps` only echoes back the raw inserted row; the id is all this client needs from it. */
+interface CreateSwapResponse {
+  request: { id: number };
+}
+
+function toSwapRequest(raw: RawEnrichedSwap): SwapRequest {
+  return {
+    id: raw.id,
+    direction: raw.direction,
+    status: raw.status,
+    message: raw.message,
+    createdAt: raw.createdAt,
+    counterpartyName: raw.counterpartyName ?? "Коллега",
+    yourShift: raw.yourShift,
+    theirShift: raw.theirShift,
+  };
 }
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
@@ -184,38 +203,16 @@ async function authorizedPostAction(path: string): Promise<void> {
   }
 }
 
-/** Caches the caller's own id (from `getMe`) so `getSwaps`/`proposeSwap` can
- * tell "your shift" from "their shift" without an extra round trip. */
-let cachedMeId: number | null = null;
-
-/**
- * Best-effort mapping from the raw `/api/swaps` row to the enriched shape the
- * UI needs. Until the backend enriches this endpoint (see the `SwapRequest`
- * doc comment in this file), shift times and the counterparty's name aren't
- * available here, so they're left as empty placeholders.
- */
-function rawSwapToEnriched(raw: RawSwapRequest, meId: number | null): SwapRequest {
-  const direction: SwapDirection = raw.fromEmployeeId === meId ? "outgoing" : "incoming";
-  const unknownShift: SwapShiftSummary = { date: "", start: null, end: null };
-  return {
-    id: raw.id,
-    direction,
-    status: raw.status,
-    message: raw.message,
-    createdAt: raw.createdAt,
-    resolvedAt: raw.resolvedAt,
-    counterpartyName: "Коллега",
-    yourShift: unknownShift,
-    theirShift: unknownShift,
-  };
+/** Fetches and maps `GET /api/swaps` to the enriched UI shape. Shared by
+ * `getSwaps` and `proposeSwap` (the latter re-fetches to get the freshly
+ * created request's enriched view, since `POST /api/swaps` only echoes the raw row). */
+async function fetchSwaps(): Promise<SwapRequest[]> {
+  const { swaps } = await authorizedGet<SwapsResponse>("/api/swaps");
+  return swaps.map(toSwapRequest);
 }
 
 const realClient: ApiClient = {
-  async getMe() {
-    const me = await authorizedGet<Me>("/api/me");
-    cachedMeId = me.id;
-    return me;
-  },
+  getMe: () => authorizedGet<Me>("/api/me"),
 
   async getMyShifts(from) {
     const { shifts } = await authorizedGet<ShiftsResponse>(`/api/my/shifts?from=${encodeURIComponent(from)}`);
@@ -224,22 +221,29 @@ const realClient: ApiClient = {
 
   async getTeamSchedule(from, to) {
     const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const { shifts } = await authorizedGet<ShiftsResponse>(`/api/team/schedule?${query}`);
-    return shifts;
+    const [{ shifts }, { employees }] = await Promise.all([
+      authorizedGet<ShiftsResponse>(`/api/team/schedule?${query}`),
+      authorizedGet<EmployeesResponse>("/api/employees"),
+    ]);
+    const nameById = new Map(employees.map((e) => [e.id, e.displayName]));
+    return shifts.map((s) => ({
+      ...s,
+      employeeName: s.employeeId != null ? nameById.get(s.employeeId) : undefined,
+    }));
   },
 
-  async getSwaps() {
-    const { swaps } = await authorizedGet<SwapsResponse>("/api/swaps");
-    return swaps.map((raw) => rawSwapToEnriched(raw, cachedMeId));
-  },
+  getSwaps: () => fetchSwaps(),
 
   async proposeSwap(fromShiftId, toShiftId, message) {
-    const { request } = await authorizedPostJson<{ request: RawSwapRequest }>("/api/swaps", {
+    const { request } = await authorizedPostJson<CreateSwapResponse>("/api/swaps", {
       fromShiftId,
       toShiftId,
       message,
     });
-    return rawSwapToEnriched(request, cachedMeId);
+    const swaps = await fetchSwaps();
+    const created = swaps.find((s) => s.id === request.id);
+    if (!created) throw new Error("Created swap request not found in /api/swaps response");
+    return created;
   },
 
   acceptSwap: (id) => authorizedPostAction(`/api/swaps/${id}/accept`),

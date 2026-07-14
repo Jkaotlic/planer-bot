@@ -156,7 +156,7 @@ export async function mockCreateEmployee(name: string): Promise<CreateEmployeeRe
   const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-  return { employee, inviteToken };
+  return { employee, inviteToken, inviteLink: null };
 }
 
 export async function mockArchiveEmployee(id: number): Promise<void> {
