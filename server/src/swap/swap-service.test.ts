@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
+import { auditLog } from "../db/schema";
 import { createEmployee } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { getSwapRequest, createSwapRequest } from "../repo/swaps";
@@ -23,6 +24,24 @@ describe("swap service", () => {
     const ok = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.counterpartyId).toBe(b.id);
+  });
+
+  it("createSwap rejects a duplicate (fromShiftId,toShiftId) pending swap", () => {
+    const { db, a, sa, sb } = setup();
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    expect(first.ok).toBe(true);
+    const second = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    expect(second).toEqual({ ok: false, reason: "duplicate" });
+  });
+
+  it("accept writes an audit_log row for the swap", () => {
+    const { db, a, b, sa, sb } = setup();
+    const req = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    if (!req.ok) throw new Error("setup");
+    const res = acceptSwap(db, req.request.id, b.id, NOW);
+    expect(res.ok).toBe(true);
+    const rows = db.select().from(auditLog).all();
+    expect(rows.some((r) => r.type === "swap_done")).toBe(true);
   });
 
   it("accept exchanges the shifts atomically and cancels siblings", () => {

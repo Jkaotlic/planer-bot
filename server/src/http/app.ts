@@ -9,9 +9,10 @@ import { listActiveTemplates } from "../repo/templates";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
 import { getByTelegramId, getEmployeeById, createAdminEmployee, listActive } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-schema";
-import { createSwap, acceptSwap, declineSwap, cancelSwap, type SwapNow } from "../swap/swap-service";
+import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
 import { notifyUser, notifyAdmins } from "../bot/notify";
+import { teamNow } from "../util/team-time";
 
 export interface AppDeps {
   db: Db;
@@ -112,16 +113,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ ok: true });
   });
 
-  const teamToday = (): SwapNow => {
-    const s = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
-    const t = new Intl.DateTimeFormat("en-GB", { timeZone: config.teamTz, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
-    return { date: s, time: t };
-  };
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
 
   app.post("/api/swaps", requireAuth(config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
+    if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
     const res = createSwap(db, { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message });
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Тебе предложили обмен сменой. Открой приложение, чтобы ответить."); }
@@ -129,7 +126,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.post("/api/swaps/:id/accept", requireAuth(config.jwtSecret), async (c) => {
-    const res = acceptSwap(db, Number(c.req.param("id")), c.get("auth").employeeId, teamToday());
+    const res = acceptSwap(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz));
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) {
       const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Твой обмен приняли ✅ Смены поменялись.");

@@ -74,4 +74,41 @@ describe("swap endpoints", () => {
     const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
     expect((await list.json()).swaps.length).toBe(1);
   });
+
+  it("rejects a non-string message (400)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const res = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id, message: {} }));
+    expect(res.status).toBe(400);
+  });
+
+  it("decline flow: counterparty declines a pending swap (200)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    const declined = await app.request(`/api/swaps/${reqId}/decline`, authed(igor.token));
+    expect(declined.status).toBe(200);
+  });
+
+  it("cancel flow: initiator cancels a pending swap (200)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    const cancelled = await app.request(`/api/swaps/${reqId}/cancel`, authed(anya.token));
+    expect(cancelled.status).toBe(200);
+  });
 });
