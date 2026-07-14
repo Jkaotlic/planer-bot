@@ -6,8 +6,8 @@ import { formatTimeRange } from "../lib/shift";
 import { useIsDark } from "../lib/theme";
 
 /** "Пн, 14 июля · 09:00–18:00" (or "· Весь день" for a no-times summary). */
-function formatSwapShift(shift: SwapShiftSummary): string {
-  if (!shift.date) return "—";
+function formatSwapShift(shift: SwapShiftSummary | null): string {
+  if (!shift || !shift.date) return "—";
   return `${formatDayLabel(shift.date)} · ${formatTimeRange(shift)}`;
 }
 
@@ -66,7 +66,7 @@ export function SwapStatusPill({ status }: SwapStatusPillProps) {
   );
 }
 
-function SwapDirectionLine({ label, shift }: { label: string; shift: SwapShiftSummary }) {
+function SwapDirectionLine({ label, shift }: { label: string; shift: SwapShiftSummary | null }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 14.5 }}>
       <span style={{ color: "var(--tgui--hint_color)", flex: "none" }}>{label}</span>
