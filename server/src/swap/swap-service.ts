@@ -47,10 +47,16 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
   if (req.toEmployeeId !== actingEmployeeId) return { ok: false, reason: "not_yours" };
   if (req.status !== "pending") return { ok: false, reason: "not_pending" };
 
+  const expired = nextSwapStatus("pending", "expire");
   const fromShift = getShift(db, req.fromShiftId);
   const toShift = getShift(db, req.toShiftId);
-  if (!fromShift || !toShift || fromShift.start == null || toShift.start == null || !isSwappable(fromShift.category) || !isSwappable(toShift.category)) {
-    setSwapStatus(db, requestId, "expired");
+  if (
+    !fromShift || !toShift ||
+    fromShift.start == null || fromShift.end == null ||
+    toShift.start == null || toShift.end == null ||
+    !isSwappable(fromShift.category) || !isSwappable(toShift.category)
+  ) {
+    setSwapStatus(db, requestId, expired);
     return { ok: false, reason: "unavailable" };
   }
 
@@ -64,7 +70,7 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
     now,
   });
   if (!validation.ok) {
-    setSwapStatus(db, requestId, "expired");
+    setSwapStatus(db, requestId, expired);
     return { ok: false, reason: validation.reason };
   }
 
@@ -91,7 +97,7 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
       tx.update(swapRequests).set({ status: "cancelled", resolvedAt: new Date() }).where(eq(swapRequests.id, s.id)).run();
     }
   });
-  return { ok: true, request: { ...req, status: accepted }, counterpartyId: req.fromEmployeeId };
+  return { ok: true, request: getSwapRequest(db, requestId) ?? { ...req, status: accepted }, counterpartyId: req.fromEmployeeId };
 }
 
 export function declineSwap(db: Db, requestId: number, actingEmployeeId: number): SwapOutcome {
@@ -99,8 +105,9 @@ export function declineSwap(db: Db, requestId: number, actingEmployeeId: number)
   if (!req) return { ok: false, reason: "not_found" };
   if (req.toEmployeeId !== actingEmployeeId) return { ok: false, reason: "not_yours" };
   if (req.status !== "pending") return { ok: false, reason: "not_pending" };
-  setSwapStatus(db, requestId, nextSwapStatus("pending", "decline"));
-  return { ok: true, request: { ...req, status: "declined" }, counterpartyId: req.fromEmployeeId };
+  const declined = nextSwapStatus("pending", "decline");
+  setSwapStatus(db, requestId, declined);
+  return { ok: true, request: getSwapRequest(db, requestId) ?? { ...req, status: declined }, counterpartyId: req.fromEmployeeId };
 }
 
 export function cancelSwap(db: Db, requestId: number, actingEmployeeId: number): SwapOutcome {
@@ -108,6 +115,7 @@ export function cancelSwap(db: Db, requestId: number, actingEmployeeId: number):
   if (!req) return { ok: false, reason: "not_found" };
   if (req.fromEmployeeId !== actingEmployeeId) return { ok: false, reason: "not_yours" };
   if (req.status !== "pending") return { ok: false, reason: "not_pending" };
-  setSwapStatus(db, requestId, nextSwapStatus("pending", "cancel"));
-  return { ok: true, request: { ...req, status: "cancelled" }, counterpartyId: req.toEmployeeId };
+  const cancelled = nextSwapStatus("pending", "cancel");
+  setSwapStatus(db, requestId, cancelled);
+  return { ok: true, request: getSwapRequest(db, requestId) ?? { ...req, status: cancelled }, counterpartyId: req.toEmployeeId };
 }
