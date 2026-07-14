@@ -7,6 +7,7 @@ import { ScheduleGrid } from "./components/ScheduleGrid";
 import { Sidebar, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
+import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
 
 interface PanelTarget {
@@ -94,6 +95,8 @@ export function App() {
           <div className="centered-fill">Загрузка…</div>
         ) : nav === "employees" ? (
           <EmployeesScreen employees={employees} onChanged={refreshEmployees} />
+        ) : nav === "weekend" ? (
+          <WeekendAdminScreen />
         ) : nav === "log" ? (
           <div className="centered-fill">Раздел появится в следующем шаге</div>
         ) : !activeEmployees || !shifts ? (

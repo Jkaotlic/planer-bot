@@ -10,6 +10,11 @@ import {
   mockGetTeamSchedule,
   mockGetTemplates,
   mockRestoreEmployee,
+  mockGetWeekendSlots,
+  mockPostSlot,
+  mockAssignSlot,
+  mockGetPayroll,
+  mockGetPayrollCsv,
 } from "./mock";
 
 /** A worker row in the schedule grid / Работники screen. */
@@ -80,6 +85,50 @@ export interface NewEntryInput {
   title?: string;
 }
 
+export type WeekendSlotStatus = "open" | "assigned" | "closed";
+
+/** A vacant weekend/holiday slot opened for volunteers. */
+export interface VacantSlot {
+  id: number;
+  date: string;
+  start: string;
+  end: string;
+  title: string | null;
+  location: string | null;
+  note: string | null;
+  status: WeekendSlotStatus;
+}
+
+/** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
+export interface SlotInterest {
+  employeeId: number;
+  name: string;
+  confirmedThisMonth: number;
+}
+
+/** An open slot plus its interested workers, already ranked fairest-first by the server. */
+export interface AdminSlotView {
+  slot: VacantSlot;
+  interested: SlotInterest[];
+}
+
+export interface NewSlotInput {
+  date: string;
+  start: string;
+  end: string;
+  title?: string;
+  location?: string;
+  note?: string;
+}
+
+/** One confirmed weekend-work record for payroll. */
+export interface PayrollRow {
+  employeeId: number;
+  employeeName: string;
+  date: string;
+  hours: number;
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
@@ -90,6 +139,11 @@ export interface ApiClient {
   createEmployee(name: string): Promise<CreateEmployeeResult>;
   archiveEmployee(id: number): Promise<void>;
   restoreEmployee(id: number): Promise<void>;
+  getWeekendSlots(): Promise<AdminSlotView[]>;
+  postSlot(input: NewSlotInput): Promise<VacantSlot>;
+  assignSlot(slotId: number, employeeId: number): Promise<void>;
+  getPayroll(from: string, to: string): Promise<PayrollRow[]>;
+  getPayrollCsv(from: string, to: string): Promise<string>;
 }
 
 interface EmployeesResponse {
@@ -282,6 +336,34 @@ const realClient: ApiClient = {
   async restoreEmployee(id) {
     await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
   },
+
+  async getWeekendSlots() {
+    const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
+    return slots;
+  },
+
+  async postSlot(input) {
+    const { slot } = await authorizedPostJson<{ slot: VacantSlot }>("/api/admin/weekend/slots", input);
+    return slot;
+  },
+
+  async assignSlot(slotId, employeeId) {
+    await authorizedPostJson(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
+  },
+
+  async getPayroll(from, to) {
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const { rows } = await authorizedGet<{ rows: PayrollRow[] }>(`/api/admin/weekend/payroll?${q}`);
+    return rows;
+  },
+
+  async getPayrollCsv(from, to) {
+    const token = await authToken();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const res = await fetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(await errorMessage("/api/admin/weekend/payroll.csv", res));
+    return res.text();
+  },
 };
 
 const devClient: ApiClient = {
@@ -294,6 +376,11 @@ const devClient: ApiClient = {
   createEmployee: (name) => mockCreateEmployee(name),
   archiveEmployee: (id) => mockArchiveEmployee(id),
   restoreEmployee: (id) => mockRestoreEmployee(id),
+  getWeekendSlots: () => mockGetWeekendSlots(),
+  postSlot: (input) => mockPostSlot(input),
+  assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
+  getPayroll: (from, to) => mockGetPayroll(from, to),
+  getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
 };
 
 /**

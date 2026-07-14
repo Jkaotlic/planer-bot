@@ -1,5 +1,16 @@
 import type { EntryCategory } from "@planer/shared";
-import type { CreateEmployeeResult, Employee, FeedEvent, NewEntryInput, Shift, Template } from "./client";
+import type {
+  AdminSlotView,
+  CreateEmployeeResult,
+  Employee,
+  FeedEvent,
+  NewEntryInput,
+  NewSlotInput,
+  PayrollRow,
+  Shift,
+  Template,
+  VacantSlot,
+} from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 
 /**
@@ -169,4 +180,104 @@ export async function mockRestoreEmployee(id: number): Promise<void> {
   await delay(150);
   const employee = EMPLOYEES.find((e) => e.id === id);
   if (employee) employee.isActive = true;
+}
+
+/**
+ * In-memory "Биржа" (weekend marketplace) store for local development —
+ * open vacant slots with their fairness-ranked interested workers, plus a
+ * payroll ledger of already-confirmed weekend work. Mutated live by
+ * post/assign so the screen updates without a reload.
+ */
+
+function nameOf(employeeId: number): string {
+  return EMPLOYEES.find((e) => e.id === employeeId)?.displayName ?? "Без имени";
+}
+
+let nextSlotId = 200;
+const WEEKEND_SLOTS: AdminSlotView[] = [
+  {
+    slot: { id: 201, date: dayIso(5), start: "10:00", end: "18:00", title: "Ярмарка выходного дня", location: "ТЦ Авиапарк", note: "Нужен один человек на стенд", status: "open" },
+    interested: [
+      { employeeId: 3, name: nameOf(3), confirmedThisMonth: 0 },
+      { employeeId: 2, name: nameOf(2), confirmedThisMonth: 1 },
+      { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2 },
+    ],
+  },
+  {
+    slot: { id: 202, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
+    interested: [
+      { employeeId: 4, name: nameOf(4), confirmedThisMonth: 0 },
+      { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2 },
+    ],
+  },
+  {
+    slot: { id: 203, date: dayIso(12), start: "09:00", end: "15:00", title: "Инвентаризация", location: null, note: "Полдня, оплата в двойном размере", status: "open" },
+    interested: [],
+  },
+];
+
+/** Confirmed weekend work already logged this period — the payroll ledger. */
+const PAYROLL: PayrollRow[] = [
+  { employeeId: 5, employeeName: nameOf(5), date: dayIso(-9), hours: 8 },
+  { employeeId: 4, employeeName: nameOf(4), date: dayIso(-2), hours: 6 },
+  { employeeId: 5, employeeName: nameOf(5), date: dayIso(-1), hours: 8 },
+];
+
+export async function mockGetWeekendSlots(): Promise<AdminSlotView[]> {
+  await delay(250);
+  return WEEKEND_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
+    slot: s.slot,
+    interested: [...s.interested].sort((a, b) => a.confirmedThisMonth - b.confirmedThisMonth),
+  }));
+}
+
+export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot> {
+  await delay(250);
+  const slot: VacantSlot = {
+    id: nextSlotId++,
+    date: input.date,
+    start: input.start,
+    end: input.end,
+    title: input.title?.trim() ? input.title.trim() : null,
+    location: input.location?.trim() ? input.location.trim() : null,
+    note: input.note?.trim() ? input.note.trim() : null,
+    status: "open",
+  };
+  WEEKEND_SLOTS.unshift({ slot, interested: [] });
+  return slot;
+}
+
+export async function mockAssignSlot(slotId: number, employeeId: number): Promise<void> {
+  await delay(250);
+  const entry = WEEKEND_SLOTS.find((s) => s.slot.id === slotId);
+  if (!entry) return;
+  entry.slot = { ...entry.slot, status: "assigned" }; // drops out of the open list
+  // Mirror the real flow's eventual outcome for the demo ledger.
+  const hours = durationHoursOf(entry.slot.start, entry.slot.end);
+  PAYROLL.push({ employeeId, employeeName: nameOf(employeeId), date: entry.slot.date, hours });
+}
+
+function durationHoursOf(start: string, end: string): number {
+  const [sh, sm] = start.split(":").map(Number);
+  let endMin = Number(end.split(":")[0]) * 60 + Number(end.split(":")[1]);
+  const startMin = (sh ?? 0) * 60 + (sm ?? 0);
+  if (endMin <= startMin) endMin += 24 * 60;
+  return (endMin - startMin) / 60;
+}
+
+export async function mockGetPayroll(from: string, to: string): Promise<PayrollRow[]> {
+  await delay(200);
+  return PAYROLL.filter((r) => r.date >= from && r.date <= to).sort(
+    (a, b) => a.employeeName.localeCompare(b.employeeName) || a.date.localeCompare(b.date),
+  );
+}
+
+function csvField(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+export async function mockGetPayrollCsv(from: string, to: string): Promise<string> {
+  const rows = await mockGetPayroll(from, to);
+  const lines = rows.map((r) => [csvField(r.employeeName), r.date, String(r.hours)].join(","));
+  return ["Работник,Дата,Часы", ...lines].join("\n");
 }
