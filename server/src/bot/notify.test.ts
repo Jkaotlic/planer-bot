@@ -41,9 +41,9 @@ function admin(db: Db, name: string, tgId: number) {
 }
 
 describe("notify", () => {
-  it("notifyUser sends to the given telegram id", async () => {
+  it("notifyUser sends to the given telegram id and reports success", async () => {
     const { bot, sent } = testBot();
-    await notifyUser(bot, 999, "привет");
+    await expect(notifyUser(bot, 999, "привет")).resolves.toBe(true);
     expect(sent).toEqual([{ chat_id: 999, text: "привет" }]);
   });
 
@@ -67,9 +67,9 @@ describe("notify", () => {
     expect(sent.map((s) => s.chat_id)).toEqual([222]);
   });
 
-  it("notifyUser swallows a send failure instead of throwing", async () => {
+  it("notifyUser swallows a send failure instead of throwing, and reports it via the return value", async () => {
     const { bot } = testBotFailing("all");
-    await expect(notifyUser(bot, 999, "x")).resolves.toBeUndefined();
+    await expect(notifyUser(bot, 999, "x")).resolves.toBe(false);
   });
 
   it("notifyAdmins does not message an archived (inactive) admin", async () => {

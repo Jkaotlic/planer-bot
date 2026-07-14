@@ -237,9 +237,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const { assignments } = buildDistribution(db, body.from, body.to);
     if (body.apply === true) {
       applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId })));
-      return c.json({ applied: true, assignments });
     }
-    return c.json({ applied: false, proposal: assignments });
+    return c.json({ applied: body.apply === true, assignments });
   });
 
   app.get("/api/swaps", requireAuth(config.jwtSecret), (c) => {

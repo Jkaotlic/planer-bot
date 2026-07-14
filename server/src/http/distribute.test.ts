@@ -32,7 +32,7 @@ describe("POST /api/admin/distribute", () => {
     expect(preview.status).toBe(200);
     const previewBody = await preview.json();
     expect(previewBody.applied).toBe(false);
-    expect(previewBody.proposal.length).toBe(1);
+    expect(previewBody.assignments.length).toBe(1);
     expect(getShift(db, s1.id)?.employeeId).toBeNull(); // not applied
 
     const applied = await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-01", to: "2026-07-10", apply: true }));
