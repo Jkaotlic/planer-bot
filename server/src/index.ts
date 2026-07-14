@@ -9,6 +9,8 @@ import { openDb, runMigrations } from "./db/client";
 import { seedDefaultTemplates } from "./db/seed";
 import { createApp } from "./http/app";
 import { createBot } from "./bot/bot";
+import { runReminderTick } from "./reminders/reminder-service";
+import { teamNow } from "./util/team-time";
 import type { Env } from "./http/middleware";
 
 const config = loadConfig(process.env);
@@ -23,6 +25,14 @@ process.once("SIGTERM", () => bot.stop());
 bot.start({ onStart: (info) => console.log(`bot @${info.username} started`) }).catch((err) => {
   console.error("bot failed to start (check BOT_TOKEN):", err instanceof Error ? err.message : err);
 });
+
+// Soft evening-before reminders — polled every 5 minutes; a failed tick must not crash the server.
+const REMINDER_TICK_MS = 5 * 60 * 1000;
+setInterval(() => {
+  runReminderTick(db, bot, teamNow(config.teamTz)).catch((err) => {
+    console.error("reminder tick failed:", err instanceof Error ? err.message : err);
+  });
+}, REMINDER_TICK_MS);
 
 const app = createApp({ db, config, bot });
 
