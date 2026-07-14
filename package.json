@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
-  "workspaces": ["shared", "server"],
+  "workspaces": ["shared", "server", "miniapp"],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
