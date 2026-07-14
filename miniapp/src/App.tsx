@@ -1,31 +1,78 @@
-import { Cell, List, Section, Title } from "@telegram-apps/telegram-ui";
+import { useEffect, useState } from "react";
+import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { apiClient, type Me, type Shift } from "./api/client";
+import { TabBar, type TabKey } from "./components/TabBar";
+import { MyShiftsScreen } from "./screens/MyShiftsScreen";
+import { TeamScreen } from "./screens/TeamScreen";
+import { addDays, mondayOf, toISODate } from "./lib/week";
 
-interface SampleShift {
-  id: string;
-  text: string;
+interface AppData {
+  me: Me;
+  myShifts: Shift[];
+  teamShifts: Shift[];
 }
 
-// Purely illustrative — proves the SDK + UI kit + theming render natively.
-// No backend calls yet (see project plan for the next tasks).
-const SAMPLE_SHIFTS: SampleShift[] = [
-  { id: "mon", text: "Пн 1 июл · 08:00–17:00 · Утро" },
-  { id: "wed", text: "Ср 3 июл · 12:00–21:00 · День" },
-  { id: "fri", text: "Пт 5 июл · 17:00–23:00 · Вечер" },
-];
-
+/** App shell: bootstraps the session + this week's data once, then switches
+ * between the two screens via the bottom tab bar. */
 export function App() {
+  const [tab, setTab] = useState<TabKey>("mine");
+  const [data, setData] = useState<AppData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const monday = mondayOf(new Date());
+    const from = toISODate(monday);
+    const to = toISODate(addDays(monday, 6));
+
+    apiClient
+      .getMe()
+      .then((me) =>
+        Promise.all([Promise.resolve(me), apiClient.getMyShifts(from), apiClient.getTeamSchedule(from, to)]),
+      )
+      .then(([me, myShifts, teamShifts]) => {
+        if (!cancelled) setData({ me, myShifts, teamShifts });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <div style={centeredStyle}>
+        <Placeholder header="Не удалось загрузить" description={error} />
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div style={centeredStyle}>
+        <Spinner size="l" />
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: "16px 16px 24px" }}>
-      <Title level="1" weight="2" style={{ margin: "8px 4px 16px" }}>
-        Смены
-      </Title>
-      <List>
-        <Section footer="Заглушка интерфейса: данные пока не подключены к серверу.">
-          {SAMPLE_SHIFTS.map((shift) => (
-            <Cell key={shift.id}>{shift.text}</Cell>
-          ))}
-        </Section>
-      </List>
+    <div style={{ minHeight: "100vh", boxSizing: "border-box", paddingBottom: "calc(88px + env(safe-area-inset-bottom))" }}>
+      {tab === "mine" ? (
+        <MyShiftsScreen me={data.me} shifts={data.myShifts} />
+      ) : (
+        <TeamScreen shifts={data.teamShifts} />
+      )}
+      <TabBar active={tab} onChange={setTab} />
     </div>
   );
 }
+
+const centeredStyle = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+} as const;
