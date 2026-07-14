@@ -1,7 +1,7 @@
 import { Bot } from "grammy";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
-import { linkTelegramAccount, getByTelegramId, getEmployeeById } from "../repo/employees";
+import { linkTelegramAccount, getByTelegramId, getEmployeeById, createAdminEmployee } from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
 import { teamNow } from "../util/team-time";
@@ -50,6 +50,13 @@ export function createBot(deps: BotDeps): Bot {
     const existing = getByTelegramId(db, from.id);
     if (existing) {
       await ctx.reply(`Привет, ${existing.displayName}! 👋 Открой мини-апп, чтобы посмотреть смены.`);
+      return;
+    }
+    // Allowlisted admins self-register on first /start — no invite link needed.
+    if (config.adminTelegramIds.includes(from.id)) {
+      const displayName = [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || from.username || "Админ";
+      const admin = createAdminEmployee(db, { telegramUserId: from.id, tgUsername: from.username, displayName });
+      await ctx.reply(`Привет, ${admin.displayName}! Ты вошёл как админ ✅ Открой мини-апп для управления сменами.`);
       return;
     }
     await ctx.reply("Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");

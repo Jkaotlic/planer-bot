@@ -92,10 +92,20 @@ describe("bot /start", () => {
     expect(sent[0]?.text).toContain("Аня");
   });
 
-  it("nudges an unknown user with no token to ask an admin", async () => {
+  it("nudges an unknown (non-allowlisted) user with no token to ask an admin", async () => {
     const db = makeTestDb();
     const { bot, sent } = testBot(db);
     await bot.handleUpdate(startUpdate(666, "/start"));
+    expect(sent[0]?.text.toLowerCase()).toContain("админ");
+    expect(getByTelegramId(db, 666)).toBeUndefined();
+  });
+
+  it("self-registers an allowlisted admin on bare /start", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(111, "/start", "boss")); // 111 ∈ adminTelegramIds
+    const me = getByTelegramId(db, 111);
+    expect(me?.isAdmin).toBe(true);
     expect(sent[0]?.text.toLowerCase()).toContain("админ");
   });
 
