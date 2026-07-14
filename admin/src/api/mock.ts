@@ -1,5 +1,5 @@
 import type { EntryCategory } from "@planer/shared";
-import type { Employee, NewEntryInput, Shift, Template } from "./client";
+import type { CreateEmployeeResult, Employee, FeedEvent, NewEntryInput, Shift, Template } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 
 /**
@@ -9,13 +9,17 @@ import { addDays, mondayOf, toISODate } from "../lib/week";
  * the grid never goes stale.
  */
 
-export const EMPLOYEES: readonly Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true },
+const SEED_EMPLOYEES: readonly Employee[] = [
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001 },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002 },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004 },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005 },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006 },
 ];
+
+/** In-memory employee store — mutated live by create/archive/restore so the Работники screen (and the schedule, which only shows active workers) update without a reload. */
+const EMPLOYEES: Employee[] = [...SEED_EMPLOYEES];
 
 const MONDAY = mondayOf(new Date());
 /** ISO date for "Monday + offset days" of the current week. */
@@ -131,4 +135,38 @@ export async function mockDeleteEntry(id: number): Promise<void> {
   await delay(150);
   const index = ENTRIES.findIndex((s) => s.id === id);
   if (index !== -1) ENTRIES.splice(index, 1);
+}
+
+const EVENTS: readonly FeedEvent[] = [
+  { id: 1, kind: "success", text: "**Аня** ⇄ **Игорь** — обмен состоялся", timeLabel: "2 часа назад" },
+  { id: 2, kind: "pending", text: "**Марк** → **Аня** — ждёт ответа", timeLabel: "5 часов назад" },
+  { id: 3, kind: "error", text: "**Олег** отклонил обмен с **Дашей**", timeLabel: "вчера, 18:40" },
+  { id: 4, kind: "info", text: "Добавлено 6 смен на неделю", timeLabel: "вчера, 09:12" },
+  { id: 5, kind: "success", text: "**Даша** ⇄ **Олег** — обмен состоялся", timeLabel: "2 дня назад" },
+];
+
+export async function mockGetEvents(): Promise<FeedEvent[]> {
+  await delay(180);
+  return [...EVENTS];
+}
+
+export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
+  await delay(250);
+  const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null };
+  EMPLOYEES.push(employee);
+  const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  return { employee, inviteToken };
+}
+
+export async function mockArchiveEmployee(id: number): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (employee) employee.isActive = false;
+}
+
+export async function mockRestoreEmployee(id: number): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (employee) employee.isActive = true;
 }

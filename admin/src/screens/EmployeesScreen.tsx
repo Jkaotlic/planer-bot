@@ -1,0 +1,267 @@
+import { useState } from "react";
+import { apiClient, type Employee } from "../api/client";
+import { useCategoryPalette } from "../categories";
+import { initialsOf, personPalette } from "../lib/people";
+
+const INVITE_BOT_USERNAME = "planer_bot";
+
+export interface EmployeesScreenProps {
+  employees: readonly Employee[];
+  /** Re-fetches the employee list from the API after a mutation. */
+  onChanged: () => Promise<void>;
+}
+
+/**
+ * "Работники" screen: active/archived worker lists with archive/restore
+ * actions, plus a dialog to add a new worker and hand them an invite link.
+ */
+export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) {
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [invite, setInvite] = useState<{ employee: Employee; token: string } | null>(null);
+
+  const active = employees.filter((e) => e.isActive);
+  const archived = employees.filter((e) => !e.isActive);
+
+  async function withBusy(id: number, action: () => Promise<void>) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await action();
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось выполнить действие");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="employees-screen">
+      <div className="employees-header">
+        <h2 className="employees-title">Работники</h2>
+        <button type="button" className="btn btn-primary" onClick={() => setShowAddDialog(true)}>
+          ＋ Добавить работника
+        </button>
+      </div>
+
+      {error && <div className="error-text">{error}</div>}
+
+      <EmployeesSection
+        title="Активные"
+        employees={active}
+        emptyLabel="Пока нет активных работников"
+        actionLabel="Архивировать"
+        busyId={busyId}
+        onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
+      />
+
+      <EmployeesSection
+        title="Архив"
+        employees={archived}
+        emptyLabel="Архив пуст"
+        actionLabel="Восстановить"
+        busyId={busyId}
+        onAction={(id) => withBusy(id, () => apiClient.restoreEmployee(id))}
+      />
+
+      {showAddDialog && (
+        <AddEmployeeDialog
+          onCancel={() => setShowAddDialog(false)}
+          onCreated={async (employee, inviteToken) => {
+            setShowAddDialog(false);
+            await onChanged();
+            setInvite({ employee, token: inviteToken });
+          }}
+        />
+      )}
+
+      {invite && <InviteLinkDialog employee={invite.employee} token={invite.token} onClose={() => setInvite(null)} />}
+    </div>
+  );
+}
+
+interface EmployeesSectionProps {
+  title: string;
+  employees: readonly Employee[];
+  emptyLabel: string;
+  actionLabel: string;
+  busyId: number | null;
+  onAction: (id: number) => void;
+}
+
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction }: EmployeesSectionProps) {
+  return (
+    <section className="employees-section">
+      <h3 className="employees-section-title">{title}</h3>
+      {employees.length === 0 ? (
+        <div className="employees-empty">{emptyLabel}</div>
+      ) : (
+        <div className="employees-list">
+          {employees.map((employee) => (
+            <EmployeeRow
+              key={employee.id}
+              employee={employee}
+              actionLabel={actionLabel}
+              busy={busyId === employee.id}
+              onAction={() => onAction(employee.id)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EmployeeRow({
+  employee,
+  actionLabel,
+  busy,
+  onAction,
+}: {
+  employee: Employee;
+  actionLabel: string;
+  busy: boolean;
+  onAction: () => void;
+}) {
+  const palette = personPalette(employee.id);
+  const linked = employee.telegramUserId != null;
+  // "Привязан" reuses the weekend_work category's green so linked-status reads
+  // as a system color rather than a one-off, and stays legible in both themes.
+  const linkedPalette = useCategoryPalette("weekend_work");
+  const chipStyle = linked ? { background: linkedPalette.bg, color: linkedPalette.fg } : undefined;
+  return (
+    <div className="employee-row-card">
+      <span className="avatar" style={{ background: palette.bg, color: palette.fg }}>
+        {initialsOf(employee.displayName)}
+      </span>
+      <span className="employee-row-name">{employee.displayName}</span>
+      <span className="status-chip" style={chipStyle}>
+        {linked ? "привязан" : "не привязан"}
+      </span>
+      {employee.isAdmin && <span className="admin-badge">админ</span>}
+      <span className="employee-row-spacer" />
+      <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
+        {busy ? "…" : actionLabel}
+      </button>
+    </div>
+  );
+}
+
+function AddEmployeeDialog({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void;
+  onCreated: (employee: Employee, inviteToken: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError("Введите имя работника");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const { employee, inviteToken } = await apiClient.createEmployee(trimmed);
+      await onCreated(employee, inviteToken);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать работника");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="panel-overlay" onClick={onCancel}>
+      <div className="panel" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="panel-title">Добавить работника</span>
+          <button type="button" className="panel-close" onClick={onCancel} aria-label="Закрыть">
+            ×
+          </button>
+        </div>
+
+        <div className="field-group">
+          <label className="field-label" htmlFor="new-employee-name">
+            Имя
+          </label>
+          <input
+            id="new-employee-name"
+            type="text"
+            value={name}
+            placeholder="Например, Настя Волкова"
+            autoFocus
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </div>
+
+        {error && <div className="error-text">{error}</div>}
+
+        <div className="panel-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>
+            Отмена
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => void handleSubmit()} disabled={saving}>
+            {saving ? "Создание…" : "Создать"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InviteLinkDialog({ employee, token, onClose }: { employee: Employee; token: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const link = `https://t.me/${INVITE_BOT_USERNAME}?start=${token}`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (e.g. insecure context) — the link is still
+      // selectable/copyable by hand from the input below.
+    }
+  }
+
+  return (
+    <div className="panel-overlay" onClick={onClose}>
+      <div className="panel" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="panel-title">{employee.displayName} добавлен(а)</span>
+          <button type="button" className="panel-close" onClick={onClose} aria-label="Закрыть">
+            ×
+          </button>
+        </div>
+
+        <div className="field-group">
+          <span className="field-label">Ссылка-приглашение</span>
+          <div className="invite-link-row">
+            <input type="text" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+            <button type="button" className="btn btn-secondary" onClick={() => void copyLink()}>
+              {copied ? "Скопировано" : "Копировать"}
+            </button>
+          </div>
+          <p className="invite-hint">Отправь ссылку работнику — по ней он привяжет Telegram.</p>
+        </div>
+
+        <div className="panel-actions">
+          <button type="button" className="btn btn-primary" onClick={onClose}>
+            Готово
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
