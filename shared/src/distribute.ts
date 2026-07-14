@@ -13,6 +13,7 @@ export interface WorkerLoad {
   lateScore: number; // seeded from existing period load
   hours: number; // seeded from existing period load
   busy: { date: string; start: string; end: string }[]; // their timed shifts (overlap check), seeded + grown
+  absentDates: string[]; // dates (YYYY-MM-DD) they're on approved vacation/business trip
 }
 
 export interface Assignment {
@@ -34,11 +35,11 @@ export function lateWeight(shift: { start: string; end: string }): number {
  * tiebreak by hours then id. Pure (works on copies). Leaves a slot unassigned if nobody is free.
  */
 export function distributeFairly(slots: FillSlot[], workers: WorkerLoad[]): Assignment[] {
-  const load = workers.map((w) => ({ ...w, busy: [...w.busy] }));
+  const load = workers.map((w) => ({ ...w, busy: [...w.busy], absentDates: [...w.absentDates] }));
   const order = [...slots].sort((a, b) => lateWeight(b) - lateWeight(a));
   const out: Assignment[] = [];
   for (const slot of order) {
-    const free = load.filter((w) => !w.busy.some((b) => shiftsOverlap(b, slot)));
+    const free = load.filter((w) => !w.absentDates.includes(slot.date) && !w.busy.some((b) => shiftsOverlap(b, slot)));
     if (free.length === 0) continue;
     free.sort((a, b) => a.lateScore - b.lateScore || a.hours - b.hours || a.employeeId - b.employeeId);
     const w = free[0]!;

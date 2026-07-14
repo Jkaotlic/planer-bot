@@ -2,7 +2,13 @@ import { describe, it, expect } from "vitest";
 import { lateWeight, distributeFairly, type FillSlot, type WorkerLoad } from "./distribute";
 
 const slot = (id: number, date: string, start: string, end: string): FillSlot => ({ id, date, start, end });
-const idleWorker = (employeeId: number): WorkerLoad => ({ employeeId, lateScore: 0, hours: 0, busy: [] });
+const idleWorker = (employeeId: number): WorkerLoad => ({
+  employeeId,
+  lateScore: 0,
+  hours: 0,
+  busy: [],
+  absentDates: [],
+});
 
 describe("lateWeight", () => {
   it("weighs a night shift (15:00-23:00) as 2", () => {
@@ -50,7 +56,7 @@ describe("distributeFairly", () => {
       slot(3, "2026-07-03", "23:00", "07:00"),
     ];
     const workers = [
-      { employeeId: 1, lateScore: 10, hours: 0, busy: [] },
+      { employeeId: 1, lateScore: 10, hours: 0, busy: [], absentDates: [] },
       idleWorker(2),
       idleWorker(3),
     ];
@@ -63,7 +69,13 @@ describe("distributeFairly", () => {
   it("does not assign a slot to a worker whose busy overlaps it", () => {
     const slots = [slot(1, "2026-07-01", "09:00", "17:00")];
     const workers = [
-      { employeeId: 1, lateScore: 0, hours: 0, busy: [{ date: "2026-07-01", start: "08:00", end: "18:00" }] },
+      {
+        employeeId: 1,
+        lateScore: 0,
+        hours: 0,
+        busy: [{ date: "2026-07-01", start: "08:00", end: "18:00" }],
+        absentDates: [],
+      },
       idleWorker(2),
     ];
     const assignments = distributeFairly(slots, workers);
@@ -81,5 +93,26 @@ describe("distributeFairly", () => {
     const assignments = distributeFairly(slots, workers);
     expect(assignments.length).toBeLessThan(slots.length);
     expect(assignments).toHaveLength(2);
+  });
+
+  it("does not assign a slot to a worker who is absent (vacation/business trip) on that date, even with the lowest lateScore", () => {
+    const slots = [slot(1, "2026-07-01", "23:00", "07:00")];
+    const workers = [
+      { employeeId: 1, lateScore: 0, hours: 0, busy: [], absentDates: ["2026-07-01"] },
+      { employeeId: 2, lateScore: 5, hours: 0, busy: [], absentDates: [] },
+    ];
+    const assignments = distributeFairly(slots, workers);
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]!.employeeId).toBe(2);
+
+    const countFor = (id: number) => assignments.filter((a) => a.employeeId === id).length;
+    expect(countFor(1)).toBe(0);
+  });
+
+  it("leaves a slot unassigned when the only candidate is absent on that date", () => {
+    const slots = [slot(1, "2026-07-01", "23:00", "07:00")];
+    const workers = [{ employeeId: 1, lateScore: 0, hours: 0, busy: [], absentDates: ["2026-07-01"] }];
+    const assignments = distributeFairly(slots, workers);
+    expect(assignments).toHaveLength(0);
   });
 });

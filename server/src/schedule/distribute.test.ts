@@ -39,6 +39,36 @@ describe("buildDistribution", () => {
     }
   });
 
+  it("does not assign a worker to a slot on a date they're on vacation", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // Anya is on vacation the day of the unassigned slot; absences have null start/end.
+    createShift(db, { date: "2026-07-02", category: "vacation", employeeId: anya.id });
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    expect(assignment?.employeeId).not.toBe(anya.id);
+    expect(assignment?.employeeId).toBe(igor.id);
+  });
+
+  it("does not assign a worker to a slot on any date covered by a multi-day business trip", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // Anya is on a business trip 2026-07-05..2026-07-07 (multi-day, expand via endDate).
+    createShift(db, { date: "2026-07-05", endDate: "2026-07-07", category: "business_trip", employeeId: anya.id });
+    const slot = createShift(db, { date: "2026-07-06", start: "08:00", end: "17:00" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    expect(assignment?.employeeId).not.toBe(anya.id);
+    expect(assignment?.employeeId).toBe(igor.id);
+  });
+
   it("does not double-book a worker across overlapping unassigned slots at the same time", () => {
     const db = makeTestDb();
     createEmployee(db, { displayName: "Аня" });
