@@ -23,6 +23,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1).default("./data/planer.db"),
   JWT_SECRET: z.string().min(32),
   PUBLIC_URL: z.string().url(),
+  BOT_USERNAME: z.string().optional(),
 });
 
 export interface Config {
@@ -32,6 +33,7 @@ export interface Config {
   databaseUrl: string;
   jwtSecret: string;
   publicUrl: string;
+  botUsername?: string;
 }
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
@@ -48,5 +50,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     databaseUrl: e.DATABASE_URL,
     jwtSecret: e.JWT_SECRET,
     publicUrl: e.PUBLIC_URL,
+    botUsername: e.BOT_USERNAME,
   };
 }

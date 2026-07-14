@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import type { Bot } from "grammy";
 import type { Db } from "../db/client";
@@ -7,10 +8,20 @@ import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { listActiveTemplates } from "../repo/templates";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
-import { getByTelegramId, getEmployeeById, createAdminEmployee, listActive } from "../repo/employees";
+import type { Shift } from "../db/schema";
+import {
+  getByTelegramId,
+  getEmployeeById,
+  createAdminEmployee,
+  createEmployee,
+  listActive,
+  archiveEmployee,
+  restoreEmployee,
+} from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
+import { listRecentAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins } from "../bot/notify";
 import { teamNow } from "../util/team-time";
 
@@ -80,7 +91,47 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ shifts: listShiftsInRange(db, from, to) });
   });
 
+  app.get("/api/employees", requireAuth(config.jwtSecret), (c) =>
+    c.json({ employees: listActive(db).map((e) => ({ id: e.id, displayName: e.displayName })) }),
+  );
+
   app.get("/api/admin/employees", requireAdmin(config.jwtSecret), (c) => c.json({ employees: listActive(db) }));
+
+  app.post("/api/admin/employees", requireAdmin(config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
+    if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
+      return c.json({ error: "displayName is required" }, 400);
+    }
+    const inviteToken = randomBytes(16).toString("hex");
+    const employee = createEmployee(db, { displayName: body.displayName, inviteToken });
+    const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
+    return c.json({ employee, inviteToken, inviteLink }, 201);
+  });
+
+  app.post("/api/admin/employees/:id/archive", requireAdmin(config.jwtSecret), (c) => {
+    const id = Number(c.req.param("id"));
+    const employee = archiveEmployee(db, id, teamNow(config.teamTz).date);
+    if (!employee) return c.json({ error: "not_found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/admin/employees/:id/restore", requireAdmin(config.jwtSecret), (c) => {
+    const id = Number(c.req.param("id"));
+    const employee = restoreEmployee(db, id);
+    if (!employee) return c.json({ error: "not_found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  app.get("/api/admin/events", requireAdmin(config.jwtSecret), (c) => {
+    const events = listRecentAudit(db, 30).map((row) => ({
+      id: row.id,
+      type: row.type,
+      createdAt: row.createdAt,
+      actorName: row.actorEmployeeId != null ? (getEmployeeById(db, row.actorEmployeeId)?.displayName ?? null) : null,
+      payload: row.payload,
+    }));
+    return c.json({ events });
+  });
 
   app.post("/api/admin/entries", requireAdmin(config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
@@ -114,6 +165,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
+
+  type ShiftSummary = { date: string; start: string | null; end: string | null; title: string | null };
+  const shiftSummaryOf = (shiftId: number): ShiftSummary | null => {
+    const shift: Shift | undefined = getShift(db, shiftId);
+    if (!shift) return null;
+    return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
+  };
+  const nameOf = (employeeId: number): string | null => getEmployeeById(db, employeeId)?.displayName ?? null;
 
   app.post("/api/swaps", requireAuth(config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
@@ -149,7 +208,26 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ ok: true });
   });
 
-  app.get("/api/swaps", requireAuth(config.jwtSecret), (c) => c.json({ swaps: listSwapsForEmployee(db, c.get("auth").employeeId) }));
+  app.get("/api/swaps", requireAuth(config.jwtSecret), (c) => {
+    const me = c.get("auth").employeeId;
+    const swaps = listSwapsForEmployee(db, me).map((row) => {
+      const outgoing = row.fromEmployeeId === me;
+      const counterpartyId = outgoing ? row.toEmployeeId : row.fromEmployeeId;
+      const yourShiftId = outgoing ? row.fromShiftId : row.toShiftId;
+      const theirShiftId = outgoing ? row.toShiftId : row.fromShiftId;
+      return {
+        id: row.id,
+        status: row.status,
+        message: row.message,
+        createdAt: row.createdAt,
+        direction: outgoing ? "outgoing" : "incoming",
+        counterpartyName: nameOf(counterpartyId),
+        yourShift: shiftSummaryOf(yourShiftId),
+        theirShift: shiftSummaryOf(theirShiftId),
+      };
+    });
+    return c.json({ swaps });
+  });
 
   return app;
 }

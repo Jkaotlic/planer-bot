@@ -75,6 +75,31 @@ describe("swap endpoints", () => {
     expect((await list.json()).swaps.length).toBe(1);
   });
 
+  it("enriches GET /api/swaps with direction, counterpartyName, and shift summaries for both sides", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id, title: "Смена Ани" });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id, title: "Смена Игоря" });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id, message: "выручи" }));
+    expect(created.status).toBe(201);
+
+    const fromAnya = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const anyaSwap = (await fromAnya.json()).swaps[0];
+    expect(anyaSwap.direction).toBe("outgoing");
+    expect(anyaSwap.counterpartyName).toBe("Игорь");
+    expect(anyaSwap.yourShift).toEqual({ date: sa.date, start: sa.start, end: sa.end, title: "Смена Ани" });
+    expect(anyaSwap.theirShift).toEqual({ date: sb.date, start: sb.start, end: sb.end, title: "Смена Игоря" });
+
+    const fromIgor = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${igor.token}` } });
+    const igorSwap = (await fromIgor.json()).swaps[0];
+    expect(igorSwap.direction).toBe("incoming");
+    expect(igorSwap.counterpartyName).toBe("Аня");
+    expect(igorSwap.yourShift).toEqual({ date: sb.date, start: sb.start, end: sb.end, title: "Смена Игоря" });
+    expect(igorSwap.theirShift).toEqual({ date: sa.date, start: sa.start, end: sa.end, title: "Смена Ани" });
+  });
+
   it("rejects a non-string message (400)", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
