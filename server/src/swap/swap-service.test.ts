@@ -74,4 +74,13 @@ describe("swap service", () => {
     expect(cancelSwap(db, r2.request.id, b.id).ok).toBe(false); // counterparty can't cancel
     expect(cancelSwap(db, r2.request.id, a.id).ok).toBe(true);
   });
+
+  it("degrades gracefully (no crash) when a swappable shift has a null time", () => {
+    const { db, a, b, sb } = setup();
+    const bad = createShift(db, { date: "2026-07-10", start: "08:00", end: null, category: "shift", employeeId: a.id });
+    const req = createSwapRequest(db, { fromEmployeeId: a.id, fromShiftId: bad.id, toEmployeeId: b.id, toShiftId: sb.id });
+    const res = acceptSwap(db, req.id, b.id, NOW);
+    expect(res.ok).toBe(false);
+    expect(getSwapRequest(db, req.id)?.status).toBe("expired");
+  });
 });
