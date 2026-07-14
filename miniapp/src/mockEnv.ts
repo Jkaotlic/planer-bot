@@ -5,7 +5,7 @@ import { emitEvent, mockTelegramEnv, type ThemeParams } from "@telegram-apps/sdk
  * Deliberately distinct from a plain white page so that CSS-variable theming
  * is visibly proven to work when the app is opened in a regular browser tab.
  */
-const themeParams: ThemeParams = {
+const darkThemeParams: ThemeParams = {
   accent_text_color: "#6ab2f2",
   bg_color: "#17212b",
   button_color: "#5288c1",
@@ -22,6 +22,31 @@ const themeParams: ThemeParams = {
   subtitle_text_color: "#708499",
   text_color: "#f5f5f5",
 };
+
+/** Light counterpart, aligned with the product's approved mockups (light palette). */
+const lightThemeParams: ThemeParams = {
+  accent_text_color: "#3390ec",
+  bg_color: "#efeef4",
+  button_color: "#3390ec",
+  button_text_color: "#ffffff",
+  bottom_bar_bg_color: "#ffffff",
+  destructive_text_color: "#e23b32",
+  header_bg_color: "#ffffff",
+  hint_color: "#8a9099",
+  link_color: "#3390ec",
+  secondary_bg_color: "#efeef4",
+  section_bg_color: "#ffffff",
+  section_header_text_color: "#8a9099",
+  section_separator_color: "#e7e7ed",
+  subtitle_text_color: "#8a9099",
+  text_color: "#0b0b0f",
+};
+
+// `?theme=light` (e.g. for local QA or screenshot tooling) switches the mock
+// to the light palette; default stays dark, matching this file's original
+// behavior when the param is absent.
+const themeParams: ThemeParams =
+  new URLSearchParams(window.location.search).get("theme") === "light" ? lightThemeParams : darkThemeParams;
 
 /** A fake authenticated user + init data, raw-encoded the way a real client sends it. */
 const initDataRaw = new URLSearchParams([
