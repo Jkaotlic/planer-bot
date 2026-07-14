@@ -1,5 +1,5 @@
 import type { Category } from "../categories";
-import type { Me, Shift } from "./client";
+import type { Me, Shift, SwapDirection, SwapRequest, SwapShiftSummary, SwapStatus } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 
 /**
@@ -108,4 +108,124 @@ export async function mockGetMyShifts(from: string): Promise<Shift[]> {
 export async function mockGetTeamSchedule(from: string, to: string): Promise<Shift[]> {
   await delay(350);
   return ALL_ENTRIES.filter((s) => overlapsRange(s, from, to)).sort(byDateThenStart);
+}
+
+/**
+ * In-memory "Обмены" store for local development. The real `GET /api/swaps`
+ * returns bare rows with no shift times or counterparty names (see the
+ * `SwapRequest` doc comment in `client.ts`) — enriching it server-side is
+ * tracked as a follow-up, not done here. This mock instead keeps the fully
+ * ENRICHED shape the UI actually renders, and every mutator below
+ * (`mockProposeSwap`/`mockAcceptSwap`/`mockDeclineSwap`/`mockCancelSwap`)
+ * updates it in place so the "Обмены" tab reflects changes live, without a
+ * page reload.
+ */
+
+function findShiftById(id: number): Shift {
+  const shift = ALL_ENTRIES.find((s) => s.id === id);
+  if (!shift) throw new Error(`Unknown shift id ${id}`);
+  return shift;
+}
+
+/** The one `category === "shift"` entry for this employee on this day — used only to seed realistic swap requests below. */
+function shiftOf(employeeId: number, date: string): Shift {
+  const shift = ALL_ENTRIES.find((s) => s.employeeId === employeeId && s.date === date && s.category === "shift");
+  if (!shift) throw new Error(`No seed shift for employee ${employeeId} on ${date}`);
+  return shift;
+}
+
+function toSummary(shift: Shift): SwapShiftSummary {
+  return { date: shift.date, start: shift.start, end: shift.end };
+}
+
+let nextSwapId = 1;
+
+/** Builds the enriched request as seen from `MOCK_ME`'s point of view (the mock only ever runs as Аня). */
+function buildSwapRequest(input: {
+  direction: SwapDirection;
+  status: SwapStatus;
+  message: string | null;
+  createdAt: Date;
+  counterpartyId: number;
+  yourShift: Shift;
+  theirShift: Shift;
+}): SwapRequest {
+  return {
+    id: nextSwapId++,
+    direction: input.direction,
+    status: input.status,
+    message: input.message,
+    createdAt: input.createdAt.toISOString(),
+    resolvedAt: input.status === "pending" ? null : input.createdAt.toISOString(),
+    counterpartyName: personName(input.counterpartyId),
+    yourShift: toSummary(input.yourShift),
+    theirShift: toSummary(input.theirShift),
+  };
+}
+
+// Seed: 1 incoming request (Игорь proposes to Аня) + 1 outgoing request
+// (Аня proposed to Марк), both pending, so the "Обмены" tab has something to
+// show from the first load.
+const SWAPS: SwapRequest[] = [
+  buildSwapRequest({
+    direction: "incoming",
+    status: "pending",
+    message: "Смогу выйти в пятницу вместо тебя — подстрахуешь меня в субботу?",
+    createdAt: new Date(Date.now() - 20 * 60 * 60 * 1000),
+    counterpartyId: 2, // Игорь Петров
+    yourShift: shiftOf(1, dayIso(5)), // Аня, Сб
+    theirShift: shiftOf(2, dayIso(4)), // Игорь, Пт
+  }),
+  buildSwapRequest({
+    direction: "outgoing",
+    status: "pending",
+    message: null,
+    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+    counterpartyId: 3, // Марк Волков
+    yourShift: shiftOf(1, dayIso(2)), // Аня, Ср
+    theirShift: shiftOf(3, dayIso(1)), // Марк, Вт
+  }),
+];
+
+export async function mockGetSwaps(): Promise<SwapRequest[]> {
+  await delay(200);
+  return [...SWAPS].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function mockProposeSwap(fromShiftId: number, toShiftId: number, message?: string): Promise<SwapRequest> {
+  await delay(300);
+  const fromShift = findShiftById(fromShiftId);
+  const toShift = findShiftById(toShiftId);
+  const request = buildSwapRequest({
+    direction: "outgoing",
+    status: "pending",
+    message: message?.trim() ? message.trim() : null,
+    createdAt: new Date(),
+    counterpartyId: toShift.employeeId ?? MOCK_ME.id,
+    yourShift: fromShift,
+    theirShift: toShift,
+  });
+  SWAPS.unshift(request);
+  return request;
+}
+
+function resolveSwap(id: number, status: SwapStatus): void {
+  const index = SWAPS.findIndex((s) => s.id === id);
+  if (index === -1) return;
+  SWAPS[index] = { ...SWAPS[index]!, status, resolvedAt: new Date().toISOString() };
+}
+
+export async function mockAcceptSwap(id: number): Promise<void> {
+  await delay(250);
+  resolveSwap(id, "accepted");
+}
+
+export async function mockDeclineSwap(id: number): Promise<void> {
+  await delay(250);
+  resolveSwap(id, "declined");
+}
+
+export async function mockCancelSwap(id: number): Promise<void> {
+  await delay(250);
+  resolveSwap(id, "cancelled");
 }

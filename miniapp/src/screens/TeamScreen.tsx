@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { List, Placeholder, Section, Subheadline, Title } from "@telegram-apps/telegram-ui";
 import type { Shift } from "../api/client";
+import { ScreenScroll } from "../components/ScreenScroll";
 import { TeamMemberRow } from "../components/TeamMemberRow";
 import { addDays, formatDayLabel, formatWeekRangeLabel, isWeekendIso, mondayOf, toISODate } from "../lib/week";
 
@@ -23,7 +24,7 @@ export function TeamScreen({ shifts }: TeamScreenProps) {
   const hasAnything = byDay.some((group) => group.shifts.length > 0);
 
   return (
-    <div style={{ padding: "16px 16px 0" }}>
+    <ScreenScroll>
       <header style={{ margin: "8px 4px 20px" }}>
         <Title level="2" weight="2">
           Команда
@@ -49,7 +50,7 @@ export function TeamScreen({ shifts }: TeamScreenProps) {
           )}
         </List>
       )}
-    </div>
+    </ScreenScroll>
   );
 }
 
