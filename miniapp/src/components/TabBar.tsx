@@ -1,13 +1,13 @@
 import { Tabbar } from "@telegram-apps/telegram-ui";
 
-export type TabKey = "mine" | "team" | "swaps";
+export type TabKey = "mine" | "team" | "swaps" | "weekend";
 
 export interface TabBarProps {
   active: TabKey;
   onChange: (tab: TabKey) => void;
 }
 
-/** Bottom navigation: "Смены" (my shifts), "Команда", and "Обмены" (swap requests). */
+/** Bottom navigation: "Смены", "Команда", "Обмены", and "Биржа" (weekend marketplace). */
 export function TabBar({ active, onChange }: TabBarProps) {
   return (
     <Tabbar>
@@ -19,6 +19,9 @@ export function TabBar({ active, onChange }: TabBarProps) {
       </Tabbar.Item>
       <Tabbar.Item selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
         <SwapIcon />
+      </Tabbar.Item>
+      <Tabbar.Item selected={active === "weekend"} text="Биржа" onClick={() => onChange("weekend")}>
+        <MarketIcon />
       </Tabbar.Item>
     </Tabbar>
   );
@@ -49,6 +52,17 @@ function SwapIcon() {
   return (
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M4 8h13l-3-3M20 16H7l3 3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A raised hand — the "Биржа" (weekend marketplace) tab icon, echoing the "🙋 Хочу" action. */
+function MarketIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10" />
+      <path d="M11 10V4.5a1.5 1.5 0 0 1 3 0V10" />
+      <path d="M14 10.5V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1a5 5 0 0 1-4.3-2.5L4 14a1.6 1.6 0 0 1 2.6-1.8L8 14V8" />
     </svg>
   );
 }

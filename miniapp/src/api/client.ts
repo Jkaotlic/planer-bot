@@ -9,6 +9,11 @@ import {
   mockGetSwaps,
   mockGetTeamSchedule,
   mockProposeSwap,
+  mockGetWeekendSlots,
+  mockExpressInterest,
+  mockGetWeekendOffers,
+  mockConfirmOffer,
+  mockDeclineOffer,
 } from "./mock";
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -76,6 +81,34 @@ export interface SwapRequest {
   theirShift: SwapShiftSummary | null;
 }
 
+export type WeekendSlotStatus = "open" | "assigned" | "closed";
+
+/** A vacant weekend/holiday slot an admin opened for volunteers. */
+export interface VacantSlot {
+  id: number;
+  date: string;
+  start: string;
+  end: string;
+  title: string | null;
+  location: string | null;
+  note: string | null;
+  status: WeekendSlotStatus;
+}
+
+/** An open slot plus whether the current user already raised their hand for it. */
+export interface WeekendSlotView {
+  slot: VacantSlot;
+  interested: boolean;
+}
+
+export type WeekendOfferStatus = "offered" | "confirmed" | "declined";
+
+/** A weekend-work offer addressed to the current user: the slot, and the assignment's state. */
+export interface WeekendOffer {
+  assignment: { id: number; status: WeekendOfferStatus; hours: number };
+  slot: VacantSlot;
+}
+
 export interface ApiClient {
   getMe(): Promise<Me>;
   getMyShifts(from: string): Promise<Shift[]>;
@@ -85,6 +118,11 @@ export interface ApiClient {
   acceptSwap(id: number): Promise<void>;
   declineSwap(id: number): Promise<void>;
   cancelSwap(id: number): Promise<void>;
+  getWeekendSlots(): Promise<WeekendSlotView[]>;
+  expressInterest(slotId: number): Promise<void>;
+  getWeekendOffers(): Promise<WeekendOffer[]>;
+  confirmOffer(id: number): Promise<void>;
+  declineOffer(id: number): Promise<void>;
 }
 
 interface ShiftsResponse {
@@ -249,6 +287,18 @@ const realClient: ApiClient = {
   acceptSwap: (id) => authorizedPostAction(`/api/swaps/${id}/accept`),
   declineSwap: (id) => authorizedPostAction(`/api/swaps/${id}/decline`),
   cancelSwap: (id) => authorizedPostAction(`/api/swaps/${id}/cancel`),
+
+  async getWeekendSlots() {
+    const { slots } = await authorizedGet<{ slots: WeekendSlotView[] }>("/api/weekend/slots");
+    return slots;
+  },
+  expressInterest: (slotId) => authorizedPostAction(`/api/weekend/slots/${slotId}/interest`),
+  async getWeekendOffers() {
+    const { offers } = await authorizedGet<{ offers: WeekendOffer[] }>("/api/weekend/offers");
+    return offers;
+  },
+  confirmOffer: (id) => authorizedPostAction(`/api/weekend/offers/${id}/confirm`),
+  declineOffer: (id) => authorizedPostAction(`/api/weekend/offers/${id}/decline`),
 };
 
 const devClient: ApiClient = {
@@ -260,6 +310,11 @@ const devClient: ApiClient = {
   acceptSwap: (id) => mockAcceptSwap(id),
   declineSwap: (id) => mockDeclineSwap(id),
   cancelSwap: (id) => mockCancelSwap(id),
+  getWeekendSlots: () => mockGetWeekendSlots(),
+  expressInterest: (slotId) => mockExpressInterest(slotId),
+  getWeekendOffers: () => mockGetWeekendOffers(),
+  confirmOffer: (id) => mockConfirmOffer(id),
+  declineOffer: (id) => mockDeclineOffer(id),
 };
 
 /**

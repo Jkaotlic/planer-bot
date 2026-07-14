@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Me, type Shift, type SwapRequest } from "./api/client";
+import { apiClient, type Me, type Shift, type SwapRequest, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
+import { WeekendScreen } from "./screens/WeekendScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 
 interface AppData {
@@ -13,6 +14,8 @@ interface AppData {
   myShifts: Shift[];
   teamShifts: Shift[];
   swaps: SwapRequest[];
+  weekendSlots: WeekendSlotView[];
+  weekendOffers: WeekendOffer[];
 }
 
 /** App shell: bootstraps the session + this week's data once, then switches
@@ -25,6 +28,8 @@ export function App() {
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busySwapId, setBusySwapId] = useState<number | null>(null);
+  const [busySlotId, setBusySlotId] = useState<number | null>(null);
+  const [busyOfferId, setBusyOfferId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,10 +45,12 @@ export function App() {
           apiClient.getMyShifts(from),
           apiClient.getTeamSchedule(from, to),
           apiClient.getSwaps(),
+          apiClient.getWeekendSlots(),
+          apiClient.getWeekendOffers(),
         ]),
       )
-      .then(([me, myShifts, teamShifts, swaps]) => {
-        if (!cancelled) setData({ me, myShifts, teamShifts, swaps });
+      .then(([me, myShifts, teamShifts, swaps, weekendSlots, weekendOffers]) => {
+        if (!cancelled) setData({ me, myShifts, teamShifts, swaps, weekendSlots, weekendOffers });
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -76,6 +83,35 @@ export function App() {
       console.error("Swap action failed:", err);
     } finally {
       setBusySwapId(null);
+    }
+  }
+
+  async function refreshWeekend() {
+    const [weekendSlots, weekendOffers] = await Promise.all([apiClient.getWeekendSlots(), apiClient.getWeekendOffers()]);
+    setData((prev) => (prev ? { ...prev, weekendSlots, weekendOffers } : prev));
+  }
+
+  async function handleInterest(slotId: number) {
+    setBusySlotId(slotId);
+    try {
+      await apiClient.expressInterest(slotId);
+      await refreshWeekend();
+    } catch (err) {
+      console.error("Interest action failed:", err);
+    } finally {
+      setBusySlotId(null);
+    }
+  }
+
+  async function runOfferAction(id: number, action: (id: number) => Promise<void>) {
+    setBusyOfferId(id);
+    try {
+      await action(id);
+      await refreshWeekend();
+    } catch (err) {
+      console.error("Offer action failed:", err);
+    } finally {
+      setBusyOfferId(null);
     }
   }
 
@@ -122,6 +158,17 @@ export function App() {
           onAccept={(id) => void runSwapAction(id, apiClient.acceptSwap)}
           onDecline={(id) => void runSwapAction(id, apiClient.declineSwap)}
           onCancel={(id) => void runSwapAction(id, apiClient.cancelSwap)}
+        />
+      )}
+      {tab === "weekend" && (
+        <WeekendScreen
+          slots={data.weekendSlots}
+          offers={data.weekendOffers}
+          busySlotId={busySlotId}
+          busyOfferId={busyOfferId}
+          onInterest={(id) => void handleInterest(id)}
+          onConfirm={(id) => void runOfferAction(id, apiClient.confirmOffer)}
+          onDecline={(id) => void runOfferAction(id, apiClient.declineOffer)}
         />
       )}
       <TabBar active={tab} onChange={setTab} />
