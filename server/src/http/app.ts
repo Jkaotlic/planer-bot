@@ -24,6 +24,7 @@ import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins } from "../bot/notify";
 import { teamNow } from "../util/team-time";
+import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 
 export interface AppDeps {
   db: Db;
@@ -206,6 +207,19 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Заявку на обмен отменили."); }
     return c.json({ ok: true });
+  });
+
+  app.post("/api/admin/distribute", requireAdmin(config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { from?: unknown; to?: unknown; apply?: unknown };
+    if (typeof body.from !== "string" || typeof body.to !== "string") {
+      return c.json({ error: "from and to are required" }, 400);
+    }
+    const { assignments } = buildDistribution(db, body.from, body.to);
+    if (body.apply === true) {
+      applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId })));
+      return c.json({ applied: true, assignments });
+    }
+    return c.json({ applied: false, proposal: assignments });
   });
 
   app.get("/api/swaps", requireAuth(config.jwtSecret), (c) => {
