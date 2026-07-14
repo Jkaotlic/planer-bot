@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, integer, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { SwapStatus, EntryCategory } from "@planer/shared";
 
 const createdAt = () =>
@@ -80,6 +80,44 @@ export const auditLog = sqliteTable("audit_log", {
   createdAt: createdAt(),
 });
 
+export const vacantSlots = sqliteTable("vacant_slots", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  date: text().notNull(),
+  start: text().notNull(),
+  end: text().notNull(),
+  title: text(),
+  location: text(),
+  note: text(),
+  status: text().$type<"open" | "assigned" | "closed">().notNull().default("open"),
+  createdAt: createdAt(),
+});
+
+export const slotInterest = sqliteTable(
+  "slot_interest",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    slotId: integer().notNull().references(() => vacantSlots.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("slot_interest_unique").on(t.slotId, t.employeeId)],
+);
+
+export const weekendAssignments = sqliteTable(
+  "weekend_assignments",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    slotId: integer().notNull().references(() => vacantSlots.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    status: text().$type<"offered" | "confirmed" | "declined">().notNull().default("offered"),
+    hours: real().notNull(),
+    shiftId: integer().references(() => shifts.id),
+    createdAt: createdAt(),
+    confirmedAt: integer({ mode: "timestamp" }),
+  },
+  (t) => [uniqueIndex("weekend_assignment_slot").on(t.slotId)],
+);
+
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;
 export type ShiftTemplate = typeof shiftTemplates.$inferSelect;
@@ -92,3 +130,9 @@ export type ReminderLog = typeof reminderLog.$inferSelect;
 export type NewReminderLog = typeof reminderLog.$inferInsert;
 export type AuditLog = typeof auditLog.$inferSelect;
 export type NewAuditLog = typeof auditLog.$inferInsert;
+export type VacantSlot = typeof vacantSlots.$inferSelect;
+export type NewVacantSlot = typeof vacantSlots.$inferInsert;
+export type SlotInterest = typeof slotInterest.$inferSelect;
+export type NewSlotInterest = typeof slotInterest.$inferInsert;
+export type WeekendAssignment = typeof weekendAssignments.$inferSelect;
+export type NewWeekendAssignment = typeof weekendAssignments.$inferInsert;
