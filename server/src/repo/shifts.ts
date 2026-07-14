@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, or } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, reminderLog, type Shift, type NewShift } from "../db/schema";
 
@@ -42,4 +42,21 @@ export function deleteShift(db: Db, id: number): boolean {
 
 export function listShiftsByEmployee(db: Db, employeeId: number): Shift[] {
   return db.select().from(shifts).where(eq(shifts.employeeId, employeeId)).all();
+}
+
+/** Unassigned, timed 'shift' slots in [from, to] — candidates for fair auto-distribution. */
+export function listUnassignedShifts(db: Db, from: string, to: string): Shift[] {
+  return db
+    .select()
+    .from(shifts)
+    .where(and(
+      isNull(shifts.employeeId),
+      eq(shifts.category, "shift"),
+      isNotNull(shifts.start),
+      isNotNull(shifts.end),
+      gte(shifts.date, from),
+      lte(shifts.date, to),
+    ))
+    .orderBy(shifts.date, shifts.start)
+    .all();
 }
