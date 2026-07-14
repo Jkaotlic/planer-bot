@@ -1,19 +1,26 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import type { EntryCategory } from "@planer/shared";
 import {
+  mockArchiveEmployee,
+  mockCreateEmployee,
   mockCreateEntry,
   mockDeleteEntry,
   mockGetEmployees,
+  mockGetEvents,
   mockGetTeamSchedule,
   mockGetTemplates,
+  mockRestoreEmployee,
 } from "./mock";
 
-/** A worker row in the schedule grid. */
+/** A worker row in the schedule grid / Работники screen. */
 export interface Employee {
   id: number;
   displayName: string;
   isAdmin: boolean;
+  /** false once archived (see `archiveEmployee`). */
   isActive: boolean;
+  /** null until the worker opens the invite link and links their Telegram account. */
+  telegramUserId: number | null;
 }
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -43,6 +50,22 @@ export interface Template {
   sendReminder: boolean;
 }
 
+/** A recent activity item for the "События" feed. */
+export interface FeedEvent {
+  id: number;
+  kind: "success" | "pending" | "error" | "info";
+  /** Plain text with `**bold**` spans around actor names (rendered by `EventsFeed`). */
+  text: string;
+  /** Human-readable relative/absolute time, e.g. "2 часа назад". */
+  timeLabel: string;
+}
+
+export interface CreateEmployeeResult {
+  employee: Employee;
+  /** Single-use token embedded in the invite deep-link. */
+  inviteToken: string;
+}
+
 export interface NewEntryInput {
   date: string;
   category: EntryCategory;
@@ -59,8 +82,12 @@ export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
   getTemplates(): Promise<Template[]>;
+  getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<Shift>;
   deleteEntry(id: number): Promise<void>;
+  createEmployee(name: string): Promise<CreateEmployeeResult>;
+  archiveEmployee(id: number): Promise<void>;
+  restoreEmployee(id: number): Promise<void>;
 }
 
 interface EmployeesResponse {
@@ -73,6 +100,10 @@ interface ShiftsResponse {
 
 interface TemplatesResponse {
   templates: Template[];
+}
+
+interface EventsResponse {
+  events: FeedEvent[];
 }
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
@@ -163,6 +194,14 @@ const realClient: ApiClient = {
     return templates;
   },
 
+  async getEvents() {
+    // NOTE: `/api/admin/events` doesn't exist on the server yet — there is no
+    // activity log to read from. Tracked as a follow-up alongside the
+    // employee-management endpoints below; dev uses mock data in the meantime.
+    const { events } = await authorizedGet<EventsResponse>("/api/admin/events");
+    return events;
+  },
+
   async createEntry(input) {
     const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/admin/entries", input);
     return entry;
@@ -171,14 +210,37 @@ const realClient: ApiClient = {
   async deleteEntry(id) {
     await authorizedDelete(`/api/admin/entries/${id}`);
   },
+
+  // NOTE: none of the three employee-management endpoints below exist on the
+  // server yet. `GET /api/admin/employees` is real (server/src/http/app.ts),
+  // but creating an employee (+ generating an invite deep-link) and
+  // archiving/restoring one are not wired up — only the repo-level helpers
+  // exist (server/src/repo/employees.ts: createEmployee, archiveEmployee,
+  // restoreEmployee). Tracked as a follow-up; these calls are shaped for once
+  // that lands. Until then, only `devClient` (mock, below) is exercised.
+  async createEmployee(name) {
+    return authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name });
+  },
+
+  async archiveEmployee(id) {
+    await authorizedPostJson(`/api/admin/employees/${id}/archive`, {});
+  },
+
+  async restoreEmployee(id) {
+    await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
+  },
 };
 
 const devClient: ApiClient = {
   getEmployees: () => mockGetEmployees(),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getTemplates: () => mockGetTemplates(),
+  getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
   deleteEntry: (id) => mockDeleteEntry(id),
+  createEmployee: (name) => mockCreateEmployee(name),
+  archiveEmployee: (id) => mockArchiveEmployee(id),
+  restoreEmployee: (id) => mockRestoreEmployee(id),
 };
 
 /**

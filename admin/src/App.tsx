@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { apiClient, type Employee, type Shift, type Template } from "./api/client";
+import { apiClient, type Employee, type FeedEvent, type Shift, type Template } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
+import { BalanceRail } from "./components/BalanceRail";
+import { EventsFeed } from "./components/EventsFeed";
 import { ScheduleGrid } from "./components/ScheduleGrid";
 import { Sidebar, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
 
 interface PanelTarget {
@@ -18,20 +21,22 @@ export function App() {
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
+  const [events, setEvents] = useState<FeedEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   const weekLabel = formatWeekRangeLabel(weekMonday, addDays(weekMonday, 6));
 
-  // Employees + presets load once; the schedule reloads whenever the visible week changes.
+  // Employees + presets + events load once; the schedule reloads whenever the visible week changes.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([apiClient.getEmployees(), apiClient.getTemplates()])
-      .then(([e, t]) => {
+    Promise.all([apiClient.getEmployees(), apiClient.getTemplates(), apiClient.getEvents()])
+      .then(([e, t, ev]) => {
         if (!cancelled) {
           setEmployees(e);
           setTemplates(t);
+          setEvents(ev);
         }
       })
       .catch((err: unknown) => {
@@ -41,6 +46,10 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  async function refreshEmployees() {
+    setEmployees(await apiClient.getEmployees());
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -72,16 +81,22 @@ export function App() {
   }
 
   const admin = employees?.find((e) => e.isAdmin);
+  // Archived workers don't appear in the live schedule or the add-entry picker.
+  const activeEmployees = employees?.filter((e) => e.isActive) ?? null;
 
   return (
     <div className="app-shell">
       <Sidebar active={nav} onChange={setNav} adminLabel={admin ? `${firstName(admin.displayName)} · админ` : "Админ"} />
       <div className="main-column">
-        {nav !== "schedule" ? (
-          <div className="centered-fill">Раздел появится в следующем шаге</div>
-        ) : error ? (
+        {error ? (
           <div className="centered-fill">{error}</div>
-        ) : !employees || !templates || !shifts ? (
+        ) : !employees || !templates ? (
+          <div className="centered-fill">Загрузка…</div>
+        ) : nav === "employees" ? (
+          <EmployeesScreen employees={employees} onChanged={refreshEmployees} />
+        ) : nav === "log" ? (
+          <div className="centered-fill">Раздел появится в следующем шаге</div>
+        ) : !activeEmployees || !shifts ? (
           <div className="centered-fill">Загрузка…</div>
         ) : (
           <>
@@ -90,16 +105,22 @@ export function App() {
               onPrevWeek={() => setWeekMonday((m) => addDays(m, -7))}
               onNextWeek={() => setWeekMonday((m) => addDays(m, 7))}
               onDistributeFairly={() => {}}
-              onAddEntry={() => openAddPanel(employees[0]?.id ?? 1, weekDates[0]!)}
+              onAddEntry={() => openAddPanel(activeEmployees[0]?.id ?? 1, weekDates[0]!)}
             />
-            <ScheduleGrid employees={employees} shifts={shifts} weekDates={weekDates} onAddClick={openAddPanel} />
+            <div className="schedule-layout">
+              <ScheduleGrid employees={activeEmployees} shifts={shifts} weekDates={weekDates} onAddClick={openAddPanel} />
+              <aside className="right-rail">
+                <BalanceRail employees={activeEmployees} shifts={shifts} />
+                <EventsFeed events={events} />
+              </aside>
+            </div>
           </>
         )}
       </div>
 
-      {panelTarget && employees && templates && (
+      {panelTarget && activeEmployees && templates && (
         <AddEntryPanel
-          employees={employees}
+          employees={activeEmployees}
           templates={templates}
           weekDates={weekDates}
           initialEmployeeId={panelTarget.employeeId}

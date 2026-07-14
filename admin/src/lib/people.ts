@@ -30,3 +30,17 @@ export function personPalette(employeeId: number | null): PersonPalette {
   const index = (((id - 1) % PALETTE.length) + PALETTE.length) % PALETTE.length;
   return PALETTE[index] ?? PALETTE[0]!;
 }
+
+/**
+ * Russian plural form for a count: 1 -> one, 2-4 -> few, 5+ -> many
+ * (with the standard 11-14 exception, which always takes `many`).
+ * Mirrors miniapp/src/lib/shift.ts's helper of the same name.
+ */
+export function pluralizeRu(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
