@@ -1,0 +1,575 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /* Dark-mode fallbacks for when no Telegram theme is injected (plain
+     browser tab) but the OS prefers dark. Telegram's own --tg-theme-* vars
+     (bound in init.ts) always win when present, in either color scheme. */
+  --fallback-bg: #efeef4;
+  --fallback-secondary-bg: #e4e3ea;
+  --fallback-section-bg: #ffffff;
+  --fallback-text: #0b0b0f;
+  --fallback-hint: #767b87;
+  --fallback-link: #3390ec;
+  --fallback-button: #3390ec;
+  --fallback-button-text: #ffffff;
+  --fallback-destructive: #e23b32;
+  --fallback-separator: #dcdbe3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fallback-bg: #14181f;
+    --fallback-secondary-bg: #1b202a;
+    --fallback-section-bg: #1e232d;
+    --fallback-text: #f2f2f5;
+    --fallback-hint: #8a93a3;
+    --fallback-link: #6ab2f2;
+    --fallback-button: #4d8ed6;
+    --fallback-button-text: #ffffff;
+    --fallback-destructive: #ff6b60;
+    --fallback-separator: #2a3040;
+  }
+}
+
+:root {
+  --surface: var(--tg-theme-bg-color, var(--fallback-bg));
+  --surface-secondary: var(--tg-theme-secondary-bg-color, var(--fallback-secondary-bg));
+  --surface-section: var(--tg-theme-section-bg-color, var(--fallback-section-bg));
+  --text: var(--tg-theme-text-color, var(--fallback-text));
+  --hint: var(--tg-theme-hint-color, var(--fallback-hint));
+  --link: var(--tg-theme-link-color, var(--fallback-link));
+  --button: var(--tg-theme-button-color, var(--fallback-button));
+  --button-text: var(--tg-theme-button-text-color, var(--fallback-button-text));
+  --destructive: var(--tg-theme-destructive-text-color, var(--fallback-destructive));
+  --separator: var(--tg-theme-section-separator-color, var(--fallback-separator));
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--surface);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* ---------- App shell ---------- */
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  min-width: 960px;
+}
+
+.sidebar {
+  flex: 0 0 232px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-section);
+  border-right: 1px solid var(--separator);
+  padding: 20px 14px;
+}
+
+.sidebar-brand {
+  font-size: 20px;
+  font-weight: 700;
+  padding: 4px 10px 20px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-nav-item:hover {
+  background: var(--surface-secondary);
+}
+
+.sidebar-nav-item.active {
+  background: var(--button);
+  color: var(--button-text);
+}
+
+.sidebar-nav-icon {
+  flex: 0 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px 10px 2px;
+  font-size: 13px;
+  color: var(--hint);
+  border-top: 1px solid var(--separator);
+}
+
+.main-column {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ---------- Top bar ---------- */
+
+.topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.week-switcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.week-switcher-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--separator);
+  background: var(--surface-section);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.week-switcher-btn:hover {
+  background: var(--surface-secondary);
+}
+
+.week-label {
+  min-width: 150px;
+  text-align: center;
+}
+
+.topbar-spacer {
+  flex: 1 1 auto;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--button);
+  color: var(--button-text);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+.btn-secondary {
+  background: var(--surface-secondary);
+  color: var(--text);
+  border-color: var(--separator);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-section);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---------- Schedule grid ---------- */
+
+.grid-scroll {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0 24px 24px;
+}
+
+.schedule-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 940px;
+}
+
+.schedule-table th,
+.schedule-table td {
+  border-bottom: 1px solid var(--separator);
+  padding: 0;
+}
+
+.schedule-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 2;
+  padding: 10px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hint);
+  text-align: left;
+  border-bottom: 1px solid var(--separator);
+}
+
+.schedule-table thead th.weekend-col {
+  color: var(--destructive);
+}
+
+.day-col-header {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.day-col-header .dow {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.day-col-header .dom {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.employee-col-header {
+  min-width: 172px;
+}
+
+.schedule-table th.employee-col-header,
+.schedule-table td.employee-cell {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.schedule-table thead th.employee-col-header {
+  z-index: 3;
+}
+
+.employee-cell {
+  padding: 10px 12px !important;
+  min-width: 172px;
+}
+
+.employee-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--button);
+  color: var(--button-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.employee-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.day-cell {
+  vertical-align: top;
+  min-width: 112px;
+  height: 68px;
+  padding: 6px !important;
+}
+
+.day-cell.weekend-col {
+  background: color-mix(in srgb, var(--destructive) 4%, transparent);
+}
+
+.day-cell-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.entry-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 5px 7px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  cursor: default;
+}
+
+.entry-chip .chip-time {
+  font-weight: 700;
+}
+
+.entry-chip .chip-title {
+  opacity: 0.9;
+}
+
+.empty-cell-add {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--hint);
+  font-size: 18px;
+  opacity: 0.35;
+  cursor: pointer;
+}
+
+.empty-cell-add:hover {
+  opacity: 1;
+  background: var(--surface-secondary);
+}
+
+/* ---------- Category chip ---------- */
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- Add-entry panel ---------- */
+
+.panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 18, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.panel {
+  width: 460px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background: var(--surface-section);
+  border-radius: 16px;
+  border: 1px solid var(--separator);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  padding: 22px 22px 18px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.panel-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.panel-close {
+  border: none;
+  background: none;
+  color: var(--hint);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.field-group {
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hint);
+  margin-bottom: 6px;
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+
+select,
+input[type="text"],
+input[type="time"] {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--separator);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.category-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.category-option {
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.category-option.selected {
+  border-color: transparent;
+  outline: 2px solid var(--button);
+  outline-offset: -1px;
+}
+
+.preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preset-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--separator);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.preset-option.selected {
+  outline: 2px solid var(--button);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.preset-name {
+  font-weight: 600;
+}
+
+.preset-time {
+  color: var(--hint);
+  font-size: 12.5px;
+}
+
+.friday-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--button);
+  background: color-mix(in srgb, var(--button) 16%, transparent);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.custom-time-toggle {
+  margin-top: 4px;
+  background: none;
+  border: none;
+  color: var(--link);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.error-text {
+  color: var(--destructive);
+  font-size: 12.5px;
+  margin-top: 6px;
+}
+
+.centered-fill {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hint);
+  font-size: 15px;
+}
