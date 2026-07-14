@@ -22,7 +22,7 @@ import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-s
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
-import { notifyUser, notifyAdmins, notifySwapProposal } from "../bot/notify";
+import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
@@ -37,7 +37,7 @@ import {
   openSlotsForWorker,
   myOffers,
 } from "../weekend/weekend-service";
-import { listOpenSlots } from "../repo/weekend";
+import { listOpenSlots, getVacantSlot } from "../repo/weekend";
 
 export interface AppDeps {
   db: Db;
@@ -201,6 +201,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return `${dateLabel}${time}`;
   };
 
+  /** "Сб 19 июл · 10:00–18:00 · Ярмарка" — short line describing a vacant slot for chat. */
+  const slotLineOf = (s: { date: string; start: string; end: string; title?: string | null }): string => {
+    const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
+      .formatToParts(new Date(`${s.date}T00:00:00Z`));
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const weekday = get("weekday");
+    const dateLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${get("day")} ${get("month").replace(/\.$/, "")}`;
+    const title = s.title ? ` · ${s.title}` : "";
+    return `${dateLabel} · ${s.start}–${s.end}${title}`;
+  };
+
   app.post("/api/swaps", requireAuth(config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
@@ -327,7 +338,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       location: typeof body.location === "string" ? body.location : null,
       note: typeof body.note === "string" ? body.note : null,
     });
-    // TODO(bot): notify all workers about the new vacant slot (Task 3)
+    if (bot) await notifyVacantSlot(bot, db, slot.id, `Нужен человек на выходной:\n${slotLineOf(slot)}\n\nНажми «Хочу», если готов выйти.`);
     return c.json({ slot }, 201);
   });
 
@@ -346,7 +357,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) {
       const tg = tgOf(body.employeeId);
-      if (tg != null) await notifyUser(bot, tg, "Тебе предложили работу в выходной. Загляни в приложение, чтобы подтвердить или отказаться.");
+      const slot = getVacantSlot(db, res.assignment.slotId);
+      if (tg != null && slot) {
+        await notifyWeekendOffer(bot, tg, res.assignment.id, `Тебе предложили работу в выходной:\n${slotLineOf(slot)}\n\nПодтвердишь?`);
+      }
     }
     return c.json({ assignment: res.assignment }, 201);
   });

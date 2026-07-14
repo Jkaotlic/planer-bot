@@ -3,6 +3,7 @@ import type { Db } from "../db/client";
 import type { Config } from "../config";
 import { linkTelegramAccount, getByTelegramId, getEmployeeById } from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
+import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
 import { teamNow } from "../util/team-time";
 import { notifyUser, notifyAdmins } from "./notify";
 
@@ -81,6 +82,41 @@ export function createBot(deps: BotDeps): Bot {
     if (action === "accept") {
       await notifyAdmins(bot, db, "Обмен сменами состоялся.");
     }
+  });
+
+  bot.callbackQuery(/^weekend:interest:(\d+)$/, async (ctx) => {
+    const slotId = Number(ctx.match[1]);
+    const me = getByTelegramId(db, ctx.from.id);
+    if (!me) {
+      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+      return;
+    }
+    const res = expressInterest(db, slotId, me.id);
+    if (!res.ok) {
+      await ctx.answerCallbackQuery({ text: res.reason === "not_open" ? "Уже разобрали" : "Слот не найден" });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Записал 🙋" });
+    await ctx.editMessageReplyMarkup(); // drop the button — interest recorded
+  });
+
+  bot.callbackQuery(/^weekend:(confirm|decline):(\d+)$/, async (ctx) => {
+    const action = ctx.match[1] as "confirm" | "decline";
+    const id = Number(ctx.match[2]);
+    const me = getByTelegramId(db, ctx.from.id);
+    if (!me) {
+      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+      return;
+    }
+    const res = action === "confirm" ? confirmOffer(db, id, me.id) : declineOffer(db, id, me.id);
+    if (!res.ok) {
+      const text = res.reason === "not_yours" ? "Это не твой оффер" : res.reason === "not_offered" ? "Уже обработано" : "Не получилось";
+      await ctx.answerCallbackQuery({ text });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: action === "confirm" ? "Беру ✅" : "Отказ" });
+    await ctx.editMessageText(action === "confirm" ? "✅ Ты подтвердил работу в выходной." : "✖ Ты отказался от работы в выходной.");
+    await notifyAdmins(bot, db, action === "confirm" ? "Работник подтвердил работу в выходной ✅" : "Работник отказался от работы в выходной.");
   });
 
   bot.catch((err) => {
