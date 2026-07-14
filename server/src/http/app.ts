@@ -22,7 +22,7 @@ import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-s
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
-import { notifyUser, notifyAdmins } from "../bot/notify";
+import { notifyUser, notifyAdmins, notifySwapProposal } from "../bot/notify";
 import { teamNow } from "../util/team-time";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 
@@ -175,13 +175,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
   };
   const nameOf = (employeeId: number): string | null => getEmployeeById(db, employeeId)?.displayName ?? null;
 
+  /** "Пн 13 июл · 08:00–17:00"-style short line describing a shift, for chat notifications. */
+  const shiftLineOf = (shiftId: number): string => {
+    const shift = getShift(db, shiftId);
+    if (!shift) return "смену";
+    const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
+      .formatToParts(new Date(`${shift.date}T00:00:00Z`));
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const weekday = get("weekday");
+    const dateLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${get("day")} ${get("month").replace(/\.$/, "")}`;
+    const time = shift.start != null && shift.end != null ? ` · ${shift.start}–${shift.end}` : "";
+    return `${dateLabel}${time}`;
+  };
+
   app.post("/api/swaps", requireAuth(config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
     if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
     const res = createSwap(db, { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message });
     if (!res.ok) return c.json({ error: res.reason }, 400);
-    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Тебе предложили обмен сменой. Открой приложение, чтобы ответить."); }
+    if (bot) {
+      const tg = tgOf(res.counterpartyId);
+      if (tg != null) {
+        const fromName = nameOf(res.request.fromEmployeeId) ?? "Коллега";
+        const text = `«${fromName} предлагает обмен: отдаёт ${shiftLineOf(res.request.fromShiftId)}, хочет твою ${shiftLineOf(res.request.toShiftId)}»`;
+        await notifySwapProposal(bot, tg, res.request.id, text);
+      }
+    }
     return c.json({ request: res.request }, 201);
   });
 

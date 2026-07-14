@@ -1,4 +1,4 @@
-import type { Bot } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins } from "../repo/employees";
 
@@ -7,6 +7,16 @@ export async function notifyUser(bot: Bot, telegramUserId: number, text: string)
     await bot.api.sendMessage(telegramUserId, text);
   } catch (err) {
     console.error(`notifyUser: failed for ${telegramUserId}:`, err);
+  }
+}
+
+/** Sends a swap proposal with inline Принять/Отклонить buttons routed to `swap:<action>:<requestId>` callbacks. */
+export async function notifySwapProposal(bot: Bot, telegramUserId: number, requestId: number, text: string): Promise<void> {
+  const kb = new InlineKeyboard().text("✅ Принять", `swap:accept:${requestId}`).text("✖ Отклонить", `swap:decline:${requestId}`);
+  try {
+    await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
+  } catch (err) {
+    console.error(`notifySwapProposal: failed for ${telegramUserId}:`, err);
   }
 }
 
