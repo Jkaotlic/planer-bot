@@ -270,12 +270,13 @@ async function requestToken(): Promise<string> {
   const browserToken = storedToken();
   if (browserToken) return browserToken;
 
+  let initData = "";
   try {
     restoreInitData();
+    initData = initDataRaw() ?? "";
   } catch {
     // No launch params (opened in a plain browser without a login link).
   }
-  const initData = initDataRaw() ?? "";
   if (!initData) {
     throw new AuthRequiredError("Требуется вход");
   }
