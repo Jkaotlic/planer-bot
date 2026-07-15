@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee, type NewEntryInput, type Shift, type Template } from "../../api/client";
-import { CategoryChip, categoryLabel, type Category } from "../../categories";
+import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { durationHours, formatTimeRange } from "../../lib/shift";
@@ -183,7 +183,7 @@ export function AdminScheduleScreen() {
             ) : dayEntries.length === 0 ? (
               <Placeholder description="В этот день пока ничего не запланировано." />
             ) : (
-              dayEntries.map((s) => <EntryRow key={s.id} shift={s} onTap={() => setEditing(s)} />)
+              dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)
             )}
             <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
               <Button size="m" mode="filled" stretched onClick={() => setEditing("new")}>
@@ -257,16 +257,33 @@ function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSe
   );
 }
 
-function EntryRow({ shift, onTap }: { shift: Shift; onTap: () => void }) {
+function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readonly Template[]; onTap: () => void }) {
   const name = shift.employeeName ?? "— не назначен —";
   const palette = personPalette(shift.employeeId);
-  const heading = shift.title ?? categoryLabel(shift.category);
+  // The badge shows *which* preset (Утро/День/…) in that preset's own colour, so
+  // the day reads at a glance instead of every shift being the same blue.
+  const entryPalette = useEntryPalette(shift, templates);
   return (
     <Cell
       onClick={onTap}
       before={<Avatar acronym={shift.employeeId != null ? initialsOf(name) : "?"} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-      subtitle={`${formatTimeRange(shift)} · ${heading}`}
-      after={<CategoryChip category={shift.category} />}
+      subtitle={formatTimeRange(shift)}
+      after={
+        <span
+          style={{
+            display: "inline-block",
+            fontSize: 12.5,
+            fontWeight: 600,
+            borderRadius: 999,
+            padding: "4px 10px",
+            whiteSpace: "nowrap",
+            background: entryPalette.bg,
+            color: entryPalette.fg,
+          }}
+        >
+          {shift.title ?? categoryLabel(shift.category)}
+        </span>
+      }
     >
       {name}
     </Cell>

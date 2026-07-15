@@ -17,7 +17,7 @@ function monthRange(d: Date): { from: string; to: string } {
 }
 
 /**
- * "Биржа" (admin): open vacant weekend slots with their fairness-ranked
+ * "Работа в выходные дни" (admin): open vacant weekend slots with their fairness-ranked
  * volunteers to assign in one tap, plus a payroll ledger with CSV export.
  * Mirrors the desktop `WeekendAdminScreen`, rebuilt as a mobile column.
  */

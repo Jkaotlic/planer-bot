@@ -123,6 +123,7 @@ export function App() {
               <ScheduleGrid
                 employees={activeEmployees}
                 shifts={shifts}
+                templates={templates}
                 weekDates={weekDates}
                 onAddClick={openAddPanel}
                 onEntryClick={setEditingEntry}

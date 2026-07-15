@@ -1,11 +1,13 @@
-import type { Employee, Shift } from "../api/client";
-import { categoryLabel, useCategoryPalette } from "../categories";
+import type { Employee, Shift, Template } from "../api/client";
+import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
 import { dayOfMonth, isWeekendIso, weekdayShort } from "../lib/week";
 
 export interface ScheduleGridProps {
   employees: Employee[];
   shifts: Shift[];
+  /** Presets — an entry is coloured by the accent of the preset it came from. */
+  templates: readonly Template[];
   /** The 7 ISO dates of the currently displayed week, Monday first. */
   weekDates: readonly string[];
   onAddClick: (employeeId: number, date: string) => void;
@@ -27,7 +29,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, weekDates, onAddClick, onEntryClick }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick }: ScheduleGridProps) {
   return (
     <div className="grid-scroll">
       <table className="schedule-table">
@@ -57,6 +59,7 @@ export function ScheduleGrid({ employees, shifts, weekDates, onAddClick, onEntry
                   weekend={isWeekendIso(date)}
                   onAdd={() => onAddClick(employee.id, date)}
                   onEntryClick={onEntryClick}
+                  templates={templates}
                 />
               ))}
             </tr>
@@ -84,11 +87,13 @@ function DayCell({
   weekend,
   onAdd,
   onEntryClick,
+  templates,
 }: {
   entries: Shift[];
   weekend: boolean;
   onAdd: () => void;
   onEntryClick: (entry: Shift) => void;
+  templates: readonly Template[];
 }) {
   return (
     <td className={`day-cell${weekend ? " weekend-col" : ""}`}>
@@ -96,7 +101,7 @@ function DayCell({
         {entries.length > 0 ? (
           <>
             {entries.map((entryItem) => (
-              <EntryChip key={entryItem.id} entry={entryItem} onClick={() => onEntryClick(entryItem)} />
+              <EntryChip key={entryItem.id} entry={entryItem} templates={templates} onClick={() => onEntryClick(entryItem)} />
             ))}
             <button type="button" className="cell-add-more" onClick={onAdd} aria-label="Добавить ещё запись">
               ＋
@@ -112,8 +117,8 @@ function DayCell({
   );
 }
 
-function EntryChip({ entry, onClick }: { entry: Shift; onClick: () => void }) {
-  const palette = useCategoryPalette(entry.category);
+function EntryChip({ entry, templates, onClick }: { entry: Shift; templates: readonly Template[]; onClick: () => void }) {
+  const palette = useEntryPalette(entry, templates);
   return (
     <button
       type="button"

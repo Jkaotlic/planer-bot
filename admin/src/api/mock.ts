@@ -39,6 +39,7 @@ function dayIso(offsetFromMonday: number): string {
 }
 
 interface EntryDraft {
+  templateId?: number | null;
   date: string;
   start: string | null;
   end: string | null;
@@ -50,7 +51,7 @@ interface EntryDraft {
 
 let nextId = 1;
 function entry(draft: EntryDraft): Shift {
-  return { id: nextId++, ...draft };
+  return { id: nextId++, templateId: draft.templateId ?? null, ...draft };
 }
 
 // A full week across the 5-person team (Пн=0 .. Вс=6), touching every
@@ -90,11 +91,11 @@ const SEED_ENTRIES: Shift[] = [
 const ENTRIES: Shift[] = [...SEED_ENTRIES];
 
 export const TEMPLATES: readonly Template[] = [
-  { id: 1, name: "Утро", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
-  { id: 2, name: "День", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
-  { id: 3, name: "Вечер", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
-  { id: 4, name: "Ночь", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
-  { id: 5, name: "Дежурство · Поклонка", start: "09:00", end: "21:00", fridayStart: "09:00", fridayEnd: "21:00", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
+  { id: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
+  { id: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
+  { id: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
+  { id: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
+  { id: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "21:00", fridayStart: "09:00", fridayEnd: "21:00", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
 ];
 
 function delay(ms: number): Promise<void> {
@@ -221,7 +222,7 @@ export async function mockGetEmployeeInvite(id: number, regenerate = false): Pro
 }
 
 /**
- * In-memory "Биржа" (weekend marketplace) store for local development —
+ * In-memory "Работа в выходные дни" (weekend marketplace) store for local development —
  * open vacant slots with their fairness-ranked interested workers, plus a
  * payroll ledger of already-confirmed weekend work. Mutated live by
  * post/assign so the screen updates without a reload.

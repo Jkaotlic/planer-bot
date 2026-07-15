@@ -851,7 +851,7 @@ input[type="time"] {
   font-size: 15px;
 }
 
-/* ── Биржа выходных (weekend marketplace) ───────────────────────────────── */
+/* ── Работа в выходные дни (weekend marketplace) ────────────────────────── */
 
 .weekend-slot-list {
   display: flex;
