@@ -42,7 +42,7 @@ describe("repository", () => {
   it("reads seeded templates in order", () => {
     const db = makeTestDb();
     seedDefaultTemplates(db);
-    expect(listActiveTemplates(db).map((t) => t.name)).toEqual(["Утро", "День", "Вечер", "Ночь"]);
+    expect(listActiveTemplates(db).map((t) => t.name)).toEqual(["Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка"]);
   });
 
   it("creates shifts and queries by range and by employee", () => {

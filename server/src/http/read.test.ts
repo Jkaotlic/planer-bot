@@ -34,7 +34,7 @@ describe("read endpoints", () => {
     const app = createApp({ db, config });
     const res = await app.request("/api/templates", bearer(await tokenFor(app, 333)));
     expect(res.status).toBe(200);
-    expect((await res.json()).templates.map((t: { name: string }) => t.name)).toEqual(["Утро", "День", "Вечер", "Ночь"]);
+    expect((await res.json()).templates.map((t: { name: string }) => t.name)).toEqual(["Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка"]);
   });
 
   it("returns the caller's own upcoming shifts", async () => {
