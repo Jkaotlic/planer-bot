@@ -19,6 +19,15 @@ const BALANCE_COUNTED: ReadonlySet<EntryCategory> = new Set([
   "weekend_work",
 ]);
 
+/**
+ * Named colour slots a preset can claim, so different shifts (Утро/День/Вечер/…)
+ * read apart at a glance in the schedule instead of all sharing the category's
+ * one blue. Only the *name* is shared — each app maps it to its own light/dark
+ * values, since legibility is a per-theme concern.
+ */
+export const templateAccents = ["gold", "blue", "violet", "indigo", "teal", "green", "rose"] as const;
+export type TemplateAccent = (typeof templateAccents)[number];
+
 /** Only regular shifts can be swapped between workers. */
 export function isSwappable(category: EntryCategory): boolean {
   return category === "shift";

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus, EntryCategory } from "@planer/shared";
+import type { SwapStatus, EntryCategory, TemplateAccent } from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -32,6 +32,8 @@ export const shiftTemplates = sqliteTable("shift_templates", {
   fridayEnd: text(),
   /** Default place for duty/offsite presets (e.g. "Поклонка"); null for plain shifts. */
   location: text(),
+  /** Colour slot so each preset is distinguishable in the schedule (see `TemplateAccent`). */
+  accent: text().$type<TemplateAccent>().notNull().default("blue"),
   isLate: integer({ mode: "boolean" }).notNull().default(false),
   sendReminder: integer({ mode: "boolean" }).notNull().default(false),
   sortOrder: integer().notNull().default(0),

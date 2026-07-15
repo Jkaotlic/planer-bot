@@ -1,0 +1,1 @@
+ALTER TABLE `shift_templates` ADD `accent` text DEFAULT 'blue' NOT NULL;
