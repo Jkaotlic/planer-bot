@@ -1,17 +1,10 @@
 import { eq } from "drizzle-orm";
-import {
-  distributeFairly,
-  lateWeight,
-  shiftDurationHours,
-  countsForBalance,
-  isAbsence,
-  type FillSlot,
-  type WorkerLoad,
-} from "@planer/shared";
+import { distributeFairly, countsForBalance, isAbsence, type FillSlot, type WorkerLoad } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts } from "../db/schema";
 import { listUnassignedShifts, listShiftsByEmployee } from "../repo/shifts";
 import { listActive, getEmployeeById } from "../repo/employees";
+import { listActiveTemplates } from "../repo/templates";
 
 export interface DistributionAssignment {
   shiftId: number;
@@ -39,16 +32,38 @@ function expandDateRange(start: string, end: string, from: string, to: string): 
   return dates;
 }
 
-function seedWorkerLoad(db: Db, employeeId: number, from: string, to: string): WorkerLoad {
+/**
+ * Which kind of shift this is, for per-kind fairness. Prefer the preset it was
+ * created from; fall back to its title (older rows predate templateId being
+ * stored), and finally to a single bucket for one-off custom times.
+ */
+function shiftKind(
+  s: { templateId: number | null; title: string | null },
+  nameById: ReadonlyMap<number, string>,
+): string {
+  if (s.templateId != null) {
+    const name = nameById.get(s.templateId);
+    if (name) return name;
+  }
+  return s.title ?? "Своё время";
+}
+
+function seedWorkerLoad(
+  db: Db,
+  employeeId: number,
+  from: string,
+  to: string,
+  nameById: ReadonlyMap<number, string>,
+): WorkerLoad {
   const employeeShifts = listShiftsByEmployee(db, employeeId);
   const timed = employeeShifts.filter((s) => s.start != null && s.end != null && inRange(s.date, from, to));
-  let lateScore = 0;
-  let hours = 0;
+  const byKind: Record<string, number> = {};
+  let total = 0;
   for (const s of timed) {
     if (!countsForBalance(s.category)) continue;
-    const shift = { start: s.start as string, end: s.end as string };
-    lateScore += lateWeight(shift);
-    hours += shiftDurationHours(shift);
+    const kind = shiftKind(s, nameById);
+    byKind[kind] = (byKind[kind] ?? 0) + 1;
+    total += 1;
   }
   const busy = timed.map((s) => ({ date: s.date, start: s.start as string, end: s.end as string }));
 
@@ -60,7 +75,7 @@ function seedWorkerLoad(db: Db, employeeId: number, from: string, to: string): W
   }
   const absentDates = [...absentDatesSet];
 
-  return { employeeId, lateScore, hours, busy, absentDates };
+  return { employeeId, byKind, total, busy, absentDates };
 }
 
 /** An absence entry overlaps [from, to] if its range [date, endDate ?? date] intersects it. */
@@ -69,17 +84,24 @@ function overlapsRange(s: { date: string; endDate: string | null }, from: string
   return s.date <= to && end >= from;
 }
 
-/** Proposes assignments for unfilled 'shift' slots in [from, to], balancing late load across active workers. */
+/**
+ * Proposes assignments for unfilled 'shift' slots in [from, to]. Fairness is judged
+ * per shift kind (Утро/День/Вечер/Ночь), not by hours — so nobody collects all the
+ * nights while the hour totals still look even.
+ */
 export function buildDistribution(db: Db, from: string, to: string): { assignments: DistributionAssignment[] } {
+  const nameById = new Map(listActiveTemplates(db).map((t) => [t.id, t.name]));
+
   const unassigned = listUnassignedShifts(db, from, to);
   const slots: FillSlot[] = unassigned.map((s) => ({
     id: s.id,
     date: s.date,
     start: s.start as string,
     end: s.end as string,
+    kind: shiftKind(s, nameById),
   }));
 
-  const workers = listActive(db).map((e) => seedWorkerLoad(db, e.id, from, to));
+  const workers = listActive(db).map((e) => seedWorkerLoad(db, e.id, from, to, nameById));
 
   const assignments = distributeFairly(slots, workers).map((a) => ({
     shiftId: a.shiftId,

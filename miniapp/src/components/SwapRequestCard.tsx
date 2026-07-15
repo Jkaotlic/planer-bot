@@ -5,10 +5,12 @@ import { formatDayLabel } from "../lib/week";
 import { formatTimeRange } from "../lib/shift";
 import { useIsDark } from "../lib/theme";
 
-/** "Пн, 14 июля · 09:00–18:00" (or "· Весь день" for a no-times summary). */
+/** "Пн, 14 июля · 09:00–18:00 · День" — the preset name matters: without it a
+ * Friday «Утро» (08:00–15:45) reads like a mis-timed «День». */
 function formatSwapShift(shift: SwapShiftSummary | null): string {
   if (!shift || !shift.date) return "—";
-  return `${formatDayLabel(shift.date)} · ${formatTimeRange(shift)}`;
+  const name = shift.title ? ` · ${shift.title}` : "";
+  return `${formatDayLabel(shift.date)} · ${formatTimeRange(shift)}${name}`;
 }
 
 const STATUS_LABELS: Record<SwapStatus, string> = {
