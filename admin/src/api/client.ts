@@ -11,6 +11,8 @@ import {
   mockGetTemplates,
   mockRestoreEmployee,
   mockSetEmployeeAdmin,
+  mockRenameEmployee,
+  mockGetEmployeeInvite,
   mockGetWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -141,6 +143,9 @@ export interface ApiClient {
   archiveEmployee(id: number): Promise<void>;
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
+  renameEmployee(id: number, displayName: string): Promise<void>;
+  /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
+  getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getWeekendSlots(): Promise<AdminSlotView[]>;
   postSlot(input: NewSlotInput): Promise<VacantSlot>;
   assignSlot(slotId: number, employeeId: number): Promise<void>;
@@ -339,6 +344,19 @@ async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T>
   return (await res.json()) as T;
 }
 
+async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T> {
+  const token = await authToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw await toError(path, res);
+  }
+  return (await res.json()) as T;
+}
+
 async function authorizedDelete(path: string): Promise<void> {
   const token = await authToken();
   const res = await fetch(`${API_BASE}${path}`, {
@@ -401,6 +419,14 @@ const realClient: ApiClient = {
     await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
   },
 
+  async renameEmployee(id, displayName) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
+  },
+
+  getEmployeeInvite(id, regenerate = false) {
+    return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
+  },
+
   async getWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
     return slots;
@@ -441,6 +467,8 @@ const devClient: ApiClient = {
   archiveEmployee: (id) => mockArchiveEmployee(id),
   restoreEmployee: (id) => mockRestoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
+  renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
+  getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),

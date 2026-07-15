@@ -219,3 +219,53 @@ describe("POST /api/admin/employees/:id/role", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("POST /api/admin/employees/:id/invite", () => {
+  it("re-issues the invite link for an unlinked worker (and can regenerate)", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Настя", inviteToken: "orig-token" }); // unlinked
+    const app = createApp({ db, config: configWithBotUsername });
+    const token = await tokenFor(app, 111);
+
+    const first = await app.request(`/api/admin/employees/${w.id}/invite`, authedJson(token, {}));
+    expect(first.status).toBe(200);
+    const b1 = await first.json();
+    expect(b1.inviteToken).toBe("orig-token"); // reuses existing
+    expect(b1.inviteLink).toBe("https://t.me/planer_bot?start=orig-token");
+
+    const regen = await app.request(`/api/admin/employees/${w.id}/invite`, authedJson(token, { regenerate: true }));
+    const b2 = await regen.json();
+    expect(b2.inviteToken).not.toBe("orig-token"); // fresh token
+    expect(getEmployeeById(db, w.id)?.inviteToken).toBe(b2.inviteToken);
+  });
+
+  it("refuses for an already-linked worker (400)", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333); // linked
+    const app = createApp({ db, config: configWithBotUsername });
+    const res = await app.request(`/api/admin/employees/${w.id}/invite`, authedJson(await tokenFor(app, 111), {}));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("already_linked");
+  });
+});
+
+describe("PATCH /api/admin/employees/:id (rename)", () => {
+  it("renames a worker", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request(`/api/admin/employees/${w.id}`, authedJson(await tokenFor(app, 111), { displayName: "  Игорь Петров  " }, "PATCH"));
+    expect(res.status).toBe(200);
+    expect(getEmployeeById(db, w.id)?.displayName).toBe("Игорь Петров"); // trimmed
+  });
+
+  it("rejects a blank name (400) and a worker caller (403)", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const blank = await app.request(`/api/admin/employees/${w.id}`, authedJson(await tokenFor(app, 111), { displayName: "   " }, "PATCH"));
+    expect(blank.status).toBe(400);
+    const forbidden = await app.request(`/api/admin/employees/${w.id}`, authedJson(await tokenFor(app, 333), { displayName: "X" }, "PATCH"));
+    expect(forbidden.status).toBe(403);
+  });
+});

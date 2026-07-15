@@ -369,6 +369,18 @@ export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promis
   if (employee) employee.isAdmin = isAdmin;
 }
 
+export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (employee) employee.displayName = displayName;
+}
+
+export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
+  await delay(150);
+  const inviteToken = `${id}-${regenerate ? "regen" : "keep"}`.padEnd(12, "0").slice(0, 12);
+  return { inviteToken, inviteLink: `https://t.me/your_bot_username?start=${inviteToken}` };
+}
+
 // --- Расписание -------------------------------------------------------------
 
 const TEMPLATES: readonly Template[] = [

@@ -77,6 +77,14 @@ export function setEmployeeAdmin(db: Db, id: number, isAdmin: boolean): Employee
   return db.update(employees).set({ isAdmin }).where(eq(employees.id, id)).returning().all()[0];
 }
 
+export function renameEmployee(db: Db, id: number, displayName: string): Employee | undefined {
+  return db.update(employees).set({ displayName }).where(eq(employees.id, id)).returning().all()[0];
+}
+
+export function setInviteToken(db: Db, id: number, inviteToken: string): Employee | undefined {
+  return db.update(employees).set({ inviteToken }).where(eq(employees.id, id)).returning().all()[0];
+}
+
 /** Count of active admins — used to block removing the last one (lockout guard). */
 export function countActiveAdmins(db: Db): number {
   return db.select().from(employees).where(and(eq(employees.isAdmin, true), eq(employees.isActive, true))).all().length;
