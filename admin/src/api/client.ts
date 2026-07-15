@@ -4,6 +4,7 @@ import {
   mockArchiveEmployee,
   mockCreateEmployee,
   mockCreateEntry,
+  mockUpdateEntry,
   mockDeleteEntry,
   mockGetEmployees,
   mockGetEvents,
@@ -89,7 +90,8 @@ export interface NewEntryInput {
   templateId?: number;
   employeeId?: number;
   location?: string;
-  title?: string;
+  /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
+  title?: string | null;
 }
 
 export type WeekendSlotStatus = "open" | "assigned" | "closed";
@@ -142,6 +144,7 @@ export interface ApiClient {
   getTemplates(): Promise<Template[]>;
   getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<Shift>;
+  updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
   deleteEntry(id: number): Promise<void>;
   createEmployee(name: string): Promise<CreateEmployeeResult>;
   archiveEmployee(id: number): Promise<void>;
@@ -403,6 +406,11 @@ const realClient: ApiClient = {
     return entry;
   },
 
+  async updateEntry(id, input) {
+    const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/admin/entries/${id}`, input);
+    return entry;
+  },
+
   async deleteEntry(id) {
     await authorizedDelete(`/api/admin/entries/${id}`);
   },
@@ -466,6 +474,7 @@ const devClient: ApiClient = {
   getTemplates: () => mockGetTemplates(),
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
+  updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
   createEmployee: (name) => mockCreateEmployee(name),
   archiveEmployee: (id) => mockArchiveEmployee(id),

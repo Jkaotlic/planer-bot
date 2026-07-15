@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { EntryCategory } from "@planer/shared";
-import type { Employee, NewEntryInput, Template } from "../api/client";
+import type { Employee, NewEntryInput, Shift, Template } from "../api/client";
 import { ALL_CATEGORIES, categoryLabel } from "../categories";
 import { formatDayLabel, weekdayIndex } from "../lib/week";
 
@@ -10,8 +10,12 @@ export interface AddEntryPanelProps {
   weekDates: readonly string[];
   initialEmployeeId: number;
   initialDate: string;
+  /** When set, the panel edits this entry in place instead of creating a new one. */
+  existing?: Shift | null;
   onCancel: () => void;
   onSave: (input: NewEntryInput) => Promise<void>;
+  /** Only offered while editing. */
+  onDelete?: () => Promise<void>;
 }
 
 const FRIDAY_INDEX = 4;
@@ -26,29 +30,43 @@ function isMultiDay(category: EntryCategory): boolean {
   return category === "vacation" || category === "business_trip";
 }
 
-/** Modal for creating a schedule entry for a chosen worker + day, opened from a "+" cell or the top bar. */
+/** Modal for creating a schedule entry — or, when `existing` is passed, editing one in place. */
 export function AddEntryPanel({
   employees,
   templates,
   weekDates,
   initialEmployeeId,
   initialDate,
+  existing,
   onCancel,
   onSave,
+  onDelete,
 }: AddEntryPanelProps) {
-  const [employeeId, setEmployeeId] = useState(initialEmployeeId);
-  const [date, setDate] = useState(initialDate);
-  const [endDate, setEndDate] = useState(initialDate);
-  const [category, setCategory] = useState<EntryCategory>("shift");
-  const [templateId, setTemplateId] = useState<number | null>(templates[0]?.id ?? null);
-  const [customTime, setCustomTime] = useState(false);
-  const [start, setStart] = useState("09:00");
-  const [end, setEnd] = useState("18:00");
-  const [title, setTitle] = useState("");
+  const presetsOf = (cat: EntryCategory): Template[] => templates.filter((t) => t.category === cat);
+
+  const [employeeId, setEmployeeId] = useState(existing?.employeeId ?? initialEmployeeId);
+  const [date, setDate] = useState(existing?.date ?? initialDate);
+  const [endDate, setEndDate] = useState(existing?.endDate ?? existing?.date ?? initialDate);
+  const [category, setCategory] = useState<EntryCategory>(existing?.category ?? "shift");
+  // Default the preset to the one matching the entry's current title, else the
+  // first preset of its category.
+  const [templateId, setTemplateId] = useState<number | null>(
+    templates.find((t) => t.name === existing?.title)?.id ?? presetsOf(existing?.category ?? "shift")[0]?.id ?? null,
+  );
+  // Editing a timed entry round-trips its exact clock times, so start in "custom" mode.
+  const [customTime, setCustomTime] = useState(existing != null && existing.start != null);
+  const [start, setStart] = useState(existing?.start ?? "09:00");
+  const [end, setEnd] = useState(existing?.end ?? "18:00");
+  const [title, setTitle] = useState(existing?.title ?? "");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isFriday = useMemo(() => weekdayIndex(date) === FRIDAY_INDEX, [date]);
+
+  const categoryPresets = presetsOf(category);
+  /** Preset mode applies to timed categories that actually have presets. */
+  const presetMode = needsTime(category) && categoryPresets.length > 0 && !customTime;
 
   function templateTimes(template: Template): { start: string; end: string } {
     return isFriday
@@ -56,12 +74,17 @@ export function AddEntryPanel({
       : { start: template.start, end: template.end };
   }
 
+  /** Selecting a preset also prefills the place from its default location. */
+  function selectPreset(template: Template) {
+    setTemplateId(template.id);
+    if (template.location) setTitle(template.location);
+  }
+
   function selectCategory(next: EntryCategory) {
     setCategory(next);
     setError(null);
-    if (next !== "shift") {
-      setCustomTime(false);
-    }
+    setCustomTime(false);
+    setTemplateId(presetsOf(next)[0]?.id ?? null);
   }
 
   async function handleSave() {
@@ -73,10 +96,9 @@ export function AddEntryPanel({
     }
 
     const input: NewEntryInput = { date, category, employeeId };
-    if (title.trim()) input.title = title.trim();
 
-    if (category === "shift" && !customTime) {
-      const template = templates.find((t) => t.id === templateId);
+    if (presetMode) {
+      const template = categoryPresets.find((t) => t.id === templateId) ?? categoryPresets[0];
       if (!template) {
         setError("Выберите пресет или укажите своё время");
         return;
@@ -85,7 +107,9 @@ export function AddEntryPanel({
       input.templateId = template.id;
       input.start = times.start;
       input.end = times.end;
-      if (!input.title) input.title = template.name;
+      // The title always follows the chosen preset — otherwise editing a "День"
+      // entry to the "Утро" preset would keep showing the stale old name.
+      input.title = template.name;
     } else if (needsTime(category)) {
       if (!start || !end) {
         setError("Укажите время начала и окончания");
@@ -93,6 +117,8 @@ export function AddEntryPanel({
       }
       input.start = start;
       input.end = end;
+      // Duty/offsite carry the place as their title; a custom-time shift has none.
+      input.title = category === "duty" || category === "offsite" ? title.trim() || null : null;
     } else if (isMultiDay(category)) {
       if (endDate && endDate !== date) input.endDate = endDate;
     }
@@ -107,11 +133,26 @@ export function AddEntryPanel({
     }
   }
 
+  async function handleDelete() {
+    if (!onDelete) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await onDelete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить запись");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const busy = saving || deleting;
+
   return (
     <div className="panel-overlay" onClick={onCancel}>
       <div className="panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel-header">
-          <span className="panel-title">Добавить смену</span>
+          <span className="panel-title">{existing ? "Изменить запись" : "Добавить смену"}</span>
           <button type="button" className="panel-close" onClick={onCancel} aria-label="Закрыть">
             ×
           </button>
@@ -171,18 +212,18 @@ export function AddEntryPanel({
           </div>
         </div>
 
-        {category === "shift" && !customTime && (
+        {presetMode && (
           <div className="field-group">
             <span className="field-label">Пресет{isFriday ? " · пятница, сокращённый день" : ""}</span>
             <div className="preset-list">
-              {templates.map((template) => {
+              {categoryPresets.map((template) => {
                 const times = templateTimes(template);
                 return (
                   <button
                     key={template.id}
                     type="button"
                     className={`preset-option${templateId === template.id ? " selected" : ""}`}
-                    onClick={() => setTemplateId(template.id)}
+                    onClick={() => selectPreset(template)}
                   >
                     <span className="preset-name">{template.name}</span>
                     <span className="preset-time">
@@ -199,26 +240,18 @@ export function AddEntryPanel({
           </div>
         )}
 
-        {category === "shift" && customTime && (
+        {needsTime(category) && !presetMode && (
           <div className="field-group">
-            <span className="field-label">Своё время</span>
+            <span className="field-label">Время</span>
             <div className="field-row">
               <input type="time" value={start} onChange={(e) => setStart(e.target.value)} />
               <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
             </div>
-            <button type="button" className="custom-time-toggle" onClick={() => setCustomTime(false)}>
-              Вернуться к пресетам
-            </button>
-          </div>
-        )}
-
-        {needsTime(category) && category !== "shift" && (
-          <div className="field-group">
-            <label className="field-label">Время</label>
-            <div className="field-row">
-              <input type="time" value={start} onChange={(e) => setStart(e.target.value)} />
-              <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
-            </div>
+            {categoryPresets.length > 0 && (
+              <button type="button" className="custom-time-toggle" onClick={() => setCustomTime(false)}>
+                Вернуться к пресетам
+              </button>
+            )}
           </div>
         )}
 
@@ -257,10 +290,15 @@ export function AddEntryPanel({
         {error && <div className="error-text">{error}</div>}
 
         <div className="panel-actions">
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>
+          {existing && onDelete && (
+            <button type="button" className="btn btn-danger" onClick={() => void handleDelete()} disabled={busy}>
+              {deleting ? "Удаление…" : "Удалить"}
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
             Отмена
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => void handleSave()} disabled={saving}>
+          <button type="button" className="btn btn-primary" onClick={() => void handleSave()} disabled={busy}>
             {saving ? "Сохранение…" : "Сохранить"}
           </button>
         </div>

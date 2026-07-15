@@ -143,6 +143,24 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
   return created;
 }
 
+export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<Shift> {
+  await delay(200);
+  const index = ENTRIES.findIndex((s) => s.id === id);
+  if (index === -1) throw new Error(`Unknown entry ${id}`);
+  const updated: Shift = {
+    ...ENTRIES[index]!,
+    date: input.date,
+    start: input.start ?? null,
+    end: input.end ?? null,
+    endDate: input.endDate ?? null,
+    category: input.category,
+    title: input.title ?? null,
+    employeeId: input.employeeId ?? null,
+  };
+  ENTRIES[index] = updated;
+  return updated;
+}
+
 export async function mockDeleteEntry(id: number): Promise<void> {
   await delay(150);
   const index = ENTRIES.findIndex((s) => s.id === id);

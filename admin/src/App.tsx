@@ -26,6 +26,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
+  /** The entry currently open for editing (clicking a chip in the grid). */
+  const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   const weekLabel = formatWeekRangeLabel(weekMonday, addDays(weekMonday, 6));
@@ -118,7 +120,13 @@ export function App() {
               onAddEntry={() => openAddPanel(activeEmployees[0]?.id ?? 1, weekDates[0]!)}
             />
             <div className="schedule-layout">
-              <ScheduleGrid employees={activeEmployees} shifts={shifts} weekDates={weekDates} onAddClick={openAddPanel} />
+              <ScheduleGrid
+                employees={activeEmployees}
+                shifts={shifts}
+                weekDates={weekDates}
+                onAddClick={openAddPanel}
+                onEntryClick={setEditingEntry}
+              />
               <aside className="right-rail">
                 <BalanceRail employees={activeEmployees} shifts={shifts} />
                 <EventsFeed events={events} />
@@ -128,19 +136,36 @@ export function App() {
         )}
       </div>
 
-      {panelTarget && activeEmployees && templates && (
+      {(panelTarget || editingEntry) && activeEmployees && templates && (
         <AddEntryPanel
+          // Remount per target so the form re-seeds from the clicked entry.
+          key={editingEntry ? `edit-${editingEntry.id}` : `new-${panelTarget?.employeeId}-${panelTarget?.date}`}
           employees={activeEmployees}
           templates={templates}
           weekDates={weekDates}
-          initialEmployeeId={panelTarget.employeeId}
-          initialDate={panelTarget.date}
-          onCancel={() => setPanelTarget(null)}
-          onSave={async (input) => {
-            await apiClient.createEntry(input);
+          initialEmployeeId={panelTarget?.employeeId ?? activeEmployees[0]?.id ?? 0}
+          initialDate={panelTarget?.date ?? weekDates[0]!}
+          existing={editingEntry}
+          onCancel={() => {
             setPanelTarget(null);
+            setEditingEntry(null);
+          }}
+          onSave={async (input) => {
+            if (editingEntry) await apiClient.updateEntry(editingEntry.id, input);
+            else await apiClient.createEntry(input);
+            setPanelTarget(null);
+            setEditingEntry(null);
             await refreshSchedule();
           }}
+          onDelete={
+            editingEntry
+              ? async () => {
+                  await apiClient.deleteEntry(editingEntry.id);
+                  setEditingEntry(null);
+                  await refreshSchedule();
+                }
+              : undefined
+          }
         />
       )}
     </div>
