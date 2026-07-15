@@ -58,6 +58,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const { db, config, bot } = deps;
   const app = new Hono<Env>();
 
+  // API responses are live data — never let a browser / Telegram webview serve
+  // a cached copy, or an admin's edits won't show up until the app is reopened.
+  app.use("/api/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (/FOREIGN KEY/i.test(msg)) return c.json({ error: "invalid_reference" }, 400);
