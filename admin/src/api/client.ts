@@ -1,5 +1,5 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
-import type { EntryCategory } from "@planer/shared";
+import type { EntryCategory, TemplateAccent } from "@planer/shared";
 import {
   mockArchiveEmployee,
   mockCreateEmployee,
@@ -44,6 +44,8 @@ export interface Shift {
   endDate: string | null;
   category: EntryCategory;
   title: string | null;
+  /** The preset this entry came from, if any — drives its colour in the grid. */
+  templateId: number | null;
   employeeId: number | null;
 }
 
@@ -61,6 +63,8 @@ export interface Template {
   category: EntryCategory;
   /** Default place for duty/offsite presets, null for plain shifts. */
   location: string | null;
+  /** Colour slot so each preset reads apart in the schedule. */
+  accent: TemplateAccent;
 }
 
 /** A recent activity item for the "События" feed. */

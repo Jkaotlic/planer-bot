@@ -11,7 +11,7 @@ function monthRange(d: Date): { from: string; to: string } {
   return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
 }
 
-/** "Биржа выходных": open vacant slots with fairness-ranked volunteers to assign, and a payroll ledger with CSV export. */
+/** "Работа в выходные дни": open vacant slots with fairness-ranked volunteers to assign, and a payroll ledger with CSV export. */
 export function WeekendAdminScreen() {
   const [slots, setSlots] = useState<AdminSlotView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function WeekendAdminScreen() {
   return (
     <div className="employees-screen">
       <div className="employees-header">
-        <h2 className="employees-title">Биржа выходных</h2>
+        <h2 className="employees-title">Работа в выходные дни</h2>
         <button type="button" className="btn btn-primary" onClick={() => setShowPost(true)}>
           ＋ Открыть смену
         </button>

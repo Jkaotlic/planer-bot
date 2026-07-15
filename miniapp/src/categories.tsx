@@ -2,6 +2,9 @@ import type { CSSProperties, ReactNode } from "react";
 import { Chip } from "@telegram-apps/telegram-ui";
 import { useIsDark } from "./lib/theme";
 
+/** Mirrors the backend's `TemplateAccent` (see `shared/src/category.ts`). */
+export type TemplateAccent = "gold" | "blue" | "violet" | "indigo" | "teal" | "green" | "rose";
+
 /** Mirrors the backend's `EntryCategory` (see `shared/src/category.ts`). */
 export type Category = "shift" | "vacation" | "sick_leave" | "duty" | "offsite" | "business_trip" | "weekend_work";
 
@@ -45,6 +48,51 @@ const DARK_PALETTE: Record<Category, CategoryPalette> = {
   business_trip: { bg: "rgba(102,112,225,0.24)", fg: "#AEB4F7" },
   weekend_work: { bg: "rgba(70,190,90,0.22)", fg: "#86E093" },
 };
+
+
+// Per-preset accents. A preset's colour wins over its category's, so Утро/День/
+// Вечер/Ночь read apart in the schedule instead of sharing one blue; entries with
+// no preset still fall back to the category colour below.
+const LIGHT_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
+  gold: { bg: "#FBF1CF", fg: "#7A5A00" },
+  blue: { bg: "#E3EFFC", fg: "#1C6FC9" },
+  violet: { bg: "#EEE6FB", fg: "#7132C6" },
+  indigo: { bg: "#DFE3F8", fg: "#2F3A9E" },
+  teal: { bg: "#DEF5F0", fg: "#0C7A6E" },
+  green: { bg: "#E1F6E1", fg: "#1F7A34" },
+  rose: { bg: "#FCE4E4", fg: "#B3261E" },
+};
+
+const DARK_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
+  gold: { bg: "rgba(235,190,70,0.22)", fg: "#F0CE79" },
+  blue: { bg: "rgba(64,150,238,0.24)", fg: "#8EC9FF" },
+  violet: { bg: "rgba(160,110,235,0.24)", fg: "#C4A4F5" },
+  indigo: { bg: "rgba(92,104,220,0.28)", fg: "#A6AEF7" },
+  teal: { bg: "rgba(48,191,171,0.22)", fg: "#5FE0CB" },
+  green: { bg: "rgba(70,190,90,0.22)", fg: "#86E093" },
+  rose: { bg: "rgba(230,80,60,0.24)", fg: "#F5A296" },
+};
+
+/** Minimal shape needed to colour an entry — avoids importing the api types here. */
+interface ColourableEntry {
+  category: Category;
+  templateId: number | null;
+}
+interface AccentedTemplate {
+  id: number;
+  accent: TemplateAccent;
+}
+
+/**
+ * Colours for one schedule entry: the accent of the preset it came from, falling
+ * back to its category's colour when it has no preset (custom times, absences).
+ */
+export function useEntryPalette(entry: ColourableEntry, templates: readonly AccentedTemplate[]): CategoryPalette {
+  const isDark = useIsDark();
+  const accent = entry.templateId != null ? templates.find((t) => t.id === entry.templateId)?.accent : undefined;
+  if (accent) return (isDark ? DARK_ACCENTS : LIGHT_ACCENTS)[accent];
+  return (isDark ? DARK_PALETTE : LIGHT_PALETTE)[entry.category];
+}
 
 /** The category's chip colors for the currently active Telegram theme. */
 export function useCategoryPalette(category: Category): CategoryPalette {

@@ -9,7 +9,7 @@ export interface TabBarProps {
   isAdmin: boolean;
 }
 
-/** Bottom navigation: "Смены", "Команда", "Обмены", "Биржа", and — for admins only — "Админ". */
+/** Bottom navigation: "Смены", "Команда", "Обмены", "Выходные" (работа в выходные дни), and — for admins only — "Админ". */
 export function TabBar({ active, onChange, isAdmin }: TabBarProps) {
   // Built as an array (rather than inline JSX with a `&&`) so the optional
   // admin item stays a bare element — `Tabbar` types its children as a plain
@@ -24,7 +24,7 @@ export function TabBar({ active, onChange, isAdmin }: TabBarProps) {
     <Tabbar.Item key="swaps" selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
       <SwapIcon />
     </Tabbar.Item>,
-    <Tabbar.Item key="weekend" selected={active === "weekend"} text="Биржа" onClick={() => onChange("weekend")}>
+    <Tabbar.Item key="weekend" selected={active === "weekend"} text="Выходные" onClick={() => onChange("weekend")}>
       <MarketIcon />
     </Tabbar.Item>,
   ];
@@ -67,7 +67,7 @@ function SwapIcon() {
   );
 }
 
-/** A raised hand — the "Биржа" (weekend marketplace) tab icon, echoing the "🙋 Хочу" action. */
+/** A raised hand — the "Выходные" (работа в выходные дни) tab icon, echoing the "🙋 Хочу" action. */
 function MarketIcon() {
   return (
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">

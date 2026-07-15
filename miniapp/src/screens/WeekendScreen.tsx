@@ -18,7 +18,7 @@ export interface WeekendScreenProps {
   onDecline: (offerId: number) => void;
 }
 
-/** "Биржа": weekend/holiday shifts up for grabs, and offers an admin addressed to you. */
+/** "Работа в выходные дни": weekend/holiday shifts up for grabs, and offers an admin addressed to you. */
 export function WeekendScreen({ slots, offers, busySlotId, busyOfferId, onInterest, onConfirm, onDecline }: WeekendScreenProps) {
   const liveOffers = offers.filter((o) => o.assignment.status !== "declined");
 
@@ -26,7 +26,7 @@ export function WeekendScreen({ slots, offers, busySlotId, busyOfferId, onIntere
     <ScreenScroll>
       <header style={{ margin: "8px 4px 4px" }}>
         <Title level="2" weight="2">
-          Биржа выходных
+          Работа в выходные дни
         </Title>
         <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
           Свободные смены в выходные и праздники. Нажми «Хочу» — админ распределит по-честному.

@@ -1,5 +1,5 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
-import type { Category } from "../categories";
+import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
   mockCancelSwap,
@@ -45,6 +45,8 @@ export interface Shift {
   endDate: string | null;
   category: Category;
   title: string | null;
+  /** The preset this entry came from, if any — drives its colour in the schedule. */
+  templateId: number | null;
   employeeId: number | null;
   /**
    * Not part of the raw `/api/team/schedule` row — the real client joins it
@@ -155,6 +157,8 @@ export interface Template {
   category: Category;
   /** Default place for duty/offsite presets (prefills the entry form's "Место"), null for plain shifts. */
   location: string | null;
+  /** Colour slot so each preset reads apart in the schedule. */
+  accent: TemplateAccent;
 }
 
 export interface CreateEmployeeResult {

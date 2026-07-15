@@ -8,7 +8,7 @@ type AdminSection = "schedule" | "weekend" | "employees";
 
 const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "schedule", label: "Расписание" },
-  { key: "weekend", label: "Биржа" },
+  { key: "weekend", label: "Выходные" },
   { key: "employees", label: "Работники" },
 ];
 

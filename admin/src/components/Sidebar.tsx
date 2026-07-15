@@ -10,7 +10,7 @@ export interface SidebarProps {
 const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
   { key: "schedule", label: "Расписание", icon: <CalendarIcon /> },
   { key: "employees", label: "Работники", icon: <PeopleIcon /> },
-  { key: "weekend", label: "Биржа", icon: <MarketIcon /> },
+  { key: "weekend", label: "Работа в выходные", icon: <MarketIcon /> },
   { key: "log", label: "Журнал", icon: <LogIcon /> },
 ];
 
