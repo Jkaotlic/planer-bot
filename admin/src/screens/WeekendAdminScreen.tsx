@@ -50,6 +50,19 @@ export function WeekendAdminScreen() {
     }
   }
 
+  async function handleUnassign(assignmentId: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiClient.unassignSlot(assignmentId);
+      await reloadSlots();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось снять");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="employees-screen">
       <div className="employees-header">
@@ -70,7 +83,7 @@ export function WeekendAdminScreen() {
         ) : (
           <div className="weekend-slot-list">
             {slots.map((view) => (
-              <SlotCard key={view.slot.id} view={view} busy={busy} onAssign={handleAssign} />
+              <SlotCard key={view.slot.id} view={view} busy={busy} onAssign={handleAssign} onUnassign={handleUnassign} />
             ))}
           </div>
         )}
@@ -92,8 +105,20 @@ export function WeekendAdminScreen() {
   );
 }
 
-function SlotCard({ view, busy, onAssign }: { view: AdminSlotView; busy: boolean; onAssign: (slotId: number, employeeId: number) => void }) {
-  const { slot, interested } = view;
+function SlotCard({
+  view,
+  busy,
+  onAssign,
+  onUnassign,
+}: {
+  view: AdminSlotView;
+  busy: boolean;
+  onAssign: (slotId: number, employeeId: number) => void;
+  onUnassign: (assignmentId: number) => void;
+}) {
+  const { slot, interested, assignees } = view;
+  // Already-assigned people can't be assigned again from the volunteer list.
+  const assignedIds = new Set(assignees.map((a) => a.employeeId));
   return (
     <div className="weekend-slot-card">
       <div className="weekend-slot-head">
@@ -110,19 +135,37 @@ function SlotCard({ view, busy, onAssign }: { view: AdminSlotView; busy: boolean
         </span>
       </div>
 
+      {assignees.length > 0 && (
+        <div className="weekend-assignee-list">
+          <span className="weekend-assignee-title">Назначены · {assignees.length}</span>
+          {assignees.map((a) => (
+            <div key={a.assignmentId} className="weekend-assignee-row">
+              <span className="weekend-interest-name">{a.name}</span>
+              <span className="status-chip">{a.status === "confirmed" ? "подтвердил" : "ждём ответа"}</span>
+              <span className="employee-row-spacer" />
+              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => onUnassign(a.assignmentId)}>
+                Снять
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {interested.length === 0 ? (
         <div className="weekend-slot-empty">Пока никто не откликнулся — уведомление ушло всем.</div>
       ) : (
         <div className="weekend-interest-list">
-          {interested.map((person, i) => (
-            <InterestRow
-              key={person.employeeId}
-              person={person}
-              recommended={i === 0}
-              busy={busy}
-              onAssign={() => onAssign(slot.id, person.employeeId)}
-            />
-          ))}
+          {interested
+            .filter((p) => !assignedIds.has(p.employeeId))
+            .map((person, i) => (
+              <InterestRow
+                key={person.employeeId}
+                person={person}
+                recommended={i === 0}
+                busy={busy}
+                onAssign={() => onAssign(slot.id, person.employeeId)}
+              />
+            ))}
         </div>
       )}
     </div>

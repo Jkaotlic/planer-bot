@@ -241,6 +241,7 @@ const WEEKEND_SLOTS: AdminSlotView[] = [
       { employeeId: 2, name: nameOf(2), confirmedThisMonth: 1, passedOver: 0 },
       { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2, passedOver: 0 },
     ],
+    assignees: [],
   },
   {
     slot: { id: 202, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
@@ -248,10 +249,12 @@ const WEEKEND_SLOTS: AdminSlotView[] = [
       { employeeId: 4, name: nameOf(4), confirmedThisMonth: 0, passedOver: 2 },
       { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2, passedOver: 0 },
     ],
+    assignees: [],
   },
   {
     slot: { id: 203, date: dayIso(12), start: "09:00", end: "15:00", title: "Инвентаризация", location: null, note: "Полдня, оплата в двойном размере", status: "open" },
     interested: [],
+    assignees: [],
   },
 ];
 
@@ -266,7 +269,10 @@ export async function mockGetWeekendSlots(): Promise<AdminSlotView[]> {
   await delay(250);
   return WEEKEND_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
     slot: s.slot,
-    interested: [...s.interested].sort((a, b) => a.confirmedThisMonth - b.confirmedThisMonth),
+    interested: [...s.interested].sort(
+      (a, b) => a.confirmedThisMonth - b.confirmedThisMonth || b.passedOver - a.passedOver,
+    ),
+    assignees: [...s.assignees],
   }));
 }
 
@@ -282,18 +288,32 @@ export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot> {
     note: input.note?.trim() ? input.note.trim() : null,
     status: "open",
   };
-  WEEKEND_SLOTS.unshift({ slot, interested: [] });
+  WEEKEND_SLOTS.unshift({ slot, interested: [], assignees: [] });
   return slot;
 }
+
+let nextAssignmentId = 900;
 
 export async function mockAssignSlot(slotId: number, employeeId: number): Promise<void> {
   await delay(250);
   const entry = WEEKEND_SLOTS.find((s) => s.slot.id === slotId);
-  if (!entry) return;
-  entry.slot = { ...entry.slot, status: "assigned" }; // drops out of the open list
+  if (!entry || entry.assignees.some((a) => a.employeeId === employeeId)) return;
+  // The slot stays open — it may need more than one person.
+  entry.assignees.push({ assignmentId: nextAssignmentId++, employeeId, name: nameOf(employeeId), status: "offered" });
   // Mirror the real flow's eventual outcome for the demo ledger.
   const hours = durationHoursOf(entry.slot.start, entry.slot.end);
   PAYROLL.push({ employeeId, employeeName: nameOf(employeeId), date: entry.slot.date, hours });
+}
+
+export async function mockUnassignSlot(assignmentId: number): Promise<void> {
+  await delay(200);
+  for (const entry of WEEKEND_SLOTS) {
+    const i = entry.assignees.findIndex((a) => a.assignmentId === assignmentId);
+    if (i !== -1) {
+      entry.assignees.splice(i, 1);
+      return;
+    }
+  }
 }
 
 function durationHoursOf(start: string, end: string): number {

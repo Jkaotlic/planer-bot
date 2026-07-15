@@ -82,7 +82,7 @@ function hoursLabel(hours: number): string {
 }
 
 function SlotCard({ view, busy, onInterest }: { view: WeekendSlotView; busy: boolean; onInterest: () => void }) {
-  const { slot, interested } = view;
+  const { slot, interested, assignees } = view;
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -92,6 +92,8 @@ function SlotCard({ view, busy, onInterest }: { view: WeekendSlotView; busy: boo
       <div style={{ fontSize: 14.5, fontWeight: 500 }}>{slotWhen(slot)}</div>
       {slot.location && <MetaLine icon="📍">{slot.location}</MetaLine>}
       {slot.note && <MetaLine icon="💬">{slot.note}</MetaLine>}
+      {/* Everyone can see who's going, not just admins. */}
+      {assignees.length > 0 && <MetaLine icon="👥">Выходят: {assignees.map((a) => a.name).join(", ")}</MetaLine>}
       <div style={{ marginTop: 10 }}>
         {interested ? (
           <InListPill />
