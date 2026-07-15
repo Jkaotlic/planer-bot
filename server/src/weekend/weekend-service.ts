@@ -13,11 +13,17 @@ import {
   createAssignment,
   confirmAssignment,
   listAssignmentsForEmployee,
+  listAssignmentsForSlot,
   listConfirmedInRange,
   countConfirmedByEmployeeInMonth,
   countPassedOver,
+  getAssignment,
+  findAssignment,
+  deleteAssignment,
+  reofferAssignment,
+  setAssignmentShift,
 } from "../repo/weekend";
-import { createShift } from "../repo/shifts";
+import { createShift, deleteShift } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
@@ -70,21 +76,73 @@ export function interestedForSlot(
     );
 }
 
+/**
+ * Puts a worker on a slot. A slot can take several people, so this does NOT close
+ * it — it stays visible with its assignees, and the admin can add or swap people.
+ * The weekend_work entry is created immediately, so the assignment shows up in the
+ * schedule straight away; confirm/decline only settles whether the worker accepts.
+ */
 export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOutcome {
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
-  if (slot.status !== "open") return { ok: false, reason: "not_open" };
+  if (slot.status === "closed") return { ok: false, reason: "not_open" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
+
+  const shift = createShift(db, {
+    date: slot.date,
+    start: slot.start,
+    end: slot.end,
+    category: "weekend_work",
+    employeeId,
+    title: slot.title ?? "Работа в выходной",
+    location: slot.location,
+  });
+
+  // Re-offering someone who previously declined reuses their row (slot+employee is unique).
+  const existing = findAssignment(db, slotId, employeeId);
+  if (existing) {
+    reofferAssignment(db, existing.id, shift.id);
+    return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null } };
+  }
   const hours = shiftDurationHours({ start: slot.start, end: slot.end });
   const assignment = createAssignment(db, { slotId, employeeId, hours });
-  setSlotStatus(db, slotId, "assigned");
-  return { ok: true, assignment };
+  setAssignmentShift(db, assignment.id, shift.id);
+  return { ok: true, assignment: { ...assignment, shiftId: shift.id } };
+}
+
+/** Admin removes someone from a slot: drops their schedule entry and the assignment. */
+export function unassign(db: Db, assignmentId: number): Outcome {
+  const assignment = getAssignment(db, assignmentId);
+  if (!assignment) return { ok: false, reason: "not_found" };
+  if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
+  deleteAssignment(db, assignmentId);
+  return { ok: true };
+}
+
+/** Who is on this slot right now (declined people drop off), for admins and workers alike. */
+export function assigneesForSlot(
+  db: Db,
+  slotId: number,
+): { assignmentId: number; employeeId: number; name: string; status: "offered" | "confirmed" }[] {
+  return listAssignmentsForSlot(db, slotId)
+    .filter((a) => a.status !== "declined")
+    .map((a) => ({
+      assignmentId: a.id,
+      employeeId: a.employeeId,
+      name: getEmployeeById(db, a.employeeId)?.displayName ?? "Неизвестно",
+      status: a.status as "offered" | "confirmed",
+    }));
 }
 
 export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: number): Outcome {
   const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
+  // The entry was created when the admin assigned it; accepting just records that.
+  if (assignment.shiftId != null) {
+    confirmAssignment(db, assignmentId, assignment.shiftId);
+    return { ok: true };
+  }
   const slot = getVacantSlot(db, assignment.slotId);
   if (!slot) return { ok: false, reason: "slot_missing" };
   const shift = createShift(db, {
@@ -104,8 +162,13 @@ export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: num
   const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
-  db.update(weekendAssignments).set({ status: "declined" }).where(eq(weekendAssignments.id, assignmentId)).run();
-  setSlotStatus(db, assignment.slotId, "open");
+  // Turning it down pulls the entry back out of the schedule; the slot itself stays
+  // open for someone else (it was never closed by assigning).
+  if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
+  db.update(weekendAssignments)
+    .set({ status: "declined", shiftId: null })
+    .where(eq(weekendAssignments.id, assignmentId))
+    .run();
   return { ok: true };
 }
 
@@ -135,13 +198,22 @@ export function payrollCsv(rows: { employeeName: string; date: string; hours: nu
   return ["Работник,Дата,Часы", ...lines].join("\n");
 }
 
+/**
+ * The open slots as a worker sees them: whether they've raised their hand, and who
+ * is already going — everyone should be able to see who works which weekend, not
+ * just admins.
+ */
 export function openSlotsForWorker(
   db: Db,
   employeeId: number,
   fromDate: string,
-): { slot: VacantSlot; interested: boolean }[] {
+): { slot: VacantSlot; interested: boolean; assignees: { employeeId: number; name: string; status: string }[] }[] {
   const mine = new Set(listMyInterestSlotIds(db, employeeId));
-  return listOpenSlots(db, fromDate).map((slot) => ({ slot, interested: mine.has(slot.id) }));
+  return listOpenSlots(db, fromDate).map((slot) => ({
+    slot,
+    interested: mine.has(slot.id),
+    assignees: assigneesForSlot(db, slot.id).map(({ employeeId: id, name, status }) => ({ employeeId: id, name, status })),
+  }));
 }
 
 export function myOffers(db: Db, employeeId: number): { assignment: WeekendAssignment; slot: VacantSlot }[] {

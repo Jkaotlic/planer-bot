@@ -97,7 +97,7 @@ describe("weekend-market endpoints", () => {
     expect(text).toContain(",8");
   });
 
-  it("decline reopens the slot for reassignment", async () => {
+  it("assigning keeps the slot listed and schedules the entry; declining pulls it back out", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
@@ -108,11 +108,13 @@ describe("weekend-market endpoints", () => {
     await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
     const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }))).json()).assignment.id as number;
 
-    // slot is no longer open while assigned
-    expect((await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots.some((s: any) => s.slot.id === slotId)).toBe(false);
+    // The slot stays listed (it may need more people) and the entry is already scheduled.
+    expect((await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots.some((s: any) => s.slot.id === slotId)).toBe(true);
+    expect(listShiftsInRange(db, date, date).some((s) => s.category === "weekend_work" && s.employeeId === anya.w.id)).toBe(true);
 
-    // decline → reopens
+    // Turning it down removes the entry; the slot is still on offer.
     expect((await app.request(`/api/weekend/offers/${assignmentId}/decline`, authed(anya.token))).status).toBe(200);
+    expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.w.id)).toBe(false);
     expect((await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots.some((s: any) => s.slot.id === slotId)).toBe(true);
   });
 

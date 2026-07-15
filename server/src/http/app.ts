@@ -34,6 +34,8 @@ import {
   expressInterest,
   interestedForSlot,
   assignSlot,
+  unassign,
+  assigneesForSlot,
   confirmOffer,
   declineOffer,
   payrollRows,
@@ -401,7 +403,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Admin: open slots with their ranked interested list (fairness hint: confirmedThisMonth asc)
   app.get("/api/admin/weekend/slots", requireAdmin(config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? teamNow(config.teamTz).date;
-    const slots = listOpenSlots(db, from).map((slot) => ({ slot, interested: interestedForSlot(db, slot.id) }));
+    const slots = listOpenSlots(db, from).map((slot) => ({
+      slot,
+      interested: interestedForSlot(db, slot.id),
+      assignees: assigneesForSlot(db, slot.id),
+    }));
     return c.json({ slots });
   });
 
@@ -419,6 +425,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       }
     }
     return c.json({ assignment: res.assignment }, 201);
+  });
+
+  // Admin: take someone off a slot (also removes their schedule entry).
+  app.post("/api/admin/weekend/assignments/:id/unassign", requireAdmin(config.jwtSecret), async (c) => {
+    const res = unassign(db, Number(c.req.param("id")));
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    return c.json({ ok: true });
   });
 
   // Admin: payroll rows for confirmed weekend work in a date range
