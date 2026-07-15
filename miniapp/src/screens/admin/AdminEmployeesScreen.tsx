@@ -204,42 +204,47 @@ function EmployeeRow({
     );
   }
 
+  // Card layout (not a Cell with an `after` slot): on a phone three buttons in the
+  // trailing slot squeeze the name down to "Nekh…". Name + status get the full
+  // width on top; the actions wrap onto their own row underneath.
   return (
-    <Cell
-      before={<Avatar acronym={initialsOf(employee.displayName)} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-      subtitle={
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ color: linked ? "var(--tgui--hint_color)" : "var(--tgui--destructive_text_color)" }}>
-            {linked ? "привязан" : "не привязан"}
-          </span>
-          {employee.isAdmin && <CategoryChip category="shift">админ</CategoryChip>}
-        </span>
-      }
-      after={
-        <span style={{ display: "inline-flex", gap: 6 }}>
-          {onRename && (
-            <Button size="s" mode="bezeled" disabled={busy} onClick={() => { setDraft(employee.displayName); setEditing(true); }}>
-              ✎
-            </Button>
-          )}
-          {onShowInvite && !linked && (
-            <Button size="s" mode="bezeled" disabled={busy} onClick={onShowInvite}>
-              🔗
-            </Button>
-          )}
-          {onToggleAdmin && linked && (
-            <Button size="s" mode="bezeled" loading={busy} disabled={busy} onClick={onToggleAdmin}>
-              {employee.isAdmin ? "Снять" : "Админ"}
-            </Button>
-          )}
-          <Button size="s" mode="gray" loading={busy} disabled={busy} onClick={onAction}>
-            {actionLabel}
+    <CardShell>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Avatar acronym={initialsOf(employee.displayName)} size={40} style={{ background: palette.bg, color: palette.fg, flex: "none" }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 15.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {employee.displayName}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 2, fontSize: 13 }}>
+            <span style={{ color: linked ? "var(--tgui--hint_color)" : "var(--tgui--destructive_text_color)" }}>
+              {linked ? "привязан" : "не привязан"}
+            </span>
+            {employee.isAdmin && <CategoryChip category="shift">админ</CategoryChip>}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+        {onRename && (
+          <Button size="s" mode="bezeled" disabled={busy} onClick={() => { setDraft(employee.displayName); setEditing(true); }}>
+            ✎ Имя
           </Button>
-        </span>
-      }
-    >
-      {employee.displayName}
-    </Cell>
+        )}
+        {onShowInvite && !linked && (
+          <Button size="s" mode="bezeled" disabled={busy} onClick={onShowInvite}>
+            🔗 Ссылка
+          </Button>
+        )}
+        {onToggleAdmin && linked && (
+          <Button size="s" mode="bezeled" loading={busy} disabled={busy} onClick={onToggleAdmin}>
+            {employee.isAdmin ? "Снять админа" : "Сделать админом"}
+          </Button>
+        )}
+        <Button size="s" mode="gray" loading={busy} disabled={busy} onClick={onAction}>
+          {actionLabel}
+        </Button>
+      </div>
+    </CardShell>
   );
 }
 

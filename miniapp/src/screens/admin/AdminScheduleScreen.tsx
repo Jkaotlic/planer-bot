@@ -21,7 +21,7 @@ import {
 } from "../../lib/week";
 
 /** Categories a new entry can be created with, in the order the form offers them. */
-const ORDERED_CATEGORIES: readonly Category[] = ["shift", "vacation", "duty", "offsite", "business_trip", "weekend_work"];
+const ORDERED_CATEGORIES: readonly Category[] = ["shift", "vacation", "sick_leave", "duty", "offsite", "business_trip", "weekend_work"];
 
 const FRIDAY_INDEX = 4;
 
@@ -32,7 +32,7 @@ function needsTime(category: Category): boolean {
 
 /** All-day absences that can span several days and have no clock times. */
 function isMultiDay(category: Category): boolean {
-  return category === "vacation" || category === "business_trip";
+  return category === "vacation" || category === "sick_leave" || category === "business_trip";
 }
 
 /**
@@ -563,15 +563,19 @@ function formatHours(h: number): string {
  */
 function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFilled }: FillWeekPanelProps) {
   const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
-  // Per-day chosen preset id; null = "— выходной —" (skip the day).
-  const [byDay, setByDay] = useState<Record<string, number | null>>(() =>
-    Object.fromEntries(weekDates.map((iso) => [iso, null])),
+  /** Per-day choice, encoded: "" = выходной, "p:<id>" = preset, "c:<category>" = a
+   * category that has no preset (отпуск/больничный/командировка/…). Same option set
+   * as the single-entry form, so both surfaces offer identical choices. */
+  const [byDay, setByDay] = useState<Record<string, string>>(() =>
+    Object.fromEntries(weekDates.map((iso) => [iso, ""])),
   );
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const chosenDays = weekDates.filter((iso) => byDay[iso] != null);
+  const chosenDays = weekDates.filter((iso) => byDay[iso]);
+  /** Categories with no preset of their own — offered directly alongside the presets. */
+  const plainCategories = ORDERED_CATEGORIES.filter((c) => !templates.some((t) => t.category === c));
 
   // Current-week load per active worker, recomputed whenever the schedule changes.
   const loads: WorkerLoad[] = useMemo(
@@ -600,15 +604,15 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
       : { start: template.start, end: template.end };
   }
 
-  function setDay(iso: string, value: number | null) {
+  function setDay(iso: string, value: string) {
     setByDay((prev) => ({ ...prev, [iso]: value }));
   }
 
-  /** Convenience: apply one preset to every WEEKDAY — Сб/Вс stay "выходной" unless
+  /** Convenience: apply one choice to every WEEKDAY — Сб/Вс stay "выходной" unless
    * set by hand, since a blanket fill shouldn't silently roster the weekend.
-   * Passing null clears every day. */
-  function setWholeWeek(value: number | null) {
-    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value != null && isWeekendIso(iso) ? null : value])));
+   * Passing "" clears every day. */
+  function setWholeWeek(value: string) {
+    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value && isWeekendIso(iso) ? "" : value])));
   }
 
   async function handleFill() {
@@ -626,19 +630,26 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
     let filled = 0;
     try {
       for (const iso of chosenDays) {
-        const template = templates.find((t) => t.id === byDay[iso]);
-        if (!template) continue;
-        const times = templateTimesFor(template, iso);
-        // Same preset→entry mapping as EntryForm: category/times from the preset,
-        // title = preset name (which carries the place for a duty preset).
-        await apiClient.createEntry({
-          date: iso,
-          category: template.category,
-          employeeId,
-          start: times.start,
-          end: times.end,
-          title: template.name,
-        });
+        const choice = byDay[iso]!;
+        let input: NewEntryInput;
+        if (choice.startsWith("p:")) {
+          const template = templates.find((t) => t.id === Number(choice.slice(2)));
+          if (!template) continue;
+          const times = templateTimesFor(template, iso);
+          // Same preset→entry mapping as EntryForm: category/times from the preset,
+          // title = preset name (which carries the place for a duty preset).
+          input = { date: iso, category: template.category, employeeId, start: times.start, end: times.end, title: template.name };
+        } else {
+          // A category with no preset: absences carry no times; a timed one gets
+          // sensible defaults the admin can refine on the entry afterwards.
+          const category = choice.slice(2) as Category;
+          input = { date: iso, category, employeeId };
+          if (needsTime(category)) {
+            input.start = "09:00";
+            input.end = "18:00";
+          }
+        }
+        await apiClient.createEntry(input);
         filled += 1;
         setSavedCount(filled);
       }
@@ -692,31 +703,36 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
         )}
       </div>
 
-      <Select header="Все будни одним пресетом (Сб/Вс не трогаем)" value="" onChange={(e) => setWholeWeek(e.target.value ? Number(e.target.value) : null)}>
+      <Select header="Все будни одним вариантом (Сб/Вс не трогаем)" value="" onChange={(e) => setWholeWeek(e.target.value)}>
         <option value="">— по дням —</option>
         {templates.map((t) => (
-          <option key={t.id} value={t.id}>
+          <option key={t.id} value={`p:${t.id}`}>
             {t.name}
+          </option>
+        ))}
+        {plainCategories.map((c) => (
+          <option key={c} value={`c:${c}`}>
+            {categoryLabel(c)}
           </option>
         ))}
       </Select>
 
       {weekDates.map((iso) => (
-        <Select
-          key={iso}
-          header={formatDayLabel(iso)}
-          value={byDay[iso] ?? ""}
-          onChange={(e) => setDay(iso, e.target.value ? Number(e.target.value) : null)}
-        >
+        <Select key={iso} header={formatDayLabel(iso)} value={byDay[iso] ?? ""} onChange={(e) => setDay(iso, e.target.value)}>
           <option value="">— выходной —</option>
           {templates.map((t) => {
             const times = templateTimesFor(t, iso);
             return (
-              <option key={t.id} value={t.id}>
+              <option key={t.id} value={`p:${t.id}`}>
                 {t.name} · {times.start}–{times.end}
               </option>
             );
           })}
+          {plainCategories.map((c) => (
+            <option key={c} value={`c:${c}`}>
+              {categoryLabel(c)}
+            </option>
+          ))}
         </Select>
       ))}
 
