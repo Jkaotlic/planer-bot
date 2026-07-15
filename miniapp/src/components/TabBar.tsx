@@ -1,30 +1,41 @@
 import { Tabbar } from "@telegram-apps/telegram-ui";
 
-export type TabKey = "mine" | "team" | "swaps" | "weekend";
+export type TabKey = "mine" | "team" | "swaps" | "weekend" | "admin";
 
 export interface TabBarProps {
   active: TabKey;
   onChange: (tab: TabKey) => void;
+  /** When true, an extra "Админ" tab is shown; hidden entirely for regular workers. */
+  isAdmin: boolean;
 }
 
-/** Bottom navigation: "Смены", "Команда", "Обмены", and "Биржа" (weekend marketplace). */
-export function TabBar({ active, onChange }: TabBarProps) {
-  return (
-    <Tabbar>
-      <Tabbar.Item selected={active === "mine"} text="Смены" onClick={() => onChange("mine")}>
-        <CalendarIcon />
-      </Tabbar.Item>
-      <Tabbar.Item selected={active === "team"} text="Команда" onClick={() => onChange("team")}>
-        <PeopleIcon />
-      </Tabbar.Item>
-      <Tabbar.Item selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
-        <SwapIcon />
-      </Tabbar.Item>
-      <Tabbar.Item selected={active === "weekend"} text="Биржа" onClick={() => onChange("weekend")}>
-        <MarketIcon />
-      </Tabbar.Item>
-    </Tabbar>
-  );
+/** Bottom navigation: "Смены", "Команда", "Обмены", "Биржа", and — for admins only — "Админ". */
+export function TabBar({ active, onChange, isAdmin }: TabBarProps) {
+  // Built as an array (rather than inline JSX with a `&&`) so the optional
+  // admin item stays a bare element — `Tabbar` types its children as a plain
+  // element array and rejects the `false` a short-circuit would leave behind.
+  const items = [
+    <Tabbar.Item key="mine" selected={active === "mine"} text="Смены" onClick={() => onChange("mine")}>
+      <CalendarIcon />
+    </Tabbar.Item>,
+    <Tabbar.Item key="team" selected={active === "team"} text="Команда" onClick={() => onChange("team")}>
+      <PeopleIcon />
+    </Tabbar.Item>,
+    <Tabbar.Item key="swaps" selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
+      <SwapIcon />
+    </Tabbar.Item>,
+    <Tabbar.Item key="weekend" selected={active === "weekend"} text="Биржа" onClick={() => onChange("weekend")}>
+      <MarketIcon />
+    </Tabbar.Item>,
+  ];
+  if (isAdmin) {
+    items.push(
+      <Tabbar.Item key="admin" selected={active === "admin"} text="Админ" onClick={() => onChange("admin")}>
+        <ShieldIcon />
+      </Tabbar.Item>,
+    );
+  }
+  return <Tabbar>{items}</Tabbar>;
 }
 
 // Paths reused verbatim from the approved product mockup's tab bar icons.
@@ -63,6 +74,16 @@ function MarketIcon() {
       <path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10" />
       <path d="M11 10V4.5a1.5 1.5 0 0 1 3 0V10" />
       <path d="M14 10.5V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1a5 5 0 0 1-4.3-2.5L4 14a1.6 1.6 0 0 1 2.6-1.8L8 14V8" />
+    </svg>
+  );
+}
+
+/** A shield with a check — the admin-only "Админ" tab icon. */
+function ShieldIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l7 3v5c0 4.4-3 8-7 10-4-2-7-5.6-7-10V6l7-3z" />
+      <path d="M9 12l2 2 4-4" />
     </svg>
   );
 }
