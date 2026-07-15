@@ -7,6 +7,7 @@ export type { EntryCategory as Category } from "@planer/shared";
 const CATEGORY_LABELS: Record<EntryCategory, string> = {
   shift: "Смена",
   vacation: "Отпуск",
+  sick_leave: "Больничный",
   duty: "Дежурство",
   offsite: "Выездное",
   business_trip: "Командировка",
@@ -21,6 +22,7 @@ export function categoryLabel(category: EntryCategory): string {
 export const ALL_CATEGORIES: readonly EntryCategory[] = [
   "shift",
   "vacation",
+  "sick_leave",
   "duty",
   "offsite",
   "business_trip",
@@ -38,6 +40,7 @@ interface CategoryPalette {
 const LIGHT_PALETTE: Record<EntryCategory, CategoryPalette> = {
   shift: { bg: "#E3EFFC", fg: "#1C6FC9" }, // Telegram blue
   vacation: { bg: "#FCEEDA", fg: "#8A5700" }, // amber
+  sick_leave: { bg: "#FCE4E4", fg: "#B3261E" }, // rose
   duty: { bg: "#DEF5F0", fg: "#0C7A6E" }, // teal
   offsite: { bg: "#EEE6FB", fg: "#7132C6" }, // violet
   business_trip: { bg: "#E4E6FA", fg: "#3D46B8" }, // indigo
@@ -47,6 +50,7 @@ const LIGHT_PALETTE: Record<EntryCategory, CategoryPalette> = {
 const DARK_PALETTE: Record<EntryCategory, CategoryPalette> = {
   shift: { bg: "rgba(64,150,238,0.24)", fg: "#8EC9FF" },
   vacation: { bg: "rgba(240,170,60,0.22)", fg: "#F4C169" },
+  sick_leave: { bg: "rgba(230,80,60,0.24)", fg: "#F5A296" },
   duty: { bg: "rgba(48,191,171,0.22)", fg: "#5FE0CB" },
   offsite: { bg: "rgba(160,110,235,0.24)", fg: "#C4A4F5" },
   business_trip: { bg: "rgba(102,112,225,0.24)", fg: "#AEB4F7" },

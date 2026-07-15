@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { entryCategorySchema, isSwappable, isAbsence, countsForBalance, type EntryCategory } from "./category";
 
-const ALL: EntryCategory[] = ["shift", "vacation", "duty", "offsite", "business_trip", "weekend_work"];
+const ALL: EntryCategory[] = ["shift", "vacation", "sick_leave", "duty", "offsite", "business_trip", "weekend_work"];
 
 describe("entry category", () => {
   it("validates the enum", () => {
@@ -13,8 +13,15 @@ describe("entry category", () => {
     expect(ALL.filter(isSwappable)).toEqual(["shift"]);
   });
 
-  it("absences are vacation and business_trip", () => {
-    expect(ALL.filter(isAbsence)).toEqual(["vacation", "business_trip"]);
+  it("absences are vacation, sick leave and business_trip", () => {
+    expect(ALL.filter(isAbsence)).toEqual(["vacation", "sick_leave", "business_trip"]);
+  });
+
+  it("sick leave is an absence: not swappable, not counted toward balance", () => {
+    expect(entryCategorySchema.parse("sick_leave")).toBe("sick_leave");
+    expect(isAbsence("sick_leave")).toBe(true);
+    expect(isSwappable("sick_leave")).toBe(false);
+    expect(countsForBalance("sick_leave")).toBe(false);
   });
 
   it("balance counts work, not absences", () => {

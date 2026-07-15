@@ -27,7 +27,7 @@ function needsTime(category: EntryCategory): boolean {
 
 /** Categories that can span multiple days (no clock times). */
 function isMultiDay(category: EntryCategory): boolean {
-  return category === "vacation" || category === "business_trip";
+  return category === "vacation" || category === "sick_leave" || category === "business_trip";
 }
 
 /** Modal for creating a schedule entry — or, when `existing` is passed, editing one in place. */
