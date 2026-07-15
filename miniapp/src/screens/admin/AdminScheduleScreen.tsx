@@ -4,12 +4,13 @@ import { apiClient, type Employee, type NewEntryInput, type Shift, type Template
 import { CategoryChip, categoryLabel, type Category } from "../../categories";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
-import { formatTimeRange } from "../../lib/shift";
+import { durationHours, formatTimeRange } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import {
   addDays,
   dayOfMonth,
+  firstName,
   formatDayLabel,
   formatWeekRangeLabel,
   mondayOf,
@@ -51,6 +52,8 @@ export function AdminScheduleScreen() {
   const [distributing, setDistributing] = useState(false);
   /** null = closed, "new" = add form, a Shift = editing that entry. */
   const [editing, setEditing] = useState<Shift | "new" | null>(null);
+  /** When true, the day view is replaced by the "Заполнить неделю" bulk-fill flow. */
+  const [fillOpen, setFillOpen] = useState(false);
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
@@ -126,6 +129,12 @@ export function AdminScheduleScreen() {
     await loadWeek(from, to);
   }
 
+  async function handleFilled(count: number) {
+    setFillOpen(false);
+    await loadWeek(from, to);
+    setNotice(count === 0 ? "Ни одного дня не выбрано — ничего не добавлено." : `Заполнено дней: ${count}.`);
+  }
+
   return (
     <ScreenScroll>
       <div style={{ padding: "12px 4px 0" }}>
@@ -137,7 +146,20 @@ export function AdminScheduleScreen() {
       {notice && <div style={{ padding: "8px 4px", color: "var(--tgui--hint_color)", fontSize: 13.5 }}>{notice}</div>}
 
       <List>
-        {editing !== null ? (
+        {fillOpen ? (
+          <Section header="Заполнить неделю">
+            <CardStack>
+              <FillWeekPanel
+                employees={employees}
+                templates={templates}
+                weekDates={weekDates}
+                shifts={shifts ?? []}
+                onCancel={() => setFillOpen(false)}
+                onFilled={handleFilled}
+              />
+            </CardStack>
+          </Section>
+        ) : editing !== null ? (
           <Section header={editing === "new" ? "Новая запись" : "Изменить запись"}>
             <CardStack>
               <EntryForm
@@ -168,6 +190,9 @@ export function AdminScheduleScreen() {
               </Button>
               <Button size="m" mode="bezeled" stretched loading={distributing} disabled={distributing} onClick={() => void handleDistribute()}>
                 ⚖ Распределить честно
+              </Button>
+              <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => setFillOpen(true)}>
+                📅 Заполнить неделю
               </Button>
             </div>
           </Section>
@@ -264,14 +289,19 @@ interface EntryFormProps {
  * absences take an optional multi-day range instead.
  */
 function EntryForm({ employees, templates, weekDates, existing, defaultDate, onCancel, onSaved }: EntryFormProps) {
+  const initialCategory: Category = existing?.category ?? "shift";
   const [employeeId, setEmployeeId] = useState<number>(existing?.employeeId ?? 0);
   const [date, setDate] = useState<string>(existing?.date ?? defaultDate);
   const [endDate, setEndDate] = useState<string>(existing?.endDate ?? existing?.date ?? defaultDate);
-  const [category, setCategory] = useState<Category>(existing?.category ?? "shift");
+  const [category, setCategory] = useState<Category>(initialCategory);
   // Default the preset to the one matching the entry's current title (so editing
-  // a "День" shift and switching to presets shows "День", not always "Утро").
+  // a "День" shift and switching to presets shows "День", not always "Утро");
+  // failing that, the first preset of the entry's category.
   const [templateId, setTemplateId] = useState<number | null>(
-    templates.find((t) => t.name === existing?.title)?.id ?? templates[0]?.id ?? null,
+    templates.find((t) => t.name === existing?.title)?.id ??
+      templates.find((t) => t.category === initialCategory)?.id ??
+      templates[0]?.id ??
+      null,
   );
   // Editing an existing timed entry round-trips its exact clock times, so start in "custom" mode.
   const [customTime, setCustomTime] = useState<boolean>(existing != null && existing.start != null);
@@ -288,18 +318,41 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
     return isFriday ? { start: template.fridayStart, end: template.fridayEnd } : { start: template.start, end: template.end };
   }
 
+  /** Presets the picker offers for a category — e.g. shift → Утро/День/Вечер/Ночь, duty → Поклонка. */
+  function presetsFor(cat: Category): Template[] {
+    return templates.filter((t) => t.category === cat);
+  }
+
+  const categoryPresets = presetsFor(category);
+  // Preset mode applies only to timed categories that actually have presets; the
+  // rest (offsite, weekend_work) always take explicit start/end.
+  const inPresetMode = needsTime(category) && !customTime && categoryPresets.length > 0;
+
+  /** Selecting a preset also prefills the place field from its default location (used if the admin then switches to "Своё время"). */
+  function selectTemplate(id: number) {
+    setTemplateId(id);
+    const template = templates.find((t) => t.id === id);
+    if (template?.location != null && (template.category === "duty" || template.category === "offsite")) {
+      setTitle(template.location);
+    }
+  }
+
   function selectCategory(next: Category) {
     setCategory(next);
     setFormError(null);
-    if (next !== "shift") setCustomTime(false);
+    setCustomTime(false);
+    // Reset the preset to the first one of the new category (or none).
+    const first = presetsFor(next)[0] ?? null;
+    setTemplateId(first?.id ?? null);
+    if (first?.location != null && (next === "duty" || next === "offsite")) setTitle(first.location);
   }
 
   function buildInput(): NewEntryInput | null {
     const input: NewEntryInput = { date, category };
     if (employeeId) input.employeeId = employeeId;
 
-    if (category === "shift" && !customTime) {
-      const template = templates.find((t) => t.id === templateId);
+    if (inPresetMode) {
+      const template = categoryPresets.find((t) => t.id === templateId) ?? categoryPresets[0];
       if (!template) {
         setFormError("Выберите пресет или укажите своё время");
         return null;
@@ -309,7 +362,8 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
       input.start = times.start;
       input.end = times.end;
       // The title always follows the chosen preset — otherwise editing a "День"
-      // entry to the "Утро" preset would keep showing the stale old name.
+      // entry to the "Утро" preset would keep showing the stale old name. For the
+      // duty preset the name already carries the place ("Дежурство · Поклонка").
       input.title = template.name;
     } else if (needsTime(category)) {
       if (!start || !end) {
@@ -391,10 +445,10 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
         ))}
       </Select>
 
-      {category === "shift" && !customTime && (
+      {inPresetMode && (
         <>
-          <Select header={`Пресет${isFriday ? " · пятница, сокращённый" : ""}`} value={templateId ?? ""} onChange={(e) => setTemplateId(Number(e.target.value))}>
-            {templates.map((t) => {
+          <Select header={`Пресет${isFriday ? " · пятница, сокращённый" : ""}`} value={templateId ?? ""} onChange={(e) => selectTemplate(Number(e.target.value))}>
+            {categoryPresets.map((t) => {
               const times = templateTimes(t);
               return (
                 <option key={t.id} value={t.id}>
@@ -409,7 +463,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
         </>
       )}
 
-      {category === "shift" && customTime && (
+      {needsTime(category) && customTime && categoryPresets.length > 0 && (
         <>
           <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />
           <button type="button" onClick={() => setCustomTime(false)} style={linkButtonStyle}>
@@ -418,7 +472,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
         </>
       )}
 
-      {needsTime(category) && category !== "shift" && <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />}
+      {needsTime(category) && categoryPresets.length === 0 && <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />}
 
       {isMultiDay(category) && (
         <Select header="По какой день" value={endDate} onChange={(e) => setEndDate(e.target.value)}>
@@ -432,7 +486,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
         </Select>
       )}
 
-      {(category === "duty" || category === "offsite") && (
+      {(category === "duty" || category === "offsite") && !inPresetMode && (
         <Input
           header="Место / примечание"
           placeholder={category === "duty" ? "Например, Вавилова" : "Например, Ярмарка вакансий"}
@@ -470,6 +524,215 @@ function TimeRow({ start, end, onStart, onEnd }: { start: string; end: string; o
         <Input header="Конец" type="time" value={end} onChange={(e) => onEnd(e.target.value)} />
       </div>
     </div>
+  );
+}
+
+interface FillWeekPanelProps {
+  employees: readonly Employee[];
+  templates: readonly Template[];
+  weekDates: readonly string[];
+  /** The visible week's team schedule, used only to compute the fairness hint. */
+  shifts: readonly Shift[];
+  onCancel: () => void;
+  onFilled: (count: number) => Promise<void>;
+}
+
+/** A worker's load on the visible week, for the fairness hint. */
+interface WorkerLoad {
+  employee: Employee;
+  hours: number;
+  lateCount: number;
+}
+
+/** A shift counts as "late" if it starts at/after 17:00 — matches the presets' `isLate` cutoff. */
+function isLateStart(shift: Pick<Shift, "start">): boolean {
+  return shift.start != null && shift.start >= "17:00";
+}
+
+/** Whole hours stay bare ("9"), Friday-shortened ones keep one decimal ("7.8"). */
+function formatHours(h: number): string {
+  return Number.isInteger(h) ? String(h) : h.toFixed(1);
+}
+
+/**
+ * "Заполнить неделю": pick a worker, choose a preset (or "выходной") per day of
+ * the visible week, and create one entry per chosen day in a single pass. A
+ * fairness panel shows every active worker's current-week load (hours + late
+ * shifts) so the admin can spread work by eye — a hint, not an enforced rule.
+ */
+function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFilled }: FillWeekPanelProps) {
+  const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
+  // Per-day chosen preset id; null = "— выходной —" (skip the day).
+  const [byDay, setByDay] = useState<Record<string, number | null>>(() =>
+    Object.fromEntries(weekDates.map((iso) => [iso, null])),
+  );
+  const [saving, setSaving] = useState(false);
+  const [savedCount, setSavedCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  const chosenDays = weekDates.filter((iso) => byDay[iso] != null);
+
+  // Current-week load per active worker, recomputed whenever the schedule changes.
+  const loads: WorkerLoad[] = useMemo(
+    () =>
+      employees.map((e) => {
+        const theirs = shifts.filter((s) => s.employeeId === e.id);
+        return {
+          employee: e,
+          hours: theirs.reduce((sum, s) => sum + durationHours(s), 0),
+          lateCount: theirs.filter(isLateStart).length,
+        };
+      }),
+    [employees, shifts],
+  );
+  // The least-loaded worker (fewest hours, then fewest late shifts) — starred as the fair pick.
+  const leastLoadedId = useMemo(() => {
+    const ranked = [...loads].sort(
+      (a, b) => a.hours - b.hours || a.lateCount - b.lateCount || a.employee.id - b.employee.id,
+    );
+    return ranked[0]?.employee.id ?? null;
+  }, [loads]);
+
+  function templateTimesFor(template: Template, iso: string): { start: string; end: string } {
+    return weekdayIndex(iso) === FRIDAY_INDEX
+      ? { start: template.fridayStart, end: template.fridayEnd }
+      : { start: template.start, end: template.end };
+  }
+
+  function setDay(iso: string, value: number | null) {
+    setByDay((prev) => ({ ...prev, [iso]: value }));
+  }
+
+  /** Convenience: set every day of the week to one preset (or clear them all to "выходной"). */
+  function setWholeWeek(value: number | null) {
+    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value])));
+  }
+
+  async function handleFill() {
+    if (!employeeId) {
+      setError("Сначала выберите работника");
+      return;
+    }
+    if (chosenDays.length === 0) {
+      setError("Выберите хотя бы один день");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    setSavedCount(0);
+    let filled = 0;
+    try {
+      for (const iso of chosenDays) {
+        const template = templates.find((t) => t.id === byDay[iso]);
+        if (!template) continue;
+        const times = templateTimesFor(template, iso);
+        // Same preset→entry mapping as EntryForm: category/times from the preset,
+        // title = preset name (which carries the place for a duty preset).
+        await apiClient.createEntry({
+          date: iso,
+          category: template.category,
+          employeeId,
+          start: times.start,
+          end: times.end,
+          title: template.name,
+        });
+        filled += 1;
+        setSavedCount(filled);
+      }
+      await onFilled(filled);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось заполнить неделю");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <CardShell>
+      <Select header="Работник" value={employeeId} onChange={(e) => setEmployeeId(Number(e.target.value))}>
+        <option value={0}>— выберите —</option>
+        {employees.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.displayName}
+          </option>
+        ))}
+      </Select>
+
+      {/* Fairness hint: current-week load so the admin spreads shifts by eye. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
+        <span style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>Загрузка на неделе</span>
+        {loads.map((l) => {
+          const least = l.employee.id === leastLoadedId;
+          return (
+            <div
+              key={l.employee.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 13.5,
+                color: least ? "var(--tgui--link_color)" : "var(--tgui--text_color)",
+                fontWeight: least ? 600 : 400,
+              }}
+            >
+              <span>
+                {least ? "★ " : ""}
+                {firstName(l.employee.displayName)}
+              </span>
+              <span>
+                {formatHours(l.hours)} ч · {l.lateCount} поздн.
+              </span>
+            </div>
+          );
+        })}
+        {leastLoadedId != null && (
+          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>★ меньше всех часов — реже других занят</span>
+        )}
+      </div>
+
+      <Select header="Всю неделю одним пресетом" value="" onChange={(e) => setWholeWeek(e.target.value ? Number(e.target.value) : null)}>
+        <option value="">— по дням —</option>
+        {templates.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </Select>
+
+      {weekDates.map((iso) => (
+        <Select
+          key={iso}
+          header={formatDayLabel(iso)}
+          value={byDay[iso] ?? ""}
+          onChange={(e) => setDay(iso, e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">— выходной —</option>
+          {templates.map((t) => {
+            const times = templateTimesFor(t, iso);
+            return (
+              <option key={t.id} value={t.id}>
+                {t.name} · {times.start}–{times.end}
+              </option>
+            );
+          })}
+        </Select>
+      ))}
+
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
+      {saving && (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+          Сохранение… {savedCount} из {chosenDays.length}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <Button size="m" mode="filled" stretched loading={saving} disabled={saving} onClick={() => void handleFill()}>
+          Заполнить{chosenDays.length > 0 ? ` (${chosenDays.length})` : ""}
+        </Button>
+        <Button size="m" mode="gray" disabled={saving} onClick={onCancel}>
+          Отмена
+        </Button>
+      </div>
+    </CardShell>
   );
 }
 

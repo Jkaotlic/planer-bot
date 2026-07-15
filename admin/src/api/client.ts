@@ -56,6 +56,10 @@ export interface Template {
   fridayEnd: string;
   isLate: boolean;
   sendReminder: boolean;
+  /** Which kind of entry this preset creates — default "shift"; e.g. the Поклонка preset is a "duty". */
+  category: EntryCategory;
+  /** Default place for duty/offsite presets, null for plain shifts. */
+  location: string | null;
 }
 
 /** A recent activity item for the "События" feed. */

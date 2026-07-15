@@ -90,10 +90,11 @@ const SEED_ENTRIES: Shift[] = [
 const ENTRIES: Shift[] = [...SEED_ENTRIES];
 
 export const TEMPLATES: readonly Template[] = [
-  { id: 1, name: "Утро", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true },
-  { id: 2, name: "День", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false },
-  { id: 3, name: "Вечер", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false },
-  { id: 4, name: "Ночь", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true },
+  { id: 1, name: "Утро", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
+  { id: 2, name: "День", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
+  { id: 3, name: "Вечер", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
+  { id: 4, name: "Ночь", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
+  { id: 5, name: "Дежурство · Поклонка", start: "09:00", end: "21:00", fridayStart: "09:00", fridayEnd: "21:00", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
 ];
 
 function delay(ms: number): Promise<void> {

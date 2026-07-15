@@ -151,6 +151,10 @@ export interface Template {
   fridayEnd: string;
   isLate: boolean;
   sendReminder: boolean;
+  /** Which kind of entry this preset creates — default "shift"; e.g. the Поклонка preset is a "duty". */
+  category: Category;
+  /** Default place for duty/offsite presets (prefills the entry form's "Место"), null for plain shifts. */
+  location: string | null;
 }
 
 export interface CreateEmployeeResult {
