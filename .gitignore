@@ -12,10 +12,14 @@ build/
 .env.*
 !.env.example
 
-# database
+# database — incl. the live runtime DB dir (DATABASE_URL=./data/planer.db).
+# `*.db` alone missed SQLite's -wal/-shm sidecars, which hold real data too.
+data/
 *.sqlite
 *.sqlite-*
 *.db
+*.db-shm
+*.db-wal
 
 # logs
 *.log
