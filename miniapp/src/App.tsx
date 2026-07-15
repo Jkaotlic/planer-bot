@@ -92,6 +92,39 @@ export function App() {
     setData((prev) => (prev ? { ...prev, weekendSlots, weekendOffers } : prev));
   }
 
+  /** Re-pull every worker-facing view. Called on tab switch and when the app
+   * regains focus, so an admin's schedule edits (or a colleague's swap) appear
+   * without fully reopening the mini app. */
+  async function reloadData() {
+    const monday = mondayOf(new Date());
+    const from = toISODate(monday);
+    const to = toISODate(addDays(monday, 6));
+    try {
+      const [myShifts, teamShifts, swaps, weekendSlots, weekendOffers] = await Promise.all([
+        apiClient.getMyShifts(from),
+        apiClient.getTeamSchedule(from, to),
+        apiClient.getSwaps(),
+        apiClient.getWeekendSlots(),
+        apiClient.getWeekendOffers(),
+      ]);
+      setData((prev) => (prev ? { ...prev, myShifts, teamShifts, swaps, weekendSlots, weekendOffers } : prev));
+    } catch (err) {
+      console.error("Refresh failed:", err);
+    }
+  }
+
+  // Refresh when the mini app comes back to the foreground (e.g. after the admin
+  // edited shifts, or a reminder pulled the worker back in).
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") void reloadData();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // reloadData only closes over stable refs (apiClient/setData); safe to bind once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleInterest(slotId: number) {
     setBusySlotId(slotId);
     try {
@@ -173,7 +206,15 @@ export function App() {
         />
       )}
       {tab === "admin" && data.me.isAdmin && <AdminScreen />}
-      <TabBar active={tab} onChange={setTab} isAdmin={data.me.isAdmin} />
+      <TabBar
+        active={tab}
+        onChange={(t) => {
+          setTab(t);
+          // Leaving the Админ tab (or any switch) re-pulls data so edits show immediately.
+          void reloadData();
+        }}
+        isAdmin={data.me.isAdmin}
+      />
     </div>
   );
 }
