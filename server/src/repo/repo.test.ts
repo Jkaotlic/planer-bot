@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { makeTestDb } from "../db/testdb";
-import { seedDefaultTemplates } from "../db/seed";
 import { employees } from "../db/schema";
 import { createEmployee, linkTelegramAccount, getByTelegramId, listActive } from "./employees";
 import { listActiveTemplates } from "./templates";
@@ -41,8 +40,9 @@ describe("repository", () => {
 
   it("reads seeded templates in order", () => {
     const db = makeTestDb();
-    seedDefaultTemplates(db);
-    expect(listActiveTemplates(db).map((t) => t.name)).toEqual(["Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка"]);
+    expect(listActiveTemplates(db).map((t) => t.name)).toEqual([
+      "Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка", "Открытие", "Дежурство · Телефон", "Дежурство · Вавилова 19",
+    ]);
   });
 
   it("creates shifts and queries by range and by employee", () => {

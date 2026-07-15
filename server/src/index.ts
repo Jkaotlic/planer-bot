@@ -6,7 +6,6 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import type { Hono } from "hono";
 import { loadConfig } from "./config";
 import { openDb, runMigrations } from "./db/client";
-import { seedDefaultTemplates } from "./db/seed";
 import { createApp } from "./http/app";
 import { createBot } from "./bot/bot";
 import { runReminderTick } from "./reminders/reminder-service";
@@ -16,7 +15,6 @@ import type { Env } from "./http/middleware";
 const config = loadConfig(process.env);
 const { db, sqlite } = openDb(config.databaseUrl);
 runMigrations(db, sqlite);
-seedDefaultTemplates(db);
 
 const bot = createBot({ db, config });
 process.once("SIGINT", () => bot.stop());
