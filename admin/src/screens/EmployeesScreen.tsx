@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { apiClient, type Employee } from "../api/client";
+import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
-
-const INVITE_BOT_USERNAME = "planer_bot";
 
 export interface EmployeesScreenProps {
   employees: readonly Employee[];
@@ -19,7 +17,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [invite, setInvite] = useState<{ employee: Employee; token: string } | null>(null);
+  const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
 
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
@@ -70,15 +68,15 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
       {showAddDialog && (
         <AddEmployeeDialog
           onCancel={() => setShowAddDialog(false)}
-          onCreated={async (employee, inviteToken) => {
+          onCreated={async (result) => {
             setShowAddDialog(false);
             await onChanged();
-            setInvite({ employee, token: inviteToken });
+            setInvite(result);
           }}
         />
       )}
 
-      {invite && <InviteLinkDialog employee={invite.employee} token={invite.token} onClose={() => setInvite(null)} />}
+      {invite && <InviteLinkDialog invite={invite} onClose={() => setInvite(null)} />}
     </div>
   );
 }
@@ -165,7 +163,7 @@ function AddEmployeeDialog({
   onCreated,
 }: {
   onCancel: () => void;
-  onCreated: (employee: Employee, inviteToken: string) => Promise<void>;
+  onCreated: (result: CreateEmployeeResult) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -180,8 +178,8 @@ function AddEmployeeDialog({
     setSaving(true);
     setError(null);
     try {
-      const { employee, inviteToken } = await apiClient.createEmployee(trimmed);
-      await onCreated(employee, inviteToken);
+      const result = await apiClient.createEmployee(trimmed);
+      await onCreated(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось создать работника");
     } finally {
@@ -231,9 +229,12 @@ function AddEmployeeDialog({
   );
 }
 
-function InviteLinkDialog({ employee, token, onClose }: { employee: Employee; token: string; onClose: () => void }) {
+function InviteLinkDialog({ invite, onClose }: { invite: CreateEmployeeResult; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const link = `https://t.me/${INVITE_BOT_USERNAME}?start=${token}`;
+  const { employee } = invite;
+  // Use the server-built deep-link (it knows the real bot username); fall back
+  // to the bare token only if the server has no bot username configured.
+  const link = invite.inviteLink ?? invite.inviteToken;
 
   async function copyLink() {
     try {
