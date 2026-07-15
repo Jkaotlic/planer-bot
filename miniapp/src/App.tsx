@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Me, type Shift, type SwapRequest, type WeekendSlotView, type WeekendOffer } from "./api/client";
+import { apiClient, type Me, type Shift, type SwapRequest, type Template, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
@@ -14,6 +14,8 @@ interface AppData {
   me: Me;
   myShifts: Shift[];
   teamShifts: Shift[];
+  /** Presets — the entry rows colour themselves by the one each entry came from. */
+  templates: Template[];
   swaps: SwapRequest[];
   weekendSlots: WeekendSlotView[];
   weekendOffers: WeekendOffer[];
@@ -45,13 +47,14 @@ export function App() {
           Promise.resolve(me),
           apiClient.getMyShifts(from),
           apiClient.getTeamSchedule(from, to),
+          apiClient.getTemplates(),
           apiClient.getSwaps(),
           apiClient.getWeekendSlots(),
           apiClient.getWeekendOffers(),
         ]),
       )
-      .then(([me, myShifts, teamShifts, swaps, weekendSlots, weekendOffers]) => {
-        if (!cancelled) setData({ me, myShifts, teamShifts, swaps, weekendSlots, weekendOffers });
+      .then(([me, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers]) => {
+        if (!cancelled) setData({ me, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers });
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -100,14 +103,17 @@ export function App() {
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
     try {
-      const [myShifts, teamShifts, swaps, weekendSlots, weekendOffers] = await Promise.all([
+      const [myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers] = await Promise.all([
         apiClient.getMyShifts(from),
         apiClient.getTeamSchedule(from, to),
+        // Re-pulled with the rest so an admin's preset edits (a renamed or
+        // recoloured Утро/День/…) reach the worker's rows too.
+        apiClient.getTemplates(),
         apiClient.getSwaps(),
         apiClient.getWeekendSlots(),
         apiClient.getWeekendOffers(),
       ]);
-      setData((prev) => (prev ? { ...prev, myShifts, teamShifts, swaps, weekendSlots, weekendOffers } : prev));
+      setData((prev) => (prev ? { ...prev, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers } : prev));
     } catch (err) {
       console.error("Refresh failed:", err);
     }
@@ -182,9 +188,9 @@ export function App() {
   return (
     <div style={{ minHeight: "100vh", boxSizing: "border-box" }}>
       {tab === "mine" && (
-        <MyShiftsScreen me={data.me} shifts={data.myShifts} onProposeSwap={setProposingFor} />
+        <MyShiftsScreen me={data.me} shifts={data.myShifts} templates={data.templates} onProposeSwap={setProposingFor} />
       )}
-      {tab === "team" && <TeamScreen shifts={data.teamShifts} />}
+      {tab === "team" && <TeamScreen shifts={data.teamShifts} templates={data.templates} />}
       {tab === "swaps" && (
         <SwapsScreen
           swaps={data.swaps}

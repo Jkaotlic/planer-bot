@@ -1,16 +1,18 @@
 import type { ReactNode } from "react";
 import { List, Placeholder, Section, Subheadline, Title } from "@telegram-apps/telegram-ui";
-import type { Shift } from "../api/client";
+import type { Shift, Template } from "../api/client";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { TeamMemberRow } from "../components/TeamMemberRow";
 import { addDays, formatDayLabel, formatWeekRangeLabel, isWeekendIso, mondayOf, toISODate } from "../lib/week";
 
 export interface TeamScreenProps {
   shifts: Shift[];
+  /** Presets, to colour each row by the one its entry came from. */
+  templates: readonly Template[];
 }
 
 /** "Команда": the whole team's schedule for the week, grouped by day. */
-export function TeamScreen({ shifts }: TeamScreenProps) {
+export function TeamScreen({ shifts, templates }: TeamScreenProps) {
   const monday = mondayOf(new Date());
   const days = Array.from({ length: 7 }, (_, i) => toISODate(addDays(monday, i)));
   const weekLabel = formatWeekRangeLabel(monday, addDays(monday, 6));
@@ -43,7 +45,7 @@ export function TeamScreen({ shifts }: TeamScreenProps) {
               dayShifts.length > 0 && (
                 <Section key={day} header={<DaySectionHeader day={day} />}>
                   {dayShifts.map((s) => (
-                    <TeamMemberRow key={`${day}-${s.id}`} shift={s} />
+                    <TeamMemberRow key={`${day}-${s.id}`} shift={s} templates={templates} />
                   ))}
                 </Section>
               ),

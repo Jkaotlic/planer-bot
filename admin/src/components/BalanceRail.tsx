@@ -1,6 +1,5 @@
-import { computeBalance, countsForBalance } from "@planer/shared";
-import type { Employee, Shift } from "../api/client";
-import { useCategoryPalette } from "../categories";
+import { countsForBalance } from "@planer/shared";
+import type { Employee, Shift, Template } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 import { firstName } from "../lib/week";
 
@@ -8,55 +7,92 @@ export interface BalanceRailProps {
   employees: readonly Employee[];
   /** The visible period's entries (already filtered to the current week by the caller). */
   shifts: readonly Shift[];
+  /** Presets: an entry's kind is the name of the preset it came from, so the rail must resolve templateId. */
+  templates: readonly Template[];
 }
 
-interface Balance {
+/** One worker's tally, in the very terms `distributeFairly` ranks them by. */
+interface Load {
   employeeId: number;
-  hours: number;
-  nights: number;
-  weekends: number;
+  byKind: Record<string, number>;
+  total: number;
 }
 
-function mean(values: readonly number[]): number {
-  return values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
-}
-
-/** Only work entries with concrete clock times count toward the load balance (absences don't). */
+/** Only timed work entries count toward fairness — absences don't (mirrors the server's seeding). */
 function isBalanceable(s: Shift): s is Shift & { employeeId: number; start: string; end: string } {
   return s.employeeId != null && s.start != null && s.end != null && countsForBalance(s.category);
 }
 
 /**
- * Right-hand rail on the Расписание screen: per-worker load for the visible
- * period (hours worked, night shifts, weekend shifts), computed from the
- * schedule's work entries via `@planer/shared`'s `computeBalance`.
+ * Which kind of shift an entry is — mirrors the server's `shiftKind`: prefer the
+ * preset it came from, fall back to its title (rows that predate templateId being
+ * stored), and lump one-off custom times into a single bucket.
  */
-export function BalanceRail({ employees, shifts }: BalanceRailProps) {
-  const active = employees.filter((e) => e.isActive);
-  const balanceInput = shifts
-    .filter(isBalanceable)
-    .map((s) => ({ employeeId: s.employeeId, date: s.date, start: s.start, end: s.end, isLate: false }));
-  const balances: readonly Balance[] = computeBalance(
-    balanceInput,
-    active.map((e) => e.id),
-  );
+function shiftKind(s: Pick<Shift, "templateId" | "title">, nameById: ReadonlyMap<number, string>): string {
+  if (s.templateId != null) {
+    const name = nameById.get(s.templateId);
+    if (name) return name;
+  }
+  return s.title ?? "Своё время";
+}
 
-  const maxHours = Math.max(1, ...balances.map((b) => b.hours));
-  const topBalance = balances.reduce<Balance | null>(
-    (top, b) => (top === null || b.hours > top.hours ? b : top),
-    null,
-  );
-  const note = buildNote(topBalance, balances, active);
+/**
+ * Who «Распределить честно» hands the next shift of each kind to, ranked exactly
+ * as `distributeFairly` does: fewest of that kind, then fewest shifts overall,
+ * then lowest id. It can't know who'll be free on a given day, so this is a hint.
+ */
+function nextPickByKind(loads: readonly Load[], kinds: readonly string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const kind of kinds) {
+    const ranked = [...loads].sort(
+      (a, b) => (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) || a.total - b.total || a.employeeId - b.employeeId,
+    );
+    const first = ranked[0];
+    if (first) out.set(kind, first.employeeId);
+  }
+  return out;
+}
+
+/**
+ * Right-hand rail on the Расписание screen: how many shifts of each kind
+ * (Утро/День/Вечер/Ночь…) every worker holds in the visible period. It mirrors
+ * what «Распределить честно» balances — each kind on its own, not hours — so the
+ * rail explains the button instead of contradicting it.
+ */
+export function BalanceRail({ employees, shifts, templates }: BalanceRailProps) {
+  const active = employees.filter((e) => e.isActive);
+  const nameById = new Map(templates.map((t) => [t.id, t.name]));
+
+  const loads: Load[] = active.map((e) => ({ employeeId: e.id, byKind: {}, total: 0 }));
+  const byId = new Map(loads.map((l) => [l.employeeId, l]));
+  /** Kinds actually present this period — an all-zero column would be noise. */
+  const kinds: string[] = [];
+  for (const s of shifts) {
+    if (!isBalanceable(s)) continue;
+    const load = byId.get(s.employeeId);
+    if (!load) continue; // entry left on an archived worker — not a candidate for new slots
+    const kind = shiftKind(s, nameById);
+    load.byKind[kind] = (load.byKind[kind] ?? 0) + 1;
+    load.total += 1;
+    if (!kinds.includes(kind)) kinds.push(kind);
+  }
+  // Presets first, in the order they're offered elsewhere; kinds that live only on
+  // entries (old rows, one-off times) sort after them.
+  const presetOrder = new Map(templates.map((t, i) => [t.name, i]));
+  const rankOf = (kind: string) => presetOrder.get(kind) ?? templates.length;
+  kinds.sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b, "ru"));
+
+  const maxTotal = Math.max(1, ...loads.map((l) => l.total));
+  const nextPick = nextPickByKind(loads, kinds);
 
   return (
-    <section className="balance-rail" aria-label="Баланс нагрузки">
-      <h3 className="rail-title">Баланс нагрузки</h3>
+    <section className="balance-rail" aria-label="Баланс по видам смен">
+      <h3 className="rail-title">Баланс по видам смен</h3>
       <div className="balance-rows">
         {active.map((employee) => {
-          const balance = balances.find((b) => b.employeeId === employee.id);
-          const hours = balance?.hours ?? 0;
+          const load = byId.get(employee.id);
           const palette = personPalette(employee.id);
-          const isTop = topBalance !== null && employee.id === topBalance.employeeId && hours > 0;
+          const total = load?.total ?? 0;
           return (
             <BalanceRow
               key={employee.id}
@@ -64,18 +100,31 @@ export function BalanceRail({ employees, shifts }: BalanceRailProps) {
               initials={initialsOf(employee.displayName)}
               avatarBg={palette.bg}
               avatarFg={palette.fg}
-              hours={hours}
-              fillPct={Math.min(100, (hours / maxHours) * 100)}
-              warning={isTop}
-              nights={balance?.nights ?? 0}
-              weekends={balance?.weekends ?? 0}
+              total={total}
+              fillPct={(total / maxTotal) * 100}
+              tallies={kinds.map((kind) => ({
+                kind,
+                count: load?.byKind[kind] ?? 0,
+                isNext: nextPick.get(kind) === employee.id,
+              }))}
             />
           );
         })}
       </div>
-      {note && <div className="balance-note">{note}</div>}
+      {kinds.length > 0 && (
+        <div className="balance-legend">
+          ★ — кому «Распределить честно» отдаст следующую смену такого вида, если он свободен в этот день.
+        </div>
+      )}
     </section>
   );
+}
+
+/** One "Утро 2" chip; `isNext` marks the worker first in line for that kind. */
+interface KindTally {
+  kind: string;
+  count: number;
+  isNext: boolean;
 }
 
 interface BalanceRowProps {
@@ -83,15 +132,12 @@ interface BalanceRowProps {
   initials: string;
   avatarBg: string;
   avatarFg: string;
-  hours: number;
+  total: number;
   fillPct: number;
-  warning: boolean;
-  nights: number;
-  weekends: number;
+  tallies: readonly KindTally[];
 }
 
-function BalanceRow({ name, initials, avatarBg, avatarFg, hours, fillPct, warning, nights, weekends }: BalanceRowProps) {
-  const warningPalette = useCategoryPalette("vacation");
+function BalanceRow({ name, initials, avatarBg, avatarFg, total, fillPct, tallies }: BalanceRowProps) {
   return (
     <div className="balance-row">
       <span className="avatar avatar-sm" style={{ background: avatarBg, color: avatarFg }}>
@@ -100,33 +146,27 @@ function BalanceRow({ name, initials, avatarBg, avatarFg, hours, fillPct, warnin
       <div className="balance-row-main">
         <div className="balance-row-top">
           <span className="balance-name">{name}</span>
-          <span className="balance-hours">{Math.round(hours)} ч</span>
+          <span className="balance-total">
+            {total} {pluralizeRu(total, "смена", "смены", "смен")}
+          </span>
         </div>
-        <div className="hours-bar">
-          <div
-            className="hours-bar-fill"
-            style={{ width: `${fillPct}%`, background: warning ? warningPalette.fg : "var(--button)" }}
-          />
+        {/* Total shifts — the algorithm's tiebreak once the per-kind counts are level. */}
+        <div className="load-bar">
+          <div className="load-bar-fill" style={{ width: `${fillPct}%` }} />
         </div>
         <div className="balance-caption">
-          ночи {nights} · выходные {weekends}
+          {tallies.length === 0 ? (
+            "смен на этой неделе нет"
+          ) : (
+            tallies.map((t) => (
+              <span key={t.kind} className={t.isNext ? "kind-tally kind-tally-next" : "kind-tally"}>
+                {t.isNext ? "★ " : ""}
+                {t.kind} {t.count}
+              </span>
+            ))
+          )}
         </div>
       </div>
     </div>
   );
-}
-
-function buildNote(top: Balance | null, balances: readonly Balance[], active: readonly Employee[]): string | null {
-  if (!top || top.hours <= 0) return null;
-  const avgHours = mean(balances.map((b) => b.hours));
-  const avgNights = mean(balances.map((b) => b.nights));
-  const hoursDiff = Math.round(top.hours - avgHours);
-  const nightsDiff = Math.round(top.nights - avgNights);
-  if (hoursDiff <= 0) return null;
-
-  const employee = active.find((e) => e.id === top.employeeId);
-  if (!employee) return null;
-  const name = firstName(employee.displayName);
-  const nightsPart = nightsDiff > 0 ? ` и ${nightsDiff} ${pluralizeRu(nightsDiff, "ночную", "ночные", "ночных")}` : "";
-  return `⚠ У ${name} на ${hoursDiff} ч${nightsPart} больше среднего — «Распределить честно» разгрузит.`;
 }

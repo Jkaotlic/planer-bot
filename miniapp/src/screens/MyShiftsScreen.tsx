@@ -1,5 +1,5 @@
 import { List, Placeholder, Section } from "@telegram-apps/telegram-ui";
-import type { Me, Shift } from "../api/client";
+import type { Me, Shift, Template } from "../api/client";
 import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
@@ -9,12 +9,14 @@ import { pluralizeRu, totalHours } from "../lib/shift";
 export interface MyShiftsScreenProps {
   me: Me;
   shifts: Shift[];
+  /** Presets, to colour each row by the one its entry came from. */
+  templates: readonly Template[];
   /** Opens the "Предложить обмен" flow for the tapped shift. */
   onProposeSwap: (shift: Shift) => void;
 }
 
 /** "Мои смены": a greeting hero, a week-hours summary, and the caller's own shifts. */
-export function MyShiftsScreen({ me, shifts, onProposeSwap }: MyShiftsScreenProps) {
+export function MyShiftsScreen({ me, shifts, templates, onProposeSwap }: MyShiftsScreenProps) {
   const monday = mondayOf(new Date());
   const weekLabel = formatWeekRangeLabel(monday, addDays(monday, 6));
 
@@ -37,7 +39,7 @@ export function MyShiftsScreen({ me, shifts, onProposeSwap }: MyShiftsScreenProp
         <List>
           <Section header={`Мои смены · ${weekLabel}`}>
             {sorted.map((shift) => (
-              <ShiftRow key={shift.id} shift={shift} onSwap={onProposeSwap} />
+              <ShiftRow key={shift.id} shift={shift} templates={templates} onSwap={onProposeSwap} />
             ))}
           </Section>
         </List>

@@ -1,24 +1,30 @@
 import { Cell } from "@telegram-apps/telegram-ui";
-import type { Shift } from "../api/client";
-import { CategoryChip, categoryLabel } from "../categories";
+import type { Shift, Template } from "../api/client";
 import { formatTimeRange } from "../lib/shift";
 import { DayBadge } from "./DayBadge";
+import { EntryChip } from "./EntryChip";
 
 export interface ShiftRowProps {
   shift: Shift;
+  /** Presets, to colour the entry by the one it came from. */
+  templates: readonly Template[];
   /** Opens the "Предложить обмен" flow for this shift. Omit to render the row read-only (no "Обменять" pill). */
   onSwap?: (shift: Shift) => void;
 }
 
-/** A single row in "Мои смены": day, time (or "Весь день"), what it is, and its category. */
-export function ShiftRow({ shift, onSwap }: ShiftRowProps) {
+/** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
+ * entry in its preset's colour. */
+export function ShiftRow({ shift, templates, onSwap }: ShiftRowProps) {
   const isSwappable = shift.category === "shift";
 
   return (
     <Cell
       before={<DayBadge date={shift.date} endDate={shift.endDate} />}
-      subtitle={shift.title ?? categoryLabel(shift.category)}
-      description={!isSwappable ? <CategoryChip category={shift.category} /> : undefined}
+      // The chip already names the entry ("Утро" / "Отпуск"), so it stands in for
+      // the subtitle that used to repeat that same label right above it. Unlike
+      // the old category chip it shows on every row, since a work shift's preset
+      // is exactly what the colour is here to tell apart.
+      description={<EntryChip entry={shift} templates={templates} />}
       after={isSwappable && onSwap ? <SwapChip onClick={() => onSwap(shift)} /> : undefined}
     >
       {formatTimeRange(shift)}

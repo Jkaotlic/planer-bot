@@ -4,7 +4,7 @@ import { apiClient, type Employee, type NewEntryInput, type Shift, type Template
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
-import { durationHours, formatTimeRange } from "../../lib/shift";
+import { formatTimeRange } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import {
@@ -555,28 +555,42 @@ interface FillWeekPanelProps {
   onFilled: (count: number) => Promise<void>;
 }
 
-/** A worker's load on the visible week, for the fairness hint. */
+/** A worker's load on the visible week, in the very terms «Распределить честно» ranks them by. */
 interface WorkerLoad {
   employee: Employee;
-  hours: number;
-  lateCount: number;
+  byKind: Record<string, number>;
+  total: number;
 }
 
-/** A shift counts as "late" if it starts at/after 17:00 — matches the presets' `isLate` cutoff. */
-function isLateStart(shift: Pick<Shift, "start">): boolean {
-  return shift.start != null && shift.start >= "17:00";
+/**
+ * Work entries that count toward fairness — absences don't. Mirrors
+ * `countsForBalance` in @planer/shared, which the mini-app doesn't depend on.
+ * Same set as `needsTime` today, but a separate rule on purpose: a timed
+ * category that shouldn't skew the balance must not have to change both.
+ */
+function countsForBalance(category: Category): boolean {
+  return category === "shift" || category === "duty" || category === "offsite" || category === "weekend_work";
 }
 
-/** Whole hours stay bare ("9"), Friday-shortened ones keep one decimal ("7.8"). */
-function formatHours(h: number): string {
-  return Number.isInteger(h) ? String(h) : h.toFixed(1);
+/**
+ * Which kind of shift an entry is — mirrors the server's `shiftKind`: prefer the
+ * preset it came from, fall back to its title (rows that predate templateId being
+ * stored), and lump one-off custom times into a single bucket.
+ */
+function shiftKind(s: Pick<Shift, "templateId" | "title">, nameById: ReadonlyMap<number, string>): string {
+  if (s.templateId != null) {
+    const name = nameById.get(s.templateId);
+    if (name) return name;
+  }
+  return s.title ?? "Своё время";
 }
 
 /**
  * "Заполнить неделю": pick a worker, choose a preset (or "выходной") per day of
  * the visible week, and create one entry per chosen day in a single pass. A
- * fairness panel shows every active worker's current-week load (hours + late
- * shifts) so the admin can spread work by eye — a hint, not an enforced rule.
+ * fairness panel shows how many shifts of each kind every worker already holds
+ * this week — the very thing «Распределить честно» evens out — so the admin can
+ * spread work by eye. A hint, not an enforced rule.
  */
 function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFilled }: FillWeekPanelProps) {
   const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
@@ -594,26 +608,48 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
   /** Categories with no preset of their own — offered directly alongside the presets. */
   const plainCategories = ORDERED_CATEGORIES.filter((c) => !templates.some((t) => t.category === c));
 
-  // Current-week load per active worker, recomputed whenever the schedule changes.
-  const loads: WorkerLoad[] = useMemo(
-    () =>
-      employees.map((e) => {
-        const theirs = shifts.filter((s) => s.employeeId === e.id);
-        return {
-          employee: e,
-          hours: theirs.reduce((sum, s) => sum + durationHours(s), 0),
-          lateCount: theirs.filter(isLateStart).length,
-        };
-      }),
-    [employees, shifts],
-  );
-  // The least-loaded worker (fewest hours, then fewest late shifts) — starred as the fair pick.
-  const leastLoadedId = useMemo(() => {
-    const ranked = [...loads].sort(
-      (a, b) => a.hours - b.hours || a.lateCount - b.lateCount || a.employee.id - b.employee.id,
-    );
-    return ranked[0]?.employee.id ?? null;
-  }, [loads]);
+  // Per-kind tallies for the visible week, recomputed whenever the schedule changes.
+  const { loads, kinds } = useMemo(() => {
+    const nameById = new Map(templates.map((t) => [t.id, t.name]));
+    const loads: WorkerLoad[] = employees.map((e) => ({ employee: e, byKind: {}, total: 0 }));
+    const byId = new Map(loads.map((l) => [l.employee.id, l]));
+    /** Kinds actually present this week — an all-zero row would just be noise. */
+    const kinds: string[] = [];
+    for (const s of shifts) {
+      if (s.employeeId == null || s.start == null || s.end == null || !countsForBalance(s.category)) continue;
+      const load = byId.get(s.employeeId);
+      if (!load) continue; // entry left on an archived worker — not a candidate for new slots
+      const kind = shiftKind(s, nameById);
+      load.byKind[kind] = (load.byKind[kind] ?? 0) + 1;
+      load.total += 1;
+      if (!kinds.includes(kind)) kinds.push(kind);
+    }
+    // Presets first, in the order this panel offers them; kinds that live only on
+    // entries (old rows, one-off times) sort after them.
+    const presetOrder = new Map(templates.map((t, i) => [t.name, i]));
+    const rankOf = (kind: string) => presetOrder.get(kind) ?? templates.length;
+    kinds.sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b, "ru"));
+    return { loads, kinds };
+  }, [employees, shifts, templates]);
+
+  /**
+   * Who «Распределить честно» would hand the next shift of each kind to, ranked
+   * exactly as `distributeFairly` does: fewest of that kind, then fewest shifts
+   * overall, then lowest id. It can't know who'll be free on a given day, so this
+   * stays a hint.
+   */
+  const nextByKind = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const kind of kinds) {
+      const ranked = [...loads].sort(
+        (a, b) =>
+          (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) || a.total - b.total || a.employee.id - b.employee.id,
+      );
+      const first = ranked[0];
+      if (first) out.set(kind, first.employee.id);
+    }
+    return out;
+  }, [loads, kinds]);
 
   function templateTimesFor(template: Template, iso: string): { start: string; end: string } {
     return weekdayIndex(iso) === FRIDAY_INDEX
@@ -697,34 +733,52 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
         ))}
       </Select>
 
-      {/* Fairness hint: current-week load so the admin spreads shifts by eye. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
-        <span style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>Загрузка на неделе</span>
-        {loads.map((l) => {
-          const least = l.employee.id === leastLoadedId;
-          return (
+      {/* Fairness hint: who holds how many of each shift kind this week — exactly
+          what «Распределить честно» evens out, so the panel matches the button. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
+        <span style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>Смены на неделе по видам</span>
+        {kinds.length === 0 ? (
+          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>На этой неделе смен пока нет.</span>
+        ) : (
+          loads.map((l) => (
             <div
               key={l.employee.id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 13.5,
-                color: least ? "var(--tgui--link_color)" : "var(--tgui--text_color)",
-                fontWeight: least ? 600 : 400,
-              }}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 13.5 }}
             >
-              <span>
-                {least ? "★ " : ""}
-                {firstName(l.employee.displayName)}
-              </span>
-              <span>
-                {formatHours(l.hours)} ч · {l.lateCount} поздн.
+              <span style={{ flexShrink: 0, color: "var(--tgui--text_color)" }}>{firstName(l.employee.displayName)}</span>
+              {/* Preset names can be long ("Дежурство · Поклонка"), so the tallies wrap
+                  instead of pushing the row off a phone screen. */}
+              <span
+                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: 5, rowGap: 2 }}
+              >
+                {kinds.map((kind, i) => {
+                  const next = nextByKind.get(kind) === l.employee.id;
+                  return (
+                    <span
+                      key={kind}
+                      style={{
+                        whiteSpace: "nowrap",
+                        color: next ? "var(--tgui--link_color)" : "var(--tgui--hint_color)",
+                        fontWeight: next ? 600 : 400,
+                      }}
+                    >
+                      {next ? "★ " : ""}
+                      {kind} {l.byKind[kind] ?? 0}
+                      {/* Dot trails its own tally so a wrapped line never starts with a stray separator. */}
+                      {i < kinds.length - 1 && (
+                        <span style={{ color: "var(--tgui--hint_color)", fontWeight: 400 }}> ·</span>
+                      )}
+                    </span>
+                  );
+                })}
               </span>
             </div>
-          );
-        })}
-        {leastLoadedId != null && (
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>★ меньше всех часов — реже других занят</span>
+          ))
+        )}
+        {kinds.length > 0 && (
+          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+            ★ — кому «Распределить честно» отдаст следующую смену такого вида, если он свободен.
+          </span>
         )}
       </div>
 
