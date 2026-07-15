@@ -13,6 +13,7 @@ import {
   firstName,
   formatDayLabel,
   formatWeekRangeLabel,
+  isWeekendIso,
   mondayOf,
   toISODate,
   weekdayIndex,
@@ -603,9 +604,11 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
     setByDay((prev) => ({ ...prev, [iso]: value }));
   }
 
-  /** Convenience: set every day of the week to one preset (or clear them all to "выходной"). */
+  /** Convenience: apply one preset to every WEEKDAY — Сб/Вс stay "выходной" unless
+   * set by hand, since a blanket fill shouldn't silently roster the weekend.
+   * Passing null clears every day. */
   function setWholeWeek(value: number | null) {
-    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value])));
+    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value != null && isWeekendIso(iso) ? null : value])));
   }
 
   async function handleFill() {
@@ -689,7 +692,7 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
         )}
       </div>
 
-      <Select header="Всю неделю одним пресетом" value="" onChange={(e) => setWholeWeek(e.target.value ? Number(e.target.value) : null)}>
+      <Select header="Все будни одним пресетом (Сб/Вс не трогаем)" value="" onChange={(e) => setWholeWeek(e.target.value ? Number(e.target.value) : null)}>
         <option value="">— по дням —</option>
         {templates.map((t) => (
           <option key={t.id} value={t.id}>
