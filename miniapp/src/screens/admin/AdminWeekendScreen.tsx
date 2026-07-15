@@ -149,6 +149,9 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
   const palette = personPalette(person.employeeId);
   const n = person.confirmedThisMonth;
   const countLabel = n === 0 ? "ещё не работал в этом месяце" : `${n} ${pluralizeRu(n, "раз", "раза", "раз")} в этом месяце`;
+  // Being passed over repeatedly earns priority — surface it so the ordering reads honestly.
+  const passedLabel =
+    person.passedOver > 0 ? ` · пропустили ${person.passedOver} ${pluralizeRu(person.passedOver, "раз", "раза", "раз")}` : "";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <Avatar acronym={initialsOf(person.name)} size={28} style={{ background: palette.bg, color: palette.fg, flex: "none" }} />
@@ -157,7 +160,7 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
           <span style={{ fontWeight: 500, fontSize: 14.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{person.name}</span>
           {recommended && <FairBadge />}
         </div>
-        <div style={{ fontSize: 12.5, color: n === 0 ? "var(--tgui--hint_color)" : "var(--tgui--text_color)" }}>{countLabel}</div>
+        <div style={{ fontSize: 12.5, color: n === 0 ? "var(--tgui--hint_color)" : "var(--tgui--text_color)" }}>{countLabel}{passedLabel}</div>
       </div>
       <Button size="s" mode="filled" loading={busy} disabled={busy} onClick={onAssign} style={{ flex: "none" }}>
         Назначить
@@ -166,13 +169,13 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
   );
 }
 
-/** "★ реже всех" — the fairness hint on the fewest-confirmed volunteer. */
+/** "★ реже всех работал" — the fairness hint on the volunteer with fewest weekends worked. */
 function FairBadge() {
   const isDark = useIsDark();
   const palette = isDark ? { bg: "rgba(240,170,60,0.22)", fg: "#F4C169" } : { bg: "#FCEEDA", fg: "#8A5700" };
   return (
     <span style={{ flex: "none", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap" }}>
-      ★ реже всех
+      ★ реже всех работал
     </span>
   );
 }

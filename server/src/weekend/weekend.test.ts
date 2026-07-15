@@ -117,4 +117,27 @@ describe("weekend market service", () => {
     expect(offers.map((o) => o.assignment.id)).toContain(assigned.assignment.id);
     expect(offers[0]!.slot.id).toBe(slot.id);
   });
+
+  it("ranks equal candidates by who has been passed over most (volunteered, lost the slot)", () => {
+    const db = makeTestDb();
+    const passedOver = createEmployee(db, { displayName: "Аня" });
+    const chosen = createEmployee(db, { displayName: "Борис" });
+
+    // Both wanted an earlier slot; it went to Борис, so Аня was passed over once.
+    const earlier = postSlot(db, { date: "2026-07-11", start: "09:00", end: "17:00" });
+    expressInterest(db, earlier.id, passedOver.id);
+    expressInterest(db, earlier.id, chosen.id);
+    assignSlot(db, earlier.id, chosen.id);
+
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, passedOver.id);
+    expressInterest(db, slot.id, chosen.id);
+
+    const ranked = interestedForSlot(db, slot.id);
+    // Neither has actually *worked* a weekend yet, so the tiebreak decides.
+    expect(ranked.map((i) => i.confirmedThisMonth)).toEqual([0, 0]);
+    expect(ranked[0]!.employeeId).toBe(passedOver.id);
+    expect(ranked[0]!.passedOver).toBe(1);
+    expect(ranked[1]!.passedOver).toBe(0);
+  });
 });
