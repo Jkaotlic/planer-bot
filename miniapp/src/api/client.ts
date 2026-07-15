@@ -188,6 +188,8 @@ export interface SlotInterest {
   employeeId: number;
   name: string;
   confirmedThisMonth: number;
+  /** Times they volunteered for a slot that went to someone else — breaks ties in their favour. */
+  passedOver: number;
 }
 
 /** An open slot plus its interested workers, already ranked fairest-first by the server. */

@@ -15,6 +15,7 @@ import {
   listAssignmentsForEmployee,
   listConfirmedInRange,
   countConfirmedByEmployeeInMonth,
+  countPassedOver,
 } from "../repo/weekend";
 import { createShift } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
@@ -43,10 +44,16 @@ export function expressInterest(db: Db, slotId: number, employeeId: number): Out
   return { ok: true };
 }
 
+/**
+ * Who wants this slot, fairest first. Fairness here is "how many weekends have you
+ * actually worked this month" — fewest first, so the same people don't collect every
+ * weekend. Ties go to whoever has been passed over most often (volunteered but lost
+ * the slot to someone else), so a keen volunteer isn't skipped forever.
+ */
 export function interestedForSlot(
   db: Db,
   slotId: number,
-): { employeeId: number; name: string; confirmedThisMonth: number }[] {
+): { employeeId: number; name: string; confirmedThisMonth: number; passedOver: number }[] {
   const slot = getVacantSlot(db, slotId);
   if (!slot) return [];
   const month = monthOf(slot.date);
@@ -55,8 +62,12 @@ export function interestedForSlot(
       employeeId,
       name: getEmployeeById(db, employeeId)?.displayName ?? "Неизвестно",
       confirmedThisMonth: countConfirmedByEmployeeInMonth(db, employeeId, month),
+      passedOver: countPassedOver(db, employeeId),
     }))
-    .sort((a, b) => a.confirmedThisMonth - b.confirmedThisMonth);
+    .sort(
+      (a, b) =>
+        a.confirmedThisMonth - b.confirmedThisMonth || b.passedOver - a.passedOver || a.employeeId - b.employeeId,
+    );
 }
 
 export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOutcome {

@@ -138,9 +138,11 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
         {initialsOf(person.name)}
       </span>
       <span className="weekend-interest-name">{person.name}</span>
-      {recommended && <span className="weekend-fair-badge">★ реже всех</span>}
+      {recommended && <span className="weekend-fair-badge">★ реже всех работал</span>}
       <span className={`weekend-month-count${n === 0 ? " zero" : n >= 2 ? " high" : ""}`}>
         {n === 0 ? "ещё не работал в этом месяце" : `${n} ${pluralizeRu(n, "раз", "раза", "раз")} в этом месяце`}
+        {person.passedOver > 0 &&
+          ` · пропустили ${person.passedOver} ${pluralizeRu(person.passedOver, "раз", "раза", "раз")}`}
       </span>
       <span className="employee-row-spacer" />
       <button type="button" className="btn btn-primary" onClick={onAssign} disabled={busy}>

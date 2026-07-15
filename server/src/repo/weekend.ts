@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, like } from "drizzle-orm";
+import { and, eq, gte, lte, like, ne } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   vacantSlots,
@@ -100,6 +100,20 @@ export function listConfirmedInRange(db: Db, from: string, to: string): WeekendA
     .innerJoin(vacantSlots, eq(weekendAssignments.slotId, vacantSlots.id))
     .where(and(eq(weekendAssignments.status, "confirmed"), gte(vacantSlots.date, from), lte(vacantSlots.date, to)))
     .all();
+}
+
+/**
+ * How many times this worker raised their hand for a weekend slot that then went
+ * to somebody else. Being passed over repeatedly earns priority next time, so a
+ * keen volunteer isn't skipped forever.
+ */
+export function countPassedOver(db: Db, employeeId: number): number {
+  return db
+    .select({ slotId: slotInterest.slotId })
+    .from(slotInterest)
+    .innerJoin(weekendAssignments, eq(weekendAssignments.slotId, slotInterest.slotId))
+    .where(and(eq(slotInterest.employeeId, employeeId), ne(weekendAssignments.employeeId, employeeId)))
+    .all().length;
 }
 
 export function countConfirmedByEmployeeInMonth(db: Db, employeeId: number, monthPrefix: string): number {
