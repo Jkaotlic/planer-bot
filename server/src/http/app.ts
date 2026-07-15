@@ -22,12 +22,13 @@ import {
   renameEmployee,
   setInviteToken,
 } from "../repo/employees";
-import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
+import { isWeekend, isAbsence, countsForBalance } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
@@ -218,12 +219,26 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const existing = getShift(db, id);
     if (!existing) return c.json({ error: "not_found" }, 404);
     const patch = parsed.data;
+    const category = patch.category ?? existing.category;
+
+    // Switching an entry's category has to drop the fields the new category can't
+    // carry, or the edit gets rejected against the row's leftovers: turning a shift
+    // into «Командировка» kept its 09:00–18:00 and tripped "absences must not have
+    // times". The caller only sends what changed, so normalise here.
+    if (isAbsence(category)) {
+      patch.start = null;
+      patch.end = null;
+    } else if (countsForBalance(category)) {
+      patch.endDate = null;
+    }
+
     const merged = {
-      category: patch.category ?? existing.category,
+      category,
+      date: patch.date ?? existing.date,
       start: patch.start !== undefined ? patch.start : existing.start,
       end: patch.end !== undefined ? patch.end : existing.end,
     };
-    const err = entryTimesError(merged);
+    const err = entryTimesError(merged) ?? entryDateError(merged);
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
     const entry = updateShift(db, id, patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
@@ -387,6 +402,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     };
     if (typeof body.date !== "string" || typeof body.start !== "string" || typeof body.end !== "string") {
       return c.json({ error: "date, start and end are required" }, 400);
+    }
+    // Assigning a slot writes a weekend_work entry, so a weekday slot could never
+    // produce a coherent one — reject it here rather than at assign time.
+    if (!isWeekend(body.date)) {
+      return c.json({ error: "Вакантный день может быть только субботой или воскресеньем" }, 400);
     }
     const slot = postSlot(db, {
       date: body.date,

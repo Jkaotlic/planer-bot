@@ -13,7 +13,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   vacation: "Отпуск",
   sick_leave: "Больничный",
   duty: "Дежурство",
-  offsite: "Выезд",
+  offsite: "Выездное мероприятие",
   business_trip: "Командировка",
   weekend_work: "Работа в выходной",
 };

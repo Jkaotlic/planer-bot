@@ -21,6 +21,58 @@ const authedJson = (t: string, body: unknown, method = "POST") => ({
 });
 
 describe("admin entry endpoints", () => {
+  /** 2026-07-11 is a Saturday, 2026-07-10 a Friday — fixed dates keep these deterministic. */
+  const SATURDAY = "2026-07-11";
+  const FRIDAY = "2026-07-10";
+
+  it("switching an entry to an absence clears its times instead of 400-ing", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const created = await app.request(
+      "/api/admin/entries",
+      authedJson(admin, { date: FRIDAY, category: "shift", start: "09:00", end: "18:00", employeeId: anya.id }),
+    );
+    const id = (await created.json()).entry.id as number;
+
+    // The form only sends what changed — it has no times to send for an absence, so
+    // the row's leftover 09:00–18:00 used to trip "absences must not have times".
+    for (const category of ["business_trip", "vacation", "sick_leave"] as const) {
+      const res = await app.request(`/api/admin/entries/${id}`, authedJson(admin, { category, employeeId: anya.id }, "PATCH"));
+      expect(res.status).toBe(200);
+      const row = getShift(db, id)!;
+      expect(row.category).toBe(category);
+      expect(row.start).toBeNull();
+      expect(row.end).toBeNull();
+    }
+
+    // And back: a timed category drops the absence's multi-day range.
+    const back = await app.request(
+      `/api/admin/entries/${id}`,
+      authedJson(admin, { category: "shift", start: "09:00", end: "18:00", employeeId: anya.id }, "PATCH"),
+    );
+    expect(back.status).toBe(200);
+    expect(getShift(db, id)!.endDate).toBeNull();
+  });
+
+  it("refuses «работа в выходной» on a weekday, allows it on a weekend", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const body = (date: string) => ({ date, category: "weekend_work", start: "10:00", end: "18:00", employeeId: anya.id });
+
+    expect((await app.request("/api/admin/entries", authedJson(admin, body(FRIDAY)))).status).toBe(400);
+    expect((await app.request("/api/admin/entries", authedJson(admin, body(SATURDAY)))).status).toBe(201);
+
+    // The same guard holds on edit, not just create.
+    const id = (await (await app.request("/api/admin/entries", authedJson(admin, body(SATURDAY)))).json()).entry.id as number;
+    const moved = await app.request(`/api/admin/entries/${id}`, authedJson(admin, { date: FRIDAY }, "PATCH"));
+    expect(moved.status).toBe(400);
+  });
+
   it("creates, updates, and deletes an entry (admin only)", async () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня" });

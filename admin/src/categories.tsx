@@ -9,9 +9,9 @@ const CATEGORY_LABELS: Record<EntryCategory, string> = {
   vacation: "Отпуск",
   sick_leave: "Больничный",
   duty: "Дежурство",
-  offsite: "Выездное",
+  offsite: "Выездное мероприятие",
   business_trip: "Командировка",
-  weekend_work: "Выходной",
+  weekend_work: "Работа в выходной",
 };
 
 export function categoryLabel(category: EntryCategory): string {
