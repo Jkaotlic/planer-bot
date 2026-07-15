@@ -23,10 +23,15 @@ export const employees = sqliteTable("employees", {
 export const shiftTemplates = sqliteTable("shift_templates", {
   id: integer().primaryKey({ autoIncrement: true }),
   name: text().notNull(),
+  /** Which entry category this preset creates — most are "shift", but a preset
+   * can also be a duty (e.g. "Дежурство · Поклонка"). */
+  category: text().$type<EntryCategory>().notNull().default("shift"),
   start: text().notNull(),
   end: text().notNull(),
   fridayStart: text(),
   fridayEnd: text(),
+  /** Default place for duty/offsite presets (e.g. "Поклонка"); null for plain shifts. */
+  location: text(),
   isLate: integer({ mode: "boolean" }).notNull().default(false),
   sendReminder: integer({ mode: "boolean" }).notNull().default(false),
   sortOrder: integer().notNull().default(0),
