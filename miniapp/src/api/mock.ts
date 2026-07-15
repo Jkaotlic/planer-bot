@@ -78,34 +78,37 @@ function entry(draft: EntryDraft): Shift {
 // Mutable: the admin schedule screen's create/update/delete/distribute
 // mutators operate on this same array so the team/my views reflect edits
 // without a reload.
+// Preset-backed entries carry their `templateId` (see TEMPLATES below), which is
+// what colours them per-preset; the ones deliberately left without it — absences,
+// a custom-place duty, an offsite — exercise the fallback to the category colour.
 const ALL_ENTRIES: Shift[] = [
   // Пн
-  entry({ date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 1 }),
-  entry({ date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 2 }),
-  entry({ date: dayIso(0), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 4 }),
+  entry({ templateId: 1, date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 1 }),
+  entry({ templateId: 1, date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 2 }),
+  entry({ templateId: 2, date: dayIso(0), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 4 }),
 
   // Вт–Ср: Игорь в командировке (один интервал, показывается в оба дня)
   entry({ date: dayIso(1), start: null, end: null, endDate: dayIso(2), category: "business_trip", title: null, employeeId: 2 }),
   // Вт
-  entry({ date: dayIso(1), start: "12:00", end: "21:00", endDate: null, category: "shift", title: "День", employeeId: 3 }),
-  entry({ date: dayIso(1), start: "17:00", end: "23:00", endDate: null, category: "shift", title: "Вечер", employeeId: 5 }),
+  entry({ templateId: 2, date: dayIso(1), start: "12:00", end: "21:00", endDate: null, category: "shift", title: "День", employeeId: 3 }),
+  entry({ templateId: 3, date: dayIso(1), start: "17:00", end: "23:00", endDate: null, category: "shift", title: "Вечер", employeeId: 5 }),
 
   // Ср
-  entry({ date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 1 }),
+  entry({ templateId: 2, date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 1 }),
   entry({ date: dayIso(2), start: "10:00", end: "19:00", endDate: null, category: "offsite", title: null, employeeId: 4 }),
 
   // Чт–Пт: Аня в отпуске (один интервал, показывается в оба дня)
   entry({ date: dayIso(3), start: null, end: null, endDate: dayIso(4), category: "vacation", title: null, employeeId: 1 }),
-  // Чт
+  // Чт: дежурство не по пресету — своё место, поэтому цвет категории
   entry({ date: dayIso(3), start: "09:00", end: "21:00", endDate: null, category: "duty", title: "Дежурство · Вавилова", employeeId: 3 }),
-  entry({ date: dayIso(3), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 5 }),
+  entry({ templateId: 1, date: dayIso(3), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 5 }),
 
   // Пт
-  entry({ date: dayIso(4), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 2 }),
-  entry({ date: dayIso(4), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 4 }),
+  entry({ templateId: 2, date: dayIso(4), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 2 }),
+  entry({ templateId: 1, date: dayIso(4), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 4 }),
 
   // Сб
-  entry({ date: dayIso(5), start: "11:00", end: "20:00", endDate: null, category: "shift", title: "Вечер", employeeId: 1 }),
+  entry({ templateId: 3, date: dayIso(5), start: "11:00", end: "20:00", endDate: null, category: "shift", title: "Вечер", employeeId: 1 }),
 
   // Вс: Олег работает в выходной
   entry({ date: dayIso(6), start: "10:00", end: "18:00", endDate: null, category: "weekend_work", title: null, employeeId: 5 }),

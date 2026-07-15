@@ -129,7 +129,7 @@ export function App() {
                 onEntryClick={setEditingEntry}
               />
               <aside className="right-rail">
-                <BalanceRail employees={activeEmployees} shifts={shifts} />
+                <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} />
                 <EventsFeed events={events} />
               </aside>
             </div>

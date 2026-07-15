@@ -30,13 +30,13 @@ interface CategoryPalette {
 // Chip background/foreground pairs, tuned separately per theme so every
 // category stays legible on both a near-white and a near-black canvas.
 const LIGHT_PALETTE: Record<Category, CategoryPalette> = {
-  shift: { bg: "#E3EFFC", fg: "#1C6FC9" }, // Telegram blue
-  vacation: { bg: "#FCEEDA", fg: "#8A5700" }, // amber
-  sick_leave: { bg: "#FCE4E4", fg: "#B3261E" }, // rose
-  duty: { bg: "#DEF5F0", fg: "#0C7A6E" }, // teal
-  offsite: { bg: "#EEE6FB", fg: "#7132C6" }, // violet
-  business_trip: { bg: "#E4E6FA", fg: "#3D46B8" }, // indigo
-  weekend_work: { bg: "#E1F6E1", fg: "#1F7A34" }, // green
+  shift: { bg: "#E3EFFC", fg: "#144F8F" }, // Telegram blue
+  vacation: { bg: "#FCEEDA", fg: "#714700" }, // amber
+  sick_leave: { bg: "#FCE4E4", fg: "#931F19" }, // rose
+  duty: { bg: "#DEF5F0", fg: "#095A51" }, // teal
+  offsite: { bg: "#EEE6FB", fg: "#622CAC" }, // violet
+  business_trip: { bg: "#E4E6FA", fg: "#373FA6" }, // indigo
+  weekend_work: { bg: "#E1F6E1", fg: "#185D28" }, // green
 };
 
 const DARK_PALETTE: Record<Category, CategoryPalette> = {
@@ -54,13 +54,13 @@ const DARK_PALETTE: Record<Category, CategoryPalette> = {
 // Вечер/Ночь read apart in the schedule instead of sharing one blue; entries with
 // no preset still fall back to the category colour below.
 const LIGHT_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
-  gold: { bg: "#FBF1CF", fg: "#7A5A00" },
-  blue: { bg: "#E3EFFC", fg: "#1C6FC9" },
-  violet: { bg: "#EEE6FB", fg: "#7132C6" },
+  gold: { bg: "#FBF1CF", fg: "#684D00" },
+  blue: { bg: "#E3EFFC", fg: "#144F8F" },
+  violet: { bg: "#EEE6FB", fg: "#622CAC" },
   indigo: { bg: "#DFE3F8", fg: "#2F3A9E" },
-  teal: { bg: "#DEF5F0", fg: "#0C7A6E" },
-  green: { bg: "#E1F6E1", fg: "#1F7A34" },
-  rose: { bg: "#FCE4E4", fg: "#B3261E" },
+  teal: { bg: "#DEF5F0", fg: "#095A51" },
+  green: { bg: "#E1F6E1", fg: "#185D28" },
+  rose: { bg: "#FCE4E4", fg: "#931F19" },
 };
 
 const DARK_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
