@@ -268,7 +268,11 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
   const [date, setDate] = useState<string>(existing?.date ?? defaultDate);
   const [endDate, setEndDate] = useState<string>(existing?.endDate ?? existing?.date ?? defaultDate);
   const [category, setCategory] = useState<Category>(existing?.category ?? "shift");
-  const [templateId, setTemplateId] = useState<number | null>(templates[0]?.id ?? null);
+  // Default the preset to the one matching the entry's current title (so editing
+  // a "День" shift and switching to presets shows "День", not always "Утро").
+  const [templateId, setTemplateId] = useState<number | null>(
+    templates.find((t) => t.name === existing?.title)?.id ?? templates[0]?.id ?? null,
+  );
   // Editing an existing timed entry round-trips its exact clock times, so start in "custom" mode.
   const [customTime, setCustomTime] = useState<boolean>(existing != null && existing.start != null);
   const [start, setStart] = useState<string>(existing?.start ?? "09:00");
@@ -293,7 +297,6 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
   function buildInput(): NewEntryInput | null {
     const input: NewEntryInput = { date, category };
     if (employeeId) input.employeeId = employeeId;
-    if (title.trim()) input.title = title.trim();
 
     if (category === "shift" && !customTime) {
       const template = templates.find((t) => t.id === templateId);
@@ -305,7 +308,9 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
       input.templateId = template.id;
       input.start = times.start;
       input.end = times.end;
-      if (!input.title) input.title = template.name;
+      // The title always follows the chosen preset — otherwise editing a "День"
+      // entry to the "Утро" preset would keep showing the stale old name.
+      input.title = template.name;
     } else if (needsTime(category)) {
       if (!start || !end) {
         setFormError("Укажите время начала и окончания");
@@ -313,6 +318,9 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
       }
       input.start = start;
       input.end = end;
+      // Duty/offsite carry the "Место / примечание" as their title; a custom-time
+      // shift has none — clear any stale preset name so it isn't mislabelled.
+      input.title = category === "duty" || category === "offsite" ? title.trim() || null : null;
     } else if (isMultiDay(category)) {
       if (endDate && endDate !== date) input.endDate = endDate;
     }
