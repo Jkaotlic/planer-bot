@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { entryCategorySchema, isSwappable, isAbsence, countsForBalance, type EntryCategory } from "./category";
+import {
+  entryCategorySchema,
+  isSwappable,
+  isAbsence,
+  countsForBalance,
+  templateAccents,
+  type EntryCategory,
+} from "./category";
 
 const ALL: EntryCategory[] = ["shift", "vacation", "sick_leave", "duty", "offsite", "business_trip", "weekend_work"];
 
@@ -26,5 +33,12 @@ describe("entry category", () => {
 
   it("balance counts work, not absences", () => {
     expect(ALL.filter(countsForBalance)).toEqual(["shift", "duty", "offsite", "weekend_work"]);
+  });
+});
+
+describe("templateAccents", () => {
+  it("has a distinct colour slot for each of the eight presets", () => {
+    expect(templateAccents).toEqual(["gold", "blue", "violet", "indigo", "teal", "green", "rose", "amber"]);
+    expect(new Set(templateAccents).size).toBe(templateAccents.length);
   });
 });
