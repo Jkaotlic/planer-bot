@@ -18,6 +18,7 @@ import {
   mockCreateEmployee,
   mockArchiveEmployee,
   mockRestoreEmployee,
+  mockSetEmployeeAdmin,
   mockGetTemplates,
   mockCreateEntry,
   mockUpdateEntry,
@@ -236,6 +237,7 @@ export interface ApiClient {
   createEmployee(name: string): Promise<CreateEmployeeResult>;
   archiveEmployee(id: number): Promise<void>;
   restoreEmployee(id: number): Promise<void>;
+  setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   getTemplates(): Promise<Template[]>;
   createEntry(input: NewEntryInput): Promise<Shift>;
   updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
@@ -464,6 +466,9 @@ const realClient: ApiClient = {
   async restoreEmployee(id) {
     await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
   },
+  async setEmployeeAdmin(id, isAdmin) {
+    await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
+  },
 
   async getTemplates() {
     const { templates } = await authorizedGet<{ templates: Template[] }>("/api/templates");
@@ -532,6 +537,7 @@ const devClient: ApiClient = {
   createEmployee: (name) => mockCreateEmployee(name),
   archiveEmployee: (id) => mockArchiveEmployee(id),
   restoreEmployee: (id) => mockRestoreEmployee(id),
+  setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
   updateEntry: (id, input) => mockUpdateEntry(id, input),

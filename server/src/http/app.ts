@@ -17,6 +17,8 @@ import {
   listActive,
   archiveEmployee,
   restoreEmployee,
+  setEmployeeAdmin,
+  countActiveAdmins,
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
@@ -134,6 +136,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const employee = restoreEmployee(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
     return c.json({ ok: true });
+  });
+
+  // Promote a worker to admin, or remove admin rights. Guarded so the team
+  // can never demote its last admin and lock everyone out.
+  app.post("/api/admin/employees/:id/role", requireAdmin(config.jwtSecret), async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = (await c.req.json().catch(() => ({}))) as { isAdmin?: unknown };
+    if (typeof body.isAdmin !== "boolean") return c.json({ error: "isAdmin (boolean) required" }, 400);
+    const target = getEmployeeById(db, id);
+    if (!target) return c.json({ error: "not_found" }, 404);
+    if (!body.isAdmin && target.isAdmin && countActiveAdmins(db) <= 1) {
+      return c.json({ error: "last_admin" }, 400);
+    }
+    const employee = setEmployeeAdmin(db, id, body.isAdmin);
+    return c.json({ employee });
   });
 
   app.get("/api/admin/events", requireAdmin(config.jwtSecret), (c) => {

@@ -110,6 +110,7 @@ export function AdminEmployeesScreen() {
                 actionLabel="В архив"
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
+                onToggleAdmin={() => withBusy(e.id, () => apiClient.setEmployeeAdmin(e.id, !e.isAdmin))}
               />
             ))
           )}
@@ -140,11 +141,14 @@ function EmployeeRow({
   actionLabel,
   busy,
   onAction,
+  onToggleAdmin,
 }: {
   employee: Employee;
   actionLabel: string;
   busy: boolean;
   onAction: () => void;
+  /** When provided (active roster), a linked worker can be promoted to / removed from admin. */
+  onToggleAdmin?: () => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -160,9 +164,16 @@ function EmployeeRow({
         </span>
       }
       after={
-        <Button size="s" mode="gray" loading={busy} disabled={busy} onClick={onAction}>
-          {actionLabel}
-        </Button>
+        <span style={{ display: "inline-flex", gap: 6 }}>
+          {onToggleAdmin && linked && (
+            <Button size="s" mode="bezeled" loading={busy} disabled={busy} onClick={onToggleAdmin}>
+              {employee.isAdmin ? "Снять" : "Админ"}
+            </Button>
+          )}
+          <Button size="s" mode="gray" loading={busy} disabled={busy} onClick={onAction}>
+            {actionLabel}
+          </Button>
+        </span>
       }
     >
       {employee.displayName}

@@ -73,6 +73,15 @@ export function listArchived(db: Db): Employee[] {
   return db.select().from(employees).where(eq(employees.isActive, false)).all();
 }
 
+export function setEmployeeAdmin(db: Db, id: number, isAdmin: boolean): Employee | undefined {
+  return db.update(employees).set({ isAdmin }).where(eq(employees.id, id)).returning().all()[0];
+}
+
+/** Count of active admins — used to block removing the last one (lockout guard). */
+export function countActiveAdmins(db: Db): number {
+  return db.select().from(employees).where(and(eq(employees.isAdmin, true), eq(employees.isActive, true))).all().length;
+}
+
 export function listAdmins(db: Db): Employee[] {
   return db
     .select()
