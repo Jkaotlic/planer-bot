@@ -638,7 +638,15 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
           const times = templateTimesFor(template, iso);
           // Same preset→entry mapping as EntryForm: category/times from the preset,
           // title = preset name (which carries the place for a duty preset).
-          input = { date: iso, category: template.category, employeeId, start: times.start, end: times.end, title: template.name };
+          input = {
+            date: iso,
+            category: template.category,
+            employeeId,
+            templateId: template.id,
+            start: times.start,
+            end: times.end,
+            title: template.name,
+          };
         } else {
           // A category with no preset: absences carry no times; a timed one gets
           // sensible defaults the admin can refine on the entry afterwards.
