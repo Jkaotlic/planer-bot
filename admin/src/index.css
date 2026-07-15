@@ -614,15 +614,25 @@ button {
   padding: 2px;
 }
 
+/* A chip is a button: clicking it opens the entry for editing. */
 .entry-chip {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0;
+  width: 100%;
   padding: 5px 7px;
+  border: 1px solid transparent;
   border-radius: 7px;
+  font-family: inherit;
   font-size: 11.5px;
   line-height: 1.35;
-  cursor: default;
+  text-align: left;
+  cursor: pointer;
+}
+.entry-chip:hover {
+  border-color: currentColor;
+  filter: brightness(1.03);
 }
 
 .entry-chip .chip-time {
@@ -1085,4 +1095,36 @@ input[type="time"] {
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
+}
+
+/* Small "＋" under existing entries — add another record to an occupied day. */
+.cell-add-more {
+  align-self: stretch;
+  min-height: 18px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hint);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.3;
+  cursor: pointer;
+}
+.cell-add-more:hover {
+  opacity: 1;
+  background: var(--surface-secondary);
+}
+
+.btn-danger {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 35%, transparent);
+  margin-right: auto;
+}
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--destructive) 20%, transparent);
+}
+.btn-danger:disabled {
+  opacity: 0.55;
+  cursor: default;
 }

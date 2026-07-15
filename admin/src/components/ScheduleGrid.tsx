@@ -9,6 +9,8 @@ export interface ScheduleGridProps {
   /** The 7 ISO dates of the currently displayed week, Monday first. */
   weekDates: readonly string[];
   onAddClick: (employeeId: number, date: string) => void;
+  /** Clicking an existing entry opens it for editing. */
+  onEntryClick: (entry: Shift) => void;
 }
 
 function endOf(s: Shift): string {
@@ -25,7 +27,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, weekDates, onAddClick }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, weekDates, onAddClick, onEntryClick }: ScheduleGridProps) {
   return (
     <div className="grid-scroll">
       <table className="schedule-table">
@@ -54,6 +56,7 @@ export function ScheduleGrid({ employees, shifts, weekDates, onAddClick }: Sched
                   entries={entriesFor(shifts, employee.id, date)}
                   weekend={isWeekendIso(date)}
                   onAdd={() => onAddClick(employee.id, date)}
+                  onEntryClick={onEntryClick}
                 />
               ))}
             </tr>
@@ -76,12 +79,29 @@ function EmployeeCell({ employee }: { employee: Employee }) {
   );
 }
 
-function DayCell({ entries, weekend, onAdd }: { entries: Shift[]; weekend: boolean; onAdd: () => void }) {
+function DayCell({
+  entries,
+  weekend,
+  onAdd,
+  onEntryClick,
+}: {
+  entries: Shift[];
+  weekend: boolean;
+  onAdd: () => void;
+  onEntryClick: (entry: Shift) => void;
+}) {
   return (
     <td className={`day-cell${weekend ? " weekend-col" : ""}`}>
       <div className="day-cell-inner">
         {entries.length > 0 ? (
-          entries.map((entryItem) => <EntryChip key={entryItem.id} entry={entryItem} />)
+          <>
+            {entries.map((entryItem) => (
+              <EntryChip key={entryItem.id} entry={entryItem} onClick={() => onEntryClick(entryItem)} />
+            ))}
+            <button type="button" className="cell-add-more" onClick={onAdd} aria-label="Добавить ещё запись">
+              ＋
+            </button>
+          </>
         ) : (
           <button type="button" className="empty-cell-add" onClick={onAdd} aria-label="Добавить смену">
             ＋
@@ -92,10 +112,16 @@ function DayCell({ entries, weekend, onAdd }: { entries: Shift[]; weekend: boole
   );
 }
 
-function EntryChip({ entry }: { entry: Shift }) {
+function EntryChip({ entry, onClick }: { entry: Shift; onClick: () => void }) {
   const palette = useCategoryPalette(entry.category);
   return (
-    <div className="entry-chip" style={{ background: palette.bg, color: palette.fg }}>
+    <button
+      type="button"
+      className="entry-chip"
+      style={{ background: palette.bg, color: palette.fg }}
+      onClick={onClick}
+      title="Изменить запись"
+    >
       {entry.start && entry.end ? (
         <>
           <span className="chip-time">{`${hh(entry.start)}–${hh(entry.end)}`}</span>
@@ -104,6 +130,6 @@ function EntryChip({ entry }: { entry: Shift }) {
       ) : (
         <span className="chip-title">{entry.title ?? categoryLabel(entry.category)}</span>
       )}
-    </div>
+    </button>
   );
 }
