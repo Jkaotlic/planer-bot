@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
@@ -180,6 +180,42 @@ describe("GET /api/admin/events", () => {
     const app = createApp({ db, config });
     const workerToken = await tokenFor(app, 333);
     const res = await app.request("/api/admin/events", bearer(workerToken));
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /api/admin/employees/:id/role", () => {
+  it("promotes a worker to admin and back", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111); // 111 ∈ adminTelegramIds → admin employee
+
+    const up = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: true }));
+    expect(up.status).toBe(200);
+    expect(getEmployeeById(db, w.id)?.isAdmin).toBe(true);
+
+    const down = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: false }));
+    expect(down.status).toBe(200);
+    expect(getEmployeeById(db, w.id)?.isAdmin).toBe(false);
+  });
+
+  it("refuses to demote the last admin (400 last_admin)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111);
+    const admin = getByTelegramId(db, 111)!; // the sole admin
+    const res = await app.request(`/api/admin/employees/${admin.id}/role`, authedJson(adminToken, { isAdmin: false }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("last_admin");
+    expect(getEmployeeById(db, admin.id)?.isAdmin).toBe(true);
+  });
+
+  it("rejects a worker calling it (403)", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(await tokenFor(app, 333), { isAdmin: true }));
     expect(res.status).toBe(403);
   });
 });

@@ -182,6 +182,12 @@ export async function mockRestoreEmployee(id: number): Promise<void> {
   if (employee) employee.isActive = true;
 }
 
+export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (employee) employee.isAdmin = isAdmin;
+}
+
 /**
  * In-memory "Биржа" (weekend marketplace) store for local development —
  * open vacant slots with their fairness-ranked interested workers, plus a

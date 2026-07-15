@@ -10,6 +10,7 @@ import {
   mockGetTeamSchedule,
   mockGetTemplates,
   mockRestoreEmployee,
+  mockSetEmployeeAdmin,
   mockGetWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -139,6 +140,7 @@ export interface ApiClient {
   createEmployee(name: string): Promise<CreateEmployeeResult>;
   archiveEmployee(id: number): Promise<void>;
   restoreEmployee(id: number): Promise<void>;
+  setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   getWeekendSlots(): Promise<AdminSlotView[]>;
   postSlot(input: NewSlotInput): Promise<VacantSlot>;
   assignSlot(slotId: number, employeeId: number): Promise<void>;
@@ -395,6 +397,10 @@ const realClient: ApiClient = {
     await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
   },
 
+  async setEmployeeAdmin(id, isAdmin) {
+    await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
+  },
+
   async getWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
     return slots;
@@ -434,6 +440,7 @@ const devClient: ApiClient = {
   createEmployee: (name) => mockCreateEmployee(name),
   archiveEmployee: (id) => mockArchiveEmployee(id),
   restoreEmployee: (id) => mockRestoreEmployee(id),
+  setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),

@@ -55,6 +55,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         actionLabel="Архивировать"
         busyId={busyId}
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
+        onToggleAdmin={(id, makeAdmin) => withBusy(id, () => apiClient.setEmployeeAdmin(id, makeAdmin))}
       />
 
       <EmployeesSection
@@ -89,9 +90,11 @@ interface EmployeesSectionProps {
   actionLabel: string;
   busyId: number | null;
   onAction: (id: number) => void;
+  /** When provided (active section), each row gets a make-admin / remove-admin toggle. */
+  onToggleAdmin?: (id: number, makeAdmin: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -106,6 +109,7 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, o
               actionLabel={actionLabel}
               busy={busyId === employee.id}
               onAction={() => onAction(employee.id)}
+              onToggleAdmin={onToggleAdmin ? () => onToggleAdmin(employee.id, !employee.isAdmin) : undefined}
             />
           ))}
         </div>
@@ -119,11 +123,13 @@ function EmployeeRow({
   actionLabel,
   busy,
   onAction,
+  onToggleAdmin,
 }: {
   employee: Employee;
   actionLabel: string;
   busy: boolean;
   onAction: () => void;
+  onToggleAdmin?: () => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -142,6 +148,11 @@ function EmployeeRow({
       </span>
       {employee.isAdmin && <span className="admin-badge">админ</span>}
       <span className="employee-row-spacer" />
+      {onToggleAdmin && employee.telegramUserId != null && (
+        <button type="button" className="btn btn-secondary" onClick={onToggleAdmin} disabled={busy}>
+          {employee.isAdmin ? "Убрать из админов" : "Сделать админом"}
+        </button>
+      )}
       <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
         {busy ? "…" : actionLabel}
       </button>
