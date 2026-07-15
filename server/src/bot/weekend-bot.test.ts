@@ -84,17 +84,21 @@ describe("weekend bot callbacks", () => {
     expect(sent.some((s) => s.chat_id === 111 && /подтвердил/i.test(s.text))).toBe(true);
   });
 
-  it("weekend:decline reopens the slot", async () => {
+  it("weekend:decline takes the entry back out of the schedule; the slot stays open", async () => {
     const db = makeTestDb();
     const anya = worker(db, "Аня", 201);
-    const slot = createVacantSlot(db, { date: daysFromNow(5), start: "10:00", end: "18:00" });
+    const date = daysFromNow(5);
+    const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00" });
     expressInterest(db, slot.id, anya.id);
     const assigned = assignSlot(db, slot.id, anya.id);
     if (!assigned.ok) throw new Error("assign failed");
-    expect(getVacantSlot(db, slot.id)?.status).toBe("assigned");
+    // Assigning puts it straight in the schedule and leaves the slot open for others.
+    expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.id)).toBe(true);
+    expect(getVacantSlot(db, slot.id)?.status).toBe("open");
 
     const { bot } = testBot(db);
     await bot.handleUpdate(callbackUpdate(201, `weekend:decline:${assigned.assignment.id}`));
+    expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.id)).toBe(false);
     expect(getVacantSlot(db, slot.id)?.status).toBe("open");
   });
 

@@ -72,6 +72,39 @@ export function getAssignmentForSlot(db: Db, slotId: number): WeekendAssignment 
   return db.select().from(weekendAssignments).where(eq(weekendAssignments.slotId, slotId)).get();
 }
 
+/** Every assignment on a slot — a slot can need several people. */
+export function listAssignmentsForSlot(db: Db, slotId: number): WeekendAssignment[] {
+  return db.select().from(weekendAssignments).where(eq(weekendAssignments.slotId, slotId)).all();
+}
+
+export function getAssignment(db: Db, id: number): WeekendAssignment | undefined {
+  return db.select().from(weekendAssignments).where(eq(weekendAssignments.id, id)).get();
+}
+
+export function findAssignment(db: Db, slotId: number, employeeId: number): WeekendAssignment | undefined {
+  return db
+    .select()
+    .from(weekendAssignments)
+    .where(and(eq(weekendAssignments.slotId, slotId), eq(weekendAssignments.employeeId, employeeId)))
+    .get();
+}
+
+export function deleteAssignment(db: Db, id: number): void {
+  db.delete(weekendAssignments).where(eq(weekendAssignments.id, id)).run();
+}
+
+/** Puts a previously declined assignment back into "offered" with a fresh shift link. */
+export function reofferAssignment(db: Db, id: number, shiftId: number | null): void {
+  db.update(weekendAssignments)
+    .set({ status: "offered", shiftId, confirmedAt: null })
+    .where(eq(weekendAssignments.id, id))
+    .run();
+}
+
+export function setAssignmentShift(db: Db, id: number, shiftId: number | null): void {
+  db.update(weekendAssignments).set({ shiftId }).where(eq(weekendAssignments.id, id)).run();
+}
+
 export function confirmAssignment(db: Db, id: number, shiftId: number): void {
   db.update(weekendAssignments)
     .set({ status: "confirmed", confirmedAt: new Date(), shiftId })

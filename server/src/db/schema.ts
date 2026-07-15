@@ -122,7 +122,9 @@ export const weekendAssignments = sqliteTable(
     createdAt: createdAt(),
     confirmedAt: integer({ mode: "timestamp" }),
   },
-  (t) => [uniqueIndex("weekend_assignment_slot").on(t.slotId)],
+  // One assignment per person per slot — a slot can need several people, so the
+  // uniqueness is on the pair, not on the slot alone.
+  (t) => [uniqueIndex("weekend_assignment_slot_employee").on(t.slotId, t.employeeId)],
 );
 
 export type Employee = typeof employees.$inferSelect;

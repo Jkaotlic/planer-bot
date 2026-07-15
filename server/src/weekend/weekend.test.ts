@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee } from "../repo/employees";
 import { createShift, listShiftsByEmployee } from "../repo/shifts";
-import { createVacantSlot, createAssignment, confirmAssignment } from "../repo/weekend";
+import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus } from "../repo/weekend";
 import {
   postSlot,
   expressInterest,
   interestedForSlot,
   assignSlot,
+  unassign,
+  assigneesForSlot,
   confirmOffer,
   declineOffer,
   payrollRows,
@@ -63,16 +65,44 @@ describe("weekend market service", () => {
     expect(csv).toContain("Аня,2026-07-18,8");
   });
 
-  it("expressInterest on a non-open slot is not ok", () => {
+  it("assigning someone leaves the slot open — a slot can take several people", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const other = createEmployee(db, { displayName: "Аня" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, other.id);
+    expect(assignSlot(db, slot.id, other.id).ok).toBe(true);
+
+    // Still open: someone else can volunteer and be assigned alongside.
+    expect(expressInterest(db, slot.id, worker.id).ok).toBe(true);
+    expect(assignSlot(db, slot.id, worker.id).ok).toBe(true);
+    expect(assigneesForSlot(db, slot.id).map((a) => a.employeeId).sort()).toEqual([other.id, worker.id].sort());
+    expect(openSlotsForWorker(db, worker.id, "2026-07-01").map((s) => s.slot.id)).toContain(slot.id);
+  });
+
+  it("expressInterest on a closed slot is not ok", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    const other = createEmployee(db, { displayName: "Аня" });
-    expressInterest(db, slot.id, other.id);
-    const assigned = assignSlot(db, slot.id, other.id);
-    expect(assigned.ok).toBe(true);
-    const res = expressInterest(db, slot.id, worker.id);
-    expect(res.ok).toBe(false);
+    setSlotStatus(db, slot.id, "closed");
+    expect(expressInterest(db, slot.id, worker.id).ok).toBe(false);
+  });
+
+  it("assigning puts the entry in the schedule right away; unassigning takes it back out", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00", title: "Суббота" });
+    expressInterest(db, slot.id, worker.id);
+    const assigned = assignSlot(db, slot.id, worker.id);
+    if (!assigned.ok) throw new Error("unreachable");
+
+    const scheduled = listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work");
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]!.date).toBe("2026-07-18");
+
+    expect(unassign(db, assigned.assignment.id).ok).toBe(true);
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(0);
+    expect(assigneesForSlot(db, slot.id)).toHaveLength(0);
   });
 
   it("confirming by the wrong worker is not ok", () => {
@@ -87,17 +117,20 @@ describe("weekend market service", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("declining reopens the slot", () => {
+  it("declining pulls the entry out of the schedule and drops them off the slot", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
     expressInterest(db, slot.id, worker.id);
     const assigned = assignSlot(db, slot.id, worker.id);
     if (!assigned.ok) throw new Error("unreachable");
-    const res = declineOffer(db, assigned.assignment.id, worker.id);
-    expect(res.ok).toBe(true);
-    const reopened = openSlotsForWorker(db, worker.id, "2026-07-01");
-    expect(reopened.map((s) => s.slot.id)).toContain(slot.id);
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
+
+    expect(declineOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(0);
+    expect(assigneesForSlot(db, slot.id)).toHaveLength(0);
+    // The slot stays on offer for someone else.
+    expect(openSlotsForWorker(db, worker.id, "2026-07-01").map((s) => s.slot.id)).toContain(slot.id);
   });
 
   it("openSlotsForWorker flags interested slots and myOffers lists offered+confirmed", () => {

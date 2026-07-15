@@ -1,6 +1,6 @@
 import { and, eq, gte, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { shifts, swapRequests, reminderLog, type Shift, type NewShift } from "../db/schema";
+import { shifts, swapRequests, reminderLog, type Shift, type NewShift, weekendAssignments } from "../db/schema";
 
 export function createShift(db: Db, data: NewShift): Shift {
   return db.insert(shifts).values(data).returning().all()[0]!;
@@ -36,6 +36,9 @@ export function deleteShift(db: Db, id: number): boolean {
   return db.transaction((tx) => {
     tx.delete(swapRequests).where(or(eq(swapRequests.fromShiftId, id), eq(swapRequests.toShiftId, id))).run();
     tx.delete(reminderLog).where(eq(reminderLog.shiftId, id)).run();
+    // A weekend assignment points at the entry it created; drop the link (keeping the
+    // assignment itself) or the delete trips the foreign key.
+    tx.update(weekendAssignments).set({ shiftId: null }).where(eq(weekendAssignments.shiftId, id)).run();
     return tx.delete(shifts).where(eq(shifts.id, id)).returning().all().length > 0;
   });
 }

@@ -72,13 +72,16 @@ describe("weekend market repos", () => {
     expect(listAssignmentsForEmployee(db, worker.id).map((a) => a.id)).toEqual([assignment.id]);
   });
 
-  it("enforces one assignment per slot via the unique index", () => {
+  it("allows several people on one slot, but only one assignment per person", () => {
     const db = makeTestDb();
     const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
     const a = createEmployee(db, { displayName: "Аня" });
     const b = createEmployee(db, { displayName: "Игорь" });
     createAssignment(db, { slotId: slot.id, employeeId: a.id, hours: 8 });
-    expect(() => createAssignment(db, { slotId: slot.id, employeeId: b.id, hours: 8 })).toThrow();
+    // A slot can need more than one person.
+    expect(() => createAssignment(db, { slotId: slot.id, employeeId: b.id, hours: 8 })).not.toThrow();
+    // But the same person can't be put on it twice.
+    expect(() => createAssignment(db, { slotId: slot.id, employeeId: a.id, hours: 8 })).toThrow();
   });
 
   it("counts confirmed assignments by employee within a calendar month", () => {
