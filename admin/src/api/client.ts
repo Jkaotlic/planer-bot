@@ -17,6 +17,7 @@ import {
   mockGetWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
+  mockUnassignSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
 } from "./mock";
@@ -121,10 +122,20 @@ export interface SlotInterest {
   passedOver: number;
 }
 
-/** An open slot plus its interested workers, already ranked fairest-first by the server. */
+
+/** Someone already put on a slot (a slot can need several people). */
+export interface SlotAssignee {
+  assignmentId: number;
+  employeeId: number;
+  name: string;
+  status: "offered" | "confirmed";
+}
+
+/** An open slot plus its interested workers (ranked fairest-first) and who's already on it. */
 export interface AdminSlotView {
   slot: VacantSlot;
   interested: SlotInterest[];
+  assignees: SlotAssignee[];
 }
 
 export interface NewSlotInput {
@@ -162,6 +173,7 @@ export interface ApiClient {
   getWeekendSlots(): Promise<AdminSlotView[]>;
   postSlot(input: NewSlotInput): Promise<VacantSlot>;
   assignSlot(slotId: number, employeeId: number): Promise<void>;
+  unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
 }
@@ -458,6 +470,9 @@ const realClient: ApiClient = {
   async assignSlot(slotId, employeeId) {
     await authorizedPostJson(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
   },
+  async unassignSlot(assignmentId) {
+    await authorizedPostJson(`/api/admin/weekend/assignments/${assignmentId}/unassign`, {});
+  },
 
   async getPayroll(from, to) {
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -491,6 +506,7 @@ const devClient: ApiClient = {
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
+  unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
 };

@@ -271,20 +271,25 @@ export async function mockCancelSwap(id: number): Promise<void> {
 interface SlotSeed {
   slot: VacantSlot;
   interestedIds: Set<number>;
+  /** Who is already going — workers see this too, not just admins. */
+  assignees: { employeeId: number; name: string; status: string }[];
 }
 
 const WEEKEND_SLOTS: SlotSeed[] = [
   {
     slot: { id: 101, date: dayIso(5), start: "10:00", end: "18:00", title: "Ярмарка выходного дня", location: "ТЦ Авиапарк", note: "Нужен один человек на стенд", status: "open" },
     interestedIds: new Set([3]),
+    assignees: [{ employeeId: 5, name: personName(5), status: "confirmed" }],
   },
   {
     slot: { id: 102, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
     interestedIds: new Set([1, 5]), // Аня уже записалась
+    assignees: [],
   },
   {
     slot: { id: 103, date: dayIso(12), start: "09:00", end: "15:00", title: "Инвентаризация", location: null, note: "Полдня, оплата в двойном размере", status: "open" },
     interestedIds: new Set(),
+    assignees: [],
   },
 ];
 
@@ -300,6 +305,7 @@ export async function mockGetWeekendSlots(): Promise<WeekendSlotView[]> {
   return WEEKEND_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
     slot: s.slot,
     interested: s.interestedIds.has(MOCK_ME.id),
+    assignees: [...s.assignees],
   }));
 }
 
@@ -481,6 +487,7 @@ const ADMIN_SLOTS: AdminSlotView[] = [
       { employeeId: 2, name: personName(2), confirmedThisMonth: 1, passedOver: 0 },
       { employeeId: 5, name: personName(5), confirmedThisMonth: 2, passedOver: 0 },
     ],
+    assignees: [],
   },
   {
     slot: { id: 302, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
@@ -488,10 +495,12 @@ const ADMIN_SLOTS: AdminSlotView[] = [
       { employeeId: 4, name: personName(4), confirmedThisMonth: 0, passedOver: 2 },
       { employeeId: 5, name: personName(5), confirmedThisMonth: 2, passedOver: 0 },
     ],
+    assignees: [],
   },
   {
     slot: { id: 303, date: dayIso(12), start: "09:00", end: "15:00", title: "Инвентаризация", location: null, note: "Полдня, оплата в двойном размере", status: "open" },
     interested: [],
+    assignees: [],
   },
 ];
 
@@ -506,7 +515,10 @@ export async function mockGetAdminWeekendSlots(): Promise<AdminSlotView[]> {
   await delay(250);
   return ADMIN_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
     slot: s.slot,
-    interested: [...s.interested].sort((a, b) => a.confirmedThisMonth - b.confirmedThisMonth),
+    interested: [...s.interested].sort(
+      (a, b) => a.confirmedThisMonth - b.confirmedThisMonth || b.passedOver - a.passedOver,
+    ),
+    assignees: [...s.assignees],
   }));
 }
 
@@ -522,18 +534,32 @@ export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot> {
     note: input.note?.trim() ? input.note.trim() : null,
     status: "open",
   };
-  ADMIN_SLOTS.unshift({ slot, interested: [] });
+  ADMIN_SLOTS.unshift({ slot, interested: [], assignees: [] });
   return slot;
 }
+
+let nextAssignmentId = 900;
 
 export async function mockAssignSlot(slotId: number, employeeId: number): Promise<void> {
   await delay(250);
   const view = ADMIN_SLOTS.find((s) => s.slot.id === slotId);
-  if (!view) return;
-  view.slot = { ...view.slot, status: "assigned" }; // drops out of the open list
+  if (!view || view.assignees.some((a) => a.employeeId === employeeId)) return;
+  // The slot stays open — it may need more than one person.
+  view.assignees.push({ assignmentId: nextAssignmentId++, employeeId, name: personName(employeeId), status: "offered" });
   // Mirror the real flow's eventual outcome so the payroll ledger updates too.
   const hours = slotDurationHours(view.slot.start, view.slot.end);
   PAYROLL.push({ employeeId, employeeName: personName(employeeId), date: view.slot.date, hours });
+}
+
+export async function mockUnassignSlot(assignmentId: number): Promise<void> {
+  await delay(200);
+  for (const view of ADMIN_SLOTS) {
+    const i = view.assignees.findIndex((a) => a.assignmentId === assignmentId);
+    if (i !== -1) {
+      view.assignees.splice(i, 1);
+      return;
+    }
+  }
 }
 
 function slotDurationHours(start: string, end: string): number {

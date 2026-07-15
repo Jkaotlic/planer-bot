@@ -1128,3 +1128,26 @@ input[type="time"] {
   opacity: 0.55;
   cursor: default;
 }
+
+/* Who's already on a weekend slot */
+.weekend-assignee-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.weekend-assignee-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.weekend-assignee-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-secondary);
+}

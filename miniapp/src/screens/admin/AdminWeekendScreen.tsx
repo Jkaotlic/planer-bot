@@ -59,6 +59,19 @@ export function AdminWeekendScreen() {
     }
   }
 
+  async function handleUnassign(slotId: number, assignmentId: number) {
+    setBusyId(slotId);
+    setError(null);
+    try {
+      await apiClient.unassignSlot(assignmentId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось снять");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <ScreenScroll>
       <List>
@@ -96,7 +109,13 @@ export function AdminWeekendScreen() {
           ) : (
             <CardStack>
               {slots.map((view) => (
-                <SlotCard key={view.slot.id} view={view} busy={busyId === view.slot.id} onAssign={handleAssign} />
+                <SlotCard
+                key={view.slot.id}
+                view={view}
+                busy={busyId === view.slot.id}
+                onAssign={handleAssign}
+                onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
+              />
               ))}
             </CardStack>
           )}
@@ -108,8 +127,19 @@ export function AdminWeekendScreen() {
   );
 }
 
-function SlotCard({ view, busy, onAssign }: { view: AdminSlotView; busy: boolean; onAssign: (slotId: number, employeeId: number) => void }) {
-  const { slot, interested } = view;
+function SlotCard({
+  view,
+  busy,
+  onAssign,
+  onUnassign,
+}: {
+  view: AdminSlotView;
+  busy: boolean;
+  onAssign: (slotId: number, employeeId: number) => void;
+  onUnassign: (assignmentId: number) => void;
+}) {
+  const { slot, interested, assignees } = view;
+  const assignedIds = new Set(assignees.map((a) => a.employeeId));
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -124,21 +154,40 @@ function SlotCard({ view, busy, onAssign }: { view: AdminSlotView; busy: boolean
       {slot.location && <MetaLine icon="📍">{slot.location}</MetaLine>}
       {slot.note && <MetaLine icon="💬">{slot.note}</MetaLine>}
 
-      {interested.length === 0 ? (
+      {assignees.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Назначены · {assignees.length}</span>
+          {assignees.map((a) => (
+            <div key={a.assignmentId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0 }}>{a.name}</span>
+              <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", whiteSpace: "nowrap" }}>
+                {a.status === "confirmed" ? "подтвердил" : "ждём ответа"}
+              </span>
+              <Button size="s" mode="gray" disabled={busy} onClick={() => onUnassign(a.assignmentId)}>
+                Снять
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {interested.filter((p) => !assignedIds.has(p.employeeId)).length === 0 ? (
         <div style={{ marginTop: 6, fontSize: 13.5, color: "var(--tgui--hint_color)" }}>
-          Пока никто не откликнулся — уведомление ушло всем.
+          {assignees.length > 0 ? "Других желающих нет." : "Пока никто не откликнулся — уведомление ушло всем."}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
-          {interested.map((person, i) => (
-            <InterestRow
-              key={person.employeeId}
-              person={person}
-              recommended={i === 0}
-              busy={busy}
-              onAssign={() => onAssign(slot.id, person.employeeId)}
-            />
-          ))}
+          {interested
+            .filter((p) => !assignedIds.has(p.employeeId))
+            .map((person, i) => (
+              <InterestRow
+                key={person.employeeId}
+                person={person}
+                recommended={i === 0}
+                busy={busy}
+                onAssign={() => onAssign(slot.id, person.employeeId)}
+              />
+            ))}
         </div>
       )}
     </CardShell>
