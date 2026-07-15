@@ -1,11 +1,19 @@
 import type { Category } from "../categories";
 import type {
+  AdminSlotView,
+  CreateEmployeeResult,
+  DistributeResult,
+  Employee,
   Me,
+  NewEntryInput,
+  NewSlotInput,
+  PayrollRow,
   Shift,
   SwapDirection,
   SwapRequest,
   SwapShiftSummary,
   SwapStatus,
+  Template,
   VacantSlot,
   WeekendSlotView,
   WeekendOffer,
@@ -19,18 +27,28 @@ import { addDays, mondayOf, toISODate } from "../lib/week";
  * the screens never go stale.
  */
 
-export const MOCK_ME: Me = { id: 1, displayName: "Аня Смирнова", isAdmin: false };
+// The dev caller is an admin so the "Админ" tab is reachable offline — the
+// whole point of the mocks is to exercise every screen with no backend. In
+// production `me.isAdmin` comes from the server, so this only affects dev.
+export const MOCK_ME: Me = { id: 1, displayName: "Аня Смирнова", isAdmin: true };
 
-const PEOPLE: ReadonlyMap<number, string> = new Map([
-  [1, "Аня Смирнова"],
-  [2, "Игорь Петров"],
-  [3, "Марк Волков"],
-  [4, "Даша Кузнецова"],
-  [5, "Олег Соколов"],
-]);
+/**
+ * In-memory roster shared by the worker screens (name lookups) and the admin
+ * "Работники" screen (full rows). Mutated live by create/archive/restore so
+ * both surfaces update without a reload. Ids 1–5 mirror the worker mock's
+ * original PEOPLE map; id 6 (Света, archived) exercises the archive list.
+ */
+const EMPLOYEES: Employee[] = [
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001 },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002 },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004 },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005 },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006 },
+];
 
 function personName(employeeId: number): string {
-  return PEOPLE.get(employeeId) ?? "Без имени";
+  return EMPLOYEES.find((e) => e.id === employeeId)?.displayName ?? "Без имени";
 }
 
 const MONDAY = mondayOf(new Date());
@@ -56,7 +74,10 @@ function entry(draft: EntryDraft): Shift {
 
 // A full week across a 5-person team (Пн=0 .. Вс=6). Аня (id 1) is the
 // caller — her entries double as "my shifts" and appear in the team view.
-const ALL_ENTRIES: readonly Shift[] = [
+// Mutable: the admin schedule screen's create/update/delete/distribute
+// mutators operate on this same array so the team/my views reflect edits
+// without a reload.
+const ALL_ENTRIES: Shift[] = [
   // Пн
   entry({ date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 1 }),
   entry({ date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 2 }),
@@ -304,4 +325,217 @@ export async function mockConfirmOffer(id: number): Promise<void> {
 export async function mockDeclineOffer(id: number): Promise<void> {
   await delay(250);
   setOfferStatus(id, "declined");
+}
+
+/* ===========================================================================
+ * Admin ("Админ" tab) mocks
+ *
+ * Mirrors `admin/src/api/mock.ts`, but reuses this module's existing roster
+ * (`EMPLOYEES`) and schedule (`ALL_ENTRIES`) so the admin schedule edits show
+ * up in the worker "Смены"/"Команда" views too — it's one shared dataset.
+ * =========================================================================== */
+
+// --- Работники --------------------------------------------------------------
+
+export async function mockGetAdminEmployees(): Promise<Employee[]> {
+  await delay(150);
+  return EMPLOYEES.map((e) => ({ ...e }));
+}
+
+export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
+  await delay(250);
+  const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null };
+  EMPLOYEES.push(employee);
+  const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  return { employee, inviteToken, inviteLink: `https://t.me/your_bot_username?start=${inviteToken}` };
+}
+
+export async function mockArchiveEmployee(id: number): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (employee) employee.isActive = false;
+}
+
+export async function mockRestoreEmployee(id: number): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (employee) employee.isActive = true;
+}
+
+// --- Расписание -------------------------------------------------------------
+
+const TEMPLATES: readonly Template[] = [
+  { id: 1, name: "Утро", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true },
+  { id: 2, name: "День", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false },
+  { id: 3, name: "Вечер", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false },
+  { id: 4, name: "Ночь", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true },
+];
+
+export async function mockGetTemplates(): Promise<Template[]> {
+  await delay(120);
+  return [...TEMPLATES];
+}
+
+export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
+  await delay(250);
+  const created: Shift = {
+    id: nextId++,
+    date: input.date,
+    start: input.start ?? null,
+    end: input.end ?? null,
+    endDate: input.endDate ?? null,
+    category: input.category,
+    title: input.title ?? null,
+    employeeId: input.employeeId ?? null,
+    employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
+  };
+  ALL_ENTRIES.push(created);
+  return created;
+}
+
+export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<Shift> {
+  await delay(250);
+  const shift = ALL_ENTRIES.find((s) => s.id === id);
+  if (!shift) throw new Error(`Unknown entry id ${id}`);
+  shift.date = input.date;
+  shift.category = input.category;
+  shift.start = input.start ?? null;
+  shift.end = input.end ?? null;
+  shift.endDate = input.endDate ?? null;
+  shift.title = input.title ?? null;
+  if (input.employeeId != null) {
+    shift.employeeId = input.employeeId;
+    shift.employeeName = personName(input.employeeId);
+  }
+  return shift;
+}
+
+export async function mockDeleteEntry(id: number): Promise<void> {
+  await delay(150);
+  const index = ALL_ENTRIES.findIndex((s) => s.id === id);
+  if (index !== -1) ALL_ENTRIES.splice(index, 1);
+}
+
+/**
+ * A deliberately simple stand-in for the server's fair-distribution pass:
+ * hands every still-unassigned entry in the window to whichever active worker
+ * is currently carrying the fewest entries that week (ties broken by id).
+ * `apply` writes the choices back onto `ALL_ENTRIES`; otherwise it's a preview.
+ */
+export async function mockDistribute(from: string, to: string, apply: boolean): Promise<DistributeResult> {
+  await delay(300);
+  const activeIds = EMPLOYEES.filter((e) => e.isActive).map((e) => e.id);
+  const load = new Map<number, number>(activeIds.map((id) => [id, 0]));
+  for (const s of ALL_ENTRIES) {
+    if (s.employeeId != null && load.has(s.employeeId) && overlapsRange(s, from, to)) {
+      load.set(s.employeeId, (load.get(s.employeeId) ?? 0) + 1);
+    }
+  }
+  const assignments: { shiftId: number; employeeId: number }[] = [];
+  for (const shift of ALL_ENTRIES.filter((s) => s.employeeId == null && overlapsRange(s, from, to))) {
+    let best = activeIds[0];
+    if (best == null) break; // no active workers to distribute to
+    for (const id of activeIds) {
+      if ((load.get(id) ?? 0) < (load.get(best) ?? 0)) best = id;
+    }
+    assignments.push({ shiftId: shift.id, employeeId: best });
+    load.set(best, (load.get(best) ?? 0) + 1);
+    if (apply) {
+      shift.employeeId = best;
+      shift.employeeName = personName(best);
+    }
+  }
+  return { applied: apply, assignments };
+}
+
+// --- Биржа (admin) + учёт часов ---------------------------------------------
+
+let nextAdminSlotId = 300;
+const ADMIN_SLOTS: AdminSlotView[] = [
+  {
+    slot: { id: 301, date: dayIso(5), start: "10:00", end: "18:00", title: "Ярмарка выходного дня", location: "ТЦ Авиапарк", note: "Нужен один человек на стенд", status: "open" },
+    interested: [
+      { employeeId: 3, name: personName(3), confirmedThisMonth: 0 },
+      { employeeId: 2, name: personName(2), confirmedThisMonth: 1 },
+      { employeeId: 5, name: personName(5), confirmedThisMonth: 2 },
+    ],
+  },
+  {
+    slot: { id: 302, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
+    interested: [
+      { employeeId: 4, name: personName(4), confirmedThisMonth: 0 },
+      { employeeId: 5, name: personName(5), confirmedThisMonth: 2 },
+    ],
+  },
+  {
+    slot: { id: 303, date: dayIso(12), start: "09:00", end: "15:00", title: "Инвентаризация", location: null, note: "Полдня, оплата в двойном размере", status: "open" },
+    interested: [],
+  },
+];
+
+/** Confirmed weekend work already logged — the payroll ledger backing the CSV export. */
+const PAYROLL: PayrollRow[] = [
+  { employeeId: 5, employeeName: personName(5), date: dayIso(-9), hours: 8 },
+  { employeeId: 4, employeeName: personName(4), date: dayIso(-2), hours: 6 },
+  { employeeId: 5, employeeName: personName(5), date: dayIso(-1), hours: 8 },
+];
+
+export async function mockGetAdminWeekendSlots(): Promise<AdminSlotView[]> {
+  await delay(250);
+  return ADMIN_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
+    slot: s.slot,
+    interested: [...s.interested].sort((a, b) => a.confirmedThisMonth - b.confirmedThisMonth),
+  }));
+}
+
+export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot> {
+  await delay(250);
+  const slot: VacantSlot = {
+    id: nextAdminSlotId++,
+    date: input.date,
+    start: input.start,
+    end: input.end,
+    title: input.title?.trim() ? input.title.trim() : null,
+    location: input.location?.trim() ? input.location.trim() : null,
+    note: input.note?.trim() ? input.note.trim() : null,
+    status: "open",
+  };
+  ADMIN_SLOTS.unshift({ slot, interested: [] });
+  return slot;
+}
+
+export async function mockAssignSlot(slotId: number, employeeId: number): Promise<void> {
+  await delay(250);
+  const view = ADMIN_SLOTS.find((s) => s.slot.id === slotId);
+  if (!view) return;
+  view.slot = { ...view.slot, status: "assigned" }; // drops out of the open list
+  // Mirror the real flow's eventual outcome so the payroll ledger updates too.
+  const hours = slotDurationHours(view.slot.start, view.slot.end);
+  PAYROLL.push({ employeeId, employeeName: personName(employeeId), date: view.slot.date, hours });
+}
+
+function slotDurationHours(start: string, end: string): number {
+  const toMin = (hhmm: string) => Number(hhmm.split(":")[0]) * 60 + Number(hhmm.split(":")[1]);
+  const startMin = toMin(start);
+  let endMin = toMin(end);
+  if (endMin <= startMin) endMin += 24 * 60;
+  return (endMin - startMin) / 60;
+}
+
+export async function mockGetPayroll(from: string, to: string): Promise<PayrollRow[]> {
+  await delay(200);
+  return PAYROLL.filter((r) => r.date >= from && r.date <= to).sort(
+    (a, b) => a.employeeName.localeCompare(b.employeeName) || a.date.localeCompare(b.date),
+  );
+}
+
+function csvField(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+export async function mockGetPayrollCsv(from: string, to: string): Promise<string> {
+  const rows = await mockGetPayroll(from, to);
+  const lines = rows.map((r) => [csvField(r.employeeName), r.date, String(r.hours)].join(","));
+  return ["Работник,Дата,Часы", ...lines].join("\n");
 }

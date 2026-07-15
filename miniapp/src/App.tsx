@@ -7,6 +7,7 @@ import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
+import { AdminScreen } from "./screens/AdminScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 
 interface AppData {
@@ -171,7 +172,8 @@ export function App() {
           onDecline={(id) => void runOfferAction(id, apiClient.declineOffer)}
         />
       )}
-      <TabBar active={tab} onChange={setTab} />
+      {tab === "admin" && data.me.isAdmin && <AdminScreen />}
+      <TabBar active={tab} onChange={setTab} isAdmin={data.me.isAdmin} />
     </div>
   );
 }

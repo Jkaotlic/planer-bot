@@ -14,6 +14,20 @@ import {
   mockGetWeekendOffers,
   mockConfirmOffer,
   mockDeclineOffer,
+  mockGetAdminEmployees,
+  mockCreateEmployee,
+  mockArchiveEmployee,
+  mockRestoreEmployee,
+  mockGetTemplates,
+  mockCreateEntry,
+  mockUpdateEntry,
+  mockDeleteEntry,
+  mockDistribute,
+  mockGetAdminWeekendSlots,
+  mockPostSlot,
+  mockAssignSlot,
+  mockGetPayroll,
+  mockGetPayrollCsv,
 } from "./mock";
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -109,6 +123,96 @@ export interface WeekendOffer {
   slot: VacantSlot;
 }
 
+// --- Admin-only types (the "Админ" tab) --------------------------------------
+// Ported verbatim from the desktop console's client (`admin/src/api/client.ts`)
+// so the mini-app admin surface speaks the exact same shapes as the web one.
+
+/** A worker row in the "Работники" screen and the add-entry employee picker. */
+export interface Employee {
+  id: number;
+  displayName: string;
+  isAdmin: boolean;
+  /** false once archived (see `archiveEmployee`). */
+  isActive: boolean;
+  /** null until the worker opens the invite link and links their Telegram account. */
+  telegramUserId: number | null;
+}
+
+/** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
+export interface Template {
+  id: number;
+  name: string;
+  start: string;
+  end: string;
+  fridayStart: string;
+  fridayEnd: string;
+  isLate: boolean;
+  sendReminder: boolean;
+}
+
+export interface CreateEmployeeResult {
+  employee: Employee;
+  /** Single-use token embedded in the invite deep-link. */
+  inviteToken: string;
+  /** Ready-made `https://t.me/<bot>?start=<token>` deep-link, or `null` if the server has no bot username configured. */
+  inviteLink: string | null;
+}
+
+/** Body for creating (or patching) a schedule entry — mirrors the server's `createEntrySchema`. */
+export interface NewEntryInput {
+  date: string;
+  category: Category;
+  start?: string;
+  end?: string;
+  endDate?: string;
+  templateId?: number;
+  employeeId?: number;
+  location?: string;
+  title?: string;
+}
+
+/** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
+export interface SlotInterest {
+  employeeId: number;
+  name: string;
+  confirmedThisMonth: number;
+}
+
+/** An open slot plus its interested workers, already ranked fairest-first by the server. */
+export interface AdminSlotView {
+  slot: VacantSlot;
+  interested: SlotInterest[];
+}
+
+export interface NewSlotInput {
+  date: string;
+  start: string;
+  end: string;
+  title?: string;
+  location?: string;
+  note?: string;
+}
+
+/** One confirmed weekend-work record for the payroll ledger. */
+export interface PayrollRow {
+  employeeId: number;
+  employeeName: string;
+  date: string;
+  hours: number;
+}
+
+/** One shift the fair-distribution pass would (or did) hand to a worker. */
+export interface DistributionAssignment {
+  shiftId: number;
+  employeeId: number;
+}
+
+/** Result of `POST /api/admin/distribute`: whether it was applied, plus the chosen assignments. */
+export interface DistributeResult {
+  applied: boolean;
+  assignments: DistributionAssignment[];
+}
+
 export interface ApiClient {
   getMe(): Promise<Me>;
   getMyShifts(from: string): Promise<Shift[]>;
@@ -123,6 +227,25 @@ export interface ApiClient {
   getWeekendOffers(): Promise<WeekendOffer[]>;
   confirmOffer(id: number): Promise<void>;
   declineOffer(id: number): Promise<void>;
+
+  // --- Admin-only (the "Админ" tab) -----------------------------------------
+  // Only ever called from `AdminScreen` when `me.isAdmin` is true. The server
+  // guards every one of these with `requireAdmin`, so a non-admin session gets
+  // a 403 even if the client somehow invoked them.
+  getAdminEmployees(): Promise<Employee[]>;
+  createEmployee(name: string): Promise<CreateEmployeeResult>;
+  archiveEmployee(id: number): Promise<void>;
+  restoreEmployee(id: number): Promise<void>;
+  getTemplates(): Promise<Template[]>;
+  createEntry(input: NewEntryInput): Promise<Shift>;
+  updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
+  deleteEntry(id: number): Promise<void>;
+  distribute(from: string, to: string, apply: boolean): Promise<DistributeResult>;
+  getAdminWeekendSlots(): Promise<AdminSlotView[]>;
+  postSlot(input: NewSlotInput): Promise<VacantSlot>;
+  assignSlot(slotId: number, employeeId: number): Promise<void>;
+  getPayroll(from: string, to: string): Promise<PayrollRow[]>;
+  getPayrollCsv(from: string, to: string): Promise<string>;
 }
 
 interface ShiftsResponse {
@@ -131,6 +254,11 @@ interface ShiftsResponse {
 
 interface EmployeesResponse {
   employees: { id: number; displayName: string }[];
+}
+
+/** `GET /api/admin/employees` — the richer admin roster (active + archived). */
+interface AdminEmployeesResponse {
+  employees: Employee[];
 }
 
 /** Exact shape of a `GET /api/swaps` row (server-enriched). `counterpartyName`
@@ -241,6 +369,30 @@ async function authorizedPostAction(path: string): Promise<void> {
   }
 }
 
+async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T> {
+  const token = await authToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(path, res));
+  }
+  return (await res.json()) as T;
+}
+
+async function authorizedDelete(path: string): Promise<void> {
+  const token = await authToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(path, res));
+  }
+}
+
 /** Fetches and maps `GET /api/swaps` to the enriched UI shape. Shared by
  * `getSwaps` and `proposeSwap` (the latter re-fetches to get the freshly
  * created request's enriched view, since `POST /api/swaps` only echoes the raw row). */
@@ -299,6 +451,66 @@ const realClient: ApiClient = {
   },
   confirmOffer: (id) => authorizedPostAction(`/api/weekend/offers/${id}/confirm`),
   declineOffer: (id) => authorizedPostAction(`/api/weekend/offers/${id}/decline`),
+
+  // --- Admin-only ------------------------------------------------------------
+  async getAdminEmployees() {
+    const { employees } = await authorizedGet<AdminEmployeesResponse>("/api/admin/employees");
+    return employees;
+  },
+  createEmployee: (name) => authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name }),
+  async archiveEmployee(id) {
+    await authorizedPostJson(`/api/admin/employees/${id}/archive`, {});
+  },
+  async restoreEmployee(id) {
+    await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
+  },
+
+  async getTemplates() {
+    const { templates } = await authorizedGet<{ templates: Template[] }>("/api/templates");
+    return templates;
+  },
+
+  async createEntry(input) {
+    const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/admin/entries", input);
+    return entry;
+  },
+  async updateEntry(id, input) {
+    const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/admin/entries/${id}`, input);
+    return entry;
+  },
+  deleteEntry: (id) => authorizedDelete(`/api/admin/entries/${id}`),
+
+  distribute: (from, to, apply) =>
+    authorizedPostJson<DistributeResult>("/api/admin/distribute", { from, to, apply }),
+
+  async getAdminWeekendSlots() {
+    const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
+    return slots;
+  },
+  async postSlot(input) {
+    const { slot } = await authorizedPostJson<{ slot: VacantSlot }>("/api/admin/weekend/slots", input);
+    return slot;
+  },
+  async assignSlot(slotId, employeeId) {
+    await authorizedPostJson(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
+  },
+
+  async getPayroll(from, to) {
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const { rows } = await authorizedGet<{ rows: PayrollRow[] }>(`/api/admin/weekend/payroll?${q}`);
+    return rows;
+  },
+  async getPayrollCsv(from, to) {
+    // Unlike every other admin call this returns raw CSV text, not JSON — the
+    // screen wraps it in a Blob + download link (see `AdminWeekendScreen`).
+    const token = await authToken();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const res = await fetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(await errorMessage("/api/admin/weekend/payroll.csv", res));
+    return res.text();
+  },
 };
 
 const devClient: ApiClient = {
@@ -315,6 +527,21 @@ const devClient: ApiClient = {
   getWeekendOffers: () => mockGetWeekendOffers(),
   confirmOffer: (id) => mockConfirmOffer(id),
   declineOffer: (id) => mockDeclineOffer(id),
+
+  getAdminEmployees: () => mockGetAdminEmployees(),
+  createEmployee: (name) => mockCreateEmployee(name),
+  archiveEmployee: (id) => mockArchiveEmployee(id),
+  restoreEmployee: (id) => mockRestoreEmployee(id),
+  getTemplates: () => mockGetTemplates(),
+  createEntry: (input) => mockCreateEntry(input),
+  updateEntry: (id, input) => mockUpdateEntry(id, input),
+  deleteEntry: (id) => mockDeleteEntry(id),
+  distribute: (from, to, apply) => mockDistribute(from, to, apply),
+  getAdminWeekendSlots: () => mockGetAdminWeekendSlots(),
+  postSlot: (input) => mockPostSlot(input),
+  assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
+  getPayroll: (from, to) => mockGetPayroll(from, to),
+  getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
 };
 
 /**
