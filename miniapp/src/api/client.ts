@@ -171,7 +171,8 @@ export interface NewEntryInput {
   templateId?: number;
   employeeId?: number;
   location?: string;
-  title?: string;
+  /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
+  title?: string | null;
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
