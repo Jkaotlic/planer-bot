@@ -69,6 +69,7 @@ const LIGHT_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
   teal: { bg: "#DEF5F0", fg: "#095A51" },
   green: { bg: "#E1F6E1", fg: "#185D28" },
   rose: { bg: "#FCE4E4", fg: "#931F19" },
+  amber: { bg: "#FBE8D6", fg: "#7E3803" },
 };
 
 const DARK_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
@@ -79,6 +80,7 @@ const DARK_ACCENTS: Record<TemplateAccent, CategoryPalette> = {
   teal: { bg: "rgba(48,191,171,0.22)", fg: "#5FE0CB" },
   green: { bg: "rgba(70,190,90,0.22)", fg: "#86E093" },
   rose: { bg: "rgba(230,80,60,0.24)", fg: "#F5A296" },
+  amber: { bg: "rgba(224,128,64,0.24)", fg: "#F5B98A" },
 };
 
 /** Minimal shape needed to colour an entry — avoids importing the api types here. */

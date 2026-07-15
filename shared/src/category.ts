@@ -25,7 +25,7 @@ const BALANCE_COUNTED: ReadonlySet<EntryCategory> = new Set([
  * one blue. Only the *name* is shared — each app maps it to its own light/dark
  * values, since legibility is a per-theme concern.
  */
-export const templateAccents = ["gold", "blue", "violet", "indigo", "teal", "green", "rose"] as const;
+export const templateAccents = ["gold", "blue", "violet", "indigo", "teal", "green", "rose", "amber"] as const;
 export type TemplateAccent = (typeof templateAccents)[number];
 
 /** Only regular shifts can be swapped between workers. */
