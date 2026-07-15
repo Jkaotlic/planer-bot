@@ -65,6 +65,16 @@ export function AdminEmployeesScreen() {
     }
   }
 
+  async function showInvite(employee: Employee, regenerate = false) {
+    setError(null);
+    try {
+      const info = await apiClient.getEmployeeInvite(employee.id, regenerate);
+      setInvite({ employee, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось получить ссылку");
+    }
+  }
+
   if (error && !employees) {
     return (
       <ScreenScroll>
@@ -89,7 +99,9 @@ export function AdminEmployeesScreen() {
         <Section header="Новый работник">
           <CardStack>
             <AddEmployeeForm busy={adding} onAdd={handleAdd} />
-            {invite && <InviteCard invite={invite} onDismiss={() => setInvite(null)} />}
+            {invite && (
+              <InviteCard invite={invite} onRegenerate={() => void showInvite(invite.employee, true)} onDismiss={() => setInvite(null)} />
+            )}
           </CardStack>
         </Section>
 
@@ -111,6 +123,8 @@ export function AdminEmployeesScreen() {
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
                 onToggleAdmin={() => withBusy(e.id, () => apiClient.setEmployeeAdmin(e.id, !e.isAdmin))}
+                onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
+                onShowInvite={() => void showInvite(e)}
               />
             ))
           )}
@@ -127,6 +141,8 @@ export function AdminEmployeesScreen() {
                 actionLabel="Вернуть"
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.restoreEmployee(e.id))}
+                onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
+                onShowInvite={() => void showInvite(e)}
               />
             ))
           )}
@@ -142,6 +158,8 @@ function EmployeeRow({
   busy,
   onAction,
   onToggleAdmin,
+  onRename,
+  onShowInvite,
 }: {
   employee: Employee;
   actionLabel: string;
@@ -149,9 +167,43 @@ function EmployeeRow({
   onAction: () => void;
   /** When provided (active roster), a linked worker can be promoted to / removed from admin. */
   onToggleAdmin?: () => void;
+  /** When provided, the worker can be renamed inline. */
+  onRename?: (name: string) => void;
+  /** When provided, an unlinked worker's invite link can be re-shown. */
+  onShowInvite?: () => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(employee.displayName);
+
+  if (editing) {
+    return (
+      <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <Input header="Имя" value={draft} disabled={busy} onChange={(e) => setDraft(e.target.value)} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button
+            size="s"
+            mode="filled"
+            stretched
+            loading={busy}
+            disabled={busy || !draft.trim()}
+            onClick={() => {
+              const t = draft.trim();
+              if (t && t !== employee.displayName) onRename?.(t);
+              setEditing(false);
+            }}
+          >
+            Сохранить
+          </Button>
+          <Button size="s" mode="gray" disabled={busy} onClick={() => { setDraft(employee.displayName); setEditing(false); }}>
+            Отмена
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Cell
       before={<Avatar acronym={initialsOf(employee.displayName)} size={40} style={{ background: palette.bg, color: palette.fg }} />}
@@ -165,6 +217,16 @@ function EmployeeRow({
       }
       after={
         <span style={{ display: "inline-flex", gap: 6 }}>
+          {onRename && (
+            <Button size="s" mode="bezeled" disabled={busy} onClick={() => { setDraft(employee.displayName); setEditing(true); }}>
+              ✎
+            </Button>
+          )}
+          {onShowInvite && !linked && (
+            <Button size="s" mode="bezeled" disabled={busy} onClick={onShowInvite}>
+              🔗
+            </Button>
+          )}
           {onToggleAdmin && linked && (
             <Button size="s" mode="bezeled" loading={busy} disabled={busy} onClick={onToggleAdmin}>
               {employee.isAdmin ? "Снять" : "Админ"}
@@ -209,7 +271,7 @@ function AddEmployeeForm({ busy, onAdd }: { busy: boolean; onAdd: (name: string)
   );
 }
 
-function InviteCard({ invite, onDismiss }: { invite: CreateEmployeeResult; onDismiss: () => void }) {
+function InviteCard({ invite, onRegenerate, onDismiss }: { invite: CreateEmployeeResult; onRegenerate?: () => void; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
   // In dev the mock always synthesizes a link; in prod the server may return
   // null (no bot username configured) — fall back to the bare token then.
@@ -255,6 +317,11 @@ function InviteCard({ invite, onDismiss }: { invite: CreateEmployeeResult; onDis
           Скрыть
         </Button>
       </div>
+      {onRegenerate && (
+        <Button size="s" mode="bezeled" stretched onClick={onRegenerate}>
+          Создать новую ссылку
+        </Button>
+      )}
     </CardShell>
   );
 }

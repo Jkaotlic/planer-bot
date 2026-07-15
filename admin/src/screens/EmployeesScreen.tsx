@@ -35,6 +35,16 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
     }
   }
 
+  async function showInvite(employee: Employee, regenerate = false) {
+    setError(null);
+    try {
+      const info = await apiClient.getEmployeeInvite(employee.id, regenerate);
+      setInvite({ employee, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось получить ссылку");
+    }
+  }
+
   return (
     <div className="employees-screen">
       <div className="employees-header">
@@ -54,6 +64,8 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         busyId={busyId}
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
         onToggleAdmin={(id, makeAdmin) => withBusy(id, () => apiClient.setEmployeeAdmin(id, makeAdmin))}
+        onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
+        onShowInvite={(employee) => void showInvite(employee)}
       />
 
       <EmployeesSection
@@ -63,6 +75,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         actionLabel="Восстановить"
         busyId={busyId}
         onAction={(id) => withBusy(id, () => apiClient.restoreEmployee(id))}
+        onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
       />
 
       {showAddDialog && (
@@ -76,7 +89,9 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         />
       )}
 
-      {invite && <InviteLinkDialog invite={invite} onClose={() => setInvite(null)} />}
+      {invite && (
+        <InviteLinkDialog invite={invite} onRegenerate={() => void showInvite(invite.employee, true)} onClose={() => setInvite(null)} />
+      )}
     </div>
   );
 }
@@ -90,9 +105,13 @@ interface EmployeesSectionProps {
   onAction: (id: number) => void;
   /** When provided (active section), each row gets a make-admin / remove-admin toggle. */
   onToggleAdmin?: (id: number, makeAdmin: boolean) => void;
+  /** When provided, each row can rename the worker inline. */
+  onRename?: (id: number, name: string) => void;
+  /** When provided, an unlinked worker's row can re-show its invite link. */
+  onShowInvite?: (employee: Employee) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin, onRename, onShowInvite }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -108,6 +127,8 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, o
               busy={busyId === employee.id}
               onAction={() => onAction(employee.id)}
               onToggleAdmin={onToggleAdmin ? () => onToggleAdmin(employee.id, !employee.isAdmin) : undefined}
+              onRename={onRename ? (name) => onRename(employee.id, name) : undefined}
+              onShowInvite={onShowInvite ? () => onShowInvite(employee) : undefined}
             />
           ))}
         </div>
@@ -122,12 +143,16 @@ function EmployeeRow({
   busy,
   onAction,
   onToggleAdmin,
+  onRename,
+  onShowInvite,
 }: {
   employee: Employee;
   actionLabel: string;
   busy: boolean;
   onAction: () => void;
   onToggleAdmin?: () => void;
+  onRename?: (name: string) => void;
+  onShowInvite?: () => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -135,25 +160,81 @@ function EmployeeRow({
   // as a system color rather than a one-off, and stays legible in both themes.
   const linkedPalette = useCategoryPalette("weekend_work");
   const chipStyle = linked ? { background: linkedPalette.bg, color: linkedPalette.fg } : undefined;
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(employee.displayName);
+
+  function save() {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== employee.displayName) onRename?.(trimmed);
+    setEditing(false);
+  }
+  function cancel() {
+    setDraft(employee.displayName);
+    setEditing(false);
+  }
+
   return (
     <div className="employee-row-card">
       <span className="avatar" style={{ background: palette.bg, color: palette.fg }}>
         {initialsOf(employee.displayName)}
       </span>
-      <span className="employee-row-name">{employee.displayName}</span>
-      <span className="status-chip" style={chipStyle}>
-        {linked ? "привязан" : "не привязан"}
-      </span>
-      {employee.isAdmin && <span className="admin-badge">админ</span>}
-      <span className="employee-row-spacer" />
-      {onToggleAdmin && employee.telegramUserId != null && (
-        <button type="button" className="btn btn-secondary" onClick={onToggleAdmin} disabled={busy}>
-          {employee.isAdmin ? "Убрать из админов" : "Сделать админом"}
-        </button>
+      {editing ? (
+        <input
+          className="employee-name-input"
+          type="text"
+          value={draft}
+          autoFocus
+          disabled={busy}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") cancel();
+          }}
+        />
+      ) : (
+        <span className="employee-row-name">{employee.displayName}</span>
       )}
-      <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
-        {busy ? "…" : actionLabel}
-      </button>
+      {!editing && (
+        <>
+          <span className="status-chip" style={chipStyle}>
+            {linked ? "привязан" : "не привязан"}
+          </span>
+          {employee.isAdmin && <span className="admin-badge">админ</span>}
+        </>
+      )}
+      <span className="employee-row-spacer" />
+      {editing ? (
+        <>
+          <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
+            {busy ? "…" : "Сохранить"}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={cancel} disabled={busy}>
+            Отмена
+          </button>
+        </>
+      ) : (
+        <>
+          {onRename && (
+            <button type="button" className="btn btn-secondary" onClick={() => setEditing(true)} disabled={busy} title="Переименовать">
+              ✎ Имя
+            </button>
+          )}
+          {onShowInvite && !linked && (
+            <button type="button" className="btn btn-secondary" onClick={onShowInvite} disabled={busy} title="Показать ссылку-приглашение">
+              🔗 Ссылка
+            </button>
+          )}
+          {onToggleAdmin && employee.telegramUserId != null && (
+            <button type="button" className="btn btn-secondary" onClick={onToggleAdmin} disabled={busy}>
+              {employee.isAdmin ? "Убрать из админов" : "Сделать админом"}
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
+            {busy ? "…" : actionLabel}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -229,7 +310,7 @@ function AddEmployeeDialog({
   );
 }
 
-function InviteLinkDialog({ invite, onClose }: { invite: CreateEmployeeResult; onClose: () => void }) {
+function InviteLinkDialog({ invite, onRegenerate, onClose }: { invite: CreateEmployeeResult; onRegenerate?: () => void; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const { employee } = invite;
   // Use the server-built deep-link (it knows the real bot username); fall back
@@ -251,7 +332,7 @@ function InviteLinkDialog({ invite, onClose }: { invite: CreateEmployeeResult; o
     <div className="panel-overlay" onClick={onClose}>
       <div className="panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel-header">
-          <span className="panel-title">{employee.displayName} добавлен(а)</span>
+          <span className="panel-title">Ссылка · {employee.displayName}</span>
           <button type="button" className="panel-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>
@@ -269,6 +350,11 @@ function InviteLinkDialog({ invite, onClose }: { invite: CreateEmployeeResult; o
         </div>
 
         <div className="panel-actions">
+          {onRegenerate && (
+            <button type="button" className="btn btn-secondary" onClick={onRegenerate} title="Старая ссылка перестанет работать">
+              Создать новую
+            </button>
+          )}
           <button type="button" className="btn btn-primary" onClick={onClose}>
             Готово
           </button>

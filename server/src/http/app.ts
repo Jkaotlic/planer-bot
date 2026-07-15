@@ -19,6 +19,8 @@ import {
   restoreEmployee,
   setEmployeeAdmin,
   countActiveAdmins,
+  renameEmployee,
+  setInviteToken,
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
@@ -124,6 +126,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ employee, inviteToken, inviteLink }, 201);
   });
 
+  // Rename a worker.
+  app.patch("/api/admin/employees/:id", requireAdmin(config.jwtSecret), async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
+    if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
+      return c.json({ error: "displayName is required" }, 400);
+    }
+    const employee = renameEmployee(db, id, body.displayName.trim());
+    if (!employee) return c.json({ error: "not_found" }, 404);
+    return c.json({ employee });
+  });
+
   app.post("/api/admin/employees/:id/archive", requireAdmin(config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
     const employee = archiveEmployee(db, id, teamNow(config.teamTz).date);
@@ -151,6 +165,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     const employee = setEmployeeAdmin(db, id, body.isAdmin);
     return c.json({ employee });
+  });
+
+  // (Re)issue an invite link for a worker who hasn't linked their Telegram yet —
+  // lets an admin re-show the link or replace a broken/lost one. `regenerate`
+  // forces a fresh token (invalidating any previously shared link).
+  app.post("/api/admin/employees/:id/invite", requireAdmin(config.jwtSecret), async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = (await c.req.json().catch(() => ({}))) as { regenerate?: unknown };
+    const emp = getEmployeeById(db, id);
+    if (!emp) return c.json({ error: "not_found" }, 404);
+    if (emp.telegramUserId != null) return c.json({ error: "already_linked" }, 400);
+    let inviteToken = emp.inviteToken;
+    if (!inviteToken || body.regenerate === true) {
+      inviteToken = randomBytes(16).toString("hex");
+      setInviteToken(db, id, inviteToken);
+    }
+    const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
+    return c.json({ inviteToken, inviteLink });
   });
 
   app.get("/api/admin/events", requireAdmin(config.jwtSecret), (c) => {

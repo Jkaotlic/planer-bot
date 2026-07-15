@@ -19,6 +19,8 @@ import {
   mockArchiveEmployee,
   mockRestoreEmployee,
   mockSetEmployeeAdmin,
+  mockRenameEmployee,
+  mockGetEmployeeInvite,
   mockGetTemplates,
   mockCreateEntry,
   mockUpdateEntry,
@@ -238,6 +240,9 @@ export interface ApiClient {
   archiveEmployee(id: number): Promise<void>;
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
+  renameEmployee(id: number, displayName: string): Promise<void>;
+  /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
+  getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getTemplates(): Promise<Template[]>;
   createEntry(input: NewEntryInput): Promise<Shift>;
   updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
@@ -469,6 +474,12 @@ const realClient: ApiClient = {
   async setEmployeeAdmin(id, isAdmin) {
     await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
   },
+  async renameEmployee(id, displayName) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
+  },
+  getEmployeeInvite(id, regenerate = false) {
+    return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
+  },
 
   async getTemplates() {
     const { templates } = await authorizedGet<{ templates: Template[] }>("/api/templates");
@@ -538,6 +549,8 @@ const devClient: ApiClient = {
   archiveEmployee: (id) => mockArchiveEmployee(id),
   restoreEmployee: (id) => mockRestoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
+  renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
+  getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
