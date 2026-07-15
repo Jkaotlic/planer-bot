@@ -42,9 +42,10 @@ function callbackUpdate(tgId: number, data: string) {
   };
 }
 
-const daysFromNow = (n: number): string => {
+/** Vacant slots only exist on days off, so fixtures must land on a weekend. */
+const nextSaturday = (): string => {
   const d = new Date();
-  d.setUTCDate(d.getUTCDate() + n);
+  d.setUTCDate(d.getUTCDate() + ((6 - d.getUTCDay() + 7) % 7 || 7));
   return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
 };
 
@@ -58,7 +59,7 @@ describe("weekend bot callbacks", () => {
   it("weekend:interest records interest and drops the button", async () => {
     const db = makeTestDb();
     const anya = worker(db, "Аня", 201);
-    const slot = createVacantSlot(db, { date: daysFromNow(5), start: "10:00", end: "18:00" });
+    const slot = createVacantSlot(db, { date: nextSaturday(), start: "10:00", end: "18:00" });
     const { bot, calls } = testBot(db);
     await bot.handleUpdate(callbackUpdate(201, `weekend:interest:${slot.id}`));
     expect(listInterestedEmployeeIds(db, slot.id)).toContain(anya.id);
@@ -70,7 +71,7 @@ describe("weekend bot callbacks", () => {
     const db = makeTestDb();
     createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
     const anya = worker(db, "Аня", 201);
-    const date = daysFromNow(5);
+    const date = nextSaturday();
     const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00", title: "Ярмарка" });
     expressInterest(db, slot.id, anya.id);
     const assigned = assignSlot(db, slot.id, anya.id);
@@ -87,7 +88,7 @@ describe("weekend bot callbacks", () => {
   it("weekend:decline takes the entry back out of the schedule; the slot stays open", async () => {
     const db = makeTestDb();
     const anya = worker(db, "Аня", 201);
-    const date = daysFromNow(5);
+    const date = nextSaturday();
     const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00" });
     expressInterest(db, slot.id, anya.id);
     const assigned = assignSlot(db, slot.id, anya.id);
@@ -104,7 +105,7 @@ describe("weekend bot callbacks", () => {
 
   it("tells an unknown user they are not in the system", async () => {
     const db = makeTestDb();
-    const slot = createVacantSlot(db, { date: daysFromNow(5), start: "10:00", end: "18:00" });
+    const slot = createVacantSlot(db, { date: nextSaturday(), start: "10:00", end: "18:00" });
     const { bot, calls } = testBot(db);
     await bot.handleUpdate(callbackUpdate(999, `weekend:interest:${slot.id}`));
     expect(calls.find((c) => c.method === "answerCallbackQuery")?.payload.text).toContain("не в системе");

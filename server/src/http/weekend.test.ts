@@ -26,6 +26,12 @@ const daysFromNow = (n: number): string => {
   d.setUTCDate(d.getUTCDate() + n);
   return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
 };
+/** Vacant slots only exist on days off, so fixtures must land on a weekend. */
+const nextSaturday = (): string => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + ((6 - d.getUTCDay() + 7) % 7 || 7));
+  return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
+};
 async function tokenFor(app: ReturnType<typeof createApp>, tgId: number): Promise<string> {
   const res = await app.request(new Request("http://x/api/auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(tgId) }) }));
   return (await res.json()).token as string;
@@ -48,7 +54,7 @@ describe("weekend-market endpoints", () => {
     const igor = await worker(db, app, "Игорь", 202);
 
     // admin posts a vacant slot (10:00–18:00 → 8h)
-    const date = daysFromNow(5);
+    const date = nextSaturday();
     const posted = await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка", location: "Точка" }));
     expect(posted.status).toBe(201);
     const slotId = (await posted.json()).slot.id as number;
@@ -103,7 +109,7 @@ describe("weekend-market endpoints", () => {
     const admin = await tokenFor(app, 111);
     const anya = await worker(db, app, "Аня", 201);
 
-    const date = daysFromNow(5);
+    const date = nextSaturday();
     const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00" }))).json()).slot.id as number;
     await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
     const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }))).json()).assignment.id as number;
@@ -122,7 +128,7 @@ describe("weekend-market endpoints", () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const anya = await worker(db, app, "Аня", 201);
-    expect((await app.request("/api/admin/weekend/slots", authed(anya.token, { date: daysFromNow(5), start: "10:00", end: "18:00" }))).status).toBe(403);
+    expect((await app.request("/api/admin/weekend/slots", authed(anya.token, { date: nextSaturday(), start: "10:00", end: "18:00" }))).status).toBe(403);
     expect((await app.request("/api/admin/weekend/slots", bearer(anya.token))).status).toBe(403);
   });
 
