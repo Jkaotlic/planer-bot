@@ -109,6 +109,22 @@ describe("bot /start", () => {
     expect(sent[0]?.text.toLowerCase()).toContain("админ");
   });
 
+  it("/admin hands an allowlisted admin a browser login link with a token", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(111, "/admin", "boss"));
+    expect(sent[0]?.text).toContain(`${config.publicUrl}/admin/#token=`);
+  });
+
+  it("/admin refuses a non-admin", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Игорь", inviteToken: "w" });
+    linkTelegramAccount(db, "w", 777);
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(777, "/admin"));
+    expect(sent[0]?.text.toLowerCase()).toContain("администратор");
+  });
+
   it("keeps running when a reply fails (error boundary)", async () => {
     const db = makeTestDb();
     createEmployee(db, { displayName: "Игорь", inviteToken: "tok-1" });
