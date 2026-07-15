@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { seedDefaultTemplates } from "../db/seed";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
@@ -29,12 +28,13 @@ function worker(db: Db, name: string, tgId: number) {
 describe("read endpoints", () => {
   it("returns seeded templates to any authed user", async () => {
     const db = makeTestDb();
-    seedDefaultTemplates(db);
     worker(db, "Игорь", 333);
     const app = createApp({ db, config });
     const res = await app.request("/api/templates", bearer(await tokenFor(app, 333)));
     expect(res.status).toBe(200);
-    expect((await res.json()).templates.map((t: { name: string }) => t.name)).toEqual(["Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка"]);
+    expect((await res.json()).templates.map((t: { name: string }) => t.name)).toEqual([
+      "Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка", "Открытие", "Дежурство · Телефон", "Дежурство · Вавилова 19",
+    ]);
   });
 
   it("returns the caller's own upcoming shifts", async () => {
