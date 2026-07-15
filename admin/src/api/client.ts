@@ -221,23 +221,71 @@ function toFeedEvent(raw: RawAdminEvent, namesById: ReadonlyMap<number, string>)
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
+/** Thrown when the console has no valid session — the UI shows a login prompt. */
+export class AuthRequiredError extends Error {}
+
+const ADMIN_TOKEN_KEY = "adminToken";
+
+/**
+ * Two ways to sign into the console:
+ *  - **Browser**: the bot's /admin command hands out a link ending in
+ *    `#token=<jwt>`; we stash it in localStorage and strip it from the URL.
+ *  - **Inside Telegram**: fall back to validating Telegram initData.
+ */
+function captureHashToken(): void {
+  if (typeof location === "undefined") return;
+  const m = location.hash.match(/token=([^&]+)/);
+  if (!m) return;
+  try {
+    localStorage.setItem(ADMIN_TOKEN_KEY, decodeURIComponent(m[1]!));
+  } catch {
+    /* localStorage unavailable (private mode) — token just won't persist */
+  }
+  // Don't leave the JWT sitting in the address bar / history.
+  history.replaceState(null, "", location.pathname + location.search);
+}
+captureHashToken();
+
+function storedToken(): string | null {
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Drops the cached session so the next call re-authenticates (or prompts login). */
+function clearAuth(): void {
+  tokenPromise = null;
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 let tokenPromise: Promise<string> | null = null;
 
 async function requestToken(): Promise<string> {
+  const browserToken = storedToken();
+  if (browserToken) return browserToken;
+
   try {
     restoreInitData();
   } catch {
-    // No launch params available (e.g. opened outside Telegram). Fall
-    // through and let the /api/auth call below fail with a clear 401
-    // rather than hanging on a signal that will never populate.
+    // No launch params (opened in a plain browser without a login link).
+  }
+  const initData = initDataRaw() ?? "";
+  if (!initData) {
+    throw new AuthRequiredError("Требуется вход");
   }
   const res = await fetch(`${API_BASE}/api/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ initData: initDataRaw() ?? "" }),
+    body: JSON.stringify({ initData }),
   });
   if (!res.ok) {
-    throw new Error(`Auth failed with status ${res.status}`);
+    throw new AuthRequiredError(`Auth failed with status ${res.status}`);
   }
   const body = (await res.json()) as { token: string };
   return body.token;
@@ -255,13 +303,22 @@ async function errorMessage(path: string, res: Response): Promise<string> {
   return body.error ?? `Request to ${path} failed with status ${res.status}`;
 }
 
+/** Maps a failed response to an error, turning 401 into a session-expired `AuthRequiredError`. */
+async function toError(path: string, res: Response): Promise<Error> {
+  if (res.status === 401 || res.status === 403) {
+    clearAuth();
+    return new AuthRequiredError("Сессия истекла — войди заново");
+  }
+  return new Error(await errorMessage(path, res));
+}
+
 async function authorizedGet<T>(path: string): Promise<T> {
   const token = await authToken();
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
+    throw await toError(path, res);
   }
   return (await res.json()) as T;
 }
@@ -274,7 +331,7 @@ async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T>
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
+    throw await toError(path, res);
   }
   return (await res.json()) as T;
 }
@@ -286,7 +343,7 @@ async function authorizedDelete(path: string): Promise<void> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
+    throw await toError(path, res);
   }
 }
 
@@ -361,7 +418,7 @@ const realClient: ApiClient = {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
     const res = await fetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(await errorMessage("/api/admin/weekend/payroll.csv", res));
+    if (!res.ok) throw await toError("/api/admin/weekend/payroll.csv", res);
     return res.text();
   },
 };

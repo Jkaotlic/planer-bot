@@ -1020,3 +1020,55 @@ input[type="time"] {
   font-weight: 700;
   border-bottom: none;
 }
+
+/* ── Login screen (browser session via bot /admin link) ─────────────────── */
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface-section);
+  border: 1px solid var(--separator);
+  border-radius: 16px;
+  padding: 28px 26px;
+  text-align: center;
+}
+
+.login-title {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.login-text {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.login-text code {
+  background: var(--surface-secondary);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.login-btn {
+  text-decoration: none;
+  justify-content: center;
+  width: 100%;
+}
+
+.login-hint {
+  margin: 16px 0 0;
+  font-size: 12.5px;
+  color: var(--hint);
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiClient, type Employee, type FeedEvent, type Shift, type Template } from "./api/client";
+import { apiClient, AuthRequiredError, type Employee, type FeedEvent, type Shift, type Template } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
 import { BalanceRail } from "./components/BalanceRail";
 import { EventsFeed } from "./components/EventsFeed";
@@ -24,6 +24,7 @@ export function App() {
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [needLogin, setNeedLogin] = useState(false);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
@@ -41,7 +42,9 @@ export function App() {
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+        if (cancelled) return;
+        if (err instanceof AuthRequiredError) setNeedLogin(true);
+        else setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
       });
     return () => {
       cancelled = true;
@@ -62,7 +65,9 @@ export function App() {
         if (!cancelled) setShifts(s);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
+        if (cancelled) return;
+        if (err instanceof AuthRequiredError) setNeedLogin(true);
+        else setError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
       });
     return () => {
       cancelled = true;
@@ -84,6 +89,8 @@ export function App() {
   const admin = employees?.find((e) => e.isAdmin);
   // Archived workers don't appear in the live schedule or the add-entry picker.
   const activeEmployees = employees?.filter((e) => e.isActive) ?? null;
+
+  if (needLogin) return <LoginScreen />;
 
   return (
     <div className="app-shell">
@@ -136,6 +143,27 @@ export function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+const BOT_USERNAME = "your_bot_username";
+
+/** Shown when the console has no session — points the admin at the bot's /admin login link. */
+function LoginScreen() {
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Панель администратора</h1>
+        <p className="login-text">
+          Открой бота <b>@{BOT_USERNAME}</b>, отправь команду <code>/admin</code> и нажми присланную ссылку — она
+          откроет эту панель уже с доступом.
+        </p>
+        <a className="btn btn-primary login-btn" href={`https://t.me/${BOT_USERNAME}?start=admin`} target="_blank" rel="noreferrer">
+          Открыть бота
+        </a>
+        <p className="login-hint">Либо открой панель как веб-приложение прямо из Telegram.</p>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import type { Config } from "../config";
 import { linkTelegramAccount, getByTelegramId, getEmployeeById, createAdminEmployee } from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
+import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { notifyUser, notifyAdmins } from "./notify";
 
@@ -60,6 +61,34 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     await ctx.reply("Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");
+  });
+
+  // /admin — hands an admin a browser login link for the desktop console.
+  // The link carries a long-lived admin JWT the /admin SPA reads from the URL
+  // hash; opening the console from inside Telegram still works via initData.
+  bot.command("admin", async (ctx) => {
+    const from = ctx.from;
+    if (!from) return;
+    const isAllowlisted = config.adminTelegramIds.includes(from.id);
+    let admin = getByTelegramId(db, from.id);
+    if ((!admin || !admin.isAdmin) && !isAllowlisted) {
+      await ctx.reply("Админка доступна только администраторам.");
+      return;
+    }
+    if (!admin && isAllowlisted) {
+      const displayName = [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || from.username || "Админ";
+      admin = createAdminEmployee(db, { telegramUserId: from.id, tgUsername: from.username, displayName });
+    }
+    if (!admin) {
+      await ctx.reply("Сначала отправь /start.");
+      return;
+    }
+    const token = await issueToken({ employeeId: admin.id, isAdmin: true }, config.jwtSecret, 30 * 24 * 3600);
+    const url = `${config.publicUrl}/admin/#token=${token}`;
+    await ctx.reply(
+      `Вход в админку (ссылка личная, действует 30 дней — не пересылай):\n${url}`,
+      { link_preview_options: { is_disabled: true } },
+    );
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {
