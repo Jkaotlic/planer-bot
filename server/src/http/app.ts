@@ -68,6 +68,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     c.header("Cache-Control", "no-store");
   });
 
+  // Defence in depth: everything under /api/admin/* is admin-only by construction,
+  // so a route that forgets its inline requireAdmin still can't leak. The per-route
+  // guards below stay as belt-and-suspenders.
+  app.use("/api/admin/*", requireAdmin(config.jwtSecret));
+
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (/FOREIGN KEY/i.test(msg)) return c.json({ error: "invalid_reference" }, 400);
