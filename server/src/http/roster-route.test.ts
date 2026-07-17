@@ -68,12 +68,29 @@ describe("GET /api/admin/roster.csv", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects a span over a year with 400", async () => {
+  it("rejects a valid but over-long span with 400", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = bearer(await tokenFor(app, 111));
-    // A typo'd year — the exact hang scenario the bound guards against.
-    const res = await app.request("/api/admin/roster.csv?from=0001-01-01&to=9999-12-31", admin);
+    // Both dates are individually valid — this exercises the span check itself,
+    // not the date-validity branch.
+    const res = await app.request("/api/admin/roster.csv?from=2025-01-01&to=2026-12-31", admin);
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts a span of exactly 366 days (inclusive boundary)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = bearer(await tokenFor(app, 111));
+    const res = await app.request("/api/admin/roster.csv?from=2026-01-01&to=2027-01-02", admin);
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a span of 367 days with 400", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = bearer(await tokenFor(app, 111));
+    const res = await app.request("/api/admin/roster.csv?from=2026-01-01&to=2027-01-03", admin);
     expect(res.status).toBe(400);
   });
 
