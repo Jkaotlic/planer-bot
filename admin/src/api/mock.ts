@@ -343,3 +343,9 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
   const lines = rows.map((r) => [csvField(r.employeeName), r.date, String(r.hours)].join(","));
   return ["Работник,Дата,Часы", ...lines].join("\n");
 }
+
+/** The дд.мм.гггг × ФИО matrix the real roster import/export uses — a minimal fixture is enough for DEV. */
+export async function mockGetRosterCsv(_from: string, _to: string): Promise<string> {
+  await delay(200);
+  return ";01.06.2026\nМок Пользователь;k32";
+}

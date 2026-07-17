@@ -4,10 +4,12 @@ export interface TopBarProps {
   onNextWeek: () => void;
   onDistributeFairly: () => void;
   onAddEntry: () => void;
+  /** Downloads the current month's roster as CSV (the schedule IS the roster). */
+  onExportRoster: () => void;
 }
 
 /** Week switcher + primary actions, above the schedule grid. */
-export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onDistributeFairly, onAddEntry }: TopBarProps) {
+export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onDistributeFairly, onAddEntry, onExportRoster }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="week-switcher">
@@ -20,6 +22,9 @@ export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onDistributeFairly, 
         </button>
       </div>
       <div className="topbar-spacer" />
+      <button type="button" className="btn btn-secondary" onClick={onExportRoster}>
+        ⬇ Экспорт ростера
+      </button>
       <button type="button" className="btn btn-secondary" onClick={onDistributeFairly} disabled>
         ⚖ Распределить честно
       </button>
