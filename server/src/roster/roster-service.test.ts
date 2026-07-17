@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, listActive } from "../repo/employees";
 import { listShiftsInRange } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
-import { applyRosterImport, type PersonResolution } from "./roster-service";
-import type { DecodeResult } from "./roster-codec";
+import { listActiveTemplates } from "../repo/templates";
+import { applyRosterImport, buildRosterCsv, type PersonResolution } from "./roster-service";
+import { parseRosterCsv, decodeRoster, type DecodeResult } from "./roster-codec";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
   return { perPerson, unknowns: [], proposedHolidays: [] };
@@ -53,5 +55,25 @@ describe("applyRosterImport", () => {
     const db = makeTestDb();
     const decoded = decode([{ name: "Без Карты", entries: [] }]);
     expect(() => applyRosterImport(db, decoded, [], null)).toThrow(/Без Карты/);
+  });
+});
+
+const FILE = "/Users/user/Downloads/Дежурства 2026.csv";
+
+describe("roster round-trip", () => {
+  it("import June then export gives back the source matrix (bar the one 'Нет' cell)", () => {
+    const db = makeTestDb();
+    const source = readFileSync(FILE, "utf8");
+    const decoded = decodeRoster(parseRosterCsv(source), listActiveTemplates(db));
+    // Reconcile everyone as 'create' (fresh DB has no employees yet).
+    const resolutions = decoded.perPerson.map((p) => ({ csvName: p.name, action: "create" as const }));
+    applyRosterImport(db, decoded, resolutions, null);
+
+    const exported = "﻿" + buildRosterCsv(db, "2026-06-01", "2026-06-30");
+
+    // The only expected difference: Хохлов/03.06 was 'Нет' (undecodable, not stored) -> exports as 'holiday'.
+    const normalize = (s: string) =>
+      s.replace(/\r\n/g, "\n").trim().replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
+    expect(normalize(exported)).toBe(normalize(source));
   });
 });

@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, reminderLog, type Shift, type NewShift, weekendAssignments } from "../db/schema";
 
@@ -15,6 +15,17 @@ export function listShiftsInRange(db: Db, startDate: string, endDate: string): S
     .select()
     .from(shifts)
     .where(and(gte(shifts.date, startDate), lte(shifts.date, endDate)))
+    .orderBy(shifts.date, shifts.start)
+    .all();
+}
+
+/** Shifts whose span [date, endDate ?? date] touches [from, to] — includes a
+ *  multi-day absence that began before `from`, which listShiftsInRange misses. */
+export function listShiftsOverlapping(db: Db, from: string, to: string): Shift[] {
+  return db
+    .select()
+    .from(shifts)
+    .where(and(lte(shifts.date, to), gte(sql`coalesce(${shifts.endDate}, ${shifts.date})`, from)))
     .orderBy(shifts.date, shifts.start)
     .all();
 }

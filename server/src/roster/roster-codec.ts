@@ -1,5 +1,5 @@
-import { resolveShiftTimes, type EntryCategory } from "@planer/shared";
-import type { ShiftTemplate } from "../db/schema";
+import { resolveShiftTimes, nextDate, type EntryCategory } from "@planer/shared";
+import type { Shift, ShiftTemplate } from "../db/schema";
 
 export type RosterCell = { date: string; code: string };
 export type ParsedRoster = { dates: string[]; people: { name: string; cells: RosterCell[] }[] };
@@ -112,4 +112,36 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
   // A day is non-working iff nobody has a work code on it (§5). Absences don't count as work.
   const proposedHolidays = parsed.dates.filter((d) => (workersByDate.get(d) ?? 0) === 0);
   return { perPerson, unknowns, proposedHolidays };
+}
+
+export function datesInRange(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let d = from; d <= to; d = nextDate(d)) out.push(d);
+  return out;
+}
+
+/** "YYYY-MM-DD" -> "дд.мм.гггг" for the export header. */
+function toRuDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function rosterField(v: string): string {
+  return /[";\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+/** One entry -> its roster code. Preset wins; else absence category; else non-working. */
+export function encodeEntryCode(shift: Pick<Shift, "category" | "templateId">, templatesById: Map<number, { name: string }>): string {
+  if (shift.templateId != null) {
+    const name = templatesById.get(shift.templateId)?.name;
+    const code = name ? PRESET_NAME_TO_CODE[name] : undefined;
+    if (code) return code;
+  }
+  return ABSENCE_CATEGORY_TO_CODE[shift.category] ?? NON_WORKING_CODE;
+}
+
+export function serializeRosterCsv(dates: string[], rows: { name: string; codes: string[] }[]): string {
+  const header = ["", ...dates.map(toRuDate)].join(";");
+  const lines = rows.map((r) => [rosterField(r.name), ...r.codes].join(";"));
+  return [header, ...lines].join("\r\n");
 }

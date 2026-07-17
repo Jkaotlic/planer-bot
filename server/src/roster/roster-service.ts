@@ -2,7 +2,10 @@ import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, auditLog } from "../db/schema";
 import { createEntrySchema } from "../http/entry-schema";
-import type { DecodeResult, UnknownCell } from "./roster-codec";
+import { listActive } from "../repo/employees";
+import { listActiveTemplates } from "../repo/templates";
+import { listShiftsOverlapping } from "../repo/shifts";
+import { datesInRange, serializeRosterCsv, encodeEntryCode, type DecodeResult, type UnknownCell } from "./roster-codec";
 
 export type PersonResolution =
   | { csvName: string; action: "rename"; employeeId: number }
@@ -60,4 +63,21 @@ export function applyRosterImport(
     }).run();
     return { employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted, unknowns: decoded.unknowns };
   });
+}
+
+/** Rebuild the roster matrix for [from, to]: one row per active worker, each cell
+ *  the reverse of decode. No BOM — the download route adds it (like payroll.csv). */
+export function buildRosterCsv(db: Db, from: string, to: string): string {
+  const dates = datesInRange(from, to);
+  const workers = listActive(db);
+  const shifts = listShiftsOverlapping(db, from, to);
+  const templatesById = new Map(listActiveTemplates(db).map((t) => [t.id, t] as const));
+  const rows = workers.map((w) => ({
+    name: w.displayName,
+    codes: dates.map((date) => {
+      const covering = shifts.find((s) => s.employeeId === w.id && s.date <= date && (s.endDate ?? s.date) >= date);
+      return covering ? encodeEntryCode(covering, templatesById) : "holiday";
+    }),
+  }));
+  return serializeRosterCsv(dates, rows);
 }
