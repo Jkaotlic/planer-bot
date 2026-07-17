@@ -31,16 +31,16 @@ export function applyRosterImport(
 
   return db.transaction((tx) => {
     let renamed = 0, created = 0, inserted = 0;
-    for (const person of decoded.perPerson) {
+    for (const [index, person] of decoded.perPerson.entries()) {
       const res = byName.get(person.name)!;
       let employeeId: number;
       if (res.action === "rename") {
         // Rename in place — keeps telegramUserId, so reminders keep reaching them.
-        tx.update(employees).set({ displayName: person.name }).where(eq(employees.id, res.employeeId)).run();
+        tx.update(employees).set({ displayName: person.name, rosterOrder: index }).where(eq(employees.id, res.employeeId)).run();
         employeeId = res.employeeId;
         renamed++;
       } else {
-        employeeId = tx.insert(employees).values({ displayName: person.name }).returning().all()[0]!.id;
+        employeeId = tx.insert(employees).values({ displayName: person.name, rosterOrder: index }).returning().all()[0]!.id;
         created++;
       }
       for (const e of person.entries) {
@@ -69,7 +69,11 @@ export function applyRosterImport(
  *  the reverse of decode. No BOM — the download route adds it (like payroll.csv). */
 export function buildRosterCsv(db: Db, from: string, to: string): string {
   const dates = datesInRange(from, to);
-  const workers = listActive(db);
+  // Preserve the imported file's row order (nulls — never imported — sort last);
+  // id is a stable tiebreak for people who share a rosterOrder (or both lack one).
+  const workers = [...listActive(db)].sort(
+    (a, b) => (a.rosterOrder ?? Number.MAX_SAFE_INTEGER) - (b.rosterOrder ?? Number.MAX_SAFE_INTEGER) || a.id - b.id,
+  );
   const rosterShifts = listShiftsOverlapping(db, from, to);
   const templatesById = new Map(listActiveTemplates(db).map((t) => [t.id, t] as const));
   const rows = workers.map((w) => ({

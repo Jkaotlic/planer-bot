@@ -1,0 +1,1 @@
+ALTER TABLE `employees` ADD `roster_order` integer;

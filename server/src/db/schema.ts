@@ -17,6 +17,9 @@ export const employees = sqliteTable("employees", {
   prepBufferMin: integer().notNull().default(60),
   inviteToken: text().unique(),
   archivedAt: integer({ mode: "timestamp" }),
+  /** This worker's row position in the imported roster file, 0-based. NULL = not in the
+   *  roster (e.g. a worker added in the bot later); those sort last on export. */
+  rosterOrder: integer(),
   createdAt: createdAt(),
 });
 
