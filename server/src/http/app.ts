@@ -45,6 +45,7 @@ import {
   myOffers,
 } from "../weekend/weekend-service";
 import { listOpenSlots, getVacantSlot } from "../repo/weekend";
+import { buildRosterCsv } from "../roster/roster-service";
 
 export interface AppDeps {
   db: Db;
@@ -475,6 +476,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const csv = payrollCsv(payrollRows(db, from, to));
     c.header("Content-Type", "text/csv; charset=utf-8");
     c.header("Content-Disposition", `attachment; filename="weekend-payroll-${from}_${to}.csv"`);
+    return c.body("﻿" + csv);
+  });
+
+  // Admin: the whole roster as the same дд.мм.гггг × ФИО matrix the import reads.
+  app.get("/api/admin/roster.csv", requireAdmin(config.jwtSecret), (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    if (!from || !to) return c.json({ error: "from and to are required" }, 400);
+    const csv = buildRosterCsv(db, from, to);
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="roster-${from}_${to}.csv"`);
     return c.body("﻿" + csv);
   });
 
