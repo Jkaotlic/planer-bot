@@ -7,7 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p shared/tsconfig.json && tsc -p server/tsconfig.json"
+    "typecheck": "tsc -p shared/tsconfig.json && tsc -p server/tsconfig.json && tsc -p admin/tsconfig.json && tsc -p miniapp/tsconfig.json"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
