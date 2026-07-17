@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gte, lte } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, auditLog } from "../db/schema";
 import { createEntrySchema } from "../http/entry-schema";
-import { listActive } from "../repo/employees";
+import { listActive, getEmployeeById } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
@@ -29,7 +29,45 @@ export function applyRosterImport(
     if (!byName.has(p.name)) throw new Error(`нет сверки для «${p.name}»`);
   }
 
+  // Resolve every rename target up front — a Stage 2B reconcile UI sits directly on
+  // this primitive, so a bogus, archived, or double-claimed id must not pass silently.
+  const claimedBy = new Map<number, string>(); // employeeId -> csvName that first claimed it
+  for (const res of resolutions) {
+    if (res.action !== "rename") continue;
+    const employee = getEmployeeById(db, res.employeeId);
+    if (!employee) {
+      throw new Error(`сверка «${res.csvName}» указывает на несуществующего сотрудника #${res.employeeId}`);
+    }
+    if (!employee.isActive) {
+      throw new Error(`сверка «${res.csvName}» указывает на архивного сотрудника «${employee.displayName}» — восстановите его или отмените сверку`);
+    }
+    const other = claimedBy.get(res.employeeId);
+    if (other) {
+      throw new Error(`сверки «${other}» и «${res.csvName}» указывают на одного и того же сотрудника #${res.employeeId}`);
+    }
+    claimedBy.set(res.employeeId, res.csvName);
+  }
+
+  // The imported span, across every decoded entry (endDate for multi-day runs).
+  const allEntries = decoded.perPerson.flatMap((p) => p.entries);
+  const importSpan = allEntries.length === 0 ? null : {
+    from: allEntries.reduce((m, e) => (e.date < m ? e.date : m), allEntries[0]!.date),
+    to: allEntries.reduce((m, e) => { const d = e.endDate ?? e.date; return d > m ? d : m; }, allEntries[0]!.endDate ?? allEntries[0]!.date),
+  };
+
   return db.transaction((tx) => {
+    // Re-import guard: a second pass over an already-imported month must error, not
+    // silently double every entry (Stage 3 reads these counts for fairness proposals).
+    if (importSpan) {
+      const existing = tx.select().from(shifts)
+        .where(and(gte(shifts.date, importSpan.from), lte(shifts.date, importSpan.to))).all();
+      if (existing.length > 0) {
+        throw new Error(
+          `в базе уже есть ${existing.length} записей за ${importSpan.from}..${importSpan.to} — импорт отменён (очистите период или импортируйте другой месяц)`,
+        );
+      }
+    }
+
     let renamed = 0, created = 0, inserted = 0;
     for (const [index, person] of decoded.perPerson.entries()) {
       const res = byName.get(person.name)!;

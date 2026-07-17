@@ -91,7 +91,10 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
       const code = cell.code;
       if (code === NON_WORKING_CODE || code === "") { flush(); continue; }
 
-      const absence = CODE_TO_ABSENCE[code];
+      // Object.hasOwn guards against a cell literally reading "constructor" / "toString" /
+      // etc. — a plain-object lookup would resolve those to inherited Object.prototype
+      // members instead of undefined, and blow up downstream instead of being unknown.
+      const absence = Object.hasOwn(CODE_TO_ABSENCE, code) ? CODE_TO_ABSENCE[code] : undefined;
       if (absence) {
         if (run && run.code === code) run.to = cell.date;
         else { flush(); run = { category: absence, code, from: cell.date, to: cell.date }; }
@@ -99,7 +102,8 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
       }
 
       flush();
-      const preset = byName.get(CODE_TO_PRESET_NAME[code] ?? "");
+      const presetName = Object.hasOwn(CODE_TO_PRESET_NAME, code) ? CODE_TO_PRESET_NAME[code] : undefined;
+      const preset = byName.get(presetName ?? "");
       if (!preset) { unknowns.push({ name: p.name, date: cell.date, code }); continue; }
       const { start, end } = resolveShiftTimes(preset, cell.date);
       entries.push({
