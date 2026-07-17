@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archiveEmployee } from "../repo/employees";
 import { listShiftsInRange, createShift } from "../repo/shifts";
@@ -56,6 +56,65 @@ describe("applyRosterImport", () => {
     const decoded = decode([{ name: "Без Карты", entries: [] }]);
     expect(() => applyRosterImport(db, decoded, [], null)).toThrow(/Без Карты/);
   });
+
+  it("a second import over the same span throws instead of doubling every entry", () => {
+    const db = makeTestDb();
+    const decoded = decode([
+      { name: "Один Человек", entries: [{ date: "2026-06-01", endDate: null, category: "shift", templateId: 2, location: null, start: "09:00", end: "18:00", title: "День" }] },
+    ]);
+    const resolutions: PersonResolution[] = [{ csvName: "Один Человек", action: "create" }];
+
+    applyRosterImport(db, decoded, resolutions, null); // first import succeeds
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
+
+    expect(() => applyRosterImport(db, decoded, resolutions, null)).toThrow(/2026-06-01\.\.2026-06-01/);
+    // Nothing doubled — the transaction rolled back the second attempt entirely.
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
+    expect(listActive(db)).toHaveLength(1);
+  });
+
+  it("throws if a rename targets a non-existent employeeId, and writes nothing", () => {
+    const db = makeTestDb();
+    const decoded = decode([
+      { name: "Призрак Иван", entries: [{ date: "2026-06-01", endDate: null, category: "shift", templateId: 2, location: null, start: "09:00", end: "18:00", title: "День" }] },
+    ]);
+    const resolutions: PersonResolution[] = [{ csvName: "Призрак Иван", action: "rename", employeeId: 999 }];
+
+    expect(() => applyRosterImport(db, decoded, resolutions, null)).toThrow(/Призрак Иван/);
+    expect(listActive(db)).toHaveLength(0);
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(0);
+  });
+
+  it("throws if a rename targets an archived employee, and writes nothing", () => {
+    const db = makeTestDb();
+    const archived = createEmployee(db, { displayName: "Уволенный Олег" });
+    archiveEmployee(db, archived.id, "2026-01-01");
+    const decoded = decode([
+      { name: "Уволенный Олег 2", entries: [{ date: "2026-06-01", endDate: null, category: "shift", templateId: 2, location: null, start: "09:00", end: "18:00", title: "День" }] },
+    ]);
+    const resolutions: PersonResolution[] = [{ csvName: "Уволенный Олег 2", action: "rename", employeeId: archived.id }];
+
+    expect(() => applyRosterImport(db, decoded, resolutions, null)).toThrow(/Уволенный Олег 2/);
+    expect(getEmployeeById(db, archived.id)!.displayName).toBe("Уволенный Олег"); // untouched
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(0);
+  });
+
+  it("throws if two csvNames claim the same employeeId, and writes nothing", () => {
+    const db = makeTestDb();
+    const shared = createEmployee(db, { displayName: "Общий Пётр" });
+    const decoded = decode([
+      { name: "Имя А", entries: [{ date: "2026-06-01", endDate: null, category: "shift", templateId: 2, location: null, start: "09:00", end: "18:00", title: "День" }] },
+      { name: "Имя Б", entries: [{ date: "2026-06-02", endDate: null, category: "shift", templateId: 2, location: null, start: "09:00", end: "18:00", title: "День" }] },
+    ]);
+    const resolutions: PersonResolution[] = [
+      { csvName: "Имя А", action: "rename", employeeId: shared.id },
+      { csvName: "Имя Б", action: "rename", employeeId: shared.id },
+    ];
+
+    expect(() => applyRosterImport(db, decoded, resolutions, null)).toThrow(/Имя А.*Имя Б|Имя Б.*Имя А/);
+    expect(getEmployeeById(db, shared.id)!.displayName).toBe("Общий Пётр"); // untouched
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-02")).toHaveLength(0);
+  });
 });
 
 /** Pull one person's codes (in date order) out of a buildRosterCsv() result. */
@@ -91,12 +150,14 @@ describe("buildRosterCsv", () => {
   });
 });
 
-const FILE = "/Users/user/Downloads/Дежурства 2026.csv";
+// Guarded: the real file is 26 real employees' names and who was on vacation when, so
+// it can't be committed. Set ROSTER_CSV to point at a local copy to run this suite.
+const REAL_ROSTER = process.env.ROSTER_CSV ?? "/Users/user/Downloads/Дежурства 2026.csv";
 
-describe("roster round-trip", () => {
-  it("import June then export gives back the source matrix (bar the one 'Нет' cell)", () => {
+describe.skipIf(!existsSync(REAL_ROSTER))("roster round-trip", () => {
+  it("import June then export gives back the source matrix byte-for-byte (bar the one 'Нет' cell)", () => {
     const db = makeTestDb();
-    const source = readFileSync(FILE, "utf8");
+    const source = readFileSync(REAL_ROSTER, "utf8");
     const decoded = decodeRoster(parseRosterCsv(source), listActiveTemplates(db));
     // Reconcile everyone as 'create' (fresh DB has no employees yet).
     const resolutions = decoded.perPerson.map((p) => ({ csvName: p.name, action: "create" as const }));
@@ -104,10 +165,13 @@ describe("roster round-trip", () => {
 
     const exported = "﻿" + buildRosterCsv(db, "2026-06-01", "2026-06-30");
 
-    // The only expected difference: Хохлов/03.06 was 'Нет' (undecodable, not stored) -> exports as 'holiday'.
-    const normalize = (s: string) =>
-      s.replace(/\r\n/g, "\n").trim().replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
-    expect(normalize(exported)).toBe(normalize(source));
+    // TRUE byte comparison — no line-ending normalisation, no .trim() (which would also
+    // silently eat the BOM, since JS treats U+FEFF as whitespace). The only expected
+    // difference: Хохлов/03.06 was 'Нет' (undecodable, not stored) -> exports as 'holiday'.
+    // The source file has no trailing newline and serializeRosterCsv appends none, so this
+    // lines up exactly if the codec is truly lossless.
+    const expected = source.replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
+    expect(exported).toBe(expected);
   });
 
   it("round-trips the file's row order even when the renamed people already hold low ids", () => {
@@ -127,7 +191,7 @@ describe("roster round-trip", () => {
     const safonov = nick("Михаил Тест", 100000005);
     archiveEmployee(db, testAccount.id, "2026-06-01");
 
-    const source = readFileSync(FILE, "utf8");
+    const source = readFileSync(REAL_ROSTER, "utf8");
     const decoded = decodeRoster(parseRosterCsv(source), listActiveTemplates(db));
     const renames: Record<string, number> = {
       "Орлов Андрей": orlov.id, "Титов Михаил": titov.id, "Гущин Кирилл": gushchin.id,

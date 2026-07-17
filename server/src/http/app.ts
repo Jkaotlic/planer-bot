@@ -28,7 +28,7 @@ import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
-import { isWeekend, isAbsence, countsForBalance } from "@planer/shared";
+import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
@@ -484,6 +484,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
+    if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success) {
+      return c.json({ error: "from and to must be valid YYYY-MM-DD dates" }, 400);
+    }
+    if (from > to) return c.json({ error: "from must not be after to" }, 400);
+    if (dayNumber(to) - dayNumber(from) > 366) {
+      return c.json({ error: "the range must span at most 366 days" }, 400);
+    }
     const csv = buildRosterCsv(db, from, to);
     c.header("Content-Type", "text/csv; charset=utf-8");
     c.header("Content-Disposition", `attachment; filename="roster-${from}_${to}.csv"`);

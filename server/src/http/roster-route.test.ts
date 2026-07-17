@@ -52,6 +52,39 @@ describe("GET /api/admin/roster.csv", () => {
     expect(noTo.status).toBe(400);
   });
 
+  it("rejects a malformed date with 400", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = bearer(await tokenFor(app, 111));
+    const res = await app.request("/api/admin/roster.csv?from=2026-02-30&to=2026-06-30", admin);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects 'from' after 'to' with 400", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = bearer(await tokenFor(app, 111));
+    const res = await app.request("/api/admin/roster.csv?from=2026-06-30&to=2026-06-01", admin);
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a span over a year with 400", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = bearer(await tokenFor(app, 111));
+    // A typo'd year — the exact hang scenario the bound guards against.
+    const res = await app.request("/api/admin/roster.csv?from=0001-01-01&to=9999-12-31", admin);
+    expect(res.status).toBe(400);
+  });
+
+  it("still returns 200 for a normal month", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = bearer(await tokenFor(app, 111));
+    const res = await app.request("/api/admin/roster.csv?from=2026-06-01&to=2026-06-30", admin);
+    expect(res.status).toBe(200);
+  });
+
   it("forbids a non-admin worker (403)", async () => {
     const db = makeTestDb();
     worker(db, "Игорь", 333);
