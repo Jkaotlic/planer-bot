@@ -88,6 +88,31 @@ export function App() {
     setPanelTarget({ employeeId, date });
   }
 
+  /** Downloads the current calendar month's roster as CSV — same Blob+anchor pattern as the weekend payroll export. */
+  async function exportRoster() {
+    try {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth();
+      const from = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+      const to = `${y}-${String(m + 1).padStart(2, "0")}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, "0")}`;
+      const csv = await apiClient.getRosterCsv(from, to);
+      // BOM so Excel reads UTF-8 (Cyrillic) correctly.
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `roster-${from}_${to}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err instanceof AuthRequiredError) setNeedLogin(true);
+      else setError(err instanceof Error ? err.message : "Не удалось выгрузить ростер");
+    }
+  }
+
   const admin = employees?.find((e) => e.isAdmin);
   // Archived workers don't appear in the live schedule or the add-entry picker.
   const activeEmployees = employees?.filter((e) => e.isActive) ?? null;
@@ -118,6 +143,7 @@ export function App() {
               onNextWeek={() => setWeekMonday((m) => addDays(m, 7))}
               onDistributeFairly={() => {}}
               onAddEntry={() => openAddPanel(activeEmployees[0]?.id ?? 1, weekDates[0]!)}
+              onExportRoster={() => void exportRoster()}
             />
             <div className="schedule-layout">
               <ScheduleGrid

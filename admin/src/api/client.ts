@@ -20,6 +20,7 @@ import {
   mockUnassignSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
+  mockGetRosterCsv,
 } from "./mock";
 
 /** A worker row in the schedule grid / Работники screen. */
@@ -176,6 +177,7 @@ export interface ApiClient {
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
+  getRosterCsv(from: string, to: string): Promise<string>;
 }
 
 interface EmployeesResponse {
@@ -487,6 +489,14 @@ const realClient: ApiClient = {
     if (!res.ok) throw await toError("/api/admin/weekend/payroll.csv", res);
     return res.text();
   },
+
+  async getRosterCsv(from, to) {
+    const token = await authToken();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const res = await fetch(`${API_BASE}/api/admin/roster.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw await toError("/api/admin/roster.csv", res);
+    return res.text();
+  },
 };
 
 const devClient: ApiClient = {
@@ -509,6 +519,7 @@ const devClient: ApiClient = {
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
+  getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
 };
 
 /**
