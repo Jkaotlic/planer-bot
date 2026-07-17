@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, listActive } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archiveEmployee } from "../repo/employees";
 import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { listActiveTemplates } from "../repo/templates";
@@ -105,6 +105,41 @@ describe("roster round-trip", () => {
     const exported = "﻿" + buildRosterCsv(db, "2026-06-01", "2026-06-30");
 
     // The only expected difference: Хохлов/03.06 was 'Нет' (undecodable, not stored) -> exports as 'holiday'.
+    const normalize = (s: string) =>
+      s.replace(/\r\n/g, "\n").trim().replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
+    expect(normalize(exported)).toBe(normalize(source));
+  });
+
+  it("round-trips the file's row order even when the renamed people already hold low ids", () => {
+    const db = makeTestDb();
+    // The live shape: five nickname users already exist, so their ids (1,2,4,5,6) do NOT
+    // match their positions in the file. Without rosterOrder the export reorders the rows.
+    const nick = (name: string, tg: number) => {
+      const e = createEmployee(db, { displayName: name, inviteToken: `inv-${tg}` });
+      linkTelegramAccount(db, `inv-${tg}`, tg);
+      return e;
+    };
+    const orlov = nick("Andrey Test", 100000001);
+    const titov = nick("Миша Тест", 100000002);
+    const testAccount = nick("__TEST Проверка", 999999); // archived-ish extra, never in the file
+    const gushchin = nick("Кирилл Тест", 100000003);
+    const panov = nick("Женя Тест", 100000004);
+    const safonov = nick("Михаил Тест", 100000005);
+    archiveEmployee(db, testAccount.id, "2026-06-01");
+
+    const source = readFileSync(FILE, "utf8");
+    const decoded = decodeRoster(parseRosterCsv(source), listActiveTemplates(db));
+    const renames: Record<string, number> = {
+      "Орлов Андрей": orlov.id, "Титов Михаил": titov.id, "Гущин Кирилл": gushchin.id,
+      "Панов Евгений": panov.id, "Сафонов Михаил": safonov.id,
+    };
+    const resolutions = decoded.perPerson.map((p) =>
+      p.name in renames
+        ? { csvName: p.name, action: "rename" as const, employeeId: renames[p.name]! }
+        : { csvName: p.name, action: "create" as const });
+    applyRosterImport(db, decoded, resolutions, null);
+
+    const exported = "﻿" + buildRosterCsv(db, "2026-06-01", "2026-06-30");
     const normalize = (s: string) =>
       s.replace(/\r\n/g, "\n").trim().replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
     expect(normalize(exported)).toBe(normalize(source));
