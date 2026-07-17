@@ -28,6 +28,9 @@ export function parseRosterCsv(text: string): ParsedRoster {
 }
 
 export const NON_WORKING_CODE = "holiday";
+/** A covering entry the roster vocabulary can't express (e.g. weekend_work, or a
+ *  timed entry with no preset). Never means "not working". */
+export const UNENCODABLE_CODE = "?";
 
 /** Work code -> preset NAME (ids are stable by name across live/fresh DBs). */
 export const CODE_TO_PRESET_NAME: Record<string, string> = {
@@ -137,7 +140,7 @@ export function encodeEntryCode(shift: Pick<Shift, "category" | "templateId">, t
     const code = name ? PRESET_NAME_TO_CODE[name] : undefined;
     if (code) return code;
   }
-  return ABSENCE_CATEGORY_TO_CODE[shift.category] ?? NON_WORKING_CODE;
+  return ABSENCE_CATEGORY_TO_CODE[shift.category] ?? UNENCODABLE_CODE;
 }
 
 export function serializeRosterCsv(dates: string[], rows: { name: string; codes: string[] }[]): string {
