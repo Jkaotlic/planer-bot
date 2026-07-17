@@ -5,7 +5,7 @@ import { createEntrySchema } from "../http/entry-schema";
 import { listActive } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsOverlapping } from "../repo/shifts";
-import { datesInRange, serializeRosterCsv, encodeEntryCode, type DecodeResult, type UnknownCell } from "./roster-codec";
+import { datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
 
 export type PersonResolution =
   | { csvName: string; action: "rename"; employeeId: number }
@@ -70,13 +70,13 @@ export function applyRosterImport(
 export function buildRosterCsv(db: Db, from: string, to: string): string {
   const dates = datesInRange(from, to);
   const workers = listActive(db);
-  const shifts = listShiftsOverlapping(db, from, to);
+  const rosterShifts = listShiftsOverlapping(db, from, to);
   const templatesById = new Map(listActiveTemplates(db).map((t) => [t.id, t] as const));
   const rows = workers.map((w) => ({
     name: w.displayName,
     codes: dates.map((date) => {
-      const covering = shifts.find((s) => s.employeeId === w.id && s.date <= date && (s.endDate ?? s.date) >= date);
-      return covering ? encodeEntryCode(covering, templatesById) : "holiday";
+      const covering = rosterShifts.find((s) => s.employeeId === w.id && s.date <= date && (s.endDate ?? s.date) >= date);
+      return covering ? encodeEntryCode(covering, templatesById) : NON_WORKING_CODE;
     }),
   }));
   return serializeRosterCsv(dates, rows);
