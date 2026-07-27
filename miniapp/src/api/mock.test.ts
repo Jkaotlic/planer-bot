@@ -7,6 +7,9 @@ import {
   mockGetTeamSchedule,
   mockGetTemplates,
   mockUpdateEntry,
+  mockGetRosterCsv,
+  mockPreviewRosterImport,
+  mockApplyRosterImport,
 } from "./mock";
 
 const createdEntryIds: number[] = [];
@@ -110,5 +113,67 @@ describe("team schedule development mock", () => {
       employeeId: created.employeeId ?? undefined,
     });
     expect(cleared.location).toBeNull();
+  });
+});
+
+describe("roster CSV development mock", () => {
+  /** The month around today — what the export button in the Mini App asks for. */
+  function thisMonth() {
+    const iso = toISODate(new Date());
+    const [year, month] = [Number(iso.slice(0, 4)), Number(iso.slice(5, 7))];
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(last)}` };
+  }
+
+  it("exports a matrix its own preview can read back", async () => {
+    const { from, to } = thisMonth();
+    const csv = await mockGetRosterCsv(from, to);
+
+    // Same shape as the real export: ';'-delimited, CRLF, дд.мм.гггг header.
+    const lines = csv.split("\r\n");
+    expect(lines[0]!.startsWith(";")).toBe(true);
+    expect(lines[0]!.split(";")[1]).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
+    expect(lines.length).toBeGreaterThan(1);
+
+    const preview = await mockPreviewRosterImport(csv);
+    expect(preview.from).toBe(from);
+    expect(preview.to).toBe(to);
+    // Everyone in the export is an existing worker, so every row matches by name.
+    expect(preview.people.every((p) => p.suggestedEmployeeId != null)).toBe(true);
+  });
+
+  it("marks weekend work as '?' and preserves it instead of calling it a bad code", async () => {
+    const { from, to } = thisMonth();
+    const csv = await mockGetRosterCsv(from, to);
+    expect(csv).toContain(";?");
+
+    const preview = await mockPreviewRosterImport(csv);
+    expect(preview.unknowns).toEqual([]);
+    expect(preview.preservedCount).toBeGreaterThan(0);
+  });
+
+  it("refuses a ragged row, naming it the way Excel numbers rows", async () => {
+    await expect(mockPreviewRosterImport(";01.09.2026;02.09.2026\r\nИгорь Петров;k32"))
+      .rejects.toThrow(/строка 2/);
+  });
+
+  it("refuses an occupied period until overwrite is confirmed", async () => {
+    const { from, to } = thisMonth();
+    const csv = await mockGetRosterCsv(from, to);
+    const preview = await mockPreviewRosterImport(csv);
+    expect(preview.existingCount).toBeGreaterThan(0);
+
+    const resolutions = preview.people.map((p) =>
+      p.suggestedEmployeeId == null
+        ? { csvName: p.csvName, action: "create" as const }
+        : { csvName: p.csvName, action: "rename" as const, employeeId: p.suggestedEmployeeId },
+    );
+    await expect(mockApplyRosterImport(csv, resolutions, false)).rejects.toThrow(/уже есть/);
+
+    const summary = await mockApplyRosterImport(csv, resolutions, true);
+    expect(summary.entriesDeleted).toBeGreaterThan(0);
+    // Weekend work is unencodable, so an overwrite must leave it where it was.
+    expect(summary.cellsPreserved).toBeGreaterThan(0);
   });
 });

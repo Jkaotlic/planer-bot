@@ -3,6 +3,7 @@ import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinne
 import { apiClient, type Employee, type NewEntryInput, type Shift, type Template } from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { CardShell, CardStack } from "../../components/Card";
+import { AdminRosterCsv } from "./AdminRosterCsv";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { formatTimeRange } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -55,6 +56,8 @@ export function AdminScheduleScreen() {
   const [editing, setEditing] = useState<Shift | "new" | null>(null);
   /** When true, the day view is replaced by the "Заполнить неделю" bulk-fill flow. */
   const [fillOpen, setFillOpen] = useState(false);
+  /** When true, the day view is replaced by the CSV upload/download flow. */
+  const [csvOpen, setCsvOpen] = useState(false);
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
@@ -64,6 +67,13 @@ export function AdminScheduleScreen() {
     setShifts(null);
     const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
     setShifts(schedule.shifts);
+  }
+
+  /** A CSV import renames and creates people and rewrites entries, so both the
+   *  roster and the visible week have to come back from the server. */
+  async function reloadAfterImport() {
+    const [emps] = await Promise.all([apiClient.getAdminEmployees(), loadWeek(from, to)]);
+    setEmployees(emps.filter((e) => e.isActive));
   }
 
   // Roster + templates load once; they don't change with the visible week.
@@ -161,6 +171,17 @@ export function AdminScheduleScreen() {
               />
             </CardStack>
           </Section>
+        ) : csvOpen ? (
+          <AdminRosterCsv
+            employees={employees}
+            today={selectedDate}
+            onError={setError}
+            onNotice={(message) => {
+              setNotice(message);
+              setCsvOpen(false);
+            }}
+            onImported={reloadAfterImport}
+          />
         ) : editing !== null ? (
           <Section header={editing === "new" ? "Новая запись" : "Изменить запись"}>
             <CardStack>
@@ -195,6 +216,9 @@ export function AdminScheduleScreen() {
               </Button>
               <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => setFillOpen(true)}>
                 📅 Заполнить неделю
+              </Button>
+              <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => { setNotice(null); setError(null); setCsvOpen(true); }}>
+                📄 График файлом (CSV)
               </Button>
             </div>
           </Section>
