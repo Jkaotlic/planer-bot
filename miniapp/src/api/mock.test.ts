@@ -1,7 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildTodayModel, buildWeekModel } from "../lib/team-schedule";
 import { addDays, mondayOf, toISODate } from "../lib/week";
-import { mockGetTeamSchedule, mockGetTemplates } from "./mock";
+import {
+  mockCreateEntry,
+  mockDeleteEntry,
+  mockGetTeamSchedule,
+  mockGetTemplates,
+  mockUpdateEntry,
+} from "./mock";
+
+const createdEntryIds: number[] = [];
+
+afterEach(async () => {
+  await Promise.all(createdEntryIds.splice(0).map((id) => mockDeleteEntry(id)));
+});
 
 describe("team schedule development mock", () => {
   it("exposes every state required by the Today and Week visual QA", async () => {
@@ -49,5 +61,54 @@ describe("team schedule development mock", () => {
           ),
       );
     expect(detailCell).toBeDefined();
+  });
+
+  it("preserves a supplied location when creating a schedule entry", async () => {
+    const created = await mockCreateEntry({
+      date: "2099-01-10",
+      start: "09:00",
+      end: "18:00",
+      category: "duty",
+      title: "Выездное дежурство",
+      location: "Поклонка",
+      employeeId: 1,
+    });
+    createdEntryIds.push(created.id);
+
+    expect(created.location).toBe("Поклонка");
+  });
+
+  it("preserves an updated location and clears it when the field is omitted", async () => {
+    const created = await mockCreateEntry({
+      date: "2099-01-11",
+      start: "09:00",
+      end: "18:00",
+      category: "duty",
+      title: "Своя смена",
+      location: "Старое место",
+      employeeId: 1,
+    });
+    createdEntryIds.push(created.id);
+
+    const updated = await mockUpdateEntry(created.id, {
+      date: created.date,
+      start: created.start ?? undefined,
+      end: created.end ?? undefined,
+      category: created.category,
+      title: created.title,
+      location: "Новое место",
+      employeeId: created.employeeId ?? undefined,
+    });
+    expect(updated.location).toBe("Новое место");
+
+    const cleared = await mockUpdateEntry(created.id, {
+      date: created.date,
+      start: created.start ?? undefined,
+      end: created.end ?? undefined,
+      category: created.category,
+      title: created.title,
+      employeeId: created.employeeId ?? undefined,
+    });
+    expect(cleared.location).toBeNull();
   });
 });
