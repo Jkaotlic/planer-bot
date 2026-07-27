@@ -62,7 +62,8 @@ export function AdminScheduleScreen() {
 
   async function loadWeek(fromIso: string, toIso: string) {
     setShifts(null);
-    setShifts(await apiClient.getTeamSchedule(fromIso, toIso));
+    const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
+    setShifts(schedule.shifts);
   }
 
   // Roster + templates load once; they don't change with the visible week.
@@ -87,8 +88,8 @@ export function AdminScheduleScreen() {
     let cancelled = false;
     apiClient
       .getTeamSchedule(from, to)
-      .then((s) => {
-        if (!cancelled) setShifts(s);
+      .then((schedule) => {
+        if (!cancelled) setShifts(schedule.shifts);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
