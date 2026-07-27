@@ -111,14 +111,14 @@ function toEntryView(
 
 function groupingKey(shift: Shift): string {
   if (shift.templateId != null) return `template:${shift.templateId}`;
-  return [
+  return JSON.stringify([
     "custom",
     shift.category,
-    shift.title ?? "",
-    shift.start ?? "",
-    shift.end ?? "",
-    shift.location ?? "",
-  ].join(":");
+    shift.title,
+    shift.start,
+    shift.end,
+    shift.location,
+  ]);
 }
 
 function compareShifts(
@@ -281,7 +281,8 @@ export function createLatestRequestGate(): LatestRequestGate {
 export type TeamLoadResult =
   | { status: "accepted"; schedule: TeamSchedule }
   | { status: "failed"; error: unknown }
-  | { status: "stale" };
+  | { status: "stale"; outcome: "accepted"; schedule: TeamSchedule }
+  | { status: "stale"; outcome: "failed"; error: unknown };
 
 export async function requestLatestTeamSchedule(
   load: (from: string, to: string) => Promise<TeamSchedule>,
@@ -291,8 +292,12 @@ export async function requestLatestTeamSchedule(
   const id = gate.begin();
   try {
     const schedule = await load(range.from, range.to);
-    return gate.isLatest(id) ? { status: "accepted", schedule } : { status: "stale" };
+    return gate.isLatest(id)
+      ? { status: "accepted", schedule }
+      : { status: "stale", outcome: "accepted", schedule };
   } catch (error) {
-    return gate.isLatest(id) ? { status: "failed", error } : { status: "stale" };
+    return gate.isLatest(id)
+      ? { status: "failed", error }
+      : { status: "stale", outcome: "failed", error };
   }
 }
