@@ -290,7 +290,6 @@ export function App() {
               weekLabel={weekLabel}
               onPrevWeek={() => setWeekMonday((m) => addDays(m, -7))}
               onNextWeek={() => setWeekMonday((m) => addDays(m, 7))}
-              onDistributeFairly={() => {}}
               onAddEntry={() => openAddPanel(activeEmployees[0]?.id ?? 1, weekDates[0]!)}
               onImportRoster={() => rosterFileInput.current?.click()}
               onExportRoster={() => void exportRoster()}

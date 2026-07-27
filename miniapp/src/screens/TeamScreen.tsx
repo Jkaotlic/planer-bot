@@ -110,8 +110,10 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
           parseISODate(displayRange.to),
         );
 
+  // 16px on top, not 8: at 8 the «Команда» title sat flush against the very edge
+  // of the screen, and in the real client Telegram's own header is right above it.
   return (
-    <ScreenScroll style={{ padding: `8px 12px ${TAB_BAR_CLEARANCE}` }}>
+    <ScreenScroll style={{ padding: `16px 12px ${TAB_BAR_CLEARANCE}` }}>
       <div className="team-screen">
         <Title level="2" weight="2">
           Команда

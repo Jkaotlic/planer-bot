@@ -187,13 +187,19 @@ button {
   text-align: center;
 }
 
+/* `margin-left: auto` rather than a flexible spacer element: a `flex: 1 1 auto`
+   spacer in a wrapping row grows to fill the line and shoves the actions onto a
+   line of their own, which is why the CSV buttons stretched edge to edge on a
+   narrow window. Auto margin pushes right when there is room and simply folds
+   when there isn't. */
 .topbar-spacer {
-  flex: 1 1 auto;
+  display: none;
 }
 
 .roster-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
 .visually-hidden {
@@ -282,6 +288,35 @@ button {
   flex: 1 1 auto;
   display: flex;
   min-height: 0;
+}
+
+/* The week grid needs ~980px and the right rail takes a fixed 300, so on any
+   1440px laptop the last day of the week sat outside the grid's scroll area —
+   Sunday, the one an admin is most likely to be checking. Measured: at 1440px
+   124px of the table were out of view, at 1280px 284px.
+   Above this breakpoint both fit side by side; below it the rail moves under
+   the grid, where it is just as readable and costs the week nothing. */
+@media (max-width: 1599px) {
+  .schedule-layout {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .grid-scroll {
+    flex: 0 0 auto;
+  }
+
+  .right-rail {
+    flex: 0 0 auto;
+    overflow-y: visible;
+    border-left: none;
+    border-top: 1px solid var(--separator);
+    margin-left: 0;
+    padding: 20px 24px 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    align-items: start;
+  }
 }
 
 .right-rail {
