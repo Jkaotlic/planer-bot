@@ -26,6 +26,10 @@
   box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
 }
 
+.team-screen [role="tabpanel"] {
+  min-width: 0;
+}
+
 .team-range-nav {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) 42px;
@@ -114,4 +118,113 @@
   gap: 8px;
   padding: 18px 12px;
   text-align: center;
+}
+
+.team-week {
+  display: grid;
+  grid-template-columns: minmax(82px, 1.55fr) repeat(7, minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  font-size: 10px;
+}
+
+.team-week__corner,
+.team-week__day {
+  min-width: 0;
+  padding: 6px 1px;
+  text-align: center;
+  color: var(--tgui--hint_color);
+}
+
+.team-week__day {
+  display: grid;
+  gap: 2px;
+  border-radius: 7px 7px 0 0;
+}
+
+.team-week__day.is-weekend {
+  background: rgb(127 127 127 / 8%);
+}
+
+.team-week__day.is-today {
+  box-shadow: inset 0 3px var(--tgui--link_color);
+}
+
+.team-week__row {
+  display: contents;
+}
+
+.team-week__name {
+  display: flex;
+  min-width: 0;
+  min-height: 38px;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  padding: 4px 5px;
+  border-radius: 7px;
+  background: var(--tgui--secondary_bg_color);
+}
+
+.team-week__name b,
+.team-week__name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-week__cell {
+  min-width: 0;
+  min-height: 38px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(127 127 127 / 5%);
+}
+
+.team-week__cell.is-weekend {
+  box-shadow: inset 0 0 0 999px rgb(127 127 127 / 4%);
+}
+
+.team-week__cell.has-entry {
+  display: grid;
+  place-content: center;
+  padding: 1px;
+  font: inherit;
+}
+
+.team-week__cell small {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.team-details {
+  display: grid;
+  gap: 8px;
+  padding: 8px 16px 24px;
+}
+
+.team-details__entry {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--tgui--secondary_bg_color);
+}
+
+@media (max-width: 340px) {
+  .team-screen {
+    padding-inline: 8px;
+  }
+
+  .team-week {
+    grid-template-columns: minmax(76px, 1.45fr) repeat(7, minmax(0, 1fr));
+    gap: 2px;
+    font-size: 9px;
+  }
+
+  .team-week__name {
+    padding-inline: 4px;
+  }
 }

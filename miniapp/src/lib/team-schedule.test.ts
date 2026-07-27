@@ -7,6 +7,7 @@ import {
   buildWeekModel,
   createLatestRequestGate,
   createTeamScreenState,
+  moveTeamDate,
   requestLatestTeamSchedule,
   splitDisplayName,
   teamRange,
@@ -139,11 +140,25 @@ describe("team schedule model", () => {
     expect(model.rows[2]?.cells.every((cell) => cell.entries.length === 0)).toBe(true);
     expect(model.rows[0]?.cells[0]?.entries).toHaveLength(2);
     expect(model.rows[0]?.cells[0]?.extraCount).toBe(1);
+    expect(model.rows[0]?.cells[0]?.primary?.palette).toEqual({
+      bg: "#CBC04D",
+      fg: "#292505",
+      code: "07",
+    });
     expect(
       model.rows[1]?.cells
         .slice(0, 3)
         .every((cell) => cell.entries.some((entry) => entry.shift.category === "vacation")),
     ).toBe(true);
+    expect(
+      model.rows[1]?.cells[0]?.entries
+        .find((entry) => entry.shift.category === "vacation")
+        ?.palette,
+    ).toEqual({
+      bg: "#FD0100",
+      fg: "#FFFFFF",
+      code: "О",
+    });
   });
 
   it("splits surname from the remaining name and calculates exact ranges", () => {
@@ -155,15 +170,11 @@ describe("team schedule model", () => {
     expect(teamRange("week", "2026-08-01")).toEqual({ from: "2026-07-27", to: "2026-08-02" });
   });
 
-  it("moves Today by one day and Week by seven days through the existing date helpers", () => {
-    expect(teamRange("today", "2026-07-28")).toEqual({
-      from: "2026-07-28",
-      to: "2026-07-28",
-    });
-    expect(teamRange("week", "2026-08-03")).toEqual({
-      from: "2026-08-03",
-      to: "2026-08-09",
-    });
+  it("moves Today by one day and Week by exactly seven days", () => {
+    expect(moveTeamDate("today", "2026-07-31", 1)).toBe("2026-08-01");
+    expect(moveTeamDate("today", "2026-07-31", -1)).toBe("2026-07-30");
+    expect(moveTeamDate("week", "2026-07-31", 1)).toBe("2026-08-07");
+    expect(moveTeamDate("week", "2026-07-31", -1)).toBe("2026-07-24");
   });
 
   it("distinguishes stale success from stale failure while both remain ignorable by status", async () => {
@@ -217,66 +228,100 @@ describe("team schedule model", () => {
     expect(result).toEqual({ status: "failed", error });
   });
 
-  it("keeps the committed date and schedule paired while a new target loads", () => {
+  it("keeps committed mode, date, range, and schedule paired until the pending view is accepted", () => {
     let state = createTeamScreenState("2026-07-27");
-    state = beginTeamScreenLoad(state, "2026-07-27");
+    expect(state).toMatchObject({
+      displayMode: "today",
+      displayDate: "2026-07-27",
+      targetMode: "today",
+      targetDate: "2026-07-27",
+    });
+    state = beginTeamScreenLoad(state, "today", "2026-07-27");
     state = applyTeamScreenLoadResult(
       state,
+      "today",
       "2026-07-27",
       { status: "accepted", schedule },
     )!;
 
-    const pending = beginTeamScreenLoad(state, "2026-07-28");
+    const pending = beginTeamScreenLoad(state, "week", "2026-08-01");
 
     expect(pending).toMatchObject({
+      displayMode: "today",
       displayDate: "2026-07-27",
-      targetDate: "2026-07-28",
+      targetMode: "week",
+      targetDate: "2026-08-01",
       schedule,
       loading: true,
       error: null,
     });
+    expect(teamRange(pending.displayMode, pending.displayDate)).toEqual({
+      from: "2026-07-27",
+      to: "2026-07-27",
+    });
+    expect(teamRange(pending.targetMode, pending.targetDate)).toEqual({
+      from: "2026-07-27",
+      to: "2026-08-02",
+    });
 
     const accepted = applyTeamScreenLoadResult(
       pending,
-      "2026-07-28",
+      "week",
+      "2026-08-01",
       { status: "accepted", schedule: nextSchedule },
     );
     expect(accepted).toMatchObject({
-      displayDate: "2026-07-28",
-      targetDate: "2026-07-28",
+      displayMode: "week",
+      displayDate: "2026-08-01",
+      targetMode: "week",
+      targetDate: "2026-08-01",
       schedule: nextSchedule,
       loading: false,
       error: null,
     });
+    expect(teamRange(accepted!.displayMode, accepted!.displayDate)).toEqual({
+      from: "2026-07-27",
+      to: "2026-08-02",
+    });
   });
 
-  it("retains the committed view and failed target through retry", () => {
+  it("retains the committed view and failed mode/range target through retry", () => {
     let state = createTeamScreenState("2026-07-27");
-    state = beginTeamScreenLoad(state, "2026-07-27");
+    state = beginTeamScreenLoad(state, "today", "2026-07-27");
     state = applyTeamScreenLoadResult(
       state,
+      "today",
       "2026-07-27",
       { status: "accepted", schedule },
     )!;
-    state = beginTeamScreenLoad(state, "2026-07-28");
+    state = beginTeamScreenLoad(state, "week", "2026-08-01");
 
     const failed = applyTeamScreenLoadResult(
       state,
-      "2026-07-28",
+      "week",
+      "2026-08-01",
       { status: "failed", error: new Error("offline") },
     )!;
     expect(failed).toMatchObject({
+      displayMode: "today",
       displayDate: "2026-07-27",
-      targetDate: "2026-07-28",
+      targetMode: "week",
+      targetDate: "2026-08-01",
       schedule,
       loading: false,
       error: "offline",
     });
 
-    const retrying = beginTeamScreenLoad(failed, failed.targetDate);
+    const retrying = beginTeamScreenLoad(
+      failed,
+      failed.targetMode,
+      failed.targetDate,
+    );
     expect(retrying).toMatchObject({
+      displayMode: "today",
       displayDate: "2026-07-27",
-      targetDate: "2026-07-28",
+      targetMode: "week",
+      targetDate: "2026-08-01",
       schedule,
       loading: true,
       error: null,
@@ -284,12 +329,15 @@ describe("team schedule model", () => {
 
     const recovered = applyTeamScreenLoadResult(
       retrying,
+      retrying.targetMode,
       retrying.targetDate,
       { status: "accepted", schedule: nextSchedule },
     );
     expect(recovered).toMatchObject({
-      displayDate: "2026-07-28",
-      targetDate: "2026-07-28",
+      displayMode: "week",
+      displayDate: "2026-08-01",
+      targetMode: "week",
+      targetDate: "2026-08-01",
       schedule: nextSchedule,
       loading: false,
       error: null,
@@ -299,14 +347,33 @@ describe("team schedule model", () => {
   it("returns no state transition for stale completion", () => {
     const state = beginTeamScreenLoad(
       createTeamScreenState("2026-07-27"),
-      "2026-07-28",
+      "week",
+      "2026-08-01",
     );
 
     expect(
       applyTeamScreenLoadResult(
         state,
-        "2026-07-28",
+        "week",
+        "2026-08-01",
         { status: "stale", outcome: "accepted", schedule: nextSchedule },
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a completion whose mode differs from the current pending target", () => {
+    const state = beginTeamScreenLoad(
+      createTeamScreenState("2026-07-27"),
+      "week",
+      "2026-07-27",
+    );
+
+    expect(
+      applyTeamScreenLoadResult(
+        state,
+        "today",
+        "2026-07-27",
+        { status: "accepted", schedule: nextSchedule },
       ),
     ).toBeNull();
   });

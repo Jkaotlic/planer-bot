@@ -6,15 +6,25 @@ import {
   applyTeamScreenLoadResult,
   beginTeamScreenLoad,
   buildTodayModel,
+  buildWeekModel,
   createLatestRequestGate,
   createTeamScreenState,
+  moveTeamDate,
   requestLatestTeamSchedule,
   teamRange,
+  type TeamMode,
   type TeamScreenState,
 } from "../lib/team-schedule";
-import { addDays, formatDayLabel, parseISODate, toISODate } from "../lib/week";
+import {
+  formatDayLabel,
+  formatWeekRangeLabel,
+  parseISODate,
+  toISODate,
+} from "../lib/week";
 import { TeamRangeNav } from "./team/TeamRangeNav";
 import { TeamTodayView } from "./team/TeamTodayView";
+import { TeamViewPanel, TeamViewSwitcher } from "./team/TeamViewSwitcher";
+import { TeamWeekGrid } from "./team/TeamWeekGrid";
 import "./team/team-schedule.css";
 
 export function TeamScreen({ templates }: { templates: readonly Template[] }) {
@@ -27,19 +37,25 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
     setView(next);
   }, []);
 
-  const load = useCallback(async (targetDate: string) => {
-    commitView(beginTeamScreenLoad(viewRef.current, targetDate));
+  const load = useCallback(async (targetMode: TeamMode, targetDate: string) => {
+    commitView(beginTeamScreenLoad(viewRef.current, targetMode, targetDate));
     const result = await requestLatestTeamSchedule(
       apiClient.getTeamSchedule,
-      teamRange("today", targetDate),
+      teamRange(targetMode, targetDate),
       gate.current,
     );
-    const next = applyTeamScreenLoadResult(viewRef.current, targetDate, result);
+    const next = applyTeamScreenLoadResult(
+      viewRef.current,
+      targetMode,
+      targetDate,
+      result,
+    );
     if (next) commitView(next);
   }, [commitView]);
 
   useEffect(() => {
-    void load(viewRef.current.targetDate);
+    const current = viewRef.current;
+    void load(current.targetMode, current.targetDate);
     return () => gate.current.invalidate();
   }, [load]);
 
@@ -51,18 +67,38 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         && !current.loading
         && !current.error
       ) {
-        void load(current.displayDate);
+        void load(current.displayMode, current.displayDate);
       }
     }
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  function move(days: number) {
-    if (view.loading) return;
-    const targetDate = toISODate(addDays(parseISODate(view.displayDate), days));
-    void load(targetDate);
+  function move(direction: -1 | 1) {
+    const current = viewRef.current;
+    if (current.loading) return;
+    const targetDate = moveTeamDate(
+      current.displayMode,
+      current.displayDate,
+      direction,
+    );
+    void load(current.displayMode, targetDate);
   }
+
+  function changeMode(mode: TeamMode) {
+    const current = viewRef.current;
+    if (current.loading || mode === current.displayMode) return;
+    void load(mode, current.displayDate);
+  }
+
+  const displayRange = teamRange(view.displayMode, view.displayDate);
+  const label =
+    view.displayMode === "today"
+      ? formatDayLabel(view.displayDate)
+      : formatWeekRangeLabel(
+          parseISODate(displayRange.from),
+          parseISODate(displayRange.to),
+        );
 
   return (
     <ScreenScroll style={{ padding: `8px 12px ${TAB_BAR_CLEARANCE}` }}>
@@ -70,8 +106,9 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         <Title level="2" weight="2">
           Команда
         </Title>
+        <TeamViewSwitcher value={view.displayMode} onChange={changeMode} />
         <TeamRangeNav
-          label={formatDayLabel(view.displayDate)}
+          label={label}
           busy={view.loading}
           onPrevious={() => move(-1)}
           onNext={() => move(1)}
@@ -84,17 +121,28 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         {view.error && (
           <div className="team-error" role="alert">
             <span>{view.error}</span>
-            <button type="button" onClick={() => void load(view.targetDate)}>
+            <button
+              type="button"
+              onClick={() => void load(view.targetMode, view.targetDate)}
+            >
               Повторить
             </button>
           </div>
         )}
-        {!view.schedule && view.loading && <Spinner size="m" />}
-        {view.schedule && (
-          <TeamTodayView
-            model={buildTodayModel(view.displayDate, view.schedule, templates)}
-          />
-        )}
+        <TeamViewPanel mode={view.displayMode}>
+          {!view.schedule && view.loading && <Spinner size="m" />}
+          {view.schedule && view.displayMode === "today" && (
+            <TeamTodayView
+              model={buildTodayModel(view.displayDate, view.schedule, templates)}
+            />
+          )}
+          {view.schedule && view.displayMode === "week" && (
+            <TeamWeekGrid
+              model={buildWeekModel(displayRange.from, view.schedule, templates)}
+              today={toISODate(new Date())}
+            />
+          )}
+        </TeamViewPanel>
       </div>
     </ScreenScroll>
   );
