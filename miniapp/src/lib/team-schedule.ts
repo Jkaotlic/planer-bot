@@ -274,6 +274,67 @@ export function buildWeekModel(
   return { days, rows };
 }
 
+/** One entry in the week grid's key: the coloured square, and what it stands for. */
+export interface WeekLegendItem {
+  /** The letter drawn in the cell — «У», «Н», «ВА», «07», or «•» for a one-off. */
+  code: string;
+  /** What that letter means, in the preset's own words. */
+  label: string;
+  /** The preset's exact colours, or null when the cell falls back to its category's —
+   *  those depend on the theme, so the component resolves them the same way the grid does. */
+  palette: SchedulePalette | null;
+  /** Only set alongside a null palette: which category's colour the cell used. */
+  category: EntryCategory | null;
+}
+
+/** A one-off entry with no preset behind it; the grid draws it as a dot. */
+const FALLBACK_LEGEND_CODE = "•";
+
+/**
+ * The key for a week grid, built from the week actually on screen rather than from
+ * a fixed list of presets. A single letter in a coloured square is unguessable —
+ * «П» is Поклонка and «Т» is Телефон, and nothing on the screen said so.
+ *
+ * Only the squares that are drawn count: a cell shows its primary entry and hides
+ * the rest behind «+N», so listing those would explain colours nobody can see.
+ * Names come from the entries themselves, so a renamed preset renames its own key
+ * line, with no mapping here to drift out of date.
+ *
+ * Presetless entries all read «•» but are coloured by category, so they are keyed
+ * per category — one line per distinct square, never one line for two colours.
+ */
+export function buildWeekLegend(model: WeekModel): WeekLegendItem[] {
+  const seen = new Map<string, { item: WeekLegendItem; titles: Set<string> }>();
+  for (const row of model.rows) {
+    for (const cell of row.cells) {
+      const entry = cell.primary;
+      if (!entry) continue;
+      const key = entry.palette ? entry.palette.code : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}`;
+      const existing = seen.get(key);
+      if (existing) {
+        existing.titles.add(entry.title);
+        continue;
+      }
+      seen.set(key, {
+        item: {
+          code: entry.palette?.code ?? FALLBACK_LEGEND_CODE,
+          label: entry.title,
+          palette: entry.palette,
+          category: entry.palette ? null : entry.shift.category,
+        },
+        titles: new Set([entry.title]),
+      });
+    }
+  }
+  return [...seen.values()]
+    .map(({ item, titles }) => ({ ...item, label: [...titles].sort((a, b) => a.localeCompare(b, "ru")).join(" · ") }))
+    // The presetless ones are the catch-all, so they read last however the week is shaped.
+    .sort(
+      (a, b) =>
+        (a.palette ? 0 : 1) - (b.palette ? 0 : 1) || a.label.localeCompare(b.label, "ru"),
+    );
+}
+
 export interface LatestRequestGate {
   begin(): number;
   isLatest(id: number): boolean;

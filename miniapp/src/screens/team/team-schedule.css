@@ -210,6 +210,64 @@
   line-height: 1;
 }
 
+/* The key under the week grid. A single letter in a coloured square is
+   unguessable on its own — «П» is Поклонка, «Т» is Телефон. */
+.team-legend {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--tgui--secondary_bg_color);
+}
+
+.team-legend__title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--tgui--section_header_text_color);
+  margin-bottom: 10px;
+}
+
+.team-legend__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Same square the grid draws, at the same size, so the two read as one thing. */
+.team-legend__code {
+  flex: none;
+  display: grid;
+  place-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.team-legend__label {
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.team-legend__hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--tgui--hint_color);
+}
+
 .team-details {
   display: grid;
   gap: 8px;

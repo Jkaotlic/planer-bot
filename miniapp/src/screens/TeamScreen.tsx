@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner, Title } from "@telegram-apps/telegram-ui";
-import { apiClient, type Template } from "../api/client";
+import { apiClient, type TeamSchedule, type Template } from "../api/client";
 import { useIsDark } from "../lib/theme";
 import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
 import {
   applyTeamScreenLoadResult,
   beginTeamScreenLoad,
   buildTodayModel,
+  buildWeekLegend,
   buildWeekModel,
   createLatestRequestGate,
   createTeamScreenState,
@@ -29,6 +30,7 @@ import { TeamRangeNav } from "./team/TeamRangeNav";
 import { TeamTodayView } from "./team/TeamTodayView";
 import { TeamViewPanel, TeamViewSwitcher } from "./team/TeamViewSwitcher";
 import { TeamWeekGrid } from "./team/TeamWeekGrid";
+import { TeamWeekLegend } from "./team/TeamWeekLegend";
 import "./team/team-schedule.css";
 
 export function TeamScreen({ templates }: { templates: readonly Template[] }) {
@@ -154,14 +156,31 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
             />
           )}
           {view.schedule && view.displayMode === "week" && (
-            <TeamWeekGrid
-              model={buildWeekModel(displayRange.from, view.schedule, templates)}
-              today={toISODate(new Date())}
-              isDark={isDark}
-            />
+            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} />
           )}
         </TeamViewPanel>
       </div>
     </ScreenScroll>
+  );
+}
+
+/** The week grid plus its key. Built once so both read the same model. */
+function WeekView({
+  schedule,
+  from,
+  templates,
+  isDark,
+}: {
+  schedule: TeamSchedule;
+  from: string;
+  templates: readonly Template[];
+  isDark: boolean;
+}) {
+  const model = buildWeekModel(from, schedule, templates);
+  return (
+    <>
+      <TeamWeekGrid model={model} today={toISODate(new Date())} isDark={isDark} />
+      <TeamWeekLegend items={buildWeekLegend(model)} isDark={isDark} />
+    </>
   );
 }

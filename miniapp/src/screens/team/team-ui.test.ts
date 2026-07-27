@@ -20,6 +20,7 @@ import {
   TeamViewSwitcher,
 } from "./TeamViewSwitcher";
 import { resolveWeekCellSelection, TeamWeekGrid } from "./TeamWeekGrid";
+import { TeamWeekLegend } from "./TeamWeekLegend";
 
 function fallbackPaletteSchedule(): TeamSchedule {
   const categories = [
@@ -649,5 +650,35 @@ describe("team schedule UI", () => {
         date: "2026-07-30",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("TeamWeekLegend", () => {
+  const render = (items: Parameters<typeof TeamWeekLegend>[0]["items"], isDark = false) =>
+    renderToStaticMarkup(createElement(TeamWeekLegend, { items, isDark }));
+
+  it("shows each letter next to what it means", () => {
+    const markup = render([
+      { code: "П", label: "Дежурство · Поклонка", palette: { bg: "#FE87FF", fg: "#39133A", code: "П" }, category: null },
+      { code: "Н", label: "Ночь", palette: { bg: "#20497C", fg: "#FFFFFF", code: "Н" }, category: null },
+    ]);
+    expect(markup).toContain("Что значат буквы");
+    expect(markup).toContain("Дежурство · Поклонка");
+    expect(markup).toContain("Ночь");
+    // The swatch has to be the same colour the cell is drawn in, or it explains nothing.
+    expect(markup).toContain("background:#FE87FF");
+    expect(markup).toContain("background:#20497C");
+  });
+
+  it("colours a presetless entry by its category, per theme", () => {
+    const item = { code: "•", label: "Ярмарка", palette: null, category: "offsite" as const };
+    const light = render([item], false);
+    const dark = render([item], true);
+    expect(light).toContain("Ярмарка");
+    expect(light).not.toBe(dark); // the category palette differs between themes
+  });
+
+  it("renders nothing at all for an empty week, rather than an empty box", () => {
+    expect(render([])).toBe("");
   });
 });
