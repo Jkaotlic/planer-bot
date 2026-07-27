@@ -46,6 +46,7 @@ const EMPLOYEES: Employee[] = [
   { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004 },
   { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005 },
   { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006 },
+  { id: 7, displayName: "Нина Хохлова", isAdmin: false, isActive: true, telegramUserId: 100007 },
 ];
 
 function personName(employeeId: number): string {
@@ -67,14 +68,14 @@ interface EntryDraft {
   category: Category;
   title: string | null;
   location?: string | null;
-  employeeId: number;
+  employeeId: number | null;
 }
 
 let nextId = 1;
 function entry(draft: EntryDraft): Shift {
   return {
     id: nextId++,
-    employeeName: personName(draft.employeeId),
+    employeeName: draft.employeeId != null ? personName(draft.employeeId) : undefined,
     ...draft,
     templateId: draft.templateId ?? null,
     location: draft.location ?? null,
@@ -104,26 +105,44 @@ const ALL_ENTRIES: Shift[] = [
     title: "Дежурство с 07:00",
     employeeId: 3,
   }),
+  entry({ templateId: 3, date: dayIso(0), start: "11:00", end: "20:00", endDate: null, category: "shift", title: "Вечер", employeeId: 5 }),
+  entry({ date: dayIso(0), start: null, end: null, endDate: dayIso(2), category: "vacation", title: null, employeeId: 2 }),
+  entry({
+    templateId: 5,
+    date: dayIso(0),
+    start: "09:00",
+    end: "18:00",
+    endDate: dayIso(1),
+    category: "duty",
+    title: "Дежурство · Поклонка",
+    location: "Поклонка",
+    employeeId: 4,
+  }),
 
   // Вт–Ср: Игорь в командировке (один интервал, показывается в оба дня)
   entry({ date: dayIso(1), start: null, end: null, endDate: dayIso(2), category: "business_trip", title: null, employeeId: 2 }),
   // Вт
   entry({ templateId: 2, date: dayIso(1), start: "12:00", end: "21:00", endDate: null, category: "shift", title: "День", employeeId: 3 }),
   entry({ templateId: 3, date: dayIso(1), start: "17:00", end: "23:00", endDate: null, category: "shift", title: "Вечер", employeeId: 5 }),
+  entry({ templateId: 4, date: dayIso(1), start: "15:00", end: "23:00", endDate: null, category: "shift", title: "Ночь", employeeId: 1 }),
 
   // Ср
   entry({ templateId: 2, date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 1 }),
   entry({ date: dayIso(2), start: "10:00", end: "19:00", endDate: null, category: "offsite", title: null, employeeId: 4 }),
+  entry({ templateId: 5, date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "duty", title: "Дежурство · Поклонка", location: "Поклонка", employeeId: 5 }),
+  entry({ templateId: 2, date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: null }),
 
   // Чт–Пт: Аня в отпуске (один интервал, показывается в оба дня)
   entry({ date: dayIso(3), start: null, end: null, endDate: dayIso(4), category: "vacation", title: null, employeeId: 1 }),
   // Чт: дежурство не по пресету — своё место, поэтому цвет категории
   entry({ date: dayIso(3), start: "09:00", end: "21:00", endDate: null, category: "duty", title: "Дежурство · Вавилова", employeeId: 3 }),
   entry({ templateId: 1, date: dayIso(3), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 5 }),
+  entry({ templateId: 7, date: dayIso(3), start: "09:00", end: "18:00", endDate: null, category: "duty", title: "Дежурство · Телефон", employeeId: 4 }),
 
   // Пт
   entry({ templateId: 2, date: dayIso(4), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 2 }),
   entry({ templateId: 1, date: dayIso(4), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 4 }),
+  entry({ templateId: 8, date: dayIso(4), start: "09:00", end: "18:00", endDate: null, category: "duty", title: "Дежурство · Вавилова 19", location: "Вавилова 19", employeeId: 3 }),
 
   // Сб
   entry({ templateId: 3, date: dayIso(5), start: "11:00", end: "20:00", endDate: null, category: "shift", title: "Вечер", employeeId: 1 }),
