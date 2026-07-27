@@ -46,7 +46,8 @@ import {
   myOffers,
 } from "../weekend/weekend-service";
 import { listOpenSlots, getVacantSlot } from "../repo/weekend";
-import { buildRosterCsv } from "../roster/roster-service";
+import { applyRosterImport, buildRosterCsv, type PersonResolution } from "../roster/roster-service";
+import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 
 export interface AppDeps {
   db: Db;
@@ -512,6 +513,89 @@ export function createApp(deps: AppDeps): Hono<Env> {
     c.header("Content-Type", "text/csv; charset=utf-8");
     c.header("Content-Disposition", `attachment; filename="roster-${from}_${to}.csv"`);
     return c.body("﻿" + csv);
+  });
+
+  const decodeUploadedRoster = (csv: unknown) => {
+    if (typeof csv !== "string" || csv.trim().length === 0) {
+      return { ok: false as const, status: 400 as const, body: { error: "csv is required" } };
+    }
+    if (new TextEncoder().encode(csv).byteLength > 1_000_000) {
+      return { ok: false as const, status: 413 as const, body: { error: "CSV file must not exceed 1 MB" } };
+    }
+    try {
+      const parsed = parseRosterCsv(csv);
+      if (parsed.dates.length === 0) throw new Error("в шапке CSV нет дат");
+      if (parsed.people.length === 0) throw new Error("в CSV нет сотрудников");
+      if (parsed.people.some((person) => !person.name)) throw new Error("в CSV есть строка без ФИО");
+      const seenNames = new Set<string>();
+      for (const person of parsed.people) {
+        if (seenNames.has(person.name)) throw new Error(`в CSV повторяется ФИО «${person.name}»`);
+        seenNames.add(person.name);
+      }
+      const decoded = decodeRoster(parsed, listActiveTemplates(db));
+      return { ok: true as const, parsed, decoded };
+    } catch (err) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        body: { error: err instanceof Error ? err.message : "не удалось разобрать CSV" },
+      };
+    }
+  };
+
+  // Admin: parse and validate an uploaded roster without mutating the database.
+  app.post("/api/admin/roster/import/preview", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown };
+    const result = decodeUploadedRoster(body.csv);
+    if (!result.ok) return c.json(result.body, result.status);
+    if (result.decoded.unknowns.length > 0) {
+      return c.json({ error: "unknown_roster_codes", unknowns: result.decoded.unknowns }, 422);
+    }
+    const activeByName = new Map(listActive(db).map((employee) => [employee.displayName.trim(), employee.id] as const));
+    return c.json({
+      from: result.parsed.dates[0]!,
+      to: result.parsed.dates.at(-1)!,
+      entryCount: result.decoded.perPerson.reduce((sum, person) => sum + person.entries.length, 0),
+      people: result.decoded.perPerson.map((person) => ({
+        csvName: person.name,
+        suggestedEmployeeId: activeByName.get(person.name.trim()) ?? null,
+      })),
+      unknowns: [],
+    });
+  });
+
+  // Admin: decode the same file again and apply the explicitly confirmed person map in one transaction.
+  app.post("/api/admin/roster/import/apply", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown };
+    const result = decodeUploadedRoster(body.csv);
+    if (!result.ok) return c.json(result.body, result.status);
+    if (result.decoded.unknowns.length > 0) {
+      return c.json({ error: "unknown_roster_codes", unknowns: result.decoded.unknowns }, 422);
+    }
+    if (!Array.isArray(body.resolutions)) return c.json({ error: "resolutions are required" }, 400);
+
+    const resolutions: PersonResolution[] = [];
+    for (const item of body.resolutions) {
+      if (typeof item !== "object" || item === null) return c.json({ error: "invalid resolution" }, 400);
+      const value = item as Record<string, unknown>;
+      if (typeof value.csvName !== "string" || !value.csvName.trim()) {
+        return c.json({ error: "invalid csvName in resolution" }, 400);
+      }
+      if (value.action === "create") {
+        resolutions.push({ csvName: value.csvName, action: "create" });
+      } else if (value.action === "rename" && Number.isInteger(value.employeeId) && Number(value.employeeId) > 0) {
+        resolutions.push({ csvName: value.csvName, action: "rename", employeeId: Number(value.employeeId) });
+      } else {
+        return c.json({ error: `invalid resolution for ${value.csvName}` }, 400);
+      }
+    }
+
+    try {
+      const summary = applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId);
+      return c.json({ summary }, 201);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "не удалось импортировать CSV" }, 409);
+    }
   });
 
   return app;

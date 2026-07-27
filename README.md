@@ -1,0 +1,180 @@
+# Planer Bot
+
+[![CI](https://github.com/Jkaotlic/planer-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Jkaotlic/planer-bot/actions/workflows/ci.yml)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Telegram-бот и Mini App для наглядного командного графика: смены, дежурства,
+обмены, выходные и администрирование — в одном интерфейсе.
+
+> Проект находится в активной разработке. Перед использованием в реальной
+> команде проверьте часовой пояс, правила доступа и резервное копирование базы.
+
+## Возможности
+
+- компактный экран «Сегодня» с сортировкой команды по времени;
+- недельная сетка с цветами типов смен и подробностями по нажатию;
+- личные смены и прямой обмен сменами между сотрудниками;
+- сбор желающих и назначения на выходные;
+- Telegram-уведомления и inline-действия;
+- отдельная web-админка для сотрудников, графика и событий;
+- безопасный импорт графика из CSV через preview и сопоставление ФИО;
+- экспорт графика текущего месяца в Excel-совместимый CSV;
+- Telegram `initData` → JWT без отдельных пользовательских паролей;
+- актуальная проверка прав сотрудника по SQLite при каждом запросе.
+
+## Цвета графика
+
+Цвет — это тип смены, а не статус сотрудника:
+
+| Цвет | Тип |
+| --- | --- |
+| Голубой | Вечер |
+| Персиковый | Дежурство на телефоне |
+| Оранжевый | Дежурство на Вавилова |
+| Красный | Отпуск |
+| Жёлтый | Утро |
+| Белый | Обычная смена |
+| Тёмно-синий | Ночь |
+| Розовый | Дежурство на Поклонке |
+| Оливковый | Дежурство с 07:00 |
+
+## Архитектура
+
+```text
+Telegram
+   ├── grammY bot ───────────────┐
+   └── Mini App (React + Vite) ──┤
+Browser admin (React + Vite) ────┼── Hono API ── Drizzle ORM ── SQLite
+                                 └── reminders / schedule services
+```
+
+Это npm workspaces-монорепозиторий:
+
+| Каталог | Назначение |
+| --- | --- |
+| `shared/` | доменные типы, правила времени, баланса и пересечений |
+| `server/` | Hono API, grammY bot, SQLite/Drizzle, миграции и напоминания |
+| `miniapp/` | Telegram Mini App для сотрудников |
+| `admin/` | браузерная панель администратора |
+
+Собранные приложения сервер раздаёт по `/app/` и `/admin/`, а health check
+доступен по `/api/health`.
+
+## Требования
+
+- Node.js 20 или новее;
+- npm 10 или новее;
+- Telegram-бот, созданный через BotFather;
+- публичный HTTPS URL для Telegram Mini App.
+
+## Быстрый старт
+
+```bash
+git clone https://github.com/Jkaotlic/planer-bot.git
+cd planer-bot
+npm ci
+cp server/.env.example server/.env
+```
+
+Заполните `server/.env`, затем соберите интерфейсы и запустите сервер:
+
+```bash
+npm run build --workspace @planer/miniapp
+npm run build --workspace @planer/admin
+node --import tsx --env-file=server/.env server/src/index.ts
+```
+
+По умолчанию API слушает порт `8080`, а SQLite создаётся в
+`./data/planer.db`.
+
+### Переменные окружения
+
+| Переменная | Обязательна | Описание |
+| --- | --- | --- |
+| `BOT_TOKEN` | да | токен Telegram-бота |
+| `ADMIN_TELEGRAM_IDS` | да | Telegram ID администраторов через запятую |
+| `JWT_SECRET` | да | случайная строка длиной не менее 32 символов |
+| `PUBLIC_URL` | да | внешний HTTPS URL сервиса |
+| `TEAM_TZ` | нет | IANA timezone, по умолчанию `Europe/Moscow` |
+| `DATABASE_URL` | нет | путь SQLite, по умолчанию `./data/planer.db` |
+| `PORT` | нет | HTTP-порт, по умолчанию `8080` |
+| `BOT_USERNAME` | нет | username бота без `@` |
+
+Для генерации JWT-секрета можно использовать:
+
+```bash
+openssl rand -hex 32
+```
+
+## Разработка и проверка
+
+```bash
+# тесты
+npm test
+
+# TypeScript для всех workspace
+npm run typecheck
+
+# production-сборки
+npm run build --workspace @planer/miniapp
+npm run build --workspace @planer/admin
+
+# локальная разработка отдельных частей
+npm run dev --workspace @planer/server
+npm run dev --workspace @planer/miniapp
+npm run dev --workspace @planer/admin
+```
+
+GitHub Actions выполняет установку из lock-файла, полный набор тестов, typecheck
+и обе production-сборки на Node.js 20.
+
+### Импорт и экспорт CSV
+
+В панели администратора над недельной сеткой доступны две отдельные кнопки:
+
+- `Загрузить CSV` — выбрать файл, проверить период и количество записей,
+  сопоставить ФИО из файла с существующими Telegram-пользователями и только затем
+  применить импорт;
+- `Выгрузить CSV` — скачать матрицу `ФИО × даты` с разделителем `;`, UTF-8 BOM и
+  CRLF для корректного открытия в Excel.
+
+Preview ничего не пишет в базу. Подтверждённый импорт выполняется одной
+транзакцией и целиком откатывается при ошибке. Максимальный размер файла — 1 МБ;
+неизвестные коды смен блокируют применение и показываются администратору.
+
+## Production
+
+В production держите ровно один экземпляр бота: два long-polling процесса с одним
+`BOT_TOKEN` конфликтуют. На macOS удобно использовать системный LaunchDaemon.
+
+Рекомендуемый порядок релиза:
+
+1. Запустить тесты, typecheck и обе сборки.
+2. Сделать online backup SQLite и проверить `PRAGMA integrity_check`.
+3. Перезапустить единственный процесс сервиса.
+4. Проверить новый PID, `/api/health`, `/app/`, `/admin/` и startup-логи.
+
+Пример рестарта установленного сервиса:
+
+```bash
+sudo launchctl kickstart -k system/com.planerbot.server
+```
+
+## Безопасность и данные
+
+- `.env`, SQLite-файлы и sidecar-файлы WAL/SHM, логи, backups и `dist/`
+  исключены из Git;
+- секреты не должны попадать в URL, issue, логи или коммиты;
+- Mini App проверяет Telegram `initData`, а API выдаёт короткоживущий JWT;
+- admin-маршруты дополнительно сверяют актуальную роль в базе;
+- реальные фамилии и рабочий график не входят в публичный репозиторий.
+
+При обнаружении уязвимости не публикуйте токены или персональные данные в issue:
+сначала отзовите затронутые секреты и передайте минимальный воспроизводимый пример
+без рабочих данных.
+
+## Лицензия
+
+[MIT](LICENSE) © 2026 Jkaotlic.

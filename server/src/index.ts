@@ -8,7 +8,7 @@ import { loadConfig } from "./config";
 import { openDb, runMigrations } from "./db/client";
 import { createApp } from "./http/app";
 import { createBot } from "./bot/bot";
-import { stopBotSafely } from "./bot/lifecycle";
+import { shutdownSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
 import { teamNow } from "./util/team-time";
 import { safeErrorMessage } from "./util/safe-error";
@@ -19,8 +19,6 @@ const { db, sqlite } = openDb(config.databaseUrl);
 runMigrations(db, sqlite);
 
 const bot = createBot({ db, config });
-process.once("SIGINT", () => void stopBotSafely(bot));
-process.once("SIGTERM", () => void stopBotSafely(bot));
 // Long-polling runs in the background; a bad/placeholder token must not crash the HTTP server.
 bot.start({ onStart: (info) => console.log(`bot @${info.username} started`) }).catch((err) => {
   console.error("bot failed to start (check BOT_TOKEN):", safeErrorMessage(err));
@@ -84,5 +82,24 @@ app.get("/", (c) => c.redirect("/app/"));
 
 const port = Number(process.env.PORT ?? 8080);
 if (!Number.isInteger(port) || port <= 0) throw new Error(`Invalid PORT: ${JSON.stringify(process.env.PORT)}`);
-serve({ fetch: app.fetch, port });
+const server = serve({ fetch: app.fetch, port });
+let shuttingDown = false;
+const shutdown = () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  void shutdownSafely({
+    bot,
+    closeHttp: () =>
+      new Promise<void>((resolveShutdown, rejectShutdown) => {
+        server.close((error) => {
+          if (error) rejectShutdown(error);
+          else resolveShutdown();
+        });
+      }),
+    closeDb: () => sqlite.close(),
+    exit: (code) => process.exit(code),
+  });
+};
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
 console.log(`planer-bot server listening on :${port}`);

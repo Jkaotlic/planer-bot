@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { stopBotSafely } from "./lifecycle";
+import * as lifecycle from "./lifecycle";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -20,7 +20,7 @@ describe("stopBotSafely", () => {
       },
     };
 
-    await expect(stopBotSafely(bot)).resolves.toBeUndefined();
+    await expect(lifecycle.stopBotSafely(bot)).resolves.toBeUndefined();
 
     expect(logged).toEqual([
       [
@@ -29,5 +29,28 @@ describe("stopBotSafely", () => {
       ],
     ]);
     expect(JSON.stringify(logged)).not.toContain(credential);
+  });
+
+  it("closes HTTP and SQLite before exiting after a signal", async () => {
+    const events: string[] = [];
+    const shutdownSafely = (
+      lifecycle as unknown as {
+        shutdownSafely: (deps: {
+          bot: { stop(): Promise<void> };
+          closeHttp(): Promise<void>;
+          closeDb(): void;
+          exit(code: number): void;
+        }) => Promise<void>;
+      }
+    ).shutdownSafely;
+
+    await shutdownSafely({
+      bot: { stop: async () => { events.push("bot"); } },
+      closeHttp: async () => { events.push("http"); },
+      closeDb: () => { events.push("db"); },
+      exit: (code) => { events.push(`exit:${code}`); },
+    });
+
+    expect(events).toEqual(["bot", "http", "db", "exit:0"]);
   });
 });

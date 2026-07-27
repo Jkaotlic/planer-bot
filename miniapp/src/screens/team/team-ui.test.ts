@@ -249,8 +249,8 @@ describe("team schedule UI", () => {
     });
     const schedule: TeamSchedule = {
       employees: [
-        { id: 20, displayName: "Шилов Дмитрий Сергеевич", rosterOrder: 0 },
-        { id: 10, displayName: "Юдин Максим", rosterOrder: 1 },
+        { id: 20, displayName: "Орлов Дмитрий Сергеевич", rosterOrder: 0 },
+        { id: 10, displayName: "Соколов Максим", rosterOrder: 1 },
       ],
       shifts: [
         timedShift(2, 10, "09:00", "18:00", 2),
@@ -284,12 +284,12 @@ describe("team schedule UI", () => {
     expect(markup).toContain("Дежурство с 07:00");
     expect(markup.indexOf("Дежурство с 07:00")).toBeLessThan(markup.indexOf(">День<"));
     expect(markup).toContain("07:00–16:00");
-    expect(markup).toContain("Шилов Дмитрий Сергеевич");
+    expect(markup).toContain("Орлов Дмитрий Сергеевич");
     expect(markup).toContain('class="team-group__marker" style="background:#CBC04D"');
     expect(markup).toContain("<h3>Без времени</h3>");
     expect(markup).toContain("Отпуск");
     expect(markup).toContain("Весь день");
-    expect(markup).toContain("Юдин Максим");
+    expect(markup).toContain("Соколов Максим");
   });
 
   it("renders the Today empty guidance while preserving zero totals", () => {
@@ -369,8 +369,8 @@ describe("team schedule UI", () => {
   it("renders all seven dates, active rows, two-line names, exact palettes, and full cell labels", () => {
     const schedule: TeamSchedule = {
       employees: [
-        { id: 20, displayName: "Шилов Дмитрий", rosterOrder: 0 },
-        { id: 10, displayName: "Юдин Максим", rosterOrder: 1 },
+        { id: 20, displayName: "Орлов Дмитрий", rosterOrder: 0 },
+        { id: 10, displayName: "Соколов Максим", rosterOrder: 1 },
         { id: 30, displayName: "Без Смены", rosterOrder: 2 },
       ],
       shifts: [
@@ -463,7 +463,7 @@ describe("team schedule UI", () => {
     ]);
     expect(markup.match(/class="team-week__row"/g)).toHaveLength(4);
     expect(markup).toContain(
-      '<div class="team-week__name" role="rowheader"><b>Шилов</b><span>Дмитрий</span></div>',
+      '<div class="team-week__name" role="rowheader"><b>Орлов</b><span>Дмитрий</span></div>',
     );
     expect(markup).toContain(
       '<div class="team-week__name" role="rowheader"><b>Без</b><span>Смены</span></div>',
@@ -481,10 +481,10 @@ describe("team schedule UI", () => {
     expect(markup).toContain(">О<");
     expect(markup).toContain("<small>+1</small>");
     expect(markup).toContain(
-      'aria-label="Шилов Дмитрий, 2026-07-27: Дежурство с 07:00, День"',
+      'aria-label="Орлов Дмитрий, 2026-07-27: Дежурство с 07:00, День"',
     );
     expect(markup).toContain(
-      'aria-label="Юдин Максим, 2026-07-27: День, Отпуск"',
+      'aria-label="Соколов Максим, 2026-07-27: День, Отпуск"',
     );
     expect(markup).toContain(
       'role="gridcell" aria-label="Без Смены, 2026-07-27: нет записи"',
@@ -499,7 +499,7 @@ describe("team schedule UI", () => {
       'class="team-week__day is-weekend" data-date="2026-08-01"',
     );
     expect(markup).toContain(
-      'class="team-week__cell is-weekend" role="gridcell" aria-label="Юдин Максим, 2026-08-02: нет записи"',
+      'class="team-week__cell is-weekend" role="gridcell" aria-label="Соколов Максим, 2026-08-02: нет записи"',
     );
 
     const withoutUnassigned = renderToStaticMarkup(
@@ -571,7 +571,7 @@ describe("team schedule UI", () => {
       rows: [
         {
           employeeId: 20,
-          displayName: "Шилов Дмитрий",
+          displayName: "Орлов Дмитрий",
           cells: [cell],
         },
       ],

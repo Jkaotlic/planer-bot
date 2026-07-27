@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseRosterCsv, decodeRoster, CODE_TO_PRESET_NAME, PRESET_NAME_TO_CODE } from "./roster-codec";
 import { makeTestDb } from "../db/testdb";
@@ -9,8 +9,6 @@ import type { DecodeResult } from "./roster-codec";
 // Fake names, engineered byte-for-byte like the real export: UTF-8 BOM, CRLF, ';'
 // delimiter, no trailing newline. See task-10-brief.md Fix 4 for what it must cover.
 const FIXTURE = readFileSync(join(__dirname, "__fixtures__/roster-sample.csv"), "utf8");
-
-const REAL_ROSTER = process.env.ROSTER_CSV ?? "/Users/user/Downloads/Дежурства 2026.csv";
 
 describe("parseRosterCsv", () => {
   it("handles CRLF, bare LF, and a trailing newline the same", () => {
@@ -27,6 +25,16 @@ describe("parseRosterCsv", () => {
 
   it("rejects a malformed header date", () => {
     expect(() => parseRosterCsv(";2026-06-01\nИван;k32")).toThrow(/дата/i);
+  });
+
+  it("rejects a calendar date that matches the format but does not exist", () => {
+    expect(() => parseRosterCsv(";31.02.2026\nИван;k32")).toThrow(/дата/i);
+  });
+
+  it("round-trips a quoted employee name containing the delimiter and quotes", () => {
+    const parsed = parseRosterCsv(';01.08.2026\n"Иван; ""Старший""";k32');
+    expect(parsed.people[0]?.name).toBe('Иван; "Старший"');
+    expect(parsed.people[0]?.cells).toEqual([{ date: "2026-08-01", code: "k32" }]);
   });
 
   it("parses the synthetic fixture: 8 dates, 6 people, BOM stripped", () => {
@@ -85,8 +93,8 @@ describe("decodeRoster (against the synthetic fixture)", () => {
   });
 
   it("reports an undecodable cell and records nothing for it", () => {
-    expect(decoded.unknowns).toEqual([{ name: "Хохлова Ирина", date: "2026-07-06", code: "xyz" }]);
-    expect(person("Хохлова Ирина").entries.some((e) => e.date === "2026-07-06")).toBe(false);
+    expect(decoded.unknowns).toEqual([{ name: "Белова Ирина", date: "2026-07-06", code: "xyz" }]);
+    expect(person("Белова Ирина").entries.some((e) => e.date === "2026-07-06")).toBe(false);
   });
 
   it("proposes the columns nobody works on as holidays", () => {
@@ -125,65 +133,5 @@ describe("prototype-chain-safe code lookups", () => {
     const decoded = decodeRoster(parseRosterCsv(text), listActiveTemplates(makeTestDb()));
     expect(decoded.unknowns).toEqual([{ name: "Иван", date: "2026-06-01", code: "constructor" }]);
     expect(decoded.perPerson).toEqual([{ name: "Иван", entries: [] }]);
-  });
-});
-
-describe.skipIf(!existsSync(REAL_ROSTER))("decodeRoster (against the real June file + real presets)", () => {
-  // Guarded: the real file is 26 real employees' names and who was on vacation when,
-  // so it can't be committed. Set ROSTER_CSV to point at a local copy to run this suite.
-  const templates = existsSync(REAL_ROSTER) ? listActiveTemplates(makeTestDb()) : [];
-  const decoded: DecodeResult = existsSync(REAL_ROSTER)
-    ? decodeRoster(parseRosterCsv(readFileSync(REAL_ROSTER, "utf8")), templates)
-    : { perPerson: [], unknowns: [], proposedHolidays: [] };
-  const person = (name: string) => decoded.perPerson.find((p) => p.name === name)!;
-
-  it("reads the real June file: 30 dates, 26 people, BOM stripped", () => {
-    const parsed = parseRosterCsv(readFileSync(REAL_ROSTER, "utf8"));
-    expect(parsed.dates).toHaveLength(30);
-    expect(parsed.dates[0]).toBe("2026-06-01");
-    expect(parsed.dates[29]).toBe("2026-06-30");
-    expect(parsed.people).toHaveLength(26);
-    // BOM must be gone — the first name is clean, not "﻿Юдин…".
-    expect(parsed.people[0].name).toBe("Юдин Максим");
-    expect(parsed.people[1].name).toBe("Панов Евгений");
-    expect(parsed.people[0].cells[0]).toEqual({ date: "2026-06-01", code: "otp" });
-    expect(parsed.people[1].cells[0]).toEqual({ date: "2026-06-01", code: "dezh" });
-  });
-
-  it("collapses vacation and business-trip runs into 14 ranged rows total", () => {
-    const absences = decoded.perPerson.flatMap((p) => p.entries.filter((e) => e.start === null));
-    expect(absences).toHaveLength(14); // spec §5: 99 cells -> 14 rows
-
-    const yudin = person("Юдин Максим").entries.find((e) => e.category === "vacation")!;
-    expect(yudin).toMatchObject({ date: "2026-06-01", endDate: "2026-06-14", start: null, end: null, templateId: null });
-
-    const nosov = person("Носов Максим").entries.find((e) => e.category === "business_trip")!;
-    expect(nosov).toMatchObject({ date: "2026-06-01", endDate: "2026-06-07" });
-  });
-
-  it("shortens День on Friday but starts Вечер later without shortening", () => {
-    // 2026-06-05 is a Friday (weekend cells 06/07.06 are Sat/Sun).
-    const efimovFri = person("Дьяков Алексей").entries.find((e) => e.date === "2026-06-05")!;
-    expect(efimovFri).toMatchObject({ category: "shift", title: "День", start: "09:00", end: "16:45" });
-    const korenevFri = person("Лапин Виктор").entries.find((e) => e.date === "2026-06-05")!;
-    expect(korenevFri).toMatchObject({ category: "shift", title: "Вечер", start: "12:00", end: "20:00" });
-  });
-
-  it("maps duty codes to the right presets with their location", () => {
-    const pokl = person("Мишин Илья").entries.find((e) => e.date === "2026-06-01")!;
-    expect(pokl).toMatchObject({ category: "duty", title: "Дежурство · Поклонка", location: "Поклонка", start: "09:00", end: "18:00" });
-    const phone = person("Панов Евгений").entries.find((e) => e.date === "2026-06-01")!;
-    expect(phone).toMatchObject({ category: "duty", title: "Дежурство · Телефон", start: "09:00", end: "18:00" });
-  });
-
-  it("reports the single undecodable cell and records nothing for it", () => {
-    expect(decoded.unknowns).toEqual([{ name: "Хохлов Дмитрий", date: "2026-06-03", code: "Нет" }]);
-    expect(person("Хохлов Дмитрий").entries.some((e) => e.date === "2026-06-03")).toBe(false);
-  });
-
-  it("proposes exactly the 9 non-working days, incl. the 12 June holiday", () => {
-    expect(decoded.proposedHolidays).toHaveLength(9);
-    expect(decoded.proposedHolidays).toContain("2026-06-12");
-    expect(decoded.proposedHolidays).toContain("2026-06-06"); // a Saturday
   });
 });

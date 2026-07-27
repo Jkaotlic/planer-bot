@@ -7,6 +7,9 @@ import type {
   NewEntryInput,
   NewSlotInput,
   PayrollRow,
+  RosterImportPreview,
+  RosterImportSummary,
+  RosterPersonResolution,
   Shift,
   Template,
   VacantSlot,
@@ -348,4 +351,74 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
 export async function mockGetRosterCsv(_from: string, _to: string): Promise<string> {
   await delay(200);
   return ";01.06.2026\nМок Пользователь;k32";
+}
+
+const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);
+
+function mockIsoDate(value: string): string {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
+  if (!match) throw new Error(`Некорректная дата в CSV: ${value}`);
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+export async function mockPreviewRosterImport(csv: string): Promise<RosterImportPreview> {
+  await delay(220);
+  const lines = csv.replace(/^﻿/, "").split(/\r\n|\r|\n/).filter(Boolean);
+  const header = lines[0]?.split(";") ?? [];
+  const dates = header.slice(1).map(mockIsoDate);
+  if (dates.length === 0) throw new Error("В CSV нет дат");
+  const people = lines.slice(1).map((line) => {
+    const cells = line.split(";");
+    return { name: cells[0]?.trim() ?? "", codes: cells.slice(1) };
+  });
+  const unknowns = people.flatMap((person) =>
+    person.codes.flatMap((code, index) =>
+      code && !MOCK_ROSTER_CODES.has(code)
+        ? [{ name: person.name, date: dates[index] ?? dates[0]!, code }]
+        : [],
+    ),
+  );
+  if (unknowns.length > 0) throw new Error(`Неизвестный код смены: ${unknowns[0]!.code}`);
+  return {
+    from: dates[0]!,
+    to: dates.at(-1)!,
+    entryCount: people.reduce(
+      (sum, person) => sum + person.codes.filter((code) => code && code !== "holiday").length,
+      0,
+    ),
+    people: people.map((person) => ({
+      csvName: person.name,
+      suggestedEmployeeId: EMPLOYEES.find((employee) => employee.isActive && employee.displayName === person.name)?.id ?? null,
+    })),
+    unknowns: [],
+  };
+}
+
+export async function mockApplyRosterImport(
+  csv: string,
+  resolutions: RosterPersonResolution[],
+): Promise<RosterImportSummary> {
+  const preview = await mockPreviewRosterImport(csv);
+  await delay(250);
+  for (const resolution of resolutions) {
+    if (resolution.action === "rename") {
+      const employee = EMPLOYEES.find((item) => item.id === resolution.employeeId);
+      if (employee) employee.displayName = resolution.csvName;
+    } else {
+      const id = Math.max(0, ...EMPLOYEES.map((employee) => employee.id)) + 1;
+      EMPLOYEES.push({
+        id,
+        displayName: resolution.csvName,
+        isAdmin: false,
+        isActive: true,
+        telegramUserId: null,
+      });
+    }
+  }
+  return {
+    employeesRenamed: resolutions.filter((item) => item.action === "rename").length,
+    employeesCreated: resolutions.filter((item) => item.action === "create").length,
+    entriesInserted: preview.entryCount,
+    unknowns: [],
+  };
 }

@@ -23,8 +23,8 @@ const templates = [
 ] as const satisfies ReadonlyArray<Pick<Template, "id" | "name" | "accent" | "sortOrder">>;
 
 const employees = [
-  { id: 20, displayName: "Шилов Дмитрий", rosterOrder: 0 },
-  { id: 10, displayName: "Юдин Максим", rosterOrder: 1 },
+  { id: 20, displayName: "Орлов Дмитрий", rosterOrder: 0 },
+  { id: 10, displayName: "Соколов Максим", rosterOrder: 1 },
   { id: 30, displayName: "Без Смены", rosterOrder: 2 },
 ];
 
@@ -79,7 +79,7 @@ describe("team schedule model", () => {
     expect(model.workingCount).toBe(2);
     expect(model.absentCount).toBe(1);
     expect(model.groups[2]?.people.map((person) => person.displayName)).toEqual([
-      "Шилов Дмитрий",
+      "Орлов Дмитрий",
       "Не назначено",
     ]);
   });
@@ -135,8 +135,8 @@ describe("team schedule model", () => {
       "2026-08-02",
     ]);
     expect(model.rows.map((row) => row.displayName)).toEqual([
-      "Шилов Дмитрий",
-      "Юдин Максим",
+      "Орлов Дмитрий",
+      "Соколов Максим",
       "Без Смены",
       "Не назначено",
     ]);
@@ -167,8 +167,8 @@ describe("team schedule model", () => {
   });
 
   it("splits surname from the remaining name and calculates exact ranges", () => {
-    expect(splitDisplayName("Юдин Максим Сергеевич")).toEqual({
-      surname: "Юдин",
+    expect(splitDisplayName("Соколов Максим Сергеевич")).toEqual({
+      surname: "Соколов",
       rest: "Максим Сергеевич",
     });
     expect(teamRange("today", "2026-08-01")).toEqual({ from: "2026-08-01", to: "2026-08-01" });
