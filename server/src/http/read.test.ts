@@ -54,9 +54,12 @@ describe("read endpoints", () => {
     const db = makeTestDb();
     const late = worker(db, "Без порядка", 333);
     const second = worker(db, "Вторая", 444);
+    const tied = worker(db, "Равная", 445);
     const first = worker(db, "Первая", 555);
+    const laterNull = worker(db, "Ещё без порядка", 556);
     const archived = worker(db, "Архив", 666);
     db.update(employees).set({ rosterOrder: 1 }).where(eq(employees.id, second.id)).run();
+    db.update(employees).set({ rosterOrder: 1 }).where(eq(employees.id, tied.id)).run();
     db.update(employees).set({ rosterOrder: 0 }).where(eq(employees.id, first.id)).run();
     db.update(employees).set({ isActive: false }).where(eq(employees.id, archived.id)).run();
 
@@ -81,7 +84,9 @@ describe("read endpoints", () => {
     expect(body.employees).toEqual([
       { id: first.id, displayName: "Первая", rosterOrder: 0 },
       { id: second.id, displayName: "Вторая", rosterOrder: 1 },
+      { id: tied.id, displayName: "Равная", rosterOrder: 1 },
       { id: late.id, displayName: "Без порядка", rosterOrder: null },
+      { id: laterNull.id, displayName: "Ещё без порядка", rosterOrder: null },
     ]);
     expect(body.shifts).toHaveLength(2);
     expect(body.shifts.some((shift: { employeeId: number | null }) => shift.employeeId === null)).toBe(true);

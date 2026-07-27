@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
@@ -114,6 +114,7 @@ describe("runReminderTick", () => {
   });
 
   it("does not record a reminder when the send fails, and retries on the next tick", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 111);
     const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
@@ -126,17 +127,27 @@ describe("runReminderTick", () => {
       return { ok: true, result: {} } as any;
     });
 
-    const failedCount = await runReminderTick(db, failingBot, { date: TODAY, time: "20:30" });
+    try {
+      const failedCount = await runReminderTick(db, failingBot, { date: TODAY, time: "20:30" });
 
-    expect(failedCount).toBe(0);
-    expect(hasReminder(db, shift.id, "evening_before")).toBe(false);
+      expect(failedCount).toBe(0);
+      expect(hasReminder(db, shift.id, "evening_before")).toBe(false);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith(
+        "notifyUser: failed for 111:",
+        "boom",
+      );
 
-    const { bot, sent } = testBot();
-    const retryCount = await runReminderTick(db, bot, { date: TODAY, time: "20:35" });
+      const { bot, sent } = testBot();
+      const retryCount = await runReminderTick(db, bot, { date: TODAY, time: "20:35" });
 
-    expect(retryCount).toBe(1);
-    expect(sent).toHaveLength(1);
-    expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
+      expect(retryCount).toBe(1);
+      expect(sent).toHaveLength(1);
+      expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("does not remind for a shift happening today (only tomorrow)", async () => {

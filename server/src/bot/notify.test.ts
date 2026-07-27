@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Bot } from "grammy";
 import { notifyUser, notifyAdmins } from "./notify";
 import { makeTestDb } from "../db/testdb";
@@ -59,17 +59,37 @@ describe("notify", () => {
   });
 
   it("notifyAdmins keeps going (and does not throw) when one recipient fails", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const db = makeTestDb();
     admin(db, "Аня", 111);
     admin(db, "Игорь", 222);
     const { bot, sent } = testBotFailing(111);
-    await expect(notifyAdmins(bot, db, "обмен состоялся")).resolves.toBeUndefined();
-    expect(sent.map((s) => s.chat_id)).toEqual([222]);
+    try {
+      await expect(notifyAdmins(bot, db, "обмен состоялся")).resolves.toBeUndefined();
+      expect(sent.map((s) => s.chat_id)).toEqual([222]);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith(
+        "notifyAdmins: failed for 111:",
+        "telegram down",
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("notifyUser swallows a send failure instead of throwing, and reports it via the return value", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { bot } = testBotFailing("all");
-    await expect(notifyUser(bot, 999, "x")).resolves.toBe(false);
+    try {
+      await expect(notifyUser(bot, 999, "x")).resolves.toBe(false);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith(
+        "notifyUser: failed for 999:",
+        "telegram down",
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("notifyAdmins does not message an archived (inactive) admin", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
@@ -126,6 +126,7 @@ describe("bot /start", () => {
   });
 
   it("keeps running when a reply fails (error boundary)", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const db = makeTestDb();
     createEmployee(db, { displayName: "Игорь", inviteToken: "tok-1" });
     const bot = createBot({ db, config });
@@ -143,9 +144,18 @@ describe("bot /start", () => {
     // it here so the test proves what actually matters: polling survives a
     // per-update failure instead of stopping.
     const pollingEntryPoint = bot as unknown as { handleUpdates(updates: unknown[]): Promise<void> };
-    await expect(
-      pollingEntryPoint.handleUpdates([startUpdate(333, "/start tok-1")])
-    ).resolves.toBeUndefined();
+    try {
+      await expect(
+        pollingEntryPoint.handleUpdates([startUpdate(333, "/start tok-1")])
+      ).resolves.toBeUndefined();
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith(
+        "bot handler error (update 1):",
+        "telegram down",
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });
 

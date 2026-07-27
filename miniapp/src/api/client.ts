@@ -442,7 +442,7 @@ async function fetchSwaps(): Promise<SwapRequest[]> {
   return swaps.map(toSwapRequest);
 }
 
-const realClient: ApiClient = {
+export const realClient: ApiClient = {
   getMe: () => authorizedGet<Me>("/api/me"),
 
   async getMyShifts(from) {
