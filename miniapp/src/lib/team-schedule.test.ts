@@ -4,6 +4,7 @@ import {
   applyTeamScreenLoadResult,
   beginTeamScreenLoad,
   buildTodayModel,
+  buildWeekLegend,
   buildWeekModel,
   createLatestRequestGate,
   createTeamScreenState,
@@ -575,5 +576,80 @@ describe("team schedule model", () => {
       outcome: "accepted",
       schedule,
     });
+  });
+});
+
+describe("buildWeekLegend", () => {
+  const MONDAY = "2026-07-27";
+
+  /** A schedule with one entry per person, so every cell's primary is that entry. */
+  const scheduleOf = (shifts: Shift[]): TeamSchedule => ({
+    employees: [...new Set(shifts.map((s) => s.employeeId))].map((id, index) => ({
+      id: id as number,
+      displayName: `Человек ${index + 1}`,
+      rosterOrder: index,
+    })),
+    shifts,
+  });
+
+  const shift = (over: Partial<Shift> & Pick<Shift, "id" | "employeeId" | "date">): Shift => ({
+    start: "09:00", end: "18:00", endDate: null, category: "shift",
+    title: "День", templateId: 2, location: null, ...over,
+  } as Shift);
+
+  it("names every letter the grid drew, and nothing else", () => {
+    const model = buildWeekModel(MONDAY, scheduleOf([
+      shift({ id: 1, employeeId: 1, date: MONDAY }),
+      shift({ id: 2, employeeId: 2, date: MONDAY, templateId: 1, title: "Утро", start: "08:00", end: "17:00" }),
+    ]), templates);
+
+    const legend = buildWeekLegend(model);
+    // Ordered by label, ru-collated: «День» before «Утро».
+    expect(legend.map((i) => `${i.code}=${i.label}`)).toEqual(["С=День", "У=Утро"]);
+    // Presets nobody worked this week must not appear.
+    expect(legend.some((i) => i.label === "Ночь")).toBe(false);
+  });
+
+  it("carries the same colours the cells use", () => {
+    const model = buildWeekModel(MONDAY, scheduleOf([shift({ id: 1, employeeId: 1, date: MONDAY })]), templates);
+    const [item] = buildWeekLegend(model);
+    const cell = model.rows[0]!.cells[0]!;
+    expect(item!.palette).toEqual(cell.primary!.palette);
+  });
+
+  it("lists a letter once however many people worked it", () => {
+    const model = buildWeekModel(MONDAY, scheduleOf([
+      shift({ id: 1, employeeId: 1, date: MONDAY }),
+      shift({ id: 2, employeeId: 2, date: MONDAY }),
+      shift({ id: 3, employeeId: 3, date: "2026-07-28" }),
+    ]), templates);
+    expect(buildWeekLegend(model)).toHaveLength(1);
+  });
+
+  it("keeps presetless entries apart: one line per colour, not one per «•»", () => {
+    // Both fall back to «•», but they are coloured by category, so merging them
+    // into a single key would show one swatch standing for two different squares.
+    const model = buildWeekModel(MONDAY, scheduleOf([
+      shift({ id: 1, employeeId: 1, date: MONDAY, templateId: null, category: "offsite", title: "Ярмарка" }),
+      shift({ id: 2, employeeId: 2, date: MONDAY, templateId: null, category: "sick_leave", title: "Больничный", start: null, end: null }),
+    ]), templates);
+
+    const legend = buildWeekLegend(model);
+    expect(legend).toHaveLength(2);
+    expect(legend.every((i) => i.code === "•")).toBe(true);
+    expect(legend.map((i) => i.category).sort()).toEqual(["offsite", "sick_leave"]);
+    expect(legend.map((i) => i.label).sort()).toEqual(["Больничный", "Ярмарка"]);
+  });
+
+  it("puts the presetless catch-all last", () => {
+    const model = buildWeekModel(MONDAY, scheduleOf([
+      shift({ id: 1, employeeId: 1, date: MONDAY, templateId: null, category: "offsite", title: "Ярмарка" }),
+      shift({ id: 2, employeeId: 2, date: MONDAY }),
+    ]), templates);
+    expect(buildWeekLegend(model).map((i) => i.code)).toEqual(["С", "•"]);
+  });
+
+  it("is empty for a week with nothing in it", () => {
+    expect(buildWeekLegend(buildWeekModel(MONDAY, scheduleOf([]), templates))).toEqual([]);
   });
 });
