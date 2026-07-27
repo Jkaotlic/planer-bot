@@ -317,9 +317,10 @@ export function teamModeLoadTarget(
   requestedMode: TeamMode,
 ): TeamModeLoadTarget | null {
   const activeMode = state.loading ? state.targetMode : state.displayMode;
+  const activeDate = state.loading ? state.targetDate : state.displayDate;
   return requestedMode === activeMode
     ? null
-    : { mode: requestedMode, date: state.displayDate };
+    : { mode: requestedMode, date: activeDate };
 }
 
 export function teamTabFocusMode(

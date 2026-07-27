@@ -380,6 +380,25 @@ describe("team schedule model", () => {
     expect(teamTabFocusMode(state, "today")).toBe("week");
   });
 
+  it("preserves a pending navigation date when replacing its mode and uses the display date while idle", () => {
+    const idle = createTeamScreenState("2026-07-27");
+    expect(teamModeLoadTarget(idle, "week")).toEqual({
+      mode: "week",
+      date: "2026-07-27",
+    });
+
+    const pending = beginTeamScreenLoad(idle, "today", "2026-07-28");
+    const weekTarget = teamModeLoadTarget(pending, "week");
+    expect(weekTarget).toEqual({
+      mode: "week",
+      date: "2026-07-28",
+    });
+    expect(teamRange(weekTarget!.mode, weekTarget!.date)).toEqual({
+      from: "2026-07-27",
+      to: "2026-08-02",
+    });
+  });
+
   it("lets a mode change supersede an in-flight target without stale completion clearing it", async () => {
     let state = createTeamScreenState("2026-07-27");
     state = beginTeamScreenLoad(state, "today", "2026-07-27");
