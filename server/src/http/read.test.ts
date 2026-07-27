@@ -6,6 +6,8 @@ import { createShift } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
+import { employees } from "../db/schema";
+import { eq } from "drizzle-orm";
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -48,16 +50,64 @@ describe("read endpoints", () => {
     expect((await res.json()).shifts.map((s: { date: string }) => s.date)).toEqual(["2026-07-06"]);
   });
 
-  it("returns the whole team schedule in a range", async () => {
+  it("returns the full active roster in roster order and every overlapping shift", async () => {
     const db = makeTestDb();
-    const a = worker(db, "Аня", 333);
-    const b = worker(db, "Марк", 444);
-    createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", employeeId: a.id });
-    createShift(db, { date: "2026-07-03", start: "11:00", end: "20:00", employeeId: b.id });
+    const late = worker(db, "Без порядка", 333);
+    const second = worker(db, "Вторая", 444);
+    const first = worker(db, "Первая", 555);
+    const archived = worker(db, "Архив", 666);
+    db.update(employees).set({ rosterOrder: 1 }).where(eq(employees.id, second.id)).run();
+    db.update(employees).set({ rosterOrder: 0 }).where(eq(employees.id, first.id)).run();
+    db.update(employees).set({ isActive: false }).where(eq(employees.id, archived.id)).run();
+
+    createShift(db, {
+      date: "2026-06-28",
+      endDate: "2026-07-03",
+      category: "vacation",
+      employeeId: first.id,
+    });
+    createShift(db, {
+      date: "2026-07-02",
+      start: "08:00",
+      end: "17:00",
+      employeeId: null,
+    });
+
     const app = createApp({ db, config });
     const res = await app.request("/api/team/schedule?from=2026-07-01&to=2026-07-07", bearer(await tokenFor(app, 333)));
     expect(res.status).toBe(200);
-    expect((await res.json()).shifts.length).toBe(2);
+
+    const body = await res.json();
+    expect(body.employees).toEqual([
+      { id: first.id, displayName: "Первая", rosterOrder: 0 },
+      { id: second.id, displayName: "Вторая", rosterOrder: 1 },
+      { id: late.id, displayName: "Без порядка", rosterOrder: null },
+    ]);
+    expect(body.shifts).toHaveLength(2);
+    expect(body.shifts.some((shift: { employeeId: number | null }) => shift.employeeId === null)).toBe(true);
+    expect(body.shifts.some((shift: { date: string }) => shift.date === "2026-06-28")).toBe(true);
+  });
+
+  it.each([
+    ["/api/team/schedule?from=nope&to=2026-07-07", 400],
+    ["/api/team/schedule?from=2026-07-08&to=2026-07-07", 400],
+    ["/api/team/schedule?from=2026-07-01&to=2026-08-01", 400],
+  ])("rejects invalid team range %s", async (path, status) => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    expect((await app.request(path, bearer(await tokenFor(app, 333)))).status).toBe(status);
+  });
+
+  it("accepts an inclusive 31-day team range", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request(
+      "/api/team/schedule?from=2026-07-01&to=2026-07-31",
+      bearer(await tokenFor(app, 333)),
+    );
+    expect(res.status).toBe(200);
   });
 
   it("gates /api/admin/employees to admins", async () => {
