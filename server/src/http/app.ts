@@ -7,7 +7,7 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { listActiveTemplates } from "../repo/templates";
-import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange } from "../repo/shifts";
+import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
 import type { Shift } from "../db/schema";
 import {
   getByTelegramId,
@@ -15,6 +15,7 @@ import {
   createAdminEmployee,
   createEmployee,
   listActive,
+  listActiveInRosterOrder,
   archiveEmployee,
   restoreEmployee,
   setEmployeeAdmin,
@@ -122,7 +123,23 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
-    return c.json({ shifts: listShiftsInRange(db, from, to) });
+    if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success) {
+      return c.json({ error: "from and to must be valid YYYY-MM-DD dates" }, 400);
+    }
+    if (from > to) return c.json({ error: "from must not be after to" }, 400);
+    if (dayNumber(to) - dayNumber(from) > 30) {
+      return c.json({ error: "the range must span at most 31 days" }, 400);
+    }
+
+    const employees = listActiveInRosterOrder(db).map((employee) => ({
+      id: employee.id,
+      displayName: employee.displayName,
+      rosterOrder: employee.rosterOrder,
+    }));
+    return c.json({
+      employees,
+      shifts: listShiftsOverlapping(db, from, to),
+    });
   });
 
   app.get("/api/employees", requireAuth(db, config.jwtSecret), (c) =>

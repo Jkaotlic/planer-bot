@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull } from "drizzle-orm";
+import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, type Employee } from "../db/schema";
 
@@ -30,6 +30,19 @@ export function getByTelegramId(db: Db, telegramUserId: number): Employee | unde
 
 export function listActive(db: Db): Employee[] {
   return db.select().from(employees).where(eq(employees.isActive, true)).all();
+}
+
+export function listActiveInRosterOrder(db: Db): Employee[] {
+  return db
+    .select()
+    .from(employees)
+    .where(eq(employees.isActive, true))
+    .orderBy(
+      sql`case when ${employees.rosterOrder} is null then 1 else 0 end`,
+      employees.rosterOrder,
+      employees.id,
+    )
+    .all();
 }
 
 export function createAdminEmployee(
