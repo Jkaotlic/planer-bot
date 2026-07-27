@@ -190,7 +190,7 @@ export function App() {
       {tab === "mine" && (
         <MyShiftsScreen me={data.me} shifts={data.myShifts} templates={data.templates} onProposeSwap={setProposingFor} />
       )}
-      {tab === "team" && <TeamScreen shifts={data.teamShifts} templates={data.templates} />}
+      {tab === "team" && <TeamScreen templates={data.templates} />}
       {tab === "swaps" && (
         <SwapsScreen
           swaps={data.swaps}

@@ -139,6 +139,17 @@ describe("team schedule model", () => {
     expect(teamRange("week", "2026-08-01")).toEqual({ from: "2026-07-27", to: "2026-08-02" });
   });
 
+  it("moves Today by one day and Week by seven days through the existing date helpers", () => {
+    expect(teamRange("today", "2026-07-28")).toEqual({
+      from: "2026-07-28",
+      to: "2026-07-28",
+    });
+    expect(teamRange("week", "2026-08-03")).toEqual({
+      from: "2026-08-03",
+      to: "2026-08-09",
+    });
+  });
+
   it("distinguishes stale success from stale failure while both remain ignorable by status", async () => {
     const gate = createLatestRequestGate();
     let resolveOldSuccess!: (value: TeamSchedule) => void;

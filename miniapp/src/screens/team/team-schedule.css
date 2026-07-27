@@ -1,0 +1,101 @@
+.team-screen {
+  min-width: 0;
+}
+
+.team-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--tgui--secondary_bg_color);
+}
+
+.team-switcher__button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--tgui--hint_color);
+  background: transparent;
+  font: inherit;
+}
+
+.team-switcher__button.is-active {
+  color: var(--tgui--text_color);
+  background: var(--tgui--bg_color);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
+.team-range-nav {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  text-align: center;
+}
+
+.team-range-nav button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--tgui--link_color);
+  background: var(--tgui--secondary_bg_color);
+  font-size: 28px;
+}
+
+.team-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.team-summary span,
+.team-group {
+  background: var(--tgui--secondary_bg_color);
+  border-radius: 14px;
+}
+
+.team-summary span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+}
+
+.team-group {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.team-group__body {
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.team-group__heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.team-group__people {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.team-no-time {
+  margin-top: 18px;
+}
+
+.team-empty,
+.team-error {
+  display: grid;
+  gap: 8px;
+  padding: 18px 12px;
+  text-align: center;
+}
