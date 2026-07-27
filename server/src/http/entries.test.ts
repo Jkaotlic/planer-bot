@@ -3,6 +3,7 @@ import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { getShift } from "../repo/shifts";
+import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 
@@ -18,6 +19,81 @@ const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>
   }))).json()).token as string;
 const authedJson = (t: string, body: unknown, method = "POST") => ({
   method, headers: { Authorization: `Bearer ${t}`, "content-type": "application/json" }, body: JSON.stringify(body),
+});
+
+describe("schedule edits are auditable", () => {
+  const FRIDAY = "2026-07-10";
+
+  it("records who created, changed and deleted an entry, and what changed", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const adminId = (await (await app.request("/api/me", { headers: { Authorization: `Bearer ${admin}` } })).json()).id as number;
+
+    const created = await app.request(
+      "/api/admin/entries",
+      authedJson(admin, { date: FRIDAY, category: "shift", start: "09:00", end: "18:00", title: "День", employeeId: anya.id }),
+    );
+    const id = (await created.json()).entry.id as number;
+
+    await app.request(`/api/admin/entries/${id}`, authedJson(admin, { start: "11:00", end: "20:00", title: "Вечер" }, "PATCH"));
+    await app.request(`/api/admin/entries/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${admin}` } });
+
+    const events = listRecentAudit(db, 10);
+    expect(events.map((e) => e.type)).toEqual(["entry_deleted", "entry_updated", "entry_created"]);
+    expect(events.every((e) => e.actorEmployeeId === adminId)).toBe(true);
+
+    const updated = events.find((e) => e.type === "entry_updated")!.payload as {
+      before: { title: string; start: string }; after: { title: string; start: string };
+    };
+    expect(updated.before).toMatchObject({ title: "День", start: "09:00" });
+    expect(updated.after).toMatchObject({ title: "Вечер", start: "11:00" });
+
+    const deleted = events.find((e) => e.type === "entry_deleted")!.payload as { entryId: number; title: string };
+    expect(deleted).toMatchObject({ entryId: id, title: "Вечер" });
+  });
+
+  it("logs nothing when the edit was rejected", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    // Missing 'end' — createEntrySchema rejects it, so no row and no audit line.
+    const res = await app.request("/api/admin/entries", authedJson(admin, { date: FRIDAY, category: "shift", start: "09:00" }));
+    expect(res.status).toBe(400);
+    expect(listRecentAudit(db, 10)).toHaveLength(0);
+
+    const missing = await app.request("/api/admin/entries/999", { method: "DELETE", headers: { Authorization: `Bearer ${admin}` } });
+    expect(missing.status).toBe(404);
+    expect(listRecentAudit(db, 10)).toHaveLength(0);
+  });
+});
+
+describe("admin ranged reports validate their span", () => {
+  it("rejects malformed and reversed date ranges", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const auth = { headers: { Authorization: `Bearer ${admin}` } };
+
+    expect((await app.request("/api/admin/weekend/payroll?from=nope&to=2026-07-31", auth)).status).toBe(400);
+    expect((await app.request("/api/admin/weekend/payroll?from=2026-07-31&to=2026-07-01", auth)).status).toBe(400);
+    expect((await app.request("/api/admin/weekend/payroll.csv?from=2026-02-30&to=2026-07-31", auth)).status).toBe(400);
+    expect((await app.request("/api/admin/weekend/payroll?from=2020-01-01&to=2026-12-31", auth)).status).toBe(400);
+    expect((await app.request("/api/admin/weekend/payroll?from=2026-07-01&to=2026-07-31", auth)).status).toBe(200);
+  });
+
+  it("rejects a distribute call with a bad or unbounded range", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "07/01/2026", to: "2026-07-31" }))).status).toBe(400);
+    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-31", to: "2026-07-01" }))).status).toBe(400);
+    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "2020-01-01", to: "2026-12-31" }))).status).toBe(400);
+    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-01", to: "2026-07-31" }))).status).toBe(200);
+  });
 });
 
 describe("admin entry endpoints", () => {

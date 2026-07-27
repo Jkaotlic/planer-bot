@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Daily online backup of the SQLite database.
+
+  A SYSTEM LaunchDaemon, not a user LaunchAgent, for the same reason the server is:
+  this Mac has no auto-login, so it sits at the login screen after a reboot and a
+  LaunchAgent would never fire. `UserName` keeps the job running as the account that
+  owns the files.
+
+  Install (needs admin rights):
+    sudo cp ops/com.planerbot.backup.plist /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/com.planerbot.backup.plist
+    sudo chmod 644 /Library/LaunchDaemons/com.planerbot.backup.plist
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.planerbot.backup.plist
+
+  Run once, now:     sudo launchctl kickstart -k system/com.planerbot.backup
+  Status:            sudo launchctl print system/com.planerbot.backup
+  Stop:              sudo launchctl bootout system/com.planerbot.backup
+  Log:               ~/planer-bot-backup.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.planerbot.backup</string>
+
+    <key>UserName</key>
+    <string>user</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/user/planer-bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/user/planer-bot/ops/backup-db.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/user</string>
+        <key>PLANER_BACKUP_DIR</key>
+        <string>/Users/user/planer-bot-backups</string>
+        <key>PLANER_BACKUP_KEEP</key>
+        <string>30</string>
+    </dict>
+
+    <!-- 04:30 daily: after the 20:00 reminder window, long before anyone opens the app. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <!-- If the Mac was asleep at 04:30, launchd runs the job once it wakes. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/user/planer-bot-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/user/planer-bot-backup.log</string>
+</dict>
+</plist>

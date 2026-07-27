@@ -37,6 +37,23 @@ describe("parseRosterCsv", () => {
     expect(parsed.people[0]?.cells).toEqual([{ date: "2026-08-01", code: "k32" }]);
   });
 
+  it("rejects a row with fewer cells than the header has dates", () => {
+    // Header carries 3 dates; Пётр's row stops after one. Padding it out silently
+    // would import the two missing days as "не работает" — invented data.
+    const text = ";01.08.2026;02.08.2026;03.08.2026\nИван;k32;k32;k32\nПётр;k32";
+    expect(() => parseRosterCsv(text)).toThrow(/Пётр.*3.*1|Пётр/);
+  });
+
+  it("rejects a row with more cells than the header has dates", () => {
+    const text = ";01.08.2026;02.08.2026\nИван;k32;k32;k32";
+    expect(() => parseRosterCsv(text)).toThrow(/Иван/);
+  });
+
+  it("names the offending row so the admin can find it in Excel", () => {
+    const text = ";01.08.2026;02.08.2026\nИван;k32;k32\nПётр;k32";
+    expect(() => parseRosterCsv(text)).toThrow(/строка 3/);
+  });
+
   it("parses the synthetic fixture: 8 dates, 6 people, BOM stripped", () => {
     const parsed = parseRosterCsv(FIXTURE);
     expect(parsed.dates).toEqual([
@@ -119,11 +136,21 @@ describe("CODE_TO_PRESET_NAME stays resolvable (Stage 3 preset-editor guard)", (
 });
 
 describe("UNENCODABLE_CODE ('?') round-trip closure", () => {
-  it("a '?' cell decodes to a reported unknown, not an entry", () => {
+  // '?' is what the export writes for a covering entry the roster vocabulary can't
+  // express (weekend work, a one-off custom time). Re-importing that file must not
+  // be blocked by it: '?' means "there is something here — leave it alone".
+  it("a '?' cell is preserved, not reported as an unknown code", () => {
     const text = "﻿;01.06.2026\r\nИван;?";
     const decoded = decodeRoster(parseRosterCsv(text), listActiveTemplates(makeTestDb()));
-    expect(decoded.unknowns).toEqual([{ name: "Иван", date: "2026-06-01", code: "?" }]);
+    expect(decoded.unknowns).toEqual([]);
+    expect(decoded.preserved).toEqual([{ name: "Иван", date: "2026-06-01" }]);
     expect(decoded.perPerson).toEqual([{ name: "Иван", entries: [] }]);
+  });
+
+  it("a '?' day counts as worked, so it is never proposed as a holiday", () => {
+    const text = "﻿;01.06.2026;02.06.2026\r\nИван;?;holiday";
+    const decoded = decodeRoster(parseRosterCsv(text), listActiveTemplates(makeTestDb()));
+    expect(decoded.proposedHolidays).toEqual(["2026-06-02"]);
   });
 });
 

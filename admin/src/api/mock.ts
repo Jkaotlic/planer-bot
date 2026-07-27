@@ -15,6 +15,7 @@ import type {
   VacantSlot,
 } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
+import { inviteLinkFor } from "../lib/bot";
 
 /**
  * Realistic sample data for local development (see `client.ts`: every
@@ -224,7 +225,7 @@ export async function mockGetEmployeeInvite(id: number, regenerate = false): Pro
   await delay(150);
   const seed = `${id}-${regenerate ? "regen" : "keep"}`;
   const inviteToken = seed.padEnd(12, "0").slice(0, 12);
-  return { inviteToken, inviteLink: `https://t.me/your_bot_username?start=${inviteToken}` };
+  return { inviteToken, inviteLink: inviteLinkFor(inviteToken) };
 }
 
 /**
@@ -361,29 +362,59 @@ function mockIsoDate(value: string): string {
   return `${match[3]}-${match[2]}-${match[1]}`;
 }
 
-export async function mockPreviewRosterImport(csv: string): Promise<RosterImportPreview> {
-  await delay(220);
+/** What the export writes for an entry the roster vocabulary can't express. On import
+ *  it means "there is something on that day — leave it alone", never "bad code". */
+const MOCK_PRESERVE_CODE = "?";
+
+/** DEV mirror of the server's own rule: only entries the codec can write back are the
+ *  import's to replace. Everything else — weekend work, a one-off custom time, an
+ *  outing with a free-text title — survives an overwrite untouched.
+ *  The server keys on templateId; the DEV fixture predates presets, so key on the
+ *  preset NAME instead, which is what the codec ultimately resolves to anyway. */
+function mockIsEncodable(shift: Shift): boolean {
+  if (shift.category === "vacation" || shift.category === "business_trip") return true;
+  if (shift.category !== "shift" && shift.category !== "duty") return false;
+  return TEMPLATES.some((template) => template.name === shift.title);
+}
+
+function mockParseRoster(csv: string) {
   const lines = csv.replace(/^﻿/, "").split(/\r\n|\r|\n/).filter(Boolean);
   const header = lines[0]?.split(";") ?? [];
   const dates = header.slice(1).map(mockIsoDate);
   if (dates.length === 0) throw new Error("В CSV нет дат");
-  const people = lines.slice(1).map((line) => {
+  const people = lines.slice(1).map((line, index) => {
     const cells = line.split(";");
+    if (cells.length - 1 !== dates.length) {
+      const name = cells[0]?.trim() ?? "";
+      throw new Error(`строка ${index + 2}${name ? ` («${name}»)` : ""}: ${cells.length - 1} клеток, а в шапке ${dates.length} дат`);
+    }
     return { name: cells[0]?.trim() ?? "", codes: cells.slice(1) };
   });
+  return { dates, people };
+}
+
+export async function mockPreviewRosterImport(csv: string): Promise<RosterImportPreview> {
+  await delay(220);
+  const { dates, people } = mockParseRoster(csv);
   const unknowns = people.flatMap((person) =>
     person.codes.flatMap((code, index) =>
-      code && !MOCK_ROSTER_CODES.has(code)
+      code && code !== MOCK_PRESERVE_CODE && !MOCK_ROSTER_CODES.has(code)
         ? [{ name: person.name, date: dates[index] ?? dates[0]!, code }]
         : [],
     ),
   );
-  if (unknowns.length > 0) throw new Error(`Неизвестный код смены: ${unknowns[0]!.code}`);
+  if (unknowns.length > 0) {
+    const [y, m, d] = (unknowns[0]!.date).split("-");
+    throw new Error(`Не понял коды в файле: ${unknowns[0]!.name}, ${d}.${m}.${y} — «${unknowns[0]!.code}».`);
+  }
+  const from = dates[0]!;
+  const to = dates.at(-1)!;
   return {
-    from: dates[0]!,
-    to: dates.at(-1)!,
+    from,
+    to,
     entryCount: people.reduce(
-      (sum, person) => sum + person.codes.filter((code) => code && code !== "holiday").length,
+      (sum, person) =>
+        sum + person.codes.filter((code) => code && code !== "holiday" && code !== MOCK_PRESERVE_CODE).length,
       0,
     ),
     people: people.map((person) => ({
@@ -391,15 +422,39 @@ export async function mockPreviewRosterImport(csv: string): Promise<RosterImport
       suggestedEmployeeId: EMPLOYEES.find((employee) => employee.isActive && employee.displayName === person.name)?.id ?? null,
     })),
     unknowns: [],
+    preservedCount: people.reduce(
+      (sum, person) => sum + person.codes.filter((code) => code === MOCK_PRESERVE_CODE).length,
+      0,
+    ),
+    existingCount: ENTRIES.filter((s) => overlapsRange(s, from, to)).length,
   };
 }
 
 export async function mockApplyRosterImport(
   csv: string,
   resolutions: RosterPersonResolution[],
+  overwrite = false,
 ): Promise<RosterImportSummary> {
   const preview = await mockPreviewRosterImport(csv);
   await delay(250);
+  if (preview.existingCount > 0 && !overwrite) {
+    throw new Error(
+      `За ${preview.from}..${preview.to} в базе уже есть ${preview.existingCount} записей. ` +
+        `Отметьте «перезаписать период», чтобы заменить их.`,
+    );
+  }
+
+  let entriesDeleted = 0;
+  if (overwrite) {
+    for (let i = ENTRIES.length - 1; i >= 0; i--) {
+      const shift = ENTRIES[i]!;
+      if (overlapsRange(shift, preview.from, preview.to) && mockIsEncodable(shift)) {
+        ENTRIES.splice(i, 1);
+        entriesDeleted++;
+      }
+    }
+  }
+
   for (const resolution of resolutions) {
     if (resolution.action === "rename") {
       const employee = EMPLOYEES.find((item) => item.id === resolution.employeeId);
@@ -419,6 +474,8 @@ export async function mockApplyRosterImport(
     employeesRenamed: resolutions.filter((item) => item.action === "rename").length,
     employeesCreated: resolutions.filter((item) => item.action === "create").length,
     entriesInserted: preview.entryCount,
+    entriesDeleted,
+    cellsPreserved: preview.preservedCount,
     unknowns: [],
   };
 }

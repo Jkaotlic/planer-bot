@@ -26,7 +26,7 @@ import {
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
-import { listRecentAudit } from "../repo/audit";
+import { listRecentAudit, recordAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
 import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber } from "@planer/shared";
@@ -46,7 +46,7 @@ import {
   myOffers,
 } from "../weekend/weekend-service";
 import { listOpenSlots, getVacantSlot } from "../repo/weekend";
-import { applyRosterImport, buildRosterCsv, type PersonResolution } from "../roster/roster-service";
+import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 
 export interface AppDeps {
@@ -230,10 +230,19 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ events });
   });
 
+  /** The fields worth keeping in the audit feed — enough to answer «что именно поменяли»
+   *  without copying the whole row into the log. */
+  const auditShape = (s: Shift) => ({
+    entryId: s.id, employeeId: s.employeeId, date: s.date, endDate: s.endDate,
+    category: s.category, title: s.title, start: s.start, end: s.end,
+  });
+
   app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
-    return c.json({ entry: createShift(db, parsed.data) }, 201);
+    const entry = createShift(db, parsed.data);
+    recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
+    return c.json({ entry }, 201);
   });
 
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -266,12 +275,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
     const entry = updateShift(db, id, patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
+    recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: auditShape(existing), after: auditShape(entry) });
     return c.json({ entry });
   });
 
   app.delete("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
+    // Read it before it's gone — the feed has to be able to say what was deleted.
+    const existing = getShift(db, id);
     if (!deleteShift(db, id)) return c.json({ error: "not_found" }, 404);
+    if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, auditShape(existing));
     return c.json({ ok: true });
   });
 
@@ -350,12 +363,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ ok: true });
   });
 
+  /** Shared guard for the ranged admin reports: a real calendar range, in order, and
+   *  bounded. Unbounded spans scan the whole table inside the same process that
+   *  long-polls the bot, so a typo could stall every worker's chat. */
+  const rangeError = (from: unknown, to: unknown, maxSpanDays: number): string | null => {
+    if (typeof from !== "string" || typeof to !== "string" || !from || !to) return "from and to are required";
+    if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success) {
+      return "from and to must be valid YYYY-MM-DD dates";
+    }
+    if (from > to) return "from must not be after to";
+    if (dayNumber(to) - dayNumber(from) > maxSpanDays) {
+      return `the range must span at most ${maxSpanDays + 1} days`;
+    }
+    return null;
+  };
+
   app.post("/api/admin/distribute", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { from?: unknown; to?: unknown; apply?: unknown };
-    if (typeof body.from !== "string" || typeof body.to !== "string") {
-      return c.json({ error: "from and to are required" }, 400);
-    }
-    const { assignments } = buildDistribution(db, body.from, body.to);
+    // A quarter is already far beyond how far ahead this team plans.
+    const err = rangeError(body.from, body.to, 92);
+    if (err) return c.json({ error: err }, 400);
+    const { assignments } = buildDistribution(db, body.from as string, body.to as string);
     if (body.apply === true) {
       applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId })));
     }
@@ -482,16 +510,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/admin/weekend/payroll", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
-    if (!from || !to) return c.json({ error: "from and to are required" }, 400);
-    return c.json({ rows: payrollRows(db, from, to) });
+    const err = rangeError(from, to, 366);
+    if (err) return c.json({ error: err }, 400);
+    return c.json({ rows: payrollRows(db, from!, to!) });
   });
 
   // Admin: same payroll as a downloadable CSV (BOM-prefixed for Excel/Cyrillic)
   app.get("/api/admin/weekend/payroll.csv", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
-    if (!from || !to) return c.json({ error: "from and to are required" }, 400);
-    const csv = payrollCsv(payrollRows(db, from, to));
+    const err = rangeError(from, to, 366);
+    if (err) return c.json({ error: err }, 400);
+    const csv = payrollCsv(payrollRows(db, from!, to!));
     c.header("Content-Type", "text/csv; charset=utf-8");
     c.header("Content-Disposition", `attachment; filename="weekend-payroll-${from}_${to}.csv"`);
     return c.body("﻿" + csv);
@@ -515,12 +545,35 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.body("﻿" + csv);
   });
 
+  const MAX_CSV_BYTES = 1_000_000;
+  /** JSON overhead around a 1 MB string (escaping, the wrapper object) — generous, but
+   *  a hard stop long before an upload can buffer the whole process out of memory. */
+  const MAX_UPLOAD_BYTES = 4_000_000;
+
+  /** Refuses an oversized upload from the header alone, BEFORE c.req.json() buffers it.
+   *  This process also long-polls the bot, so one giant body would stall the whole team. */
+  const oversizedUpload = (c: { req: { header(name: string): string | undefined } }): boolean => {
+    const declared = Number(c.req.header("content-length"));
+    return Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES;
+  };
+
+  /** «Игорь Петров, 01.08.2026 — «wat»» — an unknown cell as the admin sees it in Excel. */
+  const describeUnknowns = (unknowns: { name: string; date: string; code: string }[]): string => {
+    const shown = unknowns.slice(0, 5).map((u) => {
+      const [y, m, d] = u.date.split("-");
+      return `${u.name}, ${d}.${m}.${y} — «${u.code}»`;
+    });
+    const rest = unknowns.length - shown.length;
+    return `Не понял коды в файле: ${shown.join("; ")}${rest > 0 ? ` и ещё ${rest}` : ""}. ` +
+      `Исправьте их в файле или уберите эти дни и загрузите снова.`;
+  };
+
   const decodeUploadedRoster = (csv: unknown) => {
     if (typeof csv !== "string" || csv.trim().length === 0) {
       return { ok: false as const, status: 400 as const, body: { error: "csv is required" } };
     }
-    if (new TextEncoder().encode(csv).byteLength > 1_000_000) {
-      return { ok: false as const, status: 413 as const, body: { error: "CSV file must not exceed 1 MB" } };
+    if (new TextEncoder().encode(csv).byteLength > MAX_CSV_BYTES) {
+      return { ok: false as const, status: 413 as const, body: { error: "Файл больше 1 МБ — загрузите месяц отдельно" } };
     }
     try {
       const parsed = parseRosterCsv(csv);
@@ -545,34 +598,46 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: parse and validate an uploaded roster without mutating the database.
   app.post("/api/admin/roster/import/preview", requireAdmin(db, config.jwtSecret), async (c) => {
+    if (oversizedUpload(c)) return c.json({ error: "Файл больше 1 МБ — загрузите месяц отдельно" }, 413);
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
     if (result.decoded.unknowns.length > 0) {
-      return c.json({ error: "unknown_roster_codes", unknowns: result.decoded.unknowns }, 422);
+      return c.json({ error: describeUnknowns(result.decoded.unknowns), unknowns: result.decoded.unknowns }, 422);
     }
+    const from = result.parsed.dates[0]!;
+    const to = result.parsed.dates.at(-1)!;
     const activeByName = new Map(listActive(db).map((employee) => [employee.displayName.trim(), employee.id] as const));
     return c.json({
-      from: result.parsed.dates[0]!,
-      to: result.parsed.dates.at(-1)!,
+      from,
+      to,
       entryCount: result.decoded.perPerson.reduce((sum, person) => sum + person.entries.length, 0),
       people: result.decoded.perPerson.map((person) => ({
         csvName: person.name,
         suggestedEmployeeId: activeByName.get(person.name.trim()) ?? null,
       })),
       unknowns: [],
+      // Cells exported as '?' — real entries the CSV can't express, which the import
+      // will step around rather than recreate.
+      preservedCount: result.decoded.preserved.length,
+      // What the period already holds. Non-zero means applying needs `overwrite`.
+      existingCount: listShiftsOverlapping(db, from, to).length,
     });
   });
 
   // Admin: decode the same file again and apply the explicitly confirmed person map in one transaction.
   app.post("/api/admin/roster/import/apply", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown };
+    if (oversizedUpload(c)) return c.json({ error: "Файл больше 1 МБ — загрузите месяц отдельно" }, 413);
+    const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown; overwrite?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
     if (result.decoded.unknowns.length > 0) {
-      return c.json({ error: "unknown_roster_codes", unknowns: result.decoded.unknowns }, 422);
+      return c.json({ error: describeUnknowns(result.decoded.unknowns), unknowns: result.decoded.unknowns }, 422);
     }
     if (!Array.isArray(body.resolutions)) return c.json({ error: "resolutions are required" }, 400);
+    if (body.overwrite !== undefined && typeof body.overwrite !== "boolean") {
+      return c.json({ error: "overwrite must be a boolean" }, 400);
+    }
 
     const resolutions: PersonResolution[] = [];
     for (const item of body.resolutions) {
@@ -591,9 +656,26 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     try {
-      const summary = applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId);
+      const summary = applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId, {
+        overwrite: body.overwrite === true,
+        // The file's own header dates, not the decoded entries' extent: a month that is
+        // entirely 'holiday' decodes to nothing yet still means "this month is empty".
+        span: { from: result.parsed.dates[0]!, to: result.parsed.dates.at(-1)! },
+      });
       return c.json({ summary }, 201);
     } catch (err) {
+      if (err instanceof RosterImportConflictError) {
+        return c.json(
+          {
+            error: `За ${err.from}..${err.to} в базе уже есть ${err.existingCount} записей. ` +
+              `Отметьте «перезаписать период», чтобы заменить их.`,
+            existingCount: err.existingCount,
+            from: err.from,
+            to: err.to,
+          },
+          409,
+        );
+      }
       return c.json({ error: err instanceof Error ? err.message : "не удалось импортировать CSV" }, 409);
     }
   });

@@ -3,12 +3,18 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archiveEmployee } from "../repo/employees";
 import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
-import { applyRosterImport, buildRosterCsv, type PersonResolution } from "./roster-service";
+import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "./roster-service";
 import type { DecodeResult } from "./roster-codec";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
-  return { perPerson, unknowns: [], proposedHolidays: [] };
+  return { perPerson, unknowns: [], preserved: [], proposedHolidays: [] };
 }
+
+/** A plain timed 'День' entry — the shape the codec both writes and can encode back. */
+const dayShift = (date: string) => ({
+  date, endDate: null, category: "shift" as const, templateId: 2,
+  location: null, start: "09:00", end: "18:00", title: "День",
+});
 
 describe("applyRosterImport", () => {
   it("renames an existing nickname user (keeping Telegram) and creates the rest", () => {
@@ -69,6 +75,119 @@ describe("applyRosterImport", () => {
     // Nothing doubled — the transaction rolled back the second attempt entirely.
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
     expect(listActive(db)).toHaveLength(1);
+  });
+
+  it("reports the conflict as a typed error carrying the count and span", () => {
+    const db = makeTestDb();
+    const decoded = decode([{ name: "Один Человек", entries: [dayShift("2026-06-01")] }]);
+    const resolutions: PersonResolution[] = [{ csvName: "Один Человек", action: "create" }];
+    applyRosterImport(db, decoded, resolutions, null);
+
+    try {
+      applyRosterImport(db, decoded, resolutions, null);
+      expect.unreachable("second import must conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RosterImportConflictError);
+      const conflict = err as RosterImportConflictError;
+      expect(conflict.existingCount).toBe(1);
+      expect(conflict.from).toBe("2026-06-01");
+      expect(conflict.to).toBe("2026-06-01");
+    }
+  });
+
+  it("overwrite replaces the month's encodable entries instead of refusing", () => {
+    const db = makeTestDb();
+    const decoded = decode([{ name: "Один Человек", entries: [dayShift("2026-06-01")] }]);
+    const resolutions: PersonResolution[] = [{ csvName: "Один Человек", action: "create" }];
+    applyRosterImport(db, decoded, resolutions, null);
+    const first = listShiftsInRange(db, "2026-06-01", "2026-06-01");
+    expect(first).toHaveLength(1);
+
+    // Same person, same day, but now an evening shift — the rename path reuses the
+    // employee created by the first import, so nobody is duplicated.
+    const second = decode([{
+      name: "Один Человек",
+      entries: [{ ...dayShift("2026-06-01"), templateId: 4, title: "Вечер", start: "11:00", end: "20:00" }],
+    }]);
+    const summary = applyRosterImport(
+      db, second, [{ csvName: "Один Человек", action: "rename", employeeId: first[0]!.employeeId! }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-01" } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1);
+    expect(summary.entriesInserted).toBe(1);
+    const after = listShiftsInRange(db, "2026-06-01", "2026-06-01");
+    expect(after).toHaveLength(1);
+    expect(after[0]!.title).toBe("Вечер");
+    expect(listActive(db)).toHaveLength(1); // no duplicate person
+  });
+
+  it("overwrite keeps entries the CSV cannot express — weekend work survives a re-import", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Рыночный Игорь" });
+    // A real weekend_work entry (no templateId) — exports as '?', so the CSV can't recreate it.
+    createShift(db, { date: "2026-06-06", start: "10:00", end: "19:00", category: "weekend_work", templateId: null, employeeId: w.id });
+    createShift(db, { ...dayShift("2026-06-01"), employeeId: w.id });
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-30")).toHaveLength(2);
+
+    const decoded = decode([{ name: "Рыночный Игорь", entries: [dayShift("2026-06-02")] }]);
+    const summary = applyRosterImport(
+      db, decoded, [{ csvName: "Рыночный Игорь", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1); // only the encodable 'День' went
+    const after = listShiftsInRange(db, "2026-06-01", "2026-06-30");
+    expect(after.map((s) => s.category).sort()).toEqual(["shift", "weekend_work"]);
+    expect(after.find((s) => s.category === "weekend_work")!.date).toBe("2026-06-06");
+  });
+
+  it("overwrite refuses when an existing range reaches outside the file's span", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Отпускник Олег" });
+    // Vacation 28 May -> 2 June. A June-only file has no authority over May, and
+    // deleting the row would take May with it.
+    createShift(db, { date: "2026-05-28", endDate: "2026-06-02", category: "vacation", employeeId: w.id });
+
+    expect(() => applyRosterImport(
+      db, decode([{ name: "Отпускник Олег", entries: [dayShift("2026-06-10")] }]),
+      [{ csvName: "Отпускник Олег", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+    )).toThrow(/Отпускник Олег.*2026-05-28/);
+
+    // Nothing touched: the vacation is intact and no new entry landed.
+    expect(listShiftsInRange(db, "2026-05-28", "2026-06-30")).toHaveLength(1);
+  });
+
+  it("overwrite records what it removed in the audit trail", () => {
+    const db = makeTestDb();
+    const decoded = decode([{ name: "Один Человек", entries: [dayShift("2026-06-01")] }]);
+    applyRosterImport(db, decoded, [{ csvName: "Один Человек", action: "create" }], null);
+    const employeeId = listActive(db)[0]!.id;
+
+    applyRosterImport(
+      db, decoded, [{ csvName: "Один Человек", action: "rename", employeeId }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-01" } },
+    );
+
+    const imports = listRecentAudit(db, 10).filter((a) => a.type === "roster_import");
+    expect(imports).toHaveLength(2);
+    expect(imports[0]!.payload).toMatchObject({ overwrite: true, entriesDeleted: 1, entriesInserted: 1 });
+  });
+
+  it("an explicit span makes an empty CSV still clear the month it covers", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Пустой Месяц" });
+    createShift(db, { ...dayShift("2026-06-15"), employeeId: w.id });
+
+    const summary = applyRosterImport(
+      db, decode([{ name: "Пустой Месяц", entries: [] }]),
+      [{ csvName: "Пустой Месяц", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1);
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-30")).toHaveLength(0);
   });
 
   it("throws if a rename targets a non-existent employeeId, and writes nothing", () => {

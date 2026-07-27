@@ -18,6 +18,8 @@ import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
+import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
+import { BOT_USERNAME } from "./lib/bot";
 
 interface PanelTarget {
   employeeId: number;
@@ -27,8 +29,11 @@ interface PanelTarget {
 interface RosterImportState {
   fileName: string;
   csv: string;
+  encoding: CsvEncoding;
   preview: RosterImportPreview;
   resolutions: RosterPersonResolution[];
+  /** Explicitly confirmed «заменить то, что уже стоит в этом периоде». */
+  overwrite: boolean;
   busy: boolean;
   error: string | null;
 }
@@ -49,6 +54,27 @@ export function validateRosterResolutions(resolutions: RosterPersonResolution[])
     return "Один сотрудник выбран для нескольких строк CSV";
   }
   return null;
+}
+
+/**
+ * Why «Применить» is blocked, or null when it isn't. An occupied period is not an
+ * error — it just has to be confirmed, because applying will replace what's there.
+ */
+export function rosterImportBlocker(state: Pick<RosterImportState, "preview" | "overwrite" | "resolutions">): string | null {
+  if (state.preview.existingCount > 0 && !state.overwrite) {
+    return `За этот период уже есть ${state.preview.existingCount} записей — отметь «перезаписать», чтобы заменить их`;
+  }
+  return validateRosterResolutions(state.resolutions);
+}
+
+/** "1 запись" / "2 записи" / "5 записей" — the feedback line reads as Russian, not as a log. */
+export function pluralRecords(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return `${count} записей`;
+  if (mod10 === 1) return `${count} запись`;
+  if (mod10 >= 2 && mod10 <= 4) return `${count} записи`;
+  return `${count} записей`;
 }
 
 /** App shell: sidebar nav + top bar + the schedule grid (this task's scope). */
@@ -130,13 +156,18 @@ export function App() {
       return;
     }
     try {
-      const csv = await file.text();
+      // NOT file.text(): that assumes UTF-8, and Excel on Windows still writes
+      // windows-1251. Mojibake ФИО match nobody, so the import would silently
+      // duplicate the whole team instead of updating it.
+      const { text: csv, encoding } = await readCsvFile(file);
       const preview = await apiClient.previewRosterImport(csv);
       setRosterImport({
         fileName: file.name,
         csv,
+        encoding,
         preview,
         resolutions: createInitialRosterResolutions(preview),
+        overwrite: false,
         busy: false,
         error: null,
       });
@@ -162,19 +193,24 @@ export function App() {
 
   async function confirmRosterImport() {
     if (!rosterImport) return;
-    const validationError = validateRosterResolutions(rosterImport.resolutions);
-    if (validationError) {
-      setRosterImport({ ...rosterImport, error: validationError });
+    const blocker = rosterImportBlocker(rosterImport);
+    if (blocker) {
+      setRosterImport({ ...rosterImport, error: blocker });
       return;
     }
     setRosterImport({ ...rosterImport, busy: true, error: null });
     try {
-      const summary = await apiClient.applyRosterImport(rosterImport.csv, rosterImport.resolutions);
+      const summary = await apiClient.applyRosterImport(
+        rosterImport.csv,
+        rosterImport.resolutions,
+        rosterImport.overwrite,
+      );
       setRosterImport(null);
-      setRosterNotice({
-        kind: "success",
-        text: `CSV загружен: ${summary.entriesInserted} записей, новых сотрудников — ${summary.employeesCreated}`,
-      });
+      const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
+      if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
+      if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
+      if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
+      setRosterNotice({ kind: "success", text: `CSV загружен: ${parts.join(", ")}` });
       await Promise.all([
         refreshEmployees(),
         refreshSchedule(),
@@ -348,11 +384,43 @@ export function App() {
 
             <div className="roster-import-summary">
               <span><b>{rosterImport.preview.from}</b> — <b>{rosterImport.preview.to}</b></span>
-              <span>{rosterImport.preview.people.length} сотрудников · {rosterImport.preview.entryCount} записей</span>
+              <span>{rosterImport.preview.people.length} сотрудников · {pluralRecords(rosterImport.preview.entryCount)}</span>
             </div>
             <p className="roster-import-hint">
               Проверь сопоставление ФИО. До нажатия «Применить» база не меняется; импорт выполняется целиком одной транзакцией.
             </p>
+
+            {rosterImport.encoding === "windows-1251" && (
+              <p className="roster-import-hint" role="status">
+                Файл сохранён в windows-1251 (так делает Excel) — прочитал его правильно, но проверь ФИО в списке ниже.
+              </p>
+            )}
+
+            {rosterImport.preview.preservedCount > 0 && (
+              <p className="roster-import-hint">
+                Клеток «?» — {rosterImport.preview.preservedCount}. Это записи, которые CSV не умеет описать (работа в
+                выходной, своё время). Импорт их не тронет.
+              </p>
+            )}
+
+            {rosterImport.preview.existingCount > 0 && (
+              <label className="roster-overwrite">
+                <input
+                  type="checkbox"
+                  checked={rosterImport.overwrite}
+                  disabled={rosterImport.busy}
+                  onChange={(event) =>
+                    setRosterImport((current) =>
+                      current ? { ...current, overwrite: event.target.checked, error: null } : current,
+                    )
+                  }
+                />
+                <span>
+                  За этот период уже есть <b>{pluralRecords(rosterImport.preview.existingCount)}</b>. Перезаписать —
+                  старые записи периода будут удалены и заменены содержимым файла.
+                </span>
+              </label>
+            )}
 
             <div className="roster-reconcile-list">
               {rosterImport.preview.people.map((person, index) => {
@@ -383,8 +451,18 @@ export function App() {
               <button type="button" className="btn btn-secondary" onClick={() => setRosterImport(null)} disabled={rosterImport.busy}>
                 Отмена
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => void confirmRosterImport()} disabled={rosterImport.busy}>
-                {rosterImport.busy ? "Загружаю…" : "Применить CSV"}
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmRosterImport()}
+                disabled={rosterImport.busy || rosterImportBlocker(rosterImport) !== null}
+                title={rosterImportBlocker(rosterImport) ?? undefined}
+              >
+                {rosterImport.busy
+                  ? "Загружаю…"
+                  : rosterImport.overwrite
+                    ? "Перезаписать период"
+                    : "Применить CSV"}
               </button>
             </div>
           </section>
@@ -394,7 +472,6 @@ export function App() {
   );
 }
 
-const BOT_USERNAME = "your_bot_username";
 
 /** Shown when the console has no session — points the admin at the bot's /admin login link. */
 function LoginScreen() {

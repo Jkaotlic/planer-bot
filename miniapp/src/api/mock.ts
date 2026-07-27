@@ -20,6 +20,7 @@ import type {
   WeekendOffer,
 } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
+import { inviteLinkFor } from "../lib/bot";
 
 /**
  * Realistic sample data for local development (see `client.ts`: every
@@ -405,7 +406,7 @@ export async function mockCreateEmployee(name: string): Promise<CreateEmployeeRe
   const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-  return { employee, inviteToken, inviteLink: `https://t.me/your_bot_username?start=${inviteToken}` };
+  return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
 }
 
 export async function mockArchiveEmployee(id: number): Promise<void> {
@@ -435,7 +436,7 @@ export async function mockRenameEmployee(id: number, displayName: string): Promi
 export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
   await delay(150);
   const inviteToken = `${id}-${regenerate ? "regen" : "keep"}`.padEnd(12, "0").slice(0, 12);
-  return { inviteToken, inviteLink: `https://t.me/your_bot_username?start=${inviteToken}` };
+  return { inviteToken, inviteLink: inviteLinkFor(inviteToken) };
 }
 
 // --- Расписание -------------------------------------------------------------

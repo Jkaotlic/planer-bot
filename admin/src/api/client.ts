@@ -175,6 +175,11 @@ export interface RosterImportPreview {
   entryCount: number;
   people: RosterImportPerson[];
   unknowns: RosterUnknownCell[];
+  /** Cells the file marks '?': real entries the CSV can't express, which the import
+   *  steps around instead of recreating (weekend work, one-off custom times). */
+  preservedCount: number;
+  /** How many entries the period already holds. Non-zero means applying needs `overwrite`. */
+  existingCount: number;
 }
 
 export type RosterPersonResolution =
@@ -185,6 +190,8 @@ export interface RosterImportSummary {
   employeesRenamed: number;
   employeesCreated: number;
   entriesInserted: number;
+  entriesDeleted: number;
+  cellsPreserved: number;
   unknowns: RosterUnknownCell[];
 }
 
@@ -211,7 +218,7 @@ export interface ApiClient {
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
-  applyRosterImport(csv: string, resolutions: RosterPersonResolution[]): Promise<RosterImportSummary>;
+  applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
 }
 
 interface EmployeesResponse {
@@ -536,10 +543,10 @@ const realClient: ApiClient = {
     return authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv });
   },
 
-  async applyRosterImport(csv, resolutions) {
+  async applyRosterImport(csv, resolutions, overwrite = false) {
     const { summary } = await authorizedPostJson<{ summary: RosterImportSummary }>(
       "/api/admin/roster/import/apply",
-      { csv, resolutions },
+      { csv, resolutions, overwrite },
     );
     return summary;
   },
@@ -567,7 +574,7 @@ const devClient: ApiClient = {
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
-  applyRosterImport: (csv, resolutions) => mockApplyRosterImport(csv, resolutions),
+  applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
 };
 
 /**

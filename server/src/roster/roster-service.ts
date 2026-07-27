@@ -1,11 +1,11 @@
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { employees, shifts, auditLog } from "../db/schema";
+import { employees, shifts, auditLog, swapRequests, reminderLog, weekendAssignments } from "../db/schema";
 import { createEntrySchema } from "../http/entry-schema";
 import { listActive, getEmployeeById } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsOverlapping } from "../repo/shifts";
-import { datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
+import { datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, UNENCODABLE_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
 
 export type PersonResolution =
   | { csvName: string; action: "rename"; employeeId: number }
@@ -15,14 +15,35 @@ export type ImportSummary = {
   employeesRenamed: number;
   employeesCreated: number;
   entriesInserted: number;
+  entriesDeleted: number;
+  cellsPreserved: number;
   unknowns: UnknownCell[];
 };
+
+export interface ApplyOptions {
+  /** Replace what is already in the span instead of refusing. */
+  overwrite?: boolean;
+  /** The span the file describes. Defaults to the decoded entries' own extent, which
+   *  is not the same thing: a month whose CSV is entirely 'holiday' decodes to no
+   *  entries at all, yet still means "this month is empty" and must clear it. */
+  span?: { from: string; to: string };
+}
+
+/** Thrown when the target span already holds entries and the caller didn't ask to
+ *  overwrite. Carries the numbers the admin screen needs to offer that choice. */
+export class RosterImportConflictError extends Error {
+  constructor(readonly existingCount: number, readonly from: string, readonly to: string) {
+    super(`в базе уже есть ${existingCount} записей за ${from}..${to} — импорт отменён`);
+    this.name = "RosterImportConflictError";
+  }
+}
 
 export function applyRosterImport(
   db: Db,
   decoded: DecodeResult,
   resolutions: PersonResolution[],
   actorEmployeeId: number | null,
+  options: ApplyOptions = {},
 ): ImportSummary {
   const byName = new Map(resolutions.map((r) => [r.csvName, r] as const));
   for (const p of decoded.perPerson) {
@@ -48,23 +69,61 @@ export function applyRosterImport(
     claimedBy.set(res.employeeId, res.csvName);
   }
 
-  // The imported span, across every decoded entry (endDate for multi-day runs).
+  // The span the import governs. An explicit span (the CSV's own header dates) wins;
+  // otherwise fall back to the decoded entries' extent.
   const allEntries = decoded.perPerson.flatMap((p) => p.entries);
-  const importSpan = allEntries.length === 0 ? null : {
+  const importSpan = options.span ?? (allEntries.length === 0 ? null : {
     from: allEntries.reduce((m, e) => (e.date < m ? e.date : m), allEntries[0]!.date),
     to: allEntries.reduce((m, e) => { const d = e.endDate ?? e.date; return d > m ? d : m; }, allEntries[0]!.endDate ?? allEntries[0]!.date),
-  };
+  });
+
+  const templatesById = new Map(listActiveTemplates(db).map((t) => [t.id, t] as const));
 
   return db.transaction((tx) => {
-    // Re-import guard: a second pass over an already-imported month must error, not
+    let deleted = 0;
+    // Re-import guard: a second pass over an already-imported month must never
     // silently double every entry (Stage 3 reads these counts for fairness proposals).
+    // With `overwrite` the admin has explicitly chosen to replace it instead.
     if (importSpan) {
       const existing = tx.select().from(shifts)
-        .where(and(gte(shifts.date, importSpan.from), lte(shifts.date, importSpan.to))).all();
+        .where(and(
+          lte(shifts.date, importSpan.to),
+          gte(sql`coalesce(${shifts.endDate}, ${shifts.date})`, importSpan.from),
+        )).all();
+
+      if (existing.length > 0 && !options.overwrite) {
+        throw new RosterImportConflictError(existing.length, importSpan.from, importSpan.to);
+      }
+
       if (existing.length > 0) {
-        throw new Error(
-          `в базе уже есть ${existing.length} записей за ${importSpan.from}..${importSpan.to} — импорт отменён (очистите период или импортируйте другой месяц)`,
-        );
+        // Only entries the roster vocabulary can express are the import's to replace.
+        // Weekend work and one-off custom times export as '?' — the file cannot
+        // recreate them, so overwriting must leave them exactly where they are.
+        const encodable = existing.filter((s) => encodeEntryCode(s, templatesById) !== UNENCODABLE_CODE);
+
+        // A range that starts before or ends after the span reaches outside the file's
+        // authority: deleting it would destroy a month the CSV never described, and
+        // keeping it would double-cover the days it shares. Refuse, and say which.
+        const straddling = encodable.filter((s) => s.date < importSpan.from || (s.endDate ?? s.date) > importSpan.to);
+        if (straddling.length > 0) {
+          const s = straddling[0]!;
+          const who = s.employeeId != null ? (getEmployeeById(db, s.employeeId)?.displayName ?? `#${s.employeeId}`) : "без сотрудника";
+          throw new Error(
+            `запись «${who}» ${s.date}..${s.endDate ?? s.date} выходит за пределы ${importSpan.from}..${importSpan.to} ` +
+              `— перезапись отменена, поправьте её вручную и повторите (таких записей: ${straddling.length})`,
+          );
+        }
+
+        const ids = encodable.map((s) => s.id);
+        if (ids.length > 0) {
+          // Same foreign-key cleanup deleteShift() does, batched — it opens its own
+          // transaction, which cannot nest inside this one.
+          tx.delete(swapRequests).where(or(inArray(swapRequests.fromShiftId, ids), inArray(swapRequests.toShiftId, ids))).run();
+          tx.delete(reminderLog).where(inArray(reminderLog.shiftId, ids)).run();
+          tx.update(weekendAssignments).set({ shiftId: null }).where(inArray(weekendAssignments.shiftId, ids)).run();
+          tx.delete(shifts).where(inArray(shifts.id, ids)).run();
+        }
+        deleted = ids.length;
       }
     }
 
@@ -97,9 +156,17 @@ export function applyRosterImport(
     tx.insert(auditLog).values({
       type: "roster_import",
       actorEmployeeId,
-      payload: { employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted, unknowns: decoded.unknowns.length },
+      payload: {
+        employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted,
+        entriesDeleted: deleted, overwrite: options.overwrite === true,
+        cellsPreserved: decoded.preserved.length, unknowns: decoded.unknowns.length,
+        from: importSpan?.from ?? null, to: importSpan?.to ?? null,
+      },
     }).run();
-    return { employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted, unknowns: decoded.unknowns };
+    return {
+      employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted,
+      entriesDeleted: deleted, cellsPreserved: decoded.preserved.length, unknowns: decoded.unknowns,
+    };
   });
 }
 
