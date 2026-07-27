@@ -13,6 +13,7 @@ import type {
   SwapRequest,
   SwapShiftSummary,
   SwapStatus,
+  TeamSchedule,
   Template,
   VacantSlot,
   WeekendSlotView,
@@ -65,12 +66,19 @@ interface EntryDraft {
   endDate: string | null;
   category: Category;
   title: string | null;
+  location?: string | null;
   employeeId: number;
 }
 
 let nextId = 1;
 function entry(draft: EntryDraft): Shift {
-  return { id: nextId++, employeeName: personName(draft.employeeId), templateId: draft.templateId ?? null, ...draft };
+  return {
+    id: nextId++,
+    employeeName: personName(draft.employeeId),
+    ...draft,
+    templateId: draft.templateId ?? null,
+    location: draft.location ?? null,
+  };
 }
 
 // A full week across a 5-person team (Пн=0 .. Вс=6). Аня (id 1) is the
@@ -86,6 +94,16 @@ const ALL_ENTRIES: Shift[] = [
   entry({ templateId: 1, date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 1 }),
   entry({ templateId: 1, date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 2 }),
   entry({ templateId: 2, date: dayIso(0), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 4 }),
+  entry({
+    templateId: 6,
+    date: dayIso(0),
+    start: "07:00",
+    end: "16:00",
+    endDate: null,
+    category: "duty",
+    title: "Дежурство с 07:00",
+    employeeId: 3,
+  }),
 
   // Вт–Ср: Игорь в командировке (один интервал, показывается в оба дня)
   entry({ date: dayIso(1), start: null, end: null, endDate: dayIso(2), category: "business_trip", title: null, employeeId: 2 }),
@@ -140,9 +158,18 @@ export async function mockGetMyShifts(from: string): Promise<Shift[]> {
   return ALL_ENTRIES.filter((s) => s.employeeId === MOCK_ME.id && endOf(s) >= from).sort(byDateThenStart);
 }
 
-export async function mockGetTeamSchedule(from: string, to: string): Promise<Shift[]> {
+export async function mockGetTeamSchedule(from: string, to: string): Promise<TeamSchedule> {
   await delay(350);
-  return ALL_ENTRIES.filter((s) => overlapsRange(s, from, to)).sort(byDateThenStart);
+  return {
+    employees: EMPLOYEES
+      .filter((employee) => employee.isActive)
+      .map((employee, rosterOrder) => ({
+        id: employee.id,
+        displayName: employee.displayName,
+        rosterOrder,
+      })),
+    shifts: ALL_ENTRIES.filter((entry) => overlapsRange(entry, from, to)).sort(byDateThenStart),
+  };
 }
 
 /**
@@ -394,14 +421,14 @@ export async function mockGetEmployeeInvite(id: number, regenerate = false): Pro
 // --- Расписание -------------------------------------------------------------
 
 const TEMPLATES: readonly Template[] = [
-  { id: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
-  { id: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
-  { id: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
-  { id: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
-  { id: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
-  { id: 6, name: "Открытие", accent: "amber", start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true, category: "shift", location: null },
-  { id: 7, name: "Дежурство · Телефон", accent: "rose", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: null },
-  { id: 8, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
+  { id: 1, sortOrder: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
+  { id: 2, sortOrder: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
+  { id: 3, sortOrder: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
+  { id: 4, sortOrder: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
+  { id: 5, sortOrder: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
+  { id: 6, sortOrder: 0, name: "Дежурство с 07:00", accent: "amber", start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true, category: "duty", location: null },
+  { id: 7, sortOrder: 6, name: "Дежурство · Телефон", accent: "rose", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: null },
+  { id: 8, sortOrder: 7, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
 ];
 
 export async function mockGetTemplates(): Promise<Template[]> {
@@ -419,6 +446,7 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
     endDate: input.endDate ?? null,
     category: input.category,
     title: input.title ?? null,
+    location: input.location ?? null,
     templateId: input.templateId ?? null,
     employeeId: input.employeeId ?? null,
     employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
@@ -437,6 +465,7 @@ export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise
   shift.end = input.end ?? null;
   shift.endDate = input.endDate ?? null;
   shift.title = input.title ?? null;
+  shift.location = input.location ?? null;
   if (input.employeeId != null) {
     shift.employeeId = input.employeeId;
     shift.employeeName = personName(input.employeeId);

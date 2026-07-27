@@ -46,7 +46,7 @@ export function App() {
         Promise.all([
           Promise.resolve(me),
           apiClient.getMyShifts(from),
-          apiClient.getTeamSchedule(from, to),
+          apiClient.getTeamSchedule(from, to).then((schedule) => schedule.shifts),
           apiClient.getTemplates(),
           apiClient.getSwaps(),
           apiClient.getWeekendSlots(),
@@ -105,7 +105,7 @@ export function App() {
     try {
       const [myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers] = await Promise.all([
         apiClient.getMyShifts(from),
-        apiClient.getTeamSchedule(from, to),
+        apiClient.getTeamSchedule(from, to).then((schedule) => schedule.shifts),
         // Re-pulled with the rest so an admin's preset edits (a renamed or
         // recoloured Утро/День/…) reach the worker's rows too.
         apiClient.getTemplates(),

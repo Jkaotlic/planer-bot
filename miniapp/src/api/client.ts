@@ -46,16 +46,29 @@ export interface Shift {
   endDate: string | null;
   category: Category;
   title: string | null;
+  /** Optional place for duties, offsite work, and other location-specific entries. */
+  location: string | null;
   /** The preset this entry came from, if any — drives its colour in the schedule. */
   templateId: number | null;
   employeeId: number | null;
   /**
-   * Not part of the raw `/api/team/schedule` row — the real client joins it
-   * in from `/api/employees` (id -> displayName) after fetching the shifts.
+   * Not part of the raw shift row — the real client joins it from the roster
+   * returned by `/api/team/schedule` (id -> displayName).
    * Only `getTeamSchedule` populates this; `getMyShifts` leaves it
    * `undefined` (every row already belongs to the caller).
    */
   employeeName?: string;
+}
+
+export interface TeamEmployee {
+  id: number;
+  displayName: string;
+  rosterOrder: number | null;
+}
+
+export interface TeamSchedule {
+  employees: TeamEmployee[];
+  shifts: Shift[];
 }
 
 export interface Me {
@@ -148,6 +161,7 @@ export interface Employee {
 /** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
 export interface Template {
   id: number;
+  sortOrder: number;
   name: string;
   start: string;
   end: string;
@@ -242,7 +256,7 @@ export interface DistributeResult {
 export interface ApiClient {
   getMe(): Promise<Me>;
   getMyShifts(from: string): Promise<Shift[]>;
-  getTeamSchedule(from: string, to: string): Promise<Shift[]>;
+  getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
   proposeSwap(fromShiftId: number, toShiftId: number, message?: string): Promise<SwapRequest>;
   acceptSwap(id: number): Promise<void>;
@@ -281,10 +295,6 @@ export interface ApiClient {
 
 interface ShiftsResponse {
   shifts: Shift[];
-}
-
-interface EmployeesResponse {
-  employees: { id: number; displayName: string }[];
 }
 
 /** `GET /api/admin/employees` — the richer admin roster (active + archived). */
@@ -442,15 +452,15 @@ const realClient: ApiClient = {
 
   async getTeamSchedule(from, to) {
     const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const [{ shifts }, { employees }] = await Promise.all([
-      authorizedGet<ShiftsResponse>(`/api/team/schedule?${query}`),
-      authorizedGet<EmployeesResponse>("/api/employees"),
-    ]);
-    const nameById = new Map(employees.map((e) => [e.id, e.displayName]));
-    return shifts.map((s) => ({
-      ...s,
-      employeeName: s.employeeId != null ? nameById.get(s.employeeId) : undefined,
-    }));
+    const schedule = await authorizedGet<TeamSchedule>(`/api/team/schedule?${query}`);
+    const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
+    return {
+      employees: schedule.employees,
+      shifts: schedule.shifts.map((shift) => ({
+        ...shift,
+        employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,
+      })),
+    };
   },
 
   getSwaps: () => fetchSwaps(),
