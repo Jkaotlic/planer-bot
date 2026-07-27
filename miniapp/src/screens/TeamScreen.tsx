@@ -1,67 +1,93 @@
-import type { ReactNode } from "react";
-import { List, Placeholder, Section, Subheadline, Title } from "@telegram-apps/telegram-ui";
-import type { Shift, Template } from "../api/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Spinner, Title } from "@telegram-apps/telegram-ui";
+import { apiClient, type TeamSchedule, type Template } from "../api/client";
 import { ScreenScroll } from "../components/ScreenScroll";
-import { TeamMemberRow } from "../components/TeamMemberRow";
-import { addDays, formatDayLabel, formatWeekRangeLabel, isWeekendIso, mondayOf, toISODate } from "../lib/week";
+import {
+  buildTodayModel,
+  createLatestRequestGate,
+  requestLatestTeamSchedule,
+  teamRange,
+} from "../lib/team-schedule";
+import { addDays, formatDayLabel, parseISODate, toISODate } from "../lib/week";
+import { TeamRangeNav } from "./team/TeamRangeNav";
+import { TeamTodayView } from "./team/TeamTodayView";
+import "./team/team-schedule.css";
 
-export interface TeamScreenProps {
-  shifts: Shift[];
-  /** Presets, to colour each row by the one its entry came from. */
-  templates: readonly Template[];
-}
+export function TeamScreen({ templates }: { templates: readonly Template[] }) {
+  const [selectedDate, setSelectedDate] = useState(() => toISODate(new Date()));
+  const [schedule, setSchedule] = useState<TeamSchedule | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const gate = useRef(createLatestRequestGate());
+  const range = useMemo(() => teamRange("today", selectedDate), [selectedDate]);
 
-/** "Команда": the whole team's schedule for the week, grouped by day. */
-export function TeamScreen({ shifts, templates }: TeamScreenProps) {
-  const monday = mondayOf(new Date());
-  const days = Array.from({ length: 7 }, (_, i) => toISODate(addDays(monday, i)));
-  const weekLabel = formatWeekRangeLabel(monday, addDays(monday, 6));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const result = await requestLatestTeamSchedule(
+      apiClient.getTeamSchedule,
+      range,
+      gate.current,
+    );
+    if (result.status === "stale") return;
+    if (result.status === "failed") {
+      setError(
+        result.error instanceof Error
+          ? result.error.message
+          : "Не удалось загрузить расписание",
+      );
+    } else {
+      setSchedule(result.schedule);
+    }
+    setLoading(false);
+  }, [range]);
 
-  const byDay = days.map((day) => ({
-    day,
-    shifts: shifts
-      .filter((s) => s.date <= day && (s.endDate ?? s.date) >= day)
-      .sort((a, b) => (a.start ?? "").localeCompare(b.start ?? "")),
-  }));
-  const hasAnything = byDay.some((group) => group.shifts.length > 0);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") void load();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [load]);
+
+  function move(days: number) {
+    setSelectedDate(toISODate(addDays(parseISODate(selectedDate), days)));
+  }
 
   return (
-    <ScreenScroll>
-      <header style={{ margin: "8px 4px 20px" }}>
+    <ScreenScroll style={{ padding: "8px 12px 96px" }}>
+      <div className="team-screen">
         <Title level="2" weight="2">
           Команда
         </Title>
-        <Subheadline level="2" style={{ color: "var(--tgui--hint_color)", marginTop: 4 }}>
-          {weekLabel}
-        </Subheadline>
-      </header>
-
-      {!hasAnything ? (
-        <Placeholder header="Пока пусто" description="На этой неделе в расписании команды ничего нет." />
-      ) : (
-        <List>
-          {byDay.map(
-            ({ day, shifts: dayShifts }) =>
-              dayShifts.length > 0 && (
-                <Section key={day} header={<DaySectionHeader day={day} />}>
-                  {dayShifts.map((s) => (
-                    <TeamMemberRow key={`${day}-${s.id}`} shift={s} templates={templates} />
-                  ))}
-                </Section>
-              ),
-          )}
-        </List>
-      )}
+        <TeamRangeNav
+          label={formatDayLabel(selectedDate)}
+          busy={loading}
+          onPrevious={() => move(-1)}
+          onNext={() => move(1)}
+        />
+        {loading && (
+          <div className="team-refreshing" role="status">
+            Обновляем…
+          </div>
+        )}
+        {error && (
+          <div className="team-error" role="alert">
+            <span>{error}</span>
+            <button type="button" onClick={() => void load()}>
+              Повторить
+            </button>
+          </div>
+        )}
+        {!schedule && loading && <Spinner size="m" />}
+        {schedule && (
+          <TeamTodayView model={buildTodayModel(selectedDate, schedule, templates)} />
+        )}
+      </div>
     </ScreenScroll>
-  );
-}
-
-function DaySectionHeader({ day }: { day: string }): ReactNode {
-  const weekend = isWeekendIso(day);
-  return (
-    <>
-      {formatDayLabel(day)}
-      {weekend && <span style={{ color: "var(--tgui--hint_color)", fontWeight: 400 }}> · выходной</span>}
-    </>
   );
 }
