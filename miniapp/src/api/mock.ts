@@ -8,6 +8,9 @@ import type {
   NewEntryInput,
   NewSlotInput,
   PayrollRow,
+  RosterImportPreview,
+  RosterImportSummary,
+  RosterPersonResolution,
   Shift,
   SwapDirection,
   SwapRequest,
@@ -641,4 +644,149 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
   const rows = await mockGetPayroll(from, to);
   const lines = rows.map((r) => [csvField(r.employeeName), r.date, String(r.hours)].join(","));
   return ["Работник,Дата,Часы", ...lines].join("\n");
+}
+
+// --- Roster CSV (the ФИО × даты matrix) --------------------------------------
+// DEV mirror of server/src/roster/*: enough behaviour that the upload screen can be
+// exercised end to end with no backend — including the two cases that used to be
+// dead ends, an unreadable code and a period that is already full.
+
+const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);
+/** What the export writes for an entry the matrix can't express. Never "bad code". */
+const MOCK_PRESERVE_CODE = "?";
+const PRESET_NAME_TO_CODE: Record<string, string> = {
+  "День": "k32", "Дежурство с 07:00": "k32-7", "Утро": "k32-8", "Вечер": "k32-11",
+  "Ночь": "k32-15", "Дежурство · Телефон": "dezh", "Дежурство · Поклонка": "pokl",
+  "Дежурство · Вавилова 19": "v19",
+};
+
+function mockRuDate(iso: string): string {
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+}
+
+function mockIsoDate(value: string): string {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
+  if (!match) throw new Error(`Некорректная дата в CSV: ${value}`);
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+/** Only entries the codec can write back are the import's to replace. */
+function mockRosterCode(shift: Shift): string {
+  const byPreset = TEMPLATES.find((t) => t.id === shift.templateId);
+  const code = byPreset ? PRESET_NAME_TO_CODE[byPreset.name] : undefined;
+  if (code) return code;
+  if (shift.category === "vacation") return "otp";
+  if (shift.category === "business_trip") return "event";
+  return MOCK_PRESERVE_CODE;
+}
+
+export async function mockGetRosterCsv(from: string, to: string): Promise<string> {
+  await delay(200);
+  const dates: string[] = [];
+  for (let d = from; d <= to; d = toISODate(addDays(new Date(`${d}T00:00:00Z`), 1))) dates.push(d);
+  const rows = EMPLOYEES.filter((e) => e.isActive).map((e) => {
+    const codes = dates.map((date) => {
+      const covering = ALL_ENTRIES.find((s) => s.employeeId === e.id && s.date <= date && endOf(s) >= date);
+      return covering ? mockRosterCode(covering) : "holiday";
+    });
+    return [e.displayName, ...codes].join(";");
+  });
+  return [["", ...dates.map(mockRuDate)].join(";"), ...rows].join("\r\n");
+}
+
+function mockParseRoster(csv: string) {
+  const lines = csv.replace(/^﻿/, "").split(/\r\n|\r|\n/).filter(Boolean);
+  const dates = (lines[0]?.split(";") ?? []).slice(1).map(mockIsoDate);
+  if (dates.length === 0) throw new Error("В CSV нет дат");
+  const people = lines.slice(1).map((line, index) => {
+    const cells = line.split(";");
+    const name = cells[0]?.trim() ?? "";
+    if (cells.length - 1 !== dates.length) {
+      throw new Error(`строка ${index + 2}${name ? ` («${name}»)` : ""}: ${cells.length - 1} клеток, а в шапке ${dates.length} дат`);
+    }
+    return { name, codes: cells.slice(1) };
+  });
+  return { dates, people };
+}
+
+export async function mockPreviewRosterImport(csv: string): Promise<RosterImportPreview> {
+  await delay(220);
+  const { dates, people } = mockParseRoster(csv);
+  const unknown = people.flatMap((person) =>
+    person.codes.flatMap((code, index) =>
+      code && code !== MOCK_PRESERVE_CODE && !MOCK_ROSTER_CODES.has(code)
+        ? [{ name: person.name, date: dates[index] ?? dates[0]!, code }]
+        : [],
+    ),
+  );
+  if (unknown.length > 0) {
+    const first = unknown[0]!;
+    throw new Error(`Не понял коды в файле: ${first.name}, ${mockRuDate(first.date)} — «${first.code}».`);
+  }
+  const from = dates[0]!;
+  const to = dates.at(-1)!;
+  return {
+    from,
+    to,
+    entryCount: people.reduce(
+      (sum, p) => sum + p.codes.filter((c) => c && c !== "holiday" && c !== MOCK_PRESERVE_CODE).length,
+      0,
+    ),
+    people: people.map((p) => ({
+      csvName: p.name,
+      suggestedEmployeeId: EMPLOYEES.find((e) => e.isActive && e.displayName === p.name)?.id ?? null,
+    })),
+    unknowns: [],
+    preservedCount: people.reduce((sum, p) => sum + p.codes.filter((c) => c === MOCK_PRESERVE_CODE).length, 0),
+    existingCount: ALL_ENTRIES.filter((s) => overlapsRange(s, from, to)).length,
+  };
+}
+
+export async function mockApplyRosterImport(
+  csv: string,
+  resolutions: RosterPersonResolution[],
+  overwrite = false,
+): Promise<RosterImportSummary> {
+  const preview = await mockPreviewRosterImport(csv);
+  await delay(250);
+  if (preview.existingCount > 0 && !overwrite) {
+    throw new Error(
+      `За ${preview.from}..${preview.to} в базе уже есть ${preview.existingCount} записей. ` +
+        `Отметьте «перезаписать период», чтобы заменить их.`,
+    );
+  }
+
+  let entriesDeleted = 0;
+  if (overwrite) {
+    for (let i = ALL_ENTRIES.length - 1; i >= 0; i--) {
+      const shift = ALL_ENTRIES[i]!;
+      if (overlapsRange(shift, preview.from, preview.to) && mockRosterCode(shift) !== MOCK_PRESERVE_CODE) {
+        ALL_ENTRIES.splice(i, 1);
+        entriesDeleted++;
+      }
+    }
+  }
+
+  for (const resolution of resolutions) {
+    if (resolution.action === "rename") {
+      const employee = EMPLOYEES.find((item) => item.id === resolution.employeeId);
+      if (employee) employee.displayName = resolution.csvName;
+    } else {
+      EMPLOYEES.push({
+        id: Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1,
+        displayName: resolution.csvName,
+        isAdmin: false,
+        isActive: true,
+        telegramUserId: null,
+      });
+    }
+  }
+  return {
+    employeesRenamed: resolutions.filter((r) => r.action === "rename").length,
+    employeesCreated: resolutions.filter((r) => r.action === "create").length,
+    entriesInserted: preview.entryCount,
+    entriesDeleted,
+    cellsPreserved: preview.preservedCount,
+    unknowns: [],
+  };
 }

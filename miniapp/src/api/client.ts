@@ -32,6 +32,9 @@ import {
   mockUnassignSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
+  mockGetRosterCsv,
+  mockPreviewRosterImport,
+  mockApplyRosterImport,
 } from "./mock";
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -291,6 +294,46 @@ export interface ApiClient {
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
+  getRosterCsv(from: string, to: string): Promise<string>;
+  previewRosterImport(csv: string): Promise<RosterImportPreview>;
+  applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
+}
+
+/** One row of the uploaded file, and the active worker whose name matches it exactly. */
+export interface RosterImportPerson {
+  csvName: string;
+  suggestedEmployeeId: number | null;
+}
+
+export interface RosterUnknownCell {
+  name: string;
+  date: string;
+  code: string;
+}
+
+export interface RosterImportPreview {
+  from: string;
+  to: string;
+  entryCount: number;
+  people: RosterImportPerson[];
+  unknowns: RosterUnknownCell[];
+  /** Cells written as '?': entries the matrix can't express, which the import leaves alone. */
+  preservedCount: number;
+  /** What the period already holds — non-zero means applying needs `overwrite`. */
+  existingCount: number;
+}
+
+export type RosterPersonResolution =
+  | { csvName: string; action: "create" }
+  | { csvName: string; action: "rename"; employeeId: number };
+
+export interface RosterImportSummary {
+  employeesRenamed: number;
+  employeesCreated: number;
+  entriesInserted: number;
+  entriesDeleted: number;
+  cellsPreserved: number;
+  unknowns: RosterUnknownCell[];
 }
 
 interface ShiftsResponse {
@@ -564,6 +607,27 @@ export const realClient: ApiClient = {
     if (!res.ok) throw new Error(await errorMessage("/api/admin/weekend/payroll.csv", res));
     return res.text();
   },
+
+  async getRosterCsv(from, to) {
+    const token = await authToken();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const res = await fetch(`${API_BASE}/api/admin/roster.csv?${q}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(await errorMessage("/api/admin/roster.csv", res));
+    return res.text();
+  },
+
+  previewRosterImport: (csv) =>
+    authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv }),
+
+  async applyRosterImport(csv, resolutions, overwrite = false) {
+    const { summary } = await authorizedPostJson<{ summary: RosterImportSummary }>(
+      "/api/admin/roster/import/apply",
+      { csv, resolutions, overwrite },
+    );
+    return summary;
+  },
 };
 
 const devClient: ApiClient = {
@@ -599,6 +663,9 @@ const devClient: ApiClient = {
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
+  getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
+  previewRosterImport: (csv) => mockPreviewRosterImport(csv),
+  applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
 };
 
 /**
