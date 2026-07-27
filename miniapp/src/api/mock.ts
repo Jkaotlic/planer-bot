@@ -37,7 +37,8 @@ export const MOCK_ME: Me = { id: 1, displayName: "Аня Смирнова", isAd
  * In-memory roster shared by the worker screens (name lookups) and the admin
  * "Работники" screen (full rows). Mutated live by create/archive/restore so
  * both surfaces update without a reload. Ids 1–5 mirror the worker mock's
- * original PEOPLE map; id 6 (Света, archived) exercises the archive list.
+ * original PEOPLE map; id 6 exercises the archive list and id 7 the active
+ * employee-without-shifts state.
  */
 const EMPLOYEES: Employee[] = [
   { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001 },
@@ -82,7 +83,7 @@ function entry(draft: EntryDraft): Shift {
   };
 }
 
-// A full week across a 5-person team (Пн=0 .. Вс=6). Аня (id 1) is the
+// A full week across a six-person active roster (Пн=0 .. Вс=6). Аня (id 1) is the
 // caller — her entries double as "my shifts" and appear in the team view.
 // Mutable: the admin schedule screen's create/update/delete/distribute
 // mutators operate on this same array so the team/my views reflect edits
