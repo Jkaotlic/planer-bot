@@ -307,6 +307,28 @@ export interface TeamScreenState {
   error: string | null;
 }
 
+export interface TeamModeLoadTarget {
+  mode: TeamMode;
+  date: string;
+}
+
+export function teamModeLoadTarget(
+  state: TeamScreenState,
+  requestedMode: TeamMode,
+): TeamModeLoadTarget | null {
+  const activeMode = state.loading ? state.targetMode : state.displayMode;
+  return requestedMode === activeMode
+    ? null
+    : { mode: requestedMode, date: state.displayDate };
+}
+
+export function teamTabFocusMode(
+  state: TeamScreenState,
+  pendingFocusMode: TeamMode,
+): TeamMode {
+  return state.loading ? pendingFocusMode : state.displayMode;
+}
+
 export function createTeamScreenState(date: string): TeamScreenState {
   return {
     displayMode: "today",

@@ -1,7 +1,6 @@
 import {
   useEffect,
   useRef,
-  useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -25,32 +24,47 @@ export function teamModeForArrowKey(
   return mode === "today" ? "week" : "today";
 }
 
+interface TeamViewKeyEvent {
+  key: string;
+  preventDefault(): void;
+}
+
+type TeamModeChange = (mode: TeamMode) => boolean | void;
+
+export function handleTeamViewSwitcherKeyDown(
+  event: TeamViewKeyEvent,
+  mode: TeamMode,
+  onChange: TeamModeChange,
+  focus: (mode: TeamMode) => void,
+): boolean {
+  const next = teamModeForArrowKey(mode, event.key);
+  if (!next) return false;
+  event.preventDefault();
+  const accepted = onChange(next);
+  if (accepted !== false) focus(next);
+  return true;
+}
+
 export function TeamViewSwitcher({
   value,
+  focusValue = value,
   onChange,
 }: {
   value: TeamMode;
-  onChange: (value: TeamMode) => void;
+  focusValue?: TeamMode;
+  onChange: TeamModeChange;
 }) {
-  const [focusedMode, setFocusedMode] = useState<TeamMode>(value);
   const tabs = useRef<Partial<Record<TeamMode, HTMLButtonElement>>>({});
+  const previousFocusValue = useRef(focusValue);
 
   useEffect(() => {
-    setFocusedMode(value);
-  }, [value]);
+    if (previousFocusValue.current === focusValue) return;
+    previousFocusValue.current = focusValue;
+    tabs.current[focusValue]?.focus();
+  }, [focusValue]);
 
-  function select(mode: TeamMode) {
-    setFocusedMode(mode);
-    onChange(mode);
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, mode: TeamMode) {
-    const next = teamModeForArrowKey(mode, event.key);
-    if (!next) return;
-    event.preventDefault();
-    setFocusedMode(next);
-    tabs.current[next]?.focus();
-    onChange(next);
+  function focus(mode: TeamMode) {
+    tabs.current[mode]?.focus();
   }
 
   return (
@@ -63,10 +77,12 @@ export function TeamViewSwitcher({
           id={teamViewTabId(mode)}
           aria-selected={value === mode}
           aria-controls={teamViewPanelId(mode)}
-          tabIndex={focusedMode === mode ? 0 : -1}
+          tabIndex={focusValue === mode ? 0 : -1}
           className={value === mode ? "team-switcher__button is-active" : "team-switcher__button"}
-          onClick={() => select(mode)}
-          onKeyDown={(event) => onKeyDown(event, mode)}
+          onClick={() => onChange(mode)}
+          onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
+            handleTeamViewSwitcherKeyDown(event, mode, onChange, focus);
+          }}
           ref={(element) => {
             if (element) tabs.current[mode] = element;
             else delete tabs.current[mode];
