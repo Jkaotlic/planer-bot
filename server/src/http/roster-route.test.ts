@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createShift } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -139,6 +140,8 @@ describe("admin roster CSV import", () => {
         { csvName: "Новый Сотрудник", suggestedEmployeeId: null },
       ],
       unknowns: [],
+      preservedCount: 0,
+      existingCount: 0,
     });
 
     const exported = await app.request(
@@ -172,6 +175,8 @@ describe("admin roster CSV import", () => {
         employeesRenamed: 1,
         employeesCreated: 1,
         entriesInserted: 2,
+        entriesDeleted: 0,
+        cellsPreserved: 0,
         unknowns: [],
       },
     });
@@ -198,10 +203,142 @@ describe("admin roster CSV import", () => {
     });
 
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({
-      error: "unknown_roster_codes",
-      unknowns: [{ name: "Игорь Петров", date: "2026-08-01", code: "wat" }],
+    const body = await res.json();
+    // The admin sees Russian naming the exact cell, not a machine string.
+    expect(body.error).toMatch(/Игорь Петров/);
+    expect(body.error).toMatch(/01\.08\.2026/);
+    expect(body.error).toMatch(/wat/);
+    expect(body.unknowns).toEqual([{ name: "Игорь Петров", date: "2026-08-01", code: "wat" }]);
+  });
+
+  it("accepts a '?' cell — it means «leave that day alone», not «bad code»", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv: ";01.08.2026;02.08.2026\r\nИгорь Петров;?;k32" }),
     });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.preservedCount).toBe(1);
+    expect(body.entryCount).toBe(1);
+    expect(body.unknowns).toEqual([]);
+  });
+
+  it("rejects a ragged row and names it the way Excel numbers it", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv: ";01.08.2026;02.08.2026\r\nИгорь Петров;k32;k32\r\nОбрезанный Пётр;k32" }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/строка 3/);
+    expect(body.error).toMatch(/Обрезанный Пётр/);
+  });
+
+  it("preview counts what already occupies the span so the admin can decide", async () => {
+    const db = makeTestDb();
+    const existing = worker(db, "Игорь Петров", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    createShift(db, {
+      employeeId: existing.id, date: "2026-08-01", category: "shift",
+      templateId: 2, start: "09:00", end: "18:00", title: "День",
+    });
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).existingCount).toBe(1);
+  });
+
+  it("refuses to apply over an occupied span, and says how much is there", async () => {
+    const db = makeTestDb();
+    const existing = worker(db, "Игорь Петров", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    createShift(db, {
+      employeeId: existing.id, date: "2026-08-01", category: "shift",
+      templateId: 2, start: "09:00", end: "18:00", title: "День",
+    });
+
+    const res = await app.request("/api/admin/roster/import/apply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        csv,
+        resolutions: [
+          { csvName: "Игорь Петров", action: "rename", employeeId: existing.id },
+          { csvName: "Новый Сотрудник", action: "create" },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ existingCount: 1, from: "2026-08-01", to: "2026-08-02" });
+    expect(body.error).toMatch(/уже есть 1/);
+  });
+
+  it("applies over an occupied span when the admin confirms overwrite", async () => {
+    const db = makeTestDb();
+    const existing = worker(db, "Игорь Петров", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    createShift(db, {
+      employeeId: existing.id, date: "2026-08-01", category: "shift",
+      templateId: 4, start: "11:00", end: "20:00", title: "Вечер",
+    });
+
+    const res = await app.request("/api/admin/roster/import/apply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        csv,
+        overwrite: true,
+        resolutions: [
+          { csvName: "Игорь Петров", action: "rename", employeeId: existing.id },
+          { csvName: "Новый Сотрудник", action: "create" },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).summary).toMatchObject({ entriesDeleted: 1, entriesInserted: 2 });
+    const exported = await app.request("/api/admin/roster.csv?from=2026-08-01&to=2026-08-02", bearer(token));
+    expect(new TextDecoder().decode(await exported.arrayBuffer())).toContain("Игорь Петров;k32;holiday");
+  });
+
+  it("rejects an oversized upload before parsing the body", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "content-length": String(50 * 1024 * 1024),
+      },
+      body: JSON.stringify({ csv }),
+    });
+
+    expect(res.status).toBe(413);
   });
 
   it("rejects duplicate employee names before showing the preview", async () => {

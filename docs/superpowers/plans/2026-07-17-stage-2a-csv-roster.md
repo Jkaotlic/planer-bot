@@ -349,10 +349,10 @@ describe("decodeRoster (against the real June file + real presets)", () => {
 
   it("shortens День on Friday but starts Вечер later without shortening", () => {
     // 2026-06-05 is a Friday (weekend cells 06/07.06 are Sat/Sun).
-    const efimovFri = person("Дьяков Алексей").entries.find((e) => e.date === "2026-06-05")!;
-    expect(efimovFri).toMatchObject({ category: "shift", title: "День", start: "09:00", end: "16:45" });
-    const korenevFri = person("Лапин Виктор").entries.find((e) => e.date === "2026-06-05")!;
-    expect(korenevFri).toMatchObject({ category: "shift", title: "Вечер", start: "12:00", end: "20:00" });
+    const dyakovFri = person("Дьяков Алексей").entries.find((e) => e.date === "2026-06-05")!;
+    expect(dyakovFri).toMatchObject({ category: "shift", title: "День", start: "09:00", end: "16:45" });
+    const lapinFri = person("Лапин Виктор").entries.find((e) => e.date === "2026-06-05")!;
+    expect(lapinFri).toMatchObject({ category: "shift", title: "Вечер", start: "12:00", end: "20:00" });
   });
 
   it("maps duty codes to the right presets with their location", () => {

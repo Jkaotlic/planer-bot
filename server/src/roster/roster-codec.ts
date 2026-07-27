@@ -54,10 +54,20 @@ export function parseRosterCsv(text: string): ParsedRoster {
   if (lines.length === 0) throw new Error("пустой файл ростера");
   const header = parseRosterLine(lines[0]);
   const dates = header.slice(1).map(parseRuDate); // header[0] is the empty name column
-  const people = lines.slice(1).map((line) => {
+  const people = lines.slice(1).map((line, index) => {
     const fields = parseRosterLine(line);
+    const name = fields[0].trim();
+    // A ragged row is never harmless: padding a short one out writes "не работает"
+    // onto days the file never described, and a long one silently drops its tail.
+    // Excel always emits full-width rows, so a mismatch means the file was edited by
+    // hand — say which row, counted the way the admin sees it in the spreadsheet.
+    if (fields.length - 1 !== dates.length) {
+      throw new Error(
+        `строка ${index + 2}${name ? ` («${name}»)` : ""}: ${fields.length - 1} клеток, а в шапке ${dates.length} дат`,
+      );
+    }
     return {
-      name: fields[0].trim(),
+      name,
       cells: dates.map((date, i) => ({ date, code: (fields[i + 1] ?? "").trim() })),
     };
   });
@@ -101,15 +111,20 @@ export type DecodedEntry = {
   title: string | null;
 };
 export type UnknownCell = { name: string; date: string; code: string };
+/** A cell the export wrote as '?': something covers that day which the roster
+ *  vocabulary can't express. On import it means "leave whatever is there alone". */
+export type PreservedCell = { name: string; date: string };
 export type DecodeResult = {
   perPerson: { name: string; entries: DecodedEntry[] }[];
   unknowns: UnknownCell[];
+  preserved: PreservedCell[];
   proposedHolidays: string[];
 };
 
 export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): DecodeResult {
   const byName = new Map(templates.map((t) => [t.name, t] as const));
   const unknowns: UnknownCell[] = [];
+  const preserved: PreservedCell[] = [];
   const workersByDate = new Map<string, number>(); // count of WORK-code cells per date
 
   const perPerson = parsed.people.map((p) => {
@@ -127,6 +142,17 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
     for (const cell of p.cells) {
       const code = cell.code;
       if (code === NON_WORKING_CODE || code === "") { flush(); continue; }
+
+      // '?' is our own export marker for an entry the vocabulary can't express
+      // (weekend work, a one-off custom time). Re-importing that file must leave
+      // the existing entry alone rather than refusing the whole file — but the day
+      // still counts as worked, so it is never mistaken for a holiday.
+      if (code === UNENCODABLE_CODE) {
+        flush();
+        preserved.push({ name: p.name, date: cell.date });
+        workersByDate.set(cell.date, (workersByDate.get(cell.date) ?? 0) + 1);
+        continue;
+      }
 
       // Object.hasOwn guards against a cell literally reading "constructor" / "toString" /
       // etc. — a plain-object lookup would resolve those to inherited Object.prototype
@@ -155,7 +181,7 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
 
   // A day is non-working iff nobody has a work code on it (§5). Absences don't count as work.
   const proposedHolidays = parsed.dates.filter((d) => (workersByDate.get(d) ?? 0) === 0);
-  return { perPerson, unknowns, proposedHolidays };
+  return { perPerson, unknowns, preserved, proposedHolidays };
 }
 
 export function datesInRange(from: string, to: string): string[] {

@@ -799,6 +799,26 @@ button {
   line-height: 1.45;
 }
 
+/* The one destructive choice on this screen — it has to look like a decision, not a hint. */
+.roster-overwrite {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--danger, #d1495b);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger, #d1495b) 8%, transparent);
+  font-size: 12.5px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.roster-overwrite input {
+  margin-top: 2px;
+  flex: none;
+}
+
 .roster-reconcile-list {
   display: flex;
   flex-direction: column;
