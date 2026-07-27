@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Shift, TeamSchedule, Template } from "../api/client";
 import {
+  applyTeamScreenLoadResult,
+  beginTeamScreenLoad,
   buildTodayModel,
   buildWeekModel,
   createLatestRequestGate,
+  createTeamScreenState,
   requestLatestTeamSchedule,
   splitDisplayName,
   teamRange,
@@ -42,6 +45,19 @@ const schedule: TeamSchedule = {
     shift({ id: 3, date: "2026-07-26", endDate: "2026-07-29", start: null, end: null, title: null, templateId: null, category: "vacation", employeeId: 10 }),
     shift({ id: 4, date: "2026-07-27", employeeId: null }),
     shift({ id: 5, date: "2026-07-27", start: "09:00", end: "18:00", employeeId: 20 }),
+  ],
+};
+
+const nextSchedule: TeamSchedule = {
+  employees,
+  shifts: [
+    shift({
+      id: 20,
+      date: "2026-07-28",
+      start: "10:00",
+      end: "19:00",
+      employeeId: 30,
+    }),
   ],
 };
 
@@ -199,5 +215,118 @@ describe("team schedule model", () => {
       gate,
     );
     expect(result).toEqual({ status: "failed", error });
+  });
+
+  it("keeps the committed date and schedule paired while a new target loads", () => {
+    let state = createTeamScreenState("2026-07-27");
+    state = beginTeamScreenLoad(state, "2026-07-27");
+    state = applyTeamScreenLoadResult(
+      state,
+      "2026-07-27",
+      { status: "accepted", schedule },
+    )!;
+
+    const pending = beginTeamScreenLoad(state, "2026-07-28");
+
+    expect(pending).toMatchObject({
+      displayDate: "2026-07-27",
+      targetDate: "2026-07-28",
+      schedule,
+      loading: true,
+      error: null,
+    });
+
+    const accepted = applyTeamScreenLoadResult(
+      pending,
+      "2026-07-28",
+      { status: "accepted", schedule: nextSchedule },
+    );
+    expect(accepted).toMatchObject({
+      displayDate: "2026-07-28",
+      targetDate: "2026-07-28",
+      schedule: nextSchedule,
+      loading: false,
+      error: null,
+    });
+  });
+
+  it("retains the committed view and failed target through retry", () => {
+    let state = createTeamScreenState("2026-07-27");
+    state = beginTeamScreenLoad(state, "2026-07-27");
+    state = applyTeamScreenLoadResult(
+      state,
+      "2026-07-27",
+      { status: "accepted", schedule },
+    )!;
+    state = beginTeamScreenLoad(state, "2026-07-28");
+
+    const failed = applyTeamScreenLoadResult(
+      state,
+      "2026-07-28",
+      { status: "failed", error: new Error("offline") },
+    )!;
+    expect(failed).toMatchObject({
+      displayDate: "2026-07-27",
+      targetDate: "2026-07-28",
+      schedule,
+      loading: false,
+      error: "offline",
+    });
+
+    const retrying = beginTeamScreenLoad(failed, failed.targetDate);
+    expect(retrying).toMatchObject({
+      displayDate: "2026-07-27",
+      targetDate: "2026-07-28",
+      schedule,
+      loading: true,
+      error: null,
+    });
+
+    const recovered = applyTeamScreenLoadResult(
+      retrying,
+      retrying.targetDate,
+      { status: "accepted", schedule: nextSchedule },
+    );
+    expect(recovered).toMatchObject({
+      displayDate: "2026-07-28",
+      targetDate: "2026-07-28",
+      schedule: nextSchedule,
+      loading: false,
+      error: null,
+    });
+  });
+
+  it("returns no state transition for stale completion", () => {
+    const state = beginTeamScreenLoad(
+      createTeamScreenState("2026-07-27"),
+      "2026-07-28",
+    );
+
+    expect(
+      applyTeamScreenLoadResult(
+        state,
+        "2026-07-28",
+        { status: "stale", outcome: "accepted", schedule: nextSchedule },
+      ),
+    ).toBeNull();
+  });
+
+  it("invalidates an in-flight request when the screen lifetime ends", async () => {
+    const gate = createLatestRequestGate();
+    let resolve!: (value: TeamSchedule) => void;
+    const pending = requestLatestTeamSchedule(
+      () => new Promise<TeamSchedule>((done) => { resolve = done; }),
+      { from: "2026-07-27", to: "2026-07-27" },
+      gate,
+    );
+
+    gate.invalidate();
+    resolve(schedule);
+
+    expect(await pending).toEqual({
+      status: "stale",
+      outcome: "accepted",
+      schedule,
+    });
   });
 });

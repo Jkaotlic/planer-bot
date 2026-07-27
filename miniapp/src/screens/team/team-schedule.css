@@ -82,10 +82,26 @@
   gap: 8px;
 }
 
+.team-group__heading > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.team-group__heading > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .team-group__people {
   display: grid;
   gap: 5px;
   margin-top: 8px;
+}
+
+.team-group__people span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .team-no-time {

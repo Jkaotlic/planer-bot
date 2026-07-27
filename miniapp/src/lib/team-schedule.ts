@@ -268,6 +268,7 @@ export function buildWeekModel(
 export interface LatestRequestGate {
   begin(): number;
   isLatest(id: number): boolean;
+  invalidate(): void;
 }
 
 export function createLatestRequestGate(): LatestRequestGate {
@@ -275,6 +276,9 @@ export function createLatestRequestGate(): LatestRequestGate {
   return {
     begin: () => ++latest,
     isLatest: (id) => id === latest,
+    invalidate: () => {
+      latest += 1;
+    },
   };
 }
 
@@ -283,6 +287,61 @@ export type TeamLoadResult =
   | { status: "failed"; error: unknown }
   | { status: "stale"; outcome: "accepted"; schedule: TeamSchedule }
   | { status: "stale"; outcome: "failed"; error: unknown };
+
+export interface TeamScreenState {
+  displayDate: string;
+  targetDate: string;
+  schedule: TeamSchedule | null;
+  loading: boolean;
+  error: string | null;
+}
+
+export function createTeamScreenState(date: string): TeamScreenState {
+  return {
+    displayDate: date,
+    targetDate: date,
+    schedule: null,
+    loading: false,
+    error: null,
+  };
+}
+
+export function beginTeamScreenLoad(
+  state: TeamScreenState,
+  targetDate: string,
+): TeamScreenState {
+  return {
+    ...state,
+    targetDate,
+    loading: true,
+    error: null,
+  };
+}
+
+export function applyTeamScreenLoadResult(
+  state: TeamScreenState,
+  targetDate: string,
+  result: TeamLoadResult,
+): TeamScreenState | null {
+  if (result.status === "stale" || state.targetDate !== targetDate) return null;
+  if (result.status === "failed") {
+    return {
+      ...state,
+      loading: false,
+      error:
+        result.error instanceof Error
+          ? result.error.message
+          : "Не удалось загрузить расписание",
+    };
+  }
+  return {
+    displayDate: targetDate,
+    targetDate,
+    schedule: result.schedule,
+    loading: false,
+    error: null,
+  };
+}
 
 export async function requestLatestTeamSchedule(
   load: (from: string, to: string) => Promise<TeamSchedule>,
