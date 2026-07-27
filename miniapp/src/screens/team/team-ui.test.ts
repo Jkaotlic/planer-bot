@@ -8,16 +8,18 @@ import {
   type TeamEntryView,
   type TodayModel,
   type WeekCell,
+  type WeekModel,
 } from "../../lib/team-schedule";
 import { TeamRangeNav } from "./TeamRangeNav";
 import { toTeamEntryDetailRows } from "./TeamEntryDetails";
 import { TeamTodayView } from "./TeamTodayView";
 import {
+  handleTeamViewSwitcherKeyDown,
   teamModeForArrowKey,
   TeamViewPanel,
   TeamViewSwitcher,
 } from "./TeamViewSwitcher";
-import { selectWeekCellDetails, TeamWeekGrid } from "./TeamWeekGrid";
+import { resolveWeekCellSelection, TeamWeekGrid } from "./TeamWeekGrid";
 
 describe("team schedule UI", () => {
   it("renders Today and Week as labelled tabs with the current tab selected", () => {
@@ -53,12 +55,74 @@ describe("team schedule UI", () => {
     expect(markup).toContain(">Неделя<");
   });
 
-  it("wraps roving tab focus through Today and Week with horizontal arrows", () => {
+  it("runs the production arrow handler and never moves focus after a rejected change", () => {
     expect(teamModeForArrowKey("today", "ArrowRight")).toBe("week");
     expect(teamModeForArrowKey("week", "ArrowRight")).toBe("today");
     expect(teamModeForArrowKey("today", "ArrowLeft")).toBe("week");
     expect(teamModeForArrowKey("week", "ArrowLeft")).toBe("today");
     expect(teamModeForArrowKey("today", "Enter")).toBeNull();
+
+    let prevented = 0;
+    const changed: string[] = [];
+    const focused: string[] = [];
+    const event = {
+      key: "ArrowRight",
+      preventDefault: () => {
+        prevented += 1;
+      },
+    };
+
+    expect(
+      handleTeamViewSwitcherKeyDown(
+        event,
+        "today",
+        (mode) => {
+          changed.push(mode);
+          return true;
+        },
+        (mode) => focused.push(mode),
+      ),
+    ).toBe(true);
+    expect({ prevented, changed, focused }).toEqual({
+      prevented: 1,
+      changed: ["week"],
+      focused: ["week"],
+    });
+
+    event.key = "ArrowLeft";
+    expect(
+      handleTeamViewSwitcherKeyDown(
+        event,
+        "week",
+        (mode) => {
+          changed.push(mode);
+          return false;
+        },
+        (mode) => focused.push(mode),
+      ),
+    ).toBe(true);
+    expect({ prevented, changed, focused }).toEqual({
+      prevented: 2,
+      changed: ["week", "today"],
+      focused: ["week"],
+    });
+  });
+
+  it("keeps selected tab and roving tab stop independently controlled while pending", () => {
+    const markup = renderToStaticMarkup(
+      createElement(TeamViewSwitcher, {
+        value: "today",
+        focusValue: "week",
+        onChange: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain(
+      'id="team-view-tab-today" aria-selected="true" aria-controls="team-view-panel-today" tabindex="-1"',
+    );
+    expect(markup).toContain(
+      'id="team-view-tab-week" aria-selected="false" aria-controls="team-view-panel-week" tabindex="0"',
+    );
   });
 
   it("renders the range label live and disables both navigation buttons while busy", () => {
@@ -197,7 +261,7 @@ describe("team schedule UI", () => {
           category: "shift",
           title: null,
           location: null,
-          templateId: 1,
+          templateId: 2,
           employeeId: 10,
         },
         {
@@ -249,13 +313,13 @@ describe("team schedule UI", () => {
     ]);
     expect(markup.match(/class="team-week__row"/g)).toHaveLength(4);
     expect(markup).toContain(
-      '<div class="team-week__name"><b>Шилов</b><span>Дмитрий</span></div>',
+      '<div class="team-week__name" role="rowheader"><b>Шилов</b><span>Дмитрий</span></div>',
     );
     expect(markup).toContain(
-      '<div class="team-week__name"><b>Без</b><span>Смены</span></div>',
+      '<div class="team-week__name" role="rowheader"><b>Без</b><span>Смены</span></div>',
     );
     expect(markup).toContain(
-      '<div class="team-week__name"><b>Не</b><span>назначено</span></div>',
+      '<div class="team-week__name" role="rowheader"><b>Не</b><span>назначено</span></div>',
     );
     expect(markup).toContain(
       'style="background:#CBC04D;color:#292505"',
@@ -267,7 +331,13 @@ describe("team schedule UI", () => {
     expect(markup).toContain(">О<");
     expect(markup).toContain("<small>+1</small>");
     expect(markup).toContain(
-      'aria-label="2026-07-27: Дежурство с 07:00, День"',
+      'aria-label="Шилов Дмитрий, 2026-07-27: Дежурство с 07:00, День"',
+    );
+    expect(markup).toContain(
+      'aria-label="Юдин Максим, 2026-07-27: День, Отпуск"',
+    );
+    expect(markup).toContain(
+      'role="gridcell" aria-label="Без Смены, 2026-07-27: нет записи"',
     );
     expect(markup).toContain(
       'class="team-week__day is-today" data-date="2026-07-30"',
@@ -276,7 +346,7 @@ describe("team schedule UI", () => {
       'class="team-week__day is-weekend" data-date="2026-08-01"',
     );
     expect(markup).toContain(
-      'class="team-week__cell is-weekend" aria-label="2026-08-02: нет записи"',
+      'class="team-week__cell is-weekend" role="gridcell" aria-label="Юдин Максим, 2026-08-02: нет записи"',
     );
 
     const withoutUnassigned = renderToStaticMarkup(
@@ -295,7 +365,7 @@ describe("team schedule UI", () => {
     expect(withoutUnassigned.match(/class="team-week__row"/g)).toHaveLength(3);
     expect(withoutUnassigned).not.toContain("Не назначено");
     expect(withoutUnassigned).toContain(
-      '<div class="team-week__name"><b>Без</b><span>Смены</span></div>',
+      '<div class="team-week__name" role="rowheader"><b>Без</b><span>Смены</span></div>',
     );
   });
 
@@ -341,9 +411,21 @@ describe("team schedule UI", () => {
       extraCount: 1,
     };
 
-    expect(selectWeekCellDetails(cell)).toEqual(entries);
+    const selection = { employeeId: 20, date: "2026-07-30" };
+    const model: WeekModel = {
+      days: ["2026-07-30"],
+      rows: [
+        {
+          employeeId: 20,
+          displayName: "Шилов Дмитрий",
+          cells: [cell],
+        },
+      ],
+    };
+
+    expect(resolveWeekCellSelection(model, selection)).toEqual(entries);
     expect(
-      toTeamEntryDetailRows(selectWeekCellDetails(cell)),
+      toTeamEntryDetailRows(resolveWeekCellSelection(model, selection)),
     ).toEqual([
       {
         id: 90,
@@ -360,12 +442,57 @@ describe("team schedule UI", () => {
         dateRange: "2026-07-30",
       },
     ]);
+
+    const refreshedEntry: TeamEntryView = {
+      ...entries[0]!,
+      title: "Обновлённая выездная встреча",
+    };
     expect(
-      selectWeekCellDetails({
-        date: "2026-07-31",
-        entries: [],
-        primary: null,
-        extraCount: 0,
+      resolveWeekCellSelection(
+        {
+          ...model,
+          rows: [
+            {
+              ...model.rows[0]!,
+              cells: [
+                {
+                  ...cell,
+                  entries: [refreshedEntry],
+                  primary: refreshedEntry,
+                  extraCount: 0,
+                },
+              ],
+            },
+          ],
+        },
+        selection,
+      ),
+    ).toEqual([refreshedEntry]);
+    expect(
+      resolveWeekCellSelection(
+        {
+          ...model,
+          rows: [
+            {
+              ...model.rows[0]!,
+              cells: [
+                {
+                  date: "2026-07-30",
+                  entries: [],
+                  primary: null,
+                  extraCount: 0,
+                },
+              ],
+            },
+          ],
+        },
+        selection,
+      ),
+    ).toEqual([]);
+    expect(
+      resolveWeekCellSelection(model, {
+        employeeId: 999,
+        date: "2026-07-30",
       }),
     ).toEqual([]);
   });

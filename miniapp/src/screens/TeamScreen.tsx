@@ -11,7 +11,9 @@ import {
   createTeamScreenState,
   moveTeamDate,
   requestLatestTeamSchedule,
+  teamModeLoadTarget,
   teamRange,
+  teamTabFocusMode,
   type TeamMode,
   type TeamScreenState,
 } from "../lib/team-schedule";
@@ -29,6 +31,7 @@ import "./team/team-schedule.css";
 
 export function TeamScreen({ templates }: { templates: readonly Template[] }) {
   const [view, setView] = useState(() => createTeamScreenState(toISODate(new Date())));
+  const [tabFocusMode, setTabFocusMode] = useState<TeamMode>(view.displayMode);
   const viewRef = useRef(view);
   const gate = useRef(createLatestRequestGate());
 
@@ -60,6 +63,10 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
   }, [load]);
 
   useEffect(() => {
+    if (!view.loading) setTabFocusMode(view.displayMode);
+  }, [view.displayMode, view.loading]);
+
+  useEffect(() => {
     function onVisible() {
       const current = viewRef.current;
       if (
@@ -85,10 +92,13 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
     void load(current.displayMode, targetDate);
   }
 
-  function changeMode(mode: TeamMode) {
+  function changeMode(mode: TeamMode): boolean {
     const current = viewRef.current;
-    if (current.loading || mode === current.displayMode) return;
-    void load(mode, current.displayDate);
+    const target = teamModeLoadTarget(current, mode);
+    if (!target) return false;
+    setTabFocusMode(mode);
+    void load(target.mode, target.date);
+    return true;
   }
 
   const displayRange = teamRange(view.displayMode, view.displayDate);
@@ -106,7 +116,11 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         <Title level="2" weight="2">
           Команда
         </Title>
-        <TeamViewSwitcher value={view.displayMode} onChange={changeMode} />
+        <TeamViewSwitcher
+          value={view.displayMode}
+          focusValue={teamTabFocusMode(view, tabFocusMode)}
+          onChange={changeMode}
+        />
         <TeamRangeNav
           label={label}
           busy={view.loading}

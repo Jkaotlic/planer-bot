@@ -151,6 +151,7 @@
   box-shadow: inset 0 3px var(--tgui--link_color);
 }
 
+.team-week__header,
 .team-week__row {
   display: contents;
 }
@@ -181,6 +182,16 @@
   border: 0;
   border-radius: 6px;
   background: rgb(127 127 127 / 5%);
+}
+
+.team-week__slot {
+  min-width: 0;
+  min-height: 38px;
+}
+
+.team-week__slot .team-week__cell {
+  width: 100%;
+  height: 100%;
 }
 
 .team-week__cell.is-weekend {

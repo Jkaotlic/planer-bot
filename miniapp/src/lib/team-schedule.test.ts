@@ -10,7 +10,9 @@ import {
   moveTeamDate,
   requestLatestTeamSchedule,
   splitDisplayName,
+  teamModeLoadTarget,
   teamRange,
+  teamTabFocusMode,
 } from "./team-schedule";
 
 const templates = [
@@ -338,6 +340,114 @@ describe("team schedule model", () => {
       displayDate: "2026-08-01",
       targetMode: "week",
       targetDate: "2026-08-01",
+      schedule: nextSchedule,
+      loading: false,
+      error: null,
+    });
+  });
+
+  it("controls the tab stop across pending, failure, retry, and completion", () => {
+    let state = createTeamScreenState("2026-07-27");
+    state = beginTeamScreenLoad(state, "today", "2026-07-27");
+    state = applyTeamScreenLoadResult(
+      state,
+      "today",
+      "2026-07-27",
+      { status: "accepted", schedule },
+    )!;
+    expect(teamTabFocusMode(state, "week")).toBe("today");
+
+    state = beginTeamScreenLoad(state, "week", "2026-07-27");
+    expect(teamTabFocusMode(state, "week")).toBe("week");
+
+    state = applyTeamScreenLoadResult(
+      state,
+      "week",
+      "2026-07-27",
+      { status: "failed", error: new Error("offline") },
+    )!;
+    expect(teamTabFocusMode(state, "week")).toBe("today");
+
+    state = beginTeamScreenLoad(state, "week", "2026-07-27");
+    expect(teamTabFocusMode(state, "today")).toBe("today");
+
+    state = applyTeamScreenLoadResult(
+      state,
+      "week",
+      "2026-07-27",
+      { status: "accepted", schedule: nextSchedule },
+    )!;
+    expect(teamTabFocusMode(state, "today")).toBe("week");
+  });
+
+  it("lets a mode change supersede an in-flight target without stale completion clearing it", async () => {
+    let state = createTeamScreenState("2026-07-27");
+    state = beginTeamScreenLoad(state, "today", "2026-07-27");
+    state = applyTeamScreenLoadResult(
+      state,
+      "today",
+      "2026-07-27",
+      { status: "accepted", schedule },
+    )!;
+
+    const gate = createLatestRequestGate();
+    let resolveWeek!: (value: TeamSchedule) => void;
+    const weekPayload = new Promise<TeamSchedule>((resolve) => {
+      resolveWeek = resolve;
+    });
+    const weekTarget = teamModeLoadTarget(state, "week");
+    expect(weekTarget).toEqual({ mode: "week", date: "2026-07-27" });
+    state = beginTeamScreenLoad(state, weekTarget!.mode, weekTarget!.date);
+    const weekRequest = requestLatestTeamSchedule(
+      () => weekPayload,
+      teamRange(weekTarget!.mode, weekTarget!.date),
+      gate,
+    );
+
+    expect(teamModeLoadTarget(state, "week")).toBeNull();
+    const todayTarget = teamModeLoadTarget(state, "today");
+    expect(todayTarget).toEqual({ mode: "today", date: "2026-07-27" });
+    state = beginTeamScreenLoad(state, todayTarget!.mode, todayTarget!.date);
+
+    let resolveToday!: (value: TeamSchedule) => void;
+    const todayPayload = new Promise<TeamSchedule>((resolve) => {
+      resolveToday = resolve;
+    });
+    const todayRequest = requestLatestTeamSchedule(
+      () => todayPayload,
+      teamRange(todayTarget!.mode, todayTarget!.date),
+      gate,
+    );
+
+    resolveWeek(schedule);
+    const staleWeek = await weekRequest;
+    expect(staleWeek.status).toBe("stale");
+    expect(
+      applyTeamScreenLoadResult(
+        state,
+        weekTarget!.mode,
+        weekTarget!.date,
+        staleWeek,
+      ),
+    ).toBeNull();
+    expect(state).toMatchObject({
+      displayMode: "today",
+      targetMode: "today",
+      schedule,
+      loading: true,
+    });
+
+    resolveToday(nextSchedule);
+    const acceptedToday = await todayRequest;
+    state = applyTeamScreenLoadResult(
+      state,
+      todayTarget!.mode,
+      todayTarget!.date,
+      acceptedToday,
+    )!;
+    expect(state).toMatchObject({
+      displayMode: "today",
+      targetMode: "today",
       schedule: nextSchedule,
       loading: false,
       error: null,
