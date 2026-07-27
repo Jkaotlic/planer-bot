@@ -54,7 +54,7 @@ describe("decodeRoster (against the synthetic fixture)", () => {
     expect(person("Кузнецова Мария").entries.find((e) => e.date === "2026-07-01")).toMatchObject(
       { category: "shift", title: "Вечер", start: "11:00", end: "20:00" });
     expect(person("Соколов Дмитрий").entries.find((e) => e.date === "2026-07-01")).toMatchObject(
-      { category: "shift", title: "Открытие", start: "07:00", end: "16:00" });
+      { category: "duty", title: "Дежурство с 07:00", start: "07:00", end: "16:00" });
     expect(person("Соколов Дмитрий").entries.find((e) => e.date === "2026-07-02")).toMatchObject(
       { category: "shift", title: "Утро", start: "08:00", end: "17:00" });
     expect(person("Соколов Дмитрий").entries.find((e) => e.date === "2026-07-03")).toMatchObject(
