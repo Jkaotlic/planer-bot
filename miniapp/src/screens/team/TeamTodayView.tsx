@@ -1,6 +1,13 @@
 import type { TodayGroup, TodayModel } from "../../lib/team-schedule";
+import { categoryPaletteForTheme } from "../../categories";
 
-export function TeamTodayView({ model }: { model: TodayModel }) {
+export function TeamTodayView({
+  model,
+  isDark,
+}: {
+  model: TodayModel;
+  isDark: boolean;
+}) {
   const empty = model.groups.length === 0 && model.noTimeGroups.length === 0;
 
   return (
@@ -21,13 +28,13 @@ export function TeamTodayView({ model }: { model: TodayModel }) {
       ) : (
         <div className="team-today">
           {model.groups.map((group) => (
-            <TodayGroupCard key={group.key} group={group} />
+            <TodayGroupCard key={group.key} group={group} isDark={isDark} />
           ))}
           {model.noTimeGroups.length > 0 && (
             <section className="team-no-time">
               <h3>Без времени</h3>
               {model.noTimeGroups.map((group) => (
-                <TodayGroupCard key={group.key} group={group} />
+                <TodayGroupCard key={group.key} group={group} isDark={isDark} />
               ))}
             </section>
           )}
@@ -37,8 +44,17 @@ export function TeamTodayView({ model }: { model: TodayModel }) {
   );
 }
 
-function TodayGroupCard({ group }: { group: TodayGroup }) {
-  const markerStyle = group.palette ? { background: group.palette.bg } : undefined;
+function TodayGroupCard({
+  group,
+  isDark,
+}: {
+  group: TodayGroup;
+  isDark: boolean;
+}) {
+  const category = group.entries[0]?.shift.category;
+  const palette = group.palette
+    ?? (category ? categoryPaletteForTheme(category, isDark) : null);
+  const markerStyle = palette ? { background: palette.bg } : undefined;
 
   return (
     <section className="team-group">

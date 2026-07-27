@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { categoryPaletteForTheme } from "../../categories";
 import type {
   TeamEntryView,
   WeekCell,
@@ -28,9 +29,11 @@ export function resolveWeekCellSelection(
 export function TeamWeekGrid({
   model,
   today,
+  isDark,
 }: {
   model: WeekModel;
   today: string;
+  isDark: boolean;
 }) {
   const [selection, setSelection] = useState<WeekCellSelection | null>(null);
   const details = resolveWeekCellSelection(model, selection);
@@ -73,6 +76,7 @@ export function TeamWeekGrid({
                   key={`${row.employeeId ?? "open"}:${cell.date}`}
                   cell={cell}
                   employeeName={row.displayName}
+                  isDark={isDark}
                   onOpen={() => {
                     setSelection({
                       employeeId: row.employeeId,
@@ -101,10 +105,12 @@ export function TeamWeekGrid({
 function WeekCellButton({
   cell,
   employeeName,
+  isDark,
   onOpen,
 }: {
   cell: WeekCell;
   employeeName: string;
+  isDark: boolean;
   onOpen: () => void;
 }) {
   if (!cell.primary) {
@@ -116,21 +122,19 @@ function WeekCellButton({
       />
     );
   }
-  const palette = cell.primary.palette;
+  const exactPalette = cell.primary.palette;
+  const palette = exactPalette
+    ?? categoryPaletteForTheme(cell.primary.shift.category, isDark);
   return (
     <div className="team-week__slot" role="gridcell">
       <button
         type="button"
         className={`team-week__cell has-entry${isWeekend(cell.date) ? " is-weekend" : ""}`}
-        style={
-          palette
-            ? { background: palette.bg, color: palette.fg }
-            : { color: "var(--tgui--text_color)" }
-        }
+        style={{ background: palette.bg, color: palette.fg }}
         aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => entry.title).join(", ")}`}
         onClick={onOpen}
       >
-        <b>{palette?.code ?? "•"}</b>
+        <b>{exactPalette?.code ?? "•"}</b>
         {cell.extraCount > 0 && <small>+{cell.extraCount}</small>}
       </button>
     </div>

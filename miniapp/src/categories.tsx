@@ -20,7 +20,7 @@ export function categoryLabel(category: Category): string {
   return CATEGORY_LABELS[category];
 }
 
-interface CategoryPalette {
+export interface CategoryPalette {
   readonly bg: string;
   readonly fg: string;
 }
@@ -47,6 +47,15 @@ const DARK_PALETTE: Record<Category, CategoryPalette> = {
   weekend_work: { bg: "rgba(70,190,90,0.22)", fg: "#86E093" },
 };
 
+/** Resolves the existing category colour for an explicit Telegram appearance. */
+export function categoryPaletteForTheme(
+  category: Category,
+  isDark: boolean,
+): CategoryPalette {
+  const exact = exactSchedulePalette(undefined, category);
+  if (exact) return { bg: exact.bg, fg: exact.fg };
+  return (isDark ? DARK_PALETTE : LIGHT_PALETTE)[category];
+}
 
 /** Minimal shape needed to colour an entry — avoids importing the api types here. */
 interface ColourableEntry {
@@ -73,9 +82,7 @@ export function useEntryPalette(entry: ColourableEntry, templates: readonly Acce
 /** The category's chip colors for the currently active Telegram theme. */
 export function useCategoryPalette(category: Category): CategoryPalette {
   const isDark = useIsDark();
-  const exact = exactSchedulePalette(undefined, category);
-  if (exact) return { bg: exact.bg, fg: exact.fg };
-  return (isDark ? DARK_PALETTE : LIGHT_PALETTE)[category];
+  return categoryPaletteForTheme(category, isDark);
 }
 
 export interface CategoryChipProps {

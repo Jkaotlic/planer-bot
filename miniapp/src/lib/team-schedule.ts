@@ -330,6 +330,15 @@ export function teamTabFocusMode(
   return state.loading ? pendingFocusMode : state.displayMode;
 }
 
+export function teamVisibilityRefreshTarget(
+  state: TeamScreenState,
+): TeamModeLoadTarget | null {
+  if (state.loading) return null;
+  return state.error
+    ? { mode: state.targetMode, date: state.targetDate }
+    : { mode: state.displayMode, date: state.displayDate };
+}
+
 export function createTeamScreenState(date: string): TeamScreenState {
   return {
     displayMode: "today",

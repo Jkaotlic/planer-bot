@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner, Title } from "@telegram-apps/telegram-ui";
 import { apiClient, type Template } from "../api/client";
+import { useIsDark } from "../lib/theme";
 import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
 import {
   applyTeamScreenLoadResult,
@@ -14,6 +15,7 @@ import {
   teamModeLoadTarget,
   teamRange,
   teamTabFocusMode,
+  teamVisibilityRefreshTarget,
   type TeamMode,
   type TeamScreenState,
 } from "../lib/team-schedule";
@@ -34,6 +36,7 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
   const [tabFocusMode, setTabFocusMode] = useState<TeamMode>(view.displayMode);
   const viewRef = useRef(view);
   const gate = useRef(createLatestRequestGate());
+  const isDark = useIsDark();
 
   const commitView = useCallback((next: TeamScreenState) => {
     viewRef.current = next;
@@ -69,12 +72,9 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
   useEffect(() => {
     function onVisible() {
       const current = viewRef.current;
-      if (
-        document.visibilityState === "visible"
-        && !current.loading
-        && !current.error
-      ) {
-        void load(current.displayMode, current.displayDate);
+      if (document.visibilityState === "visible") {
+        const target = teamVisibilityRefreshTarget(current);
+        if (target) void load(target.mode, target.date);
       }
     }
     document.addEventListener("visibilitychange", onVisible);
@@ -148,12 +148,14 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
           {view.schedule && view.displayMode === "today" && (
             <TeamTodayView
               model={buildTodayModel(view.displayDate, view.schedule, templates)}
+              isDark={isDark}
             />
           )}
           {view.schedule && view.displayMode === "week" && (
             <TeamWeekGrid
               model={buildWeekModel(displayRange.from, view.schedule, templates)}
               today={toISODate(new Date())}
+              isDark={isDark}
             />
           )}
         </TeamViewPanel>
