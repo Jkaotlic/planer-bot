@@ -47,7 +47,7 @@ const EMPLOYEES: Employee[] = [
   { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004 },
   { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005 },
   { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006 },
-  { id: 7, displayName: "Нина Хохлова", isAdmin: false, isActive: true, telegramUserId: 100007 },
+  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007 },
 ];
 
 function personName(employeeId: number): string {

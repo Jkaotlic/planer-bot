@@ -1,12 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archiveEmployee } from "../repo/employees";
 import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
-import { listActiveTemplates } from "../repo/templates";
 import { applyRosterImport, buildRosterCsv, type PersonResolution } from "./roster-service";
-import { parseRosterCsv, decodeRoster, type DecodeResult } from "./roster-codec";
+import type { DecodeResult } from "./roster-codec";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
   return { perPerson, unknowns: [], proposedHolidays: [] };
@@ -16,14 +14,14 @@ describe("applyRosterImport", () => {
   it("renames an existing nickname user (keeping Telegram) and creates the rest", () => {
     const db = makeTestDb();
     const bot = createEmployee(db, { displayName: "Женя Тест", inviteToken: "inv-1" });
-    linkTelegramAccount(db, "inv-1", 555, "demo_worker3");
+    linkTelegramAccount(db, "inv-1", 555, "test_worker");
 
     const decoded = decode([
-      { name: "Панов Евгений", entries: [{ date: "2026-06-01", endDate: null, category: "duty", templateId: 7, location: null, start: "09:00", end: "18:00", title: "Дежурство · Телефон" }] },
+      { name: "Сидоров Евгений", entries: [{ date: "2026-06-01", endDate: null, category: "duty", templateId: 7, location: null, start: "09:00", end: "18:00", title: "Дежурство · Телефон" }] },
       { name: "Новиков Пётр", entries: [{ date: "2026-06-01", endDate: null, category: "shift", templateId: 2, location: null, start: "09:00", end: "18:00", title: "День" }] },
     ]);
     const resolutions: PersonResolution[] = [
-      { csvName: "Панов Евгений", action: "rename", employeeId: bot.id },
+      { csvName: "Сидоров Евгений", action: "rename", employeeId: bot.id },
       { csvName: "Новиков Пётр", action: "create" },
     ];
 
@@ -31,10 +29,10 @@ describe("applyRosterImport", () => {
     expect(summary).toMatchObject({ employeesRenamed: 1, employeesCreated: 1, entriesInserted: 2 });
 
     const renamed = getEmployeeById(db, bot.id)!;
-    expect(renamed.displayName).toBe("Панов Евгений");
+    expect(renamed.displayName).toBe("Сидоров Евгений");
     expect(renamed.telegramUserId).toBe(555); // link preserved — the whole point
 
-    expect(listActive(db).map((e) => e.displayName).sort()).toEqual(["Панов Евгений", "Новиков Пётр"]);
+    expect(listActive(db).map((e) => e.displayName).sort()).toEqual(["Новиков Пётр", "Сидоров Евгений"]);
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(2);
     expect(listRecentAudit(db, 10).filter((a) => a.type === "roster_import")).toHaveLength(1);
   });
@@ -147,65 +145,5 @@ describe("buildRosterCsv", () => {
     const csv = buildRosterCsv(db, "2026-06-01", "2026-06-03");
     const codes = rowFor(csv, "Отпускник Олег");
     expect(codes).toEqual(["otp", "otp", "holiday"]); // 06-01, 06-02 still in the vacation; 06-03 is free
-  });
-});
-
-// Guarded: the real file is 26 real employees' names and who was on vacation when, so
-// it can't be committed. Set ROSTER_CSV to point at a local copy to run this suite.
-const REAL_ROSTER = process.env.ROSTER_CSV ?? "/Users/user/Downloads/Дежурства 2026.csv";
-
-describe.skipIf(!existsSync(REAL_ROSTER))("roster round-trip", () => {
-  it("import June then export gives back the source matrix byte-for-byte (bar the one 'Нет' cell)", () => {
-    const db = makeTestDb();
-    const source = readFileSync(REAL_ROSTER, "utf8");
-    const decoded = decodeRoster(parseRosterCsv(source), listActiveTemplates(db));
-    // Reconcile everyone as 'create' (fresh DB has no employees yet).
-    const resolutions = decoded.perPerson.map((p) => ({ csvName: p.name, action: "create" as const }));
-    applyRosterImport(db, decoded, resolutions, null);
-
-    const exported = "﻿" + buildRosterCsv(db, "2026-06-01", "2026-06-30");
-
-    // TRUE byte comparison — no line-ending normalisation, no .trim() (which would also
-    // silently eat the BOM, since JS treats U+FEFF as whitespace). The only expected
-    // difference: Хохлов/03.06 was 'Нет' (undecodable, not stored) -> exports as 'holiday'.
-    // The source file has no trailing newline and serializeRosterCsv appends none, so this
-    // lines up exactly if the codec is truly lossless.
-    const expected = source.replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
-    expect(exported).toBe(expected);
-  });
-
-  it("round-trips the file's row order even when the renamed people already hold low ids", () => {
-    const db = makeTestDb();
-    // The live shape: five nickname users already exist, so their ids (1,2,4,5,6) do NOT
-    // match their positions in the file. Without rosterOrder the export reorders the rows.
-    const nick = (name: string, tg: number) => {
-      const e = createEmployee(db, { displayName: name, inviteToken: `inv-${tg}` });
-      linkTelegramAccount(db, `inv-${tg}`, tg);
-      return e;
-    };
-    const orlov = nick("Andrey Test", 100000001);
-    const titov = nick("Миша Тест", 100000002);
-    const testAccount = nick("__TEST Проверка", 999999); // archived-ish extra, never in the file
-    const gushchin = nick("Кирилл Тест", 100000003);
-    const panov = nick("Женя Тест", 100000004);
-    const safonov = nick("Михаил Тест", 100000005);
-    archiveEmployee(db, testAccount.id, "2026-06-01");
-
-    const source = readFileSync(REAL_ROSTER, "utf8");
-    const decoded = decodeRoster(parseRosterCsv(source), listActiveTemplates(db));
-    const renames: Record<string, number> = {
-      "Орлов Андрей": orlov.id, "Титов Михаил": titov.id, "Гущин Кирилл": gushchin.id,
-      "Панов Евгений": panov.id, "Сафонов Михаил": safonov.id,
-    };
-    const resolutions = decoded.perPerson.map((p) =>
-      p.name in renames
-        ? { csvName: p.name, action: "rename" as const, employeeId: renames[p.name]! }
-        : { csvName: p.name, action: "create" as const });
-    applyRosterImport(db, decoded, resolutions, null);
-
-    const exported = "﻿" + buildRosterCsv(db, "2026-06-01", "2026-06-30");
-    const normalize = (s: string) =>
-      s.replace(/\r\n/g, "\n").trim().replace("Хохлов Дмитрий;k32;k32;Нет;", "Хохлов Дмитрий;k32;k32;holiday;");
-    expect(normalize(exported)).toBe(normalize(source));
   });
 });

@@ -1,5 +1,14 @@
-import { useEffect, useState } from "react";
-import { apiClient, AuthRequiredError, type Employee, type FeedEvent, type Shift, type Template } from "./api/client";
+import { useEffect, useRef, useState } from "react";
+import {
+  apiClient,
+  AuthRequiredError,
+  type Employee,
+  type FeedEvent,
+  type RosterImportPreview,
+  type RosterPersonResolution,
+  type Shift,
+  type Template,
+} from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
 import { BalanceRail } from "./components/BalanceRail";
 import { EventsFeed } from "./components/EventsFeed";
@@ -15,6 +24,33 @@ interface PanelTarget {
   date: string;
 }
 
+interface RosterImportState {
+  fileName: string;
+  csv: string;
+  preview: RosterImportPreview;
+  resolutions: RosterPersonResolution[];
+  busy: boolean;
+  error: string | null;
+}
+
+export function createInitialRosterResolutions(preview: RosterImportPreview): RosterPersonResolution[] {
+  return preview.people.map((person) =>
+    person.suggestedEmployeeId == null
+      ? { csvName: person.csvName, action: "create" }
+      : { csvName: person.csvName, action: "rename", employeeId: person.suggestedEmployeeId },
+  );
+}
+
+export function validateRosterResolutions(resolutions: RosterPersonResolution[]): string | null {
+  const employeeIds = resolutions
+    .filter((item): item is Extract<RosterPersonResolution, { action: "rename" }> => item.action === "rename")
+    .map((item) => item.employeeId);
+  if (new Set(employeeIds).size !== employeeIds.length) {
+    return "Один сотрудник выбран для нескольких строк CSV";
+  }
+  return null;
+}
+
 /** App shell: sidebar nav + top bar + the schedule grid (this task's scope). */
 export function App() {
   const [nav, setNav] = useState<NavKey>("schedule");
@@ -28,6 +64,9 @@ export function App() {
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
+  const [rosterImport, setRosterImport] = useState<RosterImportState | null>(null);
+  const [rosterNotice, setRosterNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const rosterFileInput = useRef<HTMLInputElement>(null);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   const weekLabel = formatWeekRangeLabel(weekMonday, addDays(weekMonday, 6));
@@ -82,6 +121,80 @@ export function App() {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
     setShifts(await apiClient.getTeamSchedule(from, to));
+  }
+
+  async function previewRosterFile(file: File) {
+    setRosterNotice(null);
+    if (file.size > 1_000_000) {
+      setRosterNotice({ kind: "error", text: "CSV больше 1 МБ — выбери файл поменьше" });
+      return;
+    }
+    try {
+      const csv = await file.text();
+      const preview = await apiClient.previewRosterImport(csv);
+      setRosterImport({
+        fileName: file.name,
+        csv,
+        preview,
+        resolutions: createInitialRosterResolutions(preview),
+        busy: false,
+        error: null,
+      });
+    } catch (err) {
+      if (err instanceof AuthRequiredError) setNeedLogin(true);
+      else setRosterNotice({ kind: "error", text: err instanceof Error ? err.message : "Не удалось прочитать CSV" });
+    }
+  }
+
+  function changeRosterResolution(index: number, value: string) {
+    setRosterImport((current) => {
+      if (!current) return current;
+      const person = current.preview.people[index];
+      if (!person) return current;
+      const resolutions = [...current.resolutions];
+      resolutions[index] =
+        value === "create"
+          ? { csvName: person.csvName, action: "create" }
+          : { csvName: person.csvName, action: "rename", employeeId: Number(value) };
+      return { ...current, resolutions, error: null };
+    });
+  }
+
+  async function confirmRosterImport() {
+    if (!rosterImport) return;
+    const validationError = validateRosterResolutions(rosterImport.resolutions);
+    if (validationError) {
+      setRosterImport({ ...rosterImport, error: validationError });
+      return;
+    }
+    setRosterImport({ ...rosterImport, busy: true, error: null });
+    try {
+      const summary = await apiClient.applyRosterImport(rosterImport.csv, rosterImport.resolutions);
+      setRosterImport(null);
+      setRosterNotice({
+        kind: "success",
+        text: `CSV загружен: ${summary.entriesInserted} записей, новых сотрудников — ${summary.employeesCreated}`,
+      });
+      await Promise.all([
+        refreshEmployees(),
+        refreshSchedule(),
+        apiClient.getEvents().then(setEvents),
+      ]);
+    } catch (err) {
+      if (err instanceof AuthRequiredError) {
+        setNeedLogin(true);
+        return;
+      }
+      setRosterImport((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: err instanceof Error ? err.message : "Не удалось применить CSV",
+            }
+          : current,
+      );
+    }
   }
 
   function openAddPanel(employeeId: number, date: string) {
@@ -143,8 +256,26 @@ export function App() {
               onNextWeek={() => setWeekMonday((m) => addDays(m, 7))}
               onDistributeFairly={() => {}}
               onAddEntry={() => openAddPanel(activeEmployees[0]?.id ?? 1, weekDates[0]!)}
+              onImportRoster={() => rosterFileInput.current?.click()}
               onExportRoster={() => void exportRoster()}
             />
+            <input
+              ref={rosterFileInput}
+              className="visually-hidden"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void previewRosterFile(file);
+              }}
+            />
+            {rosterNotice && (
+              <div className={`roster-notice roster-notice-${rosterNotice.kind}`} role="status">
+                {rosterNotice.text}
+                <button type="button" onClick={() => setRosterNotice(null)} aria-label="Закрыть сообщение">×</button>
+              </div>
+            )}
             <div className="schedule-layout">
               <ScheduleGrid
                 employees={activeEmployees}
@@ -194,6 +325,70 @@ export function App() {
               : undefined
           }
         />
+      )}
+
+      {rosterImport && activeEmployees && (
+        <div className="panel-overlay" onClick={() => !rosterImport.busy && setRosterImport(null)}>
+          <section className="panel roster-import-panel" onClick={(event) => event.stopPropagation()} aria-modal="true" role="dialog">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">Загрузка расписания из CSV</div>
+                <div className="roster-import-file">{rosterImport.fileName}</div>
+              </div>
+              <button
+                type="button"
+                className="panel-close"
+                onClick={() => setRosterImport(null)}
+                disabled={rosterImport.busy}
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="roster-import-summary">
+              <span><b>{rosterImport.preview.from}</b> — <b>{rosterImport.preview.to}</b></span>
+              <span>{rosterImport.preview.people.length} сотрудников · {rosterImport.preview.entryCount} записей</span>
+            </div>
+            <p className="roster-import-hint">
+              Проверь сопоставление ФИО. До нажатия «Применить» база не меняется; импорт выполняется целиком одной транзакцией.
+            </p>
+
+            <div className="roster-reconcile-list">
+              {rosterImport.preview.people.map((person, index) => {
+                const resolution = rosterImport.resolutions[index]!;
+                return (
+                  <label className="roster-reconcile-row" key={`${person.csvName}-${index}`}>
+                    <span>{person.csvName}</span>
+                    <select
+                      value={resolution.action === "create" ? "create" : String(resolution.employeeId)}
+                      onChange={(event) => changeRosterResolution(index, event.target.value)}
+                      disabled={rosterImport.busy}
+                    >
+                      <option value="create">＋ Создать нового</option>
+                      {activeEmployees.map((employee) => (
+                        <option value={employee.id} key={employee.id}>
+                          ↔ {employee.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
+
+            {rosterImport.error && <div className="roster-import-error">{rosterImport.error}</div>}
+
+            <div className="panel-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setRosterImport(null)} disabled={rosterImport.busy}>
+                Отмена
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => void confirmRosterImport()} disabled={rosterImport.busy}>
+                {rosterImport.busy ? "Загружаю…" : "Применить CSV"}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

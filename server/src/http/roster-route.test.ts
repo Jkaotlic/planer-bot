@@ -113,3 +113,110 @@ describe("GET /api/admin/roster.csv", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("admin roster CSV import", () => {
+  const csv = "\uFEFF;01.08.2026;02.08.2026\r\nИгорь Петров;k32;holiday\r\nНовый Сотрудник;k32-7;holiday";
+
+  it("previews the period, entries and exact-name employee suggestion without writing", async () => {
+    const db = makeTestDb();
+    const existing = worker(db, "Игорь Петров", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      from: "2026-08-01",
+      to: "2026-08-02",
+      entryCount: 2,
+      people: [
+        { csvName: "Игорь Петров", suggestedEmployeeId: existing.id },
+        { csvName: "Новый Сотрудник", suggestedEmployeeId: null },
+      ],
+      unknowns: [],
+    });
+
+    const exported = await app.request(
+      "/api/admin/roster.csv?from=2026-08-01&to=2026-08-02",
+      bearer(token),
+    );
+    expect(new TextDecoder().decode(await exported.arrayBuffer())).not.toContain("Новый Сотрудник");
+  });
+
+  it("applies confirmed resolutions atomically and returns a summary", async () => {
+    const db = makeTestDb();
+    const existing = worker(db, "Игорь Петров", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/roster/import/apply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        csv,
+        resolutions: [
+          { csvName: "Игорь Петров", action: "rename", employeeId: existing.id },
+          { csvName: "Новый Сотрудник", action: "create" },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({
+      summary: {
+        employeesRenamed: 1,
+        employeesCreated: 1,
+        entriesInserted: 2,
+        unknowns: [],
+      },
+    });
+
+    const exported = await app.request(
+      "/api/admin/roster.csv?from=2026-08-01&to=2026-08-02",
+      bearer(token),
+    );
+    const body = new TextDecoder().decode(await exported.arrayBuffer());
+    expect(body).toContain("Игорь Петров;k32;holiday");
+    expect(body).toContain("Новый Сотрудник;k32-7;holiday");
+  });
+
+  it("rejects a preview containing unknown roster codes", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const badCsv = ";01.08.2026\r\nИгорь Петров;wat";
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv: badCsv }),
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error: "unknown_roster_codes",
+      unknowns: [{ name: "Игорь Петров", date: "2026-08-01", code: "wat" }],
+    });
+  });
+
+  it("rejects duplicate employee names before showing the preview", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const duplicateCsv = ";01.08.2026\r\nИгорь Петров;k32\r\nИгорь Петров;k32-7";
+
+    const res = await app.request("/api/admin/roster/import/preview", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv: duplicateCsv }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "в CSV повторяется ФИО «Игорь Петров»" });
+  });
+});

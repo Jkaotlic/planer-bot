@@ -21,6 +21,8 @@ import {
   mockGetPayroll,
   mockGetPayrollCsv,
   mockGetRosterCsv,
+  mockPreviewRosterImport,
+  mockApplyRosterImport,
 } from "./mock";
 
 /** A worker row in the schedule grid / Работники screen. */
@@ -156,6 +158,36 @@ export interface PayrollRow {
   hours: number;
 }
 
+export interface RosterImportPerson {
+  csvName: string;
+  suggestedEmployeeId: number | null;
+}
+
+export interface RosterUnknownCell {
+  name: string;
+  date: string;
+  code: string;
+}
+
+export interface RosterImportPreview {
+  from: string;
+  to: string;
+  entryCount: number;
+  people: RosterImportPerson[];
+  unknowns: RosterUnknownCell[];
+}
+
+export type RosterPersonResolution =
+  | { csvName: string; action: "create" }
+  | { csvName: string; action: "rename"; employeeId: number };
+
+export interface RosterImportSummary {
+  employeesRenamed: number;
+  employeesCreated: number;
+  entriesInserted: number;
+  unknowns: RosterUnknownCell[];
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
@@ -178,6 +210,8 @@ export interface ApiClient {
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
+  previewRosterImport(csv: string): Promise<RosterImportPreview>;
+  applyRosterImport(csv: string, resolutions: RosterPersonResolution[]): Promise<RosterImportSummary>;
 }
 
 interface EmployeesResponse {
@@ -497,6 +531,18 @@ const realClient: ApiClient = {
     if (!res.ok) throw await toError("/api/admin/roster.csv", res);
     return res.text();
   },
+
+  previewRosterImport(csv) {
+    return authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv });
+  },
+
+  async applyRosterImport(csv, resolutions) {
+    const { summary } = await authorizedPostJson<{ summary: RosterImportSummary }>(
+      "/api/admin/roster/import/apply",
+      { csv, resolutions },
+    );
+    return summary;
+  },
 };
 
 const devClient: ApiClient = {
@@ -520,6 +566,8 @@ const devClient: ApiClient = {
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
+  previewRosterImport: (csv) => mockPreviewRosterImport(csv),
+  applyRosterImport: (csv, resolutions) => mockApplyRosterImport(csv, resolutions),
 };
 
 /**

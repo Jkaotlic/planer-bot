@@ -8,17 +8,54 @@ export type ParsedRoster = { dates: string[]; people: { name: string; cells: Ros
 function parseRuDate(s: string): string {
   const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s.trim());
   if (!m) throw new Error(`плохая дата в шапке ростера: "${s}"`);
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error(`плохая дата в шапке ростера: "${s}"`);
+  }
   return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+/** Splits one semicolon-delimited roster row, including Excel-style quoted fields. */
+function parseRosterLine(line: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index]!;
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') {
+        field += '"';
+        index++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === ";" && !quoted) {
+      fields.push(field);
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  if (quoted) throw new Error("незакрытая кавычка в CSV ростера");
+  fields.push(field);
+  return fields;
 }
 
 export function parseRosterCsv(text: string): ParsedRoster {
   const clean = text.replace(/^﻿/, "");
   const lines = clean.split(/\r\n|\r|\n/).filter((l) => l.length > 0);
   if (lines.length === 0) throw new Error("пустой файл ростера");
-  const header = lines[0].split(";");
+  const header = parseRosterLine(lines[0]);
   const dates = header.slice(1).map(parseRuDate); // header[0] is the empty name column
   const people = lines.slice(1).map((line) => {
-    const fields = line.split(";");
+    const fields = parseRosterLine(line);
     return {
       name: fields[0].trim(),
       cells: dates.map((date, i) => ({ date, code: (fields[i + 1] ?? "").trim() })),
