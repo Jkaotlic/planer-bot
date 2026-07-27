@@ -35,7 +35,7 @@ export const UNENCODABLE_CODE = "?";
 /** Work code -> preset NAME (ids are stable by name across live/fresh DBs). */
 export const CODE_TO_PRESET_NAME: Record<string, string> = {
   "k32": "День",
-  "k32-7": "Открытие",
+  "k32-7": "Дежурство с 07:00",
   "k32-8": "Утро",
   "k32-11": "Вечер",
   "k32-15": "Ночь",
