@@ -1,13 +1,14 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins, listActive } from "../repo/employees";
+import { safeErrorMessage } from "../util/safe-error";
 
 export async function notifyUser(bot: Bot, telegramUserId: number, text: string): Promise<boolean> {
   try {
     await bot.api.sendMessage(telegramUserId, text);
     return true;
   } catch (err) {
-    console.error(`notifyUser: failed for ${telegramUserId}:`, err);
+    console.error(`notifyUser: failed for ${telegramUserId}:`, safeErrorMessage(err));
     return false;
   }
 }
@@ -18,7 +19,7 @@ export async function notifySwapProposal(bot: Bot, telegramUserId: number, reque
   try {
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
   } catch (err) {
-    console.error(`notifySwapProposal: failed for ${telegramUserId}:`, err);
+    console.error(`notifySwapProposal: failed for ${telegramUserId}:`, safeErrorMessage(err));
   }
 }
 
@@ -31,7 +32,7 @@ export async function notifyVacantSlot(bot: Bot, db: Db, slotId: number, text: s
     try {
       await bot.api.sendMessage(e.telegramUserId, text, { reply_markup: kb });
     } catch (err) {
-      console.error(`notifyVacantSlot: failed for ${e.telegramUserId}:`, err);
+      console.error(`notifyVacantSlot: failed for ${e.telegramUserId}:`, safeErrorMessage(err));
     }
   }
 }
@@ -43,7 +44,7 @@ export async function notifyWeekendOffer(bot: Bot, telegramUserId: number, assig
   try {
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
   } catch (err) {
-    console.error(`notifyWeekendOffer: failed for ${telegramUserId}:`, err);
+    console.error(`notifyWeekendOffer: failed for ${telegramUserId}:`, safeErrorMessage(err));
   }
 }
 
@@ -53,7 +54,7 @@ export async function notifyAdmins(bot: Bot, db: Db, text: string): Promise<void
     try {
       await bot.api.sendMessage(admin.telegramUserId, text);
     } catch (err) {
-      console.error(`notifyAdmins: failed for ${admin.telegramUserId}:`, err);
+      console.error(`notifyAdmins: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
   }
 }

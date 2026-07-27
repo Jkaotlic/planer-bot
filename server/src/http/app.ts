@@ -72,7 +72,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Defence in depth: everything under /api/admin/* is admin-only by construction,
   // so a route that forgets its inline requireAdmin still can't leak. The per-route
   // guards below stay as belt-and-suspenders.
-  app.use("/api/admin/*", requireAdmin(config.jwtSecret));
+  app.use("/api/admin/*", requireAdmin(db, config.jwtSecret));
 
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -105,33 +105,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin } });
   });
 
-  app.get("/api/me", requireAuth(config.jwtSecret), (c) => {
+  app.get("/api/me", requireAuth(db, config.jwtSecret), (c) => {
     const me = getEmployeeById(db, c.get("auth").employeeId);
     if (!me) return c.json({ error: "not_found" }, 404);
     return c.json({ id: me.id, displayName: me.displayName, isAdmin: c.get("auth").isAdmin });
   });
 
-  app.get("/api/templates", requireAuth(config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));
+  app.get("/api/templates", requireAuth(db, config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));
 
-  app.get("/api/my/shifts", requireAuth(config.jwtSecret), (c) => {
+  app.get("/api/my/shifts", requireAuth(db, config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
     return c.json({ shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from) });
   });
 
-  app.get("/api/team/schedule", requireAuth(config.jwtSecret), (c) => {
+  app.get("/api/team/schedule", requireAuth(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
     return c.json({ shifts: listShiftsInRange(db, from, to) });
   });
 
-  app.get("/api/employees", requireAuth(config.jwtSecret), (c) =>
+  app.get("/api/employees", requireAuth(db, config.jwtSecret), (c) =>
     c.json({ employees: listActive(db).map((e) => ({ id: e.id, displayName: e.displayName })) }),
   );
 
-  app.get("/api/admin/employees", requireAdmin(config.jwtSecret), (c) => c.json({ employees: listActive(db) }));
+  app.get("/api/admin/employees", requireAdmin(db, config.jwtSecret), (c) => c.json({ employees: listActive(db) }));
 
-  app.post("/api/admin/employees", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/employees", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
       return c.json({ error: "displayName is required" }, 400);
@@ -143,7 +143,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Rename a worker.
-  app.patch("/api/admin/employees/:id", requireAdmin(config.jwtSecret), async (c) => {
+  app.patch("/api/admin/employees/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
@@ -154,14 +154,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ employee });
   });
 
-  app.post("/api/admin/employees/:id/archive", requireAdmin(config.jwtSecret), (c) => {
+  app.post("/api/admin/employees/:id/archive", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
     const employee = archiveEmployee(db, id, teamNow(config.teamTz).date);
     if (!employee) return c.json({ error: "not_found" }, 404);
     return c.json({ ok: true });
   });
 
-  app.post("/api/admin/employees/:id/restore", requireAdmin(config.jwtSecret), (c) => {
+  app.post("/api/admin/employees/:id/restore", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
     const employee = restoreEmployee(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
@@ -170,7 +170,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Promote a worker to admin, or remove admin rights. Guarded so the team
   // can never demote its last admin and lock everyone out.
-  app.post("/api/admin/employees/:id/role", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/employees/:id/role", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as { isAdmin?: unknown };
     if (typeof body.isAdmin !== "boolean") return c.json({ error: "isAdmin (boolean) required" }, 400);
@@ -186,7 +186,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // (Re)issue an invite link for a worker who hasn't linked their Telegram yet —
   // lets an admin re-show the link or replace a broken/lost one. `regenerate`
   // forces a fresh token (invalidating any previously shared link).
-  app.post("/api/admin/employees/:id/invite", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/employees/:id/invite", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as { regenerate?: unknown };
     const emp = getEmployeeById(db, id);
@@ -201,7 +201,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ inviteToken, inviteLink });
   });
 
-  app.get("/api/admin/events", requireAdmin(config.jwtSecret), (c) => {
+  app.get("/api/admin/events", requireAdmin(db, config.jwtSecret), (c) => {
     const events = listRecentAudit(db, 30).map((row) => ({
       id: row.id,
       type: row.type,
@@ -212,13 +212,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ events });
   });
 
-  app.post("/api/admin/entries", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     return c.json({ entry: createShift(db, parsed.data) }, 201);
   });
 
-  app.patch("/api/admin/entries/:id", requireAdmin(config.jwtSecret), async (c) => {
+  app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const parsed = updateEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
@@ -251,7 +251,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ entry });
   });
 
-  app.delete("/api/admin/entries/:id", requireAdmin(config.jwtSecret), (c) => {
+  app.delete("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
     if (!deleteShift(db, id)) return c.json({ error: "not_found" }, 404);
     return c.json({ ok: true });
@@ -291,7 +291,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return `${dateLabel} · ${s.start}–${s.end}${title}`;
   };
 
-  app.post("/api/swaps", requireAuth(config.jwtSecret), async (c) => {
+  app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
     if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
@@ -308,7 +308,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ request: res.request }, 201);
   });
 
-  app.post("/api/swaps/:id/accept", requireAuth(config.jwtSecret), async (c) => {
+  app.post("/api/swaps/:id/accept", requireAuth(db, config.jwtSecret), async (c) => {
     const res = acceptSwap(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz));
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) {
@@ -318,21 +318,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ ok: true });
   });
 
-  app.post("/api/swaps/:id/decline", requireAuth(config.jwtSecret), async (c) => {
+  app.post("/api/swaps/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
     const res = declineSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Твой обмен отклонили."); }
     return c.json({ ok: true });
   });
 
-  app.post("/api/swaps/:id/cancel", requireAuth(config.jwtSecret), async (c) => {
+  app.post("/api/swaps/:id/cancel", requireAuth(db, config.jwtSecret), async (c) => {
     const res = cancelSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Заявку на обмен отменили."); }
     return c.json({ ok: true });
   });
 
-  app.post("/api/admin/distribute", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/distribute", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { from?: unknown; to?: unknown; apply?: unknown };
     if (typeof body.from !== "string" || typeof body.to !== "string") {
       return c.json({ error: "from and to are required" }, 400);
@@ -344,7 +344,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ applied: body.apply === true, assignments });
   });
 
-  app.get("/api/swaps", requireAuth(config.jwtSecret), (c) => {
+  app.get("/api/swaps", requireAuth(db, config.jwtSecret), (c) => {
     const me = c.get("auth").employeeId;
     const swaps = listSwapsForEmployee(db, me).map((row) => {
       const outgoing = row.fromEmployeeId === me;
@@ -368,25 +368,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // --- Weekend-work marketplace ---------------------------------------------
 
   // Worker: browse open vacant slots (with "am I interested?" flag)
-  app.get("/api/weekend/slots", requireAuth(config.jwtSecret), (c) => {
+  app.get("/api/weekend/slots", requireAuth(db, config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? teamNow(config.teamTz).date;
     return c.json({ slots: openSlotsForWorker(db, c.get("auth").employeeId, from) });
   });
 
   // Worker: express interest in a slot (idempotent)
-  app.post("/api/weekend/slots/:id/interest", requireAuth(config.jwtSecret), (c) => {
+  app.post("/api/weekend/slots/:id/interest", requireAuth(db, config.jwtSecret), (c) => {
     const res = expressInterest(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     return c.json({ ok: true }, 201);
   });
 
   // Worker: my offered/confirmed weekend assignments
-  app.get("/api/weekend/offers", requireAuth(config.jwtSecret), (c) =>
+  app.get("/api/weekend/offers", requireAuth(db, config.jwtSecret), (c) =>
     c.json({ offers: myOffers(db, c.get("auth").employeeId) }),
   );
 
   // Worker: confirm an offer -> creates a weekend_work shift
-  app.post("/api/weekend/offers/:id/confirm", requireAuth(config.jwtSecret), async (c) => {
+  app.post("/api/weekend/offers/:id/confirm", requireAuth(db, config.jwtSecret), async (c) => {
     const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) await notifyAdmins(bot, db, "Работник подтвердил работу в выходной ✅");
@@ -394,7 +394,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Worker: decline an offer -> slot reopens
-  app.post("/api/weekend/offers/:id/decline", requireAuth(config.jwtSecret), async (c) => {
+  app.post("/api/weekend/offers/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
     const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     if (bot) await notifyAdmins(bot, db, "Работник отказался от работы в выходной.");
@@ -402,7 +402,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Admin: post a new vacant slot
-  app.post("/api/admin/weekend/slots", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/weekend/slots", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
       date?: unknown; start?: unknown; end?: unknown; title?: unknown; location?: unknown; note?: unknown;
     };
@@ -427,7 +427,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Admin: open slots with their ranked interested list (fairness hint: confirmedThisMonth asc)
-  app.get("/api/admin/weekend/slots", requireAdmin(config.jwtSecret), (c) => {
+  app.get("/api/admin/weekend/slots", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? teamNow(config.teamTz).date;
     const slots = listOpenSlots(db, from).map((slot) => ({
       slot,
@@ -438,7 +438,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Admin: assign a slot to an interested worker -> creates an offered assignment
-  app.post("/api/admin/weekend/slots/:id/assign", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/weekend/slots/:id/assign", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { employeeId?: unknown };
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId);
@@ -454,14 +454,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Admin: take someone off a slot (also removes their schedule entry).
-  app.post("/api/admin/weekend/assignments/:id/unassign", requireAdmin(config.jwtSecret), async (c) => {
+  app.post("/api/admin/weekend/assignments/:id/unassign", requireAdmin(db, config.jwtSecret), async (c) => {
     const res = unassign(db, Number(c.req.param("id")));
     if (!res.ok) return c.json({ error: res.reason }, 400);
     return c.json({ ok: true });
   });
 
   // Admin: payroll rows for confirmed weekend work in a date range
-  app.get("/api/admin/weekend/payroll", requireAdmin(config.jwtSecret), (c) => {
+  app.get("/api/admin/weekend/payroll", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
@@ -469,7 +469,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Admin: same payroll as a downloadable CSV (BOM-prefixed for Excel/Cyrillic)
-  app.get("/api/admin/weekend/payroll.csv", requireAdmin(config.jwtSecret), (c) => {
+  app.get("/api/admin/weekend/payroll.csv", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
@@ -480,7 +480,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // Admin: the whole roster as the same дд.мм.гггг × ФИО matrix the import reads.
-  app.get("/api/admin/roster.csv", requireAdmin(config.jwtSecret), (c) => {
+  app.get("/api/admin/roster.csv", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
     const to = c.req.query("to");
     if (!from || !to) return c.json({ error: "from and to are required" }, 400);
