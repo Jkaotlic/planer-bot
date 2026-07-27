@@ -340,6 +340,9 @@ describe("team schedule UI", () => {
       'role="gridcell" aria-label="Без Смены, 2026-07-27: нет записи"',
     );
     expect(markup).toContain(
+      'style="color:var(--tgui--text_color)" aria-label="Не назначено, 2026-07-27: Открытая смена"',
+    );
+    expect(markup).toContain(
       'class="team-week__day is-today" data-date="2026-07-30"',
     );
     expect(markup).toContain(

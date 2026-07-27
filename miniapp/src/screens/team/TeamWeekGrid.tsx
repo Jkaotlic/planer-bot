@@ -122,7 +122,11 @@ function WeekCellButton({
       <button
         type="button"
         className={`team-week__cell has-entry${isWeekend(cell.date) ? " is-weekend" : ""}`}
-        style={palette ? { background: palette.bg, color: palette.fg } : undefined}
+        style={
+          palette
+            ? { background: palette.bg, color: palette.fg }
+            : { color: "var(--tgui--text_color)" }
+        }
         aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => entry.title).join(", ")}`}
         onClick={onOpen}
       >
