@@ -7,6 +7,7 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { notifyUser, notifyAdmins } from "./notify";
+import { safeErrorMessage } from "../util/safe-error";
 
 export interface BotDeps {
   db: Db;
@@ -156,7 +157,10 @@ export function createBot(deps: BotDeps): Bot {
   });
 
   bot.catch((err) => {
-    console.error(`bot handler error (update ${err.ctx?.update?.update_id ?? "?"}):`, err.error);
+    console.error(
+      `bot handler error (update ${err.ctx?.update?.update_id ?? "?"}):`,
+      safeErrorMessage(err.error),
+    );
   });
 
   return bot;

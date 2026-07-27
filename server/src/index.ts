@@ -8,8 +8,10 @@ import { loadConfig } from "./config";
 import { openDb, runMigrations } from "./db/client";
 import { createApp } from "./http/app";
 import { createBot } from "./bot/bot";
+import { stopBotSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
 import { teamNow } from "./util/team-time";
+import { safeErrorMessage } from "./util/safe-error";
 import type { Env } from "./http/middleware";
 
 const config = loadConfig(process.env);
@@ -17,11 +19,11 @@ const { db, sqlite } = openDb(config.databaseUrl);
 runMigrations(db, sqlite);
 
 const bot = createBot({ db, config });
-process.once("SIGINT", () => bot.stop());
-process.once("SIGTERM", () => bot.stop());
+process.once("SIGINT", () => void stopBotSafely(bot));
+process.once("SIGTERM", () => void stopBotSafely(bot));
 // Long-polling runs in the background; a bad/placeholder token must not crash the HTTP server.
 bot.start({ onStart: (info) => console.log(`bot @${info.username} started`) }).catch((err) => {
-  console.error("bot failed to start (check BOT_TOKEN):", err instanceof Error ? err.message : err);
+  console.error("bot failed to start (check BOT_TOKEN):", safeErrorMessage(err));
 });
 
 // Soft evening-before reminders — polled every 5 minutes; a failed tick must not crash the server,
@@ -33,7 +35,7 @@ setInterval(() => {
   reminderRunning = true;
   Promise.resolve(runReminderTick(db, bot, teamNow(config.teamTz)))
     .catch((err) => {
-      console.error("reminder tick failed:", err instanceof Error ? err.message : err);
+      console.error("reminder tick failed:", safeErrorMessage(err));
     })
     .finally(() => {
       reminderRunning = false;
