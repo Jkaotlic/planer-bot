@@ -27,6 +27,7 @@ logs/
 
 # brainstorming visual companion (local only)
 .superpowers/
+.worktrees/
 
 # os / editor
 .DS_Store
