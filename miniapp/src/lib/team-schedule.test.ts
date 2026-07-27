@@ -13,6 +13,7 @@ import {
   teamModeLoadTarget,
   teamRange,
   teamTabFocusMode,
+  teamVisibilityRefreshTarget,
 } from "./team-schedule";
 
 const templates = [
@@ -141,6 +142,8 @@ describe("team schedule model", () => {
     ]);
     expect(model.rows[2]?.cells.every((cell) => cell.entries.length === 0)).toBe(true);
     expect(model.rows[0]?.cells[0]?.entries).toHaveLength(2);
+    expect(model.rows[0]?.cells[0]?.entries.map((entry) => entry.shift.id)).toEqual([2, 5]);
+    expect(model.rows[0]?.cells[0]?.primary?.shift.id).toBe(2);
     expect(model.rows[0]?.cells[0]?.extraCount).toBe(1);
     expect(model.rows[0]?.cells[0]?.primary?.palette).toEqual({
       bg: "#CBC04D",
@@ -343,6 +346,54 @@ describe("team schedule model", () => {
       schedule: nextSchedule,
       loading: false,
       error: null,
+    });
+  });
+
+  it("refreshes the failed target after returning to the foreground", () => {
+    let state = createTeamScreenState("2026-07-27");
+    state = beginTeamScreenLoad(state, "today", "2026-07-27");
+    state = applyTeamScreenLoadResult(
+      state,
+      "today",
+      "2026-07-27",
+      { status: "accepted", schedule },
+    )!;
+    state = beginTeamScreenLoad(state, "week", "2026-08-01");
+    state = applyTeamScreenLoadResult(
+      state,
+      "week",
+      "2026-08-01",
+      { status: "failed", error: new Error("offline") },
+    )!;
+
+    const refreshTarget = teamVisibilityRefreshTarget(state);
+    expect(refreshTarget).toEqual({ mode: "week", date: "2026-08-01" });
+
+    state = beginTeamScreenLoad(
+      state,
+      refreshTarget!.mode,
+      refreshTarget!.date,
+    );
+    expect(teamVisibilityRefreshTarget(state)).toBeNull();
+
+    state = applyTeamScreenLoadResult(
+      state,
+      refreshTarget!.mode,
+      refreshTarget!.date,
+      { status: "accepted", schedule: nextSchedule },
+    )!;
+    expect(state).toMatchObject({
+      displayMode: "week",
+      displayDate: "2026-08-01",
+      targetMode: "week",
+      targetDate: "2026-08-01",
+      schedule: nextSchedule,
+      loading: false,
+      error: null,
+    });
+    expect(teamVisibilityRefreshTarget(state)).toEqual({
+      mode: "week",
+      date: "2026-08-01",
     });
   });
 

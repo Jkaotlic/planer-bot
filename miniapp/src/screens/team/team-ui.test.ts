@@ -21,6 +21,93 @@ import {
 } from "./TeamViewSwitcher";
 import { resolveWeekCellSelection, TeamWeekGrid } from "./TeamWeekGrid";
 
+function fallbackPaletteSchedule(): TeamSchedule {
+  const categories = [
+    {
+      id: 101,
+      employeeId: 1,
+      date: "2026-07-27",
+      start: "07:00",
+      end: "16:00",
+      category: "duty",
+      title: "Дежурство с 07:00",
+      templateId: 6,
+    },
+    {
+      id: 102,
+      employeeId: 2,
+      date: "2026-07-27",
+      start: "09:00",
+      end: "18:00",
+      category: "duty",
+      title: "Своя точка",
+      templateId: null,
+    },
+    {
+      id: 103,
+      employeeId: 3,
+      date: "2026-07-28",
+      start: "10:00",
+      end: "19:00",
+      category: "offsite",
+      title: "Выезд",
+      templateId: null,
+    },
+    {
+      id: 104,
+      employeeId: 4,
+      date: "2026-07-29",
+      start: "11:00",
+      end: "20:00",
+      category: "weekend_work",
+      title: null,
+      templateId: null,
+    },
+    {
+      id: 105,
+      employeeId: 5,
+      date: "2026-07-30",
+      start: null,
+      end: null,
+      category: "sick_leave",
+      title: null,
+      templateId: null,
+    },
+    {
+      id: 106,
+      employeeId: 6,
+      date: "2026-07-31",
+      start: null,
+      end: null,
+      category: "business_trip",
+      title: null,
+      templateId: null,
+    },
+  ] as const;
+
+  return {
+    employees: categories.map((entry, index) => ({
+      id: entry.employeeId,
+      displayName: `Сотрудник ${index + 1}`,
+      rosterOrder: index,
+    })),
+    shifts: categories.map((entry) => ({
+      ...entry,
+      endDate: null,
+      location: null,
+    })),
+  };
+}
+
+const fallbackPaletteTemplates = [
+  {
+    id: 6,
+    name: "Дежурство с 07:00",
+    accent: "amber",
+    sortOrder: 0,
+  },
+] as const;
+
 describe("team schedule UI", () => {
   it("renders Today and Week as labelled tabs with the current tab selected", () => {
     const markup = renderToStaticMarkup(
@@ -187,7 +274,9 @@ describe("team schedule UI", () => {
       { id: 2, name: "День", accent: "blue", sortOrder: 1 },
     ]);
 
-    const markup = renderToStaticMarkup(createElement(TeamTodayView, { model }));
+    const markup = renderToStaticMarkup(
+      createElement(TeamTodayView, { model, isDark: false }),
+    );
 
     expect(markup).toContain('aria-label="Итоги дня"');
     expect(markup).toContain("<b>2</b> На работе");
@@ -211,13 +300,70 @@ describe("team schedule UI", () => {
       noTimeGroups: [],
     };
 
-    const markup = renderToStaticMarkup(createElement(TeamTodayView, { model }));
+    const markup = renderToStaticMarkup(
+      createElement(TeamTodayView, { model, isDark: false }),
+    );
 
     expect(markup).toContain("<b>0</b> На работе");
     expect(markup).toContain("<b>0</b> Отсутствует");
     expect(markup).toContain("На этот день записей нет");
     expect(markup).toContain("Выберите соседнюю дату стрелками.");
     expect(markup).not.toContain('class="team-today"');
+  });
+
+  it("uses theme-aware fallback markers in Today without changing exact operational colours", () => {
+    const schedule = fallbackPaletteSchedule();
+    const model = buildTodayModel("2026-07-27", schedule, fallbackPaletteTemplates);
+
+    const light = renderToStaticMarkup(
+      createElement(TeamTodayView, { model, isDark: false }),
+    );
+    const dark = renderToStaticMarkup(
+      createElement(TeamTodayView, { model, isDark: true }),
+    );
+
+    expect(light).toContain('style="background:#CBC04D"');
+    expect(dark).toContain('style="background:#CBC04D"');
+    expect(light).toContain('style="background:#DEF5F0"');
+    expect(dark).toContain('style="background:rgba(48,191,171,0.22)"');
+    expect(light).toContain("Своя точка");
+  });
+
+  it("uses every existing light/dark fallback category palette in Week cells", () => {
+    const schedule = fallbackPaletteSchedule();
+    const model = buildWeekModel("2026-07-27", schedule, fallbackPaletteTemplates);
+
+    const light = renderToStaticMarkup(
+      createElement(TeamWeekGrid, {
+        model,
+        today: "2026-07-27",
+        isDark: false,
+      }),
+    );
+    const dark = renderToStaticMarkup(
+      createElement(TeamWeekGrid, {
+        model,
+        today: "2026-07-27",
+        isDark: true,
+      }),
+    );
+
+    for (const colour of ["#DEF5F0", "#EEE6FB", "#E1F6E1", "#FCE4E4", "#E4E6FA"]) {
+      expect(light).toContain(`background:${colour}`);
+    }
+    for (const colour of [
+      "rgba(48,191,171,0.22)",
+      "rgba(160,110,235,0.24)",
+      "rgba(70,190,90,0.22)",
+      "rgba(230,80,60,0.24)",
+      "rgba(102,112,225,0.24)",
+    ]) {
+      expect(dark).toContain(`background:${colour}`);
+    }
+    expect(light).toContain("background:#CBC04D;color:#292505");
+    expect(dark).toContain("background:#CBC04D;color:#292505");
+    expect(light).toContain(">•<");
+    expect(dark).toContain(">•<");
   });
 
   it("renders all seven dates, active rows, two-line names, exact palettes, and full cell labels", () => {
@@ -298,7 +444,11 @@ describe("team schedule UI", () => {
     const model = buildWeekModel("2026-07-27", schedule, templates);
 
     const markup = renderToStaticMarkup(
-      createElement(TeamWeekGrid, { model, today: "2026-07-30" }),
+      createElement(TeamWeekGrid, {
+        model,
+        today: "2026-07-30",
+        isDark: false,
+      }),
     );
 
     expect(markup.match(/class="team-week__day/g)).toHaveLength(7);
@@ -340,7 +490,7 @@ describe("team schedule UI", () => {
       'role="gridcell" aria-label="Без Смены, 2026-07-27: нет записи"',
     );
     expect(markup).toContain(
-      'style="color:var(--tgui--text_color)" aria-label="Не назначено, 2026-07-27: Открытая смена"',
+      'style="background:#E3EFFC;color:#144F8F" aria-label="Не назначено, 2026-07-27: Открытая смена"',
     );
     expect(markup).toContain(
       'class="team-week__day is-today" data-date="2026-07-30"',
@@ -363,6 +513,7 @@ describe("team schedule UI", () => {
           templates,
         ),
         today: "2026-07-30",
+        isDark: false,
       }),
     );
     expect(withoutUnassigned.match(/class="team-week__row"/g)).toHaveLength(3);
