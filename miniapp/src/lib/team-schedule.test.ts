@@ -64,6 +64,41 @@ describe("team schedule model", () => {
     ]);
   });
 
+  it("keeps custom groups separate when exact tuples share a colon-joined representation", () => {
+    const collisionSchedule: TeamSchedule = {
+      employees,
+      shifts: [
+        shift({
+          id: 6,
+          date: "2026-07-27",
+          title: "Встреча",
+          start: "09:10",
+          end: "18:20",
+          location: "30:Офис",
+          templateId: null,
+          category: "duty",
+          employeeId: 20,
+        }),
+        shift({
+          id: 7,
+          date: "2026-07-27",
+          title: "Встреча:09",
+          start: "10:18",
+          end: "20:30",
+          location: "Офис",
+          templateId: null,
+          category: "duty",
+          employeeId: 10,
+        }),
+      ],
+    };
+
+    const model = buildTodayModel("2026-07-27", collisionSchedule, templates);
+
+    expect(model.groups.map((group) => group.title)).toEqual(["Встреча", "Встреча:09"]);
+    expect(model.groups.map((group) => group.entries.map((entry) => entry.shift.id))).toEqual([[6], [7]]);
+  });
+
   it("keeps roster order, every employee row, seven days, unassigned work, and +N details", () => {
     const model = buildWeekModel(
       "2026-07-27",
@@ -104,28 +139,44 @@ describe("team schedule model", () => {
     expect(teamRange("week", "2026-08-01")).toEqual({ from: "2026-07-27", to: "2026-08-02" });
   });
 
-  it("drops an older response that finishes after the latest request", async () => {
+  it("distinguishes stale success from stale failure while both remain ignorable by status", async () => {
     const gate = createLatestRequestGate();
-    let resolveOld!: (value: TeamSchedule) => void;
-    let resolveNew!: (value: TeamSchedule) => void;
-    const oldPromise = new Promise<TeamSchedule>((resolve) => { resolveOld = resolve; });
-    const newPromise = new Promise<TeamSchedule>((resolve) => { resolveNew = resolve; });
-    const load = (from: string) => from === "2026-07-27" ? oldPromise : newPromise;
-
-    const oldRequest = requestLatestTeamSchedule(
-      load,
+    let resolveOldSuccess!: (value: TeamSchedule) => void;
+    const oldSuccessPromise = new Promise<TeamSchedule>((resolve) => { resolveOldSuccess = resolve; });
+    const oldSuccessRequest = requestLatestTeamSchedule(
+      () => oldSuccessPromise,
       { from: "2026-07-27", to: "2026-07-27" },
       gate,
     );
-    const newRequest = requestLatestTeamSchedule(
-      load,
+    const acceptedRequest = requestLatestTeamSchedule(
+      async () => schedule,
       { from: "2026-07-28", to: "2026-07-28" },
       gate,
     );
-    resolveNew(schedule);
-    expect(await newRequest).toEqual({ status: "accepted", schedule });
-    resolveOld(schedule);
-    expect(await oldRequest).toEqual({ status: "stale" });
+    expect(await acceptedRequest).toEqual({ status: "accepted", schedule });
+    resolveOldSuccess(schedule);
+    const staleSuccess = await oldSuccessRequest;
+
+    const staleError = new Error("late offline");
+    let rejectOldFailure!: (error: Error) => void;
+    const oldFailurePromise = new Promise<TeamSchedule>((_resolve, reject) => { rejectOldFailure = reject; });
+    const oldFailureRequest = requestLatestTeamSchedule(
+      () => oldFailurePromise,
+      { from: "2026-07-29", to: "2026-07-29" },
+      gate,
+    );
+    const finalAcceptedRequest = requestLatestTeamSchedule(
+      async () => schedule,
+      { from: "2026-07-30", to: "2026-07-30" },
+      gate,
+    );
+    expect(await finalAcceptedRequest).toEqual({ status: "accepted", schedule });
+    rejectOldFailure(staleError);
+    const staleFailure = await oldFailureRequest;
+
+    expect(staleSuccess).toEqual({ status: "stale", outcome: "accepted", schedule });
+    expect(staleFailure).toEqual({ status: "stale", outcome: "failed", error: staleError });
+    expect([staleSuccess.status, staleFailure.status]).toEqual(["stale", "stale"]);
   });
 
   it("surfaces an error only when the failing request is still current", async () => {
@@ -137,26 +188,5 @@ describe("team schedule model", () => {
       gate,
     );
     expect(result).toEqual({ status: "failed", error });
-  });
-
-  it("drops an older failure after a newer request has been accepted", async () => {
-    const gate = createLatestRequestGate();
-    let rejectOld!: (error: Error) => void;
-    const oldPromise = new Promise<TeamSchedule>((_resolve, reject) => { rejectOld = reject; });
-    const load = (from: string) => from === "2026-07-27" ? oldPromise : Promise.resolve(schedule);
-
-    const oldRequest = requestLatestTeamSchedule(
-      load,
-      { from: "2026-07-27", to: "2026-07-27" },
-      gate,
-    );
-    const newRequest = requestLatestTeamSchedule(
-      load,
-      { from: "2026-07-28", to: "2026-07-28" },
-      gate,
-    );
-    expect(await newRequest).toEqual({ status: "accepted", schedule });
-    rejectOld(new Error("late offline"));
-    expect(await oldRequest).toEqual({ status: "stale" });
   });
 });
