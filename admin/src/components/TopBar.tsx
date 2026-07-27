@@ -2,7 +2,6 @@ export interface TopBarProps {
   weekLabel: string;
   onPrevWeek: () => void;
   onNextWeek: () => void;
-  onDistributeFairly: () => void;
   onAddEntry: () => void;
   /** Opens the safe CSV preview/reconciliation flow. */
   onImportRoster: () => void;
@@ -10,8 +9,12 @@ export interface TopBarProps {
   onExportRoster: () => void;
 }
 
-/** Week switcher + primary actions, above the schedule grid. */
-export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onDistributeFairly, onAddEntry, onImportRoster, onExportRoster }: TopBarProps) {
+/** Week switcher + primary actions, above the schedule grid.
+ *
+ *  «Распределить честно» is deliberately absent: the console never had a client
+ *  method for it, so the button sat here permanently disabled and read as broken
+ *  software. The feature itself works — it lives in the Mini App's «Админ» tab. */
+export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onAddEntry, onImportRoster, onExportRoster }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="week-switcher">
@@ -32,9 +35,6 @@ export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onDistributeFairly, 
           ⬇ Выгрузить CSV
         </button>
       </div>
-      <button type="button" className="btn btn-secondary" onClick={onDistributeFairly} disabled>
-        ⚖ Распределить честно
-      </button>
       <button type="button" className="btn btn-primary" onClick={onAddEntry}>
         ＋ Добавить смену
       </button>

@@ -35,7 +35,15 @@ export function TabBar({ active, onChange, isAdmin }: TabBarProps) {
       </Tabbar.Item>,
     );
   }
-  return <Tabbar>{items}</Tabbar>;
+  // Wrapped so `index.css` can reach the items: five tabs on a phone leave
+  // telegram-ui's default padding no room for the labels, and every one of them
+  // rendered as «Сме…». The class is the only stable hook — telegram-ui's own
+  // class names are content hashes.
+  return (
+    <div className="tab-bar-fit">
+      <Tabbar>{items}</Tabbar>
+    </div>
+  );
 }
 
 // Paths reused verbatim from the approved product mockup's tab bar icons.

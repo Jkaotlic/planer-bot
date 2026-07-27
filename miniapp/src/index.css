@@ -15,4 +15,54 @@ body {
   background-color: var(--tg-theme-bg-color, #ffffff);
   color: var(--tg-theme-text-color, #000000);
   -webkit-font-smoothing: antialiased;
+  /* telegram-ui only sets a font on its OWN typography components; everything
+     else — every plain div, every screen we wrote ourselves — inherited the
+     browser default, which is Times. Half the app was rendering in a serif.
+     Same stack telegram-ui uses for `--tgui--font-family`, so the two agree. */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Roboto", "Apple Color Emoji", "Helvetica Neue", sans-serif;
+}
+
+/* Form controls do not inherit the body font on their own, so they fell back to
+   Times too — most visibly in the CSV screen's ФИО dropdowns. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* ---------- Bottom tab bar ----------
+   telegram-ui pads each Tabbar item 16px per side. With five tabs on a 390px
+   phone that leaves the label just 40px, so every one of them rendered
+   truncated: «Сме…», «Ком…», «Об…», «Вых…», «Адм…». Reclaim the padding and
+   drop the label a point — «Выходные», the longest, then fits whole. */
+.tab-bar-fit > div {
+  padding-inline: 2px;
+}
+
+.tab-bar-fit button {
+  padding-inline: 2px;
+}
+
+.tab-bar-fit button > span {
+  font-size: 12px;
+  letter-spacing: -0.1px;
+}
+
+/* The bar sits over scrolling content at 95% opacity, so text slid visibly
+   underneath it. Nothing behind a navigation bar should be legible. */
+.tab-bar-fit > div {
+  background-color: var(--tg-theme-secondary-bg-color, var(--tg-theme-bg-color, #ffffff));
+}
+
+/* ---------- Admin section switcher ----------
+   Three segments across a phone: «Расписание» rendered as «Расписа…». The
+   control pads each item 12px per side, which is more than the longest word
+   can spare. */
+.admin-sections button {
+  padding-inline: 4px;
+}
+
+.admin-sections button > * {
+  font-size: 14px;
 }

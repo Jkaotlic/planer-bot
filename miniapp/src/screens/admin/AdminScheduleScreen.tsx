@@ -149,10 +149,15 @@ export function AdminScheduleScreen() {
 
   return (
     <ScreenScroll>
-      <div style={{ padding: "12px 4px 0" }}>
-        <WeekBar label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))} onPrev={() => goWeek(-1)} onNext={() => goWeek(1)} />
-        <DayStrip dates={weekDates} selected={selectedDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
-      </div>
+      {/* The week switcher and day strip drive the day view, the entry form and the
+          bulk fill. The CSV screen works on whole months from the file itself, so
+          leaving them up there would offer navigation that changes nothing. */}
+      {!csvOpen && (
+        <div style={{ padding: "12px 4px 0" }}>
+          <WeekBar label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))} onPrev={() => goWeek(-1)} onNext={() => goWeek(1)} />
+          <DayStrip dates={weekDates} selected={selectedDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+        </div>
+      )}
 
       {error && <div style={{ padding: "8px 4px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>}
       {notice && <div style={{ padding: "8px 4px", color: "var(--tgui--hint_color)", fontSize: 13.5 }}>{notice}</div>}
@@ -282,6 +287,19 @@ function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSe
   );
 }
 
+/**
+ * What the badge says. The full preset name is written for the desktop grid
+ * («Дежурство · Поклонка»), and on a phone it was wide enough to push the
+ * worker's name AND their hours into an ellipsis — «Даша К…», «09:00–1…».
+ * The row already says it's a duty by its colour, so the badge only has to
+ * carry the part that tells the duties apart.
+ */
+export function badgeLabel(title: string | null, category: Category): string {
+  const full = title ?? categoryLabel(category);
+  const [prefix, rest] = full.split(" · ");
+  return rest && prefix === "Дежурство" ? rest : full;
+}
+
 function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readonly Template[]; onTap: () => void }) {
   const name = shift.employeeName ?? "— не назначен —";
   const palette = personPalette(shift.employeeId);
@@ -302,11 +320,16 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
             borderRadius: 999,
             padding: "4px 10px",
             whiteSpace: "nowrap",
+            // Belt and braces: whatever the label turns out to be, the name and
+            // the hours keep their room. The badge truncates before they do.
+            maxWidth: 132,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
             background: entryPalette.bg,
             color: entryPalette.fg,
           }}
         >
-          {shift.title ?? categoryLabel(shift.category)}
+          {badgeLabel(shift.title, shift.category)}
         </span>
       }
     >

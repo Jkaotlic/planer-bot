@@ -24,7 +24,9 @@ export function AdminScreen() {
 
   return (
     <div>
-      <div style={{ padding: "12px 16px 0" }}>
+      {/* `admin-sections` is the hook index.css uses to reclaim the segment
+          padding — at default padding «Расписание» renders as «Расписа…». */}
+      <div className="admin-sections" style={{ padding: "12px 16px 0" }}>
         <SegmentedControl>
           {SECTIONS.map(({ key, label }) => (
             <SegmentedControl.Item key={key} selected={section === key} onClick={() => setSection(key)}>
