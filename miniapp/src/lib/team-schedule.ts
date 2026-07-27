@@ -88,6 +88,15 @@ export function teamRange(mode: TeamMode, selectedDate: string): TeamRange {
   return { from: toISODate(monday), to: toISODate(addDays(monday, 6)) };
 }
 
+export function moveTeamDate(
+  mode: TeamMode,
+  selectedDate: string,
+  direction: -1 | 1,
+): string {
+  const step = mode === "today" ? direction : direction * 7;
+  return toISODate(addDays(new Date(`${selectedDate}T12:00:00`), step));
+}
+
 function templateFor(
   shift: Shift,
   templates: readonly ScheduleTemplate[],
@@ -289,7 +298,9 @@ export type TeamLoadResult =
   | { status: "stale"; outcome: "failed"; error: unknown };
 
 export interface TeamScreenState {
+  displayMode: TeamMode;
   displayDate: string;
+  targetMode: TeamMode;
   targetDate: string;
   schedule: TeamSchedule | null;
   loading: boolean;
@@ -298,7 +309,9 @@ export interface TeamScreenState {
 
 export function createTeamScreenState(date: string): TeamScreenState {
   return {
+    displayMode: "today",
     displayDate: date,
+    targetMode: "today",
     targetDate: date,
     schedule: null,
     loading: false,
@@ -308,10 +321,12 @@ export function createTeamScreenState(date: string): TeamScreenState {
 
 export function beginTeamScreenLoad(
   state: TeamScreenState,
+  targetMode: TeamMode,
   targetDate: string,
 ): TeamScreenState {
   return {
     ...state,
+    targetMode,
     targetDate,
     loading: true,
     error: null,
@@ -320,10 +335,17 @@ export function beginTeamScreenLoad(
 
 export function applyTeamScreenLoadResult(
   state: TeamScreenState,
+  targetMode: TeamMode,
   targetDate: string,
   result: TeamLoadResult,
 ): TeamScreenState | null {
-  if (result.status === "stale" || state.targetDate !== targetDate) return null;
+  if (
+    result.status === "stale"
+    || state.targetMode !== targetMode
+    || state.targetDate !== targetDate
+  ) {
+    return null;
+  }
   if (result.status === "failed") {
     return {
       ...state,
@@ -335,7 +357,9 @@ export function applyTeamScreenLoadResult(
     };
   }
   return {
+    displayMode: targetMode,
     displayDate: targetDate,
+    targetMode,
     targetDate,
     schedule: result.schedule,
     loading: false,
