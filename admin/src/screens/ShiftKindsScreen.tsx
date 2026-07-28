@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiClient, AuthRequiredError, type Employee, type TemplateRolesView } from "../api/client";
+import { apiClient, AuthRequiredError, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import { exactSchedulePalette } from "@planer/shared";
 import { useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -65,6 +65,18 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     }
   }
 
+  async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
+    setBusyId(kind.templateId);
+    setError(null);
+    try {
+      await apiClient.setRotationUnit(kind.templateId, unit);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить очередь");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (error && !kinds) return <div className="centered-fill">{error}</div>;
   if (!kinds) return <div className="centered-fill">Загрузка…</div>;
 
@@ -90,6 +102,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             busy={busyId === kind.templateId}
             onToggleOpen={() => setOpenId(openId === kind.templateId ? null : kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
+            onRotationUnit={(unit) => saveRotation(kind, unit)}
           />
         ))}
       </div>
@@ -104,6 +117,7 @@ function KindCard({
   busy,
   onToggleOpen,
   onChange,
+  onRotationUnit,
 }: {
   kind: TemplateRolesView;
   employees: Employee[];
@@ -111,6 +125,7 @@ function KindCard({
   busy: boolean;
   onToggleOpen: () => void;
   onChange: (patch: Partial<TemplateRolesView>) => void;
+  onRotationUnit: (unit: "day" | "week") => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -119,6 +134,25 @@ function KindCard({
   // name — otherwise all four duties read «Д» here and «Т»/«П»/«ВА»/«07» there.
   const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
   const preferred = Object.keys(kind.preference).length;
+  const [queue, setQueue] = useState<TemplateQueue | null>(null);
+
+  // The queue is history, not settings — fetched only when the card is opened,
+  // and re-fetched whenever the pool changes, since the pool decides who is in it.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    apiClient
+      .getTemplateQueue(kind.templateId)
+      .then((next) => {
+        if (!cancelled) setQueue(next);
+      })
+      .catch(() => {
+        if (!cancelled) setQueue(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, kind.templateId, kind.pool.length]);
 
   return (
     <section className="kind-card">
@@ -136,6 +170,29 @@ function KindCard({
 
       {open && (
         <div className="kind-people">
+          <div className="kind-rotation">
+            <label className="kind-rotation-unit">
+              Очередь идёт
+              <select
+                value={queue?.rotationUnit ?? "day"}
+                disabled={busy || !queue}
+                onChange={(e) => void onRotationUnit(e.target.value as "day" | "week")}
+              >
+                <option value="day">по дням</option>
+                <option value="week">по неделям</option>
+              </select>
+            </label>
+            {queue && queue.queue.length > 0 ? (
+              <p className="kind-rotation-hint">
+                Следующие: {queue.queue.slice(0, 3).map((turn) => turn.label).join(" → ")}
+                <br />
+                <span className="kind-rotation-note">Бот только подсказывает — ставишь смену ты сам.</span>
+              </p>
+            ) : (
+              <p className="kind-rotation-hint">Очередь появится, когда в допущенных кто-нибудь будет.</p>
+            )}
+          </div>
+
           <div className="kind-people-head">
             <span>Работник</span>
             <span title="Может брать этот вид смены">Допущен</span>

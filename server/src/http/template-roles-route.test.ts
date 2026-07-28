@@ -130,3 +130,83 @@ describe("the pool actually changes who «Распределить честно�
     expect(away.assignments).toEqual([]);
   });
 });
+
+describe("whose turn it is", () => {
+  const duty = (db: Db, employeeId: number, templateId: number, date: string) =>
+    createShift(db, {
+      employeeId, date, endDate: null, category: "duty", templateId,
+      start: "09:00", end: "18:00", title: "Дежурство · Поклонка",
+    });
+
+  it("puts a newcomer first, then whoever went longest without it", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const pokl = presetId(db, "Дежурство · Поклонка");
+    const recent = createEmployee(db, { displayName: "Недавний" }).id;
+    const old = createEmployee(db, { displayName: "Давний" }).id;
+    const never = createEmployee(db, { displayName: "Новичок" }).id;
+    const token = await tokenFor(app, 111);
+
+    duty(db, recent, pokl, "2026-07-27");
+    duty(db, old, pokl, "2026-06-15");
+
+    await app.request(`/api/admin/templates/${pokl}/roles`, send(token, { pool: [recent, old, never] }));
+    const res = await app.request(`/api/admin/templates/${pokl}/queue?asOf=2026-08-03`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.queue.map((t: { displayName: string }) => t.displayName)).toEqual(["Новичок", "Давний", "Недавний"]);
+    expect(body.queue[0].label).toBe("Новичок (ещё не дежурил)");
+    expect(body.queue[1].daysSince).toBe(49);
+  });
+
+  it("asks the whole roster when the pool is empty, and only the pool when it isn't", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const night = presetId(db, "Ночь");
+    const inPool = createEmployee(db, { displayName: "Свой" }).id;
+    createEmployee(db, { displayName: "Чужой" });
+    const token = await tokenFor(app, 111);
+    const ask = async () =>
+      (await (await app.request(`/api/admin/templates/${night}/queue?asOf=2026-08-03`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })).json()).queue.map((t: { displayName: string }) => t.displayName);
+
+    expect(await ask()).toEqual(expect.arrayContaining(["Свой", "Чужой"]));
+    await app.request(`/api/admin/templates/${night}/roles`, send(token, { pool: [inPool] }));
+    expect(await ask()).toEqual(["Свой"]);
+  });
+
+  it("switches a preset between day and week rotation, and words the hint to match", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const pokl = presetId(db, "Дежурство · Поклонка");
+
+    const res = await app.request(`/api/admin/templates/${pokl}/rotation`, send(token, { rotationUnit: "week" }));
+    expect(res.status).toBe(200);
+    expect(listActiveTemplates(db).find((t) => t.id === pokl)!.rotationUnit).toBe("week");
+
+    duty(db, createEmployee(db, { displayName: "Ктото" }).id, pokl, "2026-07-13");
+    const queue = await (await app.request(`/api/admin/templates/${pokl}/queue?asOf=2026-08-03`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })).json();
+    expect(queue.rotationUnit).toBe("week");
+    expect(queue.queue.find((t: { displayName: string }) => t.displayName === "Ктото").label).toBe("Ктото (3 недели назад)");
+
+    expect((await app.request(`/api/admin/templates/${pokl}/rotation`, send(token, { rotationUnit: "месяц" }))).status).toBe(400);
+    expect((await app.request("/api/admin/templates/9999/rotation", send(token, { rotationUnit: "day" }))).status).toBe(404);
+  });
+
+  it("rejects a bad asOf and an unknown preset", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const auth = { headers: { Authorization: `Bearer ${token}` } };
+    const night = presetId(db, "Ночь");
+    expect((await app.request(`/api/admin/templates/${night}/queue?asOf=03.08.2026`, auth)).status).toBe(400);
+    expect((await app.request("/api/admin/templates/9999/queue", auth)).status).toBe(404);
+  });
+});

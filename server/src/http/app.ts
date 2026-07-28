@@ -7,7 +7,7 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { listActiveTemplates } from "../repo/templates";
-import { getAllTemplateRoles, setTemplateRoles, UnknownEmployeesError } from "../repo/template-roles";
+import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
 import type { Shift } from "../db/schema";
 import {
@@ -31,7 +31,7 @@ import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit, recordAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
-import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber } from "@planer/shared";
+import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
@@ -414,6 +414,37 @@ export function createApp(deps: AppDeps): Hono<Env> {
         ...(roles.get(template.id) ?? { pool: [], preference: {} }),
       })),
     });
+  });
+
+  // Whose turn it is for a kind of shift. The bot only suggests — it never assigns
+  // a duty itself, so this is a read-only hint the admin acts on or ignores.
+  app.get("/api/admin/templates/:id/queue", requireAdmin(db, config.jwtSecret), (c) => {
+    const templateId = Number(c.req.param("id"));
+    const template = listActiveTemplates(db).find((item) => item.id === templateId);
+    if (!template) return c.json({ error: "not_found" }, 404);
+
+    const asOf = c.req.query("asOf") ?? teamNow(config.teamTz).date;
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+
+    const queue = rotationQueue(rotationCandidatesFor(db, templateId), asOf);
+    return c.json({
+      templateId,
+      rotationUnit: template.rotationUnit,
+      asOf,
+      queue: queue.map((turn) => ({ ...turn, label: describeTurn(turn, template.rotationUnit) })),
+    });
+  });
+
+  app.put("/api/admin/templates/:id/rotation", requireAdmin(db, config.jwtSecret), async (c) => {
+    const templateId = Number(c.req.param("id"));
+    if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { rotationUnit?: unknown };
+    if (body.rotationUnit !== "day" && body.rotationUnit !== "week") {
+      return c.json({ error: "rotationUnit must be «day» or «week»" }, 400);
+    }
+    setRotationUnit(db, templateId, body.rotationUnit);
+    recordAudit(db, "template_rotation_changed", c.get("auth").employeeId, { templateId, rotationUnit: body.rotationUnit });
+    return c.json({ templateId, rotationUnit: body.rotationUnit });
   });
 
   app.put("/api/admin/templates/:id/roles", requireAdmin(db, config.jwtSecret), async (c) => {
