@@ -128,6 +128,8 @@ export function applyRosterImport(
     }
 
     let renamed = 0, created = 0, inserted = 0;
+    /** The file's people, in the file's row order — the roster's own order. */
+    const orderedIds: number[] = [];
     for (const [index, person] of decoded.perPerson.entries()) {
       const res = byName.get(person.name)!;
       let employeeId: number;
@@ -140,6 +142,7 @@ export function applyRosterImport(
         employeeId = tx.insert(employees).values({ displayName: person.name, rosterOrder: index }).returning().all()[0]!.id;
         created++;
       }
+      orderedIds.push(employeeId);
       for (const e of person.entries) {
         const parsed = createEntrySchema.safeParse({
           date: e.date, endDate: e.endDate, category: e.category, templateId: e.templateId,
@@ -153,6 +156,30 @@ export function applyRosterImport(
         inserted++;
       }
     }
+    // The loop above numbered the file's people 0..n-1. Anybody active who is NOT
+    // in the file still holds whatever number they had, which now collides with
+    // one of those — two people showing as «2», and the list order falling back to
+    // id. Put the file's roster first, in the file's order, and everyone else
+    // after it, keeping their relative order.
+    const fileIds = new Set(orderedIds);
+    const others = tx
+      .select()
+      .from(employees)
+      .where(eq(employees.isActive, true))
+      .orderBy(
+        sql`case when ${employees.rosterOrder} is null then 1 else 0 end`,
+        employees.rosterOrder,
+        employees.id,
+      )
+      .all()
+      .filter((employee) => !fileIds.has(employee.id));
+    others.forEach((employee, index) => {
+      const next = decoded.perPerson.length + index;
+      if (employee.rosterOrder !== next) {
+        tx.update(employees).set({ rosterOrder: next }).where(eq(employees.id, employee.id)).run();
+      }
+    });
+
     tx.insert(auditLog).values({
       type: "roster_import",
       actorEmployeeId,

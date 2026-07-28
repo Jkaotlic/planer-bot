@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archiveEmployee } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archiveEmployee, reorderEmployee } from "../repo/employees";
 import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "./roster-service";
@@ -264,5 +264,59 @@ describe("buildRosterCsv", () => {
     const csv = buildRosterCsv(db, "2026-06-01", "2026-06-03");
     const codes = rowFor(csv, "Отпускник Олег");
     expect(codes).toEqual(["otp", "otp", "holiday"]); // 06-01, 06-02 still in the vacation; 06-03 is free
+  });
+});
+
+describe("an import and a hand-made order", () => {
+  const CSV_PEOPLE = ["Анна Аз", "Борис Буки", "Вера Веди"];
+  const decodedTrio = () => decode(CSV_PEOPLE.map((name) => ({ name, entries: [dayShift("2026-08-03")] })));
+  const span = { from: "2026-08-01", to: "2026-08-31" };
+
+  it("numbers the file's people in the file's own row order", () => {
+    const db = makeTestDb();
+    applyRosterImport(db, decodedTrio(), CSV_PEOPLE.map((csvName) => ({ csvName, action: "create" as const })), null, { span });
+    expect(listActive(db).map((e) => e.displayName)).toEqual(CSV_PEOPLE);
+    expect(listActive(db).map((e) => e.rosterOrder)).toEqual([0, 1, 2]);
+  });
+
+  it("puts somebody who is not in the file after it — never sharing a number with it", () => {
+    const db = makeTestDb();
+    applyRosterImport(db, decodedTrio(), CSV_PEOPLE.map((csvName) => ({ csvName, action: "create" as const })), null, { span });
+
+    // An outsider parked in the middle of the list.
+    const outsider = createEmployee(db, { displayName: "Не В Файле" }).id;
+    reorderEmployee(db, outsider, 2);
+    expect(listActive(db).map((e) => e.displayName)).toEqual(["Анна Аз", "Не В Файле", "Борис Буки", "Вера Веди"]);
+
+    const ids = new Map(listActive(db).map((e) => [e.displayName, e.id]));
+    applyRosterImport(
+      db, decodedTrio(),
+      CSV_PEOPLE.map((csvName) => ({ csvName, action: "rename" as const, employeeId: ids.get(csvName)! })),
+      null, { span, overwrite: true },
+    );
+
+    // The file's order wins, the outsider follows it, and — the actual bug this
+    // pins — every number is still unique and contiguous.
+    expect(listActive(db).map((e) => e.displayName)).toEqual([...CSV_PEOPLE, "Не В Файле"]);
+    const orders = listActive(db).map((e) => e.rosterOrder);
+    expect(orders).toEqual([0, 1, 2, 3]);
+    expect(new Set(orders).size).toBe(orders.length);
+  });
+
+  it("keeps several outsiders in their own relative order", () => {
+    const db = makeTestDb();
+    applyRosterImport(db, decodedTrio(), CSV_PEOPLE.map((csvName) => ({ csvName, action: "create" as const })), null, { span });
+    const first = createEmployee(db, { displayName: "Гость Один" }).id;
+    const second = createEmployee(db, { displayName: "Гость Два" }).id;
+    reorderEmployee(db, second, 1);
+    reorderEmployee(db, first, 1); // Один before Два
+
+    const ids = new Map(listActive(db).map((e) => [e.displayName, e.id]));
+    applyRosterImport(
+      db, decodedTrio(),
+      CSV_PEOPLE.map((csvName) => ({ csvName, action: "rename" as const, employeeId: ids.get(csvName)! })),
+      null, { span, overwrite: true },
+    );
+    expect(listActive(db).map((e) => e.displayName)).toEqual([...CSV_PEOPLE, "Гость Один", "Гость Два"]);
   });
 });
