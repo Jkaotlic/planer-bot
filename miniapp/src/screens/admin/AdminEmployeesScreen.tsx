@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
@@ -121,6 +122,7 @@ export function AdminEmployeesScreen() {
                 employee={e}
                 position={index + 1}
                 onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
+                onBirthDate={(birthDate) => withBusy(e.id, () => apiClient.setBirthDate(e.id, birthDate))}
                 actionLabel="В архив"
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
@@ -164,6 +166,7 @@ function EmployeeRow({
   onShowInvite,
   position,
   onReorder,
+  onBirthDate,
 }: {
   employee: Employee;
   actionLabel: string;
@@ -172,6 +175,8 @@ function EmployeeRow({
   /** 1-based place in the list, shown and editable. Absent for archived workers. */
   position?: number;
   onReorder?: (position: number) => void;
+  /** When provided, the worker's birthday can be set or cleared. */
+  onBirthDate?: (birthDate: string | null) => void;
   /** When provided (active roster), a linked worker can be promoted to / removed from admin. */
   onToggleAdmin?: () => void;
   /** When provided, the worker can be renamed inline. */
@@ -233,6 +238,13 @@ function EmployeeRow({
           </div>
         </div>
       </div>
+
+      {onBirthDate && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13, color: "var(--tgui--hint_color)" }}>
+          <span style={{ flex: "none" }}>День рождения</span>
+          <BirthDateField value={employee.birthDate} busy={busy} onChange={onBirthDate} />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
         {onRename && (
@@ -393,5 +405,75 @@ function PositionField({
         if (e.key === "Escape") setDraft(String(position));
       }}
     />
+  );
+}
+
+/** February gets 29: a birthday on the 29th is real, whatever the year holds. */
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+const selectStyle = {
+  padding: "6px 8px",
+  borderRadius: 8,
+  border: "1px solid var(--tgui--outline)",
+  background: "var(--tgui--secondary_bg_color)",
+  color: "var(--tgui--text_color)",
+  font: "inherit",
+  fontSize: 13,
+} as const;
+
+/**
+ * Day and month, as two selects rather than a date picker: a birthday has no
+ * year that anyone needs here, and a native date field would force one to be
+ * invented and then quietly thrown away.
+ */
+function BirthDateField({
+  value,
+  busy,
+  onChange,
+}: {
+  value: string | null;
+  busy: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  const parsed = value ? parseBirthDate(value) : null;
+  const month = parsed?.month ?? 0;
+  const day = parsed?.day ?? 0;
+
+  function commit(nextMonth: number, nextDay: number) {
+    if (nextMonth === 0 || nextDay === 0) {
+      if (value !== null) onChange(null);
+      return;
+    }
+    // Picking «31» and then «февраль» must not save an impossible date.
+    onChange(toBirthDate(nextMonth, Math.min(nextDay, DAYS_IN_MONTH[nextMonth - 1]!)));
+  }
+
+  return (
+    <span style={{ display: "inline-flex", gap: 6, minWidth: 0 }}>
+      <select
+        value={day || ""}
+        disabled={busy}
+        aria-label="День рождения — число"
+        style={{ ...selectStyle, minWidth: 62 }}
+        onChange={(e) => commit(month || 1, Number(e.target.value))}
+      >
+        <option value="">—</option>
+        {Array.from({ length: month ? DAYS_IN_MONTH[month - 1]! : 31 }, (_, i) => i + 1).map((d) => (
+          <option value={d} key={d}>{d}</option>
+        ))}
+      </select>
+      <select
+        value={month || ""}
+        disabled={busy}
+        aria-label="День рождения — месяц"
+        style={{ ...selectStyle, minWidth: 118 }}
+        onChange={(e) => commit(Number(e.target.value), day || 1)}
+      >
+        <option value="">не указан</option>
+        {MONTH_NAMES.map((name, index) => (
+          <option value={index + 1} key={name}>{name}</option>
+        ))}
+      </select>
+    </span>
   );
 }

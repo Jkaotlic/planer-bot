@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -66,6 +67,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         onToggleAdmin={(id, makeAdmin) => withBusy(id, () => apiClient.setEmployeeAdmin(id, makeAdmin))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
         onReorder={(id, position) => withBusy(id, () => apiClient.reorderEmployee(id, position).then(() => {}))}
+        onBirthDate={(id, birthDate) => withBusy(id, () => apiClient.setBirthDate(id, birthDate))}
         onShowInvite={(employee) => void showInvite(employee)}
       />
 
@@ -112,9 +114,11 @@ interface EmployeesSectionProps {
   onShowInvite?: (employee: Employee) => void;
   /** When provided (active section), each row can be moved to a position in the list. */
   onReorder?: (id: number, position: number) => void;
+  /** When provided, each row can set or clear the worker's birthday. */
+  onBirthDate?: (id: number, birthDate: string | null) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin, onRename, onShowInvite, onReorder }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -128,6 +132,7 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, o
               employee={employee}
               position={onReorder ? index + 1 : undefined}
               onReorder={onReorder ? (position) => onReorder(employee.id, position) : undefined}
+              onBirthDate={onBirthDate ? (birthDate) => onBirthDate(employee.id, birthDate) : undefined}
               actionLabel={actionLabel}
               busy={busyId === employee.id}
               onAction={() => onAction(employee.id)}
@@ -152,6 +157,7 @@ function EmployeeRow({
   onRename,
   onShowInvite,
   onReorder,
+  onBirthDate,
 }: {
   employee: Employee;
   actionLabel: string;
@@ -163,6 +169,7 @@ function EmployeeRow({
   onRename?: (name: string) => void;
   onShowInvite?: () => void;
   onReorder?: (position: number) => void;
+  onBirthDate?: (birthDate: string | null) => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -215,6 +222,12 @@ function EmployeeRow({
           </span>
           {employee.isAdmin && <span className="admin-badge">админ</span>}
         </>
+      )}
+      {!editing && onBirthDate && (
+        <span className="employee-birthday" title="День рождения">
+          🎂
+          <BirthDateField value={employee.birthDate} busy={busy} onChange={onBirthDate} />
+        </span>
       )}
       <span className="employee-row-spacer" />
       {editing ? (
@@ -423,3 +436,62 @@ function PositionField({
     />
   );
 }
+
+/**
+ * Day and month, as two selects rather than a date picker: a birthday has no
+ * year that anyone needs here, and a native date field would force one to be
+ * invented and then quietly thrown away.
+ */
+function BirthDateField({
+  value,
+  busy,
+  onChange,
+}: {
+  value: string | null;
+  busy: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  const parsed = value ? parseBirthDate(value) : null;
+  const month = parsed?.month ?? 0;
+  const day = parsed?.day ?? 0;
+
+  function commit(nextMonth: number, nextDay: number) {
+    if (nextMonth === 0 || nextDay === 0) {
+      if (value !== null) onChange(null);
+      return;
+    }
+    // Picking «31» and then «февраль» must not save an impossible date.
+    const clamped = Math.min(nextDay, DAYS_IN_MONTH[nextMonth - 1]!);
+    onChange(toBirthDate(nextMonth, clamped));
+  }
+
+  return (
+    <span className="birthday-field">
+      <select
+        value={day || ""}
+        disabled={busy}
+        aria-label="День рождения — число"
+        onChange={(e) => commit(month || 1, Number(e.target.value))}
+      >
+        <option value="">—</option>
+        {Array.from({ length: month ? DAYS_IN_MONTH[month - 1]! : 31 }, (_, i) => i + 1).map((d) => (
+          <option value={d} key={d}>{d}</option>
+        ))}
+      </select>
+      <select
+        value={month || ""}
+        disabled={busy}
+        aria-label="День рождения — месяц"
+        onChange={(e) => commit(Number(e.target.value), day || 1)}
+      >
+        <option value="">не указан</option>
+        {MONTH_NAMES.map((name, index) => (
+          <option value={index + 1} key={name}>{name}</option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+/** February gets 29: a birthday on the 29th is real, whatever the year holds. */
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];

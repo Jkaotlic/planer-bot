@@ -317,3 +317,68 @@ describe("worker order", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("birthdays", () => {
+  it("stores a birthday as day and month, with no year to invent", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Именинник" }).id;
+
+    const res = await app.request(`/api/admin/employees/${id}`, authedJson(admin, { birthDate: "05-08" }, "PATCH"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).employee).toMatchObject({ birthDate: "05-08", displayName: "Именинник" });
+    expect(getEmployeeById(db, id)!.birthDate).toBe("05-08");
+  });
+
+  it("sets a name and a birthday in one edit", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Старое Имя" }).id;
+
+    await app.request(`/api/admin/employees/${id}`, authedJson(admin, { displayName: "Новое Имя", birthDate: "12-31" }, "PATCH"));
+    expect(getEmployeeById(db, id)).toMatchObject({ displayName: "Новое Имя", birthDate: "12-31" });
+  });
+
+  it("clears a birthday with null — nobody is obliged to give one", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Скрытный" }).id;
+
+    await app.request(`/api/admin/employees/${id}`, authedJson(admin, { birthDate: "05-08" }, "PATCH"));
+    await app.request(`/api/admin/employees/${id}`, authedJson(admin, { birthDate: null }, "PATCH"));
+    expect(getEmployeeById(db, id)!.birthDate).toBeNull();
+  });
+
+  it("refuses a day that month hasn't got, and anything not ММ-ДД", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Кто-то" }).id;
+
+    for (const bad of ["02-30", "13-01", "2026-05-08", "8-5", "05.08", ""]) {
+      const res = await app.request(`/api/admin/employees/${id}`, authedJson(admin, { birthDate: bad }, "PATCH"));
+      expect(res.status, `«${bad}» must be rejected`).toBe(400);
+    }
+    expect(getEmployeeById(db, id)!.birthDate).toBeNull();
+  });
+
+  it("accepts 29 February", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Високосный" }).id;
+    const res = await app.request(`/api/admin/employees/${id}`, authedJson(admin, { birthDate: "02-29" }, "PATCH"));
+    expect(res.status).toBe(200);
+  });
+
+  it("still refuses an edit that changes nothing at all", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Кто-то" }).id;
+    expect((await app.request(`/api/admin/employees/${id}`, authedJson(admin, {}, "PATCH"))).status).toBe(400);
+  });
+});
