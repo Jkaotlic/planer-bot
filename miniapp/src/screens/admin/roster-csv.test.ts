@@ -111,6 +111,7 @@ describe("the screen as rendered", () => {
           onError: () => {},
           onNotice: () => {},
           onImported: () => {},
+        onClose: () => {},
           ...props,
         }),
       ),

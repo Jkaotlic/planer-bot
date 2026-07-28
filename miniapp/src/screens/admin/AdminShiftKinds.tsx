@@ -1,0 +1,237 @@
+import { useEffect, useState } from "react";
+import { exactSchedulePalette } from "@planer/shared";
+import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { apiClient, type Employee, type TemplateRolesView } from "../../api/client";
+import { CardShell, CardStack } from "../../components/Card";
+import { initialsOf, personPalette } from "../../lib/people";
+import { useEntryPalette } from "../../categories";
+
+/**
+ * "все (26)" or "5 из 26". An empty pool is not "nobody" — it is an unconfigured
+ * preset, and it means everyone. Saying so is the whole difference between the
+ * screen reading as a whitelist and reading as a blacklist.
+ */
+export function poolSummary(poolSize: number, total: number): string {
+  return poolSize === 0 ? `все (${total})` : `${poolSize} из ${total}`;
+}
+
+export function toggleId(ids: readonly number[], id: number): number[] {
+  return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
+}
+
+export function togglePreference(
+  preference: Readonly<Record<number, number>>,
+  id: number,
+): Record<number, number> {
+  const next = { ...preference };
+  if (next[id]) delete next[id];
+  else next[id] = 1;
+  return next;
+}
+
+/**
+ * «Кто что может» (admin, mobile): the pool and the preferences for each kind of
+ * shift. One kind open at a time — twenty-six rows of two toggles is already the
+ * whole screen, and two kinds open at once would just be scrolling.
+ */
+export function AdminShiftKinds({
+  employees,
+  onError,
+  onClose,
+}: {
+  employees: Employee[];
+  onError: (message: string | null) => void;
+  /** Back to the day view — without it this screen is a dead end. */
+  onClose: () => void;
+}) {
+  const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const active = employees.filter((employee) => employee.isActive);
+
+  useEffect(() => {
+    apiClient
+      .getTemplateRoles()
+      .then(setKinds)
+      .catch((err: unknown) => onError(err instanceof Error ? err.message : "Не удалось загрузить виды смен"));
+  }, [onError]);
+
+  async function save(kind: TemplateRolesView, patch: Partial<TemplateRolesView>) {
+    const next = { ...kind, ...patch };
+    setKinds((current) => current?.map((item) => (item.templateId === kind.templateId ? next : item)) ?? current);
+    setBusyId(kind.templateId);
+    onError(null);
+    try {
+      await apiClient.saveTemplateRoles(next.templateId, next.pool, next.preference);
+    } catch (err) {
+      // Put the server's version back rather than leaving a lie on screen.
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      onError(err instanceof Error ? err.message : "Не удалось сохранить");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (!kinds) {
+    return (
+      <Section header="Кто что может">
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spinner size="m" />
+        </div>
+      </Section>
+    );
+  }
+
+  return (
+    <Section header="Кто что может">
+      <CardStack>
+        <CardShell>
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+            Пустой список допущенных значит «все» — никого не нужно исключать, просто не отмечай.
+            «Любит» не перебивает справедливость: решает только ничью, когда смен этого вида поровну.
+          </div>
+        </CardShell>
+
+        {kinds.map((kind) => (
+          <KindCard
+            key={kind.templateId}
+            kind={kind}
+            employees={active}
+            open={openId === kind.templateId}
+            busy={busyId === kind.templateId}
+            onToggleOpen={() => setOpenId(openId === kind.templateId ? null : kind.templateId)}
+            onChange={(patch) => void save(kind, patch)}
+          />
+        ))}
+
+        {active.length === 0 && <Placeholder description="Сначала добавь работников." />}
+
+        <CardShell>
+          <Button size="s" mode="gray" stretched onClick={onClose}>
+            ← Назад к расписанию
+          </Button>
+        </CardShell>
+      </CardStack>
+    </Section>
+  );
+}
+
+function KindCard({
+  kind,
+  employees,
+  open,
+  busy,
+  onToggleOpen,
+  onChange,
+}: {
+  kind: TemplateRolesView;
+  employees: Employee[];
+  open: boolean;
+  busy: boolean;
+  onToggleOpen: () => void;
+  onChange: (patch: Partial<TemplateRolesView>) => void;
+}) {
+  const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
+    { id: kind.templateId, accent: kind.accent },
+  ]);
+  // The very letter the week grid draws for this kind, not the first letter of its
+  // name — otherwise all four duties read «Д» here and «Т»/«П»/«ВА»/«07» there.
+  const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
+  const preferred = Object.keys(kind.preference).length;
+
+  return (
+    <CardShell>
+      <button
+        type="button"
+        onClick={onToggleOpen}
+        aria-expanded={open}
+        style={{
+          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          background: "transparent", border: "none", padding: 0, font: "inherit",
+          color: "var(--tgui--text_color)", textAlign: "left", cursor: "pointer",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            flex: "none", display: "grid", placeContent: "center", width: 30, height: 30,
+            borderRadius: 8, fontSize: 13, fontWeight: 700, background: palette.bg, color: palette.fg,
+          }}
+        >
+          {code}
+        </span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{kind.name}</span>
+          <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+            допущены: {poolSummary(kind.pool.length, employees.length)}
+            {preferred > 0 && ` · любят: ${preferred}`}
+          </span>
+        </span>
+        <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)" }}>
+          <div
+            style={{
+              display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, padding: "10px 0 6px",
+              color: "var(--tgui--hint_color)", fontSize: 11.5, fontWeight: 600, textTransform: "uppercase",
+            }}
+          >
+            <span>Работник</span>
+            <span style={{ justifySelf: "center" }}>Допущен</span>
+            <span style={{ justifySelf: "center" }}>Любит</span>
+          </div>
+          {employees.map((employee) => {
+            const colours = personPalette(employee.id);
+            return (
+              <label
+                key={employee.id}
+                style={{
+                  display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, alignItems: "center",
+                  padding: "7px 0", borderTop: "1px solid var(--tgui--outline)",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: 14 }}>
+                  <span
+                    style={{
+                      flex: "none", display: "grid", placeContent: "center", width: 26, height: 26,
+                      borderRadius: 999, fontSize: 10.5, fontWeight: 700,
+                      background: colours.bg, color: colours.fg,
+                    }}
+                  >
+                    {initialsOf(employee.displayName)}
+                  </span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {employee.displayName}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={kind.pool.includes(employee.id)}
+                  disabled={busy}
+                  style={{ justifySelf: "center", width: 20, height: 20 }}
+                  aria-label={`${employee.displayName}: допущен к «${kind.name}»`}
+                  onChange={() => onChange({ pool: toggleId(kind.pool, employee.id) })}
+                />
+                <input
+                  type="checkbox"
+                  checked={Boolean(kind.preference[employee.id])}
+                  disabled={busy}
+                  style={{ justifySelf: "center", width: 20, height: 20 }}
+                  aria-label={`${employee.displayName}: любит «${kind.name}»`}
+                  onChange={() => onChange({ preference: togglePreference(kind.preference, employee.id) })}
+                />
+              </label>
+            );
+          })}
+          {kind.pool.length > 0 && (
+            <Button size="s" mode="gray" stretched disabled={busy} style={{ marginTop: 12 }} onClick={() => onChange({ pool: [] })}>
+              Сбросить на «все»
+            </Button>
+          )}
+        </div>
+      )}
+    </CardShell>
+  );
+}

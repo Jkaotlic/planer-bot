@@ -4,6 +4,7 @@ import { apiClient, type Employee, type NewEntryInput, type Shift, type Template
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { CardShell, CardStack } from "../../components/Card";
 import { AdminRosterCsv } from "./AdminRosterCsv";
+import { AdminShiftKinds } from "./AdminShiftKinds";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { formatTimeRange } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -58,6 +59,8 @@ export function AdminScheduleScreen() {
   const [fillOpen, setFillOpen] = useState(false);
   /** When true, the day view is replaced by the CSV upload/download flow. */
   const [csvOpen, setCsvOpen] = useState(false);
+  /** When true, the day view is replaced by the «кто что может» editor. */
+  const [kindsOpen, setKindsOpen] = useState(false);
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
@@ -152,7 +155,7 @@ export function AdminScheduleScreen() {
       {/* The week switcher and day strip drive the day view, the entry form and the
           bulk fill. The CSV screen works on whole months from the file itself, so
           leaving them up there would offer navigation that changes nothing. */}
-      {!csvOpen && (
+      {!csvOpen && !kindsOpen && (
         <div style={{ padding: "12px 4px 0" }}>
           <WeekBar label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))} onPrev={() => goWeek(-1)} onNext={() => goWeek(1)} />
           <DayStrip dates={weekDates} selected={selectedDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
@@ -176,6 +179,8 @@ export function AdminScheduleScreen() {
               />
             </CardStack>
           </Section>
+        ) : kindsOpen ? (
+          <AdminShiftKinds employees={employees} onError={setError} onClose={() => setKindsOpen(false)} />
         ) : csvOpen ? (
           <AdminRosterCsv
             employees={employees}
@@ -186,6 +191,7 @@ export function AdminScheduleScreen() {
               setCsvOpen(false);
             }}
             onImported={reloadAfterImport}
+            onClose={() => setCsvOpen(false)}
           />
         ) : editing !== null ? (
           <Section header={editing === "new" ? "Новая запись" : "Изменить запись"}>
@@ -224,6 +230,9 @@ export function AdminScheduleScreen() {
               </Button>
               <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => { setNotice(null); setError(null); setCsvOpen(true); }}>
                 📄 График файлом (CSV)
+              </Button>
+              <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => { setNotice(null); setError(null); setKindsOpen(true); }}>
+                ⚙ Кто что может
               </Button>
             </div>
           </Section>

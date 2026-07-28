@@ -33,6 +33,8 @@ import {
   mockUnassignSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
+  mockGetTemplateRoles,
+  mockSaveTemplateRoles,
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
@@ -257,6 +259,18 @@ export interface DistributeResult {
   assignments: DistributionAssignment[];
 }
 
+/** A preset plus who may take it and who asked for it. An empty pool means everyone. */
+export interface TemplateRolesView {
+  templateId: number;
+  name: string;
+  category: Category;
+  accent: TemplateAccent;
+  /** Employee ids allowed to take this preset. Empty = everyone. */
+  pool: number[];
+  /** employeeId -> weight. Present means "asked for this kind". */
+  preference: Record<number, number>;
+}
+
 export interface ApiClient {
   getMe(): Promise<Me>;
   getMyShifts(from: string): Promise<Shift[]>;
@@ -297,6 +311,8 @@ export interface ApiClient {
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
+  getTemplateRoles(): Promise<TemplateRolesView[]>;
+  saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
@@ -619,6 +635,22 @@ export const realClient: ApiClient = {
     return res.text();
   },
 
+  async getTemplateRoles() {
+    const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
+    return templates;
+  },
+
+  async saveTemplateRoles(templateId, pool, preference) {
+    const token = await authToken();
+    const path = `/api/admin/templates/${templateId}/roles`;
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ pool, preference }),
+    });
+    if (!res.ok) throw new Error(await errorMessage(path, res));
+  },
+
   async getRosterCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -675,6 +707,8 @@ const devClient: ApiClient = {
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
+  getTemplateRoles: () => mockGetTemplateRoles(),
+  saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),

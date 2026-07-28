@@ -95,6 +95,8 @@ interface Props {
   onNotice: (message: string) => void;
   /** Reload the screen's data after entries and people changed underneath it. */
   onImported: () => void | Promise<void>;
+  /** Back to the day view — without it, opening this screen by mistake traps you. */
+  onClose: () => void;
 }
 
 /**
@@ -106,7 +108,7 @@ interface Props {
  * a real roster is 26 rows, each needing its own «создать нового / это вот он»
  * decision, and that never fits in a popup.
  */
-export function AdminRosterCsv({ employees, today, onError, onNotice, onImported }: Props) {
+export function AdminRosterCsv({ employees, today, onError, onNotice, onImported, onClose }: Props) {
   const [state, setState] = useState<RosterImportState | null>(null);
   const [exporting, setExporting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -328,6 +330,11 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
             <Spinner size="s" />
           </CardShell>
         )}
+        <CardShell>
+          <Button size="s" mode="gray" stretched onClick={onClose}>
+            ← Назад к расписанию
+          </Button>
+        </CardShell>
       </CardStack>
     </Section>
   );

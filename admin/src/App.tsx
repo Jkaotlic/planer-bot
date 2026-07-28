@@ -16,6 +16,7 @@ import { ScheduleGrid } from "./components/ScheduleGrid";
 import { Sidebar, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
+import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
@@ -278,6 +279,8 @@ export function App() {
           <div className="centered-fill">Загрузка…</div>
         ) : nav === "employees" ? (
           <EmployeesScreen employees={employees} onChanged={refreshEmployees} />
+        ) : nav === "kinds" ? (
+          <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "weekend" ? (
           <WeekendAdminScreen />
         ) : nav === "log" ? (
