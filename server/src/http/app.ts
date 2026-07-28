@@ -21,6 +21,7 @@ import {
   setEmployeeAdmin,
   countActiveAdmins,
   renameEmployee,
+  reorderEmployee,
   setInviteToken,
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
@@ -170,6 +171,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const employee = renameEmployee(db, id, body.displayName.trim());
     if (!employee) return c.json({ error: "not_found" }, 404);
     return c.json({ employee });
+  });
+
+  // Move a worker to a position in the list. The number is what the admin sees
+  // (1 = first), and the server renumbers everyone so the column stays contiguous.
+  app.post("/api/admin/employees/:id/order", requireAdmin(db, config.jwtSecret), async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = (await c.req.json().catch(() => ({}))) as { position?: unknown };
+    if (typeof body.position !== "number" || !Number.isFinite(body.position)) {
+      return c.json({ error: "position (number) required" }, 400);
+    }
+    const before = getEmployeeById(db, id);
+    const employees = reorderEmployee(db, id, body.position);
+    if (!employees) return c.json({ error: "not_found" }, 404);
+    const after = employees.find((employee) => employee.id === id)!;
+    recordAudit(db, "employee_reordered", c.get("auth").employeeId, {
+      employeeId: id,
+      displayName: after.displayName,
+      from: before?.rosterOrder ?? null,
+      to: after.rosterOrder,
+    });
+    return c.json({ employees });
   });
 
   app.post("/api/admin/employees/:id/archive", requireAdmin(db, config.jwtSecret), (c) => {

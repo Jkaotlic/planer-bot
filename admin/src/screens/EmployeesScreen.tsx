@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -65,6 +65,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
         onToggleAdmin={(id, makeAdmin) => withBusy(id, () => apiClient.setEmployeeAdmin(id, makeAdmin))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
+        onReorder={(id, position) => withBusy(id, () => apiClient.reorderEmployee(id, position).then(() => {}))}
         onShowInvite={(employee) => void showInvite(employee)}
       />
 
@@ -109,9 +110,11 @@ interface EmployeesSectionProps {
   onRename?: (id: number, name: string) => void;
   /** When provided, an unlinked worker's row can re-show its invite link. */
   onShowInvite?: (employee: Employee) => void;
+  /** When provided (active section), each row can be moved to a position in the list. */
+  onReorder?: (id: number, position: number) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin, onRename, onShowInvite }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin, onRename, onShowInvite, onReorder }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -119,10 +122,12 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, o
         <div className="employees-empty">{emptyLabel}</div>
       ) : (
         <div className="employees-list">
-          {employees.map((employee) => (
+          {employees.map((employee, index) => (
             <EmployeeRow
               key={employee.id}
               employee={employee}
+              position={onReorder ? index + 1 : undefined}
+              onReorder={onReorder ? (position) => onReorder(employee.id, position) : undefined}
               actionLabel={actionLabel}
               busy={busyId === employee.id}
               onAction={() => onAction(employee.id)}
@@ -141,18 +146,23 @@ function EmployeeRow({
   employee,
   actionLabel,
   busy,
+  position,
   onAction,
   onToggleAdmin,
   onRename,
   onShowInvite,
+  onReorder,
 }: {
   employee: Employee;
   actionLabel: string;
   busy: boolean;
+  /** 1-based place in the list, shown and editable. Absent for archived workers. */
+  position?: number;
   onAction: () => void;
   onToggleAdmin?: () => void;
   onRename?: (name: string) => void;
   onShowInvite?: () => void;
+  onReorder?: (position: number) => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -176,6 +186,9 @@ function EmployeeRow({
 
   return (
     <div className="employee-row-card">
+      {position !== undefined && onReorder && (
+        <PositionField position={position} busy={busy} onCommit={onReorder} />
+      )}
       <span className="avatar" style={{ background: palette.bg, color: palette.fg }}>
         {initialsOf(employee.displayName)}
       </span>
@@ -361,5 +374,52 @@ function InviteLinkDialog({ invite, onRegenerate, onClose }: { invite: CreateEmp
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The worker's place in the list, as a number you type rather than arrows you
+ * click: moving somebody from 26th to 1st is one keystroke instead of 25 taps,
+ * and it reads the same on a phone as on a desktop.
+ */
+function PositionField({
+  position,
+  busy,
+  onCommit,
+}: {
+  position: number;
+  busy: boolean;
+  onCommit: (position: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(position));
+  // The list re-sorts under us after every move, so the field follows the row.
+  useEffect(() => setDraft(String(position)), [position]);
+
+  function commit() {
+    const next = Number(draft);
+    if (!Number.isFinite(next) || Math.trunc(next) === position) {
+      setDraft(String(position));
+      return;
+    }
+    onCommit(Math.trunc(next));
+  }
+
+  return (
+    <input
+      className="employee-position"
+      type="number"
+      min={1}
+      inputMode="numeric"
+      value={draft}
+      disabled={busy}
+      aria-label="Номер в списке"
+      title="Номер в списке — впиши другой, чтобы переставить"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(String(position));
+      }}
+    />
   );
 }

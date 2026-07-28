@@ -492,11 +492,15 @@ button {
 
 /* ---------- Работники screen ---------- */
 
+/* Wide enough that a full row — number, avatar, name, two chips and three
+   buttons — sits on one line; still a bounded column rather than full-bleed on a
+   large monitor. At 760px every admin's row wrapped its last button onto a
+   second line. */
 .employees-screen {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 24px;
-  max-width: 760px;
+  max-width: 1020px;
 }
 
 .employees-header {
@@ -537,9 +541,12 @@ button {
   gap: 8px;
 }
 
+/* Wraps because the widest row — an admin, who gets an extra chip and the longer
+   «Убрать из админов» — overflowed the card and clipped its last button. */
 .employee-row-card {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 14px;
   border-radius: 12px;
@@ -832,6 +839,27 @@ button {
   color: var(--hint);
   font-size: 12.5px;
   line-height: 1.45;
+}
+
+/* The worker's place in the list. Narrow on purpose — it holds two digits, and
+   the row's real content is the name next to it. */
+.employee-position {
+  flex: none;
+  width: 44px;
+  padding: 6px 4px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--hint);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.employee-position:focus {
+  color: var(--text);
+  border-color: var(--button);
+  outline: none;
 }
 
 /* The one destructive choice on this screen — it has to look like a decision, not a hint. */

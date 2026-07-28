@@ -436,6 +436,21 @@ export async function mockRenameEmployee(id: number, displayName: string): Promi
   if (employee) employee.displayName = displayName;
 }
 
+/** Mirrors the server: move one worker, then renumber everyone contiguously. */
+export async function mockReorderEmployee(id: number, position: number): Promise<Employee[]> {
+  await delay(150);
+  const active = EMPLOYEES.filter((e) => e.isActive);
+  const from = active.findIndex((e) => e.id === id);
+  if (from === -1) throw new Error("Работник не найден");
+  const target = Math.min(Math.max(Math.trunc(position), 1), active.length) - 1;
+  const [moved] = active.splice(from, 1);
+  active.splice(target, 0, moved!);
+  const archived = EMPLOYEES.filter((e) => !e.isActive);
+  EMPLOYEES.length = 0;
+  EMPLOYEES.push(...active, ...archived);
+  return [...active];
+}
+
 export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
   await delay(150);
   const inviteToken = `${id}-${regenerate ? "regen" : "keep"}`.padEnd(12, "0").slice(0, 12);
