@@ -7,6 +7,7 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { listActiveTemplates } from "../repo/templates";
+import { getAllTemplateRoles, setTemplateRoles, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
 import type { Shift } from "../db/schema";
 import {
@@ -399,6 +400,58 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     return null;
   };
+
+  // Who may take each kind of shift, and who asked for it. One object per preset;
+  // an empty pool is an unconfigured preset and means everyone.
+  app.get("/api/admin/templates/roles", requireAdmin(db, config.jwtSecret), (c) => {
+    const roles = getAllTemplateRoles(db);
+    return c.json({
+      templates: listActiveTemplates(db).map((template) => ({
+        templateId: template.id,
+        name: template.name,
+        category: template.category,
+        accent: template.accent,
+        ...(roles.get(template.id) ?? { pool: [], preference: {} }),
+      })),
+    });
+  });
+
+  app.put("/api/admin/templates/:id/roles", requireAdmin(db, config.jwtSecret), async (c) => {
+    const templateId = Number(c.req.param("id"));
+    if (!listActiveTemplates(db).some((template) => template.id === templateId)) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { pool?: unknown; preference?: unknown };
+    if (!Array.isArray(body.pool) || body.pool.some((id) => !Number.isInteger(id))) {
+      return c.json({ error: "pool must be an array of employee ids" }, 400);
+    }
+    const preference: Record<number, number> = {};
+    if (body.preference !== undefined) {
+      if (typeof body.preference !== "object" || body.preference === null || Array.isArray(body.preference)) {
+        return c.json({ error: "preference must be an object of employeeId -> weight" }, 400);
+      }
+      for (const [key, weight] of Object.entries(body.preference)) {
+        const employeeId = Number(key);
+        if (!Number.isInteger(employeeId) || typeof weight !== "number" || !Number.isFinite(weight)) {
+          return c.json({ error: "preference must be an object of employeeId -> weight" }, 400);
+        }
+        preference[employeeId] = Math.trunc(weight);
+      }
+    }
+
+    try {
+      const saved = setTemplateRoles(db, templateId, { pool: body.pool as number[], preference });
+      recordAudit(db, "template_roles_changed", c.get("auth").employeeId, {
+        templateId,
+        poolSize: saved.pool.length,
+        preferred: Object.keys(saved.preference).length,
+      });
+      return c.json({ templateId, ...saved });
+    } catch (err) {
+      if (err instanceof UnknownEmployeesError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+  });
 
   app.post("/api/admin/distribute", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { from?: unknown; to?: unknown; apply?: unknown };
