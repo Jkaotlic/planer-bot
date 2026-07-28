@@ -22,6 +22,9 @@ import {
   mockGetPayroll,
   mockGetPayrollCsv,
   mockGetRosterCsv,
+  mockGetShiftCounts,
+  mockGetShiftCountsCsv,
+  mockGetJournal,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -228,6 +231,40 @@ export interface TemplateQueue {
   queue: RotationTurnView[];
 }
 
+/** One row of «кто сколько отдежурил». */
+export interface ShiftCountsRow {
+  employeeId: number;
+  displayName: string;
+  byKind: Record<string, number>;
+  total: number;
+}
+
+export interface ShiftCountsReport {
+  from: string;
+  to: string;
+  /** Column order, already sorted the way the presets are shown elsewhere. */
+  kinds: string[];
+  rows: ShiftCountsRow[];
+}
+
+/** One line of the «кто когда что менял» history. */
+export interface JournalEvent {
+  id: number;
+  type: string;
+  createdAt: string;
+  actorName: string | null;
+  payload: unknown;
+}
+
+export interface JournalPage {
+  total: number;
+  limit: number;
+  offset: number;
+  /** Only the types actually present in the log, so the filter offers real options. */
+  availableTypes: string[];
+  events: JournalEvent[];
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
@@ -252,6 +289,9 @@ export interface ApiClient {
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
+  getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
+  getShiftCountsCsv(from: string, to: string): Promise<string>;
+  getJournal(params: { types?: string[]; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -599,6 +639,30 @@ const realClient: ApiClient = {
     return res.text();
   },
 
+  getShiftCounts(from, to) {
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    return authorizedGet<ShiftCountsReport>(`/api/admin/reports/shift-counts?${q}`);
+  },
+
+  async getShiftCountsCsv(from, to) {
+    const token = await authToken();
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const path = `/api/admin/reports/shift-counts.csv?${q}`;
+    const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw await toError(path, res);
+    return res.text();
+  },
+
+  getJournal(params) {
+    const q = new URLSearchParams();
+    if (params.types?.length) q.set("types", params.types.join(","));
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    q.set("limit", String(params.limit ?? 50));
+    q.set("offset", String(params.offset ?? 0));
+    return authorizedGet<JournalPage>(`/api/admin/journal?${q.toString()}`);
+  },
+
   getTemplateQueue(templateId) {
     return authorizedGet<TemplateQueue>(`/api/admin/templates/${templateId}/queue`);
   },
@@ -658,6 +722,9 @@ const devClient: ApiClient = {
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
+  getShiftCounts: (from, to) => mockGetShiftCounts(from, to),
+  getShiftCountsCsv: (from, to) => mockGetShiftCountsCsv(from, to),
+  getJournal: (params) => mockGetJournal(params),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),

@@ -1549,3 +1549,133 @@ input[type="time"] {
   border-radius: 10px;
   background: var(--surface-secondary);
 }
+
+/* ---------- Журнал ---------- */
+
+.journal-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.journal-tab {
+  padding: 8px 14px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--surface-section);
+  color: var(--hint);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.journal-tab.active {
+  background: var(--button);
+  border-color: var(--button);
+  color: var(--button-text);
+}
+
+.journal-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.journal-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hint);
+  font-size: 13.5px;
+}
+
+.journal-controls input,
+.journal-controls select {
+  padding: 6px 9px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.journal-count {
+  margin-left: auto;
+  color: var(--hint);
+  font-size: 13px;
+}
+
+/* A wide table of kinds scrolls on its own rather than pushing the page sideways. */
+.journal-table-scroll {
+  overflow-x: auto;
+}
+
+.counts-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.counts-table th,
+.counts-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--separator);
+  text-align: center;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.counts-table thead th {
+  color: var(--hint);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.counts-name {
+  text-align: left !important;
+}
+
+.counts-table td.counts-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.counts-total {
+  font-weight: 700;
+}
+
+.counts-zero {
+  color: var(--hint);
+}
+
+.journal-row {
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(120px, auto) minmax(150px, auto) 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 14px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--surface-section);
+  font-size: 13.5px;
+}
+
+.journal-type {
+  font-weight: 600;
+}
+
+.journal-actor,
+.journal-when {
+  color: var(--hint);
+}
+
+.journal-payload {
+  color: var(--hint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

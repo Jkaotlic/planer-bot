@@ -3,18 +3,21 @@ import { SegmentedControl } from "@telegram-apps/telegram-ui";
 import { AdminScheduleScreen } from "./admin/AdminScheduleScreen";
 import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
+import { AdminJournal } from "./admin/AdminJournal";
+import { toISODate } from "../lib/week";
 
-type AdminSection = "schedule" | "weekend" | "employees";
+type AdminSection = "schedule" | "weekend" | "employees" | "journal";
 
 const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "schedule", label: "Расписание" },
   { key: "weekend", label: "Выходные" },
   { key: "employees", label: "Работники" },
+  { key: "journal", label: "Журнал" },
 ];
 
 /**
- * The admin-only "Админ" tab: a segmented sub-nav over the three admin
- * surfaces (schedule / weekend marketplace / workers). Each sub-screen owns
+ * The admin-only "Админ" tab: a segmented sub-nav over the four admin
+ * surfaces (schedule / weekend marketplace / workers / journal). Each sub-screen owns
  * its own data-loading and mutations — nothing is fetched until its section is
  * first shown, so opening the tab is cheap. Rendered only when `me.isAdmin`
  * (see `App`), and every call it makes is `requireAdmin`-guarded server-side.
@@ -39,6 +42,7 @@ export function AdminScreen() {
       {section === "schedule" && <AdminScheduleScreen />}
       {section === "weekend" && <AdminWeekendScreen />}
       {section === "employees" && <AdminEmployeesScreen />}
+      {section === "journal" && <AdminJournal today={toISODate(new Date())} />}
     </div>
   );
 }

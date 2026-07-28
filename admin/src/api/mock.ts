@@ -10,6 +10,9 @@ import type {
   RosterImportPreview,
   TemplateRolesView,
   TemplateQueue,
+  JournalEvent,
+  JournalPage,
+  ShiftCountsReport,
   RosterImportSummary,
   RosterPersonResolution,
   Shift,
@@ -442,6 +445,68 @@ export async function mockGetTemplateQueue(templateId: number): Promise<Template
   }));
 
   return { templateId, rotationUnit: unit, asOf, queue };
+}
+
+// --- Отчёты и журнал ---------------------------------------------------------
+
+const MOCK_JOURNAL_TYPES = ["entry_created", "entry_updated", "entry_deleted", "swap_accepted", "roster_import"];
+
+/** A believable log so the screen can be exercised with no backend. */
+const JOURNAL: JournalEvent[] = Array.from({ length: 34 }, (_, index) => ({
+  id: 1000 - index,
+  type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
+  createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
+  actorName: EMPLOYEES[index % 3]?.displayName ?? null,
+  payload: { entryId: 500 + index, date: dayIso(index % 7) },
+}));
+
+export async function mockGetJournal(params: {
+  types?: string[]; from?: string; to?: string; limit?: number; offset?: number;
+}): Promise<JournalPage> {
+  await delay(200);
+  const types = params.types ?? [];
+  const matching = JOURNAL.filter((event) => types.length === 0 || types.includes(event.type));
+  const limit = params.limit ?? 50;
+  const offset = params.offset ?? 0;
+  return {
+    total: matching.length,
+    limit,
+    offset,
+    availableTypes: [...new Set(JOURNAL.map((e) => e.type))].sort(),
+    events: matching.slice(offset, offset + limit),
+  };
+}
+
+export async function mockGetShiftCounts(from: string, to: string): Promise<ShiftCountsReport> {
+  await delay(220);
+  const inRange = ENTRIES.filter((s) => s.date >= from && s.date <= to && s.employeeId != null);
+  const kinds: string[] = [];
+  const rows = EMPLOYEES.filter((e) => e.isActive).map((employee) => {
+    const byKind: Record<string, number> = {};
+    let total = 0;
+    for (const shift of inRange) {
+      if (shift.employeeId !== employee.id) continue;
+      // Absences are not work — same rule as the server.
+      if (shift.category === "vacation" || shift.category === "sick_leave" || shift.category === "business_trip") continue;
+      const kind = (shift.templateId != null ? TEMPLATES.find((t) => t.id === shift.templateId)?.name : undefined)
+        ?? shift.title ?? "Своё время";
+      byKind[kind] = (byKind[kind] ?? 0) + 1;
+      total += 1;
+      if (!kinds.includes(kind)) kinds.push(kind);
+    }
+    return { employeeId: employee.id, displayName: employee.displayName, byKind, total };
+  });
+  const ordered = TEMPLATES.map((t) => t.name).filter((name) => kinds.includes(name));
+  return { from, to, kinds: [...ordered, ...kinds.filter((k) => !ordered.includes(k))], rows };
+}
+
+export async function mockGetShiftCountsCsv(from: string, to: string): Promise<string> {
+  const report = await mockGetShiftCounts(from, to);
+  const header = ["Работник", ...report.kinds, "Всего"].join(";");
+  const lines = report.rows.map((row) =>
+    [row.displayName, ...report.kinds.map((kind) => String(row.byKind[kind] ?? 0)), String(row.total)].join(";"),
+  );
+  return [header, ...lines].join("\r\n");
 }
 
 const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);

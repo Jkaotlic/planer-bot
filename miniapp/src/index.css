@@ -56,13 +56,13 @@ textarea {
 }
 
 /* ---------- Admin section switcher ----------
-   Three segments across a phone: «Расписание» rendered as «Расписа…». The
-   control pads each item 12px per side, which is more than the longest word
-   can spare. */
+   Four segments across a phone leave each about 89px, and «Расписание» does not
+   fit that at the control's own size — it rendered «Расписан…». Reclaim the
+   padding and drop the label two points; measured against the longest word. */
 .admin-sections button {
-  padding-inline: 4px;
+  padding-inline: 3px;
 }
 
 .admin-sections button > * {
-  font-size: 14px;
+  font-size: 12.5px;
 }
