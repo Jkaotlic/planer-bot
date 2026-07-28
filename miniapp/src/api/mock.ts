@@ -44,7 +44,21 @@ import { inviteLinkFor } from "../lib/bot";
 // The dev caller is an admin so the "Админ" tab is reachable offline — the
 // whole point of the mocks is to exercise every screen with no backend. In
 // production `me.isAdmin` comes from the server, so this only affects dev.
-export const MOCK_ME: Me = { id: 1, displayName: "Аня Смирнова", isAdmin: true };
+export const MOCK_ME: Me = {
+  id: 1,
+  displayName: "Аня Смирнова",
+  // Telegram's own first name — deliberately NOT derived from displayName, which
+  // in the live roster is «Фамилия Имя». See `addressOf` in @planer/shared.
+  address: "Аня",
+  isAdmin: true,
+  remindersEnabled: true,
+};
+
+export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {
+  await delay(200);
+  MOCK_ME.remindersEnabled = enabled;
+  return enabled;
+}
 
 /**
  * In-memory roster shared by the worker screens (name lookups) and the admin

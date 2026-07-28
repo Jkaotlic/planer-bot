@@ -9,3 +9,4 @@ export * from "./distribute";
 export * from "./reminder";
 export * from "./rotation";
 export * from "./birthday";
+export * from "./address";

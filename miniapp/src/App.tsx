@@ -188,7 +188,15 @@ export function App() {
   return (
     <div style={{ minHeight: "100vh", boxSizing: "border-box" }}>
       {tab === "mine" && (
-        <MyShiftsScreen me={data.me} shifts={data.myShifts} templates={data.templates} onProposeSwap={setProposingFor} />
+        <MyShiftsScreen
+          me={data.me}
+          shifts={data.myShifts}
+          templates={data.templates}
+          onProposeSwap={setProposingFor}
+          onRemindersChanged={(remindersEnabled) =>
+            setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
+          }
+        />
       )}
       {tab === "team" && <TeamScreen templates={data.templates} />}
       {tab === "swaps" && (

@@ -63,13 +63,36 @@ function startUpdate(tgId: number, text: string, username?: string) {
 }
 
 describe("bot /start", () => {
-  it("links a worker via /start <token> and greets by name", async () => {
+  it("greets by the name the person gave Telegram, and names the roster row they claimed", async () => {
     const db = makeTestDb();
-    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "tok-1" });
+    const w = createEmployee(db, { displayName: "Петров Игорь", inviteToken: "tok-1" });
     const { bot, sent } = testBot(db);
     await bot.handleUpdate(startUpdate(333, "/start tok-1", "igor"));
+
     expect(getByTelegramId(db, 333)?.id).toBe(w.id);
-    expect(sent[0]?.text).toContain("Игорь");
+    // "T" is this fixture's Telegram first_name. Addressing people by the roster's
+    // first word would say «Петров» — a roll-call, which is the bug addressOf fixes.
+    expect(sent[0]?.text).toContain("Готово, T!");
+    expect(sent[0]?.text).not.toContain("Готово, Петров!");
+    // …but the row they just claimed is still named: an invite is single-use, so
+    // "this isn't me" has to be catchable right here.
+    expect(sent[0]?.text).toContain("Петров Игорь");
+  });
+
+  it("stores the Telegram first name on link, so later messages can use it", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Петров Игорь", inviteToken: "tok-1" });
+    const { bot } = testBot(db);
+    await bot.handleUpdate(startUpdate(333, "/start tok-1", "igor"));
+    expect(getByTelegramId(db, 333)?.tgFirstName).toBe("T");
+  });
+
+  it("does not repeat the roster name when it is the same word as the greeting", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "T", inviteToken: "tok-2" });
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(334, "/start tok-2", "t"));
+    expect(sent[0]?.text).not.toContain("В расписании ты");
   });
 
   it("replies invalid for an unknown/used token (and does not link)", async () => {

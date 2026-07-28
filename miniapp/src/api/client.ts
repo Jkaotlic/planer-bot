@@ -5,6 +5,7 @@ import {
   mockCancelSwap,
   mockDeclineSwap,
   mockGetMe,
+  mockSetRemindersEnabled,
   mockGetMyShifts,
   mockGetSwaps,
   mockGetTeamSchedule,
@@ -88,8 +89,14 @@ export interface TeamSchedule {
 
 export interface Me {
   id: number;
+  /** «Фамилия Имя» as the roster has it — for lists and columns. */
   displayName: string;
+  /** What to greet this person with: their Telegram first name when we know it.
+   *  Never derive this from `displayName` — see `addressOf` in @planer/shared. */
+  address: string;
   isAdmin: boolean;
+  /** Their own shift-reminder switch. */
+  remindersEnabled: boolean;
 }
 
 export type SwapStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
@@ -371,6 +378,8 @@ export interface BirthdayPreview {
 
 export interface ApiClient {
   getMe(): Promise<Me>;
+  /** Turns this person's own shift reminders on or off. */
+  setRemindersEnabled(enabled: boolean): Promise<boolean>;
   getMyShifts(from: string): Promise<Shift[]>;
   getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
@@ -629,6 +638,11 @@ async function fetchSwaps(): Promise<SwapRequest[]> {
 export const realClient: ApiClient = {
   getMe: () => authorizedGet<Me>("/api/me"),
 
+  async setRemindersEnabled(enabled) {
+    const res = await authorizedPatchJson<{ remindersEnabled: boolean }>("/api/me/settings", { remindersEnabled: enabled });
+    return res.remindersEnabled;
+  },
+
   async getMyShifts(from) {
     const { shifts } = await authorizedGet<ShiftsResponse>(`/api/my/shifts?from=${encodeURIComponent(from)}`);
     return shifts;
@@ -849,6 +863,7 @@ export const realClient: ApiClient = {
 
 const devClient: ApiClient = {
   getMe: () => mockGetMe(),
+  setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
   getMyShifts: (from) => mockGetMyShifts(from),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getSwaps: () => mockGetSwaps(),
