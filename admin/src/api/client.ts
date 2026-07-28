@@ -23,6 +23,8 @@ import {
   mockGetPayrollCsv,
   mockGetRosterCsv,
   mockGetTemplateRoles,
+  mockGetTemplateQueue,
+  mockSetRotationUnit,
   mockSaveTemplateRoles,
   mockPreviewRosterImport,
   mockApplyRosterImport,
@@ -210,6 +212,22 @@ export interface TemplateRolesView {
   preference: Record<number, number>;
 }
 
+/** One person's place in the queue for a kind of shift, already worded for display. */
+export interface RotationTurnView {
+  employeeId: number;
+  displayName: string;
+  daysSince: number | null;
+  /** "Лапин (3 недели назад)" — ready to print. */
+  label: string;
+}
+
+export interface TemplateQueue {
+  templateId: number;
+  rotationUnit: "day" | "week";
+  asOf: string;
+  queue: RotationTurnView[];
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
@@ -235,6 +253,8 @@ export interface ApiClient {
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
+  getTemplateQueue(templateId: number): Promise<TemplateQueue>;
+  setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
@@ -579,9 +599,24 @@ const realClient: ApiClient = {
     return res.text();
   },
 
+  getTemplateQueue(templateId) {
+    return authorizedGet<TemplateQueue>(`/api/admin/templates/${templateId}/queue`);
+  },
+
   async getTemplateRoles() {
     const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
     return templates;
+  },
+
+  async setRotationUnit(templateId, rotationUnit) {
+    const token = await authToken();
+    const path = `/api/admin/templates/${templateId}/rotation`;
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ rotationUnit }),
+    });
+    if (!res.ok) throw await toError(path, res);
   },
 
   async saveTemplateRoles(templateId, pool, preference) {
@@ -624,6 +659,8 @@ const devClient: ApiClient = {
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   getTemplateRoles: () => mockGetTemplateRoles(),
+  getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
+  setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),

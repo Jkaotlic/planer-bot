@@ -910,6 +910,39 @@ button {
 
 /* Two fixed columns for the toggles so every checkbox lines up under its header
    however long the name beside it is. */
+/* The queue is a hint, not a control — it reads as a note above the roster. */
+.kind-rotation {
+  padding: 12px 0 4px;
+}
+
+.kind-rotation-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--hint);
+}
+
+.kind-rotation-unit select {
+  padding: 5px 8px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.kind-rotation-hint {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.kind-rotation-note {
+  color: var(--hint);
+  font-size: 12.5px;
+}
+
 .kind-people-head,
 .kind-person {
   display: grid;

@@ -1,6 +1,8 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, max } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { templatePool, templatePreference, employees } from "../db/schema";
+import { templatePool, templatePreference, employees, shifts, shiftTemplates } from "../db/schema";
+import type { RotationCandidate, RotationUnit } from "@planer/shared";
+import { listActive } from "./employees";
 
 /**
  * Who may take a kind of shift, and who asked for it.
@@ -57,6 +59,41 @@ export function getAllTemplateRoles(db: Db): Map<number, TemplateRoles> {
     roles(row.templateId).preference[row.employeeId] = row.weight;
   }
   return out;
+}
+
+/**
+ * Whose turn it is for a preset: everyone eligible, with the last day they held
+ * it. Eligible means the pool, or the whole active roster when the pool is empty
+ * — the same rule the distributor uses, so the hint and the assignment agree.
+ *
+ * Reads history from the schedule itself rather than a separate counter, so it
+ * stays right however entries got there — imported, distributed or typed in.
+ */
+export function rotationCandidatesFor(db: Db, templateId: number): RotationCandidate[] {
+  const pool = new Set(getTemplateRoles(db, templateId).pool);
+  const eligible = listActive(db).filter((employee) => pool.size === 0 || pool.has(employee.id));
+
+  const lastHeld = new Map<number, string>();
+  for (const row of db
+    .select({ employeeId: shifts.employeeId, date: max(shifts.date) })
+    .from(shifts)
+    .where(eq(shifts.templateId, templateId))
+    .groupBy(shifts.employeeId)
+    .all()) {
+    if (row.employeeId != null && row.date) lastHeld.set(row.employeeId, row.date);
+  }
+
+  return eligible.map((employee) => ({
+    employeeId: employee.id,
+    displayName: employee.displayName,
+    rosterOrder: employee.rosterOrder,
+    lastHeld: lastHeld.get(employee.id) ?? null,
+  }));
+}
+
+/** The one column that says how this kind is handed out — by day or by week. */
+export function setRotationUnit(db: Db, templateId: number, unit: RotationUnit): void {
+  db.update(shiftTemplates).set({ rotationUnit: unit }).where(eq(shiftTemplates.id, templateId)).run();
 }
 
 class UnknownEmployeesError extends Error {

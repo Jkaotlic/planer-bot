@@ -9,6 +9,7 @@ import type {
   PayrollRow,
   RosterImportPreview,
   TemplateRolesView,
+  TemplateQueue,
   RosterImportSummary,
   RosterPersonResolution,
   Shift,
@@ -16,6 +17,7 @@ import type {
   VacantSlot,
 } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
+import { rotationQueue, describeTurn } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
 /**
@@ -399,6 +401,47 @@ export async function mockSaveTemplateRoles(
     pool: [...new Set(pool)],
     preference: Object.fromEntries(Object.entries(preference).filter(([, weight]) => weight > 0)),
   });
+}
+
+/** DEV rotation: same ordering rule as the server — newcomers first, then by how
+ *  long ago somebody last held the preset. */
+const ROTATION_UNITS = new Map<number, "day" | "week">();
+
+export async function mockSetRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void> {
+  await delay(150);
+  ROTATION_UNITS.set(templateId, rotationUnit);
+}
+
+export async function mockGetTemplateQueue(templateId: number): Promise<TemplateQueue> {
+  await delay(200);
+  const unit = ROTATION_UNITS.get(templateId) ?? "day";
+  const asOf = toISODate(new Date());
+  const pool = new Set(TEMPLATE_ROLES.get(templateId)?.pool ?? []);
+  const eligible = EMPLOYEES.filter((e) => e.isActive && (pool.size === 0 || pool.has(e.id)));
+
+  const lastHeld = new Map<number, string>();
+  for (const shift of ENTRIES) {
+    if (shift.templateId !== templateId || shift.employeeId == null) continue;
+    const seen = lastHeld.get(shift.employeeId);
+    if (!seen || shift.date > seen) lastHeld.set(shift.employeeId, shift.date);
+  }
+
+  const queue = rotationQueue(
+    eligible.map((employee) => ({
+      employeeId: employee.id,
+      displayName: employee.displayName,
+      rosterOrder: EMPLOYEES.indexOf(employee),
+      lastHeld: lastHeld.get(employee.id) ?? null,
+    })),
+    asOf,
+  ).map((turn) => ({
+    employeeId: turn.employeeId,
+    displayName: turn.displayName,
+    daysSince: turn.daysSince,
+    label: describeTurn(turn, unit),
+  }));
+
+  return { templateId, rotationUnit: unit, asOf, queue };
 }
 
 const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);
