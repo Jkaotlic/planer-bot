@@ -52,6 +52,14 @@ import { listOpenSlots, getVacantSlot } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
+import {
+  upcomingBirthdays,
+  previewCampaign,
+  updateCampaign,
+  ensureCampaign,
+  teamRecipients,
+  markSent,
+} from "../birthdays/birthday-service";
 
 export interface AppDeps {
   db: Db;
@@ -271,6 +279,90 @@ export function createApp(deps: AppDeps): Hono<Env> {
       payload: row.payload,
     }));
     return c.json({ events });
+  });
+
+  // --- Дни рождения ---------------------------------------------------------
+  // The bot never mails the team on its own. It nudges admins a week ahead; every
+  // message after that is an admin pressing a button, having seen exactly what
+  // will go out and to whom.
+
+  const birthdayAsOf = (c: { req: { query(name: string): string | undefined } }) =>
+    c.req.query("asOf") ?? teamNow(config.teamTz).date;
+
+  app.get("/api/admin/birthdays", requireAdmin(db, config.jwtSecret), (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    return c.json({ asOf, birthdays: upcomingBirthdays(db, asOf) });
+  });
+
+  app.get("/api/admin/birthdays/:id/preview", requireAdmin(db, config.jwtSecret), (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    const preview = previewCampaign(db, Number(c.req.param("id")), asOf);
+    if (!preview) return c.json({ error: "not_found" }, 404);
+    return c.json(preview);
+  });
+
+  app.put("/api/admin/birthdays/:id", requireAdmin(db, config.jwtSecret), async (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { collectUrl?: unknown; messageText?: unknown };
+
+    const patch: { collectUrl?: string | null; messageText?: string | null } = {};
+    if (body.collectUrl !== undefined) {
+      if (body.collectUrl !== null && typeof body.collectUrl !== "string") {
+        return c.json({ error: "collectUrl должен быть ссылкой или null" }, 400);
+      }
+      const url = typeof body.collectUrl === "string" ? body.collectUrl.trim() : null;
+      // Only http(s) — the link is forwarded to the whole team, so a `javascript:`
+      // or a bare word must not be able to travel in a message from the bot.
+      if (url && !/^https?:\/\/\S+$/i.test(url)) {
+        return c.json({ error: "Ссылка должна начинаться с http:// или https://" }, 400);
+      }
+      patch.collectUrl = url || null;
+    }
+    if (body.messageText !== undefined) {
+      if (body.messageText !== null && typeof body.messageText !== "string") {
+        return c.json({ error: "messageText должен быть текстом или null" }, 400);
+      }
+      const text = typeof body.messageText === "string" ? body.messageText.trim() : null;
+      if (text && text.length > 3000) return c.json({ error: "Текст длиннее 3000 символов" }, 400);
+      patch.messageText = text || null;
+    }
+    if (Object.keys(patch).length === 0) return c.json({ error: "нечего сохранять" }, 400);
+
+    const campaign = updateCampaign(db, Number(c.req.param("id")), asOf, patch);
+    if (!campaign) return c.json({ error: "not_found" }, 404);
+    return c.json({ campaign });
+  });
+
+  /** Sends the collection to the team. Needs an explicit confirmation in the body:
+   *  this is the one call in the app that messages every colleague at once. */
+  app.post("/api/admin/birthdays/:id/send", requireAdmin(db, config.jwtSecret), async (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
+    if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
+
+    const employeeId = Number(c.req.param("id"));
+    const preview = previewCampaign(db, employeeId, asOf);
+    if (!preview) return c.json({ error: "not_found" }, 404);
+    if (preview.blocker) return c.json({ error: preview.blocker }, 409);
+    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+
+    const campaign = ensureCampaign(db, employeeId, asOf)!;
+    let delivered = 0;
+    for (const recipient of teamRecipients(db, employeeId)) {
+      if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+    }
+    markSent(db, campaign.id, delivered, new Date());
+    recordAudit(db, "birthday_sent", c.get("auth").employeeId, {
+      employeeId,
+      displayName: preview.displayName,
+      delivered,
+      intended: preview.recipients.length,
+    });
+    return c.json({ delivered, intended: preview.recipients.length });
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */

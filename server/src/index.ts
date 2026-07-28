@@ -10,6 +10,7 @@ import { createApp } from "./http/app";
 import { createBot } from "./bot/bot";
 import { shutdownSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
+import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { teamNow } from "./util/team-time";
 import { safeErrorMessage } from "./util/safe-error";
 import type { Env } from "./http/middleware";
@@ -32,6 +33,9 @@ setInterval(() => {
   if (reminderRunning) return;
   reminderRunning = true;
   Promise.resolve(runReminderTick(db, bot, teamNow(config.teamTz)))
+    // The birthday notice rides the same tick: it is cheap, it only ever messages
+    // admins, and it marks itself done so it fires once per birthday, not hourly.
+    .then(() => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz).date))
     .catch((err) => {
       console.error("reminder tick failed:", safeErrorMessage(err));
     })

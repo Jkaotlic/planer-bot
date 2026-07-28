@@ -186,6 +186,39 @@ export type ReminderLog = typeof reminderLog.$inferSelect;
 export type NewReminderLog = typeof reminderLog.$inferInsert;
 export type AuditLog = typeof auditLog.$inferSelect;
 export type NewAuditLog = typeof auditLog.$inferInsert;
+/**
+ * One birthday, one year, one round of collecting — the record of what the admin
+ * decided to send and whether it went out.
+ *
+ * The bot never mails the team on its own: it only nudges admins a week ahead
+ * (that is what `adminNotifiedAt` remembers, so it nudges once and not daily).
+ * Everything after that is the admin's doing, which is why the link, the text and
+ * `sentAt` all live here rather than being derived.
+ */
+export const birthdayCampaigns = sqliteTable(
+  "birthday_campaigns",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    employeeId: integer().notNull().references(() => employees.id),
+    /** The calendar year this round belongs to — one per person per year. */
+    year: integer().notNull(),
+    /** When it is marked, YYYY-MM-DD. 29 February rolls to 1 March in a common year. */
+    celebratedOn: text().notNull(),
+    /** The Сбербанк Онлайн link the admin generated; null until they paste it. */
+    collectUrl: text(),
+    /** What the team will be sent. Null means "use the default wording". */
+    messageText: text(),
+    status: text().$type<"pending" | "ready" | "sent">().notNull().default("pending"),
+    /** When admins were nudged, so they are nudged once rather than every tick. */
+    adminNotifiedAt: integer({ mode: "timestamp" }),
+    sentAt: integer({ mode: "timestamp" }),
+    /** How many people actually received it. */
+    sentCount: integer().notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("birthday_campaign_unique").on(t.employeeId, t.year)],
+);
+
 export type VacantSlot = typeof vacantSlots.$inferSelect;
 export type NewVacantSlot = typeof vacantSlots.$inferInsert;
 export type SlotInterest = typeof slotInterest.$inferSelect;
@@ -196,5 +229,7 @@ export type TemplatePool = typeof templatePool.$inferSelect;
 export type NewTemplatePool = typeof templatePool.$inferInsert;
 export type TemplatePreference = typeof templatePreference.$inferSelect;
 export type NewTemplatePreference = typeof templatePreference.$inferInsert;
+export type BirthdayCampaign = typeof birthdayCampaigns.$inferSelect;
+export type NewBirthdayCampaign = typeof birthdayCampaigns.$inferInsert;
 export type CalendarDay = typeof calendarDays.$inferSelect;
 export type NewCalendarDay = typeof calendarDays.$inferInsert;
