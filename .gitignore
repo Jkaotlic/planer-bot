@@ -21,6 +21,14 @@ data/
 *.db-shm
 *.db-wal
 
+# Real rosters. A roster file is a team's full names plus who was off when, and
+# this repository is public — one `git add -A` from the wrong directory would put
+# it back. The only CSV that belongs in git is the synthetic fixture under
+# server/src/roster/__fixtures__/, which is already tracked and unaffected by this.
+/*.csv
+Дежурства*.csv
+roster*.csv
+
 # logs
 *.log
 logs/
