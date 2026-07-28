@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, reorderEmployee } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
+import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -267,5 +268,52 @@ describe("PATCH /api/admin/employees/:id (rename)", () => {
     expect(blank.status).toBe(400);
     const forbidden = await app.request(`/api/admin/employees/${w.id}`, authedJson(await tokenFor(app, 333), { displayName: "X" }, "PATCH"));
     expect(forbidden.status).toBe(403);
+  });
+});
+
+describe("worker order", () => {
+  it("moves a worker, renumbers the rest and records who did it", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const ids = ["Первый", "Второй", "Третий"].map((displayName) => createEmployee(db, { displayName }).id);
+    ids.forEach((id, index) => reorderEmployee(db, id, index + 1));
+
+    const res = await app.request(`/api/admin/employees/${ids[2]}/order`, authedJson(admin, { position: 1 }));
+    expect(res.status).toBe(200);
+    // The allowlisted admin auto-registers on first auth, so they are in the list
+    // too — the numbering below is over everyone, which is the point of renumbering.
+    const { employees } = await res.json();
+    const named = (list: { displayName: string }[]) =>
+      list.map((e) => e.displayName).filter((n) => n !== "T");
+    expect(named(employees)).toEqual(["Третий", "Первый", "Второй"]);
+    expect(employees.map((e: { rosterOrder: number }) => e.rosterOrder)).toEqual([0, 1, 2, 3]);
+
+    // The listing every screen reads must agree with what the move returned.
+    const listed = await (await app.request("/api/admin/employees", { headers: { Authorization: `Bearer ${admin}` } })).json();
+    expect(named(listed.employees)).toEqual(["Третий", "Первый", "Второй"]);
+
+    const moved = listRecentAudit(db, 5).find((a) => a.type === "employee_reordered")!;
+    expect(moved.payload).toMatchObject({ employeeId: ids[2], displayName: "Третий", to: 0 });
+  });
+
+  it("rejects a missing or non-numeric position, and an unknown worker", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const id = createEmployee(db, { displayName: "Один" }).id;
+
+    expect((await app.request(`/api/admin/employees/${id}/order`, authedJson(admin, {}))).status).toBe(400);
+    expect((await app.request(`/api/admin/employees/${id}/order`, authedJson(admin, { position: "первый" }))).status).toBe(400);
+    expect((await app.request("/api/admin/employees/9999/order", authedJson(admin, { position: 1 }))).status).toBe(404);
+  });
+
+  it("is admin-only", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const worker = createEmployee(db, { displayName: "Работник", inviteToken: "inv-9" });
+    linkTelegramAccount(db, "inv-9", 444);
+    const res = await app.request(`/api/admin/employees/${worker.id}/order`, authedJson(await tokenFor(app, 444), { position: 1 }));
+    expect(res.status).toBe(403);
   });
 });

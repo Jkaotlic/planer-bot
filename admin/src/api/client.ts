@@ -13,6 +13,7 @@ import {
   mockRestoreEmployee,
   mockSetEmployeeAdmin,
   mockRenameEmployee,
+  mockReorderEmployee,
   mockGetEmployeeInvite,
   mockGetWeekendSlots,
   mockPostSlot,
@@ -208,6 +209,8 @@ export interface ApiClient {
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   renameEmployee(id: number, displayName: string): Promise<void>;
+  /** Move a worker to `position` (1-based). The server renumbers the rest. */
+  reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
   getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getWeekendSlots(): Promise<AdminSlotView[]>;
@@ -492,6 +495,14 @@ const realClient: ApiClient = {
     await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
   },
 
+  async reorderEmployee(id, position) {
+    const { employees } = await authorizedPostJson<{ employees: Employee[] }>(
+      `/api/admin/employees/${id}/order`,
+      { position },
+    );
+    return employees;
+  },
+
   async renameEmployee(id, displayName) {
     await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
   },
@@ -565,6 +576,7 @@ const devClient: ApiClient = {
   restoreEmployee: (id) => mockRestoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
+  reorderEmployee: (id, position) => mockReorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),

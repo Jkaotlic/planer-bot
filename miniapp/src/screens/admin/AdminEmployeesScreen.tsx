@@ -115,10 +115,12 @@ export function AdminEmployeesScreen() {
           {active.length === 0 ? (
             <Placeholder description="Пока нет активных работников" />
           ) : (
-            active.map((e) => (
+            active.map((e, index) => (
               <EmployeeRow
                 key={e.id}
                 employee={e}
+                position={index + 1}
+                onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
                 actionLabel="В архив"
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
@@ -160,11 +162,16 @@ function EmployeeRow({
   onToggleAdmin,
   onRename,
   onShowInvite,
+  position,
+  onReorder,
 }: {
   employee: Employee;
   actionLabel: string;
   busy: boolean;
   onAction: () => void;
+  /** 1-based place in the list, shown and editable. Absent for archived workers. */
+  position?: number;
+  onReorder?: (position: number) => void;
   /** When provided (active roster), a linked worker can be promoted to / removed from admin. */
   onToggleAdmin?: () => void;
   /** When provided, the worker can be renamed inline. */
@@ -210,6 +217,9 @@ function EmployeeRow({
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {position !== undefined && onReorder && (
+          <PositionField position={position} busy={busy} onCommit={onReorder} />
+        )}
         <Avatar acronym={initialsOf(employee.displayName)} size={40} style={{ background: palette.bg, color: palette.fg, flex: "none" }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 15.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -328,5 +338,60 @@ function InviteCard({ invite, onRegenerate, onDismiss }: { invite: CreateEmploye
         </Button>
       )}
     </CardShell>
+  );
+}
+
+/**
+ * The worker's place in the list. A number you type, not arrows you tap: moving
+ * somebody from 26th to 1st is one entry instead of twenty-five taps — which
+ * matters far more on a phone than on the desktop console.
+ */
+function PositionField({
+  position,
+  busy,
+  onCommit,
+}: {
+  position: number;
+  busy: boolean;
+  onCommit: (position: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(position));
+  // The list re-sorts under us after every move, so the field follows the row.
+  useEffect(() => setDraft(String(position)), [position]);
+
+  return (
+    <input
+      type="number"
+      min={1}
+      inputMode="numeric"
+      value={draft}
+      disabled={busy}
+      aria-label="Номер в списке"
+      style={{
+        flex: "none",
+        width: 44,
+        padding: "6px 4px",
+        borderRadius: 8,
+        border: "1px solid var(--tgui--outline)",
+        background: "var(--tgui--secondary_bg_color)",
+        color: "var(--tgui--hint_color)",
+        fontSize: 13,
+        fontWeight: 600,
+        textAlign: "center",
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const next = Number(draft);
+        if (!Number.isFinite(next) || Math.trunc(next) === position) {
+          setDraft(String(position));
+          return;
+        }
+        onCommit(Math.trunc(next));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(String(position));
+      }}
+    />
   );
 }

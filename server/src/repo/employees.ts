@@ -28,21 +28,52 @@ export function getByTelegramId(db: Db, telegramUserId: number): Employee | unde
   return db.select().from(employees).where(eq(employees.telegramUserId, telegramUserId)).get();
 }
 
+/** Nulls last, then the admin's order, then id — so the sort is total and stable
+ *  even while somebody has no number yet. */
+const ROSTER_ORDER = [
+  sql`case when ${employees.rosterOrder} is null then 1 else 0 end`,
+  employees.rosterOrder,
+  employees.id,
+] as const;
+
+/** Every active worker, in the order the admin arranged them. The order is the
+ *  same everywhere — the schedule grid, the workers screen and the CSV export all
+ *  read one list, so a person sits in the same row wherever you look. */
 export function listActive(db: Db): Employee[] {
-  return db.select().from(employees).where(eq(employees.isActive, true)).all();
+  return db.select().from(employees).where(eq(employees.isActive, true)).orderBy(...ROSTER_ORDER).all();
 }
 
 export function listActiveInRosterOrder(db: Db): Employee[] {
-  return db
-    .select()
-    .from(employees)
-    .where(eq(employees.isActive, true))
-    .orderBy(
-      sql`case when ${employees.rosterOrder} is null then 1 else 0 end`,
-      employees.rosterOrder,
-      employees.id,
-    )
-    .all();
+  return listActive(db);
+}
+
+/**
+ * Moves one worker to `position` (1-based, as the admin sees it) and renumbers
+ * everyone so the list stays 0..n-1 with no gaps and no duplicates.
+ *
+ * Renumbering the whole list rather than nudging neighbours is what keeps this
+ * safe to repeat: however the numbers got skewed before — an import, a restore,
+ * a half-finished edit — one move puts the whole column back in order.
+ *
+ * Returns the new ordering, or null if that worker isn't in it.
+ */
+export function reorderEmployee(db: Db, id: number, position: number): Employee[] | null {
+  return db.transaction((tx) => {
+    const current = tx.select().from(employees).where(eq(employees.isActive, true)).orderBy(...ROSTER_ORDER).all();
+    const from = current.findIndex((employee) => employee.id === id);
+    if (from === -1) return null;
+
+    const target = Math.min(Math.max(Math.trunc(position), 1), current.length) - 1;
+    const [moved] = current.splice(from, 1);
+    current.splice(target, 0, moved!);
+
+    current.forEach((employee, index) => {
+      if (employee.rosterOrder !== index) {
+        tx.update(employees).set({ rosterOrder: index }).where(eq(employees.id, employee.id)).run();
+      }
+    });
+    return current.map((employee, index) => ({ ...employee, rosterOrder: index }));
+  });
 }
 
 export function createAdminEmployee(
