@@ -20,6 +20,8 @@ export const employees = sqliteTable("employees", {
   /** This worker's row position in the imported roster file, 0-based. NULL = not in the
    *  roster (e.g. a worker added in the bot later); those sort last on export. */
   rosterOrder: integer(),
+  /** «MM-DD» — day and month, no year. See shared/src/birthday.ts for why. */
+  birthDate: text(),
   createdAt: createdAt(),
 });
 

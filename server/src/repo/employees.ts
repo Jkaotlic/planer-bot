@@ -76,6 +76,11 @@ export function reorderEmployee(db: Db, id: number, position: number): Employee[
   });
 }
 
+/** Sets or clears a worker's birthday. `null` clears it — nobody is obliged to give one. */
+export function setBirthDate(db: Db, id: number, birthDate: string | null): Employee | undefined {
+  return db.update(employees).set({ birthDate }).where(eq(employees.id, id)).returning().all()[0];
+}
+
 export function createAdminEmployee(
   db: Db,
   data: { telegramUserId: number; tgUsername?: string; displayName: string },

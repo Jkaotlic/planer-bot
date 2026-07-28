@@ -23,6 +23,7 @@ import {
   countActiveAdmins,
   renameEmployee,
   reorderEmployee,
+  setBirthDate,
   setInviteToken,
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
@@ -31,7 +32,7 @@ import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
-import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn } from "@planer/shared";
+import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn, isBirthDate } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
@@ -163,15 +164,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ employee, inviteToken, inviteLink }, 201);
   });
 
-  // Rename a worker.
+  // Rename a worker, and/or set their birthday. Either field on its own is a
+  // valid edit; sending neither is not, so an empty body can't silently no-op.
   app.patch("/api/admin/employees/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
-    if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
+    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown; birthDate?: unknown };
+    const hasName = body.displayName !== undefined;
+    const hasBirthday = body.birthDate !== undefined;
+    if (!hasName && !hasBirthday) return c.json({ error: "displayName is required" }, 400);
+
+    if (hasName && (typeof body.displayName !== "string" || body.displayName.trim().length === 0)) {
       return c.json({ error: "displayName is required" }, 400);
     }
-    const employee = renameEmployee(db, id, body.displayName.trim());
+    // null clears it — nobody is obliged to give a birthday.
+    if (hasBirthday && body.birthDate !== null && (typeof body.birthDate !== "string" || !isBirthDate(body.birthDate))) {
+      return c.json({ error: "birthDate должен быть в виде ММ-ДД, например 05-08" }, 400);
+    }
+
+    let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    if (hasName) employee = renameEmployee(db, id, (body.displayName as string).trim()) ?? employee;
+    if (hasBirthday) employee = setBirthDate(db, id, body.birthDate as string | null) ?? employee;
+
+    recordAudit(db, "employee_updated", c.get("auth").employeeId, {
+      employeeId: id,
+      displayName: employee.displayName,
+      ...(hasBirthday ? { birthDate: employee.birthDate } : {}),
+    });
     return c.json({ employee });
   });
 

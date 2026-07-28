@@ -64,6 +64,13 @@
       "when": 1785146400000,
       "tag": "0008_team_schedule_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785243385575,
+      "tag": "0009_sad_yellow_claw",
+      "breakpoints": true
     }
   ]
 }

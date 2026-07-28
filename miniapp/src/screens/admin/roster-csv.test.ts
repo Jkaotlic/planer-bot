@@ -27,8 +27,8 @@ const preview: RosterImportPreview = {
 };
 
 const employees = [
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002 },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: null },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null },
 ];
 
 describe("initialResolutions", () => {

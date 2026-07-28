@@ -8,3 +8,4 @@ export * from "./schedule-palette";
 export * from "./distribute";
 export * from "./reminder";
 export * from "./rotation";
+export * from "./birthday";

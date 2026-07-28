@@ -51,13 +51,13 @@ export const MOCK_ME: Me = { id: 1, displayName: "Аня Смирнова", isAd
  * employee-without-shifts state.
  */
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001 },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002 },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004 },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005 },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006 },
-  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007 },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14" },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05" },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31" },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null },
+  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29" },
 ];
 
 function personName(employeeId: number): string {
@@ -412,7 +412,7 @@ export async function mockGetAdminEmployees(): Promise<Employee[]> {
 export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
   await delay(250);
   const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null };
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
   return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
@@ -455,6 +455,12 @@ export async function mockReorderEmployee(id: number, position: number): Promise
   EMPLOYEES.length = 0;
   EMPLOYEES.push(...active, ...archived);
   return [...active];
+}
+
+export async function mockSetBirthDate(id: number, birthDate: string | null): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((item) => item.id === id);
+  if (employee) employee.birthDate = birthDate;
 }
 
 export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
@@ -919,6 +925,7 @@ export async function mockApplyRosterImport(
         isAdmin: false,
         isActive: true,
         telegramUserId: null,
+        birthDate: null,
       });
     }
   }

@@ -500,7 +500,7 @@ button {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 24px;
-  max-width: 1020px;
+  max-width: 1180px;
 }
 
 .employees-header {
@@ -1678,4 +1678,38 @@ input[type="time"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* День рождения в строке работника — компактно, чтобы не спорить с кнопками. */
+.employee-birthday {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--hint);
+}
+
+.birthday-field {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.birthday-field select {
+  padding: 5px 6px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* Wide enough for «сентября» and «не указан» plus the native arrow — at auto
+   width the browser clipped them to «не указа▾». */
+.birthday-field select:first-child {
+  min-width: 58px;
+}
+
+.birthday-field select:last-child {
+  min-width: 116px;
 }

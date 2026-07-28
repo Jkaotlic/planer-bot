@@ -13,6 +13,7 @@ import {
   mockRestoreEmployee,
   mockSetEmployeeAdmin,
   mockRenameEmployee,
+  mockSetBirthDate,
   mockReorderEmployee,
   mockGetEmployeeInvite,
   mockGetWeekendSlots,
@@ -42,6 +43,8 @@ export interface Employee {
   isActive: boolean;
   /** null until the worker opens the invite link and links their Telegram account. */
   telegramUserId: number | null;
+  /** «MM-DD» — day and month of their birthday, or null if not given. */
+  birthDate: string | null;
 }
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -278,6 +281,8 @@ export interface ApiClient {
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   renameEmployee(id: number, displayName: string): Promise<void>;
+  /** `null` clears the birthday. */
+  setBirthDate(id: number, birthDate: string | null): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
@@ -592,6 +597,10 @@ const realClient: ApiClient = {
     return employees;
   },
 
+  async setBirthDate(id, birthDate) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, { birthDate });
+  },
+
   async renameEmployee(id, displayName) {
     await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
   },
@@ -713,6 +722,7 @@ const devClient: ApiClient = {
   restoreEmployee: (id) => mockRestoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
+  setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
   reorderEmployee: (id, position) => mockReorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
