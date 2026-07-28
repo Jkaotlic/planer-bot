@@ -48,6 +48,29 @@ export function formatBirthDate(value: string): string {
 }
 
 /**
+ * "сегодня" / "завтра" / "через 5 дней" — how far off a birthday is, in words.
+ *
+ * Lives here rather than in each surface because the same phrase is read in three
+ * places (the nudge the bot sends admins, the console list and the Mini App list),
+ * and three copies of Russian day-plurals is three chances to write «5 дня».
+ */
+export function describeDaysUntil(days: number): string {
+  if (days <= 0) return "сегодня";
+  if (days === 1) return "завтра";
+  return `через ${days} ${pluralDays(days)}`;
+}
+
+/** 1 день · 2 дня · 5 дней — including the 11–14 exception. */
+export function pluralDays(days: number): string {
+  const mod100 = days % 100;
+  if (mod100 >= 11 && mod100 <= 14) return "дней";
+  const mod10 = days % 10;
+  if (mod10 === 1) return "день";
+  if (mod10 >= 2 && mod10 <= 4) return "дня";
+  return "дней";
+}
+
+/**
  * How many days from `asOf` (YYYY-MM-DD) until that birthday next comes round —
  * 0 when it is today, and never negative: a birthday that has passed this year
  * counts to next year's.

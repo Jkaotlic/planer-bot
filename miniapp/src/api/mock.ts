@@ -15,6 +15,9 @@ import type {
   TemplateQueue,
   JournalEvent,
   JournalPage,
+  BirthdayCampaign,
+  BirthdayPreview,
+  UpcomingBirthday,
   ShiftCountsReport,
   Shift,
   SwapDirection,
@@ -28,7 +31,7 @@ import type {
   WeekendOffer,
 } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
-import { rotationQueue, describeTurn } from "@planer/shared";
+import { rotationQueue, describeTurn, daysUntilBirthday, formatBirthDate } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
 /**
@@ -774,6 +777,119 @@ export async function mockGetJournal(params: { types?: string[]; limit?: number;
     availableTypes: [...new Set(JOURNAL.map((e) => e.type))].sort(),
     events: matching.slice(offset, offset + limit),
   };
+}
+
+// --- Дни рождения -----------------------------------------------------------
+// Mirrors the server's rules rather than just returning data: the dev screen is
+// where the flow gets clicked through, so it has to refuse the same things —
+// no link, already sent, a link that isn't http(s).
+
+const CAMPAIGNS: BirthdayCampaign[] = [];
+
+function campaignFor(employeeId: number, create: boolean): BirthdayCampaign | null {
+  const employee = EMPLOYEES.find((e) => e.id === employeeId);
+  if (!employee?.birthDate) return null;
+  const today = toISODate(new Date());
+  const days = daysUntilBirthday(employee.birthDate, today);
+  if (days === null) return null;
+  const celebratedOn = toISODate(addDays(new Date(`${today}T00:00:00Z`), days));
+  const year = Number(celebratedOn.slice(0, 4));
+
+  const existing = CAMPAIGNS.find((c) => c.employeeId === employeeId && c.year === year);
+  if (existing || !create) return existing ?? null;
+  const created: BirthdayCampaign = {
+    id: CAMPAIGNS.length + 1, employeeId, year, celebratedOn,
+    collectUrl: null, messageText: null, status: "pending",
+    adminNotifiedAt: null, sentAt: null, sentCount: 0,
+  };
+  CAMPAIGNS.push(created);
+  return created;
+}
+
+function mockRecipients(employeeId: number): { employeeId: number; displayName: string }[] {
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== employeeId && e.telegramUserId != null)
+    .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
+}
+
+// Phrased so the name stays in the nominative — same rule, and same wording, as
+// the server's `defaultMessage`: «день рождения у Игорь Петров» is what it avoids.
+function mockDefaultMessage(name: string, label: string, collectUrl: string | null): string {
+  const lines = [`🎂 ${name} празднует день рождения ${label}.`];
+  if (collectUrl) lines.push("", `Сбор на подарок: ${collectUrl}`);
+  return lines.join("\n");
+}
+
+export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
+  await delay(200);
+  const today = toISODate(new Date());
+  return EMPLOYEES.filter((e) => e.isActive && e.birthDate)
+    .flatMap((employee) => {
+      const daysUntil = daysUntilBirthday(employee.birthDate!, today);
+      if (daysUntil === null) return [];
+      return [{
+        employeeId: employee.id,
+        displayName: employee.displayName,
+        birthDate: employee.birthDate!,
+        birthDateLabel: formatBirthDate(employee.birthDate!),
+        celebratedOn: toISODate(addDays(new Date(`${today}T00:00:00Z`), daysUntil)),
+        daysUntil,
+        campaign: campaignFor(employee.id, false),
+      }];
+    })
+    .sort((a, b) => a.daysUntil - b.daysUntil || a.displayName.localeCompare(b.displayName, "ru"));
+}
+
+export async function mockSaveBirthdayCampaign(
+  employeeId: number,
+  patch: { collectUrl?: string | null; messageText?: string | null },
+): Promise<BirthdayCampaign> {
+  await delay(180);
+  const campaign = campaignFor(employeeId, true);
+  if (!campaign) throw new Error("У этого работника не указан день рождения");
+  if (patch.collectUrl !== undefined) {
+    const url = patch.collectUrl?.trim() || null;
+    if (url && !/^https?:\/\/\S+$/i.test(url)) throw new Error("Ссылка должна начинаться с http:// или https://");
+    campaign.collectUrl = url;
+  }
+  if (patch.messageText !== undefined) campaign.messageText = patch.messageText?.trim() || null;
+  if (campaign.status !== "sent") campaign.status = campaign.collectUrl ? "ready" : "pending";
+  return { ...campaign };
+}
+
+export async function mockGetBirthdayPreview(employeeId: number): Promise<BirthdayPreview> {
+  await delay(180);
+  const employee = EMPLOYEES.find((e) => e.id === employeeId);
+  const campaign = campaignFor(employeeId, true);
+  if (!employee?.birthDate || !campaign) throw new Error("У этого работника не указан день рождения");
+
+  const recipients = mockRecipients(employeeId);
+  const label = formatBirthDate(employee.birthDate);
+  let blocker: string | null = null;
+  if (campaign.status === "sent") blocker = "Уже разослано — повторная отправка отключена.";
+  else if (!campaign.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
+  else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
+
+  return {
+    employeeId,
+    displayName: employee.displayName,
+    celebratedOn: campaign.celebratedOn,
+    collectUrl: campaign.collectUrl,
+    message: campaign.messageText?.trim() || mockDefaultMessage(employee.displayName, label, campaign.collectUrl),
+    recipients,
+    blocker,
+    alreadySentAt: campaign.sentAt,
+  };
+}
+
+export async function mockSendBirthday(employeeId: number): Promise<{ delivered: number; intended: number }> {
+  await delay(400);
+  const preview = await mockGetBirthdayPreview(employeeId);
+  if (preview.blocker) throw new Error(preview.blocker);
+  const campaign = campaignFor(employeeId, true)!;
+  campaign.status = "sent";
+  campaign.sentAt = new Date().toISOString();
+  campaign.sentCount = preview.recipients.length;
+  return { delivered: preview.recipients.length, intended: preview.recipients.length };
 }
 
 export async function mockGetShiftCounts(from: string, to: string): Promise<ShiftCountsReport> {

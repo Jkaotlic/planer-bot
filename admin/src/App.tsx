@@ -18,6 +18,7 @@ import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
+import { BirthdaysScreen } from "./screens/BirthdaysScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
@@ -284,6 +285,8 @@ export function App() {
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "weekend" ? (
           <WeekendAdminScreen />
+        ) : nav === "birthdays" ? (
+          <BirthdaysScreen />
         ) : nav === "log" ? (
           <JournalScreen />
         ) : !activeEmployees || !shifts ? (

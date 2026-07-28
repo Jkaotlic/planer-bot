@@ -5,6 +5,7 @@ import {
   toBirthDate,
   formatBirthDate,
   daysUntilBirthday,
+  describeDaysUntil,
 } from "./birthday";
 
 describe("parseBirthDate", () => {
@@ -86,5 +87,32 @@ describe("daysUntilBirthday", () => {
   it("returns null for an unreadable birthday or an unreadable day", () => {
     expect(daysUntilBirthday("02-30", "2026-08-05")).toBeNull();
     expect(daysUntilBirthday("08-05", "вчера")).toBeNull();
+  });
+});
+
+describe("describeDaysUntil", () => {
+  it("says сегодня and завтра rather than counting to them", () => {
+    expect(describeDaysUntil(0)).toBe("сегодня");
+    expect(describeDaysUntil(1)).toBe("завтра");
+  });
+
+  it("declines the day correctly, including the 11–14 trap", () => {
+    expect(describeDaysUntil(2)).toBe("через 2 дня");
+    expect(describeDaysUntil(5)).toBe("через 5 дней");
+    expect(describeDaysUntil(7)).toBe("через 7 дней");
+    // 11–14 take «дней» even though they end in 1–4 — «через 12 дня» is the
+    // giveaway that a plural rule was written from the last digit alone.
+    expect(describeDaysUntil(11)).toBe("через 11 дней");
+    expect(describeDaysUntil(12)).toBe("через 12 дней");
+    expect(describeDaysUntil(14)).toBe("через 14 дней");
+    expect(describeDaysUntil(21)).toBe("через 21 день");
+    expect(describeDaysUntil(22)).toBe("через 22 дня");
+    expect(describeDaysUntil(25)).toBe("через 25 дней");
+    expect(describeDaysUntil(101)).toBe("через 101 день");
+    expect(describeDaysUntil(111)).toBe("через 111 дней");
+  });
+
+  it("never counts backwards — a birthday that has passed rolled to next year", () => {
+    expect(describeDaysUntil(-3)).toBe("сегодня");
   });
 });

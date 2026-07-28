@@ -166,13 +166,26 @@ describe("previewCampaign — what the admin sees before anything leaves", () =>
 describe("wording", () => {
   it("names the person and the day, and carries the link when there is one", () => {
     expect(defaultMessage("Мишин Илья", "5 августа", "https://sber/x"))
-      .toBe("🎂 5 августа — день рождения у Мишин Илья.\n\nСбор на подарок: https://sber/x");
+      .toBe("🎂 Мишин Илья празднует день рождения 5 августа.\n\nСбор на подарок: https://sber/x");
     expect(defaultMessage("Мишин Илья", "5 августа", null)).not.toContain("Сбор");
+  });
+
+  it("leaves the name in the nominative — we cannot decline it", () => {
+    // One display name is stored and nothing that would let us inflect it, so
+    // every phrase has to be built around the name as given. «день рождения у
+    // Мишин Илья» is the failure this guards, and it would land in 25 chats.
+    for (const text of [
+      defaultMessage("Мишин Илья", "5 августа", "https://sber/x"),
+      adminNoticeMessage("Мишин Илья", "5 августа", 7),
+    ]) {
+      expect(text).toContain("Мишин Илья");
+      expect(text).not.toMatch(/у Мишин Илья/);
+    }
   });
 
   it("tells admins what to do next, not just that a birthday exists", () => {
     const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7);
-    expect(notice).toContain("Через 7 дн.");
+    expect(notice).toContain("через 7 дней");
     expect(notice).toContain("Сбербанк Онлайн");
     expect(notice).toMatch(/сам решишь, когда разослать/i);
   });
