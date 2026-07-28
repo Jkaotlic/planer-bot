@@ -28,7 +28,7 @@ import {
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
-import { listRecentAudit, recordAudit } from "../repo/audit";
+import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
 import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn } from "@planer/shared";
@@ -50,6 +50,7 @@ import {
 import { listOpenSlots, getVacantSlot } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
+import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
 
 export interface AppDeps {
   db: Db;
@@ -251,6 +252,57 @@ export function createApp(deps: AppDeps): Hono<Env> {
       payload: row.payload,
     }));
     return c.json({ events });
+  });
+
+  /** The full «кто когда что менял» history: filtered by type and date, paged. */
+  app.get("/api/admin/journal", requireAdmin(db, config.jwtSecret), (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    for (const [label, value] of [["from", from], ["to", to]] as const) {
+      if (value && !dateStr.safeParse(value).success) {
+        return c.json({ error: `${label} must be a valid YYYY-MM-DD date` }, 400);
+      }
+    }
+    if (from && to && from > to) return c.json({ error: "from must not be after to" }, 400);
+
+    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 200);
+    const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
+    const types = (c.req.query("types") ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+
+    const page = queryAudit(db, { types, from, to, limit, offset });
+    return c.json({
+      total: page.total,
+      limit,
+      offset,
+      availableTypes: page.availableTypes,
+      events: page.rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        createdAt: row.createdAt,
+        actorName: row.actorEmployeeId != null ? (getEmployeeById(db, row.actorEmployeeId)?.displayName ?? null) : null,
+        payload: row.payload,
+      })),
+    });
+  });
+
+  /** «Кто сколько отдежурил» — people × kinds over a period. */
+  app.get("/api/admin/reports/shift-counts", requireAdmin(db, config.jwtSecret), (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    const err = rangeError(from, to, 366);
+    if (err) return c.json({ error: err }, 400);
+    return c.json(buildShiftCountsReport(db, from!, to!));
+  });
+
+  app.get("/api/admin/reports/shift-counts.csv", requireAdmin(db, config.jwtSecret), (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    const err = rangeError(from, to, 366);
+    if (err) return c.json({ error: err }, 400);
+    const csv = shiftCountsCsv(buildShiftCountsReport(db, from!, to!));
+    c.header("Content-Type", "text/csv; charset=utf-8");
+    c.header("Content-Disposition", `attachment; filename="shift-counts-${from}_${to}.csv"`);
+    return c.body("﻿" + csv);
   });
 
   /** The fields worth keeping in the audit feed — enough to answer «что именно поменяли»

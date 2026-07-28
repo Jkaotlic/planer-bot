@@ -17,6 +17,7 @@ import { Sidebar, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
+import { JournalScreen } from "./screens/JournalScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
@@ -284,7 +285,7 @@ export function App() {
         ) : nav === "weekend" ? (
           <WeekendAdminScreen />
         ) : nav === "log" ? (
-          <div className="centered-fill">Раздел появится в следующем шаге</div>
+          <JournalScreen />
         ) : !activeEmployees || !shifts ? (
           <div className="centered-fill">Загрузка…</div>
         ) : (

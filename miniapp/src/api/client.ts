@@ -33,6 +33,8 @@ import {
   mockUnassignSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
+  mockGetShiftCounts,
+  mockGetJournal,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -289,6 +291,38 @@ export interface TemplateQueue {
   queue: RotationTurnView[];
 }
 
+/** One row of «кто сколько отдежурил». */
+export interface ShiftCountsRow {
+  employeeId: number;
+  displayName: string;
+  byKind: Record<string, number>;
+  total: number;
+}
+
+export interface ShiftCountsReport {
+  from: string;
+  to: string;
+  kinds: string[];
+  rows: ShiftCountsRow[];
+}
+
+/** One line of the «кто когда что менял» history. */
+export interface JournalEvent {
+  id: number;
+  type: string;
+  createdAt: string;
+  actorName: string | null;
+  payload: unknown;
+}
+
+export interface JournalPage {
+  total: number;
+  limit: number;
+  offset: number;
+  availableTypes: string[];
+  events: JournalEvent[];
+}
+
 export interface ApiClient {
   getMe(): Promise<Me>;
   getMyShifts(from: string): Promise<Shift[]>;
@@ -329,6 +363,8 @@ export interface ApiClient {
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
+  getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
+  getJournal(params: { types?: string[]; limit?: number; offset?: number }): Promise<JournalPage>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -655,6 +691,19 @@ export const realClient: ApiClient = {
     return res.text();
   },
 
+  getShiftCounts(from, to) {
+    const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    return authorizedGet<ShiftCountsReport>(`/api/admin/reports/shift-counts?${q}`);
+  },
+
+  getJournal(params) {
+    const q = new URLSearchParams();
+    if (params.types?.length) q.set("types", params.types.join(","));
+    q.set("limit", String(params.limit ?? 30));
+    q.set("offset", String(params.offset ?? 0));
+    return authorizedGet<JournalPage>(`/api/admin/journal?${q.toString()}`);
+  },
+
   getTemplateQueue(templateId) {
     return authorizedGet<TemplateQueue>(`/api/admin/templates/${templateId}/queue`);
   },
@@ -742,6 +791,8 @@ const devClient: ApiClient = {
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
+  getShiftCounts: (from, to) => mockGetShiftCounts(from, to),
+  getJournal: (params) => mockGetJournal(params),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
