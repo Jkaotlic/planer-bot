@@ -22,6 +22,8 @@ import {
   mockGetPayroll,
   mockGetPayrollCsv,
   mockGetRosterCsv,
+  mockGetTemplateRoles,
+  mockSaveTemplateRoles,
   mockPreviewRosterImport,
   mockApplyRosterImport,
 } from "./mock";
@@ -196,6 +198,18 @@ export interface RosterImportSummary {
   unknowns: RosterUnknownCell[];
 }
 
+/** A preset plus who may take it and who asked for it. An empty pool means everyone. */
+export interface TemplateRolesView {
+  templateId: number;
+  name: string;
+  category: EntryCategory;
+  accent: TemplateAccent;
+  /** Employee ids allowed to take this preset. Empty = everyone. */
+  pool: number[];
+  /** employeeId -> weight. Present means "asked for this kind". */
+  preference: Record<number, number>;
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
@@ -220,6 +234,8 @@ export interface ApiClient {
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
+  getTemplateRoles(): Promise<TemplateRolesView[]>;
+  saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
 }
@@ -415,6 +431,19 @@ async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T>
   return (await res.json()) as T;
 }
 
+async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> {
+  const token = await authToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw await toError(path, res);
+  }
+  return (await res.json()) as T;
+}
+
 async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
   const res = await fetch(`${API_BASE}${path}`, {
@@ -550,6 +579,15 @@ const realClient: ApiClient = {
     return res.text();
   },
 
+  async getTemplateRoles() {
+    const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
+    return templates;
+  },
+
+  async saveTemplateRoles(templateId, pool, preference) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/roles`, { pool, preference });
+  },
+
   previewRosterImport(csv) {
     return authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv });
   },
@@ -585,6 +623,8 @@ const devClient: ApiClient = {
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
+  getTemplateRoles: () => mockGetTemplateRoles(),
+  saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
 };

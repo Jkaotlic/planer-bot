@@ -1,4 +1,4 @@
-export type NavKey = "schedule" | "employees" | "weekend" | "log";
+export type NavKey = "schedule" | "employees" | "kinds" | "weekend" | "log";
 
 export interface SidebarProps {
   active: NavKey;
@@ -10,6 +10,7 @@ export interface SidebarProps {
 const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
   { key: "schedule", label: "Расписание", icon: <CalendarIcon /> },
   { key: "employees", label: "Работники", icon: <PeopleIcon /> },
+  { key: "kinds", label: "Виды смен", icon: <KindsIcon /> },
   { key: "weekend", label: "Работа в выходные", icon: <MarketIcon /> },
   { key: "log", label: "Журнал", icon: <LogIcon /> },
 ];
@@ -70,6 +71,17 @@ function LogIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M4 5h16M4 12h16M4 19h10" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Sliders — «Виды смен» is where a kind of shift is configured, not scheduled. */
+function KindsIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
     </svg>
   );
 }

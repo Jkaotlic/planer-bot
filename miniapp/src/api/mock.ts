@@ -11,6 +11,7 @@ import type {
   RosterImportPreview,
   RosterImportSummary,
   RosterPersonResolution,
+  TemplateRolesView,
   Shift,
   SwapDirection,
   SwapRequest,
@@ -665,6 +666,36 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
 // DEV mirror of server/src/roster/*: enough behaviour that the upload screen can be
 // exercised end to end with no backend — including the two cases that used to be
 // dead ends, an unreadable code and a period that is already full.
+
+/** DEV store for who may take each preset and who asked for it. Empty = everyone. */
+const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<number, number> }>();
+
+export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
+  await delay(180);
+  return TEMPLATES.map((template) => ({
+    templateId: template.id,
+    name: template.name,
+    category: template.category,
+    accent: template.accent,
+    pool: [...(TEMPLATE_ROLES.get(template.id)?.pool ?? [])],
+    preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
+  }));
+}
+
+export async function mockSaveTemplateRoles(
+  templateId: number,
+  pool: number[],
+  preference: Record<number, number>,
+): Promise<void> {
+  await delay(200);
+  const active = new Set(EMPLOYEES.filter((e) => e.isActive).map((e) => e.id));
+  const bad = [...new Set([...pool, ...Object.keys(preference).map(Number)])].filter((id) => !active.has(id));
+  if (bad.length > 0) throw new Error(`неизвестные сотрудники: ${bad.join(", ")}`);
+  TEMPLATE_ROLES.set(templateId, {
+    pool: [...new Set(pool)],
+    preference: Object.fromEntries(Object.entries(preference).filter(([, weight]) => weight > 0)),
+  });
+}
 
 const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);
 /** What the export writes for an entry the matrix can't express. Never "bad code". */

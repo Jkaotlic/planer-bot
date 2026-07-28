@@ -8,6 +8,7 @@ import type {
   NewSlotInput,
   PayrollRow,
   RosterImportPreview,
+  TemplateRolesView,
   RosterImportSummary,
   RosterPersonResolution,
   Shift,
@@ -368,6 +369,36 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
 export async function mockGetRosterCsv(_from: string, _to: string): Promise<string> {
   await delay(200);
   return ";01.06.2026\nМок Пользователь;k32";
+}
+
+/** DEV store for who may take each preset and who asked for it. Empty = everyone. */
+const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<number, number> }>();
+
+export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
+  await delay(180);
+  return TEMPLATES.map((template) => ({
+    templateId: template.id,
+    name: template.name,
+    category: template.category,
+    accent: template.accent,
+    pool: [...(TEMPLATE_ROLES.get(template.id)?.pool ?? [])],
+    preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
+  }));
+}
+
+export async function mockSaveTemplateRoles(
+  templateId: number,
+  pool: number[],
+  preference: Record<number, number>,
+): Promise<void> {
+  await delay(200);
+  const active = new Set(EMPLOYEES.filter((e) => e.isActive).map((e) => e.id));
+  const bad = [...new Set([...pool, ...Object.keys(preference).map(Number)])].filter((id) => !active.has(id));
+  if (bad.length > 0) throw new Error(`неизвестные сотрудники: ${bad.join(", ")}`);
+  TEMPLATE_ROLES.set(templateId, {
+    pool: [...new Set(pool)],
+    preference: Object.fromEntries(Object.entries(preference).filter(([, weight]) => weight > 0)),
+  });
 }
 
 const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);

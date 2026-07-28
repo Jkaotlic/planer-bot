@@ -841,6 +841,127 @@ button {
   line-height: 1.45;
 }
 
+/* ---------- Виды смен ---------- */
+
+.kinds-intro {
+  margin: 0 0 16px;
+  max-width: 68ch;
+  color: var(--hint);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.kind-card {
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  background: var(--surface-section);
+  overflow: hidden;
+}
+
+.kind-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kind-card-head:hover {
+  background: var(--surface-secondary);
+}
+
+.kind-swatch {
+  flex: none;
+  display: grid;
+  place-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.kind-name {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.kind-meta {
+  margin-left: auto;
+  color: var(--hint);
+  font-size: 13px;
+}
+
+.kind-chevron {
+  flex: none;
+  color: var(--hint);
+}
+
+.kind-people {
+  border-top: 1px solid var(--separator);
+  padding: 6px 14px 14px;
+}
+
+/* Two fixed columns for the toggles so every checkbox lines up under its header
+   however long the name beside it is. */
+.kind-people-head,
+.kind-person {
+  display: grid;
+  grid-template-columns: 1fr 84px 84px;
+  align-items: center;
+  gap: 8px;
+}
+
+.kind-people-head {
+  padding: 10px 0 6px;
+  color: var(--hint);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kind-people-head > span:not(:first-child),
+.kind-person > input {
+  justify-self: center;
+}
+
+.kind-person {
+  padding: 6px 0;
+  border-top: 1px solid var(--separator);
+  cursor: pointer;
+}
+
+.kind-person-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.kind-person input {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+}
+
+.avatar-sm {
+  width: 26px;
+  height: 26px;
+  font-size: 10.5px;
+}
+
+.kind-clear {
+  margin-top: 12px;
+}
+
 /* The worker's place in the list. Narrow on purpose — it holds two digits, and
    the row's real content is the name next to it. */
 .employee-position {
