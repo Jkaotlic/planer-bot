@@ -36,6 +36,10 @@ import {
   mockGetPayrollCsv,
   mockGetShiftCounts,
   mockGetJournal,
+  mockGetBirthdays,
+  mockSaveBirthdayCampaign,
+  mockGetBirthdayPreview,
+  mockSendBirthday,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -326,6 +330,45 @@ export interface JournalPage {
   events: JournalEvent[];
 }
 
+/** One round of collecting for one person's birthday, in one year. */
+export interface BirthdayCampaign {
+  id: number;
+  employeeId: number;
+  year: number;
+  celebratedOn: string;
+  collectUrl: string | null;
+  messageText: string | null;
+  status: "pending" | "ready" | "sent";
+  adminNotifiedAt: string | null;
+  sentAt: string | null;
+  sentCount: number;
+}
+
+export interface UpcomingBirthday {
+  employeeId: number;
+  displayName: string;
+  /** "MM-DD" as stored. */
+  birthDate: string;
+  /** "5 августа". */
+  birthDateLabel: string;
+  celebratedOn: string;
+  daysUntil: number;
+  campaign: BirthdayCampaign | null;
+}
+
+/** Exactly what would be sent, and to exactly whom — before anything leaves. */
+export interface BirthdayPreview {
+  employeeId: number;
+  displayName: string;
+  celebratedOn: string;
+  collectUrl: string | null;
+  message: string;
+  recipients: { employeeId: number; displayName: string }[];
+  /** Why sending is impossible right now, or null when it isn't. */
+  blocker: string | null;
+  alreadySentAt: string | null;
+}
+
 export interface ApiClient {
   getMe(): Promise<Me>;
   getMyShifts(from: string): Promise<Shift[]>;
@@ -370,6 +413,11 @@ export interface ApiClient {
   getPayrollCsv(from: string, to: string): Promise<string>;
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
   getJournal(params: { types?: string[]; limit?: number; offset?: number }): Promise<JournalPage>;
+  getBirthdays(): Promise<UpcomingBirthday[]>;
+  saveBirthdayCampaign(employeeId: number, patch: { collectUrl?: string | null; messageText?: string | null }): Promise<BirthdayCampaign>;
+  getBirthdayPreview(employeeId: number): Promise<BirthdayPreview>;
+  /** Sends the collection to the whole team but the birthday person. Confirmed by the caller. */
+  sendBirthday(employeeId: number): Promise<{ delivered: number; intended: number }>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -546,6 +594,19 @@ async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T
   return (await res.json()) as T;
 }
 
+async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> {
+  const token = await authToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(path, res));
+  }
+  return (await res.json()) as T;
+}
+
 async function authorizedDelete(path: string): Promise<void> {
   const token = await authToken();
   const res = await fetch(`${API_BASE}${path}`, {
@@ -713,6 +774,26 @@ export const realClient: ApiClient = {
     return authorizedGet<JournalPage>(`/api/admin/journal?${q.toString()}`);
   },
 
+  async getBirthdays() {
+    const { birthdays } = await authorizedGet<{ birthdays: UpcomingBirthday[] }>("/api/admin/birthdays");
+    return birthdays;
+  },
+
+  async saveBirthdayCampaign(employeeId, patch) {
+    const { campaign } = await authorizedPutJson<{ campaign: BirthdayCampaign }>(`/api/admin/birthdays/${employeeId}`, patch);
+    return campaign;
+  },
+
+  getBirthdayPreview(employeeId) {
+    return authorizedGet<BirthdayPreview>(`/api/admin/birthdays/${employeeId}/preview`);
+  },
+
+  sendBirthday(employeeId) {
+    // `confirm` is sent here so no caller can forget it — but the server refuses
+    // without it either way, and the screen still asks the admin out loud first.
+    return authorizedPostJson<{ delivered: number; intended: number }>(`/api/admin/birthdays/${employeeId}/send`, { confirm: true });
+  },
+
   getTemplateQueue(templateId) {
     return authorizedGet<TemplateQueue>(`/api/admin/templates/${templateId}/queue`);
   },
@@ -803,6 +884,10 @@ const devClient: ApiClient = {
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getShiftCounts: (from, to) => mockGetShiftCounts(from, to),
   getJournal: (params) => mockGetJournal(params),
+  getBirthdays: () => mockGetBirthdays(),
+  saveBirthdayCampaign: (employeeId, patch) => mockSaveBirthdayCampaign(employeeId, patch),
+  getBirthdayPreview: (employeeId) => mockGetBirthdayPreview(employeeId),
+  sendBirthday: (employeeId) => mockSendBirthday(employeeId),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),

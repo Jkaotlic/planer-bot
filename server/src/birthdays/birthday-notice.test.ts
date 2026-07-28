@@ -33,7 +33,7 @@ describe("runBirthdayNoticeTick", () => {
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(2);
-    expect(sent[0]!.text).toContain("Через 7 дн.");
+    expect(sent[0]!.text).toContain("через 7 дней");
     expect(sent[0]!.text).toContain("Именинник");
   });
 

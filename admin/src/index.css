@@ -1713,3 +1713,186 @@ input[type="time"] {
 .birthday-field select:last-child {
   min-width: 116px;
 }
+
+/* --- Дни рождения ---------------------------------------------------------
+   The one screen that writes to the whole team, so it is built to be read
+   before it is used: the exact text and the exact names, then the button. */
+
+.birthday-intro {
+  margin: 0 0 16px;
+  max-width: 62ch;
+  color: var(--hint);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.birthday-group {
+  margin: 18px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--hint);
+}
+
+.birthday-group:first-of-type {
+  margin-top: 0;
+}
+
+.birthday-notice {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--surface-section);
+  border: 1px solid var(--separator);
+  font-size: 13.5px;
+}
+
+.birthday-card {
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  background: var(--surface-section);
+}
+
+.birthday-card.open {
+  border-color: var(--button);
+}
+
+.birthday-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.birthday-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.birthday-when {
+  color: var(--hint);
+  font-size: 13px;
+}
+
+/* Pushes the chip and the button to the right edge, and is the first thing to
+   give way when the window narrows. */
+.birthday-status {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.birthday-status.sent {
+  background: rgba(52, 168, 83, 0.16);
+  color: #2e7d43;
+}
+
+.birthday-status.ready {
+  background: rgba(56, 132, 255, 0.16);
+  color: #2f6fd0;
+}
+
+.birthday-status.pending {
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  color: var(--hint);
+}
+
+.birthday-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--separator);
+}
+
+.birthday-label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 620px;
+  color: var(--hint);
+  font-size: 12.5px;
+}
+
+.birthday-label input,
+.birthday-label textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  resize: vertical;
+}
+
+.birthday-preview-title {
+  color: var(--hint);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* The message is shown as it will arrive — same line breaks, no reflow. */
+.birthday-message {
+  margin: 0;
+  padding: 10px 12px;
+  max-width: 620px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.birthday-recipients {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.birthday-recipient {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  font-size: 12.5px;
+}
+
+.birthday-blocker {
+  padding: 9px 12px;
+  max-width: 620px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--separator);
+  color: var(--hint);
+  font-size: 13px;
+}
+
+.birthday-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  max-width: 620px;
+  border-radius: 10px;
+  border: 1px solid var(--button);
+  font-size: 13px;
+}
+
+.birthday-sent-note {
+  max-width: 620px;
+  color: var(--hint);
+  font-size: 13px;
+  line-height: 1.5;
+}

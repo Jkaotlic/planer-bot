@@ -12,6 +12,8 @@ const TYPE_LABELS: Record<string, string> = {
   template_rotation_changed: "Изменена очередь",
   roster_import: "Загрузка графика из CSV",
   swap_accepted: "Обмен состоялся",
+  birthday_sent: "Разослан сбор на день рождения",
+  birthday_admin_notice: "Напоминание админам о дне рождения",
 };
 
 export function typeLabel(type: string): string {

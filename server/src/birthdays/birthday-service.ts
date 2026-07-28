@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { daysUntilBirthday, formatBirthDate, parseBirthDate } from "@planer/shared";
+import { daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate } from "@planer/shared";
 import type { Db } from "../db/client";
 import { birthdayCampaigns, employees, type BirthdayCampaign, type Employee } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -106,17 +106,24 @@ export function adminRecipients(db: Db, birthdayEmployeeId: number): Employee[] 
   return teamRecipients(db, birthdayEmployeeId).filter((employee) => employee.isAdmin);
 }
 
-/** The wording the team gets when the admin hasn't written their own. */
+/**
+ * The wording the team gets when the admin hasn't written their own.
+ *
+ * Phrased so the name stays in the nominative. We store one display name and
+ * nothing that would let us decline it, and «день рождения у Игорь Петров» is
+ * exactly the sort of thing that gets noticed when it lands in 25 chats at once.
+ */
 export function defaultMessage(name: string, birthDateLabel: string, collectUrl: string | null): string {
-  const lines = [`🎂 ${birthDateLabel} — день рождения у ${name}.`];
+  const lines = [`🎂 ${name} празднует день рождения ${birthDateLabel}.`];
   if (collectUrl) lines.push("", `Сбор на подарок: ${collectUrl}`);
   return lines.join("\n");
 }
 
-/** The nudge admins get a week ahead. */
+/** The nudge admins get a week ahead. Same nominative rule as `defaultMessage`. */
 export function adminNoticeMessage(name: string, birthDateLabel: string, daysUntil: number): string {
   return [
-    `🎂 Через ${daysUntil} дн. — день рождения у ${name} (${birthDateLabel}).`,
+    // «через 7 дней» / «завтра» / «сегодня» — the same wording both screens show.
+    `🎂 ${name} празднует день рождения ${describeDaysUntil(daysUntil)} — ${birthDateLabel}.`,
     "",
     "Создай сбор в Сбербанк Онлайн и вставь ссылку в разделе «Дни рождения»,",
     "а потом сам решишь, когда разослать команде.",
