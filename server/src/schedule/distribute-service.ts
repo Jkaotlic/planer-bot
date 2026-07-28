@@ -5,6 +5,7 @@ import { shifts } from "../db/schema";
 import { listUnassignedShifts, listShiftsByEmployee } from "../repo/shifts";
 import { listActive, getEmployeeById } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
+import { getAllTemplateRoles } from "../repo/template-roles";
 
 export interface DistributionAssignment {
   shiftId: number;
@@ -91,15 +92,24 @@ function overlapsRange(s: { date: string; endDate: string | null }, from: string
  */
 export function buildDistribution(db: Db, from: string, to: string): { assignments: DistributionAssignment[] } {
   const nameById = new Map(listActiveTemplates(db).map((t) => [t.id, t.name]));
+  // Who may take each preset, and who asked for it. Read once for the whole run
+  // rather than per slot. A slot with no preset behind it has no roles to apply,
+  // which the distributor reads as "everyone" — the same as an empty pool.
+  const rolesByTemplate = getAllTemplateRoles(db);
 
   const unassigned = listUnassignedShifts(db, from, to);
-  const slots: FillSlot[] = unassigned.map((s) => ({
-    id: s.id,
-    date: s.date,
-    start: s.start as string,
-    end: s.end as string,
-    kind: shiftKind(s, nameById),
-  }));
+  const slots: FillSlot[] = unassigned.map((s) => {
+    const roles = s.templateId != null ? rolesByTemplate.get(s.templateId) : undefined;
+    return {
+      id: s.id,
+      date: s.date,
+      start: s.start as string,
+      end: s.end as string,
+      kind: shiftKind(s, nameById),
+      pool: roles?.pool ?? null,
+      preference: roles?.preference ?? null,
+    };
+  });
 
   const workers = listActive(db).map((e) => seedWorkerLoad(db, e.id, from, to, nameById));
 

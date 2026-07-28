@@ -128,3 +128,83 @@ describe("distributeFairly", () => {
     expect(assignments).toHaveLength(0);
   });
 });
+
+describe("pools — who is allowed to take a kind at all", () => {
+  const nightAt = (id: number, date: string, patch: Partial<FillSlot> = {}): FillSlot =>
+    ({ ...slot(id, date, "15:00", "23:00", "Ночь"), ...patch });
+
+  it("hands the slot only to people in the pool, however idle the others are", () => {
+    const slots = [nightAt(1, "2026-08-03", { pool: [2] })];
+    const out = distributeFairly(slots, [idleWorker(1), idleWorker(2), idleWorker(3)]);
+    expect(out).toEqual([{ shiftId: 1, employeeId: 2 }]);
+  });
+
+  it("leaves the slot empty rather than giving it to somebody outside the pool", () => {
+    // The pool member is away; nobody else may stand in.
+    const slots = [nightAt(1, "2026-08-03", { pool: [2] })];
+    const workers = [idleWorker(1), worker(2, { absentDates: ["2026-08-03"] }), idleWorker(3)];
+    expect(distributeFairly(slots, workers)).toEqual([]);
+  });
+
+  it("still spreads fairly inside the pool", () => {
+    const slots = [
+      nightAt(1, "2026-08-03", { pool: [2, 3] }),
+      nightAt(2, "2026-08-04", { pool: [2, 3] }),
+      nightAt(3, "2026-08-05", { pool: [2, 3] }),
+      nightAt(4, "2026-08-06", { pool: [2, 3] }),
+    ];
+    const out = distributeFairly(slots, [idleWorker(1), idleWorker(2), idleWorker(3)]);
+    const counts = out.reduce<Record<number, number>>((acc, a) => ({ ...acc, [a.employeeId]: (acc[a.employeeId] ?? 0) + 1 }), {});
+    expect(counts).toEqual({ 2: 2, 3: 2 });
+    expect(out.some((a) => a.employeeId === 1)).toBe(false);
+  });
+
+  it("treats an empty or missing pool as «everyone», which is an unconfigured preset", () => {
+    const everyone = distributeFairly([nightAt(1, "2026-08-03", { pool: [] })], [idleWorker(7), idleWorker(8)]);
+    const absent = distributeFairly([nightAt(2, "2026-08-03")], [idleWorker(7), idleWorker(8)]);
+    expect(everyone).toEqual([{ shiftId: 1, employeeId: 7 }]);
+    expect(absent).toEqual([{ shiftId: 2, employeeId: 7 }]);
+  });
+});
+
+describe("preferences — who asked for a kind", () => {
+  const evening = (id: number, date: string, patch: Partial<FillSlot> = {}): FillSlot =>
+    ({ ...slot(id, date, "12:00", "20:00", "Вечер"), ...patch });
+
+  it("breaks a tie in favour of whoever likes the kind", () => {
+    // Both level on «Вечер»; 2 asked for evenings, so 2 gets it even though 1 has the lower id.
+    const out = distributeFairly([evening(1, "2026-08-03", { preference: { 2: 1 } })], [idleWorker(1), idleWorker(2)]);
+    expect(out).toEqual([{ shiftId: 1, employeeId: 2 }]);
+  });
+
+  it("never overrides fairness — a preference only settles a tie", () => {
+    // 2 loves evenings but already holds one; 1 holds none, so 1 takes this one.
+    const workers = [idleWorker(1), worker(2, { byKind: { "Вечер": 1 }, total: 1 })];
+    const out = distributeFairly([evening(1, "2026-08-03", { preference: { 2: 5 } })], workers);
+    expect(out).toEqual([{ shiftId: 1, employeeId: 1 }]);
+  });
+
+  it("ranks by weight when several people asked for the same kind", () => {
+    const out = distributeFairly(
+      [evening(1, "2026-08-03", { preference: { 1: 1, 2: 3 } })],
+      [idleWorker(1), idleWorker(2)],
+    );
+    expect(out).toEqual([{ shiftId: 1, employeeId: 2 }]);
+  });
+
+  it("sits above the overall total, or it would never fire", () => {
+    // 1 has fewer shifts overall, but both are level on «Вечер» and 2 asked for it.
+    // If preference ranked below `total`, 1 would win and the setting would be dead.
+    const workers = [idleWorker(1), worker(2, { byKind: { "Утро": 2 }, total: 2 })];
+    const out = distributeFairly([evening(1, "2026-08-03", { preference: { 2: 1 } })], workers);
+    expect(out).toEqual([{ shiftId: 1, employeeId: 2 }]);
+  });
+
+  it("ignores a preference from somebody outside the pool", () => {
+    const out = distributeFairly(
+      [evening(1, "2026-08-03", { pool: [1], preference: { 2: 9 } })],
+      [idleWorker(1), idleWorker(2)],
+    );
+    expect(out).toEqual([{ shiftId: 1, employeeId: 1 }]);
+  });
+});
