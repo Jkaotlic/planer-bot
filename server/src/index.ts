@@ -7,7 +7,7 @@ import type { Hono } from "hono";
 import { loadConfig } from "./config";
 import { openDb, runMigrations } from "./db/client";
 import { createApp } from "./http/app";
-import { createBot } from "./bot/bot";
+import { createBot, publishBotCommands } from "./bot/bot";
 import { shutdownSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
@@ -21,7 +21,12 @@ runMigrations(db, sqlite);
 
 const bot = createBot({ db, config });
 // Long-polling runs in the background; a bad/placeholder token must not crash the HTTP server.
-bot.start({ onStart: (info) => console.log(`bot @${info.username} started`) }).catch((err) => {
+bot.start({
+  onStart: (info) => {
+    console.log(`bot @${info.username} started`);
+    void publishBotCommands(bot);
+  },
+}).catch((err) => {
   console.error("bot failed to start (check BOT_TOKEN):", safeErrorMessage(err));
 });
 

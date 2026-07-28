@@ -9,6 +9,10 @@ export const employees = sqliteTable("employees", {
   id: integer().primaryKey({ autoIncrement: true }),
   telegramUserId: integer().unique(),
   tgUsername: text(),
+  /** Telegram's own `first_name` — what the person calls themselves, refreshed on
+   *  every auth. `displayName` comes from the roster file as «Фамилия Имя», which
+   *  is right for a work roster and wrong for saying hello. See `addressOf`. */
+  tgFirstName: text(),
   displayName: text().notNull(),
   phone: text(),
   isAdmin: integer({ mode: "boolean" }).notNull().default(false),

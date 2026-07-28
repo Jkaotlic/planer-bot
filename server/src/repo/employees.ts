@@ -14,14 +14,49 @@ export function linkTelegramAccount(
   inviteToken: string,
   telegramUserId: number,
   tgUsername?: string,
+  tgFirstName?: string,
 ): Employee | null {
   const rows = db
     .update(employees)
-    .set({ telegramUserId, tgUsername: tgUsername ?? null, inviteToken: null })
+    .set({
+      telegramUserId,
+      tgUsername: tgUsername ?? null,
+      tgFirstName: tgFirstName ?? null,
+      inviteToken: null,
+    })
     .where(eq(employees.inviteToken, inviteToken))
     .returning()
     .all();
   return rows[0] ?? null;
+}
+
+/**
+ * Keeps the Telegram side of a linked row current. People rename themselves, and
+ * `tgFirstName` is what the bot says hello with — a stale one is a wrong greeting
+ * forever. Called on every auth, so it writes only when something actually
+ * changed rather than touching the row on each request.
+ */
+export function rememberTelegramProfile(
+  db: Db,
+  employeeId: number,
+  profile: { tgUsername?: string | null; tgFirstName?: string | null },
+): void {
+  const current = db.select().from(employees).where(eq(employees.id, employeeId)).get();
+  if (!current) return;
+  const tgUsername = profile.tgUsername ?? null;
+  const tgFirstName = profile.tgFirstName ?? null;
+  if (current.tgUsername === tgUsername && current.tgFirstName === tgFirstName) return;
+  db.update(employees).set({ tgUsername, tgFirstName }).where(eq(employees.id, employeeId)).run();
+}
+
+/** The one setting a worker owns about themselves: shift reminders on or off. */
+export function setRemindersEnabled(db: Db, employeeId: number, enabled: boolean): Employee | undefined {
+  return db
+    .update(employees)
+    .set({ remindersEnabled: enabled })
+    .where(eq(employees.id, employeeId))
+    .returning()
+    .all()[0];
 }
 
 export function getByTelegramId(db: Db, telegramUserId: number): Employee | undefined {
@@ -83,11 +118,17 @@ export function setBirthDate(db: Db, id: number, birthDate: string | null): Empl
 
 export function createAdminEmployee(
   db: Db,
-  data: { telegramUserId: number; tgUsername?: string; displayName: string },
+  data: { telegramUserId: number; tgUsername?: string; tgFirstName?: string; displayName: string },
 ): Employee {
   return db
     .insert(employees)
-    .values({ telegramUserId: data.telegramUserId, tgUsername: data.tgUsername ?? null, displayName: data.displayName, isAdmin: true })
+    .values({
+      telegramUserId: data.telegramUserId,
+      tgUsername: data.tgUsername ?? null,
+      tgFirstName: data.tgFirstName ?? null,
+      displayName: data.displayName,
+      isAdmin: true,
+    })
     .returning()
     .all()[0]!;
 }

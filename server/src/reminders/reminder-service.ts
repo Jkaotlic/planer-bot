@@ -1,10 +1,10 @@
 import type { Bot } from "grammy";
-import { nextDate, isReminderWorthy, reminderKind, wakeTime, buildReminderText } from "@planer/shared";
+import { nextDate, isReminderWorthy, reminderKind, wakeTime, buildReminderText, addressOf } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsInRange } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 import { hasReminder, addReminder } from "../repo/reminders";
-import { notifyUser } from "../bot/notify";
+import { notifyReminder } from "../bot/notify";
 
 const REMINDER_KIND = "evening_before";
 const QUIET_HOUR_CUTOFF = "20:00";
@@ -28,13 +28,15 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
     const end = shift.end!;
     const kind = reminderKind({ start, end });
     const text = buildReminderText({
-      name: owner.displayName,
+      // The name they gave Telegram, not the roster's «Фамилия Имя» — a reminder
+      // that opens «Привет, Петров» reads as a roll-call. See `addressOf`.
+      name: addressOf(owner),
       kind,
       timeRange: `${start}–${end}`,
       wake: kind === "morning" ? wakeTime(start, owner.prepBufferMin) : undefined,
     });
 
-    if (await notifyUser(bot, owner.telegramUserId, text)) {
+    if (await notifyReminder(bot, owner.telegramUserId, text)) {
       addReminder(db, shift.id, REMINDER_KIND);
       count++;
     }

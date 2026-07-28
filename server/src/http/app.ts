@@ -25,6 +25,8 @@ import {
   reorderEmployee,
   setBirthDate,
   setInviteToken,
+  setRemindersEnabled,
+  rememberTelegramProfile,
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
@@ -32,7 +34,7 @@ import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
-import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn, isBirthDate } from "@planer/shared";
+import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn, isBirthDate, addressOf } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
@@ -112,8 +114,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (employee && !employee.isActive) return c.json({ error: "not_registered" }, 403);
     if (!employee) {
       if (!allowlisted) return c.json({ error: "not_registered" }, 403);
-      employee = createAdminEmployee(db, { telegramUserId: user.id, tgUsername: user.username, displayName: displayNameOf(user) });
+      employee = createAdminEmployee(db, {
+        telegramUserId: user.id,
+        tgUsername: user.username,
+        tgFirstName: user.firstName,
+        displayName: displayNameOf(user),
+      });
     }
+    // People rename themselves in Telegram, and `tgFirstName` is what the bot
+    // greets them with — refresh it here rather than freezing it at link time.
+    rememberTelegramProfile(db, employee.id, { tgUsername: user.username, tgFirstName: user.firstName });
     const isAdmin = employee.isAdmin || allowlisted;
     const token = await issueToken({ employeeId: employee.id, isAdmin }, config.jwtSecret);
     return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin } });
@@ -122,7 +132,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/me", requireAuth(db, config.jwtSecret), (c) => {
     const me = getEmployeeById(db, c.get("auth").employeeId);
     if (!me) return c.json({ error: "not_found" }, 404);
-    return c.json({ id: me.id, displayName: me.displayName, isAdmin: c.get("auth").isAdmin });
+    return c.json({
+      id: me.id,
+      displayName: me.displayName,
+      // What to say hello with. The roster's «Фамилия Имя» is for lists, not for
+      // greetings — see `addressOf`.
+      address: addressOf(me),
+      isAdmin: c.get("auth").isAdmin,
+      remindersEnabled: me.remindersEnabled,
+    });
+  });
+
+  /** The one setting a worker owns about themselves. Scoped to the caller by the
+   *  token: there is no employee id in the path, so nobody can mute anybody else. */
+  app.patch("/api/me/settings", requireAuth(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { remindersEnabled?: unknown };
+    if (typeof body.remindersEnabled !== "boolean") {
+      return c.json({ error: "remindersEnabled должен быть true или false" }, 400);
+    }
+    const updated = setRemindersEnabled(db, c.get("auth").employeeId, body.remindersEnabled);
+    if (!updated) return c.json({ error: "not_found" }, 404);
+    return c.json({ remindersEnabled: updated.remindersEnabled });
   });
 
   app.get("/api/templates", requireAuth(db, config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));

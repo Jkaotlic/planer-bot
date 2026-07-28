@@ -1,11 +1,19 @@
-import { Bot } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
-import { linkTelegramAccount, getByTelegramId, getEmployeeById, createAdminEmployee } from "../repo/employees";
+import {
+  linkTelegramAccount,
+  getByTelegramId,
+  getEmployeeById,
+  createAdminEmployee,
+  rememberTelegramProfile,
+  setRemindersEnabled,
+} from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
+import { addressOf } from "@planer/shared";
 import { notifyUser, notifyAdmins } from "./notify";
 import { safeErrorMessage } from "../util/safe-error";
 
@@ -25,6 +33,39 @@ function reasonToRu(reason: string): string {
   return "Не получилось";
 }
 
+/**
+ * The command menu Telegram shows next to the input field. Only the two commands
+ * everybody has: `/admin` is checked server-side anyway, and listing it for the
+ * whole team would just invite taps that answer «только для администраторов».
+ *
+ * Without this, `/notifications` is a command nobody can discover — which would
+ * defeat the point of the switch being self-service.
+ */
+export async function publishBotCommands(bot: Bot): Promise<void> {
+  try {
+    await bot.api.setMyCommands([
+      { command: "start", description: "Начать и открыть смены" },
+      { command: "notifications", description: "Напоминания о сменах — включить или выключить" },
+    ]);
+  } catch (err) {
+    // A command menu is a nicety; never let it stop the bot from running.
+    console.error("setMyCommands failed:", safeErrorMessage(err));
+  }
+}
+
+/** The «напоминания включены/выключены» line, and the one button that flips it. */
+export function remindersStateText(enabled: boolean): string {
+  return enabled
+    ? "🔔 Напоминания о сменах включены — пишу вечером накануне утренней и ночной."
+    : "🔕 Напоминания о сменах выключены — про смены не пишу.";
+}
+
+export function remindersKeyboard(enabled: boolean): InlineKeyboard {
+  return enabled
+    ? new InlineKeyboard().text("🔕 Отключить напоминания", "reminders:off")
+    : new InlineKeyboard().text("🔔 Включить напоминания", "reminders:on");
+}
+
 export function createBot(deps: BotDeps): Bot {
   const { db, config } = deps;
   const bot = new Bot(config.botToken);
@@ -37,12 +78,17 @@ export function createBot(deps: BotDeps): Bot {
     if (token) {
       const already = getByTelegramId(db, from.id);
       if (already) {
-        await ctx.reply(`Ты уже привязан, ${already.displayName} 👋`);
+        await ctx.reply(`Ты уже привязан, ${addressOf(already)} 👋`);
         return;
       }
-      const linked = linkTelegramAccount(db, token, from.id, from.username);
+      const linked = linkTelegramAccount(db, token, from.id, from.username, from.first_name);
       if (linked) {
-        await ctx.reply(`Готово, ${linked.displayName}! Ты в системе ✅ Открой мини-апп, чтобы посмотреть смены.`);
+        // Greet by their own name, but still name the roster row they just claimed:
+        // an invite link can only be used once, so «я — не этот человек» has to be
+        // catchable here. Skipped when the two names are the same word anyway.
+        const address = addressOf(linked);
+        const roster = address === linked.displayName ? "" : ` В расписании ты — ${linked.displayName}.`;
+        await ctx.reply(`Готово, ${address}! Ты в системе ✅${roster} Открой мини-апп, чтобы посмотреть смены.`);
         return;
       }
       await ctx.reply("Ссылка недействительна или уже использована. Попроси у админа новую.");
@@ -51,14 +97,21 @@ export function createBot(deps: BotDeps): Bot {
 
     const existing = getByTelegramId(db, from.id);
     if (existing) {
-      await ctx.reply(`Привет, ${existing.displayName}! 👋 Открой мини-апп, чтобы посмотреть смены.`);
+      // Keep the greeting name current — people rename themselves in Telegram.
+      rememberTelegramProfile(db, existing.id, { tgUsername: from.username, tgFirstName: from.first_name });
+      await ctx.reply(`Привет, ${addressOf({ ...existing, tgFirstName: from.first_name })}! 👋 Открой мини-апп, чтобы посмотреть смены.`);
       return;
     }
     // Allowlisted admins self-register on first /start — no invite link needed.
     if (config.adminTelegramIds.includes(from.id)) {
       const displayName = [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || from.username || "Админ";
-      const admin = createAdminEmployee(db, { telegramUserId: from.id, tgUsername: from.username, displayName });
-      await ctx.reply(`Привет, ${admin.displayName}! Ты вошёл как админ ✅ Открой мини-апп для управления сменами.`);
+      const admin = createAdminEmployee(db, {
+        telegramUserId: from.id,
+        tgUsername: from.username,
+        tgFirstName: from.first_name,
+        displayName,
+      });
+      await ctx.reply(`Привет, ${addressOf(admin)}! Ты вошёл как админ ✅ Открой мини-апп для управления сменами.`);
       return;
     }
     await ctx.reply("Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");
@@ -78,7 +131,12 @@ export function createBot(deps: BotDeps): Bot {
     }
     if (!admin && isAllowlisted) {
       const displayName = [from.first_name, from.last_name].filter(Boolean).join(" ").trim() || from.username || "Админ";
-      admin = createAdminEmployee(db, { telegramUserId: from.id, tgUsername: from.username, displayName });
+      admin = createAdminEmployee(db, {
+        telegramUserId: from.id,
+        tgUsername: from.username,
+        tgFirstName: from.first_name,
+        displayName,
+      });
     }
     if (!admin) {
       await ctx.reply("Сначала отправь /start.");
@@ -90,6 +148,39 @@ export function createBot(deps: BotDeps): Bot {
       `Вход в админку (ссылка личная, действует 30 дней — не пересылай):\n${url}`,
       { link_preview_options: { is_disabled: true } },
     );
+  });
+
+  // /notifications — the setting, reachable at any time rather than only while a
+  // reminder happens to be on screen.
+  bot.command("notifications", async (ctx) => {
+    const from = ctx.from;
+    if (!from) return;
+    const me = getByTelegramId(db, from.id);
+    if (!me) {
+      await ctx.reply("Сначала отправь /start.");
+      return;
+    }
+    await ctx.reply(remindersStateText(me.remindersEnabled), { reply_markup: remindersKeyboard(me.remindersEnabled) });
+  });
+
+  /**
+   * Turns this person's shift reminders on or off. Scoped to whoever tapped it —
+   * the callback carries no employee id, so nobody can mute a colleague.
+   */
+  bot.callbackQuery(/^reminders:(on|off)$/, async (ctx) => {
+    const enabled = ctx.match[1] === "on";
+    const me = getByTelegramId(db, ctx.from.id);
+    if (!me) {
+      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+      return;
+    }
+    setRemindersEnabled(db, me.id, enabled);
+    await ctx.answerCallbackQuery({ text: enabled ? "Включил 🔔" : "Больше не буду 🔕" });
+    // Only the buttons are rewritten: the reminder itself is still the useful part
+    // of the message, and replacing it would delete tomorrow's shift time.
+    await ctx.editMessageReplyMarkup({ reply_markup: remindersKeyboard(enabled) });
+    if (enabled) return;
+    await ctx.reply("Напоминания о сменах выключены. Вернуть — командой /notifications или в мини-аппе, «Мои смены».");
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {
