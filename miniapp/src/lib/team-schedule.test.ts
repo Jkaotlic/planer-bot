@@ -74,7 +74,7 @@ describe("team schedule model", () => {
       "Утро",
       "День",
     ]);
-    expect(model.groups.map((group) => group.palette?.code)).toEqual(["07", "У", "С"]);
+    expect(model.groups.map((group) => group.palette?.code)).toEqual(["07", "У", "Д"]);
     expect(model.noTimeGroups.map((group) => group.title)).toEqual(["Отпуск"]);
     expect(model.noTimeGroups.map((group) => group.palette?.code)).toEqual(["О"]);
     expect(model.workingCount).toBe(2);
@@ -605,7 +605,7 @@ describe("buildWeekLegend", () => {
 
     const legend = buildWeekLegend(model);
     // Ordered by label, ru-collated: «День» before «Утро».
-    expect(legend.map((i) => `${i.code}=${i.label}`)).toEqual(["С=День", "У=Утро"]);
+    expect(legend.map((i) => `${i.code}=${i.label}`)).toEqual(["Д=День", "У=Утро"]);
     // Presets nobody worked this week must not appear.
     expect(legend.some((i) => i.label === "Ночь")).toBe(false);
   });
@@ -646,7 +646,7 @@ describe("buildWeekLegend", () => {
       shift({ id: 1, employeeId: 1, date: MONDAY, templateId: null, category: "offsite", title: "Ярмарка" }),
       shift({ id: 2, employeeId: 2, date: MONDAY }),
     ]), templates);
-    expect(buildWeekLegend(model).map((i) => i.code)).toEqual(["С", "•"]);
+    expect(buildWeekLegend(model).map((i) => i.code)).toEqual(["Д", "•"]);
   });
 
   it("is empty for a week with nothing in it", () => {

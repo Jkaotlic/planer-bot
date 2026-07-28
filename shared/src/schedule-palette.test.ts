@@ -8,7 +8,7 @@ import {
 describe("working schedule palette", () => {
   it("matches every sampled colour and visible code", () => {
     expect(SCHEDULE_ACCENT_PALETTES).toEqual({
-      blue: { bg: "#EAF0F0", fg: "#17202A", code: "С" },
+      blue: { bg: "#EAF0F0", fg: "#17202A", code: "Д" },
       gold: { bg: "#FEFF01", fg: "#17202A", code: "У" },
       violet: { bg: "#08AFF3", fg: "#062C3B", code: "В" },
       indigo: { bg: "#20497C", fg: "#FFFFFF", code: "Н" },
@@ -22,6 +22,23 @@ describe("working schedule palette", () => {
       fg: "#FFFFFF",
       code: "О",
     });
+  });
+
+  it("gives every kind its own letter", () => {
+    // Two kinds sharing a letter would be invisible: the week grid would draw the
+    // same code for both, and the legend keys on it, so one line would silently
+    // stand for two different squares.
+    const codes = [
+      ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code),
+      VACATION_SCHEDULE_PALETTE.code,
+    ];
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it("never uses the dot the grid reserves for a preset-less entry", () => {
+    const codes = Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code);
+    expect(codes).not.toContain("•");
+    expect(VACATION_SCHEDULE_PALETTE.code).not.toBe("•");
   });
 
   it("leaves unspecified categories to the existing theme palette", () => {

@@ -48,7 +48,7 @@ describe("team schedule development mock", () => {
       ),
     );
     expect([...visibleCodes].sort()).toEqual(
-      ["С", "У", "В", "Н", "Т", "ВА", "П", "07", "О"].sort(),
+      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О"].sort(),
     );
 
     const detailCell = week.rows

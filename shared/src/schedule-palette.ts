@@ -7,7 +7,10 @@ export interface SchedulePalette {
 }
 
 export const SCHEDULE_ACCENT_PALETTES: Record<TemplateAccent, SchedulePalette> = {
-  blue: { bg: "#EAF0F0", fg: "#17202A", code: "С" },
+  // «Д» for «День», not «С» for «Смена»: every kind here is a смена, so «С» named
+  // the category rather than this particular one, and sat in the grid next to
+  // «У»/«В»/«Н» — which are all named after their own preset.
+  blue: { bg: "#EAF0F0", fg: "#17202A", code: "Д" },
   gold: { bg: "#FEFF01", fg: "#17202A", code: "У" },
   violet: { bg: "#08AFF3", fg: "#062C3B", code: "В" },
   indigo: { bg: "#20497C", fg: "#FFFFFF", code: "Н" },
