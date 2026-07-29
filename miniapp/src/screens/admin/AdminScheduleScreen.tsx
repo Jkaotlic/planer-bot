@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee, type NewEntryInput, type Shift, type Template } from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
+import { BackToTodayButton } from "../../components/BackToTodayButton";
 import { CardShell, CardStack } from "../../components/Card";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
@@ -15,6 +16,7 @@ import {
   firstName,
   formatDayLabel,
   formatWeekRangeLabel,
+  isCurrentPeriod,
   isWeekendIso,
   mondayOf,
   toISODate,
@@ -65,6 +67,7 @@ export function AdminScheduleScreen() {
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
   const to = weekDates[6]!;
+  const today = toISODate(new Date());
 
   async function loadWeek(fromIso: string, toIso: string) {
     setShifts(null);
@@ -119,6 +122,15 @@ export function AdminScheduleScreen() {
     setNotice(null);
   }
 
+  /** Back to the current week AND to today. Returning to the week but leaving the
+   *  selection on, say, Thursday would drop the admin on a day they never picked. */
+  function goToday() {
+    const todayIso = toISODate(new Date());
+    setWeekStart(mondayOf(new Date()));
+    setSelectedDate(todayIso);
+    setNotice(null);
+  }
+
   const dayEntries = (shifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
     .sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""));
@@ -157,8 +169,14 @@ export function AdminScheduleScreen() {
           leaving them up there would offer navigation that changes nothing. */}
       {!csvOpen && !kindsOpen && (
         <div style={{ padding: "12px 4px 0" }}>
-          <WeekBar label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))} onPrev={() => goWeek(-1)} onNext={() => goWeek(1)} />
-          <DayStrip dates={weekDates} selected={selectedDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          <WeekBar
+            label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))}
+            backVisible={!isCurrentPeriod("week", toISODate(weekStart), today)}
+            onBack={goToday}
+            onPrev={() => goWeek(-1)}
+            onNext={() => goWeek(1)}
+          />
+          <DayStrip dates={weekDates} selected={selectedDate} today={today} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
         </div>
       )}
 
@@ -242,13 +260,23 @@ export function AdminScheduleScreen() {
   );
 }
 
-function WeekBar({ label, onPrev, onNext }: { label: string; onPrev: () => void; onNext: () => void }) {
+function WeekBar({ label, backVisible, onBack, onPrev, onNext }: {
+  label: string;
+  /** False when the shown week already contains today. */
+  backVisible: boolean;
+  onBack: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
       <Button size="s" mode="gray" onClick={onPrev} aria-label="Прошлая неделя">
         ‹
       </Button>
-      <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
+        {backVisible && <BackToTodayButton label="Эта неделя" onClick={onBack} />}
+      </span>
       <Button size="s" mode="gray" onClick={onNext} aria-label="Следующая неделя">
         ›
       </Button>
@@ -256,17 +284,17 @@ function WeekBar({ label, onPrev, onNext }: { label: string; onPrev: () => void;
   );
 }
 
-function DayStrip({ dates, selected, onSelect }: { dates: readonly string[]; selected: string; onSelect: (iso: string) => void }) {
+function DayStrip({ dates, selected, today, onSelect }: { dates: readonly string[]; selected: string; today: string; onSelect: (iso: string) => void }) {
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
       {dates.map((iso) => (
-        <DayChip key={iso} iso={iso} active={iso === selected} onSelect={() => onSelect(iso)} />
+        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} onSelect={() => onSelect(iso)} />
       ))}
     </div>
   );
 }
 
-function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSelect: () => void }) {
+function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: boolean; isToday: boolean; onSelect: () => void }) {
   const isDark = useIsDark();
   const weekend = weekdayIndex(iso) >= FRIDAY_INDEX + 1;
   const bg = active ? "var(--tgui--button_color)" : "var(--tgui--secondary_bg_color)";
@@ -275,6 +303,7 @@ function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSe
     <button
       type="button"
       onClick={onSelect}
+      aria-current={isToday ? "date" : undefined}
       style={{
         flex: 1,
         border: "none",
@@ -292,6 +321,18 @@ function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSe
     >
       <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>{weekdayShort(iso)}</span>
       <span style={{ fontSize: 15, fontWeight: 600 }}>{dayOfMonth(iso)}</span>
+      {/* «Выбран» and «сегодня» were the same style, so three weeks out you
+          could not tell where you were. The dot is drawn independently of the
+          selection and stays visible on the selected chip too. */}
+      <span
+        style={{
+          width: 4,
+          height: 4,
+          borderRadius: 999,
+          background: isToday ? (active ? fg : "var(--tgui--link_color)") : "transparent",
+        }}
+        aria-hidden="true"
+      />
     </button>
   );
 }

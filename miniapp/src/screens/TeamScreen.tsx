@@ -21,8 +21,9 @@ import {
   type TeamScreenState,
 } from "../lib/team-schedule";
 import {
-  formatDayLabel,
+  formatDayLabelRelative,
   formatWeekRangeLabel,
+  isCurrentPeriod,
   parseISODate,
   toISODate,
 } from "../lib/week";
@@ -104,13 +105,14 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
   }
 
   const displayRange = teamRange(view.displayMode, view.displayDate);
-  const label =
-    view.displayMode === "today"
-      ? formatDayLabel(view.displayDate)
-      : formatWeekRangeLabel(
-          parseISODate(displayRange.from),
-          parseISODate(displayRange.to),
-        );
+  const today = toISODate(new Date());
+  const isDayMode = view.displayMode === "today";
+  const label = isDayMode
+    ? formatDayLabelRelative(view.displayDate, today)
+    : formatWeekRangeLabel(
+        parseISODate(displayRange.from),
+        parseISODate(displayRange.to),
+      );
 
   // 16px on top, not 8: at 8 the «Команда» title sat flush against the very edge
   // of the screen, and in the real client Telegram's own header is right above it.
@@ -128,6 +130,12 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         <TeamRangeNav
           label={label}
           busy={view.loading}
+          backLabel={isDayMode ? "Сегодня" : "Эта неделя"}
+          onBack={
+            isCurrentPeriod(isDayMode ? "day" : "week", view.displayDate, today)
+              ? undefined
+              : () => { if (!view.loading) void load(view.displayMode, today); }
+          }
           onPrevious={() => move(-1)}
           onNext={() => move(1)}
         />
@@ -156,7 +164,7 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
             />
           )}
           {view.schedule && view.displayMode === "week" && (
-            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} />
+            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} today={today} />
           )}
         </TeamViewPanel>
       </div>
@@ -170,16 +178,21 @@ function WeekView({
   from,
   templates,
   isDark,
+  today,
 }: {
   schedule: TeamSchedule;
   from: string;
   templates: readonly Template[];
   isDark: boolean;
+  /** Passed down from `TeamScreen` rather than read here again — one `toISODate(new
+   *  Date())` per render, so the header and the grid can never disagree about
+   *  which day is "today" (e.g. right at the midnight boundary). */
+  today: string;
 }) {
   const model = buildWeekModel(from, schedule, templates);
   return (
     <>
-      <TeamWeekGrid model={model} today={toISODate(new Date())} isDark={isDark} />
+      <TeamWeekGrid model={model} today={today} isDark={isDark} />
       <TeamWeekLegend items={buildWeekLegend(model)} isDark={isDark} />
     </>
   );

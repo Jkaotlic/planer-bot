@@ -4,7 +4,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
 import { runBirthdayNoticeTick } from "./birthday-notice";
-import { updateCampaign, ensureCampaign, markSent } from "./birthday-service";
+import { updateCampaign, ensureCampaign, markSent, markAdminNotified } from "./birthday-service";
 import type { Db } from "../db/client";
 
 const TODAY = "2026-08-01";
@@ -121,5 +121,88 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Именинник", 1, "08-08");
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
     expect(sent).toEqual([]);
+  });
+});
+
+describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
+  it("reminds admins on the day they picked, with the link they saved", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    // Prepare the round and mark the week-ahead nudge as already done, so this
+    // test observes only the scheduled reminder.
+    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    const campaign = ensureCampaign(db, who, TODAY)!;
+    markAdminNotified(db, campaign.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    expect(sent.map((m) => m.to)).toEqual([2]);
+    expect(sent[0]!.text).toContain("Именинник");
+    expect(sent[0]!.text).toContain("https://sber.ru/x");
+  });
+
+  it("reminds once, not every tick", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("stays quiet on any other day", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-04" });
+    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("says nothing about a round that already went out", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    const campaign = ensureCampaign(db, who, TODAY)!;
+    markAdminNotified(db, campaign.id, new Date());
+    markSent(db, campaign.id, 4, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("still never messages the team", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    person(db, "Обычный коллега", 3, null);
+    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    expect(sent.map((m) => m.to)).toEqual([2]);
+  });
+
+  it("records an audit line of its own", async () => {
+    const db = makeTestDb();
+    const { bot } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+    expect(listRecentAudit(db, 10).some((row) => row.type === "birthday_schedule_notice")).toBe(true);
   });
 });

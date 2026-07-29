@@ -196,6 +196,9 @@ export function App() {
           onRemindersChanged={(remindersEnabled) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
           }
+          onAddressChanged={({ preferredName, address }) =>
+            setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))
+          }
         />
       )}
       {tab === "team" && <TeamScreen templates={data.templates} />}

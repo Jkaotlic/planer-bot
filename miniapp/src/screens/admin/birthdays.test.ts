@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recipientsPhrase, recipientsSubject, statusOf, whenLabel } from "./AdminBirthdays";
+import { isCurrentRound, recipientsPhrase, recipientsSubject, statusOf, whenLabel } from "./AdminBirthdays";
 import type { BirthdayCampaign, UpcomingBirthday } from "../../api/client";
 
 function campaign(patch: Partial<BirthdayCampaign> = {}): BirthdayCampaign {
@@ -7,6 +7,7 @@ function campaign(patch: Partial<BirthdayCampaign> = {}): BirthdayCampaign {
     id: 1, employeeId: 2, year: 2026, celebratedOn: "2026-08-05",
     collectUrl: null, messageText: null, status: "pending",
     adminNotifiedAt: null, sentAt: null, sentCount: 0,
+    scheduledSendOn: null, scheduleNotifiedAt: null,
     ...patch,
   };
 }
@@ -22,25 +23,22 @@ function birthday(patch: Partial<UpcomingBirthday> = {}): UpcomingBirthday {
 
 describe("statusOf", () => {
   it("says the link is missing before anything else — it is what blocks sending", () => {
-    expect(statusOf(birthday())).toEqual({ label: "Нет ссылки", tone: "pending" });
-    expect(statusOf(birthday({ campaign: campaign() }))).toEqual({ label: "Нет ссылки", tone: "pending" });
+    expect(statusOf(null)).toEqual({ label: "Нет ссылки", tone: "pending" });
+    expect(statusOf(campaign())).toEqual({ label: "Нет ссылки", tone: "pending" });
   });
 
   it("goes to «готово» once a link is in, without sending anything", () => {
-    const ready = birthday({ campaign: campaign({ collectUrl: "https://sber.ru/x", status: "ready" }) });
-    expect(statusOf(ready)).toEqual({ label: "Готово", tone: "ready" });
+    expect(statusOf(campaign({ collectUrl: "https://sber.ru/x", status: "ready" }))).toEqual({ label: "Готово", tone: "ready" });
   });
 
   it("reports how many were reached once it has gone out", () => {
-    const sent = birthday({ campaign: campaign({ collectUrl: "https://sber.ru/x", status: "sent", sentCount: 5 }) });
-    expect(statusOf(sent)).toEqual({ label: "Разослано · 5", tone: "sent" });
+    expect(statusOf(campaign({ collectUrl: "https://sber.ru/x", status: "sent", sentCount: 5 }))).toEqual({ label: "Разослано · 5", tone: "sent" });
   });
 
   it("keeps «разослано» even if the link was later cleared", () => {
     // Sending is one-way: a campaign that has gone out must never read as
     // «готово к отправке» again, whatever else changes on it.
-    const sent = birthday({ campaign: campaign({ collectUrl: null, status: "sent", sentCount: 3 }) });
-    expect(statusOf(sent).tone).toBe("sent");
+    expect(statusOf(campaign({ collectUrl: null, status: "sent", sentCount: 3 })).tone).toBe("sent");
   });
 });
 
@@ -79,9 +77,40 @@ describe("recipientsSubject", () => {
   });
 });
 
-// The console carries its own copy of these four helpers on purpose — this app
-// depends on neither it nor its styles. The identical expectations live in
+// The console carries its own copy of the four helpers above on purpose — this
+// app depends on neither it nor its styles. The identical expectations live in
 // admin/src/screens/birthdays.test.ts; if the two ever disagree, one of the two
 // files starts failing. The one deliberate difference is the chip's wording —
 // «Нет ссылки» and «Готово» rather than «Нет ссылки на сбор» and «Готово к
 // отправке» — because on a phone the chip shares its row with the name and date.
+
+// `isCurrentRound`, below, has no console counterpart: the console's history
+// list doesn't route through another list's editor, so it never had this bug.
+describe("isCurrentRound", () => {
+  it("is openable when the exact same campaign shows up in the upcoming list", () => {
+    const row = campaign({ id: 7, employeeId: 2 });
+    const upcoming = [birthday({ employeeId: 2, campaign: row })];
+    expect(isCurrentRound(row, upcoming)).toBe(true);
+  });
+
+  it("is not openable when the upcoming list has moved on to a different round — the point of the check", () => {
+    // Same employee, but the upcoming list now resolves to next year's round
+    // (a different id). Routing the old row through the upcoming editor would
+    // open — and create — that different round.
+    const stale = campaign({ id: 7, employeeId: 2 });
+    const next = campaign({ id: 8, employeeId: 2 });
+    const upcoming = [birthday({ employeeId: 2, campaign: next })];
+    expect(isCurrentRound(stale, upcoming)).toBe(false);
+  });
+
+  it("is not openable for an employee absent from the upcoming list — archived, most likely", () => {
+    const row = campaign({ id: 7, employeeId: 2 });
+    expect(isCurrentRound(row, [])).toBe(false);
+  });
+
+  it("is not openable when the upcoming entry for that person has no campaign yet", () => {
+    const row = campaign({ id: 7, employeeId: 2 });
+    const upcoming = [birthday({ employeeId: 2, campaign: null })];
+    expect(isCurrentRound(row, upcoming)).toBe(false);
+  });
+});

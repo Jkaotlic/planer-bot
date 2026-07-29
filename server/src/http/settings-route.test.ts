@@ -79,7 +79,9 @@ describe("PATCH /api/me/settings", () => {
 
     const off = await app.request("/api/me/settings", patch(token, { remindersEnabled: false }));
     expect(off.status).toBe(200);
-    expect(await off.json()).toEqual({ remindersEnabled: false });
+    // Task 2 widened this response to carry `preferredName`/`address` too, so the
+    // greeting can update without a second round trip — see PATCH /api/me/settings.
+    expect(await off.json()).toEqual({ remindersEnabled: false, preferredName: null, address: "T" });
     expect(getEmployeeById(db, employee.id)!.remindersEnabled).toBe(false);
 
     await app.request("/api/me/settings", patch(token, { remindersEnabled: true }));

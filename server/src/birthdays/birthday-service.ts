@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate } from "@planer/shared";
 import type { Db } from "../db/client";
 import { birthdayCampaigns, employees, type BirthdayCampaign, type Employee } from "../db/schema";
@@ -175,12 +175,12 @@ export function previewCampaign(db: Db, employeeId: number, asOf: string): Campa
   };
 }
 
-/** Saves the link and/or the wording. Either moves the round to «готово к отправке». */
+/** Saves the link, the wording and/or the reminder date. A link moves the round to «готово к отправке». */
 export function updateCampaign(
   db: Db,
   employeeId: number,
   asOf: string,
-  patch: { collectUrl?: string | null; messageText?: string | null },
+  patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null },
 ): BirthdayCampaign | null {
   const campaign = ensureCampaign(db, employeeId, asOf);
   if (!campaign) return null;
@@ -188,10 +188,14 @@ export function updateCampaign(
 
   const collectUrl = patch.collectUrl !== undefined ? patch.collectUrl : campaign.collectUrl;
   const messageText = patch.messageText !== undefined ? patch.messageText : campaign.messageText;
+  const scheduledSendOn = patch.scheduledSendOn !== undefined ? patch.scheduledSendOn : campaign.scheduledSendOn;
+  // Moving the date re-arms the reminder: an admin who pushes it back a day means
+  // to be told on the new day, not to be told nothing because the old one fired.
+  const scheduleNotifiedAt = scheduledSendOn === campaign.scheduledSendOn ? campaign.scheduleNotifiedAt : null;
 
   return db
     .update(birthdayCampaigns)
-    .set({ collectUrl, messageText, status: collectUrl ? "ready" : "pending" })
+    .set({ collectUrl, messageText, scheduledSendOn, scheduleNotifiedAt, status: collectUrl ? "ready" : "pending" })
     .where(eq(birthdayCampaigns.id, campaign.id))
     .returning()
     .all()[0]!;
@@ -211,4 +215,73 @@ export function markAdminNotified(db: Db, campaignId: number, when: Date): void 
     .set({ adminNotifiedAt: when })
     .where(eq(birthdayCampaigns.id, campaignId))
     .run();
+}
+
+/**
+ * Rounds whose reminder day is today and which have not been reminded about.
+ * A round already sent is skipped: there is nothing left to remind anyone of.
+ */
+export function campaignsScheduledFor(db: Db, date: string): BirthdayCampaign[] {
+  return db
+    .select()
+    .from(birthdayCampaigns)
+    .where(and(eq(birthdayCampaigns.scheduledSendOn, date), isNull(birthdayCampaigns.scheduleNotifiedAt)))
+    .all()
+    .filter((campaign) => campaign.status !== "sent");
+}
+
+/** Records that the scheduled reminder went out, so it goes out once. */
+export function markScheduleNotified(db: Db, campaignId: number, when: Date): void {
+  db.update(birthdayCampaigns)
+    .set({ scheduleNotifiedAt: when })
+    .where(eq(birthdayCampaigns.id, campaignId))
+    .run();
+}
+
+/**
+ * The reminder an admin asked for. Same nominative rule as `defaultMessage` —
+ * we store one display name and nothing that would let us decline it.
+ */
+export function scheduleNoticeMessage(name: string, birthDateLabel: string, collectUrl: string | null): string {
+  const lines = [`⏰ Пора разослать сбор — ${name}, день рождения ${birthDateLabel}.`];
+  if (collectUrl) lines.push("", `Ссылка: ${collectUrl}`);
+  lines.push("", "Открой «Дни рождения» в мини-приложении и нажми «Разослать».");
+  return lines.join("\n");
+}
+
+export interface CampaignListRow {
+  campaign: BirthdayCampaign;
+  displayName: string;
+  /** "5 августа", or "" for somebody whose birthday was cleared after the fact. */
+  birthDateLabel: string;
+}
+
+/**
+ * Every round ever prepared, newest first.
+ *
+ * `upcomingBirthdays` cannot answer this: it keys campaigns by the NEXT
+ * occurrence of a birthday, so the moment a birthday passes its campaign drops
+ * out of that list entirely — which is precisely the one an admin wants to look
+ * back at. Hence a separate read.
+ *
+ * Bounded because this table grows by one row per person per year and the screen
+ * scrolls; a hundred is several years of a team this size.
+ */
+export function listAllCampaigns(db: Db, limit = 100): CampaignListRow[] {
+  const people = new Map(db.select().from(employees).all().map((employee) => [employee.id, employee] as const));
+  return db
+    .select()
+    .from(birthdayCampaigns)
+    .orderBy(desc(birthdayCampaigns.celebratedOn))
+    .limit(limit)
+    .all()
+    .flatMap((campaign) => {
+      const employee = people.get(campaign.employeeId);
+      if (!employee) return [];
+      return [{
+        campaign,
+        displayName: employee.displayName,
+        birthDateLabel: employee.birthDate ? formatBirthDate(employee.birthDate) : "",
+      }];
+    });
 }
