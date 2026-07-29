@@ -148,7 +148,22 @@
 }
 
 .team-week__day.is-today {
+  color: var(--tgui--text_color);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--tgui--link_color) 18%, transparent);
   box-shadow: inset 0 3px var(--tgui--link_color);
+}
+
+/* The whole column, not just its header — on a phone a 3px rail above one of
+   seven narrow columns is invisible. */
+.team-week__cell.is-today {
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--tgui--link_color) 9%, transparent);
+}
+
+/* A coloured entry keeps its own preset colour: the tint would falsify it. The
+   column is still marked by its header and by the empty cells around it. */
+.team-week__cell.has-entry.is-today {
+  box-shadow: inset 0 0 0 1.5px var(--tgui--link_color);
 }
 
 .team-week__header,

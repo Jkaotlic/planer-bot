@@ -52,6 +52,7 @@ export function TeamWeekGrid({
               key={day}
               className={`team-week__day${day === today ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`}
               data-date={day}
+              aria-current={day === today ? "date" : undefined}
               role="columnheader"
             >
               <b>{weekdayShort(day)}</b>
@@ -77,6 +78,7 @@ export function TeamWeekGrid({
                   cell={cell}
                   employeeName={row.displayName}
                   isDark={isDark}
+                  isToday={cell.date === today}
                   onOpen={() => {
                     setSelection({
                       employeeId: row.employeeId,
@@ -106,17 +108,19 @@ function WeekCellButton({
   cell,
   employeeName,
   isDark,
+  isToday,
   onOpen,
 }: {
   cell: WeekCell;
   employeeName: string;
   isDark: boolean;
+  isToday: boolean;
   onOpen: () => void;
 }) {
   if (!cell.primary) {
     return (
       <div
-        className={`team-week__cell${isWeekend(cell.date) ? " is-weekend" : ""}`}
+        className={`team-week__cell${isWeekend(cell.date) ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
         role="gridcell"
         aria-label={`${employeeName}, ${cell.date}: нет записи`}
       />
@@ -129,7 +133,7 @@ function WeekCellButton({
     <div className="team-week__slot" role="gridcell">
       <button
         type="button"
-        className={`team-week__cell has-entry${isWeekend(cell.date) ? " is-weekend" : ""}`}
+        className={`team-week__cell has-entry${isWeekend(cell.date) ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
         style={{ background: palette.bg, color: palette.fg }}
         aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => entry.title).join(", ")}`}
         onClick={onOpen}
