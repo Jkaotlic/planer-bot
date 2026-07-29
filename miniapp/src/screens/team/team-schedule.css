@@ -48,6 +48,13 @@
   font-size: 28px;
 }
 
+.team-range-nav__center {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .team-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;
