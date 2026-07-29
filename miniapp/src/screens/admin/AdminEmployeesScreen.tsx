@@ -3,7 +3,6 @@ import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
-import { AdminBirthdays } from "./AdminBirthdays";
 import { CardShell, CardStack, MetaLine } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -20,8 +19,6 @@ export function AdminEmployeesScreen() {
   const [adding, setAdding] = useState(false);
   /** The most recently created worker's invite, shown until dismissed. */
   const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
-  /** When true, the roster is replaced by the «Дни рождения» flow. */
-  const [birthdaysOpen, setBirthdaysOpen] = useState(false);
 
   async function reload() {
     setEmployees(await apiClient.getAdminEmployees());
@@ -97,19 +94,6 @@ export function AdminEmployeesScreen() {
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
 
-  // The birthday screen hangs off this one because a birthday *is* worker data —
-  // it's set two rows below, on the very card it lists. A fifth segment in the
-  // admin nav wouldn't fit: at four, «Расписание» already renders as «Расписа…».
-  if (birthdaysOpen) {
-    return (
-      <ScreenScroll>
-        <List>
-          <AdminBirthdays onClose={() => setBirthdaysOpen(false)} />
-        </List>
-      </ScreenScroll>
-    );
-  }
-
   return (
     <ScreenScroll>
       <List>
@@ -119,9 +103,6 @@ export function AdminEmployeesScreen() {
             {invite && (
               <InviteCard invite={invite} onRegenerate={() => void showInvite(invite.employee, true)} onDismiss={() => setInvite(null)} />
             )}
-            <Button size="m" mode="bezeled" stretched onClick={() => setBirthdaysOpen(true)}>
-              🎂 Дни рождения
-            </Button>
           </CardStack>
         </Section>
 
