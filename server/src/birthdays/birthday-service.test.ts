@@ -10,6 +10,10 @@ import {
   adminRecipients,
   defaultMessage,
   adminNoticeMessage,
+  adminNoticeReadyMessage,
+  campaignsScheduledFor,
+  markAdminNotified,
+  markScheduleNotified,
   markSent,
 } from "./birthday-service";
 import type { Db } from "../db/client";
@@ -188,5 +192,66 @@ describe("wording", () => {
     expect(notice).toContain("через 7 дней");
     expect(notice).toContain("Сбербанк Онлайн");
     expect(notice).toMatch(/сам решишь, когда разослать/i);
+  });
+
+  it("tells admins the collection is already ready, not to create one they already made", () => {
+    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7);
+    expect(notice).toContain("через 7 дней");
+    expect(notice).toContain("Мишин Илья");
+    expect(notice).not.toContain("Создай сбор");
+    expect(notice).not.toContain("Сбербанк Онлайн");
+    expect(notice).not.toMatch(/у Мишин Илья/);
+  });
+});
+
+describe("campaignsScheduledFor — the reminder query defect 1 fixes", () => {
+  it("matches a reminder day that has already passed and was never notified", () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "08-08");
+    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" });
+
+    // ASOF ("2026-08-01") is after the picked day ("2026-07-30") but still
+    // before the birthday itself ("2026-08-08") — the missed day heals.
+    const rows = campaignsScheduledFor(db, ASOF);
+    expect(rows.map((c) => c.employeeId)).toEqual([id]);
+  });
+
+  it("does not match once the celebration itself is behind the given date", () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "01-05");
+    updateCampaign(db, id, "2026-01-01", { collectUrl: "https://sber/x", scheduledSendOn: "2026-01-03" });
+
+    expect(campaignsScheduledFor(db, "2026-06-01")).toEqual([]);
+  });
+
+  it("matches exactly on the picked day, same as before", () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "08-08");
+    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: ASOF });
+
+    expect(campaignsScheduledFor(db, ASOF).map((c) => c.employeeId)).toEqual([id]);
+  });
+
+  it("stays quiet on a day before the picked one", () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "08-08");
+    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-08-04" });
+    expect(campaignsScheduledFor(db, ASOF)).toEqual([]);
+  });
+
+  it("excludes a round already marked notified, even a healed one", () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "08-08");
+    const campaign = updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" })!;
+    markScheduleNotified(db, campaign.id, new Date());
+    expect(campaignsScheduledFor(db, ASOF)).toEqual([]);
+  });
+
+  it("is unaffected by the unrelated week-ahead flag", () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "08-08");
+    const campaign = updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" })!;
+    markAdminNotified(db, campaign.id, new Date());
+    expect(campaignsScheduledFor(db, ASOF).map((c) => c.employeeId)).toEqual([id]);
   });
 });

@@ -13,6 +13,7 @@ import { runReminderTick } from "./reminders/reminder-service";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { teamNow } from "./util/team-time";
 import { safeErrorMessage } from "./util/safe-error";
+import { runTicksIndependently } from "./util/ticks";
 import type { Env } from "./http/middleware";
 
 const config = loadConfig(process.env);
@@ -30,23 +31,23 @@ bot.start({
   console.error("bot failed to start (check BOT_TOKEN):", safeErrorMessage(err));
 });
 
-// Soft evening-before reminders — polled every 5 minutes; a failed tick must not crash the server,
-// and a slow tick must not overlap the next one.
+// Soft evening-before reminders and the birthday nudges — polled every 5 minutes;
+// a failed tick must not crash the server, and a slow batch must not overlap the
+// next one. The two ticks run independently (see runTicksIndependently) so a
+// failure in one — e.g. the reminder tick throwing — cannot suppress the other;
+// previously they were chained with `.then()`, which skipped the birthday tick
+// entirely whenever the reminder tick rejected.
 const REMINDER_TICK_MS = 5 * 60 * 1000;
-let reminderRunning = false;
+let ticking = false;
 setInterval(() => {
-  if (reminderRunning) return;
-  reminderRunning = true;
-  Promise.resolve(runReminderTick(db, bot, teamNow(config.teamTz)))
-    // The birthday notice rides the same tick: it is cheap, it only ever messages
-    // admins, and it marks itself done so it fires once per birthday, not hourly.
-    .then(() => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz).date))
-    .catch((err) => {
-      console.error("reminder tick failed:", safeErrorMessage(err));
-    })
-    .finally(() => {
-      reminderRunning = false;
-    });
+  if (ticking) return;
+  ticking = true;
+  runTicksIndependently([
+    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz)) },
+    { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz).date) },
+  ]).finally(() => {
+    ticking = false;
+  });
 }, REMINDER_TICK_MS);
 
 const app = createApp({ db, config, bot });

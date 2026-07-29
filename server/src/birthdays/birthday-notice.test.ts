@@ -122,6 +122,26 @@ describe("runBirthdayNoticeTick", () => {
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
     expect(sent).toEqual([]);
   });
+
+  it("sends a shorter status nudge, not the creation instructions, when the link is already prepared (defect 3)", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const id = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    // The admin pasted the link before the week-ahead pass ever ran for this
+    // round — the case the new reminder-date feature made routine.
+    updateCampaign(db, id, TODAY, { collectUrl: "https://sber.ru/x" });
+
+    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("Именинник");
+    expect(sent[0]!.text).not.toContain("Создай сбор");
+    expect(sent[0]!.text).not.toContain("Сбербанк Онлайн");
+    // Still nudges exactly once — the flag semantics are unchanged.
+    expect(ensureCampaign(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
+    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(sent).toHaveLength(1);
+  });
 });
 
 describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
@@ -204,5 +224,68 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     expect(listRecentAudit(db, 10).some((row) => row.type === "birthday_schedule_notice")).toBe(true);
+  });
+
+  describe("healing a missed reminder day (defect 1)", () => {
+    it("still fires when the reminder day has passed and nobody ever ran the tick that day", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const who = person(db, "Именинник", 1, "08-08");
+      person(db, "Админ", 2, null, true);
+      // Picked a reminder day of the 3rd; the server was effectively "down" that
+      // day since nothing ever called the tick with today === "2026-08-03". The
+      // celebration itself ("2026-08-08") is still ahead, so the reminder is
+      // still useful when it finally does fire.
+      updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
+      markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+      await runBirthdayNoticeTick(db, bot, "2026-08-05");
+      expect(sent.map((m) => m.to)).toEqual([2]);
+      expect(sent[0]!.text).toContain("Именинник");
+    });
+
+    it("does not fire once the birthday itself has already passed", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      // A birthday in early January: create the round while it is still ahead,
+      // then simulate the tick running months later, long after the party.
+      const who = person(db, "Именинник", 1, "01-05");
+      person(db, "Админ", 2, null, true);
+      updateCampaign(db, who, "2026-01-01", { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-01-03" });
+      markAdminNotified(db, ensureCampaign(db, who, "2026-01-01")!.id, new Date());
+
+      // "2026-06-01" is far enough out that the week-ahead pass sees only next
+      // year's occurrence (2027-01-05), well outside its 7-day window — so any
+      // message here can only have come from the scheduled-reminder pass.
+      expect(await runBirthdayNoticeTick(db, bot, "2026-06-01")).toBe(0);
+      expect(sent).toEqual([]);
+    });
+
+    it("still fires exactly once even after healing a missed day", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const who = person(db, "Именинник", 1, "08-08");
+      person(db, "Админ", 2, null, true);
+      updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
+      markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+      await runBirthdayNoticeTick(db, bot, "2026-08-05");
+      await runBirthdayNoticeTick(db, bot, "2026-08-05");
+      await runBirthdayNoticeTick(db, bot, "2026-08-06");
+      expect(sent).toHaveLength(1);
+    });
+
+    it("still never messages the team when healing a missed day", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const who = person(db, "Именинник", 1, "08-08");
+      person(db, "Админ", 2, null, true);
+      person(db, "Обычный коллега", 3, null);
+      updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
+      markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+
+      await runBirthdayNoticeTick(db, bot, "2026-08-05");
+      expect(sent.map((m) => m.to)).toEqual([2]);
+    });
   });
 });
