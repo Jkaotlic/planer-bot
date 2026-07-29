@@ -823,7 +823,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Подсветить сегодняшнюю строку в «Мои смены»**
 
-В `miniapp/src/components/ShiftRow.tsx` добавить проп и обёртку. Интерфейс:
+В `miniapp/src/components/ShiftRow.tsx` добавить проп. Интерфейс:
 
 ```ts
   /** Today's row is marked: an accent rail on the left and a «Сегодня» chip. */
@@ -837,7 +837,11 @@ export function ShiftRow({ shift, templates, onSwap, isToday }: ShiftRowProps) {
   const isSwappable = shift.category === "shift";
 
   return (
-    <div
+    <Cell
+      // Styled on the `Cell` itself, not on a wrapper `div`: `Section` reads its
+      // own children to decide where dividers go, and an extra element between
+      // them changes that. `CellProps` extends `AllHTMLAttributes`, so `style`
+      // lands on the row's root element.
       style={
         isToday
           ? {
@@ -848,22 +852,19 @@ export function ShiftRow({ shift, templates, onSwap, isToday }: ShiftRowProps) {
             }
           : undefined
       }
+      before={<DayBadge date={shift.date} endDate={shift.endDate} />}
+      // The chip already names the entry ("Утро" / "Отпуск"), so it stands in for
+      // the subtitle that used to repeat that same label right above it. Unlike
+      // the old category chip it shows on every row, since a work shift's preset
+      // is exactly what the colour is here to tell apart.
+      description={<EntryChip entry={shift} templates={templates} />}
+      after={isSwappable && onSwap ? <SwapChip onClick={() => onSwap(shift)} /> : undefined}
     >
-      <Cell
-        before={<DayBadge date={shift.date} endDate={shift.endDate} />}
-        // The chip already names the entry ("Утро" / "Отпуск"), so it stands in for
-        // the subtitle that used to repeat that same label right above it. Unlike
-        // the old category chip it shows on every row, since a work shift's preset
-        // is exactly what the colour is here to tell apart.
-        description={<EntryChip entry={shift} templates={templates} />}
-        after={isSwappable && onSwap ? <SwapChip onClick={() => onSwap(shift)} /> : undefined}
-      >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          {formatTimeRange(shift)}
-          {isToday && <TodayChip />}
-        </span>
-      </Cell>
-    </div>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        {formatTimeRange(shift)}
+        {isToday && <TodayChip />}
+      </span>
+    </Cell>
   );
 }
 
@@ -2465,7 +2466,70 @@ export async function mockGetBirthdayCampaigns(): Promise<CampaignListRow[]> {
 
 и добавить `import { toISODate } from "../../lib/week";`.
 
-- [ ] **Step 4: Секция «Сборы»**
+- [ ] **Step 4: Развернуть `statusOf` от кампании, а не от дня рождения**
+
+Секция из следующего шага показывает тот же статус («Нет ссылки» / «Готово» / «Разослано · N»), но у неё на руках только кампания — дня рождения рядом нет. Повторять три строки условий вторым экземпляром нельзя: их уже четыре теста стерегут. Поэтому функция принимает то, от чего действительно зависит.
+
+В `miniapp/src/screens/admin/AdminBirthdays.tsx` заменить:
+
+```ts
+/** Where this round has got to, in a word. */
+export function statusOf(campaign: BirthdayCampaign | null): { label: string; tone: StatusTone } {
+  // Shorter than the console's wording on purpose: on a 390-wide row the chip
+  // shares its line with the name and the date, and «Готово к отправке» pushed
+  // «5 августа · через 8 дней» onto a second line.
+  if (campaign?.status === "sent") return { label: `Разослано · ${campaign.sentCount}`, tone: "sent" };
+  if (campaign?.collectUrl) return { label: "Готово", tone: "ready" };
+  return { label: "Нет ссылки", tone: "pending" };
+}
+```
+
+Добавить `BirthdayCampaign` в импорт типов из `../../api/client`.
+
+Единственный вызов — в `BirthdayCard` — становится:
+
+```ts
+  const status = statusOf(birthday.campaign);
+```
+
+В `miniapp/src/screens/admin/birthdays.test.ts` поправить четыре вызова в `describe("statusOf")` — хелпер `birthday()` там больше не нужен, `campaign()` остаётся:
+
+```ts
+describe("statusOf", () => {
+  it("says the link is missing before anything else — it is what blocks sending", () => {
+    expect(statusOf(null)).toEqual({ label: "Нет ссылки", tone: "pending" });
+    expect(statusOf(campaign())).toEqual({ label: "Нет ссылки", tone: "pending" });
+  });
+
+  it("goes to «готово» once a link is in, without sending anything", () => {
+    expect(statusOf(campaign({ collectUrl: "https://sber.ru/x", status: "ready" }))).toEqual({ label: "Готово", tone: "ready" });
+  });
+
+  it("reports how many were reached once it has gone out", () => {
+    expect(statusOf(campaign({ collectUrl: "https://sber.ru/x", status: "sent", sentCount: 5 }))).toEqual({ label: "Разослано · 5", tone: "sent" });
+  });
+
+  it("keeps «разослано» even if the link was later cleared", () => {
+    // Sending is one-way: a campaign that has gone out must never read as
+    // «готово к отправке» again, whatever else changes on it.
+    expect(statusOf(campaign({ collectUrl: null, status: "sent", sentCount: 3 })).tone).toBe("sent");
+  });
+});
+```
+
+Хелпер `campaign()` в этом файле тоже нужно дополнить новыми полями:
+
+```ts
+    adminNotifiedAt: null, sentAt: null, sentCount: 0,
+    scheduledSendOn: null, scheduleNotifiedAt: null,
+```
+
+Остальные блоки (`whenLabel`, `recipientsPhrase`, `recipientsSubject`) не трогать — они принимают `birthday()` и продолжают работать.
+
+Run: `npx vitest run miniapp/src/screens/admin/birthdays.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Секция «Сборы»**
 
 В том же файле добавить компонент перед `BirthdayCard`:
 
@@ -2494,26 +2558,29 @@ function CampaignsSection({ onOpen }: { onOpen: (employeeId: number) => void }) 
 
   return (
     <>
-      {rows.map(({ campaign, displayName, birthDateLabel }) => (
-        <CardShell key={campaign.id}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{displayName}</div>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
-                {birthDateLabel} · {campaign.year}
-                {campaign.scheduledSendOn && ` · напомнить ${campaign.scheduledSendOn}`}
+      {rows.map(({ campaign, displayName, birthDateLabel }) => {
+        const status = statusOf(campaign);
+        return (
+          <CardShell key={campaign.id}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{displayName}</div>
+                <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+                  {birthDateLabel} · {campaign.year}
+                  {campaign.scheduledSendOn && ` · напомнить ${campaign.scheduledSendOn}`}
+                </div>
               </div>
+              <span style={{ flex: "none", fontSize: 12, fontWeight: 600, color: TONE_COLOR[status.tone] }}>
+                {status.label}
+              </span>
             </div>
-            <span style={{ flex: "none", fontSize: 12, fontWeight: 600, color: TONE_COLOR[campaign.status === "sent" ? "sent" : campaign.collectUrl ? "ready" : "pending"] }}>
-              {campaign.status === "sent" ? `Разослано · ${campaign.sentCount}` : campaign.collectUrl ? "Готово" : "Нет ссылки"}
-            </span>
-          </div>
-          {campaign.collectUrl && <CopyableLink url={campaign.collectUrl} />}
-          <Button size="s" mode="bezeled" stretched onClick={() => onOpen(campaign.employeeId)}>
-            {campaign.status === "sent" ? "Посмотреть" : "Открыть"}
-          </Button>
-        </CardShell>
-      ))}
+            {campaign.collectUrl && <CopyableLink url={campaign.collectUrl} />}
+            <Button size="s" mode="bezeled" stretched onClick={() => onOpen(campaign.employeeId)}>
+              {status.tone === "sent" ? "Посмотреть" : "Открыть"}
+            </Button>
+          </CardShell>
+        );
+      })}
     </>
   );
 }
@@ -2561,7 +2628,7 @@ function CopyableLink({ url }: { url: string }) {
 
 Добавить `CampaignListRow` в импорт типов из `../../api/client`.
 
-- [ ] **Step 5: Встроить секцию в экран**
+- [ ] **Step 6: Встроить секцию в экран**
 
 В теле `AdminBirthdays`, после `CardStack` с ближайшими днями рождения, добавить вторую секцию внутри того же `List`:
 
@@ -2575,17 +2642,17 @@ function CopyableLink({ url }: { url: string }) {
 
 Тап по строке разворачивает уже существующую карточку в секции «Ближайшие» — тот же `openId`, тот же `CampaignEditor`, второго редактора не появляется. Для человека, чей день рождения уже прошёл, карточки в «Ближайших» может не быть; в этом случае тап ничего не раскроет, и это верно: редактировать в разосланном сообщении нечего, а ссылка и статус видны прямо в строке.
 
-- [ ] **Step 6: Проверить**
+- [ ] **Step 7: Проверить**
 
 Run: `npm test && npm run typecheck`
 Expected: PASS.
 
-- [ ] **Step 7: Прогнать сборку мини-аппа**
+- [ ] **Step 8: Прогнать сборку мини-аппа**
 
 Run: `npm run build -w @planer/miniapp`
 Expected: сборка проходит без ошибок.
 
-- [ ] **Step 8: Коммит**
+- [ ] **Step 9: Коммит**
 
 ```bash
 git add miniapp/src
