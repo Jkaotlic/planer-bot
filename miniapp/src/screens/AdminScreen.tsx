@@ -4,7 +4,7 @@ import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
 import { AdminBirthdays } from "./admin/AdminBirthdays";
 import { AdminJournal } from "./admin/AdminJournal";
-import { SectionChips } from "../components/SectionChips";
+import { SectionChips, SectionPanel } from "../components/SectionChips";
 import { toISODate } from "../lib/week";
 
 type AdminSection = "schedule" | "weekend" | "employees" | "birthdays" | "journal";
@@ -32,11 +32,13 @@ export function AdminScreen() {
     <div>
       <SectionChips sections={SECTIONS} active={section} onChange={setSection} />
 
-      {section === "schedule" && <AdminScheduleScreen />}
-      {section === "weekend" && <AdminWeekendScreen />}
-      {section === "employees" && <AdminEmployeesScreen />}
-      {section === "birthdays" && <AdminBirthdays />}
-      {section === "journal" && <AdminJournal today={toISODate(new Date())} />}
+      <SectionPanel active={section}>
+        {section === "schedule" && <AdminScheduleScreen />}
+        {section === "weekend" && <AdminWeekendScreen />}
+        {section === "employees" && <AdminEmployeesScreen />}
+        {section === "birthdays" && <AdminBirthdays />}
+        {section === "journal" && <AdminJournal today={toISODate(new Date())} />}
+      </SectionPanel>
     </div>
   );
 }
