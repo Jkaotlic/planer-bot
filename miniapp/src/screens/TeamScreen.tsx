@@ -106,13 +106,13 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
 
   const displayRange = teamRange(view.displayMode, view.displayDate);
   const today = toISODate(new Date());
-  const label =
-    view.displayMode === "today"
-      ? formatDayLabelRelative(view.displayDate, today)
-      : formatWeekRangeLabel(
-          parseISODate(displayRange.from),
-          parseISODate(displayRange.to),
-        );
+  const isDayMode = view.displayMode === "today";
+  const label = isDayMode
+    ? formatDayLabelRelative(view.displayDate, today)
+    : formatWeekRangeLabel(
+        parseISODate(displayRange.from),
+        parseISODate(displayRange.to),
+      );
 
   // 16px on top, not 8: at 8 the «Команда» title sat flush against the very edge
   // of the screen, and in the real client Telegram's own header is right above it.
@@ -130,9 +130,9 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         <TeamRangeNav
           label={label}
           busy={view.loading}
-          backLabel={view.displayMode === "today" ? "Сегодня" : "Эта неделя"}
+          backLabel={isDayMode ? "Сегодня" : "Эта неделя"}
           onBack={
-            isCurrentPeriod(view.displayMode === "today" ? "day" : "week", view.displayDate, today)
+            isCurrentPeriod(isDayMode ? "day" : "week", view.displayDate, today)
               ? undefined
               : () => { if (!view.loading) void load(view.displayMode, today); }
           }
