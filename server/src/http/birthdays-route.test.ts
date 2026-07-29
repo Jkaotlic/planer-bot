@@ -200,3 +200,74 @@ describe("POST /api/admin/birthdays/:id/send", () => {
     expect(sent.map((m) => m.to)).not.toContain(1);
   });
 });
+
+describe("scheduled send date", () => {
+  it("saves a reminder date alongside the link", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    const res = await app.request(`/api/admin/birthdays/${id}?${ASOF}`,
+      send(token, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" }, "PUT"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).campaign).toMatchObject({ scheduledSendOn: "2026-08-03", scheduleNotifiedAt: null });
+  });
+
+  it("refuses a date in the past, after the birthday, or in the wrong shape", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    const past = await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: "2026-07-31" }, "PUT"));
+    expect(past.status).toBe(400);
+
+    // Reminding to send a collection after the day has been and gone is pointless.
+    const late = await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: "2026-08-06" }, "PUT"));
+    expect(late.status).toBe(400);
+
+    const shape = await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: "3 августа" }, "PUT"));
+    expect(shape.status).toBe(400);
+  });
+
+  it("clears the date on null", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: "2026-08-03" }, "PUT"));
+    const cleared = await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: null }, "PUT"));
+    expect((await cleared.json()).campaign.scheduledSendOn).toBeNull();
+  });
+});
+
+describe("GET /api/admin/birthdays/campaigns", () => {
+  it("returns a round whose birthday has already passed — which /birthdays cannot", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    // Prepare the 2026 round while it is still ahead of us…
+    await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { collectUrl: "https://sber.ru/x" }, "PUT"));
+
+    // …then look from a month later, when `upcomingBirthdays` keys on 2027 and
+    // drops the 2026 round entirely. This is the gap the endpoint exists to fill.
+    const upcoming = await (await app.request("/api/admin/birthdays?asOf=2026-09-01", auth(token))).json();
+    expect(upcoming.birthdays.find((b: { employeeId: number }) => b.employeeId === id).campaign).toBeNull();
+
+    const { campaigns } = await (await app.request("/api/admin/birthdays/campaigns", auth(token))).json();
+    expect(campaigns).toHaveLength(1);
+    expect(campaigns[0]).toMatchObject({ displayName: "Именинник", birthDateLabel: "5 августа" });
+    expect(campaigns[0].campaign).toMatchObject({ collectUrl: "https://sber.ru/x", year: 2026 });
+  });
+
+  it("is admin-only", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    person(db, "Работник", 222, null);
+    expect((await app.request("/api/admin/birthdays/campaigns", auth(await tokenFor(app, 222)))).status).toBe(403);
+  });
+});

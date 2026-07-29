@@ -72,6 +72,7 @@ import {
   previewCampaign,
   updateCampaign,
   ensureCampaign,
+  listAllCampaigns,
   teamRecipients,
   markSent,
 } from "../birthdays/birthday-service";
@@ -369,6 +370,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ asOf, birthdays: upcomingBirthdays(db, asOf) });
   });
 
+  /** Every round ever prepared — the ones already sent included. Separate from
+   *  `/birthdays` because that one looks forward and this one looks back. */
+  app.get("/api/admin/birthdays/campaigns", requireAdmin(db, config.jwtSecret), (c) =>
+    c.json({ campaigns: listAllCampaigns(db) }));
+
   app.get("/api/admin/birthdays/:id/preview", requireAdmin(db, config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
@@ -380,9 +386,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.put("/api/admin/birthdays/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { collectUrl?: unknown; messageText?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { collectUrl?: unknown; messageText?: unknown; scheduledSendOn?: unknown };
 
-    const patch: { collectUrl?: string | null; messageText?: string | null } = {};
+    const patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null } = {};
     if (body.collectUrl !== undefined) {
       if (body.collectUrl !== null && typeof body.collectUrl !== "string") {
         return c.json({ error: "collectUrl должен быть ссылкой или null" }, 400);
@@ -402,6 +408,26 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const text = typeof body.messageText === "string" ? body.messageText.trim() : null;
       if (text && text.length > 3000) return c.json({ error: "Текст длиннее 3000 символов" }, 400);
       patch.messageText = text || null;
+    }
+    if (body.scheduledSendOn !== undefined) {
+      if (body.scheduledSendOn === null) {
+        patch.scheduledSendOn = null;
+      } else if (typeof body.scheduledSendOn !== "string" || !dateStr.safeParse(body.scheduledSendOn).success) {
+        return c.json({ error: "Дата напоминания должна быть в виде ГГГГ-ММ-ДД" }, 400);
+      } else {
+        // The window is «from today up to and including the birthday». Earlier is
+        // already gone; later is a reminder to send a collection for a party that
+        // has happened.
+        if (body.scheduledSendOn < asOf) {
+          return c.json({ error: "Дата напоминания уже прошла" }, 400);
+        }
+        const round = ensureCampaign(db, Number(c.req.param("id")), asOf);
+        if (!round) return c.json({ error: "not_found" }, 404);
+        if (body.scheduledSendOn > round.celebratedOn) {
+          return c.json({ error: "Напоминать после самого дня рождения уже поздно" }, 400);
+        }
+        patch.scheduledSendOn = body.scheduledSendOn;
+      }
     }
     if (Object.keys(patch).length === 0) return c.json({ error: "нечего сохранять" }, 400);
 

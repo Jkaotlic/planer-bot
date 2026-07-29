@@ -227,6 +227,12 @@ export const birthdayCampaigns = sqliteTable(
     status: text().$type<"pending" | "ready" | "sent">().notNull().default("pending"),
     /** When admins were nudged, so they are nudged once rather than every tick. */
     adminNotifiedAt: integer({ mode: "timestamp" }),
+    /** The day the admin asked to be reminded to send the collection. YYYY-MM-DD,
+     *  null when they did not ask. Never triggers a send by itself — see
+     *  `runBirthdayNoticeTick`. */
+    scheduledSendOn: text(),
+    /** When that reminder went out, so it goes out once rather than every tick. */
+    scheduleNotifiedAt: integer({ mode: "timestamp" }),
     sentAt: integer({ mode: "timestamp" }),
     /** How many people actually received it. */
     sentCount: integer().notNull().default(0),
