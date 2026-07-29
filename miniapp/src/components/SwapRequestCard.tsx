@@ -166,3 +166,32 @@ export function OutgoingSwapCard({ request, onCancel, busy }: OutgoingSwapCardPr
     </CardShell>
   );
 }
+
+export interface ArchivedSwapCardProps {
+  request: SwapRequest;
+}
+
+/**
+ * A settled swap, either direction. No buttons: there is nothing left to accept,
+ * decline or cancel, and the past tense in the labels says so without a chip.
+ */
+export function ArchivedSwapCard({ request }: ArchivedSwapCardProps) {
+  const outgoing = request.direction === "outgoing";
+  return (
+    <CardShell>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>{request.counterpartyName}</div>
+        <SwapStatusPill status={request.status} />
+      </div>
+      <SwapDirectionLine
+        label={outgoing ? "Ты отдавал →" : "Коллега отдавал →"}
+        shift={outgoing ? request.yourShift : request.theirShift}
+      />
+      <SwapDirectionLine
+        label={outgoing ? "Взамен просил →" : "Взамен просил твою →"}
+        shift={outgoing ? request.theirShift : request.yourShift}
+      />
+      {request.message && <MessageBubble message={request.message} />}
+    </CardShell>
+  );
+}
