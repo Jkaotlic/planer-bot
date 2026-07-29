@@ -730,7 +730,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const asOf = c.req.query("asOf") ?? teamNow(config.teamTz).date;
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
 
-    const queue = rotationQueue(rotationCandidatesFor(db, templateId), asOf);
+    const queue = rotationQueue(rotationCandidatesFor(db, templateId, asOf), asOf);
     return c.json({
       templateId,
       rotationUnit: template.rotationUnit,

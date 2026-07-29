@@ -40,7 +40,11 @@ export function rotationQueue(candidates: readonly RotationCandidate[], asOf: st
   return [...candidates]
     .map((candidate) => ({
       ...candidate,
-      daysSince: candidate.lastHeld ? daysBetween(candidate.lastHeld, asOf) : null,
+      // Clamped to 0: a lastHeld after asOf (someone already scheduled ahead) must read
+      // as "not overdue", never as a negative day count — the caller is expected to bound
+      // lastHeld by asOf itself (see rotationCandidatesFor), this is the belt-and-braces
+      // backstop so describeTurn can never render "-N дней назад" regardless of input.
+      daysSince: candidate.lastHeld ? Math.max(0, daysBetween(candidate.lastHeld, asOf)) : null,
     }))
     .sort((a, b) => {
       if (a.lastHeld === null && b.lastHeld === null) return byRoster(a, b);
@@ -63,12 +67,16 @@ function byRoster(a: RotationCandidate, b: RotationCandidate): number {
  */
 export function describeTurn(turn: RotationTurn, unit: RotationUnit): string {
   if (turn.daysSince === null) return `${turn.displayName} (ещё не дежурил)`;
-  if (turn.daysSince === 0) return `${turn.displayName} (сегодня)`;
+  // A negative daysSince means lastHeld is after asOf — someone already scheduled ahead,
+  // not overdue. rotationQueue clamps this itself, but describeTurn guards it too rather
+  // than trust every caller to route through rotationQueue first.
+  const daysSince = Math.max(0, turn.daysSince);
+  if (daysSince === 0) return `${turn.displayName} (сегодня)`;
   if (unit === "week") {
-    const weeks = Math.floor(turn.daysSince / 7);
+    const weeks = Math.floor(daysSince / 7);
     if (weeks >= 1) return `${turn.displayName} (${weeks} ${plural(weeks, "неделя", "недели", "недель")} назад)`;
   }
-  return `${turn.displayName} (${turn.daysSince} ${plural(turn.daysSince, "день", "дня", "дней")} назад)`;
+  return `${turn.displayName} (${daysSince} ${plural(daysSince, "день", "дня", "дней")} назад)`;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {
