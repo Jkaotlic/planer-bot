@@ -7,6 +7,13 @@ import {
 } from "@planer/shared";
 import type { Shift, TeamEmployee, TeamSchedule, Template } from "../api/client";
 import { addDays, mondayOf, toISODate } from "./week";
+import { createLatestRequestGate, type LatestRequestGate } from "./request-gate";
+
+// Re-exported so existing importers (and this file's own tests) keep working
+// unchanged — the gate itself now lives in `request-gate.ts` so other screens
+// (e.g. `AdminScheduleScreen`) can reuse it without importing team-specific code.
+export { createLatestRequestGate };
+export type { LatestRequestGate };
 
 export type TeamMode = "today" | "week";
 
@@ -339,23 +346,6 @@ export function buildWeekLegend(model: WeekModel): WeekLegendItem[] {
       (a, b) =>
         (a.palette ? 0 : 1) - (b.palette ? 0 : 1) || a.label.localeCompare(b.label, "ru"),
     );
-}
-
-export interface LatestRequestGate {
-  begin(): number;
-  isLatest(id: number): boolean;
-  invalidate(): void;
-}
-
-export function createLatestRequestGate(): LatestRequestGate {
-  let latest = 0;
-  return {
-    begin: () => ++latest,
-    isLatest: (id) => id === latest,
-    invalidate: () => {
-      latest += 1;
-    },
-  };
 }
 
 export type TeamLoadResult =

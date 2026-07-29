@@ -7,6 +7,7 @@ import { formatDayLabel } from "../../lib/week";
 import { pluralizeRu } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
+import { withBusy, withoutBusy } from "../../lib/busy-set";
 
 /** First & last calendar day of the month containing `d`, as "YYYY-MM-DD". */
 function monthRange(d: Date): { from: string; to: string } {
@@ -24,7 +25,10 @@ function monthRange(d: Date): { from: string; to: string } {
 export function AdminWeekendScreen() {
   const [slots, setSlots] = useState<AdminSlotView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  // One slot's assign/unassign in flight must not re-enable another slot's
+  // buttons — a single shared id would let a tap on slot B clear slot A's busy
+  // state while A's own request is still running.
+  const [busySlotIds, setBusySlotIds] = useState<ReadonlySet<number>>(new Set());
   const [showPost, setShowPost] = useState(false);
 
   async function reload() {
@@ -47,7 +51,7 @@ export function AdminWeekendScreen() {
   }, []);
 
   async function handleAssign(slotId: number, employeeId: number) {
-    setBusyId(slotId);
+    setBusySlotIds((prev) => withBusy(prev, slotId));
     setError(null);
     try {
       await apiClient.assignSlot(slotId, employeeId);
@@ -55,12 +59,12 @@ export function AdminWeekendScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось назначить");
     } finally {
-      setBusyId(null);
+      setBusySlotIds((prev) => withoutBusy(prev, slotId));
     }
   }
 
   async function handleUnassign(slotId: number, assignmentId: number) {
-    setBusyId(slotId);
+    setBusySlotIds((prev) => withBusy(prev, slotId));
     setError(null);
     try {
       await apiClient.unassignSlot(assignmentId);
@@ -68,7 +72,7 @@ export function AdminWeekendScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось снять");
     } finally {
-      setBusyId(null);
+      setBusySlotIds((prev) => withoutBusy(prev, slotId));
     }
   }
 
@@ -112,7 +116,7 @@ export function AdminWeekendScreen() {
                 <SlotCard
                 key={view.slot.id}
                 view={view}
-                busy={busyId === view.slot.id}
+                busy={busySlotIds.has(view.slot.id)}
                 onAssign={handleAssign}
                 onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
               />

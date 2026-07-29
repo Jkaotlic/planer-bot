@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee, type NewEntryInput, type Shift, type Template } from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
@@ -10,6 +10,7 @@ import { ScreenScroll } from "../../components/ScreenScroll";
 import { formatTimeRange } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
+import { createLatestRequestGate } from "../../lib/request-gate";
 import {
   addDays,
   dayOfMonth,
@@ -36,6 +37,27 @@ function needsTime(category: Category): boolean {
 /** All-day absences that can span several days and have no clock times. */
 function isMultiDay(category: Category): boolean {
   return category === "vacation" || category === "sick_leave" || category === "business_trip";
+}
+
+/**
+ * Whether the week bar + day strip should be visible. Hidden — rather than
+ * merely disabled — for every sub-flow whose own state is seeded from the
+ * visible week and never re-syncs afterwards: `EntryForm`'s `date`/`endDate`
+ * (seeded once from `defaultDate`/`weekDates`) and `FillWeekPanel`'s `byDay`
+ * (keyed once off `weekDates`) would both go stale — pointing at a day that
+ * silently stopped being an option — if the admin navigated weeks while
+ * either was open. The desktop console prevents the same class of bug with a
+ * full-screen overlay that blocks the week switcher entirely; this is the
+ * inline equivalent, reusing the pattern this screen already applies to the
+ * CSV import and «кто что может» flows.
+ */
+export function showsWeekSwitcher(state: {
+  csvOpen: boolean;
+  kindsOpen: boolean;
+  fillOpen: boolean;
+  editing: unknown;
+}): boolean {
+  return !state.csvOpen && !state.kindsOpen && !state.fillOpen && state.editing === null;
 }
 
 /**
@@ -68,10 +90,21 @@ export function AdminScheduleScreen() {
   const to = weekDates[6]!;
   const today = toISODate(new Date());
 
+  // «⚖ Распределить честно» and «📅 Заполнить неделю» both hold the week they
+  // started on in a closure and, being async, can still be running after the
+  // admin taps to a different week. Without this, whichever fetch resolves
+  // last wins outright — possibly the stale one — and the header can end up
+  // showing week N+1 while the list still shows week N. Same idea as
+  // `team-schedule.ts`'s gate: every fetch that ends in `setShifts` registers
+  // a ticket first and only applies its result while still holding the
+  // newest one.
+  const gate = useRef(createLatestRequestGate());
+
   async function loadWeek(fromIso: string, toIso: string) {
+    const id = gate.current.begin();
     setShifts(null);
     const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
-    setShifts(schedule.shifts);
+    if (gate.current.isLatest(id)) setShifts(schedule.shifts);
   }
 
   /** A CSV import renames and creates people and rewrites entries, so both the
@@ -98,13 +131,17 @@ export function AdminScheduleScreen() {
     };
   }, []);
 
-  // Schedule reloads whenever the visible week changes.
+  // Schedule reloads whenever the visible week changes. Registers with the same
+  // gate as `loadWeek` — navigating here must supersede a still-running
+  // «Распределить честно» / «Заполнить неделю» from the week just left, exactly
+  // as a second navigation here already supersedes (via `cancelled`) a first.
   useEffect(() => {
     let cancelled = false;
+    const id = gate.current.begin();
     apiClient
       .getTeamSchedule(from, to)
       .then((schedule) => {
-        if (!cancelled) setShifts(schedule.shifts);
+        if (!cancelled && gate.current.isLatest(id)) setShifts(schedule.shifts);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
@@ -165,8 +202,12 @@ export function AdminScheduleScreen() {
     <ScreenScroll>
       {/* The week switcher and day strip drive the day view, the entry form and the
           bulk fill. The CSV screen works on whole months from the file itself, so
-          leaving them up there would offer navigation that changes nothing. */}
-      {!csvOpen && !kindsOpen && (
+          leaving them up there would offer navigation that changes nothing. Hidden
+          (not just disabled) for the entry form and the bulk fill too — both seed
+          their own state from the visible week once and never re-sync, so letting
+          the admin navigate under them would leave that state pointing at a day
+          that quietly isn't an option on screen anymore. */}
+      {showsWeekSwitcher({ csvOpen, kindsOpen, fillOpen, editing }) && (
         <div style={{ padding: "12px 4px 0" }}>
           <WeekBar
             label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))}

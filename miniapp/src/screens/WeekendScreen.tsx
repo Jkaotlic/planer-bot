@@ -10,16 +10,19 @@ import { useIsDark } from "../lib/theme";
 export interface WeekendScreenProps {
   slots: WeekendSlotView[];
   offers: WeekendOffer[];
-  /** The slot / offer currently being mutated, if any — disables just its own buttons while in flight. */
-  busySlotId: number | null;
-  busyOfferId: number | null;
+  /** Ids of slots / offers currently being mutated — each card disables only its
+   *  own buttons while its own request is in flight. */
+  busySlotIds: ReadonlySet<number>;
+  busyOfferIds: ReadonlySet<number>;
+  /** Set when the last interest/confirm/decline tap failed — cleared on the next attempt. */
+  actionError: string | null;
   onInterest: (slotId: number) => void;
   onConfirm: (offerId: number) => void;
   onDecline: (offerId: number) => void;
 }
 
 /** "Работа в выходные дни": weekend/holiday shifts up for grabs, and offers an admin addressed to you. */
-export function WeekendScreen({ slots, offers, busySlotId, busyOfferId, onInterest, onConfirm, onDecline }: WeekendScreenProps) {
+export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, actionError, onInterest, onConfirm, onDecline }: WeekendScreenProps) {
   const liveOffers = offers.filter((o) => o.assignment.status !== "declined");
 
   return (
@@ -33,6 +36,10 @@ export function WeekendScreen({ slots, offers, busySlotId, busyOfferId, onIntere
         </p>
       </header>
 
+      {actionError && (
+        <div style={{ margin: "12px 4px 0", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{actionError}</div>
+      )}
+
       <List>
         {liveOffers.length > 0 && (
           <Section header="Мои назначения">
@@ -41,7 +48,7 @@ export function WeekendScreen({ slots, offers, busySlotId, busyOfferId, onIntere
                 <OfferCard
                   key={offer.assignment.id}
                   offer={offer}
-                  busy={busyOfferId === offer.assignment.id}
+                  busy={busyOfferIds.has(offer.assignment.id)}
                   onConfirm={() => onConfirm(offer.assignment.id)}
                   onDecline={() => onDecline(offer.assignment.id)}
                 />
@@ -59,7 +66,7 @@ export function WeekendScreen({ slots, offers, busySlotId, busyOfferId, onIntere
                 <SlotCard
                   key={view.slot.id}
                   view={view}
-                  busy={busySlotId === view.slot.id}
+                  busy={busySlotIds.has(view.slot.id)}
                   onInterest={() => onInterest(view.slot.id)}
                 />
               ))}

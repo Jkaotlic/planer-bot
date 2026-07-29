@@ -10,12 +10,15 @@ export interface SwapsScreenProps {
   onAccept: (id: number) => void;
   onDecline: (id: number) => void;
   onCancel: (id: number) => void;
-  /** The id of the request currently being mutated, if any — disables its own buttons while the request is in flight. */
-  busyId: number | null;
+  /** Ids of requests currently being mutated — each row disables only its own
+   *  buttons while its own request is in flight, regardless of what else is tapped. */
+  busyIds: ReadonlySet<number>;
+  /** Set when the last accept/decline/cancel tap failed — cleared on the next attempt. */
+  actionError: string | null;
 }
 
 /** "Обмены": what still needs an answer, split from what is already settled. */
-export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyId }: SwapsScreenProps) {
+export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, actionError }: SwapsScreenProps) {
   const { incoming, outgoing, archived } = splitSwaps(swaps);
   // Collapsed by default — the whole point is that finished swaps stop competing
   // for attention with the ones that still need something.
@@ -29,6 +32,10 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyId }: Sw
         </Title>
       </header>
 
+      {actionError && (
+        <div style={{ margin: "0 4px 16px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{actionError}</div>
+      )}
+
       <List>
         <Section header="Входящие">
           {incoming.length === 0 ? (
@@ -39,7 +46,7 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyId }: Sw
                 <IncomingSwapCard
                   key={request.id}
                   request={request}
-                  busy={busyId === request.id}
+                  busy={busyIds.has(request.id)}
                   onAccept={() => onAccept(request.id)}
                   onDecline={() => onDecline(request.id)}
                 />
@@ -57,7 +64,7 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyId }: Sw
                 <OutgoingSwapCard
                   key={request.id}
                   request={request}
-                  busy={busyId === request.id}
+                  busy={busyIds.has(request.id)}
                   onCancel={() => onCancel(request.id)}
                 />
               ))}
