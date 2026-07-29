@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Menu-bar control for planer-bot.
+
+  A user LaunchAgent, NOT a system LaunchDaemon — the opposite choice from the
+  server's `com.planerbot.server.plist`, and deliberately so. The server must run
+  from boot without anyone signed in, so it is a system daemon. A menu bar only
+  exists inside a logged-in GUI session, so an agent is exactly right: it starts
+  when the user logs in and stops when they log out.
+
+  Install:
+    ./mac/build.sh
+    cp mac/com.planerbot.menubar.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.planerbot.menubar.plist
+
+  Restart after a rebuild:  launchctl kickstart -k gui/$(id -u)/com.planerbot.menubar
+  Stop:                     launchctl bootout gui/$(id -u)/com.planerbot.menubar
+  Log:                      ~/planer-bot-menubar.log
+
+  No sudo anywhere here. The app asks for admin rights only when you press
+  Start/Stop/Restart, through the native authorization dialog.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.planerbot.menubar</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/user/planer-bot/mac/build/PlanerBotMenu</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Bring it back if it ever dies; it is a tiny always-on UI element. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Needs the GUI session: NSStatusItem has nowhere to live without one. -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/user/planer-bot-menubar.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/user/planer-bot-menubar.log</string>
+</dict>
+</plist>
