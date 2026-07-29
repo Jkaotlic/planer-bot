@@ -13,6 +13,9 @@ export const employees = sqliteTable("employees", {
    *  every auth. `displayName` comes from the roster file as «Фамилия Имя», which
    *  is right for a work roster and wrong for saying hello. See `addressOf`. */
   tgFirstName: text(),
+  /** How this person asked to be addressed. Null → fall back to Telegram's name,
+   *  then to the roster's. See `addressOf` in @planer/shared. */
+  preferredName: text(),
   displayName: text().notNull(),
   phone: text(),
   isAdmin: integer({ mode: "boolean" }).notNull().default(false),
