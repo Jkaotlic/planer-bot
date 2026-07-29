@@ -230,6 +230,63 @@ describe("team schedule UI", () => {
     expect(markup).toContain('<strong aria-live="polite">Вт, 28 июля</strong>');
   });
 
+  it("shows the back-to-today pill with the mode's own label when onBack is supplied", () => {
+    const dayMarkup = renderToStaticMarkup(
+      createElement(TeamRangeNav, {
+        label: "Чт, 30 июля",
+        busy: false,
+        backLabel: "Сегодня",
+        onBack: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+      }),
+    );
+    expect(dayMarkup).toContain("↩ Сегодня");
+
+    const weekMarkup = renderToStaticMarkup(
+      createElement(TeamRangeNav, {
+        label: "28 июля – 3 авг",
+        busy: false,
+        backLabel: "Эта неделя",
+        onBack: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+      }),
+    );
+    expect(weekMarkup).toContain("↩ Эта неделя");
+  });
+
+  it("renders no pill at all when onBack is omitted — the current period takes no extra space", () => {
+    const markup = renderToStaticMarkup(
+      createElement(TeamRangeNav, {
+        label: "Сегодня, Ср 29 июля",
+        busy: false,
+        backLabel: "Сегодня",
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+      }),
+    );
+
+    expect(markup).not.toContain("↩");
+  });
+
+  it("disables the pill along with the arrows while busy", () => {
+    const markup = renderToStaticMarkup(
+      createElement(TeamRangeNav, {
+        label: "Чт, 30 июля",
+        busy: true,
+        backLabel: "Эта неделя",
+        onBack: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("↩ Эта неделя");
+    // Two chevrons plus the pill, all sharing the same `busy` gate.
+    expect(markup.match(/disabled=""/g)).toHaveLength(3);
+  });
+
   it("renders Today totals, chronological groups, full names, and no-time entries", () => {
     const timedShift = (
       id: number,
