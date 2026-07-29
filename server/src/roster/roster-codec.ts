@@ -89,6 +89,11 @@ export const CODE_TO_PRESET_NAME: Record<string, string> = {
   "dezh": "Дежурство · Телефон",
   "pokl": "Дежурство · Поклонка",
   "v19": "Дежурство · Вавилова 19",
+  // Резервный дежурный. In the August file it only ever lands on a Saturday or a
+  // Sunday, always beside exactly one person on `k32` — one works, one or two
+  // stand by. It is a work code, so a day that has only reserves on it is still
+  // not proposed as a holiday.
+  "rezerv": "Дежурство · Резерв",
 };
 /** Absence code -> category (stored as a date range, no times). */
 export const CODE_TO_ABSENCE: Record<string, EntryCategory> = {

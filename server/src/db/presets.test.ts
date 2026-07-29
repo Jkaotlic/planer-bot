@@ -12,12 +12,14 @@ const EXPECTED = [
   { id: 6, name: "Дежурство с 07:00",       category: "duty",  accent: "amber",  location: null,        start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true },
   { id: 7, name: "Дежурство · Телефон",     category: "duty",  accent: "rose",   location: null,        start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true },
   { id: 8, name: "Дежурство · Вавилова 19", category: "duty",  accent: "green",  location: "Вавилова 19", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true },
+  // Added by 0012 for the roster's `rezerv` — the reserve duty officer.
+  { id: 9, name: "Дежурство · Резерв", category: "duty",  accent: "emerald", location: null, start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true },
 ];
 
 describe("presets created by migration 0006", () => {
-  it("creates all eight with the confirmed decode values", () => {
+  it("creates every preset with the confirmed decode values", () => {
     const rows = makeTestDb().select().from(shiftTemplates).orderBy(shiftTemplates.id).all();
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(EXPECTED.length);
     for (const want of EXPECTED) {
       const row = rows.find((r) => r.id === want.id)!;
       expect({
@@ -45,6 +47,6 @@ describe("presets created by migration 0006", () => {
 
   it("gives every preset its own accent so they read apart", () => {
     const accents = makeTestDb().select().from(shiftTemplates).all().map((r) => r.accent);
-    expect(new Set(accents).size).toBe(8);
+    expect(new Set(accents).size).toBe(accents.length);
   });
 });
