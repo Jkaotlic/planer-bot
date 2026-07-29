@@ -10,6 +10,7 @@ import { TeamScreen } from "./screens/TeamScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
 import { AdminScreen } from "./screens/AdminScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
+import { withBusy, withoutBusy } from "./lib/busy-set";
 
 interface AppData {
   me: Me;
@@ -31,9 +32,23 @@ export function App() {
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busySwapId, setBusySwapId] = useState<number | null>(null);
-  const [busySlotId, setBusySlotId] = useState<number | null>(null);
-  const [busyOfferId, setBusyOfferId] = useState<number | null>(null);
+  // Sets, not single ids: several rows (two pending swaps, two open weekend
+  // slots) can each have their own request in flight, and a shared id would
+  // let a tap on one row re-enable another row's buttons mid-request.
+  const [busySwapIds, setBusySwapIds] = useState<ReadonlySet<number>>(new Set());
+  const [busySlotIds, setBusySlotIds] = useState<ReadonlySet<number>>(new Set());
+  const [busyOfferIds, setBusyOfferIds] = useState<ReadonlySet<number>>(new Set());
+  // Errors from a user's own tap (Принять/Отклонить/…) — shown right on the
+  // screen they tapped from, in human Russian regardless of what the server
+  // actually said (its reason codes, e.g. "not_pending", are not meant for
+  // display). Cleared on every new attempt and on leaving the tab.
+  const [swapError, setSwapError] = useState<string | null>(null);
+  const [weekendError, setWeekendError] = useState<string | null>(null);
+  // reloadData is a background refresh (tab switch, regained focus) the user
+  // never asked for directly, so its failure gets a quieter, app-wide notice
+  // instead of a per-screen error — nothing to retry by hand, it just says the
+  // data on screen might be stale, and clears itself once a refresh succeeds.
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,15 +94,21 @@ export function App() {
     await refreshSwaps();
   }
 
-  async function runSwapAction(id: number, action: (id: number) => Promise<void>) {
-    setBusySwapId(id);
+  /** `failureMessage` is a fixed, already-Russian sentence — never the
+   *  server's `err.message` — because a rejected swap action's reason is a
+   *  bare code like "not_pending" (the counterparty already answered it),
+   *  not something to show a worker verbatim. */
+  async function runSwapAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
+    setBusySwapIds((prev) => withBusy(prev, id));
+    setSwapError(null);
     try {
       await action(id);
       await refreshSwaps();
     } catch (err) {
       console.error("Swap action failed:", err);
+      setSwapError(failureMessage);
     } finally {
-      setBusySwapId(null);
+      setBusySwapIds((prev) => withoutBusy(prev, id));
     }
   }
 
@@ -115,8 +136,12 @@ export function App() {
         apiClient.getWeekendOffers(),
       ]);
       setData((prev) => (prev ? { ...prev, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers } : prev));
+      setRefreshError(null);
     } catch (err) {
       console.error("Refresh failed:", err);
+      // Quiet, not urgent — the worker didn't ask for this refresh, and what's
+      // already on screen is still whatever the last successful load showed.
+      setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
     }
   }
 
@@ -133,26 +158,31 @@ export function App() {
   }, []);
 
   async function handleInterest(slotId: number) {
-    setBusySlotId(slotId);
+    setBusySlotIds((prev) => withBusy(prev, slotId));
+    setWeekendError(null);
     try {
       await apiClient.expressInterest(slotId);
       await refreshWeekend();
     } catch (err) {
       console.error("Interest action failed:", err);
+      setWeekendError("Не получилось записаться на смену. Попробуй ещё раз.");
     } finally {
-      setBusySlotId(null);
+      setBusySlotIds((prev) => withoutBusy(prev, slotId));
     }
   }
 
-  async function runOfferAction(id: number, action: (id: number) => Promise<void>) {
-    setBusyOfferId(id);
+  /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`. */
+  async function runOfferAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
+    setBusyOfferIds((prev) => withBusy(prev, id));
+    setWeekendError(null);
     try {
       await action(id);
       await refreshWeekend();
     } catch (err) {
       console.error("Offer action failed:", err);
+      setWeekendError(failureMessage);
     } finally {
-      setBusyOfferId(null);
+      setBusyOfferIds((prev) => withoutBusy(prev, id));
     }
   }
 
@@ -210,28 +240,58 @@ export function App() {
       {tab === "swaps" && (
         <SwapsScreen
           swaps={data.swaps}
-          busyId={busySwapId}
-          onAccept={(id) => void runSwapAction(id, apiClient.acceptSwap)}
-          onDecline={(id) => void runSwapAction(id, apiClient.declineSwap)}
-          onCancel={(id) => void runSwapAction(id, apiClient.cancelSwap)}
+          busyIds={busySwapIds}
+          actionError={swapError}
+          onAccept={(id) =>
+            void runSwapAction(id, apiClient.acceptSwap, "Не получилось принять обмен — возможно, его уже обработали. Обнови экран и попробуй снова.")
+          }
+          onDecline={(id) =>
+            void runSwapAction(id, apiClient.declineSwap, "Не получилось отклонить обмен — возможно, его уже обработали. Обнови экран и попробуй снова.")
+          }
+          onCancel={(id) =>
+            void runSwapAction(id, apiClient.cancelSwap, "Не получилось отменить обмен — возможно, он уже решён. Обнови экран и попробуй снова.")
+          }
         />
       )}
       {tab === "weekend" && (
         <WeekendScreen
           slots={data.weekendSlots}
           offers={data.weekendOffers}
-          busySlotId={busySlotId}
-          busyOfferId={busyOfferId}
+          busySlotIds={busySlotIds}
+          busyOfferIds={busyOfferIds}
+          actionError={weekendError}
           onInterest={(id) => void handleInterest(id)}
-          onConfirm={(id) => void runOfferAction(id, apiClient.confirmOffer)}
-          onDecline={(id) => void runOfferAction(id, apiClient.declineOffer)}
+          onConfirm={(id) =>
+            void runOfferAction(id, apiClient.confirmOffer, "Не получилось подтвердить смену — возможно, её уже забрали. Обнови экран и попробуй снова.")
+          }
+          onDecline={(id) =>
+            void runOfferAction(id, apiClient.declineOffer, "Не получилось отказаться от смены. Попробуй ещё раз.")
+          }
         />
       )}
       {tab === "admin" && data.me.isAdmin && <AdminScreen />}
+      {refreshError && (
+        <div
+          role="status"
+          style={{
+            padding: "8px 16px",
+            textAlign: "center",
+            fontSize: 12.5,
+            color: "var(--tgui--hint_color)",
+            background: "var(--tgui--secondary_bg_color)",
+          }}
+        >
+          {refreshError}
+        </div>
+      )}
       <TabBar
         active={tab}
         onChange={(t) => {
           setTab(t);
+          // A stale action error from wherever we're leaving shouldn't greet us
+          // on the next visit to that tab.
+          setSwapError(null);
+          setWeekendError(null);
           // Leaving the Админ tab (or any switch) re-pulls data so edits show immediately.
           void reloadData();
         }}
