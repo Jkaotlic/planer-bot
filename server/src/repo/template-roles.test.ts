@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee } from "./employees";
 import { listActiveTemplates } from "./templates";
+import { createShift } from "./shifts";
 import {
   getTemplateRoles,
   getAllTemplateRoles,
   setTemplateRoles,
+  rotationCandidatesFor,
   UnknownEmployeesError,
 } from "./template-roles";
 import type { Db } from "../db/client";
@@ -78,6 +80,31 @@ describe("setTemplateRoles", () => {
     setTemplateRoles(db, night, { pool: [a], preference: { [a]: 2 } });
     setTemplateRoles(db, night, { pool: [], preference: {} });
     expect(getTemplateRoles(db, night)).toEqual({ pool: [], preference: {} });
+  });
+});
+
+describe("rotationCandidatesFor", () => {
+  it("ignores shifts dated after asOf when picking lastHeld — a schedule built weeks ahead", () => {
+    const db = makeTestDb();
+    const night = presetId(db, "Ночь");
+    const a = createEmployee(db, { displayName: "Иванов" }).id;
+
+    // The whole point: this shift is in the future relative to asOf below, so it must
+    // not count as "already held" yet — the rotation hint is computed as of asOf.
+    createShift(db, { date: "2026-08-15", start: "22:00", end: "06:00", category: "shift", employeeId: a, templateId: night });
+
+    const candidates = rotationCandidatesFor(db, night, "2026-08-03");
+    expect(candidates.find((c) => c.employeeId === a)?.lastHeld).toBeNull();
+  });
+
+  it("still picks up a past shift as lastHeld", () => {
+    const db = makeTestDb();
+    const night = presetId(db, "Ночь");
+    const a = createEmployee(db, { displayName: "Петров" }).id;
+    createShift(db, { date: "2026-07-01", start: "22:00", end: "06:00", category: "shift", employeeId: a, templateId: night });
+
+    const candidates = rotationCandidatesFor(db, night, "2026-08-03");
+    expect(candidates.find((c) => c.employeeId === a)?.lastHeld).toBe("2026-07-01");
   });
 });
 

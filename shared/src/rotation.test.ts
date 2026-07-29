@@ -93,4 +93,20 @@ describe("describeTurn", () => {
   it("says «сегодня» rather than «0 дней назад»", () => {
     expect(describeTurn(turn(0), "day")).toBe("Лапин (сегодня)");
   });
+
+  it("never renders a negative day count for someone scheduled in the future", () => {
+    // daysSince shouldn't go negative in practice (see rotationQueue's clamp below), but
+    // the formatter must not produce "-10 дней назад" even if it somehow received one.
+    expect(describeTurn(turn(-10), "day")).not.toContain("-10");
+    expect(describeTurn(turn(-10), "week")).not.toMatch(/-\d/);
+  });
+});
+
+describe("rotationQueue clamping", () => {
+  it("never reports a negative daysSince, even if lastHeld is after asOf", () => {
+    // Guards against a future-dated shift (e.g. a schedule built weeks ahead) leaking
+    // in as someone's "last held" date for a hint computed as of an earlier day.
+    const [first] = rotationQueue([person(1, "Забронирован", "2026-08-10")], ASOF);
+    expect(first!.daysSince).not.toBeLessThan(0);
+  });
 });

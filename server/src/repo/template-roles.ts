@@ -1,4 +1,4 @@
-import { and, eq, inArray, max } from "drizzle-orm";
+import { and, eq, inArray, lte, max } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { templatePool, templatePreference, employees, shifts, shiftTemplates } from "../db/schema";
 import type { RotationCandidate, RotationUnit } from "@planer/shared";
@@ -68,8 +68,13 @@ export function getAllTemplateRoles(db: Db): Map<number, TemplateRoles> {
  *
  * Reads history from the schedule itself rather than a separate counter, so it
  * stays right however entries got there — imported, distributed or typed in.
+ *
+ * `lastHeld` is bounded to `asOf`: this team's schedule is built weeks ahead, so
+ * without the bound a future-dated shift would count as "already held" before it
+ * has happened, which is backwards — mirrors rotationQueue's own "pure as of a
+ * date" contract (see shared/src/rotation.ts) instead of leaking future rows in.
  */
-export function rotationCandidatesFor(db: Db, templateId: number): RotationCandidate[] {
+export function rotationCandidatesFor(db: Db, templateId: number, asOf: string): RotationCandidate[] {
   const pool = new Set(getTemplateRoles(db, templateId).pool);
   const eligible = listActive(db).filter((employee) => pool.size === 0 || pool.has(employee.id));
 
@@ -77,7 +82,7 @@ export function rotationCandidatesFor(db: Db, templateId: number): RotationCandi
   for (const row of db
     .select({ employeeId: shifts.employeeId, date: max(shifts.date) })
     .from(shifts)
-    .where(eq(shifts.templateId, templateId))
+    .where(and(eq(shifts.templateId, templateId), lte(shifts.date, asOf)))
     .groupBy(shifts.employeeId)
     .all()) {
     if (row.employeeId != null && row.date) lastHeld.set(row.employeeId, row.date);
