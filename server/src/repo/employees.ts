@@ -116,6 +116,14 @@ export function setBirthDate(db: Db, id: number, birthDate: string | null): Empl
   return db.update(employees).set({ birthDate }).where(eq(employees.id, id)).returning().all()[0];
 }
 
+/**
+ * Sets or clears how this person is addressed. `null` hands the decision back to
+ * `addressOf`'s fallback chain rather than storing an empty greeting.
+ */
+export function setPreferredName(db: Db, id: number, preferredName: string | null): Employee | undefined {
+  return db.update(employees).set({ preferredName }).where(eq(employees.id, id)).returning().all()[0];
+}
+
 export function createAdminEmployee(
   db: Db,
   data: { telegramUserId: number; tgUsername?: string; tgFirstName?: string; displayName: string },
