@@ -26,6 +26,7 @@ import {
   setBirthDate,
   setInviteToken,
   setRemindersEnabled,
+  setPreferredName,
   rememberTelegramProfile,
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
@@ -34,7 +35,19 @@ import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
 import { teamNow } from "../util/team-time";
-import { isWeekend, isAbsence, countsForBalance, dateStr, dayNumber, rotationQueue, describeTurn, isBirthDate, addressOf } from "@planer/shared";
+import {
+  isWeekend,
+  isAbsence,
+  countsForBalance,
+  dateStr,
+  dayNumber,
+  rotationQueue,
+  describeTurn,
+  isBirthDate,
+  addressOf,
+  normalizePreferredName,
+  PREFERRED_NAME_MAX,
+} from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
@@ -138,21 +151,42 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // What to say hello with. The roster's «Фамилия Имя» is for lists, not for
       // greetings — see `addressOf`.
       address: addressOf(me),
+      /** What they typed into «Как ко мне обращаться», so the field can show it. */
+      preferredName: me.preferredName,
       isAdmin: c.get("auth").isAdmin,
       remindersEnabled: me.remindersEnabled,
     });
   });
 
-  /** The one setting a worker owns about themselves. Scoped to the caller by the
-   *  token: there is no employee id in the path, so nobody can mute anybody else. */
+  /** The settings a worker owns about themselves. Scoped to the caller by the
+   *  token: there is no employee id in the path, so nobody can touch anybody else.
+   *  A patch, not a form — the two fields live on different screens and are saved
+   *  by different gestures, so either may arrive alone. */
   app.patch("/api/me/settings", requireAuth(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { remindersEnabled?: unknown };
-    if (typeof body.remindersEnabled !== "boolean") {
+    const body = (await c.req.json().catch(() => ({}))) as { remindersEnabled?: unknown; preferredName?: unknown };
+    const hasReminders = body.remindersEnabled !== undefined;
+    const hasPreferred = body.preferredName !== undefined;
+    if (!hasReminders && !hasPreferred) return c.json({ error: "нечего сохранять" }, 400);
+    if (hasReminders && typeof body.remindersEnabled !== "boolean") {
       return c.json({ error: "remindersEnabled должен быть true или false" }, 400);
     }
-    const updated = setRemindersEnabled(db, c.get("auth").employeeId, body.remindersEnabled);
-    if (!updated) return c.json({ error: "not_found" }, 404);
-    return c.json({ remindersEnabled: updated.remindersEnabled });
+    const preferred = hasPreferred ? normalizePreferredName(body.preferredName) : null;
+    if (preferred && !preferred.ok) {
+      return c.json({ error: `Обращение — не длиннее ${PREFERRED_NAME_MAX} символов` }, 400);
+    }
+
+    const id = c.get("auth").employeeId;
+    let employee = getEmployeeById(db, id);
+    if (!employee) return c.json({ error: "not_found" }, 404);
+    if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
+    if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
+
+    return c.json({
+      remindersEnabled: employee.remindersEnabled,
+      preferredName: employee.preferredName,
+      // Returned so the greeting can update without a second round trip.
+      address: addressOf(employee),
+    });
   });
 
   app.get("/api/templates", requireAuth(db, config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));
@@ -189,7 +223,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     c.json({ employees: listActive(db).map((e) => ({ id: e.id, displayName: e.displayName })) }),
   );
 
-  app.get("/api/admin/employees", requireAdmin(db, config.jwtSecret), (c) => c.json({ employees: listActive(db) }));
+  // `address` is computed, not stored: the admin card shows what the bot will
+  // actually say, so it is obvious whose greeting still needs setting.
+  app.get("/api/admin/employees", requireAdmin(db, config.jwtSecret), (c) =>
+    c.json({ employees: listActive(db).map((employee) => ({ ...employee, address: addressOf(employee) })) }));
 
   app.post("/api/admin/employees", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
@@ -206,10 +243,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // valid edit; sending neither is not, so an empty body can't silently no-op.
   app.patch("/api/admin/employees/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown; birthDate?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown; birthDate?: unknown; preferredName?: unknown };
     const hasName = body.displayName !== undefined;
     const hasBirthday = body.birthDate !== undefined;
-    if (!hasName && !hasBirthday) return c.json({ error: "displayName is required" }, 400);
+    const hasPreferred = body.preferredName !== undefined;
+    if (!hasName && !hasBirthday && !hasPreferred) return c.json({ error: "displayName is required" }, 400);
 
     if (hasName && (typeof body.displayName !== "string" || body.displayName.trim().length === 0)) {
       return c.json({ error: "displayName is required" }, 400);
@@ -218,18 +256,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (hasBirthday && body.birthDate !== null && (typeof body.birthDate !== "string" || !isBirthDate(body.birthDate))) {
       return c.json({ error: "birthDate должен быть в виде ММ-ДД, например 05-08" }, 400);
     }
+    const preferred = hasPreferred ? normalizePreferredName(body.preferredName) : null;
+    if (preferred && !preferred.ok) {
+      return c.json({ error: `Обращение — не длиннее ${PREFERRED_NAME_MAX} символов` }, 400);
+    }
 
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
     if (hasName) employee = renameEmployee(db, id, (body.displayName as string).trim()) ?? employee;
     if (hasBirthday) employee = setBirthDate(db, id, body.birthDate as string | null) ?? employee;
+    if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
     recordAudit(db, "employee_updated", c.get("auth").employeeId, {
       employeeId: id,
       displayName: employee.displayName,
       ...(hasBirthday ? { birthDate: employee.birthDate } : {}),
+      ...(hasPreferred ? { preferredName: employee.preferredName } : {}),
     });
-    return c.json({ employee });
+    return c.json({ employee: { ...employee, address: addressOf(employee) } });
   });
 
   // Move a worker to a position in the list. The number is what the admin sees
