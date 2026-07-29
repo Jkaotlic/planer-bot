@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recipientsPhrase, recipientsSubject, statusOf, whenLabel } from "./AdminBirthdays";
+import { isCurrentRound, recipientsPhrase, recipientsSubject, statusOf, whenLabel } from "./AdminBirthdays";
 import type { BirthdayCampaign, UpcomingBirthday } from "../../api/client";
 
 function campaign(patch: Partial<BirthdayCampaign> = {}): BirthdayCampaign {
@@ -77,9 +77,40 @@ describe("recipientsSubject", () => {
   });
 });
 
-// The console carries its own copy of these four helpers on purpose — this app
-// depends on neither it nor its styles. The identical expectations live in
+// The console carries its own copy of the four helpers above on purpose — this
+// app depends on neither it nor its styles. The identical expectations live in
 // admin/src/screens/birthdays.test.ts; if the two ever disagree, one of the two
 // files starts failing. The one deliberate difference is the chip's wording —
 // «Нет ссылки» and «Готово» rather than «Нет ссылки на сбор» and «Готово к
 // отправке» — because on a phone the chip shares its row with the name and date.
+
+// `isCurrentRound`, below, has no console counterpart: the console's history
+// list doesn't route through another list's editor, so it never had this bug.
+describe("isCurrentRound", () => {
+  it("is openable when the exact same campaign shows up in the upcoming list", () => {
+    const row = campaign({ id: 7, employeeId: 2 });
+    const upcoming = [birthday({ employeeId: 2, campaign: row })];
+    expect(isCurrentRound(row, upcoming)).toBe(true);
+  });
+
+  it("is not openable when the upcoming list has moved on to a different round — the point of the check", () => {
+    // Same employee, but the upcoming list now resolves to next year's round
+    // (a different id). Routing the old row through the upcoming editor would
+    // open — and create — that different round.
+    const stale = campaign({ id: 7, employeeId: 2 });
+    const next = campaign({ id: 8, employeeId: 2 });
+    const upcoming = [birthday({ employeeId: 2, campaign: next })];
+    expect(isCurrentRound(stale, upcoming)).toBe(false);
+  });
+
+  it("is not openable for an employee absent from the upcoming list — archived, most likely", () => {
+    const row = campaign({ id: 7, employeeId: 2 });
+    expect(isCurrentRound(row, [])).toBe(false);
+  });
+
+  it("is not openable when the upcoming entry for that person has no campaign yet", () => {
+    const row = campaign({ id: 7, employeeId: 2 });
+    const upcoming = [birthday({ employeeId: 2, campaign: null })];
+    expect(isCurrentRound(row, upcoming)).toBe(false);
+  });
+});
