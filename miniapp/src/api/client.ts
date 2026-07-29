@@ -6,6 +6,7 @@ import {
   mockDeclineSwap,
   mockGetMe,
   mockSetRemindersEnabled,
+  mockSetPreferredName,
   mockGetMyShifts,
   mockGetSwaps,
   mockGetTeamSchedule,
@@ -21,6 +22,7 @@ import {
   mockRestoreEmployee,
   mockSetEmployeeAdmin,
   mockRenameEmployee,
+  mockSetEmployeePreferredName,
   mockSetBirthDate,
   mockReorderEmployee,
   mockGetEmployeeInvite,
@@ -97,6 +99,9 @@ export interface Me {
   /** What to greet this person with: their Telegram first name when we know it.
    *  Never derive this from `displayName` — see `addressOf` in @planer/shared. */
   address: string;
+  /** What they typed into «Как ко мне обращаться». Null → `address` came from
+   *  Telegram or from the roster. */
+  preferredName: string | null;
   isAdmin: boolean;
   /** Their own shift-reminder switch. */
   remindersEnabled: boolean;
@@ -183,6 +188,10 @@ export interface Employee {
   telegramUserId: number | null;
   /** «MM-DD» — day and month of their birthday, or null if not given. */
   birthDate: string | null;
+  /** Set by the worker or by an admin; null falls back through Telegram to the roster. */
+  preferredName: string | null;
+  /** What the bot will actually call them — computed server-side by `addressOf`. */
+  address: string;
 }
 
 /** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
@@ -383,6 +392,8 @@ export interface ApiClient {
   getMe(): Promise<Me>;
   /** Turns this person's own shift reminders on or off. */
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
+  /** `null` clears it and hands the greeting back to Telegram's name. */
+  setPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }>;
   getMyShifts(from: string): Promise<Shift[]>;
   getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
@@ -406,6 +417,7 @@ export interface ApiClient {
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   renameEmployee(id: number, displayName: string): Promise<void>;
+  setEmployeePreferredName(id: number, preferredName: string | null): Promise<void>;
   /** `null` clears the birthday. */
   setBirthDate(id: number, birthDate: string | null): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
@@ -649,6 +661,9 @@ export const realClient: ApiClient = {
     return res.remindersEnabled;
   },
 
+  setPreferredName: (preferredName) =>
+    authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
+
   async getMyShifts(from) {
     const { shifts } = await authorizedGet<ShiftsResponse>(`/api/my/shifts?from=${encodeURIComponent(from)}`);
     return shifts;
@@ -726,6 +741,9 @@ export const realClient: ApiClient = {
 
   async renameEmployee(id, displayName) {
     await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
+  },
+  async setEmployeePreferredName(id, preferredName) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, { preferredName });
   },
   getEmployeeInvite(id, regenerate = false) {
     return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
@@ -870,6 +888,7 @@ export const realClient: ApiClient = {
 const devClient: ApiClient = {
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
+  setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getMyShifts: (from) => mockGetMyShifts(from),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getSwaps: () => mockGetSwaps(),
@@ -889,6 +908,7 @@ const devClient: ApiClient = {
   restoreEmployee: (id) => mockRestoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
+  setEmployeePreferredName: (id, preferredName) => mockSetEmployeePreferredName(id, preferredName),
   setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
   reorderEmployee: (id, position) => mockReorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),

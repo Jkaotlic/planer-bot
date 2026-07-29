@@ -147,6 +147,7 @@ export function AdminEmployeesScreen() {
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
                 onToggleAdmin={() => withBusy(e.id, () => apiClient.setEmployeeAdmin(e.id, !e.isAdmin))}
                 onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
+                onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
                 onShowInvite={() => void showInvite(e)}
               />
             ))
@@ -165,6 +166,7 @@ export function AdminEmployeesScreen() {
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.restoreEmployee(e.id))}
                 onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
+                onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
                 onShowInvite={() => void showInvite(e)}
               />
             ))
@@ -182,6 +184,7 @@ function EmployeeRow({
   onAction,
   onToggleAdmin,
   onRename,
+  onPreferredName,
   onShowInvite,
   position,
   onReorder,
@@ -200,6 +203,8 @@ function EmployeeRow({
   onToggleAdmin?: () => void;
   /** When provided, the worker can be renamed inline. */
   onRename?: (name: string) => void;
+  /** When provided, an admin can set how the bot addresses this worker. */
+  onPreferredName?: (preferredName: string | null) => void;
   /** When provided, an unlinked worker's invite link can be re-shown. */
   onShowInvite?: () => void;
 }) {
@@ -207,6 +212,40 @@ function EmployeeRow({
   const linked = employee.telegramUserId != null;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(employee.displayName);
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [addressDraft, setAddressDraft] = useState(employee.preferredName ?? "");
+
+  if (editingAddress) {
+    return (
+      <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <Input
+          header="Обращение"
+          placeholder={employee.address}
+          value={addressDraft}
+          disabled={busy}
+          onChange={(e) => setAddressDraft(e.target.value)}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button
+            size="s"
+            mode="filled"
+            stretched
+            loading={busy}
+            disabled={busy}
+            onClick={() => {
+              onPreferredName?.(addressDraft.trim() || null);
+              setEditingAddress(false);
+            }}
+          >
+            Сохранить
+          </Button>
+          <Button size="s" mode="gray" disabled={busy} onClick={() => { setAddressDraft(employee.preferredName ?? ""); setEditingAddress(false); }}>
+            Отмена
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (editing) {
     return (
@@ -249,6 +288,10 @@ function EmployeeRow({
           <div style={{ fontWeight: 600, fontSize: 15.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {employee.displayName}
           </div>
+          {/* What the bot will actually say. Shown always, not «when it differs
+              from the first word of displayName» — guessing which word is the
+              given name is exactly what this whole change refuses to do. */}
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5 }}>Бот зовёт: {employee.address}</div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 2, fontSize: 13 }}>
             <span style={{ color: linked ? "var(--tgui--hint_color)" : "var(--tgui--destructive_text_color)" }}>
               {linked ? "привязан" : "не привязан"}
@@ -269,6 +312,11 @@ function EmployeeRow({
         {onRename && (
           <Button size="s" mode="bezeled" disabled={busy} onClick={() => { setDraft(employee.displayName); setEditing(true); }}>
             ✎ Имя
+          </Button>
+        )}
+        {onPreferredName && (
+          <Button size="s" mode="bezeled" disabled={busy} onClick={() => { setAddressDraft(employee.preferredName ?? ""); setEditingAddress(true); }}>
+            ✎ Обращение
           </Button>
         )}
         {onShowInvite && !linked && (
