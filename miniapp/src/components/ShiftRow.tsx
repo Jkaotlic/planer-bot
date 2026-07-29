@@ -10,15 +10,31 @@ export interface ShiftRowProps {
   templates: readonly Template[];
   /** Opens the "Предложить обмен" flow for this shift. Omit to render the row read-only (no "Обменять" pill). */
   onSwap?: (shift: Shift) => void;
+  /** Today's row is marked: an accent rail on the left and a «Сегодня» chip. */
+  isToday?: boolean;
 }
 
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
-export function ShiftRow({ shift, templates, onSwap }: ShiftRowProps) {
+export function ShiftRow({ shift, templates, onSwap, isToday }: ShiftRowProps) {
   const isSwappable = shift.category === "shift";
 
   return (
     <Cell
+      // Styled on the `Cell` itself, not on a wrapper `div`: `Section` reads its
+      // own children to decide where dividers go, and an extra element between
+      // them changes that. `CellProps` extends `AllHTMLAttributes`, so `style`
+      // lands on the row's root element.
+      style={
+        isToday
+          ? {
+              // A rail rather than a filled row: the entry chip inside already
+              // carries the preset's colour, and two backgrounds fight.
+              boxShadow: "inset 3px 0 var(--tgui--link_color)",
+              background: "color-mix(in srgb, var(--tgui--link_color) 7%, transparent)",
+            }
+          : undefined
+      }
       before={<DayBadge date={shift.date} endDate={shift.endDate} />}
       // The chip already names the entry ("Утро" / "Отпуск"), so it stands in for
       // the subtitle that used to repeat that same label right above it. Unlike
@@ -27,8 +43,30 @@ export function ShiftRow({ shift, templates, onSwap }: ShiftRowProps) {
       description={<EntryChip entry={shift} templates={templates} />}
       after={isSwappable && onSwap ? <SwapChip onClick={() => onSwap(shift)} /> : undefined}
     >
-      {formatTimeRange(shift)}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        {formatTimeRange(shift)}
+        {isToday && <TodayChip />}
+      </span>
     </Cell>
+  );
+}
+
+/** The text half of the "today" signal — colour is never the only carrier. */
+function TodayChip() {
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: 0.2,
+        borderRadius: 999,
+        padding: "2px 8px",
+        color: "var(--tgui--button_text_color)",
+        background: "var(--tgui--link_color)",
+      }}
+    >
+      Сегодня
+    </span>
   );
 }
 

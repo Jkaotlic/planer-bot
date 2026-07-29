@@ -84,6 +84,17 @@ export function formatDayLabel(iso: string): string {
   return `${weekdayShort(iso)}, ${monthDayFormatter.format(parseISODate(iso))}`;
 }
 
+/**
+ * "Сегодня, Ср 29 июля" on the current day, "Чт, 30 июля" on any other.
+ *
+ * `today` is passed in rather than read from the clock so the function stays
+ * pure and testable — the screens hand it `toISODate(new Date())`.
+ */
+export function formatDayLabelRelative(iso: string, today: string): string {
+  if (iso !== today) return formatDayLabel(iso);
+  return `Сегодня, ${weekdayShort(iso)} ${monthDayFormatter.format(parseISODate(iso))}`;
+}
+
 /** "16–17 июл", or "28 июл – 3 авг" across a month boundary — for the day badge. */
 export function formatShortDateRange(startIso: string, endIso: string): string {
   const start = parseISODate(startIso);
@@ -102,4 +113,16 @@ export function formatWeekRangeLabel(monday: Date, sunday: Date): string {
 /** First token of a full display name, e.g. "Аня Смирнова" -> "Аня". */
 export function firstName(displayName: string): string {
   return displayName.trim().split(/\s+/)[0] ?? displayName;
+}
+
+/**
+ * Does the shown period already contain today? The "back to today" affordance
+ * hides when it does, so it never occupies space it cannot use.
+ *
+ * Both arguments are "YYYY-MM-DD"; `today` is passed in rather than read from
+ * the clock, so this stays pure.
+ */
+export function isCurrentPeriod(mode: "day" | "week", shownIso: string, todayIso: string): boolean {
+  if (mode === "day") return shownIso === todayIso;
+  return toISODate(mondayOf(parseISODate(shownIso))) === toISODate(mondayOf(parseISODate(todayIso)));
 }

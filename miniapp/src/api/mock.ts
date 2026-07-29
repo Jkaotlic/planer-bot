@@ -17,6 +17,7 @@ import type {
   JournalPage,
   BirthdayCampaign,
   BirthdayPreview,
+  CampaignListRow,
   UpcomingBirthday,
   ShiftCountsReport,
   Shift,
@@ -50,6 +51,7 @@ export const MOCK_ME: Me = {
   // Telegram's own first name — deliberately NOT derived from displayName, which
   // in the live roster is «Фамилия Имя». See `addressOf` in @planer/shared.
   address: "Аня",
+  preferredName: null,
   isAdmin: true,
   remindersEnabled: true,
 };
@@ -60,6 +62,23 @@ export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean
   return enabled;
 }
 
+export async function mockSetPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }> {
+  await delay(200);
+  const value = preferredName?.trim() || null;
+  MOCK_ME.preferredName = value;
+  // Mirrors `addressOf`: chosen name, then Telegram's, then the roster's.
+  MOCK_ME.address = value ?? "Аня";
+  return { preferredName: value, address: MOCK_ME.address };
+}
+
+export async function mockSetEmployeePreferredName(id: number, preferredName: string | null): Promise<void> {
+  await delay(200);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (!employee) return;
+  employee.preferredName = preferredName?.trim() || null;
+  employee.address = employee.preferredName ?? employee.displayName;
+}
+
 /**
  * In-memory roster shared by the worker screens (name lookups) and the admin
  * "Работники" screen (full rows). Mutated live by create/archive/restore so
@@ -68,13 +87,13 @@ export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean
  * employee-without-shifts state.
  */
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14" },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05" },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31" },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null },
-  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29" },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова" },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров" },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков" },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова" },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов" },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова" },
+  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29", preferredName: null, address: "Нина Белова" },
 ];
 
 function personName(employeeId: number): string {
@@ -433,7 +452,7 @@ export async function mockGetAdminEmployees(): Promise<Employee[]> {
 export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
   await delay(250);
   const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null };
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: name };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
   return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
@@ -460,7 +479,11 @@ export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promis
 export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
   await delay(150);
   const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.displayName = displayName;
+  if (!employee) return;
+  employee.displayName = displayName;
+  // Mirrors `mockSetEmployeePreferredName`: address follows displayName unless
+  // a preferredName overrides it — renaming must not leave a stale address.
+  employee.address = employee.preferredName ?? displayName;
 }
 
 /** Mirrors the server: move one worker, then renumber everyone contiguously. */
@@ -819,6 +842,7 @@ function campaignFor(employeeId: number, create: boolean): BirthdayCampaign | nu
     id: CAMPAIGNS.length + 1, employeeId, year, celebratedOn,
     collectUrl: null, messageText: null, status: "pending",
     adminNotifiedAt: null, sentAt: null, sentCount: 0,
+    scheduledSendOn: null, scheduleNotifiedAt: null,
   };
   CAMPAIGNS.push(created);
   return created;
@@ -859,7 +883,7 @@ export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
 
 export async function mockSaveBirthdayCampaign(
   employeeId: number,
-  patch: { collectUrl?: string | null; messageText?: string | null },
+  patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null },
 ): Promise<BirthdayCampaign> {
   await delay(180);
   const campaign = campaignFor(employeeId, true);
@@ -870,8 +894,33 @@ export async function mockSaveBirthdayCampaign(
     campaign.collectUrl = url;
   }
   if (patch.messageText !== undefined) campaign.messageText = patch.messageText?.trim() || null;
+  if (patch.scheduledSendOn !== undefined) {
+    const value = patch.scheduledSendOn;
+    if (value !== null) {
+      // Mirrors the server: within [today, celebratedOn], except resubmitting
+      // the round's own already-stored date — that's not an edit, so it isn't
+      // held to the "not in the past" rule once today has moved past it.
+      const today = toISODate(new Date());
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Дата напоминания должна быть в виде ГГГГ-ММ-ДД");
+      if (value !== campaign.scheduledSendOn && value < today) throw new Error("Дата напоминания уже прошла");
+      if (value > campaign.celebratedOn) throw new Error("Напоминать после самого дня рождения уже поздно");
+    }
+    if (value !== campaign.scheduledSendOn) campaign.scheduleNotifiedAt = null;
+    campaign.scheduledSendOn = value;
+  }
   if (campaign.status !== "sent") campaign.status = campaign.collectUrl ? "ready" : "pending";
   return { ...campaign };
+}
+
+export async function mockGetBirthdayCampaigns(): Promise<CampaignListRow[]> {
+  await delay(200);
+  return [...CAMPAIGNS]
+    .sort((a, b) => b.celebratedOn.localeCompare(a.celebratedOn))
+    .flatMap((campaign) => {
+      const employee = EMPLOYEES.find((e) => e.id === campaign.employeeId);
+      if (!employee?.birthDate) return [];
+      return [{ campaign: { ...campaign }, displayName: employee.displayName, birthDateLabel: formatBirthDate(employee.birthDate) }];
+    });
 }
 
 export async function mockGetBirthdayPreview(employeeId: number): Promise<BirthdayPreview> {
@@ -1052,7 +1101,11 @@ export async function mockApplyRosterImport(
   for (const resolution of resolutions) {
     if (resolution.action === "rename") {
       const employee = EMPLOYEES.find((item) => item.id === resolution.employeeId);
-      if (employee) employee.displayName = resolution.csvName;
+      if (employee) {
+        employee.displayName = resolution.csvName;
+        // Same rule as `mockRenameEmployee`/`mockSetEmployeePreferredName`.
+        employee.address = employee.preferredName ?? resolution.csvName;
+      }
     } else {
       EMPLOYEES.push({
         id: Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1,
@@ -1061,6 +1114,8 @@ export async function mockApplyRosterImport(
         isActive: true,
         telegramUserId: null,
         birthDate: null,
+        preferredName: null,
+        address: resolution.csvName,
       });
     }
   }
