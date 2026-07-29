@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate } from "@planer/shared";
 import type { Db } from "../db/client";
 import { birthdayCampaigns, employees, type BirthdayCampaign, type Employee } from "../db/schema";
@@ -215,6 +215,38 @@ export function markAdminNotified(db: Db, campaignId: number, when: Date): void 
     .set({ adminNotifiedAt: when })
     .where(eq(birthdayCampaigns.id, campaignId))
     .run();
+}
+
+/**
+ * Rounds whose reminder day is today and which have not been reminded about.
+ * A round already sent is skipped: there is nothing left to remind anyone of.
+ */
+export function campaignsScheduledFor(db: Db, date: string): BirthdayCampaign[] {
+  return db
+    .select()
+    .from(birthdayCampaigns)
+    .where(and(eq(birthdayCampaigns.scheduledSendOn, date), isNull(birthdayCampaigns.scheduleNotifiedAt)))
+    .all()
+    .filter((campaign) => campaign.status !== "sent");
+}
+
+/** Records that the scheduled reminder went out, so it goes out once. */
+export function markScheduleNotified(db: Db, campaignId: number, when: Date): void {
+  db.update(birthdayCampaigns)
+    .set({ scheduleNotifiedAt: when })
+    .where(eq(birthdayCampaigns.id, campaignId))
+    .run();
+}
+
+/**
+ * The reminder an admin asked for. Same nominative rule as `defaultMessage` —
+ * we store one display name and nothing that would let us decline it.
+ */
+export function scheduleNoticeMessage(name: string, birthDateLabel: string, collectUrl: string | null): string {
+  const lines = [`⏰ Пора разослать сбор — ${name}, день рождения ${birthDateLabel}.`];
+  if (collectUrl) lines.push("", `Ссылка: ${collectUrl}`);
+  lines.push("", "Открой «Дни рождения» в мини-приложении и нажми «Разослать».");
+  return lines.join("\n");
 }
 
 export interface CampaignListRow {
