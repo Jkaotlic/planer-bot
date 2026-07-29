@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { isIdenticalShift } from "@planer/shared";
 import { apiClient, type Me, type Shift, type SwapRequest, type Template, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -172,8 +173,12 @@ export function App() {
   }
 
   if (proposingFor) {
+    // Don't offer a swap that would be a no-op (same day, same kind of shift as
+    // the one being given up) — the server would reject it anyway, but not
+    // offering it is better than a rejection after the tap. Same predicate the
+    // server uses, so the two never drift apart.
     const colleagueShifts = data.teamShifts.filter(
-      (s) => s.category === "shift" && s.employeeId !== data.me.id,
+      (s) => s.category === "shift" && s.employeeId !== data.me.id && !isIdenticalShift(proposingFor, s),
     );
     return (
       <ProposeSwapScreen

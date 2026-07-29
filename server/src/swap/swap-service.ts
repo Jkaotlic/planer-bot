@@ -1,5 +1,5 @@
 import { and, eq, ne, or } from "drizzle-orm";
-import { isSwappable, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
+import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, auditLog, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
@@ -10,8 +10,8 @@ export type SwapOutcome =
   | { ok: true; request: SwapRequest; counterpartyId: number }
   | { ok: false; reason: string };
 
-function toDomain(s: DbShift): DomainShift {
-  return { id: s.id, date: s.date, start: s.start as string, end: s.end as string, templateId: s.templateId, title: s.title, employeeId: s.employeeId, note: s.note };
+function toDomain(s: DbShift): DomainShift & { category: DbShift["category"] } {
+  return { id: s.id, date: s.date, start: s.start as string, end: s.end as string, templateId: s.templateId, title: s.title, employeeId: s.employeeId, note: s.note, category: s.category };
 }
 
 function timedOthers(db: Db, employeeId: number, excludeShiftId: number): DomainShift[] {
@@ -31,6 +31,8 @@ export function createSwap(
   if (toShift.employeeId == null) return { ok: false, reason: "target_unassigned" };
   if (toShift.employeeId === input.fromEmployeeId) return { ok: false, reason: "same_person" };
   if (!isSwappable(fromShift.category) || !isSwappable(toShift.category)) return { ok: false, reason: "not_swappable" };
+  // A no-op swap: same day, same kind of shift — nothing would actually change hands.
+  if (isIdenticalShift(fromShift, toShift)) return { ok: false, reason: "identical-shift" };
   if (hasPendingSwap(db, input.fromShiftId, input.toShiftId)) return { ok: false, reason: "duplicate" };
   const request = createSwapRequest(db, {
     fromEmployeeId: input.fromEmployeeId,
