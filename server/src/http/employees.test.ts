@@ -127,6 +127,24 @@ describe("archive / restore employee endpoints", () => {
     expect((await afterRestore.json()).employees.some((e: { id: number }) => e.id === w.id)).toBe(true);
   });
 
+  it("journals employee_archived and employee_restored with the admin as actor", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const adminEmployeeId = getByTelegramId(db, 111)!.id;
+
+    await app.request(`/api/admin/employees/${w.id}/archive`, authedJson(admin, {}));
+    const archivedRow = listRecentAudit(db, 5).find((a) => a.type === "employee_archived")!;
+    expect(archivedRow.actorEmployeeId).toBe(adminEmployeeId);
+    expect(archivedRow.payload).toMatchObject({ employeeId: w.id, displayName: "Игорь" });
+
+    await app.request(`/api/admin/employees/${w.id}/restore`, authedJson(admin, {}));
+    const restoredRow = listRecentAudit(db, 5).find((a) => a.type === "employee_restored")!;
+    expect(restoredRow.actorEmployeeId).toBe(adminEmployeeId);
+    expect(restoredRow.payload).toMatchObject({ employeeId: w.id, displayName: "Игорь" });
+  });
+
   it("gates archive/restore to admins (403) and 404s an unknown id", async () => {
     const db = makeTestDb();
     const w = worker(db, "Игорь", 333);
@@ -167,9 +185,9 @@ describe("GET /api/admin/events", () => {
     expect(events.status).toBe(200);
     const body = await events.json();
     expect(body.events.length).toBeGreaterThan(0);
-    const swapDone = body.events.find((e: { type: string }) => e.type === "swap_done");
-    expect(swapDone).toBeDefined();
-    expect(swapDone.actorName).toBe("Игорь");
+    const swapAccepted = body.events.find((e: { type: string }) => e.type === "swap_accepted");
+    expect(swapAccepted).toBeDefined();
+    expect(swapAccepted.actorName).toBe("Игорь");
     // newest-first
     const timestamps = body.events.map((e: { createdAt: string | number }) => new Date(e.createdAt).getTime());
     expect([...timestamps]).toEqual([...timestamps].sort((a, b) => b - a));
@@ -199,6 +217,24 @@ describe("POST /api/admin/employees/:id/role", () => {
     const down = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: false }));
     expect(down.status).toBe(200);
     expect(getEmployeeById(db, w.id)?.isAdmin).toBe(false);
+  });
+
+  it("journals employee_admin_changed, actored by the granting admin, for both grant and revoke", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111);
+    const adminEmployeeId = getByTelegramId(db, 111)!.id;
+
+    await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: true }));
+    const granted = listRecentAudit(db, 5).find((a) => a.type === "employee_admin_changed")!;
+    expect(granted.actorEmployeeId).toBe(adminEmployeeId);
+    expect(granted.payload).toMatchObject({ employeeId: w.id, displayName: "Игорь", isAdmin: true });
+
+    await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: false }));
+    const revoked = listRecentAudit(db, 5).find((a) => a.type === "employee_admin_changed" && (a.payload as { isAdmin: boolean }).isAdmin === false)!;
+    expect(revoked.actorEmployeeId).toBe(adminEmployeeId);
+    expect(revoked.payload).toMatchObject({ employeeId: w.id, displayName: "Игорь", isAdmin: false });
   });
 
   it("refuses to demote the last admin (400 last_admin)", async () => {

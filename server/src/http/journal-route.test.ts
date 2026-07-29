@@ -102,6 +102,56 @@ describe("GET /api/admin/journal", () => {
     linkTelegramAccount(db, "inv-1", 222);
     expect((await app.request("/api/admin/journal", auth(await tokenFor(app, 222)))).status).toBe(403);
   });
+
+  it("filters by actor, and offers only people who actually did something", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const anya = createEmployee(db, { displayName: "Аня" }).id;
+    const igor = createEmployee(db, { displayName: "Игорь" }).id;
+    createEmployee(db, { displayName: "Марк" }); // never acts — must not show up as an actor
+
+    recordAudit(db, "entry_created", anya, { entryId: 1 });
+    recordAudit(db, "entry_created", igor, { entryId: 2 });
+    recordAudit(db, "entry_created", igor, { entryId: 3 });
+    recordAudit(db, "roster_import", null, {}); // the bot's own tick — no author
+
+    const forAnya = await (await app.request(`/api/admin/journal?actor=${anya}`, auth(token))).json();
+    expect(forAnya.total).toBe(1);
+    expect(forAnya.events[0].payload).toEqual({ entryId: 1 });
+
+    const forIgor = await (await app.request(`/api/admin/journal?actor=${igor}`, auth(token))).json();
+    expect(forIgor.total).toBe(2);
+
+    const all = await (await app.request("/api/admin/journal", auth(token))).json();
+    expect(all.total).toBe(4); // the null-actor row is still in the unfiltered feed
+    // "Аня" sorts before "Игорь"; "Марк" never acted, so he's absent even though he's an employee.
+    expect(all.availableActors).toEqual([
+      { id: anya, displayName: "Аня" },
+      { id: igor, displayName: "Игорь" },
+    ]);
+  });
+
+  it("rejects a non-numeric actor (400)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    expect((await app.request("/api/admin/journal?actor=abc", auth(token))).status).toBe(400);
+    expect((await app.request("/api/admin/journal?actor=", auth(token))).status).toBe(400);
+  });
+
+  it("never matches a null-actor event even when nothing else narrows the query", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const anya = createEmployee(db, { displayName: "Аня" }).id;
+    recordAudit(db, "birthday_admin_notice", null, {}); // the bot's tick, no author
+    recordAudit(db, "entry_created", anya, { entryId: 1 });
+
+    const res = await (await app.request(`/api/admin/journal?actor=${anya}`, auth(token))).json();
+    expect(res.total).toBe(1);
+    expect(res.events.every((e: { actorName: string | null }) => e.actorName !== null)).toBe(true);
+  });
 });
 
 describe("GET /api/admin/reports/shift-counts", () => {

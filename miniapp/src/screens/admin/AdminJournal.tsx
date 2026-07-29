@@ -14,7 +14,15 @@ const TYPE_LABELS: Record<string, string> = {
   template_roles_changed: "Изменено «кто что может»",
   template_rotation_changed: "Изменена очередь",
   roster_import: "Загрузка графика из CSV",
+  swap_proposed: "Предложен обмен",
   swap_accepted: "Обмен состоялся",
+  swap_declined: "Обмен отклонён",
+  swap_cancelled: "Обмен отменён",
+  employee_archived: "Работник архивирован",
+  employee_restored: "Работник восстановлен",
+  employee_admin_changed: "Изменены права админа",
+  weekend_slot_created: "Открыта смена на выходной",
+  weekend_assigned: "Выходная смена назначена",
   birthday_sent: "Разослан сбор на день рождения",
   birthday_admin_notice: "Напоминание админам о дне рождения",
 };
@@ -156,13 +164,14 @@ const PAGE = 30;
 function History() {
   const [page, setPage] = useState<JournalPage | null>(null);
   const [type, setType] = useState("");
+  const [actor, setActor] = useState("");
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     apiClient
-      .getJournal({ types: type ? [type] : [], limit: PAGE, offset })
+      .getJournal({ types: type ? [type] : [], actor: actor ? Number(actor) : undefined, limit: PAGE, offset })
       .then((next) => {
         if (!cancelled) setPage(next);
       })
@@ -172,7 +181,7 @@ function History() {
     return () => {
       cancelled = true;
     };
-  }, [type, offset]);
+  }, [type, actor, offset]);
 
   if (error) {
     return (
@@ -213,6 +222,25 @@ function History() {
             {page.availableTypes.map((available) => (
               <option value={available} key={available}>
                 {typeLabel(available)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={actor}
+            onChange={(e) => {
+              setOffset(0);
+              setActor(e.target.value);
+            }}
+            style={{
+              width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 8,
+              border: "1px solid var(--tgui--outline)", background: "var(--tgui--secondary_bg_color)",
+              color: "var(--tgui--text_color)", font: "inherit",
+            }}
+          >
+            <option value="">Все люди</option>
+            {page.availableActors.map((available) => (
+              <option value={String(available.id)} key={available.id}>
+                {available.displayName}
               </option>
             ))}
           </select>

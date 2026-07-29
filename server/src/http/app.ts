@@ -302,6 +302,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = Number(c.req.param("id"));
     const employee = archiveEmployee(db, id, teamNow(config.teamTz).date);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    recordAudit(db, "employee_archived", c.get("auth").employeeId, { employeeId: id, displayName: employee.displayName });
     return c.json({ ok: true });
   });
 
@@ -309,6 +310,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = Number(c.req.param("id"));
     const employee = restoreEmployee(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    recordAudit(db, "employee_restored", c.get("auth").employeeId, { employeeId: id, displayName: employee.displayName });
     return c.json({ ok: true });
   });
 
@@ -324,6 +326,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return c.json({ error: "last_admin" }, 400);
     }
     const employee = setEmployeeAdmin(db, id, body.isAdmin);
+    recordAudit(db, "employee_admin_changed", c.get("auth").employeeId, {
+      employeeId: id,
+      displayName: employee?.displayName ?? target.displayName,
+      isAdmin: body.isAdmin,
+    });
     return c.json({ employee });
   });
 
@@ -484,12 +491,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
     const types = (c.req.query("types") ?? "").split(",").map((t) => t.trim()).filter(Boolean);
 
-    const page = queryAudit(db, { types, from, to, limit, offset });
+    const actorParam = c.req.query("actor");
+    let actorEmployeeId: number | undefined;
+    if (actorParam !== undefined) {
+      if (actorParam.trim() === "" || !Number.isFinite(Number(actorParam))) {
+        return c.json({ error: "actor must be a number" }, 400);
+      }
+      actorEmployeeId = Number(actorParam);
+    }
+
+    const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId });
     return c.json({
       total: page.total,
       limit,
       offset,
       availableTypes: page.availableTypes,
+      availableActors: page.availableActors,
       events: page.rows.map((row) => ({
         id: row.id,
         type: row.type,
@@ -612,12 +629,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return `${dateLabel} · ${s.start}–${s.end}${title}`;
   };
 
+  // Both sides of a swap, by name and by shift line — a journal row built from this
+  // reads on its own, with no join back to employees or shifts.
+  const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number; toShiftId: number }) => ({
+    requestId: request.id,
+    fromEmployeeId: request.fromEmployeeId,
+    fromName: nameOf(request.fromEmployeeId) ?? "Неизвестно",
+    fromShift: shiftLineOf(request.fromShiftId),
+    toEmployeeId: request.toEmployeeId,
+    toName: nameOf(request.toEmployeeId) ?? "Неизвестно",
+    toShift: shiftLineOf(request.toShiftId),
+  });
+
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
     if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
     const res = createSwap(db, { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message });
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    // The initiator proposed it — record before notifying, since the notification is
+    // best-effort and shouldn't gate the journal entry either way.
+    recordAudit(db, "swap_proposed", c.get("auth").employeeId, swapAuditPayload(res.request));
     if (bot) {
       const tg = tgOf(res.counterpartyId);
       if (tg != null) {
@@ -632,6 +664,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/swaps/:id/accept", requireAuth(db, config.jwtSecret), async (c) => {
     const res = acceptSwap(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz));
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    // The caller is the counterparty — acceptSwap only succeeds when req.toEmployeeId
+    // === the acting employee — so they are the actor of "accepted", not the initiator.
+    recordAudit(db, "swap_accepted", c.get("auth").employeeId, swapAuditPayload(res.request));
     if (bot) {
       const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Твой обмен приняли ✅ Смены поменялись.");
       await notifyAdmins(bot, db, "Обмен сменами состоялся.");
@@ -642,6 +677,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/swaps/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
     const res = declineSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    recordAudit(db, "swap_declined", c.get("auth").employeeId, swapAuditPayload(res.request));
     if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Твой обмен отклонили."); }
     return c.json({ ok: true });
   });
@@ -649,6 +685,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/swaps/:id/cancel", requireAuth(db, config.jwtSecret), async (c) => {
     const res = cancelSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    recordAudit(db, "swap_cancelled", c.get("auth").employeeId, swapAuditPayload(res.request));
     if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Заявку на обмен отменили."); }
     return c.json({ ok: true });
   });
@@ -841,6 +878,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       location: typeof body.location === "string" ? body.location : null,
       note: typeof body.note === "string" ? body.note : null,
     });
+    recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, { slotId: slot.id, slot: slotLineOf(slot) });
     if (bot) await notifyVacantSlot(bot, db, slot.id, `Нужен человек на выходной:\n${slotLineOf(slot)}\n\nНажми «Хочу», если готов выйти.`);
     return c.json({ slot }, 201);
   });
@@ -862,9 +900,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, res.assignment.slotId);
+    recordAudit(db, "weekend_assigned", c.get("auth").employeeId, {
+      slotId: res.assignment.slotId,
+      employeeId: body.employeeId,
+      employeeName: nameOf(body.employeeId) ?? "Неизвестно",
+      slot: slot ? slotLineOf(slot) : null,
+    });
     if (bot) {
       const tg = tgOf(body.employeeId);
-      const slot = getVacantSlot(db, res.assignment.slotId);
       if (tg != null && slot) {
         await notifyWeekendOffer(bot, tg, res.assignment.id, `Тебе предложили работу в выходной:\n${slotLineOf(slot)}\n\nПодтвердишь?`);
       }

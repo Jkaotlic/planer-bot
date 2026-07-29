@@ -4,6 +4,7 @@ import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
+import { auditLog } from "../db/schema";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -151,5 +152,59 @@ describe("swap endpoints", () => {
     const reqId = (await created.json()).request.id as number;
     const cancelled = await app.request(`/api/swaps/${reqId}/cancel`, authed(anya.token));
     expect(cancelled.status).toBe(200);
+  });
+
+  it("journals swap_proposed for the initiator and swap_accepted for the accepter, both with readable names and shifts", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+
+    const rowsAfterPropose = db.select().from(auditLog).all();
+    const proposed = rowsAfterPropose.find((r) => r.type === "swap_proposed")!;
+    expect(proposed.actorEmployeeId).toBe(anya.w.id); // the initiator, not the counterparty
+    expect(proposed.payload).toMatchObject({
+      requestId: reqId,
+      fromEmployeeId: anya.w.id,
+      fromName: "Аня",
+      toEmployeeId: igor.w.id,
+      toName: "Игорь",
+    });
+    // A line must read without a join back to shifts — both sides carry a description, not bare ids.
+    expect(typeof (proposed.payload as { fromShift: unknown }).fromShift).toBe("string");
+    expect(typeof (proposed.payload as { toShift: unknown }).toShift).toBe("string");
+
+    const accepted = await app.request(`/api/swaps/${reqId}/accept`, authed(igor.token));
+    expect(accepted.status).toBe(200);
+    const acceptedRow = db.select().from(auditLog).all().find((r) => r.type === "swap_accepted")!;
+    // Игорь accepted — he's the actor, even though Аня proposed the swap.
+    expect(acceptedRow.actorEmployeeId).toBe(igor.w.id);
+    expect(acceptedRow.payload).toMatchObject({ requestId: reqId, fromEmployeeId: anya.w.id, toEmployeeId: igor.w.id });
+  });
+
+  it("journals swap_declined for the decliner and swap_cancelled for the initiator who withdraws", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+
+    const first = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const firstId = (await first.json()).request.id as number;
+    await app.request(`/api/swaps/${firstId}/decline`, authed(igor.token));
+    const declined = db.select().from(auditLog).all().find((r) => r.type === "swap_declined")!;
+    expect(declined.actorEmployeeId).toBe(igor.w.id); // the one who declined
+
+    const second = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const secondId = (await second.json()).request.id as number;
+    await app.request(`/api/swaps/${secondId}/cancel`, authed(anya.token));
+    const cancelled = db.select().from(auditLog).all().find((r) => r.type === "swap_cancelled")!;
+    expect(cancelled.actorEmployeeId).toBe(anya.w.id); // the initiator who withdrew it
   });
 });
