@@ -220,6 +220,7 @@ git commit -m "feat(address): имя, которое человек выбрал
 **Files:**
 - Modify: `server/src/http/app.ts:132-156` (`/api/me`, `PATCH /api/me/settings`), `:192` (`GET /api/admin/employees`), `:207-234` (`PATCH /api/admin/employees/:id`)
 - Modify: `server/src/http/employees.test.ts`
+- Modify: `server/src/http/settings-route.test.ts` — его `toEqual({ remindersEnabled: false })` пиннит точную форму ответа, которую эта задача расширяет; ассерт нужно дописать до нового контракта (`{ remindersEnabled, preferredName, address }`), оставив именно `toEqual`, а не ослабляя до `toMatchObject`.
 
 **Interfaces:**
 - Consumes: `addressOf`, `normalizePreferredName`, `PREFERRED_NAME_MAX`, `setPreferredName` из Задачи 1.
@@ -305,7 +306,7 @@ describe("preferred name", () => {
 
     const { employees } = await (await app.request("/api/admin/employees", bearer(admin))).json();
     expect(employees.find((e: { id: number }) => e.id === mike.id).address).toBe("Михаил");
-    expect(listRecentAudit(db, 10).some((row) => row.action === "employee_updated")).toBe(true);
+    expect(listRecentAudit(db, 10).some((row) => row.type === "employee_updated")).toBe(true);
   });
 });
 ```
