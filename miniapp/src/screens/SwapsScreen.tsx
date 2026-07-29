@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
-import { List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
+import { useState, type ReactNode } from "react";
+import { Button, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
 import type { SwapRequest } from "../api/client";
-import { IncomingSwapCard, OutgoingSwapCard } from "../components/SwapRequestCard";
+import { ArchivedSwapCard, IncomingSwapCard, OutgoingSwapCard } from "../components/SwapRequestCard";
 import { ScreenScroll } from "../components/ScreenScroll";
+import { splitSwaps } from "../lib/swaps";
 
 export interface SwapsScreenProps {
   swaps: SwapRequest[];
@@ -13,10 +14,12 @@ export interface SwapsScreenProps {
   busyId: number | null;
 }
 
-/** "Обмены": pending swaps a colleague proposed to you, and the swaps you proposed to others. */
+/** "Обмены": what still needs an answer, split from what is already settled. */
 export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyId }: SwapsScreenProps) {
-  const incoming = swaps.filter((s) => s.direction === "incoming" && s.status === "pending");
-  const outgoing = swaps.filter((s) => s.direction === "outgoing");
+  const { incoming, outgoing, archived } = splitSwaps(swaps);
+  // Collapsed by default — the whole point is that finished swaps stop competing
+  // for attention with the ones that still need something.
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   return (
     <ScreenScroll>
@@ -61,6 +64,19 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyId }: Sw
             </CardStack>
           )}
         </Section>
+
+        {/* An empty archive draws nothing at all — an empty section would be one
+            more thing to read past. */}
+        {archived.length > 0 && (
+          <Section header={`Архив · ${archived.length}`}>
+            <CardStack>
+              <Button size="s" mode="gray" stretched onClick={() => setArchiveOpen(!archiveOpen)}>
+                {archiveOpen ? "Свернуть" : "Показать завершённые"}
+              </Button>
+              {archiveOpen && archived.map((request) => <ArchivedSwapCard key={request.id} request={request} />)}
+            </CardStack>
+          </Section>
+        )}
       </List>
     </ScreenScroll>
   );
