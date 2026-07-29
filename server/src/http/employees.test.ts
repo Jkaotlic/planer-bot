@@ -162,6 +162,32 @@ describe("archive / restore employee endpoints", () => {
     const notFoundRestore = await app.request("/api/admin/employees/999999/restore", authedJson(admin, {}));
     expect(notFoundRestore.status).toBe(404);
   });
+
+  it("refuses to archive the last active admin (400 last_admin)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111);
+    const admin = getByTelegramId(db, 111)!; // the sole admin
+
+    const res = await app.request(`/api/admin/employees/${admin.id}/archive`, authedJson(adminToken, {}));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("last_admin");
+    expect(getEmployeeById(db, admin.id)?.isActive).toBe(true);
+  });
+
+  it("still archives an admin who isn't the last one", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111);
+    const admin = getByTelegramId(db, 111)!;
+    const w = worker(db, "Игорь", 333);
+    await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: true })); // now 2 admins
+
+    const res = await app.request(`/api/admin/employees/${w.id}/archive`, authedJson(adminToken, {}));
+    expect(res.status).toBe(200);
+    expect(getEmployeeById(db, w.id)?.isActive).toBe(false);
+    expect(getEmployeeById(db, admin.id)?.isActive).toBe(true); // the remaining admin is untouched
+  });
 });
 
 describe("GET /api/admin/events", () => {

@@ -125,6 +125,32 @@ describe("weekend-market endpoints", () => {
     expect((await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots.some((s: any) => s.slot.id === slotId)).toBe(true);
   });
 
+  it("a repeat assign of an already-assigned worker sends no second Telegram nudge", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 201);
+
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+
+    // Posting the slot already broadcasts a "хочешь?" nudge to every active worker
+    // (notifyVacantSlot) — count only the per-assignee "подтвердишь?" offer below.
+    const offerPings = () => sent.filter((s) => s.chat_id === 201 && /подтвердишь/i.test(s.text));
+
+    const first = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
+    expect(first.status).toBe(201);
+    expect(offerPings()).toHaveLength(1);
+
+    // Admin double-taps "Назначить" on the same, already-assigned person — a true
+    // no-op per assignSlot, so it must not ping Аня a second time for nothing new.
+    const second = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
+    expect(second.status).toBe(201);
+    expect(offerPings()).toHaveLength(1);
+  });
+
   it("journals weekend_slot_created and weekend_assigned with the admin as actor", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

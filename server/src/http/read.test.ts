@@ -142,6 +142,58 @@ describe("read endpoints", () => {
     expect(res.status).toBe(400);
   });
 
+  it("shapes /api/team/schedule shifts: strips the admin-only 'note' but keeps every field the frontends read", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    createShift(db, {
+      date: "2026-07-06",
+      start: "08:00",
+      end: "17:00",
+      endDate: null,
+      category: "shift",
+      title: "Утро",
+      location: "Поклонка",
+      templateId: null,
+      employeeId: w.id,
+      unrecognisedCode: null,
+      note: "Личная заметка админа — не для всей команды",
+    });
+    const app = createApp({ db, config });
+    const res = await app.request("/api/team/schedule?from=2026-07-01&to=2026-07-07", bearer(await tokenFor(app, 333)));
+    expect(res.status).toBe(200);
+    const shift = (await res.json()).shifts[0];
+
+    // Every field the miniapp/admin `Shift` types actually declare and read.
+    expect(shift).toEqual({
+      id: shift.id,
+      date: "2026-07-06",
+      start: "08:00",
+      end: "17:00",
+      endDate: null,
+      category: "shift",
+      title: "Утро",
+      location: "Поклонка",
+      unrecognisedCode: null,
+      templateId: null,
+      employeeId: w.id,
+    });
+    expect(shift.note).toBeUndefined();
+  });
+
+  it("still marks an unreadable roster-import cell as «?» on /api/team/schedule", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    createShift(db, {
+      date: "2026-07-06",
+      category: "shift",
+      unrecognisedCode: "Ко",
+    });
+    const app = createApp({ db, config });
+    const res = await app.request("/api/team/schedule?from=2026-07-01&to=2026-07-07", bearer(await tokenFor(app, 333)));
+    const shift = (await res.json()).shifts[0];
+    expect(shift.unrecognisedCode).toBe("Ко");
+  });
+
   it("defaults /api/my/shifts to today (in team tz) when 'from' is omitted", async () => {
     const db = makeTestDb();
     worker(db, "Игорь", 333);

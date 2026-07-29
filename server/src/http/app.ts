@@ -125,7 +125,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const allowlisted = config.adminTelegramIds.includes(user.id);
     let employee = getByTelegramId(db, user.id);
-    if (employee && !employee.isActive) return c.json({ error: "not_registered" }, 403);
+    if (employee && !employee.isActive) {
+      // An archived worker stays locked out — that's the point of archiving. But
+      // ADMIN_TELEGRAM_IDS lives in server/.env, outside this database: an operator
+      // who put a Telegram id there already trusts it more than anything the app's own
+      // admin UI can grant. So being archived — even as the team's last admin, which
+      // the guards below now prevent but a direct DB edit still could — must not be a
+      // dead end for someone on that list the way it rightly is for everyone else.
+      // Re-authenticating undoes the archive rather than re-issuing a token for a row
+      // marked inactive.
+      if (!allowlisted) return c.json({ error: "not_registered" }, 403);
+      employee = restoreEmployee(db, employee.id)!;
+      if (!employee.isAdmin) employee = setEmployeeAdmin(db, employee.id, true) ?? employee;
+      recordAudit(db, "employee_restored", employee.id, {
+        employeeId: employee.id,
+        displayName: employee.displayName,
+        via: "allowlist_reauth",
+      });
+    }
     if (!employee) {
       if (!allowlisted) return c.json({ error: "not_registered" }, 403);
       employee = createAdminEmployee(db, {
@@ -216,7 +233,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }));
     return c.json({
       employees,
-      shifts: listShiftsOverlapping(db, from, to),
+      // Shaped, not the raw row: this goes to every authenticated worker, and `note`
+      // is a free-text admin field nobody outside the admin screens should read. Keep
+      // this in sync with what the miniapp/admin `Shift` types actually declare.
+      shifts: listShiftsOverlapping(db, from, to).map((shift) => ({
+        id: shift.id,
+        date: shift.date,
+        start: shift.start,
+        end: shift.end,
+        endDate: shift.endDate,
+        category: shift.category,
+        title: shift.title,
+        location: shift.location,
+        unrecognisedCode: shift.unrecognisedCode,
+        templateId: shift.templateId,
+        employeeId: shift.employeeId,
+      })),
     });
   });
 
@@ -298,8 +330,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ employees });
   });
 
+  // Guarded exactly like the /role demote below: archiving an admin reaches the same
+  // "no active admin left" dead end, and — unlike a demote — there is no undo button
+  // for it anywhere in the app.
   app.post("/api/admin/employees/:id/archive", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
+    const target = getEmployeeById(db, id);
+    if (!target) return c.json({ error: "not_found" }, 404);
+    if (target.isAdmin && countActiveAdmins(db) <= 1) {
+      return c.json({ error: "last_admin" }, 400);
+    }
     const employee = archiveEmployee(db, id, teamNow(config.teamTz).date);
     if (!employee) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "employee_archived", c.get("auth").employeeId, { employeeId: id, displayName: employee.displayName });
@@ -907,7 +947,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       employeeName: nameOf(body.employeeId) ?? "Неизвестно",
       slot: slot ? slotLineOf(slot) : null,
     });
-    if (bot) {
+    // A repeat assign of someone already on the slot is a no-op (see assignSlot) —
+    // nothing changed, so nudging them again would just be a duplicate ping for the
+    // same offer they've already seen.
+    if (bot && res.changed) {
       const tg = tgOf(body.employeeId);
       if (tg != null && slot) {
         await notifyWeekendOffer(bot, tg, res.assignment.id, `Тебе предложили работу в выходной:\n${slotLineOf(slot)}\n\nПодтвердишь?`);
