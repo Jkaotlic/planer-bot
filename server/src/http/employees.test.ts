@@ -382,3 +382,82 @@ describe("birthdays", () => {
     expect((await app.request(`/api/admin/employees/${id}`, authedJson(admin, {}, "PATCH"))).status).toBe(400);
   });
 });
+
+describe("preferred name", () => {
+  it("greets by the chosen name, over Telegram's and over the roster's", async () => {
+    const db = makeTestDb();
+    worker(db, "Петров Алексей", 901);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 901);
+
+    const before = await (await app.request("/api/me", bearer(token))).json();
+    // `/api/auth` refreshes tgFirstName from the signed initData, which carries "T".
+    expect(before.address).toBe("T");
+    expect(before.preferredName).toBeNull();
+
+    const saved = await app.request("/api/me/settings", authedJson(token, { preferredName: " Андрей " }, "PATCH"));
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ preferredName: "Андрей", address: "Андрей" });
+
+    const after = await (await app.request("/api/me", bearer(token))).json();
+    expect(after.address).toBe("Андрей");
+    expect(after.displayName).toBe("Петров Алексей"); // lists are untouched
+  });
+
+  it("accepts each settings field on its own — the route is a patch, not a form", async () => {
+    const db = makeTestDb();
+    worker(db, "Петров Алексей", 902);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 902);
+
+    const onlyReminders = await app.request("/api/me/settings", authedJson(token, { remindersEnabled: false }, "PATCH"));
+    expect(onlyReminders.status).toBe(200);
+    expect(await onlyReminders.json()).toMatchObject({ remindersEnabled: false });
+
+    const onlyName = await app.request("/api/me/settings", authedJson(token, { preferredName: "Андрей" }, "PATCH"));
+    expect(onlyName.status).toBe(200);
+    // Setting one must not quietly reset the other.
+    expect(await onlyName.json()).toMatchObject({ remindersEnabled: false, preferredName: "Андрей" });
+  });
+
+  it("clears the name on blank, and refuses an over-long one", async () => {
+    const db = makeTestDb();
+    worker(db, "Петров Алексей", 903);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 903);
+
+    await app.request("/api/me/settings", authedJson(token, { preferredName: "Андрей" }, "PATCH"));
+    const cleared = await app.request("/api/me/settings", authedJson(token, { preferredName: "  " }, "PATCH"));
+    expect(await cleared.json()).toMatchObject({ preferredName: null });
+
+    const tooLong = await app.request("/api/me/settings", authedJson(token, { preferredName: "я".repeat(65) }, "PATCH"));
+    expect(tooLong.status).toBe(400);
+  });
+
+  it("rejects an empty settings body", async () => {
+    const db = makeTestDb();
+    worker(db, "Петров Алексей", 904);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 904);
+    expect((await app.request("/api/me/settings", authedJson(token, {}, "PATCH"))).status).toBe(400);
+  });
+
+  it("lets an admin set it for somebody who never will", async () => {
+    // The case this exists for: workers linked before tgFirstName was stored have
+    // nothing to fall back to but «Кузнецов Михаил».
+    const db = makeTestDb();
+    const mike = worker(db, "Кузнецов Михаил", 906);
+    const app = createApp({ db, config });
+    // 111 is in `config.adminTelegramIds`, so authing as it yields an admin token —
+    // the same way every other admin test in this file gets one.
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request(`/api/admin/employees/${mike.id}`, authedJson(admin, { preferredName: "Михаил" }, "PATCH"));
+    expect(res.status).toBe(200);
+    expect(getEmployeeById(db, mike.id)!.preferredName).toBe("Михаил");
+
+    const { employees } = await (await app.request("/api/admin/employees", bearer(admin))).json();
+    expect(employees.find((e: { id: number }) => e.id === mike.id).address).toBe("Михаил");
+    expect(listRecentAudit(db, 10).some((row) => row.type === "employee_updated")).toBe(true);
+  });
+});
