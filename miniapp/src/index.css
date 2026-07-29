@@ -54,15 +54,3 @@ textarea {
 .tab-bar-fit > div {
   background-color: var(--tg-theme-secondary-bg-color, var(--tg-theme-bg-color, #ffffff));
 }
-
-/* ---------- Admin section switcher ----------
-   Four segments across a phone leave each about 89px, and «Расписание» does not
-   fit that at the control's own size — it rendered «Расписан…». Reclaim the
-   padding and drop the label two points; measured against the longest word. */
-.admin-sections button {
-  padding-inline: 3px;
-}
-
-.admin-sections button > * {
-  font-size: 12.5px;
-}

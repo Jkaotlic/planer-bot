@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { describeDaysUntil } from "@planer/shared";
-import { Button, Input, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { Button, Input, List, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { apiClient, type BirthdayPreview, type UpcomingBirthday } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
+import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
 
 /**
@@ -62,7 +63,7 @@ const TONE_COLOR: Record<StatusTone, string> = {
   pending: "var(--tgui--hint_color)",
 };
 
-export function AdminBirthdays({ onClose }: { onClose: () => void }) {
+export function AdminBirthdays() {
   const [birthdays, setBirthdays] = useState<UpcomingBirthday[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,65 +85,67 @@ export function AdminBirthdays({ onClose }: { onClose: () => void }) {
 
   if (!birthdays) {
     return (
-      <Section header="Дни рождения">
-        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-          <Spinner size="m" />
-        </div>
-      </Section>
+      <ScreenScroll>
+        <List>
+          <Section header="Дни рождения">
+            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+              <Spinner size="m" />
+            </div>
+          </Section>
+        </List>
+      </ScreenScroll>
     );
   }
 
   return (
-    <Section header="Дни рождения">
-      <CardStack>
-        <CardShell>
-          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-            За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
-            «Разослать» — и не увидишь перед этим точный текст и поимённый список.
-          </div>
-        </CardShell>
+    <ScreenScroll>
+      <List>
+        <Section header="Дни рождения">
+          <CardStack>
+            <CardShell>
+              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
+                «Разослать» — и не увидишь перед этим точный текст и поимённый список.
+              </div>
+            </CardShell>
 
-        {error && (
-          <CardShell>
-            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-          </CardShell>
-        )}
+            {error && (
+              <CardShell>
+                <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+              </CardShell>
+            )}
 
-        {notice && (
-          <CardShell>
-            <div style={{ fontSize: 13.5 }}>{notice}</div>
-          </CardShell>
-        )}
+            {notice && (
+              <CardShell>
+                <div style={{ fontSize: 13.5 }}>{notice}</div>
+              </CardShell>
+            )}
 
-        {birthdays.length === 0 && (
-          <Placeholder description="Ни у кого не указан день рождения — проставь даты в разделе «Работники»." />
-        )}
+            {birthdays.length === 0 && (
+              <Placeholder description="Ни у кого не указан день рождения — проставь даты в разделе «Работники»." />
+            )}
 
-        {birthdays.map((birthday) => (
-          <BirthdayCard
-            key={birthday.employeeId}
-            birthday={birthday}
-            open={openId === birthday.employeeId}
-            onToggle={() => {
-              setNotice(null);
-              setOpenId(openId === birthday.employeeId ? null : birthday.employeeId);
-            }}
-            onChanged={reload}
-            onSent={(delivered) => {
-              setOpenId(null);
-              setNotice(`Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`);
-              void reload();
-            }}
-          />
-        ))}
-
-        <CardShell>
-          <Button size="s" mode="gray" stretched onClick={onClose}>
-            ← Назад к работникам
-          </Button>
-        </CardShell>
-      </CardStack>
-    </Section>
+            {birthdays.map((birthday) => (
+              <BirthdayCard
+                key={birthday.employeeId}
+                birthday={birthday}
+                open={openId === birthday.employeeId}
+                onToggle={() => {
+                  setNotice(null);
+                  setOpenId(openId === birthday.employeeId ? null : birthday.employeeId);
+                }}
+                onChanged={reload}
+                onSent={(delivered) => {
+                  setOpenId(null);
+                  setNotice(`Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`);
+                  void reload();
+                }}
+              />
+            ))}
+          </CardStack>
+        </Section>
+      </List>
+    </ScreenScroll>
   );
 }
 
