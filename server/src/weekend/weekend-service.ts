@@ -27,7 +27,9 @@ import { createShift, deleteShift } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
-export type AssignOutcome = { ok: true; assignment: WeekendAssignment } | { ok: false; reason: string };
+/** `changed` is false only for the true no-op branch below (already assigned, nothing
+ *  written) — callers use it to skip re-notifying the worker on a repeat "Назначить". */
+export type AssignOutcome = { ok: true; assignment: WeekendAssignment; changed: boolean } | { ok: false; reason: string };
 
 /** "2026-07-14" -> "2026-07". */
 function monthOf(date: string): string {
@@ -96,7 +98,7 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
   // never bounces a confirmed worker back to "offered" — they didn't decline, so
   // demanding a fresh confirmation would be a false "please reconfirm".
   if (existing && existing.status !== "declined" && existing.shiftId != null) {
-    return { ok: true, assignment: existing };
+    return { ok: true, assignment: existing, changed: false };
   }
 
   const shift = createShift(db, {
@@ -113,18 +115,18 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
     if (existing.status === "declined") {
       // Re-offering someone who previously declined reuses their row (slot+employee is unique).
       reofferAssignment(db, existing.id, shift.id);
-      return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null } };
+      return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null }, changed: true };
     }
     // offered/confirmed but its shift link had gone missing (e.g. the schedule entry was
     // deleted directly) — repair the link without touching status or creating a duplicate.
     setAssignmentShift(db, existing.id, shift.id);
-    return { ok: true, assignment: { ...existing, shiftId: shift.id } };
+    return { ok: true, assignment: { ...existing, shiftId: shift.id }, changed: true };
   }
 
   const hours = shiftDurationHours({ start: slot.start, end: slot.end });
   const assignment = createAssignment(db, { slotId, employeeId, hours });
   setAssignmentShift(db, assignment.id, shift.id);
-  return { ok: true, assignment: { ...assignment, shiftId: shift.id } };
+  return { ok: true, assignment: { ...assignment, shiftId: shift.id }, changed: true };
 }
 
 /** Admin removes someone from a slot: drops their schedule entry and the assignment. */
