@@ -215,7 +215,7 @@ ALTER TABLE `birthday_campaigns` ADD `schedule_notified_at` integer;
 | Валидация даты отсылки | `server/src/http/birthdays-route.test.ts` | формат, прошлое, дата после ДР, `null` |
 | Список сборов | `server/src/http/birthdays-route.test.ts` | прошлогодняя разосланная кампания возвращается, порядок, потолок в сто строк |
 | Тик напоминания | `server/src/birthdays/birthday-notice.test.ts` | срабатывает в свой день, ровно раз, не трогает `sent`, не пишет команде |
-| Разбиение обменов | `miniapp/src/screens/swaps-split.test.ts` (новый) | три корзины, завершённые входящие видны в архиве |
+| Разбиение обменов | `miniapp/src/lib/swaps.test.ts` (новый) | три корзины, завершённые входящие видны в архиве |
 | «Сегодня» и возврат | `miniapp/src/screens/team/team-ui.test.ts` | кнопка появляется только вне текущего периода; возврат сбрасывает и неделю, и день |
 
 Логика раскладывается по чистым функциям (`splitSwaps`, `isCurrentPeriod`, `resolveAddress`), которые тестируются без рендера, — так же, как это уже сделано с `team-schedule.ts` и `buildWeekModel`.
