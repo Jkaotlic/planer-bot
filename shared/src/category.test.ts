@@ -37,8 +37,8 @@ describe("entry category", () => {
 });
 
 describe("templateAccents", () => {
-  it("has a distinct colour slot for each of the eight presets", () => {
-    expect(templateAccents).toEqual(["gold", "blue", "violet", "indigo", "teal", "green", "rose", "amber"]);
+  it("has a distinct colour slot for every preset", () => {
+    expect(templateAccents).toEqual(["gold", "blue", "violet", "indigo", "teal", "green", "rose", "amber", "emerald"]);
     expect(new Set(templateAccents).size).toBe(templateAccents.length);
   });
 });

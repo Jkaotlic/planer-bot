@@ -162,3 +162,45 @@ describe("prototype-chain-safe code lookups", () => {
     expect(decoded.perPerson).toEqual([{ name: "Иван", entries: [] }]);
   });
 });
+
+describe("rezerv — резервный дежурный", () => {
+  const templates = () => listActiveTemplates(makeTestDb());
+
+  it("decodes to the Резерв preset instead of being an unknown code", () => {
+    const parsed = parseRosterCsv("﻿;08.08.2026\r\nИван;rezerv");
+    const decoded = decodeRoster(parsed, templates());
+
+    expect(decoded.unknowns).toEqual([]);
+    const entry = decoded.perPerson[0]!.entries[0]!;
+    expect(entry.title).toBe("Дежурство · Резерв");
+    expect(entry.category).toBe("duty");
+    expect(entry.start).toBe("09:00");
+  });
+
+  it("counts as somebody covering the day, so a reserve-only weekend is not a holiday", () => {
+    // In the August file every rezerv falls on a Saturday or Sunday. If it did not
+    // count as work, importing would propose those days as company holidays and
+    // then write «не работает» over them.
+    const parsed = parseRosterCsv("﻿;08.08.2026;09.08.2026\r\nИван;rezerv;holiday");
+    const decoded = decodeRoster(parsed, templates());
+
+    expect(decoded.proposedHolidays).toEqual(["2026-08-09"]);
+  });
+
+  it("survives the export/import round trip", () => {
+    const parsed = parseRosterCsv("﻿;08.08.2026\r\nИван;rezerv");
+    expect(PRESET_NAME_TO_CODE["Дежурство · Резерв"]).toBe("rezerv");
+    expect(CODE_TO_PRESET_NAME["rezerv"]).toBe("Дежурство · Резерв");
+    expect(parsed.people[0]!.cells[0]!.code).toBe("rezerv");
+  });
+
+  it("does not collapse a run of reserve days into one range", () => {
+    // Only absences are ranges; a duty is one entry per day, or two people on the
+    // same weekend would be indistinguishable from one person on a two-day range.
+    const parsed = parseRosterCsv("﻿;08.08.2026;09.08.2026\r\nИван;rezerv;rezerv");
+    const decoded = decodeRoster(parsed, templates());
+
+    expect(decoded.perPerson[0]!.entries).toHaveLength(2);
+    expect(decoded.perPerson[0]!.entries.every((e) => e.endDate === null)).toBe(true);
+  });
+});

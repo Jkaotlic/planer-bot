@@ -18,6 +18,10 @@ export const SCHEDULE_ACCENT_PALETTES: Record<TemplateAccent, SchedulePalette> =
   green: { bg: "#FFBE00", fg: "#17202A", code: "ВА" },
   teal: { bg: "#FE87FF", fg: "#39133A", code: "П" },
   amber: { bg: "#CBC04D", fg: "#292505", code: "07" },
+  // Резерв. A real green — the `green` slot above is historically an orange, and
+  // nothing else here is green, so a standby square reads apart from every kind
+  // of actual shift at a glance. «Р» was the only free initial.
+  emerald: { bg: "#2F7D4F", fg: "#FFFFFF", code: "Р" },
 };
 
 export const VACATION_SCHEDULE_PALETTE: SchedulePalette = {

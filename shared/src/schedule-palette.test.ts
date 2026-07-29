@@ -4,6 +4,7 @@ import {
   VACATION_SCHEDULE_PALETTE,
   exactSchedulePalette,
 } from "./schedule-palette";
+import { templateAccents } from "./category";
 
 describe("working schedule palette", () => {
   it("matches every sampled colour and visible code", () => {
@@ -16,6 +17,7 @@ describe("working schedule palette", () => {
       green: { bg: "#FFBE00", fg: "#17202A", code: "ВА" },
       teal: { bg: "#FE87FF", fg: "#39133A", code: "П" },
       amber: { bg: "#CBC04D", fg: "#292505", code: "07" },
+      emerald: { bg: "#2F7D4F", fg: "#FFFFFF", code: "Р" },
     });
     expect(VACATION_SCHEDULE_PALETTE).toEqual({
       bg: "#FD0100",
@@ -39,6 +41,15 @@ describe("working schedule palette", () => {
     const codes = Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code);
     expect(codes).not.toContain("•");
     expect(VACATION_SCHEDULE_PALETTE.code).not.toBe("•");
+  });
+
+  it("covers every accent a preset can claim", () => {
+    // A preset whose accent has no palette entry falls back to the flat category
+    // colour, so a new kind would silently render as «any other duty».
+    for (const accent of templateAccents) {
+      expect(SCHEDULE_ACCENT_PALETTES[accent], accent).toBeDefined();
+    }
+    expect(Object.keys(SCHEDULE_ACCENT_PALETTES).sort()).toEqual([...templateAccents].sort());
   });
 
   it("leaves unspecified categories to the existing theme palette", () => {

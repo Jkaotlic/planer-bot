@@ -36,6 +36,7 @@ describe("read endpoints", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).templates.map((t: { name: string }) => t.name)).toEqual([
       "Утро", "День", "Вечер", "Ночь", "Дежурство · Поклонка", "Дежурство с 07:00", "Дежурство · Телефон", "Дежурство · Вавилова 19",
+      "Дежурство · Резерв",
     ]);
   });
 
