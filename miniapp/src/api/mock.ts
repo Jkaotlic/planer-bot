@@ -88,6 +88,7 @@ function dayIso(offsetFromMonday: number): string {
 }
 
 interface EntryDraft {
+  unrecognisedCode?: string | null;
   templateId?: number | null;
   date: string;
   start: string | null;
@@ -159,6 +160,9 @@ const ALL_ENTRIES: Shift[] = [
   entry({ date: dayIso(2), start: "10:00", end: "19:00", endDate: null, category: "offsite", title: null, employeeId: 4 }),
   entry({ templateId: 5, date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "duty", title: "Дежурство · Поклонка", location: "Поклонка", employeeId: 5 }),
   entry({ templateId: 2, date: dayIso(2), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: null }),
+  // A cell a roster import could not read — exercises the grey «?» square. Real
+  // imports produce these whenever the file says something like «Ко».
+  entry({ date: dayIso(2), start: null, end: null, endDate: null, category: "shift", title: null, employeeId: 3, unrecognisedCode: "Ко" }),
 
   // Чт–Пт: Аня в отпуске (один интервал, показывается в оба дня)
   entry({ date: dayIso(3), start: null, end: null, endDate: dayIso(4), category: "vacation", title: null, employeeId: 1 }),
@@ -1014,6 +1018,7 @@ export async function mockPreviewRosterImport(csv: string): Promise<RosterImport
       suggestedEmployeeId: EMPLOYEES.find((e) => e.isActive && e.displayName === p.name)?.id ?? null,
     })),
     unknowns: [],
+    unknownsMessage: null,
     preservedCount: people.reduce((sum, p) => sum + p.codes.filter((c) => c === MOCK_PRESERVE_CODE).length, 0),
     existingCount: ALL_ENTRIES.filter((s) => overlapsRange(s, from, to)).length,
   };

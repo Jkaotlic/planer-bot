@@ -144,6 +144,17 @@ export function applyRosterImport(
       }
       orderedIds.push(employeeId);
       for (const e of person.entries) {
+        // An unread cell is a faithful record of a file, not user input, so it does
+        // not go through `createEntrySchema` — that schema rightly insists a work
+        // entry has clock times, and this is the one case where we have none and
+        // must not invent any. Nothing else may create these: see the API test.
+        if (e.unrecognisedCode) {
+          tx.insert(shifts).values({
+            date: e.date, category: "shift", employeeId, unrecognisedCode: e.unrecognisedCode,
+          }).run();
+          inserted++;
+          continue;
+        }
         const parsed = createEntrySchema.safeParse({
           date: e.date, endDate: e.endDate, category: e.category, templateId: e.templateId,
           location: e.location, start: e.start, end: e.end, title: e.title, employeeId,

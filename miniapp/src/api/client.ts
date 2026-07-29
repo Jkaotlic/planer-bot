@@ -64,6 +64,9 @@ export interface Shift {
   title: string | null;
   /** Optional place for duties, offsite work, and other location-specific entries. */
   location: string | null;
+  /** Set only when a roster import could not read this cell: the original text,
+   *  e.g. «Ко». Such an entry has no preset and no times, and draws as «?». */
+  unrecognisedCode?: string | null;
   /** The preset this entry came from, if any — drives its colour in the schedule. */
   templateId: number | null;
   employeeId: number | null;
@@ -454,6 +457,9 @@ export interface RosterImportPreview {
   entryCount: number;
   people: RosterImportPerson[];
   unknowns: RosterUnknownCell[];
+  /** Ready-made Russian naming the exact cells, or null when the file read cleanly.
+   *  Unreadable cells are a warning, not a refusal — they import marked «?». */
+  unknownsMessage: string | null;
   /** Cells written as '?': entries the matrix can't express, which the import leaves alone. */
   preservedCount: number;
   /** What the period already holds — non-zero means applying needs `overwrite`. */

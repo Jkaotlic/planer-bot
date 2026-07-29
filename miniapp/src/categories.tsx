@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Chip } from "@telegram-apps/telegram-ui";
-import { exactSchedulePalette, type EntryCategory, type TemplateAccent } from "@planer/shared";
+import { exactSchedulePalette, UNRECOGNISED_SCHEDULE_PALETTE, type EntryCategory, type TemplateAccent } from "@planer/shared";
 import { useIsDark } from "./lib/theme";
 
 export type { EntryCategory as Category, TemplateAccent } from "@planer/shared";
@@ -61,6 +61,8 @@ export function categoryPaletteForTheme(
 interface ColourableEntry {
   category: Category;
   templateId: number | null;
+  /** Set only on a cell the import could not read — it wins over every other colour. */
+  unrecognisedCode?: string | null;
 }
 interface AccentedTemplate {
   id: number;
@@ -73,6 +75,9 @@ interface AccentedTemplate {
  */
 export function useEntryPalette(entry: ColourableEntry, templates: readonly AccentedTemplate[]): CategoryPalette {
   const isDark = useIsDark();
+  // An unread cell is not a kind of shift — it is «мы не поняли файл», and it keeps
+  // its own grey whatever category it was filed under.
+  if (entry.unrecognisedCode) return { bg: UNRECOGNISED_SCHEDULE_PALETTE.bg, fg: UNRECOGNISED_SCHEDULE_PALETTE.fg };
   const accent = entry.templateId != null ? templates.find((t) => t.id === entry.templateId)?.accent : undefined;
   const exact = exactSchedulePalette(accent, entry.category);
   if (exact) return { bg: exact.bg, fg: exact.fg };

@@ -26,6 +26,7 @@ describe("development roster import client", () => {
         { csvName: "Новый Сотрудник", suggestedEmployeeId: null },
       ],
       unknowns: [],
+      unknownsMessage: null,
       preservedCount: 0,
       existingCount: 0,
     });

@@ -63,6 +63,9 @@ export interface Shift {
   endDate: string | null;
   category: EntryCategory;
   title: string | null;
+  /** Set only when a roster import could not read this cell: the original text,
+   *  e.g. «Ко». Such an entry has no preset and no times, and draws as «?». */
+  unrecognisedCode?: string | null;
   /** The preset this entry came from, if any — drives its colour in the grid. */
   templateId: number | null;
   employeeId: number | null;
@@ -190,6 +193,9 @@ export interface RosterImportPreview {
   entryCount: number;
   people: RosterImportPerson[];
   unknowns: RosterUnknownCell[];
+  /** Ready-made Russian naming the exact cells, or null when the file read cleanly.
+   *  Unreadable cells are a warning, not a refusal — they import marked «?». */
+  unknownsMessage: string | null;
   /** Cells the file marks '?': real entries the CSV can't express, which the import
    *  steps around instead of recreating (weekend work, one-off custom times). */
   preservedCount: number;

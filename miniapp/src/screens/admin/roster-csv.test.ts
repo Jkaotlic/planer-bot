@@ -22,6 +22,7 @@ const preview: RosterImportPreview = {
     { csvName: "Новый Сотрудник", suggestedEmployeeId: null },
   ],
   unknowns: [],
+  unknownsMessage: null,
   preservedCount: 0,
   existingCount: 0,
 };

@@ -856,15 +856,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES;
   };
 
-  /** «Игорь Петров, 01.08.2026 — «wat»» — an unknown cell as the admin sees it in Excel. */
+  /** «Игорь Петров, 01.08.2026 — «wat»» — an unread cell as the admin sees it in Excel.
+   *  A warning, not an error: the import goes through and marks those cells «?». */
   const describeUnknowns = (unknowns: { name: string; date: string; code: string }[]): string => {
     const shown = unknowns.slice(0, 5).map((u) => {
       const [y, m, d] = u.date.split("-");
       return `${u.name}, ${d}.${m}.${y} — «${u.code}»`;
     });
     const rest = unknowns.length - shown.length;
-    return `Не понял коды в файле: ${shown.join("; ")}${rest > 0 ? ` и ещё ${rest}` : ""}. ` +
-      `Исправьте их в файле или уберите эти дни и загрузите снова.`;
+    const plural = unknowns.length === 1 ? "клетку" : "клеток";
+    return `Не понял ${unknowns.length} ${plural}: ${shown.join("; ")}${rest > 0 ? ` и ещё ${rest}` : ""}. ` +
+      `Загружу их со знаком «?» — поправьте в файле и загрузите снова, когда будет удобно.`;
   };
 
   const decodeUploadedRoster = (csv: unknown) => {
@@ -901,9 +903,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
-    if (result.decoded.unknowns.length > 0) {
-      return c.json({ error: describeUnknowns(result.decoded.unknowns), unknowns: result.decoded.unknowns }, 422);
-    }
     const from = result.parsed.dates[0]!;
     const to = result.parsed.dates.at(-1)!;
     const activeByName = new Map(listActive(db).map((employee) => [employee.displayName.trim(), employee.id] as const));
@@ -915,7 +914,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
         csvName: person.name,
         suggestedEmployeeId: activeByName.get(person.name.trim()) ?? null,
       })),
-      unknowns: [],
+      // Cells we could not read. No longer fatal: they are listed here so the screen
+      // can say exactly where they are, and they import as «?».
+      unknowns: result.decoded.unknowns,
+      unknownsMessage: result.decoded.unknowns.length > 0 ? describeUnknowns(result.decoded.unknowns) : null,
       // Cells exported as '?' — real entries the CSV can't express, which the import
       // will step around rather than recreate.
       preservedCount: result.decoded.preserved.length,
@@ -930,9 +932,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown; overwrite?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
-    if (result.decoded.unknowns.length > 0) {
-      return c.json({ error: describeUnknowns(result.decoded.unknowns), unknowns: result.decoded.unknowns }, 422);
-    }
     if (!Array.isArray(body.resolutions)) return c.json({ error: "resolutions are required" }, 400);
     if (body.overwrite !== undefined && typeof body.overwrite !== "boolean") {
       return c.json({ error: "overwrite must be a boolean" }, 400);
@@ -961,7 +960,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // entirely 'holiday' decodes to nothing yet still means "this month is empty".
         span: { from: result.parsed.dates[0]!, to: result.parsed.dates.at(-1)! },
       });
-      return c.json({ summary }, 201);
+      return c.json({
+        summary,
+        // Repeated on the way out, because the admin may never have looked at the
+        // preview — the file can be applied straight from a saved resolution set.
+        unknownsMessage: summary.unknowns.length > 0 ? describeUnknowns(summary.unknowns) : null,
+      }, 201);
     } catch (err) {
       if (err instanceof RosterImportConflictError) {
         return c.json(
