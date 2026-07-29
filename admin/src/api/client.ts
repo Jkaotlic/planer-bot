@@ -49,6 +49,10 @@ export interface Employee {
   telegramUserId: number | null;
   /** «MM-DD» — day and month of their birthday, or null if not given. */
   birthDate: string | null;
+  /** What the bot will actually call them — computed server-side by `addressOf`.
+   *  Never derive this from `displayName`: the roster is «Фамилия Имя», so its
+   *  first word is a surname. See `addressOf` in @planer/shared. */
+  address: string;
 }
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */

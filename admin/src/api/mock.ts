@@ -33,13 +33,16 @@ import { inviteLinkFor } from "../lib/bot";
  * the grid never goes stale.
  */
 
+// `address` mirrors the roster's displayName here: none of the sample workers
+// have a `preferredName` set, so the server's `addressOf` would fall back to
+// `displayName` for all of them too. See the `Employee.address` doc comment.
 const SEED_EMPLOYEES: readonly Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14" },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05" },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31" },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", address: "Аня Смирнова" },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", address: "Игорь Петров" },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: "Марк Волков" },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", address: "Даша Кузнецова" },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, address: "Олег Соколов" },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, address: "Света Орлова" },
 ];
 
 /** In-memory employee store — mutated live by create/archive/restore so the Работники screen (and the schedule, which only shows active workers) update without a reload. */
@@ -200,7 +203,7 @@ export async function mockGetEvents(): Promise<FeedEvent[]> {
 export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
   await delay(250);
   const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null };
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: name };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
   return { employee, inviteToken, inviteLink: null };
@@ -227,7 +230,12 @@ export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promis
 export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
   await delay(150);
   const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.displayName = displayName;
+  // No `preferredName` modeled here, so address follows the roster name — mirrors
+  // the server, which would fall back to the new `displayName` the same way.
+  if (employee) {
+    employee.displayName = displayName;
+    employee.address = displayName;
+  }
 }
 
 /** Mirrors the server: move one worker, then renumber everyone contiguously. */
@@ -736,7 +744,10 @@ export async function mockApplyRosterImport(
   for (const resolution of resolutions) {
     if (resolution.action === "rename") {
       const employee = EMPLOYEES.find((item) => item.id === resolution.employeeId);
-      if (employee) employee.displayName = resolution.csvName;
+      if (employee) {
+        employee.displayName = resolution.csvName;
+        employee.address = resolution.csvName;
+      }
     } else {
       const id = Math.max(0, ...EMPLOYEES.map((employee) => employee.id)) + 1;
       EMPLOYEES.push({
@@ -746,6 +757,7 @@ export async function mockApplyRosterImport(
         isActive: true,
         telegramUserId: null,
         birthDate: null,
+        address: resolution.csvName,
       });
     }
   }

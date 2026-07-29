@@ -5,7 +5,6 @@ import { DayBadge } from "../components/DayBadge";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { categoryLabel } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
-import { firstName } from "../lib/week";
 import { formatTimeRange } from "../lib/shift";
 
 export interface ProposeSwapScreenProps {
@@ -24,8 +23,11 @@ export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConf
   const [submitting, setSubmitting] = useState(false);
 
   const selected = colleagueShifts.find((s) => s.id === selectedId) ?? null;
+  // `employeeName` is the roster's «Фамилия Имя», not an address — we only have the
+  // full display name here (no `address` on a team-schedule row), so show it whole
+  // rather than guess at a first name. See `addressOf` in @planer/shared.
   const confirmLabel = selected
-    ? `Предложить обмен ${firstName(selected.employeeName ?? "коллеге")}`
+    ? `Предложить обмен ${selected.employeeName ?? "коллеге"}`
     : "Выберите смену коллеги";
 
   async function handleConfirm() {
