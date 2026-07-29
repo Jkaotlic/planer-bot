@@ -88,6 +88,17 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
   if (slot.status === "closed") return { ok: false, reason: "not_open" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
 
+  // slotId+employeeId is unique, so a second assign for the same pair always lands here.
+  const existing = findAssignment(db, slotId, employeeId);
+
+  // Already on the slot with a live shift entry: a double-tap of "Назначить" (or
+  // re-assigning someone who already confirmed) changes nothing. In particular this
+  // never bounces a confirmed worker back to "offered" — they didn't decline, so
+  // demanding a fresh confirmation would be a false "please reconfirm".
+  if (existing && existing.status !== "declined" && existing.shiftId != null) {
+    return { ok: true, assignment: existing };
+  }
+
   const shift = createShift(db, {
     date: slot.date,
     start: slot.start,
@@ -98,12 +109,18 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
     location: slot.location,
   });
 
-  // Re-offering someone who previously declined reuses their row (slot+employee is unique).
-  const existing = findAssignment(db, slotId, employeeId);
   if (existing) {
-    reofferAssignment(db, existing.id, shift.id);
-    return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null } };
+    if (existing.status === "declined") {
+      // Re-offering someone who previously declined reuses their row (slot+employee is unique).
+      reofferAssignment(db, existing.id, shift.id);
+      return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null } };
+    }
+    // offered/confirmed but its shift link had gone missing (e.g. the schedule entry was
+    // deleted directly) — repair the link without touching status or creating a duplicate.
+    setAssignmentShift(db, existing.id, shift.id);
+    return { ok: true, assignment: { ...existing, shiftId: shift.id } };
   }
+
   const hours = shiftDurationHours({ start: slot.start, end: slot.end });
   const assignment = createAssignment(db, { slotId, employeeId, hours });
   setAssignmentShift(db, assignment.id, shift.id);
