@@ -1,5 +1,6 @@
 import { List, Placeholder, Section } from "@telegram-apps/telegram-ui";
 import type { Me, Shift, Template } from "../api/client";
+import { AddressField } from "../components/AddressField";
 import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
@@ -16,11 +17,13 @@ export interface MyShiftsScreenProps {
   onProposeSwap: (shift: Shift) => void;
   /** Keeps `me` in step when the reminders switch is flipped. */
   onRemindersChanged: (enabled: boolean) => void;
+  /** Keeps `me` in step when the greeting name is saved. */
+  onAddressChanged: (next: { preferredName: string | null; address: string }) => void;
 }
 
 /** "Мои смены": a greeting hero, a week-hours summary, the caller's own shifts,
  *  and their reminders switch. */
-export function MyShiftsScreen({ me, shifts, templates, onProposeSwap, onRemindersChanged }: MyShiftsScreenProps) {
+export function MyShiftsScreen({ me, shifts, templates, onProposeSwap, onRemindersChanged, onAddressChanged }: MyShiftsScreenProps) {
   const monday = mondayOf(new Date());
   const weekLabel = formatWeekRangeLabel(monday, addDays(monday, 6));
 
@@ -55,6 +58,16 @@ export function MyShiftsScreen({ me, shifts, templates, onProposeSwap, onReminde
       <List>
         <Section header="Уведомления">
           <RemindersSwitch enabled={me.remindersEnabled} onChanged={onRemindersChanged} />
+        </Section>
+      </List>
+
+      <List>
+        <Section header="Обращение">
+          <AddressField
+            preferredName={me.preferredName}
+            address={me.address}
+            onSaved={onAddressChanged}
+          />
         </Section>
       </List>
     </ScreenScroll>

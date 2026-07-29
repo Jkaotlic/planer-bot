@@ -50,6 +50,7 @@ export const MOCK_ME: Me = {
   // Telegram's own first name — deliberately NOT derived from displayName, which
   // in the live roster is «Фамилия Имя». See `addressOf` in @planer/shared.
   address: "Аня",
+  preferredName: null,
   isAdmin: true,
   remindersEnabled: true,
 };
@@ -60,6 +61,23 @@ export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean
   return enabled;
 }
 
+export async function mockSetPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }> {
+  await delay(200);
+  const value = preferredName?.trim() || null;
+  MOCK_ME.preferredName = value;
+  // Mirrors `addressOf`: chosen name, then Telegram's, then the roster's.
+  MOCK_ME.address = value ?? "Аня";
+  return { preferredName: value, address: MOCK_ME.address };
+}
+
+export async function mockSetEmployeePreferredName(id: number, preferredName: string | null): Promise<void> {
+  await delay(200);
+  const employee = EMPLOYEES.find((e) => e.id === id);
+  if (!employee) return;
+  employee.preferredName = preferredName?.trim() || null;
+  employee.address = employee.preferredName ?? employee.displayName;
+}
+
 /**
  * In-memory roster shared by the worker screens (name lookups) and the admin
  * "Работники" screen (full rows). Mutated live by create/archive/restore so
@@ -68,13 +86,13 @@ export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean
  * employee-without-shifts state.
  */
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14" },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05" },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31" },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null },
-  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29" },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова" },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров" },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков" },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова" },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов" },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова" },
+  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29", preferredName: null, address: "Нина Белова" },
 ];
 
 function personName(employeeId: number): string {
@@ -433,7 +451,7 @@ export async function mockGetAdminEmployees(): Promise<Employee[]> {
 export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
   await delay(250);
   const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null };
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: name };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
   return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
@@ -1061,6 +1079,8 @@ export async function mockApplyRosterImport(
         isActive: true,
         telegramUserId: null,
         birthDate: null,
+        preferredName: null,
+        address: resolution.csvName,
       });
     }
   }
