@@ -151,6 +151,66 @@ describe("weekend market service", () => {
     expect(offers[0]!.slot.id).toBe(slot.id);
   });
 
+  it("re-assigning the same person to the same slot leaves exactly one weekend_work shift", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, worker.id);
+
+    const first = assignSlot(db, slot.id, worker.id);
+    if (!first.ok) throw new Error("unreachable");
+    // Admin double-taps "Назначить" on the same person.
+    const second = assignSlot(db, slot.id, worker.id);
+    if (!second.ok) throw new Error("unreachable");
+
+    expect(second.assignment.id).toBe(first.assignment.id);
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
+    expect(assigneesForSlot(db, slot.id)).toHaveLength(1);
+  });
+
+  it("re-assigning a confirmed worker does not bounce them back to offered", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, worker.id);
+    const assigned = assignSlot(db, slot.id, worker.id);
+    if (!assigned.ok) throw new Error("unreachable");
+    expect(confirmOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
+
+    const reassigned = assignSlot(db, slot.id, worker.id);
+    if (!reassigned.ok) throw new Error("unreachable");
+    expect(reassigned.assignment.status).toBe("confirmed");
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
+  });
+
+  it("unassign after a re-assign leaves no weekend_work shift behind", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, worker.id);
+    assignSlot(db, slot.id, worker.id);
+    const reassigned = assignSlot(db, slot.id, worker.id);
+    if (!reassigned.ok) throw new Error("unreachable");
+
+    expect(unassign(db, reassigned.assignment.id).ok).toBe(true);
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(0);
+  });
+
+  it("re-offering after a decline still leaves exactly one weekend_work shift", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, worker.id);
+    const assigned = assignSlot(db, slot.id, worker.id);
+    if (!assigned.ok) throw new Error("unreachable");
+    expect(declineOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
+
+    const reoffered = assignSlot(db, slot.id, worker.id);
+    if (!reoffered.ok) throw new Error("unreachable");
+    expect(reoffered.assignment.status).toBe("offered");
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
+  });
+
   it("ranks equal candidates by who has been passed over most (volunteered, lost the slot)", () => {
     const db = makeTestDb();
     const passedOver = createEmployee(db, { displayName: "Аня" });
