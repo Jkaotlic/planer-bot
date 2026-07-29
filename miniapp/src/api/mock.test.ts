@@ -47,8 +47,10 @@ describe("team schedule development mock", () => {
         ),
       ),
     );
+    // «?» is in the set on purpose: the mock carries one cell a roster import could
+    // not read, so the grey square and its legend line get exercised in dev too.
     expect([...visibleCodes].sort()).toEqual(
-      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О"].sort(),
+      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О", "?"].sort(),
     );
 
     const detailCell = week.rows
