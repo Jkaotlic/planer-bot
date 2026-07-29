@@ -21,7 +21,7 @@ import {
   type TeamScreenState,
 } from "../lib/team-schedule";
 import {
-  formatDayLabel,
+  formatDayLabelRelative,
   formatWeekRangeLabel,
   parseISODate,
   toISODate,
@@ -104,9 +104,10 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
   }
 
   const displayRange = teamRange(view.displayMode, view.displayDate);
+  const today = toISODate(new Date());
   const label =
     view.displayMode === "today"
-      ? formatDayLabel(view.displayDate)
+      ? formatDayLabelRelative(view.displayDate, today)
       : formatWeekRangeLabel(
           parseISODate(displayRange.from),
           parseISODate(displayRange.to),

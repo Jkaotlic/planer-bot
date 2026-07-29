@@ -65,6 +65,7 @@ export function AdminScheduleScreen() {
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
   const to = weekDates[6]!;
+  const today = toISODate(new Date());
 
   async function loadWeek(fromIso: string, toIso: string) {
     setShifts(null);
@@ -158,7 +159,7 @@ export function AdminScheduleScreen() {
       {!csvOpen && !kindsOpen && (
         <div style={{ padding: "12px 4px 0" }}>
           <WeekBar label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))} onPrev={() => goWeek(-1)} onNext={() => goWeek(1)} />
-          <DayStrip dates={weekDates} selected={selectedDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          <DayStrip dates={weekDates} selected={selectedDate} today={today} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
         </div>
       )}
 
@@ -256,17 +257,17 @@ function WeekBar({ label, onPrev, onNext }: { label: string; onPrev: () => void;
   );
 }
 
-function DayStrip({ dates, selected, onSelect }: { dates: readonly string[]; selected: string; onSelect: (iso: string) => void }) {
+function DayStrip({ dates, selected, today, onSelect }: { dates: readonly string[]; selected: string; today: string; onSelect: (iso: string) => void }) {
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
       {dates.map((iso) => (
-        <DayChip key={iso} iso={iso} active={iso === selected} onSelect={() => onSelect(iso)} />
+        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} onSelect={() => onSelect(iso)} />
       ))}
     </div>
   );
 }
 
-function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSelect: () => void }) {
+function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: boolean; isToday: boolean; onSelect: () => void }) {
   const isDark = useIsDark();
   const weekend = weekdayIndex(iso) >= FRIDAY_INDEX + 1;
   const bg = active ? "var(--tgui--button_color)" : "var(--tgui--secondary_bg_color)";
@@ -292,6 +293,18 @@ function DayChip({ iso, active, onSelect }: { iso: string; active: boolean; onSe
     >
       <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>{weekdayShort(iso)}</span>
       <span style={{ fontSize: 15, fontWeight: 600 }}>{dayOfMonth(iso)}</span>
+      {/* «Выбран» and «сегодня» were the same style, so three weeks out you
+          could not tell where you were. The dot is drawn independently of the
+          selection and stays visible on the selected chip too. */}
+      <span
+        style={{
+          width: 4,
+          height: 4,
+          borderRadius: 999,
+          background: isToday ? (active ? fg : "var(--tgui--link_color)") : "transparent",
+        }}
+        aria-hidden="true"
+      />
     </button>
   );
 }

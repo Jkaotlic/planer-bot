@@ -5,7 +5,7 @@ import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
 import { RemindersSwitch } from "../components/RemindersSwitch";
-import { addDays, formatWeekRangeLabel, mondayOf } from "../lib/week";
+import { addDays, formatWeekRangeLabel, mondayOf, toISODate } from "../lib/week";
 import { pluralizeRu, totalHours } from "../lib/shift";
 
 export interface MyShiftsScreenProps {
@@ -26,6 +26,7 @@ export interface MyShiftsScreenProps {
 export function MyShiftsScreen({ me, shifts, templates, onProposeSwap, onRemindersChanged, onAddressChanged }: MyShiftsScreenProps) {
   const monday = mondayOf(new Date());
   const weekLabel = formatWeekRangeLabel(monday, addDays(monday, 6));
+  const today = toISODate(new Date());
 
   const workShifts = shifts.filter((s) => s.category === "shift");
   const hours = Math.round(totalHours(workShifts));
@@ -49,7 +50,7 @@ export function MyShiftsScreen({ me, shifts, templates, onProposeSwap, onReminde
         <List>
           <Section header={`Мои смены · ${weekLabel}`}>
             {sorted.map((shift) => (
-              <ShiftRow key={shift.id} shift={shift} templates={templates} onSwap={onProposeSwap} />
+              <ShiftRow key={shift.id} shift={shift} templates={templates} onSwap={onProposeSwap} isToday={shift.date === today} />
             ))}
           </Section>
         </List>
