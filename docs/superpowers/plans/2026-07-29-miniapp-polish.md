@@ -168,7 +168,7 @@ export function normalizePreferredName(raw: unknown): PreferredNameResult {
 - [ ] **Step 4: Убедиться, что тесты проходят**
 
 Run: `npx vitest run shared/src/address.test.ts`
-Expected: PASS, 9 тестов.
+Expected: PASS, 12 тестов.
 
 - [ ] **Step 5: Добавить колонку в схему**
 
@@ -182,7 +182,7 @@ Expected: PASS, 9 тестов.
 
 - [ ] **Step 6: Сгенерировать миграцию**
 
-Run: `npm run db:generate -w @planer/server`
+Run: `npx drizzle-kit generate` (из корня репозитория — `drizzle.config.ts` лежит именно там; `npm run db:generate -w @planer/server` не работает, потому что `-w` уводит cwd в `server/`, где конфига нет)
 Expected: создан `server/drizzle/0014_*.sql` с единственной строкой `ALTER TABLE \`employees\` ADD \`preferred_name\` text;` и обновлённые `meta/_journal.json` + `meta/0014_snapshot.json`.
 
 Открыть сгенерированный `.sql` и глазами проверить, что там ровно один `ALTER TABLE ... ADD`. Если drizzle-kit сгенерировал что-то ещё (пересоздание таблицы, DROP) — остановиться и разобраться, а не коммитить: на проде живая база.
@@ -1924,7 +1924,7 @@ Expected: FAIL — поле `scheduledSendOn` не сохраняется, ро�
 
 - [ ] **Step 4: Сгенерировать миграцию**
 
-Run: `npm run db:generate -w @planer/server`
+Run: `npx drizzle-kit generate` (из корня репозитория, см. Задачу 1 — `npm run db:generate -w @planer/server` нерабочая)
 Expected: `server/drizzle/0015_*.sql` с двумя `ALTER TABLE ... ADD`. Проверить глазами, как в Задаче 1.
 
 - [ ] **Step 5: Расширить сервис**
