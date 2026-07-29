@@ -157,7 +157,7 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
             />
           )}
           {view.schedule && view.displayMode === "week" && (
-            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} />
+            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} today={today} />
           )}
         </TeamViewPanel>
       </div>
@@ -171,16 +171,21 @@ function WeekView({
   from,
   templates,
   isDark,
+  today,
 }: {
   schedule: TeamSchedule;
   from: string;
   templates: readonly Template[];
   isDark: boolean;
+  /** Passed down from `TeamScreen` rather than read here again — one `toISODate(new
+   *  Date())` per render, so the header and the grid can never disagree about
+   *  which day is "today" (e.g. right at the midnight boundary). */
+  today: string;
 }) {
   const model = buildWeekModel(from, schedule, templates);
   return (
     <>
-      <TeamWeekGrid model={model} today={toISODate(new Date())} isDark={isDark} />
+      <TeamWeekGrid model={model} today={today} isDark={isDark} />
       <TeamWeekLegend items={buildWeekLegend(model)} isDark={isDark} />
     </>
   );
