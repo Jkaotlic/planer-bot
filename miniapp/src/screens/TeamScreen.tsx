@@ -23,6 +23,7 @@ import {
 import {
   formatDayLabelRelative,
   formatWeekRangeLabel,
+  isCurrentPeriod,
   parseISODate,
   toISODate,
 } from "../lib/week";
@@ -129,6 +130,12 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         <TeamRangeNav
           label={label}
           busy={view.loading}
+          backLabel={view.displayMode === "today" ? "Сегодня" : "Эта неделя"}
+          onBack={
+            isCurrentPeriod(view.displayMode === "today" ? "day" : "week", view.displayDate, today)
+              ? undefined
+              : () => { if (!view.loading) void load(view.displayMode, today); }
+          }
           onPrevious={() => move(-1)}
           onNext={() => move(1)}
         />

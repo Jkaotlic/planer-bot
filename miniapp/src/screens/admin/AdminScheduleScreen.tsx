@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee, type NewEntryInput, type Shift, type Template } from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
+import { BackToTodayButton } from "../../components/BackToTodayButton";
 import { CardShell, CardStack } from "../../components/Card";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
@@ -15,6 +16,7 @@ import {
   firstName,
   formatDayLabel,
   formatWeekRangeLabel,
+  isCurrentPeriod,
   isWeekendIso,
   mondayOf,
   toISODate,
@@ -120,6 +122,15 @@ export function AdminScheduleScreen() {
     setNotice(null);
   }
 
+  /** Back to the current week AND to today. Returning to the week but leaving the
+   *  selection on, say, Thursday would drop the admin on a day they never picked. */
+  function goToday() {
+    const todayIso = toISODate(new Date());
+    setWeekStart(mondayOf(new Date()));
+    setSelectedDate(todayIso);
+    setNotice(null);
+  }
+
   const dayEntries = (shifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
     .sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""));
@@ -158,7 +169,13 @@ export function AdminScheduleScreen() {
           leaving them up there would offer navigation that changes nothing. */}
       {!csvOpen && !kindsOpen && (
         <div style={{ padding: "12px 4px 0" }}>
-          <WeekBar label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))} onPrev={() => goWeek(-1)} onNext={() => goWeek(1)} />
+          <WeekBar
+            label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))}
+            backVisible={!isCurrentPeriod("week", toISODate(weekStart), today)}
+            onBack={goToday}
+            onPrev={() => goWeek(-1)}
+            onNext={() => goWeek(1)}
+          />
           <DayStrip dates={weekDates} selected={selectedDate} today={today} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
         </div>
       )}
@@ -243,13 +260,23 @@ export function AdminScheduleScreen() {
   );
 }
 
-function WeekBar({ label, onPrev, onNext }: { label: string; onPrev: () => void; onNext: () => void }) {
+function WeekBar({ label, backVisible, onBack, onPrev, onNext }: {
+  label: string;
+  /** False when the shown week already contains today. */
+  backVisible: boolean;
+  onBack: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
       <Button size="s" mode="gray" onClick={onPrev} aria-label="Прошлая неделя">
         ‹
       </Button>
-      <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
+        {backVisible && <BackToTodayButton label="Эта неделя" onClick={onBack} />}
+      </span>
       <Button size="s" mode="gray" onClick={onNext} aria-label="Следующая неделя">
         ›
       </Button>

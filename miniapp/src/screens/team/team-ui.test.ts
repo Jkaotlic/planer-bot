@@ -218,6 +218,7 @@ describe("team schedule UI", () => {
       createElement(TeamRangeNav, {
         label: "Вт, 28 июля",
         busy: true,
+        backLabel: "Сегодня",
         onPrevious: () => undefined,
         onNext: () => undefined,
       }),

@@ -114,3 +114,15 @@ export function formatWeekRangeLabel(monday: Date, sunday: Date): string {
 export function firstName(displayName: string): string {
   return displayName.trim().split(/\s+/)[0] ?? displayName;
 }
+
+/**
+ * Does the shown period already contain today? The "back to today" affordance
+ * hides when it does, so it never occupies space it cannot use.
+ *
+ * Both arguments are "YYYY-MM-DD"; `today` is passed in rather than read from
+ * the clock, so this stays pure.
+ */
+export function isCurrentPeriod(mode: "day" | "week", shownIso: string, todayIso: string): boolean {
+  if (mode === "day") return shownIso === todayIso;
+  return toISODate(mondayOf(parseISODate(shownIso))) === toISODate(mondayOf(parseISODate(todayIso)));
+}
