@@ -7,6 +7,7 @@ function campaign(patch: Partial<BirthdayCampaign> = {}): BirthdayCampaign {
     id: 1, employeeId: 2, year: 2026, celebratedOn: "2026-08-05",
     collectUrl: null, messageText: null, status: "pending",
     adminNotifiedAt: null, sentAt: null, sentCount: 0,
+    scheduledSendOn: null, scheduleNotifiedAt: null,
     ...patch,
   };
 }
@@ -22,25 +23,22 @@ function birthday(patch: Partial<UpcomingBirthday> = {}): UpcomingBirthday {
 
 describe("statusOf", () => {
   it("says the link is missing before anything else — it is what blocks sending", () => {
-    expect(statusOf(birthday())).toEqual({ label: "Нет ссылки", tone: "pending" });
-    expect(statusOf(birthday({ campaign: campaign() }))).toEqual({ label: "Нет ссылки", tone: "pending" });
+    expect(statusOf(null)).toEqual({ label: "Нет ссылки", tone: "pending" });
+    expect(statusOf(campaign())).toEqual({ label: "Нет ссылки", tone: "pending" });
   });
 
   it("goes to «готово» once a link is in, without sending anything", () => {
-    const ready = birthday({ campaign: campaign({ collectUrl: "https://sber.ru/x", status: "ready" }) });
-    expect(statusOf(ready)).toEqual({ label: "Готово", tone: "ready" });
+    expect(statusOf(campaign({ collectUrl: "https://sber.ru/x", status: "ready" }))).toEqual({ label: "Готово", tone: "ready" });
   });
 
   it("reports how many were reached once it has gone out", () => {
-    const sent = birthday({ campaign: campaign({ collectUrl: "https://sber.ru/x", status: "sent", sentCount: 5 }) });
-    expect(statusOf(sent)).toEqual({ label: "Разослано · 5", tone: "sent" });
+    expect(statusOf(campaign({ collectUrl: "https://sber.ru/x", status: "sent", sentCount: 5 }))).toEqual({ label: "Разослано · 5", tone: "sent" });
   });
 
   it("keeps «разослано» even if the link was later cleared", () => {
     // Sending is one-way: a campaign that has gone out must never read as
     // «готово к отправке» again, whatever else changes on it.
-    const sent = birthday({ campaign: campaign({ collectUrl: null, status: "sent", sentCount: 3 }) });
-    expect(statusOf(sent).tone).toBe("sent");
+    expect(statusOf(campaign({ collectUrl: null, status: "sent", sentCount: 3 })).tone).toBe("sent");
   });
 });
 

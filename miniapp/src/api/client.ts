@@ -41,6 +41,7 @@ import {
   mockGetJournal,
   mockGetBirthdays,
   mockSaveBirthdayCampaign,
+  mockGetBirthdayCampaigns,
   mockGetBirthdayPreview,
   mockSendBirthday,
   mockGetTemplateRoles,
@@ -361,6 +362,9 @@ export interface BirthdayCampaign {
   adminNotifiedAt: string | null;
   sentAt: string | null;
   sentCount: number;
+  /** The day an admin asked to be reminded to send it. Null when they didn't ask. */
+  scheduledSendOn: string | null;
+  scheduleNotifiedAt: string | null;
 }
 
 export interface UpcomingBirthday {
@@ -373,6 +377,14 @@ export interface UpcomingBirthday {
   celebratedOn: string;
   daysUntil: number;
   campaign: BirthdayCampaign | null;
+}
+
+/** A prepared round, with the person it belongs to. Unlike `UpcomingBirthday`
+ *  this includes rounds whose birthday has already passed. */
+export interface CampaignListRow {
+  campaign: BirthdayCampaign;
+  displayName: string;
+  birthDateLabel: string;
 }
 
 /** Exactly what would be sent, and to exactly whom — before anything leaves. */
@@ -438,7 +450,12 @@ export interface ApiClient {
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
   getJournal(params: { types?: string[]; limit?: number; offset?: number }): Promise<JournalPage>;
   getBirthdays(): Promise<UpcomingBirthday[]>;
-  saveBirthdayCampaign(employeeId: number, patch: { collectUrl?: string | null; messageText?: string | null }): Promise<BirthdayCampaign>;
+  saveBirthdayCampaign(
+    employeeId: number,
+    patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null },
+  ): Promise<BirthdayCampaign>;
+  /** Every round ever prepared, newest first — the sent ones included. */
+  getBirthdayCampaigns(): Promise<CampaignListRow[]>;
   getBirthdayPreview(employeeId: number): Promise<BirthdayPreview>;
   /** Sends the collection to the whole team but the birthday person. Confirmed by the caller. */
   sendBirthday(employeeId: number): Promise<{ delivered: number; intended: number }>;
@@ -817,6 +834,11 @@ export const realClient: ApiClient = {
     return birthdays;
   },
 
+  async getBirthdayCampaigns() {
+    const { campaigns } = await authorizedGet<{ campaigns: CampaignListRow[] }>("/api/admin/birthdays/campaigns");
+    return campaigns;
+  },
+
   async saveBirthdayCampaign(employeeId, patch) {
     const { campaign } = await authorizedPutJson<{ campaign: BirthdayCampaign }>(`/api/admin/birthdays/${employeeId}`, patch);
     return campaign;
@@ -926,6 +948,7 @@ const devClient: ApiClient = {
   getShiftCounts: (from, to) => mockGetShiftCounts(from, to),
   getJournal: (params) => mockGetJournal(params),
   getBirthdays: () => mockGetBirthdays(),
+  getBirthdayCampaigns: () => mockGetBirthdayCampaigns(),
   saveBirthdayCampaign: (employeeId, patch) => mockSaveBirthdayCampaign(employeeId, patch),
   getBirthdayPreview: (employeeId) => mockGetBirthdayPreview(employeeId),
   sendBirthday: (employeeId) => mockSendBirthday(employeeId),

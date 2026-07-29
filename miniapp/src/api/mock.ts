@@ -17,6 +17,7 @@ import type {
   JournalPage,
   BirthdayCampaign,
   BirthdayPreview,
+  CampaignListRow,
   UpcomingBirthday,
   ShiftCountsReport,
   Shift,
@@ -841,6 +842,7 @@ function campaignFor(employeeId: number, create: boolean): BirthdayCampaign | nu
     id: CAMPAIGNS.length + 1, employeeId, year, celebratedOn,
     collectUrl: null, messageText: null, status: "pending",
     adminNotifiedAt: null, sentAt: null, sentCount: 0,
+    scheduledSendOn: null, scheduleNotifiedAt: null,
   };
   CAMPAIGNS.push(created);
   return created;
@@ -881,7 +883,7 @@ export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
 
 export async function mockSaveBirthdayCampaign(
   employeeId: number,
-  patch: { collectUrl?: string | null; messageText?: string | null },
+  patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null },
 ): Promise<BirthdayCampaign> {
   await delay(180);
   const campaign = campaignFor(employeeId, true);
@@ -892,8 +894,31 @@ export async function mockSaveBirthdayCampaign(
     campaign.collectUrl = url;
   }
   if (patch.messageText !== undefined) campaign.messageText = patch.messageText?.trim() || null;
+  if (patch.scheduledSendOn !== undefined) {
+    const value = patch.scheduledSendOn;
+    if (value !== null) {
+      // Mirrors the server: within [today, celebratedOn].
+      const today = toISODate(new Date());
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Дата напоминания должна быть в виде ГГГГ-ММ-ДД");
+      if (value < today) throw new Error("Дата напоминания уже прошла");
+      if (value > campaign.celebratedOn) throw new Error("Напоминать после самого дня рождения уже поздно");
+    }
+    if (value !== campaign.scheduledSendOn) campaign.scheduleNotifiedAt = null;
+    campaign.scheduledSendOn = value;
+  }
   if (campaign.status !== "sent") campaign.status = campaign.collectUrl ? "ready" : "pending";
   return { ...campaign };
+}
+
+export async function mockGetBirthdayCampaigns(): Promise<CampaignListRow[]> {
+  await delay(200);
+  return [...CAMPAIGNS]
+    .sort((a, b) => b.celebratedOn.localeCompare(a.celebratedOn))
+    .flatMap((campaign) => {
+      const employee = EMPLOYEES.find((e) => e.id === campaign.employeeId);
+      if (!employee?.birthDate) return [];
+      return [{ campaign: { ...campaign }, displayName: employee.displayName, birthDateLabel: formatBirthDate(employee.birthDate) }];
+    });
 }
 
 export async function mockGetBirthdayPreview(employeeId: number): Promise<BirthdayPreview> {
