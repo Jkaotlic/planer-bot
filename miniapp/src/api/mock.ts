@@ -478,7 +478,11 @@ export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promis
 export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
   await delay(150);
   const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.displayName = displayName;
+  if (!employee) return;
+  employee.displayName = displayName;
+  // Mirrors `mockSetEmployeePreferredName`: address follows displayName unless
+  // a preferredName overrides it — renaming must not leave a stale address.
+  employee.address = employee.preferredName ?? displayName;
 }
 
 /** Mirrors the server: move one worker, then renumber everyone contiguously. */
@@ -1070,7 +1074,11 @@ export async function mockApplyRosterImport(
   for (const resolution of resolutions) {
     if (resolution.action === "rename") {
       const employee = EMPLOYEES.find((item) => item.id === resolution.employeeId);
-      if (employee) employee.displayName = resolution.csvName;
+      if (employee) {
+        employee.displayName = resolution.csvName;
+        // Same rule as `mockRenameEmployee`/`mockSetEmployeePreferredName`.
+        employee.address = employee.preferredName ?? resolution.csvName;
+      }
     } else {
       EMPLOYEES.push({
         id: Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1,
