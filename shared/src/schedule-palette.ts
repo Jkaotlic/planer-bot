@@ -30,6 +30,20 @@ export const VACATION_SCHEDULE_PALETTE: SchedulePalette = {
   code: "О",
 };
 
+/**
+ * A cell the import could not read — the file said something like «Ко» and we
+ * refused to guess what it meant.
+ *
+ * Deliberately grey rather than red: nothing is broken in the schedule, we simply
+ * did not understand one square, and it must not shout louder than a real absence.
+ * It stays visible until somebody fixes the file, which is the point.
+ */
+export const UNRECOGNISED_SCHEDULE_PALETTE: SchedulePalette = {
+  bg: "#6B7280",
+  fg: "#FFFFFF",
+  code: "?",
+};
+
 export function exactSchedulePalette(
   accent: TemplateAccent | undefined,
   category: EntryCategory,

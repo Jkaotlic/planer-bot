@@ -1,5 +1,6 @@
 import {
   exactSchedulePalette,
+  UNRECOGNISED_SCHEDULE_PALETTE,
   isAbsence,
   type EntryCategory,
   type SchedulePalette,
@@ -111,6 +112,11 @@ function toEntryView(
   templates: readonly ScheduleTemplate[],
 ): TeamEntryView {
   const template = templateFor(shift, templates);
+  // A cell the import could not read keeps its own grey «?» square and says so in
+  // words — «Смена» would claim we know what it is, and we do not.
+  if (shift.unrecognisedCode) {
+    return { shift, title: `Не распознано: «${shift.unrecognisedCode}»`, palette: UNRECOGNISED_SCHEDULE_PALETTE };
+  }
   return {
     shift,
     title: template?.name ?? shift.title ?? CATEGORY_TITLES[shift.category],

@@ -78,12 +78,20 @@ export function summaryLine(summary: {
   entriesDeleted: number;
   cellsPreserved: number;
   employeesCreated: number;
+  unknowns?: { name: string; date: string; code: string }[];
 }): string {
   const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
   if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
   if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
   if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
-  return `CSV загружен: ${parts.join(", ")}`;
+  const line = `CSV загружен: ${parts.join(", ")}`;
+  // Unreadable cells no longer stop the import, so the count has to travel with the
+  // success notice — otherwise «загружено» is the last thing said about a file that
+  // put question marks in the grid.
+  const unreadable = summary.unknowns?.length ?? 0;
+  return unreadable > 0
+    ? `${line}. ⚠ Не понял ${unreadable} ${unreadable === 1 ? "клетку" : "клеток"} — они стоят со знаком «?»`
+    : line;
 }
 
 interface Props {
@@ -214,6 +222,13 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
             {state.encoding === "windows-1251" && (
               <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 8 }}>
                 Файл в кодировке windows-1251 (так сохраняет Excel) — прочитал правильно, но глянь ФИО ниже.
+              </div>
+            )}
+            {state.preview.unknownsMessage && (
+              // A warning, not a blocker: the month still imports and these cells
+              // land as «?», visible in the grid until somebody fixes the file.
+              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, marginTop: 8, lineHeight: 1.45 }}>
+                ⚠ {state.preview.unknownsMessage}
               </div>
             )}
             {state.preview.preservedCount > 0 && (

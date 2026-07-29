@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SCHEDULE_ACCENT_PALETTES,
   VACATION_SCHEDULE_PALETTE,
+  UNRECOGNISED_SCHEDULE_PALETTE,
   exactSchedulePalette,
 } from "./schedule-palette";
 import { templateAccents } from "./category";
@@ -33,6 +34,7 @@ describe("working schedule palette", () => {
     const codes = [
       ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code),
       VACATION_SCHEDULE_PALETTE.code,
+      UNRECOGNISED_SCHEDULE_PALETTE.code,
     ];
     expect(new Set(codes).size).toBe(codes.length);
   });
@@ -41,6 +43,15 @@ describe("working schedule palette", () => {
     const codes = Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code);
     expect(codes).not.toContain("•");
     expect(VACATION_SCHEDULE_PALETTE.code).not.toBe("•");
+    expect(UNRECOGNISED_SCHEDULE_PALETTE.code).not.toBe("•");
+  });
+
+  it("marks an unreadable cell with «?» and nothing else uses that letter", () => {
+    // «?» has to stay unambiguous: it is the one square that means «мы не поняли
+    // файл», and a preset claiming it would hide real cells behind that meaning.
+    expect(UNRECOGNISED_SCHEDULE_PALETTE.code).toBe("?");
+    expect(Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code)).not.toContain("?");
+    expect(VACATION_SCHEDULE_PALETTE.code).not.toBe("?");
   });
 
   it("covers every accent a preset can claim", () => {

@@ -127,7 +127,11 @@ function EntryChip({ entry, templates, onClick }: { entry: Shift; templates: rea
       onClick={onClick}
       title="Изменить запись"
     >
-      {entry.start && entry.end ? (
+      {entry.unrecognisedCode ? (
+        // Not «Смена»: the file said something we could not read, and the chip has
+        // to say that rather than invent a kind of shift.
+        <span className="chip-title">{`? «${entry.unrecognisedCode}»`}</span>
+      ) : entry.start && entry.end ? (
         <>
           <span className="chip-time">{`${hh(entry.start)}–${hh(entry.end)}`}</span>
           <span className="chip-title">{entry.title ?? categoryLabel(entry.category)}</span>

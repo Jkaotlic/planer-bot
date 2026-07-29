@@ -73,6 +73,15 @@ export const shifts = sqliteTable("shifts", {
   title: text(),
   employeeId: integer().references(() => employees.id),
   note: text(),
+  /**
+   * The raw cell text when a roster import could not read it — «Ко» and the like.
+   *
+   * Kept verbatim rather than dropped, for three reasons: the grid can draw «?»
+   * instead of pretending the day is empty, the export writes the original code
+   * back so nothing is lost in a round trip, and the cell stays flagged on every
+   * re-import until somebody actually fixes the file. Null on every normal entry.
+   */
+  unrecognisedCode: text(),
   createdAt: createdAt(),
   updatedAt: createdAt().$onUpdate(() => new Date()),
 });

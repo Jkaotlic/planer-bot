@@ -109,9 +109,14 @@ describe("decodeRoster (against the synthetic fixture)", () => {
       { date: "2026-07-03", endDate: "2026-07-04", start: null, end: null, templateId: null });
   });
 
-  it("reports an undecodable cell and records nothing for it", () => {
+  it("reports an unreadable cell AND keeps it, marked, instead of dropping the day", () => {
     expect(decoded.unknowns).toEqual([{ name: "Белова Ирина", date: "2026-07-06", code: "xyz" }]);
-    expect(person("Белова Ирина").entries.some((e) => e.date === "2026-07-06")).toBe(false);
+    // Dropping it would quietly turn a working day into a day off — the more
+    // expensive of the two mistakes. It is kept with the original text on it.
+    const cell = person("Белова Ирина").entries.find((e) => e.date === "2026-07-06")!;
+    expect(cell.unrecognisedCode).toBe("xyz");
+    expect(cell.templateId).toBeNull();
+    expect({ start: cell.start, end: cell.end }).toEqual({ start: null, end: null });
   });
 
   it("proposes the columns nobody works on as holidays", () => {
@@ -159,7 +164,7 @@ describe("prototype-chain-safe code lookups", () => {
     const text = "﻿;01.06.2026\r\nИван;constructor";
     const decoded = decodeRoster(parseRosterCsv(text), listActiveTemplates(makeTestDb()));
     expect(decoded.unknowns).toEqual([{ name: "Иван", date: "2026-06-01", code: "constructor" }]);
-    expect(decoded.perPerson).toEqual([{ name: "Иван", entries: [] }]);
+    expect(decoded.perPerson[0]!.entries[0]!.unrecognisedCode).toBe("constructor");
   });
 });
 

@@ -114,6 +114,10 @@ export type DecodedEntry = {
   start: string | null;
   end: string | null;
   title: string | null;
+  /** Set only for a cell we could not read: the raw text, kept verbatim. Such an
+   *  entry is the one work entry with no clock times — inventing hours for
+   *  something we did not understand would be a lie. */
+  unrecognisedCode?: string | null;
 };
 export type UnknownCell = { name: string; date: string; code: string };
 /** A cell the export wrote as '?': something covers that day which the roster
@@ -172,7 +176,20 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
       flush();
       const presetName = Object.hasOwn(CODE_TO_PRESET_NAME, code) ? CODE_TO_PRESET_NAME[code] : undefined;
       const preset = byName.get(presetName ?? "");
-      if (!preset) { unknowns.push({ name: p.name, date: cell.date, code }); continue; }
+      if (!preset) {
+        // A cell we cannot read no longer sinks the whole file. It is reported so
+        // the admin is told exactly where it is, AND kept as an entry marked «?»:
+        // dropping it would quietly turn somebody's working day into a day off,
+        // which is the more expensive mistake of the two.
+        unknowns.push({ name: p.name, date: cell.date, code });
+        entries.push({
+          date: cell.date, endDate: null, category: "shift", templateId: null,
+          location: null, start: null, end: null, title: null, unrecognisedCode: code,
+        });
+        // Somebody is down for that day, so it is not a company holiday.
+        workersByDate.set(cell.date, (workersByDate.get(cell.date) ?? 0) + 1);
+        continue;
+      }
       const { start, end } = resolveShiftTimes(preset, cell.date);
       entries.push({
         date: cell.date, endDate: null, category: preset.category, templateId: preset.id,
@@ -205,8 +222,16 @@ function rosterField(v: string): string {
   return /[";\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
-/** One entry -> its roster code. Preset wins; else absence category; else non-working. */
-export function encodeEntryCode(shift: Pick<Shift, "category" | "templateId">, templatesById: Map<number, { name: string }>): string {
+/** One entry -> its roster code. An unread cell wins over everything (it keeps the
+ *  original text), then the preset, then the absence category, else non-working. */
+export function encodeEntryCode(
+  shift: Pick<Shift, "category" | "templateId"> & { unrecognisedCode?: string | null },
+  templatesById: Map<number, { name: string }>,
+): string {
+  // Write back exactly what the file said. The export is what the admin edits and
+  // re-uploads, so replacing «Ко» with anything else would either lose the cell or
+  // silently invent a shift nobody rostered.
+  if (shift.unrecognisedCode) return shift.unrecognisedCode;
   if (shift.templateId != null) {
     const name = templatesById.get(shift.templateId)?.name;
     const code = name ? PRESET_NAME_TO_CODE[name] : undefined;

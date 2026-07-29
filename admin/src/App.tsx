@@ -402,6 +402,14 @@ export function App() {
               </p>
             )}
 
+            {rosterImport.preview.unknownsMessage && (
+              // A warning, not a blocker: the month still imports, and these cells
+              // land as «?» so they are visible in the grid until somebody fixes them.
+              <p className="roster-import-warning" role="status">
+                ⚠ {rosterImport.preview.unknownsMessage}
+              </p>
+            )}
+
             {rosterImport.preview.preservedCount > 0 && (
               <p className="roster-import-hint">
                 Клеток «?» — {rosterImport.preview.preservedCount}. Это записи, которые CSV не умеет описать (работа в

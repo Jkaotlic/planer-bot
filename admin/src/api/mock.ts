@@ -699,6 +699,7 @@ export async function mockPreviewRosterImport(csv: string): Promise<RosterImport
       suggestedEmployeeId: EMPLOYEES.find((employee) => employee.isActive && employee.displayName === person.name)?.id ?? null,
     })),
     unknowns: [],
+    unknownsMessage: null,
     preservedCount: people.reduce(
       (sum, person) => sum + person.codes.filter((code) => code === MOCK_PRESERVE_CODE).length,
       0,

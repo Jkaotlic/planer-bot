@@ -140,6 +140,7 @@ describe("admin roster CSV import", () => {
         { csvName: "Новый Сотрудник", suggestedEmployeeId: null },
       ],
       unknowns: [],
+      unknownsMessage: null,
       preservedCount: 0,
       existingCount: 0,
     });
@@ -179,6 +180,7 @@ describe("admin roster CSV import", () => {
         cellsPreserved: 0,
         unknowns: [],
       },
+      unknownsMessage: null,
     });
 
     const exported = await app.request(
@@ -190,7 +192,7 @@ describe("admin roster CSV import", () => {
     expect(body).toContain("Новый Сотрудник;k32-7;holiday");
   });
 
-  it("rejects a preview containing unknown roster codes", async () => {
+  it("warns about an unreadable cell in the preview instead of refusing the file", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const token = await tokenFor(app, 111);
@@ -202,13 +204,41 @@ describe("admin roster CSV import", () => {
       body: JSON.stringify({ csv: badCsv }),
     });
 
-    expect(res.status).toBe(422);
+    // 200, not 422: one bad cell out of hundreds must not cost the whole month.
+    expect(res.status).toBe(200);
     const body = await res.json();
     // The admin sees Russian naming the exact cell, not a machine string.
-    expect(body.error).toMatch(/Игорь Петров/);
-    expect(body.error).toMatch(/01\.08\.2026/);
-    expect(body.error).toMatch(/wat/);
+    expect(body.unknownsMessage).toMatch(/Игорь Петров/);
+    expect(body.unknownsMessage).toMatch(/01\.08\.2026/);
+    expect(body.unknownsMessage).toMatch(/wat/);
+    expect(body.unknownsMessage).toMatch(/\?/);
     expect(body.unknowns).toEqual([{ name: "Игорь Петров", date: "2026-08-01", code: "wat" }]);
+  });
+
+  it("imports the unreadable cell as «?» and writes the original code back out", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const badCsv = ";01.08.2026;02.08.2026\r\nИгорь Петров;wat;k32";
+
+    const applied = await app.request("/api/admin/roster/import/apply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ csv: badCsv, resolutions: [{ csvName: "Игорь Петров", action: "create" }] }),
+    });
+
+    expect(applied.status).toBe(201);
+    const body = await applied.json();
+    // Both days are in — the readable one and the marked one.
+    expect(body.summary.entriesInserted).toBe(2);
+    expect(body.unknownsMessage).toMatch(/wat/);
+
+    // Round trip: the export writes «wat» back, so re-uploading it warns again
+    // rather than silently losing the cell or inventing a shift for it.
+    const exported = await app.request("/api/admin/roster.csv?from=2026-08-01&to=2026-08-02", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(await exported.text()).toContain("wat;k32");
   });
 
   it("accepts a '?' cell — it means «leave that day alone», not «bad code»", async () => {
@@ -355,5 +385,25 @@ describe("admin roster CSV import", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "в CSV повторяется ФИО «Игорь Петров»" });
+  });
+});
+
+describe("the «?» entry is the import's alone", () => {
+  it("cannot be created through the entries API", async () => {
+    // The one work entry with no clock times exists only because a file said
+    // something we could not read. An admin adding an entry by hand always knows
+    // what it is, so the normal validation must keep insisting on times.
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const employee = worker(db, "Игорь Петров", 333);
+
+    const res = await app.request("/api/admin/entries", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ date: "2026-08-01", category: "shift", employeeId: employee.id, unrecognisedCode: "wat" }),
+    });
+
+    expect(res.status).toBe(400);
   });
 });
