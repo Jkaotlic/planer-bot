@@ -7,6 +7,7 @@ import { getEmployeeById } from "../repo/employees";
 import {
   ADMIN_NOTICE_DAYS,
   adminNoticeMessage,
+  adminNoticeReadyMessage,
   adminRecipients,
   campaignsScheduledFor,
   ensureCampaign,
@@ -39,7 +40,11 @@ export async function runBirthdayNoticeTick(db: Db, bot: Bot, today: string): Pr
     const admins = adminRecipients(db, birthday.employeeId);
     if (admins.length === 0) continue;
 
-    const text = adminNoticeMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil);
+    // An admin who already pasted the link doesn't need to be told to create
+    // one — that instruction is exactly the defect this branch guards against.
+    const text = campaign.collectUrl
+      ? adminNoticeReadyMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil)
+      : adminNoticeMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil);
     let delivered = 0;
     for (const admin of admins) {
       if (await notifyUser(bot, admin.telegramUserId!, text)) delivered += 1;

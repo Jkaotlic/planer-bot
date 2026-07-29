@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lte } from "drizzle-orm";
 import { daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate } from "@planer/shared";
 import type { Db } from "../db/client";
 import { birthdayCampaigns, employees, type BirthdayCampaign, type Employee } from "../db/schema";
@@ -130,6 +130,21 @@ export function adminNoticeMessage(name: string, birthDateLabel: string, daysUnt
   ].join("\n");
 }
 
+/**
+ * The week-ahead nudge when an admin already pasted the link before this pass
+ * ever ran — preparing early became the normal case once the reminder-date
+ * feature landed. Telling them to create a collection they already made would
+ * be exactly the noise this message exists to avoid, so it only carries the
+ * heads-up and drops the instructions to create the link.
+ */
+export function adminNoticeReadyMessage(name: string, birthDateLabel: string, daysUntil: number): string {
+  return [
+    `🎂 ${name} празднует день рождения ${describeDaysUntil(daysUntil)} — ${birthDateLabel}.`,
+    "",
+    "Сбор уже готов — открой «Дни рождения» и разошли его команде, когда будет время.",
+  ].join("\n");
+}
+
 export interface CampaignPreview {
   employeeId: number;
   displayName: string;
@@ -218,16 +233,29 @@ export function markAdminNotified(db: Db, campaignId: number, when: Date): void 
 }
 
 /**
- * Rounds whose reminder day is today and which have not been reminded about.
+ * Rounds whose reminder day is today — or earlier and missed — and which have
+ * not been reminded about.
+ *
+ * Unlike `upcomingBirthdays`, which scans a 7-day window and so heals itself
+ * after any outage, a scheduled reminder is a single day: if the server was
+ * down (or a tick failed) on exactly that day, `eq(scheduledSendOn, date)`
+ * would never match again and the reminder would be lost for good. So this
+ * also picks up any campaign whose `scheduledSendOn` is in the past. The catch
+ * is bounding how far back: reminding an admin to send a collection for a
+ * birthday that has already been and gone is noise, not a service. The
+ * campaign's own `celebratedOn` is the natural upper edge for that — as long
+ * as today has not yet passed the birthday being collected for, a late
+ * reminder is still useful; once it has, it is filtered out below.
+ *
  * A round already sent is skipped: there is nothing left to remind anyone of.
  */
 export function campaignsScheduledFor(db: Db, date: string): BirthdayCampaign[] {
   return db
     .select()
     .from(birthdayCampaigns)
-    .where(and(eq(birthdayCampaigns.scheduledSendOn, date), isNull(birthdayCampaigns.scheduleNotifiedAt)))
+    .where(and(lte(birthdayCampaigns.scheduledSendOn, date), isNull(birthdayCampaigns.scheduleNotifiedAt)))
     .all()
-    .filter((campaign) => campaign.status !== "sent");
+    .filter((campaign) => campaign.status !== "sent" && campaign.celebratedOn >= date);
 }
 
 /** Records that the scheduled reminder went out, so it goes out once. */
