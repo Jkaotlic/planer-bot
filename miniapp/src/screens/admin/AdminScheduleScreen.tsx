@@ -13,7 +13,6 @@ import { useIsDark } from "../../lib/theme";
 import {
   addDays,
   dayOfMonth,
-  firstName,
   formatDayLabel,
   formatWeekRangeLabel,
   isCurrentPeriod,
@@ -843,7 +842,7 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
               key={l.employee.id}
               style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 13.5 }}
             >
-              <span style={{ flexShrink: 0, color: "var(--tgui--text_color)" }}>{firstName(l.employee.displayName)}</span>
+              <span style={{ flexShrink: 0, color: "var(--tgui--text_color)" }}>{l.employee.address}</span>
               {/* Preset names can be long ("Дежурство · Поклонка"), so the tallies wrap
                   instead of pushing the row off a phone screen. */}
               <span

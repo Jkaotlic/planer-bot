@@ -20,7 +20,7 @@ import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { BirthdaysScreen } from "./screens/BirthdaysScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
-import { addDays, firstName, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
+import { addDays, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
 import { BOT_USERNAME } from "./lib/bot";
 
@@ -273,7 +273,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar active={nav} onChange={setNav} adminLabel={admin ? `${firstName(admin.displayName)} · админ` : "Админ"} />
+      <Sidebar active={nav} onChange={setNav} adminLabel={admin ? `${admin.address} · админ` : "Админ"} />
       <div className="main-column">
         {error ? (
           <div className="centered-fill">{error}</div>

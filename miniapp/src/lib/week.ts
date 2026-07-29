@@ -110,11 +110,6 @@ export function formatWeekRangeLabel(monday: Date, sunday: Date): string {
   return monthDayFormatter.formatRange(monday, sunday);
 }
 
-/** First token of a full display name, e.g. "Аня Смирнова" -> "Аня". */
-export function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] ?? displayName;
-}
-
 /**
  * Does the shown period already contain today? The "back to today" affordance
  * hides when it does, so it never occupies space it cannot use.

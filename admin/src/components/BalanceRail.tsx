@@ -1,7 +1,6 @@
 import { countsForBalance } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
-import { firstName } from "../lib/week";
 
 export interface BalanceRailProps {
   employees: readonly Employee[];
@@ -96,7 +95,7 @@ export function BalanceRail({ employees, shifts, templates }: BalanceRailProps) 
           return (
             <BalanceRow
               key={employee.id}
-              name={firstName(employee.displayName)}
+              name={employee.address}
               initials={initialsOf(employee.displayName)}
               avatarBg={palette.bg}
               avatarFg={palette.fg}
