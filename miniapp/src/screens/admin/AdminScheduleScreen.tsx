@@ -303,6 +303,7 @@ function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: bool
     <button
       type="button"
       onClick={onSelect}
+      aria-current={isToday ? "date" : undefined}
       style={{
         flex: 1,
         border: "none",
