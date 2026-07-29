@@ -233,7 +233,8 @@ function EmployeeRow({
             loading={busy}
             disabled={busy}
             onClick={() => {
-              onPreferredName?.(addressDraft.trim() || null);
+              const trimmed = addressDraft.trim();
+              if (trimmed !== (employee.preferredName ?? "")) onPreferredName?.(trimmed || null);
               setEditingAddress(false);
             }}
           >
