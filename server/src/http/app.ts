@@ -415,14 +415,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
       } else if (typeof body.scheduledSendOn !== "string" || !dateStr.safeParse(body.scheduledSendOn).success) {
         return c.json({ error: "Дата напоминания должна быть в виде ГГГГ-ММ-ДД" }, 400);
       } else {
+        // Read the round before validating: a client that resends this field
+        // unchanged on every save (the miniapp does) must not get stuck the
+        // moment the reminder day is behind us but the birthday isn't —
+        // resubmitting the round's own stored value is not an edit.
+        const round = ensureCampaign(db, Number(c.req.param("id")), asOf);
+        if (!round) return c.json({ error: "not_found" }, 404);
         // The window is «from today up to and including the birthday». Earlier is
         // already gone; later is a reminder to send a collection for a party that
         // has happened.
-        if (body.scheduledSendOn < asOf) {
+        if (body.scheduledSendOn !== round.scheduledSendOn && body.scheduledSendOn < asOf) {
           return c.json({ error: "Дата напоминания уже прошла" }, 400);
         }
-        const round = ensureCampaign(db, Number(c.req.param("id")), asOf);
-        if (!round) return c.json({ error: "not_found" }, 404);
         if (body.scheduledSendOn > round.celebratedOn) {
           return c.json({ error: "Напоминать после самого дня рождения уже поздно" }, 400);
         }
