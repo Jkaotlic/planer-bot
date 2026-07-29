@@ -920,7 +920,9 @@ function TodayChip() {
 
 - [ ] **Step 7: Подтонировать колонку сегодня в недельной сетке**
 
-В `miniapp/src/screens/team/team-schedule.css` заменить правило `.team-week__day.is-today` (строки 150-152):
+В `miniapp/src/screens/team/team-schedule.css` заменить правило `.team-week__day.is-today` (строки 150-152). **Порядок правил важен:** блок `.team-week__cell.is-today` обязан стоять ниже уже существующего `.team-week__cell.is-weekend` — селекторы равны по специфичности, и побеждает тот, что ниже. Владелец проекта постановил: когда сегодня выпадает на выходной, побеждает сегодня.
+
+
 
 ```css
 .team-week__day.is-today {
@@ -931,7 +933,12 @@ function TodayChip() {
 }
 
 /* The whole column, not just its header — on a phone a 3px rail above one of
-   seven narrow columns is invisible. */
+   seven narrow columns is invisible.
+
+   Must be ordered AFTER `.team-week__cell.is-weekend`: both selectors carry the
+   same specificity, so source order decides, and today has to win. Two days in
+   seven are weekends, and losing the tint on exactly those days would defeat the
+   rule. The header block above resolves the same tie the same way. */
 .team-week__cell.is-today {
   box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--tgui--link_color) 9%, transparent);
 }
