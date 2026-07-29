@@ -16,11 +16,31 @@ export interface ProposeSwapScreenProps {
   onConfirm: (toShiftId: number, message: string) => Promise<void>;
 }
 
+/** Server rejection codes for `POST /api/swaps` (see `createSwap` in swap-service.ts),
+ *  turned into something a person can read. Anything not listed here (including a
+ *  network/auth failure, whose message is a raw HTTP status string) falls back to
+ *  the generic message below rather than leaking a code onto the screen. */
+const SWAP_ERROR_MESSAGES: Record<string, string> = {
+  "identical-shift": "Это та же самая смена — обмен ничего не изменит.",
+  duplicate: "Ты уже предложил обмен на эту смену — дождись ответа.",
+  not_your_shift: "Эта смена больше не твоя — обнови страницу.",
+  target_unassigned: "На эту смену сейчас никто не назначен.",
+  same_person: "Нельзя предложить обмен самому себе.",
+  not_swappable: "Такими сменами нельзя меняться.",
+  shift_not_found: "Смена не найдена — возможно, её уже изменили.",
+};
+
+function describeSwapError(err: unknown): string {
+  const code = err instanceof Error ? err.message : "";
+  return SWAP_ERROR_MESSAGES[code] ?? "Не получилось предложить обмен. Попробуй ещё раз.";
+}
+
 /** "Предложить обмен": pick a colleague's shift to swap for the one you're giving up, add an optional note, confirm. */
 export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConfirm }: ProposeSwapScreenProps) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selected = colleagueShifts.find((s) => s.id === selectedId) ?? null;
   // `employeeName` is the roster's «Фамилия Имя», not an address — we only have the
@@ -33,8 +53,11 @@ export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConf
   async function handleConfirm() {
     if (!selected || submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
       await onConfirm(selected.id, message.trim());
+    } catch (err) {
+      setError(describeSwapError(err));
     } finally {
       setSubmitting(false);
     }
@@ -109,6 +132,11 @@ export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConf
       </List>
 
       <div style={{ padding: "6px 4px 4px" }}>
+        {error && (
+          <div style={{ padding: "0 8px 8px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+            {error}
+          </div>
+        )}
         <Button size="l" stretched mode="filled" disabled={!selected || submitting} loading={submitting} onClick={handleConfirm}>
           {confirmLabel}
         </Button>

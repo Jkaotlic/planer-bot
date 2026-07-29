@@ -100,6 +100,22 @@ describe("swap endpoints", () => {
     expect(igorSwap.theirShift).toEqual({ date: sa.date, start: sa.start, end: sa.end, title: "Смена Ани" });
   });
 
+  it("refuses to propose a swap between two identical shifts (400, identical-shift)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    // Both work the same hand-made «08:00–17:00» shift on the same day — a swap
+    // between them would leave both exactly where they started.
+    const same = daysFromNow(2);
+    const sa = createShift(db, { date: same, start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: same, start: "08:00", end: "17:00", employeeId: igor.w.id });
+
+    const res = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("identical-shift");
+  });
+
   it("rejects a non-string message (400)", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
