@@ -231,6 +231,52 @@ describe("scheduled send date", () => {
     expect(shape.status).toBe(400);
   });
 
+  it("lets a stale reminder date through unchanged, alongside an edit to something else", async () => {
+    // The miniapp always resends `scheduledSendOn`, changed or not. If the
+    // reminder day has since slipped into the past, that must not block
+    // pasting the collection link — resubmitting the round's own stored
+    // value is not an edit, even though it now reads as "in the past".
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    await app.request(`/api/admin/birthdays/${id}?asOf=2026-08-01`,
+      send(token, { scheduledSendOn: "2026-08-01" }, "PUT"));
+
+    const res = await app.request(`/api/admin/birthdays/${id}?asOf=2026-08-03`,
+      send(token, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-01" }, "PUT"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).campaign).toMatchObject({ collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-01" });
+  });
+
+  it("still refuses a genuinely different past date, not just any past-looking value", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    await app.request(`/api/admin/birthdays/${id}?asOf=2026-08-01`,
+      send(token, { scheduledSendOn: "2026-08-01" }, "PUT"));
+
+    const res = await app.request(`/api/admin/birthdays/${id}?asOf=2026-08-03`,
+      send(token, { scheduledSendOn: "2026-08-02" }, "PUT"));
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts the two boundary dates: exactly today, and exactly the birthday", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const id = person(db, "Именинник", 1, "08-05");
+
+    const atAsOf = await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: "2026-08-01" }, "PUT"));
+    expect(atAsOf.status).toBe(200);
+
+    const atCelebratedOn = await app.request(`/api/admin/birthdays/${id}?${ASOF}`, send(token, { scheduledSendOn: "2026-08-05" }, "PUT"));
+    expect(atCelebratedOn.status).toBe(200);
+  });
+
   it("clears the date on null", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

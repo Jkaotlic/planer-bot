@@ -897,10 +897,12 @@ export async function mockSaveBirthdayCampaign(
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn;
     if (value !== null) {
-      // Mirrors the server: within [today, celebratedOn].
+      // Mirrors the server: within [today, celebratedOn], except resubmitting
+      // the round's own already-stored date — that's not an edit, so it isn't
+      // held to the "not in the past" rule once today has moved past it.
       const today = toISODate(new Date());
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Дата напоминания должна быть в виде ГГГГ-ММ-ДД");
-      if (value < today) throw new Error("Дата напоминания уже прошла");
+      if (value !== campaign.scheduledSendOn && value < today) throw new Error("Дата напоминания уже прошла");
       if (value > campaign.celebratedOn) throw new Error("Напоминать после самого дня рождения уже поздно");
     }
     if (value !== campaign.scheduledSendOn) campaign.scheduleNotifiedAt = null;
