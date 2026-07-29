@@ -347,6 +347,9 @@ export interface JournalPage {
   limit: number;
   offset: number;
   availableTypes: string[];
+  /** Everyone who has ever been the actor of an event — only real actors, not the
+   *  whole roster — so the person filter offers only people who actually did something. */
+  availableActors: { id: number; displayName: string }[];
   events: JournalEvent[];
 }
 
@@ -448,7 +451,7 @@ export interface ApiClient {
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
-  getJournal(params: { types?: string[]; limit?: number; offset?: number }): Promise<JournalPage>;
+  getJournal(params: { types?: string[]; actor?: number; limit?: number; offset?: number }): Promise<JournalPage>;
   getBirthdays(): Promise<UpcomingBirthday[]>;
   saveBirthdayCampaign(
     employeeId: number,
@@ -824,6 +827,7 @@ export const realClient: ApiClient = {
   getJournal(params) {
     const q = new URLSearchParams();
     if (params.types?.length) q.set("types", params.types.join(","));
+    if (params.actor != null) q.set("actor", String(params.actor));
     q.set("limit", String(params.limit ?? 30));
     q.set("offset", String(params.offset ?? 0));
     return authorizedGet<JournalPage>(`/api/admin/journal?${q.toString()}`);

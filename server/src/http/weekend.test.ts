@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getByTelegramId } from "../repo/employees";
 import { listShiftsInRange } from "../repo/shifts";
+import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -122,6 +123,31 @@ describe("weekend-market endpoints", () => {
     expect((await app.request(`/api/weekend/offers/${assignmentId}/decline`, authed(anya.token))).status).toBe(200);
     expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.w.id)).toBe(false);
     expect((await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots.some((s: any) => s.slot.id === slotId)).toBe(true);
+  });
+
+  it("journals weekend_slot_created and weekend_assigned with the admin as actor", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const adminEmployeeId = getByTelegramId(db, 111)!.id;
+    const anya = await worker(db, app, "Аня", 201);
+
+    const date = nextSaturday();
+    const posted = await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }));
+    const slotId = (await posted.json()).slot.id as number;
+
+    const created = listRecentAudit(db, 5).find((a) => a.type === "weekend_slot_created")!;
+    expect(created.actorEmployeeId).toBe(adminEmployeeId);
+    expect(created.payload).toMatchObject({ slotId });
+    expect(typeof (created.payload as { slot: unknown }).slot).toBe("string"); // reads without a join
+
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+    await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
+
+    const assigned = listRecentAudit(db, 5).find((a) => a.type === "weekend_assigned")!;
+    expect(assigned.actorEmployeeId).toBe(adminEmployeeId);
+    expect(assigned.payload).toMatchObject({ slotId, employeeId: anya.w.id, employeeName: "Аня" });
+    expect(typeof (assigned.payload as { slot: unknown }).slot).toBe("string");
   });
 
   it("guards admin-only endpoints against workers (403)", async () => {

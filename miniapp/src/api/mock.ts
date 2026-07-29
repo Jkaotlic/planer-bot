@@ -797,26 +797,39 @@ export async function mockGetTemplateQueue(templateId: number): Promise<Template
 
 const MOCK_JOURNAL_TYPES = ["entry_created", "entry_updated", "entry_deleted", "swap_accepted", "roster_import"];
 
-const JOURNAL: JournalEvent[] = Array.from({ length: 34 }, (_, index) => ({
-  id: 1000 - index,
-  type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
-  createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
-  actorName: EMPLOYEES[index % 3]?.displayName ?? null,
-  payload: { entryId: 500 + index },
-}));
+// actorId rides along for filtering; it isn't part of the JournalEvent the API
+// returns per row (the row only ever carries the resolved name).
+const JOURNAL: (JournalEvent & { actorId: number | null })[] = Array.from({ length: 34 }, (_, index) => {
+  const actor = EMPLOYEES[index % 3] ?? null;
+  return {
+    id: 1000 - index,
+    type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
+    createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
+    actorName: actor?.displayName ?? null,
+    actorId: actor?.id ?? null,
+    payload: { entryId: 500 + index },
+  };
+});
 
-export async function mockGetJournal(params: { types?: string[]; limit?: number; offset?: number }): Promise<JournalPage> {
+export async function mockGetJournal(params: { types?: string[]; actor?: number; limit?: number; offset?: number }): Promise<JournalPage> {
   await delay(200);
   const types = params.types ?? [];
-  const matching = JOURNAL.filter((event) => types.length === 0 || types.includes(event.type));
+  const matching = JOURNAL.filter(
+    (event) => (types.length === 0 || types.includes(event.type)) && (params.actor == null || event.actorId === params.actor),
+  );
   const limit = params.limit ?? 30;
   const offset = params.offset ?? 0;
+  const actorsById = new Map(JOURNAL.filter((e) => e.actorId != null).map((e) => [e.actorId!, e.actorName!]));
+  const availableActors = [...actorsById.entries()]
+    .map(([id, displayName]) => ({ id, displayName }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ru"));
   return {
     total: matching.length,
     limit,
     offset,
     availableTypes: [...new Set(JOURNAL.map((e) => e.type))].sort(),
-    events: matching.slice(offset, offset + limit),
+    availableActors,
+    events: matching.slice(offset, offset + limit).map(({ actorId: _actorId, ...event }) => event),
   };
 }
 

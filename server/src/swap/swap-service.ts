@@ -1,7 +1,7 @@
 import { and, eq, ne, or } from "drizzle-orm";
 import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
-import { shifts, swapRequests, auditLog, type Shift as DbShift, type SwapRequest } from "../db/schema";
+import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
 import { createSwapRequest, getSwapRequest, setSwapStatus, hasPendingSwap } from "../repo/swaps";
 
@@ -79,15 +79,13 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
 
   const accepted = nextSwapStatus("pending", "accept");
   // Safe read-validate-write under single-process better-sqlite3 (spec §11); revisit if horizontally scaled.
+  // Journaling this swap happens in the HTTP layer, after this transaction returns —
+  // never inside it, so a bookkeeping failure can never roll back a swap that already
+  // succeeded.
   db.transaction((tx) => {
     tx.update(shifts).set({ employeeId: req.toEmployeeId }).where(eq(shifts.id, fromShift.id)).run();
     tx.update(shifts).set({ employeeId: req.fromEmployeeId }).where(eq(shifts.id, toShift.id)).run();
     tx.update(swapRequests).set({ status: accepted, resolvedAt: new Date() }).where(eq(swapRequests.id, requestId)).run();
-    tx.insert(auditLog).values({
-      type: "swap_done",
-      actorEmployeeId: req.toEmployeeId,
-      payload: { requestId, fromEmployeeId: req.fromEmployeeId, toEmployeeId: req.toEmployeeId, fromShiftId: fromShift.id, toShiftId: toShift.id },
-    }).run();
     const siblings = tx
       .select()
       .from(swapRequests)
