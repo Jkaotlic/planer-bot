@@ -148,18 +148,33 @@ export async function notifySwapProposal(bot: Bot, telegramUserId: number, reque
   }
 }
 
-/** Broadcasts a new vacant weekend slot to every active worker, each with a "🙋 Хочу" button
- * routed to `weekend:interest:<slotId>`. */
-export async function notifyVacantSlot(bot: Bot, db: Db, slotId: number, text: string): Promise<void> {
+/**
+ * Broadcasts a new vacant weekend slot to every active worker, each with a
+ * "🙋 Хочу" button routed to `weekend:interest:<slotId>`.
+ *
+ * Reports how far it got, because only people who have linked Telegram can be
+ * reached at all: with a third of the team linked, «опубликовано» silently means
+ * «спросил треть». Same `delivered`/`intended` pair the birthday broadcast returns.
+ */
+export async function notifyVacantSlot(
+  bot: Bot,
+  db: Db,
+  slotId: number,
+  text: string,
+): Promise<{ delivered: number; intended: number }> {
   const kb = new InlineKeyboard().text("🙋 Хочу", `weekend:interest:${slotId}`);
-  for (const e of listActive(db)) {
+  const team = listActive(db);
+  let delivered = 0;
+  for (const e of team) {
     if (e.telegramUserId == null) continue;
     try {
       await bot.api.sendMessage(e.telegramUserId, text, { reply_markup: kb });
+      delivered += 1;
     } catch (err) {
       console.error(`notifyVacantSlot: failed for ${e.telegramUserId}:`, safeErrorMessage(err));
     }
   }
+  return { delivered, intended: team.length };
 }
 
 /** Sends a weekend-work offer with inline Беру/Не смогу buttons routed to

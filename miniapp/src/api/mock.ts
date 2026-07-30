@@ -659,7 +659,7 @@ export async function mockGetAdminWeekendSlots(): Promise<AdminSlotView[]> {
   }));
 }
 
-export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot> {
+export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot & { delivered: number; intended: number }> {
   await delay(250);
   const slot: VacantSlot = {
     id: nextAdminSlotId++,
@@ -672,7 +672,10 @@ export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot> {
     status: "open",
   };
   ADMIN_SLOTS.unshift({ slot, interested: [], assignees: [] });
-  return slot;
+  // Not everybody in the demo roster linked Telegram — so the notice has
+  // something to say about how far the call for volunteers got.
+  const team = EMPLOYEES.filter((e) => e.isActive);
+  return { ...slot, delivered: team.filter((e) => e.telegramUserId != null).length, intended: team.length };
 }
 
 let nextAssignmentId = 900;

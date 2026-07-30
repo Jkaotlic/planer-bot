@@ -12,11 +12,24 @@ function monthRange(d: Date): { from: string; to: string } {
 }
 
 /** "Работа в выходные дни": open vacant slots with fairness-ranked volunteers to assign, and a payroll ledger with CSV export. */
+/**
+ * What to say after opening a weekend slot.
+ *
+ * The call for volunteers only reaches people who have linked Telegram, and a
+ * bare «смена открыта» reads as «спросил команду» even when it asked a third of
+ * it. Mirrored in the other console — see the twin of this file.
+ */
+export function reachNotice(delivered: number, intended: number): string {
+  if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
+  return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
+}
+
 export function WeekendAdminScreen() {
   const [slots, setSlots] = useState<AdminSlotView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showPost, setShowPost] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function reloadSlots() {
     setSlots(await apiClient.getWeekendSlots());
@@ -73,6 +86,7 @@ export function WeekendAdminScreen() {
       </div>
 
       {error && <div className="error-text">{error}</div>}
+      {notice && <div className="roster-notice roster-notice-success" role="status">{notice}</div>}
 
       <section className="employees-section">
         <h3 className="employees-section-title">Открытые смены</h3>
@@ -94,8 +108,9 @@ export function WeekendAdminScreen() {
       {showPost && (
         <PostSlotDialog
           onCancel={() => setShowPost(false)}
-          onCreated={async () => {
+          onCreated={async (reach) => {
             setShowPost(false);
+            setNotice(reachNotice(reach.delivered, reach.intended));
             await reloadSlots();
           }}
           onError={setError}
@@ -296,7 +311,7 @@ function PayrollSection({ onError }: { onError: (msg: string | null) => void }) 
   );
 }
 
-function PostSlotDialog({ onCancel, onCreated, onError }: { onCancel: () => void; onCreated: () => Promise<void>; onError: (msg: string | null) => void }) {
+function PostSlotDialog({ onCancel, onCreated, onError }: { onCancel: () => void; onCreated: (reach: { delivered: number; intended: number }) => Promise<void>; onError: (msg: string | null) => void }) {
   const [date, setDate] = useState("");
   const [start, setStart] = useState("10:00");
   const [end, setEnd] = useState("18:00");
@@ -319,8 +334,8 @@ function PostSlotDialog({ onCancel, onCreated, onError }: { onCancel: () => void
     setLocalError(null);
     onError(null);
     try {
-      await apiClient.postSlot({ date, start, end, title: title || undefined, location: location || undefined, note: note || undefined });
-      await onCreated();
+      const created = await apiClient.postSlot({ date, start, end, title: title || undefined, location: location || undefined, note: note || undefined });
+      await onCreated(created);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : "Не удалось открыть смену");
     } finally {

@@ -457,7 +457,9 @@ export interface ApiClient {
   deleteEntry(id: number): Promise<void>;
   distribute(from: string, to: string, apply: boolean): Promise<DistributeResult>;
   getAdminWeekendSlots(): Promise<AdminSlotView[]>;
-  postSlot(input: NewSlotInput): Promise<VacantSlot>;
+  /** The slot, plus how many of the team the «нужен человек» broadcast reached —
+   *  only people who linked Telegram can be told at all. */
+  postSlot(input: NewSlotInput): Promise<VacantSlot & { delivered: number; intended: number }>;
   assignSlot(slotId: number, employeeId: number): Promise<void>;
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
@@ -807,8 +809,11 @@ export const realClient: ApiClient = {
     return slots;
   },
   async postSlot(input) {
-    const { slot } = await authorizedPostJson<{ slot: VacantSlot }>("/api/admin/weekend/slots", input);
-    return slot;
+    const { slot, delivered, intended } = await authorizedPostJson<{ slot: VacantSlot; delivered: number; intended: number }>(
+      "/api/admin/weekend/slots",
+      input,
+    );
+    return { ...slot, delivered, intended };
   },
   async assignSlot(slotId, employeeId) {
     await authorizedPostJson(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });

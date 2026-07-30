@@ -1031,9 +1031,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
       location: typeof body.location === "string" ? body.location : null,
       note: typeof body.note === "string" ? body.note : null,
     });
-    recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, { slotId: slot.id, slot: slotLineOf(slot) });
-    if (bot) await notifyVacantSlot(bot, db, slot.id, `Нужен человек на выходной:\n${slotLineOf(slot)}\n\nНажми «Хочу», если готов выйти.`);
-    return c.json({ slot }, 201);
+    // How many of the team the call for volunteers actually reached — a slot posted
+    // to a team where most people never opened the bot is a question asked of
+    // nobody, and the admin has no other way to find that out.
+    const reach = bot
+      ? await notifyVacantSlot(bot, db, slot.id, `Нужен человек на выходной:\n${slotLineOf(slot)}\n\nНажми «Хочу», если готов выйти.`)
+      : { delivered: 0, intended: listActive(db).length };
+    recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, {
+      slotId: slot.id,
+      slot: slotLineOf(slot),
+      ...reach,
+    });
+    return c.json({ slot, ...reach }, 201);
   });
 
   // Admin: open slots with their ranked interested list (fairness hint: confirmedThisMonth asc)
