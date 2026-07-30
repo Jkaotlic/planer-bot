@@ -791,7 +791,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       recordAudit(db, "swap_auto_cancelled", c.get("auth").employeeId, payload);
     }
     if (bot) {
-      const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapAcceptedText());
+      const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapAcceptedText(swapAuditPayload(res.request)));
       await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(res.request)));
       // Accepting can silently auto-cancel other pending swaps that touched the
       // same shift(s). Both of their sides are told: the counterparty otherwise
@@ -813,7 +813,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const res = declineSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     recordAudit(db, "swap_declined", c.get("auth").employeeId, swapAuditPayload(res.request));
-    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapDeclinedText()); }
+    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapDeclinedText(swapAuditPayload(res.request))); }
     return c.json({ ok: true });
   });
 

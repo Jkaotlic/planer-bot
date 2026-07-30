@@ -334,7 +334,8 @@ export function createBot(deps: BotDeps): Bot {
     // bumped sibling proposal's counterparty hearing why their buttons died.
     const initiatorTg = getEmployeeById(db, res.counterpartyId)?.telegramUserId;
     if (initiatorTg != null) {
-      await notifyUser(bot, initiatorTg, action === "accept" ? swapAcceptedText() : swapDeclinedText());
+      const payload = swapAuditPayload(db, res.request);
+      await notifyUser(bot, initiatorTg, action === "accept" ? swapAcceptedText(payload) : swapDeclinedText(payload));
     }
     if (action === "accept") {
       await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(db, res.request)));
