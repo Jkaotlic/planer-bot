@@ -57,7 +57,14 @@ describe("swap endpoints", () => {
     expect(accepted.status).toBe(200);
     expect(getShift(db, sa.id)?.employeeId).toBe(igor.w.id);
     expect(getShift(db, sb.id)?.employeeId).toBe(anya.w.id);
-    expect(sent.some((s) => s.chat_id === 201)).toBe(true); // Аня notified of acceptance
+
+    // Аня hears which swap, not just that one happened: with several proposals
+    // out at once «Твой обмен приняли» names none of them. Admins already got
+    // the fully-named version of the same event.
+    const toAnya = sent.filter((s) => s.chat_id === 201).map((s) => s.text).join("\n");
+    expect(toAnya).toContain("Игорь");
+    expect(toAnya).toContain("08:00–17:00");
+    expect(toAnya).toContain("11:00–20:00");
   });
 
   it("accept notifies admins by name and notifies the counterparty of a sibling swap it auto-cancels", async () => {
@@ -182,9 +189,10 @@ describe("swap endpoints", () => {
     expect(res.status).toBe(400);
   });
 
-  it("decline flow: counterparty declines a pending swap (200)", async () => {
+  it("decline flow: counterparty declines a pending swap (200), naming the swap", async () => {
     const db = makeTestDb();
-    const app = createApp({ db, config });
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
@@ -193,6 +201,9 @@ describe("swap endpoints", () => {
     const reqId = (await created.json()).request.id as number;
     const declined = await app.request(`/api/swaps/${reqId}/decline`, authed(igor.token));
     expect(declined.status).toBe(200);
+    const toAnya = sent.filter((s) => s.chat_id === 201).map((s) => s.text).join("\n");
+    expect(toAnya).toContain("Игорь");
+    expect(toAnya).toContain("08:00–17:00");
   });
 
   it("cancel flow: initiator cancels a pending swap (200)", async () => {

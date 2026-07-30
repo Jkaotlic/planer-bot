@@ -11,14 +11,21 @@ import type { SwapAuditPayload } from "../util/message-lines";
 // to agree today and had nothing keeping them that way. Both call sites import
 // these instead, so a wording change can never land on only one path.
 
-/** Sent to a swap's original initiator once the counterparty accepts it. */
-export function swapAcceptedText(): string {
-  return "Твой обмен приняли ✅ Смены поменялись.";
+/**
+ * Sent to a swap's original initiator once the counterparty accepts it.
+ *
+ * Names both shifts, like the admin broadcast below has always done. Somebody
+ * with two proposals out at once read «Твой обмен приняли ✅ Смены поменялись»
+ * and still didn't know which shift they were working tomorrow.
+ */
+export function swapAcceptedText(p: SwapAuditPayload): string {
+  return `Твой обмен с ${p.toName} приняли ✅ Ты отдал(а) ${p.fromShift}, взамен работаешь ${p.toShift}.`;
 }
 
-/** Sent to a swap's original initiator once the counterparty declines it. */
-export function swapDeclinedText(): string {
-  return "Твой обмен отклонили.";
+/** Sent to a swap's original initiator once the counterparty declines it. Named
+ *  for the same reason as the accepted one — «Твой обмен отклонили» is which? */
+export function swapDeclinedText(p: SwapAuditPayload): string {
+  return `${p.toName} отклонил(а) твой обмен: ${p.fromShift} ↔ ${p.toShift}.`;
 }
 
 /** Admin broadcast once a swap actually goes through. Named and dated, so with
