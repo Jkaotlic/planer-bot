@@ -22,6 +22,7 @@ import { createLatestRequestGate } from "../../lib/request-gate";
 import {
   addDays,
   dayOfMonth,
+  dayOptions,
   formatDayLabel,
   formatWeekRangeLabel,
   isCurrentPeriod,
@@ -677,7 +678,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
         </div>
         <div style={{ flex: 1 }}>
           <Select header="День" value={date} onChange={(e) => { setDate(e.target.value); setEndDate(e.target.value); }}>
-            {weekDates.map((iso) => (
+            {dayOptions(weekDates, date).map((iso) => (
               <option key={iso} value={iso}>
                 {formatDayLabel(iso)}
               </option>
@@ -725,7 +726,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
 
       {isMultiDay(category) && (
         <Select header="По какой день" value={endDate} onChange={(e) => setEndDate(e.target.value)}>
-          {weekDates
+          {dayOptions(weekDates, endDate)
             .filter((iso) => iso >= date)
             .map((iso) => (
               <option key={iso} value={iso}>

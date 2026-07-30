@@ -79,6 +79,22 @@ export function isWeekendIso(iso: string): boolean {
   return idx === 5 || idx === 6;
 }
 
+/**
+ * The shown week's days, plus a date the entry already holds that falls outside
+ * them.
+ *
+ * The entry panel is opened from a week grid, so its day pickers offer that week.
+ * But an absence imported from the roster routinely runs longer than one week, and
+ * a `<select>` whose value matches none of its options renders as the *first* one:
+ * the screen then tells the admin the отпуск ends on Monday when it really runs to
+ * the 22nd, and one touch of the control shortens it to Sunday for real — there is
+ * no way to express the stored date from that screen at all. Carrying the entry's
+ * own date into the list keeps the panel able to show, and re-save, what is there.
+ */
+export function dayOptions(weekDates: readonly string[], current: string): string[] {
+  return weekDates.includes(current) ? [...weekDates] : [...weekDates, current].sort();
+}
+
 /** "Пн, 14 июля" */
 export function formatDayLabel(iso: string): string {
   return `${weekdayShort(iso)}, ${monthDayFormatter.format(parseISODate(iso))}`;
