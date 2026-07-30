@@ -9,6 +9,15 @@ export function createEmployee(
   return db.insert(employees).values(data).returning().all()[0]!;
 }
 
+/**
+ * Claims a roster row with an invite token, returning it — or null if the token
+ * matches nothing usable.
+ *
+ * `isActive` is part of "usable": an archived row is one the system has been told
+ * to stop counting, and a leftover invite for it used to link happily and answer
+ * «Ты в системе ✅», after which `/api/auth` 403'd the person on their first tap.
+ * A token that leads nowhere is better refused at the door.
+ */
 export function linkTelegramAccount(
   db: Db,
   inviteToken: string,
@@ -24,7 +33,7 @@ export function linkTelegramAccount(
       tgFirstName: tgFirstName ?? null,
       inviteToken: null,
     })
-    .where(eq(employees.inviteToken, inviteToken))
+    .where(and(eq(employees.inviteToken, inviteToken), eq(employees.isActive, true)))
     .returning()
     .all();
   return rows[0] ?? null;

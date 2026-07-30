@@ -103,6 +103,25 @@ describe("POST /api/admin/employees", () => {
   });
 });
 
+describe("invite links", () => {
+  // `linkTelegramAccount` refuses archived rows, so a link for one can only ever
+  // answer «ссылка недействительна». Say so here instead of minting it.
+  it("refuses to mint an invite for an archived worker (400)", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Игорь Петров" });
+    const app = createApp({ db, config: configWithBotUsername });
+    const admin = await tokenFor(app, 111);
+
+    const before = await app.request(`/api/admin/employees/${w.id}/invite`, authedJson(admin, {}));
+    expect(before.status).toBe(200);
+
+    await app.request(`/api/admin/employees/${w.id}/archive`, authedJson(admin, {}));
+    const after = await app.request(`/api/admin/employees/${w.id}/invite`, authedJson(admin, {}));
+    expect(after.status).toBe(400);
+    expect((await after.json()).error).toBe("archived");
+  });
+});
+
 describe("archive / restore employee endpoints", () => {
   it("archive removes from active lists + unassigns future shifts; restore brings back", async () => {
     const db = makeTestDb();
