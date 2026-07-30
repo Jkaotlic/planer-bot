@@ -1,5 +1,7 @@
-// MIRROR of admin/src/lib/csv-encoding.ts — the Mini App deliberately does not
-// depend on the desktop console or on @planer/shared. Change both together.
+// MIRROR of admin/src/lib/csv-encoding.ts, byte for byte. The two frontends don't
+// import from each other, and this never moved into @planer/shared (which both of
+// them do depend on) — moving it there would delete the mirror, and is the one
+// thing that would. Until then: change both together.
 
 export type CsvEncoding = "utf-8" | "windows-1251";
 

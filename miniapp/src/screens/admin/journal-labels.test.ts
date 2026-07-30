@@ -4,9 +4,10 @@ import { typeLabel } from "./AdminJournal";
 /**
  * Every event type the server can write to `audit_log`, as of this test.
  *
- * MIRRORS `admin/src/screens/journal-labels.test.ts` — the Mini App keeps its own
- * copy of everything shared with the console (see the note on why it doesn't import
- * `@planer/shared`). Add a `recordAudit(...)` call on the server, add it in both.
+ * MIRRORS `admin/src/screens/journal-labels.test.ts`. Duplicated rather than
+ * imported because this is a list of what the *server* writes, and `@planer/shared`
+ * — which both consoles do depend on — doesn't carry it. Add a `recordAudit(...)`
+ * call on the server, add it in both.
  */
 const EMITTED_TYPES = [
   "birthday_admin_notice",

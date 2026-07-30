@@ -4,10 +4,11 @@ import { typeLabel } from "./JournalScreen";
 /**
  * Every event type the server can write to `audit_log`, as of this test.
  *
- * Kept as a plain list rather than imported: the console and the Mini App each own
- * their label map, and the Mini App deliberately doesn't depend on `@planer/shared`
- * — so this list is mirrored in `miniapp/src/screens/admin/journal-labels.test.ts`.
- * Add a `recordAudit(...)` call on the server, add it here and in the mirror.
+ * Kept as a plain list rather than imported: this is a list of what the *server*
+ * writes, and `@planer/shared` — which both consoles do depend on — doesn't carry
+ * it. The console and the Mini App each own their label map, so the list is
+ * mirrored in `miniapp/src/screens/admin/journal-labels.test.ts`. Add a
+ * `recordAudit(...)` call on the server, add it here and in the mirror.
  *
  * Why it matters: `typeLabel` falls back to the raw type, so a missing entry doesn't
  * break anything visibly in code review — it just shows an admin `weekend_assigned`
