@@ -207,4 +207,34 @@ describe("preferences — who asked for a kind", () => {
     );
     expect(out).toEqual([{ shiftId: 1, employeeId: 1 }]);
   });
+
+  // An overnight slot spends half its hours on the following date, so an absence
+  // there is as disqualifying as one on the slot's own date — otherwise somebody
+  // works 00:00–06:00 of the first day of their own vacation. The seeding side
+  // already reaches across midnight for `busy` (see seedWorkerLoad); this is the
+  // same reach on the absence side.
+  it("keeps an overnight slot away from somebody who is absent the next day", () => {
+    const overnight = slot(1, "2026-08-03", "22:00", "06:00");
+    const out = distributeFairly(
+      [overnight],
+      [worker(1, { absentDates: ["2026-08-04"] }), idleWorker(2)],
+    );
+    expect(out).toEqual([{ shiftId: 1, employeeId: 2 }]);
+  });
+
+  it("leaves an overnight slot unassigned when the only candidate is absent the next day", () => {
+    const out = distributeFairly(
+      [slot(1, "2026-08-03", "22:00", "06:00")],
+      [worker(1, { absentDates: ["2026-08-04"] })],
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("still fills a same-day slot when the absence is only tomorrow", () => {
+    const out = distributeFairly(
+      [slot(1, "2026-08-03", "15:00", "23:00")],
+      [worker(1, { absentDates: ["2026-08-04"] })],
+    );
+    expect(out).toEqual([{ shiftId: 1, employeeId: 1 }]);
+  });
 });
