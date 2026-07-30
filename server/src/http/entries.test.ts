@@ -54,6 +54,26 @@ describe("schedule edits are auditable", () => {
     expect(deleted).toMatchObject({ entryId: id, title: "Вечер" });
   });
 
+  it("refuses to edit a range into ending before it starts", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const created = await app.request(
+      "/api/admin/entries",
+      authedJson(admin, { date: "2026-07-20", endDate: "2026-07-24", category: "vacation", employeeId: anya.id }),
+    );
+    const id = (await created.json()).entry.id as number;
+
+    // Moving only the start past the existing end. The patch itself carries one
+    // date, so nothing but the merge can see that the pair is now backwards — and
+    // a backwards range is an entry no reader of a period ever finds again.
+    const res = await app.request(`/api/admin/entries/${id}`, authedJson(admin, { date: "2026-07-28" }, "PATCH"));
+    expect(res.status).toBe(400);
+    expect(getShift(db, id)).toMatchObject({ date: "2026-07-20", endDate: "2026-07-24" });
+  });
+
   it("logs nothing when the edit was rejected", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

@@ -46,6 +46,20 @@ describe("entry input schema", () => {
   });
 
   /**
+   * Отпуск, который кончается раньше, чем начался, — запись-призрак: она лежит в
+   * базе, но каждый читатель диапазона спрашивает `date <= d && (endDate ?? date) >= d`
+   * и не находит её ни в одном дне. Её не видно ни в сетке, ни в командном
+   * расписании, ни в выгрузке ростера; распределение считает такого человека
+   * свободным и ставит ему смены посреди «отпуска», который админ завёл.
+   */
+  it("rejects a range that ends before it starts", () => {
+    const backwards = createEntrySchema.safeParse({ date: "2026-07-20", endDate: "2026-07-10", category: "vacation" });
+    expect(backwards.success).toBe(false);
+    const sameDay = createEntrySchema.safeParse({ date: "2026-07-10", endDate: "2026-07-10", category: "vacation" });
+    expect(sameDay.success).toBe(true);
+  });
+
+  /**
    * «Работа в выходной» = только суббота или воскресенье. Государственные
    * праздники в будни днями отдыха не считаются — календаря праздников в системе
    * нет (`calendar_days` пуста и никем не пишется), и до тех пор это правило надо
