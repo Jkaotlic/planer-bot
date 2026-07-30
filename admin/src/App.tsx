@@ -280,7 +280,9 @@ export function App() {
     }
   }
 
-  const admin = employees?.find((e) => e.isAdmin);
+  // Active: the roster now carries the archive too, and a former admin sitting in
+  // it must not become the name in the sidebar.
+  const admin = employees?.find((e) => e.isAdmin && e.isActive);
   // Archived workers don't appear in the live schedule or the add-entry picker.
   const activeEmployees = employees?.filter((e) => e.isActive) ?? null;
 

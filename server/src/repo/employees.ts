@@ -168,7 +168,20 @@ export function restoreEmployee(db: Db, id: number): Employee | undefined {
 }
 
 export function listArchived(db: Db): Employee[] {
-  return db.select().from(employees).where(eq(employees.isActive, false)).all();
+  return db.select().from(employees).where(eq(employees.isActive, false)).orderBy(...ROSTER_ORDER).all();
+}
+
+/**
+ * The whole roster for an admin screen: active in the admin's order, then the
+ * archive underneath.
+ *
+ * Both consoles draw their «Архив» tab by filtering this list for `isActive ===
+ * false`, so serving only the active ones made that tab permanently empty and
+ * «Восстановить» impossible to reach. Everything that must not see an archived
+ * person — the grid, the pools, the balance — filters `isActive` itself.
+ */
+export function listForAdmin(db: Db): Employee[] {
+  return [...listActive(db), ...listArchived(db)];
 }
 
 export function setEmployeeAdmin(db: Db, id: number, isAdmin: boolean): Employee | undefined {

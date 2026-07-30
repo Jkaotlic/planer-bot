@@ -115,8 +115,12 @@ describe("archive / restore employee endpoints", () => {
     expect(archived.status).toBe(200);
     expect((await archived.json()).ok).toBe(true);
     expect(getShift(db, future.id)?.employeeId).toBeNull();
+    // The admin roster is the one list that has to keep showing them — it is what
+    // draws the «Архив» tab and its «Восстановить» button. Everywhere else they're gone.
     const afterArchive = await app.request("/api/admin/employees", bearer(admin));
-    expect((await afterArchive.json()).employees.some((e: { id: number }) => e.id === w.id)).toBe(false);
+    const archivedRow = (await afterArchive.json()).employees.find((e: { id: number }) => e.id === w.id);
+    expect(archivedRow).toBeDefined();
+    expect(archivedRow.isActive).toBe(false);
     const afterArchivePublic = await app.request("/api/employees", bearer(admin));
     expect((await afterArchivePublic.json()).employees.some((e: { id: number }) => e.id === w.id)).toBe(false);
 
@@ -125,6 +129,27 @@ describe("archive / restore employee endpoints", () => {
     expect(getEmployeeById(db, w.id)?.isActive).toBe(true);
     const afterRestore = await app.request("/api/admin/employees", bearer(admin));
     expect((await afterRestore.json()).employees.some((e: { id: number }) => e.id === w.id)).toBe(true);
+  });
+
+  // Both consoles build their «Архив» tab by filtering this one list for
+  // `isActive === false`. Serving only the active ones left that tab permanently
+  // empty and «Восстановить» unreachable — archiving was a one-way door.
+  it("GET /api/admin/employees lists archived workers after the active ones", async () => {
+    const db = makeTestDb();
+    const first = worker(db, "Первый Работник", 331);
+    const second = worker(db, "Второй Работник", 332);
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request(`/api/admin/employees/${second.id}/archive`, authedJson(admin, {}));
+    const list = (await (await app.request("/api/admin/employees", bearer(admin))).json())
+      .employees as { id: number; isActive: boolean }[];
+
+    expect(list.filter((e) => e.id === second.id)).toHaveLength(1);
+    expect(list.find((e) => e.id === second.id)!.isActive).toBe(false);
+    // Active first, archive at the bottom — the screen renders in the order it gets.
+    expect(list.findIndex((e) => e.id === first.id)).toBeLessThan(list.findIndex((e) => e.id === second.id));
+    expect(list.at(-1)!.id).toBe(second.id);
   });
 
   it("journals employee_archived and employee_restored with the admin as actor", async () => {
