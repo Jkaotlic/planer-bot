@@ -8,6 +8,7 @@ import {
   type RosterPersonResolution,
   type Shift,
   type Template,
+  type TemplateRolesView,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
 import { BalanceRail } from "./components/BalanceRail";
@@ -86,6 +87,9 @@ export function App() {
   const [weekMonday, setWeekMonday] = useState(() => mondayOf(new Date()));
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
+  /** Pools and preferences, for the ★ in the balance rail — it ranks by the same rule
+   *  the server does, and cannot do that without them. */
+  const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -103,12 +107,18 @@ export function App() {
   // Employees + presets + events load once; the schedule reloads whenever the visible week changes.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([apiClient.getEmployees(), apiClient.getTemplates(), apiClient.getEvents()])
-      .then(([e, t, ev]) => {
+    Promise.all([
+      apiClient.getEmployees(),
+      apiClient.getTemplates(),
+      apiClient.getEvents(),
+      apiClient.getTemplateRoles(),
+    ])
+      .then(([e, t, ev, roles]) => {
         if (!cancelled) {
           setEmployees(e);
           setTemplates(t);
           setEvents(ev);
+          setTemplateRoles(roles);
         }
       })
       .catch((err: unknown) => {
@@ -328,7 +338,7 @@ export function App() {
                 onEntryClick={setEditingEntry}
               />
               <aside className="right-rail">
-                <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} />
+                <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
                 <EventsFeed events={events} />
               </aside>
             </div>

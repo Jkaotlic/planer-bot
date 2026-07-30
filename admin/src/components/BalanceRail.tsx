@@ -1,5 +1,5 @@
-import { countsForBalance } from "@planer/shared";
-import type { Employee, Shift, Template } from "../api/client";
+import { allowedByPool, countsForBalance } from "@planer/shared";
+import type { Employee, Shift, Template, TemplateRolesView } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 
 export interface BalanceRailProps {
@@ -8,6 +8,26 @@ export interface BalanceRailProps {
   shifts: readonly Shift[];
   /** Presets: an entry's kind is the name of the preset it came from, so the rail must resolve templateId. */
   templates: readonly Template[];
+  /**
+   * Who may take each preset and who asked for it, straight from
+   * `/api/admin/templates/roles`. Without it the ★ can only guess, and a guess here
+   * is worse than nothing — see `nextPickByKind`.
+   */
+  roles: readonly TemplateRolesView[];
+}
+
+/** Who may take a kind of shift, and who asked for it — the two things the server
+ *  applies before fairness, keyed by kind rather than by preset id because that is
+ *  how the rail's columns are identified. */
+export interface KindRoles {
+  /** Employee ids allowed to take this kind. Empty means everyone. */
+  pool: readonly number[];
+  /** employeeId -> weight, higher wins. Absent means they didn't ask. */
+  preference: Readonly<Record<number, number>>;
+}
+
+export function rolesByKind(roles: readonly TemplateRolesView[]): Map<string, KindRoles> {
+  return new Map(roles.map((r) => [r.name, { pool: r.pool, preference: r.preference }]));
 }
 
 /** One worker's tally, in the very terms `distributeFairly` ranks them by. */
@@ -36,15 +56,39 @@ function shiftKind(s: Pick<Shift, "templateId" | "title">, nameById: ReadonlyMap
 }
 
 /**
- * Who «Распределить честно» hands the next shift of each kind to, ranked exactly
- * as `distributeFairly` does: fewest of that kind, then fewest shifts overall,
- * then lowest id. It can't know who'll be free on a given day, so this is a hint.
+ * Who «Распределить честно» hands the next shift of each kind to, in the server's
+ * own order (`distributeFairly`): the pool as a hard filter, then fewest of that
+ * kind, then who asked for it, then fewest shifts overall, then lowest id.
+ *
+ * The pool and the preference used to be missing here, which was harmless only
+ * while no preset had a pool: the rail would star whoever held fewest of a duty
+ * across the whole team — including people who may not take that duty at all — and
+ * the button would then hand it to somebody else. A hint the admin believes has to
+ * rank by the real rule, so this mirrors all four keys and the filter.
+ *
+ * A kind with no eligible candidate gets no entry, and so no ★ at all: better a
+ * blank than a name that cannot be picked. It still can't know who will be free on
+ * the day, so it stays a hint.
  */
-function nextPickByKind(loads: readonly Load[], kinds: readonly string[]): Map<string, number> {
+export function nextPickByKind(
+  loads: readonly Load[],
+  kinds: readonly string[],
+  byKind: ReadonlyMap<string, KindRoles>,
+): Map<string, number> {
   const out = new Map<string, number>();
   for (const kind of kinds) {
-    const ranked = [...loads].sort(
-      (a, b) => (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) || a.total - b.total || a.employeeId - b.employeeId,
+    // A kind with no preset behind it (a one-off time, an old row) has no roles, which
+    // reads as "everyone" — the same as an unconfigured preset.
+    const kindRoles = byKind.get(kind);
+    const pool = kindRoles?.pool;
+    const preferenceOf = (employeeId: number) => kindRoles?.preference[employeeId] ?? 0;
+    const eligible = loads.filter((l) => allowedByPool(pool, l.employeeId));
+    const ranked = [...eligible].sort(
+      (a, b) =>
+        (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) ||
+        preferenceOf(b.employeeId) - preferenceOf(a.employeeId) ||
+        a.total - b.total ||
+        a.employeeId - b.employeeId,
     );
     const first = ranked[0];
     if (first) out.set(kind, first.employeeId);
@@ -58,7 +102,7 @@ function nextPickByKind(loads: readonly Load[], kinds: readonly string[]): Map<s
  * what «Распределить честно» balances — each kind on its own, not hours — so the
  * rail explains the button instead of contradicting it.
  */
-export function BalanceRail({ employees, shifts, templates }: BalanceRailProps) {
+export function BalanceRail({ employees, shifts, templates, roles }: BalanceRailProps) {
   const active = employees.filter((e) => e.isActive);
   const nameById = new Map(templates.map((t) => [t.id, t.name]));
 
@@ -82,7 +126,7 @@ export function BalanceRail({ employees, shifts, templates }: BalanceRailProps) 
   kinds.sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b, "ru"));
 
   const maxTotal = Math.max(1, ...loads.map((l) => l.total));
-  const nextPick = nextPickByKind(loads, kinds);
+  const nextPick = nextPickByKind(loads, kinds, rolesByKind(roles));
 
   return (
     <section className="balance-rail" aria-label="Баланс по видам смен">

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Employee, type NewEntryInput, type Shift, type Template } from "../../api/client";
+import {
+  apiClient,
+  type Employee,
+  type NewEntryInput,
+  type Shift,
+  type Template,
+  type TemplateRolesView,
+} from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
 import { CardShell, CardStack } from "../../components/Card";
@@ -60,6 +67,63 @@ export function showsWeekSwitcher(state: {
   return !state.csvOpen && !state.kindsOpen && !state.fillOpen && state.editing === null;
 }
 
+/** Who may take a kind of shift, and who asked for it — the two things the server
+ *  applies before fairness, keyed by kind because that is how the tallies below are
+ *  identified. MIRRORS `KindRoles` in the console's BalanceRail. */
+export interface KindRoles {
+  /** Employee ids allowed to take this kind. Empty means everyone. */
+  pool: readonly number[];
+  /** employeeId -> weight, higher wins. Absent means they didn't ask. */
+  preference: Readonly<Record<number, number>>;
+}
+
+export function rolesByKind(roles: readonly TemplateRolesView[]): Map<string, KindRoles> {
+  return new Map(roles.map((r) => [r.name, { pool: r.pool, preference: r.preference }]));
+}
+
+/**
+ * Who «Распределить честно» hands the next shift of each kind to, in the server's own
+ * order (`distributeFairly`): the pool as a hard filter, then fewest of that kind,
+ * then who asked for it, then fewest shifts overall, then lowest id.
+ *
+ * The pool and the preference used to be missing here, which was harmless only while
+ * no preset had a pool: the ★ would land on whoever held fewest of a duty across the
+ * whole team — including people who may not take that duty at all — and the button
+ * would then hand it to somebody else. A hint the admin believes has to rank by the
+ * real rule.
+ *
+ * A kind with nobody eligible gets no entry, so no ★ at all: better a blank than a
+ * name that cannot be picked. MIRRORS `nextPickByKind` in the console's BalanceRail.
+ */
+export function nextPickByKind(
+  loads: readonly { employeeId: number; byKind: Record<string, number>; total: number }[],
+  kinds: readonly string[],
+  byKind: ReadonlyMap<string, KindRoles>,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const kind of kinds) {
+    // A kind with no preset behind it (a one-off time, an old row) has no roles, which
+    // reads as "everyone" — the same as an unconfigured preset.
+    const kindRoles = byKind.get(kind);
+    const pool = kindRoles?.pool;
+    const preferenceOf = (employeeId: number) => kindRoles?.preference[employeeId] ?? 0;
+    const ranked = loads
+      // Hand-mirrored `allowedByPool` from shared — an empty pool means everyone. The
+      // Mini App deliberately doesn't import @planer/shared; change both together.
+      .filter((l) => !pool || pool.length === 0 || pool.includes(l.employeeId))
+      .sort(
+        (a, b) =>
+          (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) ||
+          preferenceOf(b.employeeId) - preferenceOf(a.employeeId) ||
+          a.total - b.total ||
+          a.employeeId - b.employeeId,
+      );
+    const first = ranked[0];
+    if (first) out.set(kind, first.employeeId);
+  }
+  return out;
+}
+
 /**
  * What «⚖ Распределить честно» reports back.
  *
@@ -97,6 +161,9 @@ export function AdminScheduleScreen() {
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  /** Pools and preferences, for the ★ in «Заполнить неделю» — it ranks by the same rule
+   *  the server does, and cannot do that without them. */
+  const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [distributing, setDistributing] = useState(false);
@@ -141,11 +208,12 @@ export function AdminScheduleScreen() {
   // Roster + templates load once; they don't change with the visible week.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates()])
-      .then(([emps, tmpls]) => {
+    Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates(), apiClient.getTemplateRoles()])
+      .then(([emps, tmpls, roles]) => {
         if (cancelled) return;
         setEmployees(emps.filter((e) => e.isActive));
         setTemplates(tmpls);
+        setTemplateRoles(roles);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -255,6 +323,7 @@ export function AdminScheduleScreen() {
                 templates={templates}
                 weekDates={weekDates}
                 shifts={shifts ?? []}
+                roles={templateRoles}
                 onCancel={() => setFillOpen(false)}
                 onFilled={handleFilled}
               />
@@ -712,6 +781,9 @@ interface FillWeekPanelProps {
   weekDates: readonly string[];
   /** The visible week's team schedule, used only to compute the fairness hint. */
   shifts: readonly Shift[];
+  /** Pools and preferences — without them the ★ can only guess, and a guess the admin
+   *  believes is worse than no hint at all. */
+  roles: readonly TemplateRolesView[];
   onCancel: () => void;
   onFilled: (count: number) => Promise<void>;
 }
@@ -753,7 +825,7 @@ function shiftKind(s: Pick<Shift, "templateId" | "title">, nameById: ReadonlyMap
  * this week — the very thing «Распределить честно» evens out — so the admin can
  * spread work by eye. A hint, not an enforced rule.
  */
-function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFilled }: FillWeekPanelProps) {
+function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCancel, onFilled }: FillWeekPanelProps) {
   const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
   /** Per-day choice, encoded: "" = выходной, "p:<id>" = preset, "c:<category>" = a
    * category that has no preset (отпуск/больничный/командировка/…). Same option set
@@ -793,24 +865,18 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, onCancel, onFi
     return { loads, kinds };
   }, [employees, shifts, templates]);
 
-  /**
-   * Who «Распределить честно» would hand the next shift of each kind to, ranked
-   * exactly as `distributeFairly` does: fewest of that kind, then fewest shifts
-   * overall, then lowest id. It can't know who'll be free on a given day, so this
-   * stays a hint.
-   */
-  const nextByKind = useMemo(() => {
-    const out = new Map<string, number>();
-    for (const kind of kinds) {
-      const ranked = [...loads].sort(
-        (a, b) =>
-          (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) || a.total - b.total || a.employee.id - b.employee.id,
-      );
-      const first = ranked[0];
-      if (first) out.set(kind, first.employee.id);
-    }
-    return out;
-  }, [loads, kinds]);
+  /** Who «Распределить честно» would hand the next shift of each kind to. It can't know
+   *  who'll be free on the day, so it stays a hint — but it ranks by the server's real
+   *  rule, pool and preference included (see `nextPickByKind`). */
+  const nextByKind = useMemo(
+    () =>
+      nextPickByKind(
+        loads.map((l) => ({ employeeId: l.employee.id, byKind: l.byKind, total: l.total })),
+        kinds,
+        rolesByKind(roles),
+      ),
+    [loads, kinds, roles],
+  );
 
   function templateTimesFor(template: Template, iso: string): { start: string; end: string } {
     return weekdayIndex(iso) === FRIDAY_INDEX
