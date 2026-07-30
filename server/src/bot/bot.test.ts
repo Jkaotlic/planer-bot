@@ -393,6 +393,12 @@ describe("bot swap callback buttons", () => {
     const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
     expect(anyaMessages.some((t) => t.toLowerCase().includes("отменил"))).toBe(true);
     expect(anyaMessages.some((t) => t.includes("Марк"))).toBe(true);
+
+    // And Марк — who proposed it, has been waiting, and did nothing wrong. Without
+    // this he only sees «Отменено» on his own request: the same pill he'd see if
+    // he had withdrawn it himself.
+    const markMessages = sent.filter((s) => s.chat_id === 203).map((s) => s.text);
+    expect(markMessages.some((t) => t.toLowerCase().includes("отменил"))).toBe(true);
   });
 
   it("a failing cosmetic edit does not suppress the initiator's notification", async () => {

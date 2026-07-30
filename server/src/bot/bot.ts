@@ -317,12 +317,14 @@ export function createBot(deps: BotDeps): Bot {
     if (action === "accept") {
       await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(db, res.request)));
       // Accepting can silently auto-cancel other pending swaps that touched the
-      // same shift(s) — their counterparty otherwise only learns about it by
-      // tapping a now-stale button and getting a bare "Уже обработано".
+      // same shift(s). Both sides hear about it — the counterparty whose buttons
+      // just died, and the initiator who has been waiting and would otherwise
+      // read «Отменено» as their own doing. Same rule as the mini-app route.
       for (const sibling of res.cancelledSiblings ?? []) {
-        const siblingTg = getEmployeeById(db, sibling.toEmployeeId)?.telegramUserId;
-        if (siblingTg != null) {
-          await notifyUser(bot, siblingTg, swapAutoCancelledText(swapAuditPayload(db, sibling)));
+        const text = swapAutoCancelledText(swapAuditPayload(db, sibling));
+        for (const employeeId of [sibling.fromEmployeeId, sibling.toEmployeeId]) {
+          const siblingTg = getEmployeeById(db, employeeId)?.telegramUserId;
+          if (siblingTg != null) await notifyUser(bot, siblingTg, text);
         }
       }
     }
