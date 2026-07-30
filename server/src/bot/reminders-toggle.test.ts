@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createBot, remindersKeyboard, remindersStateText } from "./bot";
@@ -114,6 +114,29 @@ describe("the reminders switch in the bot", () => {
     expect(replies.join("\n")).toMatch(/notifications|мини-апп/i);
   });
 
+  it("still says where to get them back even when the cosmetic button-swap fails", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const db = makeTestDb();
+    worker(db, "Смирнова Аня", 209);
+    const bot = createBot({ db, config });
+    bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
+      can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+    const calls: { method: string; payload: Record<string, unknown> }[] = [];
+    bot.api.config.use((_prev, method, payload) => {
+      calls.push({ method, payload: payload as Record<string, unknown> });
+      if (method === "editMessageReplyMarkup") throw new Error("telegram down");
+      return { ok: true, result: {} } as never;
+    });
+
+    try {
+      await bot.handleUpdate(tapUpdate(209, "reminders:off") as never);
+      const replies = calls.filter((c) => c.method === "sendMessage").map((c) => String(c.payload.text));
+      expect(replies.join("\n")).toMatch(/notifications|мини-апп/i);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("ignores a tap from somebody who isn't in the system", async () => {
     const db = makeTestDb();
     const { bot, calls } = testBot(db);
@@ -163,5 +186,14 @@ describe("remindersStateText / remindersKeyboard", () => {
     const whenOff = JSON.stringify(remindersKeyboard(false).inline_keyboard);
     expect(whenOn).toContain("reminders:off");
     expect(whenOff).toContain("reminders:on");
+  });
+
+  it("names all three shifts reminders actually cover — morning, evening and night (see shared/src/reminder.ts's isReminderWorthy)", () => {
+    // The plain day shift is the only one that's silent; morning, evening and
+    // night all get a reminder. The old wording named only two of the three.
+    const text = remindersStateText(true);
+    expect(text).toContain("утренней");
+    expect(text).toContain("вечерней");
+    expect(text).toContain("ночной");
   });
 });

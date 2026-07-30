@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, createAdminEmployee } from "../repo/employees";
@@ -23,6 +23,26 @@ function testBot(db: Db) {
   const calls: { method: string; payload: any }[] = [];
   bot.api.config.use((_prev, method, payload) => {
     calls.push({ method, payload });
+    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
+    return { ok: true, result: {} } as any;
+  });
+  return { bot, sent, calls };
+}
+
+/** Like testBot, but the given API method throws for every call — proves a
+ *  transient Telegram failure on a cosmetic edit doesn't swallow a notification
+ *  already sent before it. */
+function testBotFailingMethod(db: Db, failingMethod: string) {
+  const bot = createBot({ db, config });
+  bot.botInfo = {
+    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
+    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
+  } as unknown as typeof bot.botInfo;
+  const sent: { chat_id: number | string; text: string }[] = [];
+  const calls: { method: string; payload: any }[] = [];
+  bot.api.config.use((_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === failingMethod) throw new Error("telegram down");
     if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
     return { ok: true, result: {} } as any;
   });
@@ -67,7 +87,7 @@ describe("weekend bot callbacks", () => {
     expect(calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
   });
 
-  it("weekend:confirm creates a weekend_work shift and notifies admins", async () => {
+  it("weekend:confirm creates a weekend_work shift, preserves the offer text, and notifies admins by name and slot", async () => {
     const db = makeTestDb();
     createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
     const anya = worker(db, "Аня", 201);
@@ -81,8 +101,34 @@ describe("weekend bot callbacks", () => {
     await bot.handleUpdate(callbackUpdate(201, `weekend:confirm:${assigned.assignment.id}`));
 
     expect(listShiftsInRange(db, date, date).some((s) => s.category === "weekend_work" && s.employeeId === anya.id)).toBe(true);
-    expect(calls.some((c) => c.method === "editMessageText")).toBe(true);
-    expect(sent.some((s) => s.chat_id === 111 && /подтвердил/i.test(s.text))).toBe(true);
+    // Only the buttons go stale — rewriting the text would wipe which slot and
+    // hours this was, exactly what the reminders handler's comment warns against.
+    expect(calls.some((c) => c.method === "editMessageText")).toBe(false);
+    expect(calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
+    const adminMsg = sent.find((s) => s.chat_id === 111 && /подтвердил/i.test(s.text));
+    expect(adminMsg).toBeDefined();
+    expect(adminMsg!.text).toContain("Аня");
+    expect(adminMsg!.text).toContain("Ярмарка"); // the slot line, not a bare "Работник подтвердил"
+  });
+
+  it("a failing cosmetic edit does not suppress the admin notification on weekend:confirm", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const db = makeTestDb();
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const anya = worker(db, "Аня", 201);
+    const date = nextSaturday();
+    const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00" });
+    expressInterest(db, slot.id, anya.id);
+    const assigned = assignSlot(db, slot.id, anya.id);
+    if (!assigned.ok) throw new Error("assign failed");
+
+    const { bot, sent } = testBotFailingMethod(db, "editMessageReplyMarkup");
+    try {
+      await bot.handleUpdate(callbackUpdate(201, `weekend:confirm:${assigned.assignment.id}`));
+      expect(sent.some((s) => s.chat_id === 111 && /подтвердил/i.test(s.text))).toBe(true);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("weekend:decline takes the entry back out of the schedule; the slot stays open", async () => {

@@ -8,13 +8,27 @@ import {
   createAdminEmployee,
   rememberTelegramProfile,
   setRemindersEnabled,
+  restoreEmployee,
+  setEmployeeAdmin,
 } from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
+import { getVacantSlot } from "../repo/weekend";
+import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf } from "@planer/shared";
-import { notifyUser, notifyAdmins } from "./notify";
+import {
+  notifyUser,
+  notifyAdmins,
+  swapAcceptedText,
+  swapDeclinedText,
+  swapAcceptedAdminText,
+  swapAutoCancelledText,
+  weekendConfirmedAdminText,
+  weekendDeclinedAdminText,
+} from "./notify";
+import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { safeErrorMessage } from "../util/safe-error";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
@@ -38,7 +52,24 @@ function reasonToRu(reason: string): string {
   if (reason === "not_found") return "Заявка не найдена";
   if (reason === "unavailable") return "Смена больше недоступна";
   if (reason === "from-shift-in-past" || reason === "to-shift-in-past") return "Смена уже прошла";
+  // Reachable if a shift is edited (or reassigned by another swap) while this
+  // one is still pending — the shift moved out from under the swap.
+  if (reason === "from-shift-not-owned" || reason === "to-shift-not-owned") return "Смена уже досталась другому человеку";
+  if (reason === "identical-shift") return "Смены теперь совпадают";
   return "Не получилось";
+}
+
+/** Runs a cosmetic Telegram edit (rewriting or dropping buttons after the
+ *  fact) without letting a transient failure propagate. Every function in
+ *  `notify.ts` already guards its own API call the same way; the edit calls
+ *  below are the odd ones out, and an essential notification must never be
+ *  lost because a decorative edit that came after it threw. */
+async function safeEdit(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    console.error("bot: cosmetic edit failed:", safeErrorMessage(err));
+  }
 }
 
 /**
@@ -64,7 +95,7 @@ export async function publishBotCommands(bot: Bot): Promise<void> {
 /** The «напоминания включены/выключены» line, and the one button that flips it. */
 export function remindersStateText(enabled: boolean): string {
   return enabled
-    ? "🔔 Напоминания о сменах включены — пишу вечером накануне утренней и ночной."
+    ? "🔔 Напоминания о сменах включены — пишу вечером накануне утренней, вечерней и ночной."
     : "🔕 Напоминания о сменах выключены — про смены не пишу.";
 }
 
@@ -105,6 +136,16 @@ export function createBot(deps: BotDeps): Bot {
 
     const existing = getByTelegramId(db, from.id);
     if (existing) {
+      // Archived and not on the allowlist: POST /api/auth would 403 them the
+      // moment they opened the mini app, so the cheerful "открой мини-апп"
+      // greeting is a promise this account can't keep. Say so honestly instead.
+      // An allowlisted person is the one documented exception — /api/auth
+      // restores them on sight (see its comment), so the normal greeting
+      // below is still true for them and they must not be told they're locked out.
+      if (!existing.isActive && !config.adminTelegramIds.includes(from.id)) {
+        await ctx.reply("Ты в архиве — доступ в мини-апп закрыт. Если это ошибка, напиши админу.");
+        return;
+      }
       // Keep the greeting name current — people rename themselves in Telegram.
       rememberTelegramProfile(db, existing.id, { tgUsername: from.username, tgFirstName: from.first_name });
       await ctx.reply(`Привет, ${addressOf({ ...existing, tgFirstName: from.first_name })}! 👋 Открой мини-апп, чтобы посмотреть смены.`);
@@ -133,6 +174,25 @@ export function createBot(deps: BotDeps): Bot {
     if (!from) return;
     const isAllowlisted = config.adminTelegramIds.includes(from.id);
     let admin = getByTelegramId(db, from.id);
+
+    // Archiving only ever flips `isActive` — it never touches `isAdmin` — so a
+    // former admin who got archived still passes the guard below and would
+    // otherwise get a fresh 12-hour token that 401s on every single request at
+    // `requireAdmin`. Catch that here rather than handing out a dead link.
+    if (admin && !admin.isActive) {
+      if (!isAllowlisted) {
+        await ctx.reply("Ты в архиве — админка недоступна. Если это ошибка, напиши другому админу.");
+        return;
+      }
+      // Same restore-on-reauth as POST /api/auth (see its comment): a Telegram
+      // id on ADMIN_TELEGRAM_IDS is trusted by the operator more than anything
+      // the admin UI itself can grant, so being archived can't be a dead end
+      // here either — restore before handing out a token that would actually work.
+      admin = restoreEmployee(db, admin.id)!;
+      if (!admin.isAdmin) admin = setEmployeeAdmin(db, admin.id, true) ?? admin;
+      recordAudit(db, "employee_restored", admin.id, { employeeId: admin.id, displayName: admin.displayName, via: "allowlist_reauth" });
+    }
+
     if ((!admin || !admin.isAdmin) && !isAllowlisted) {
       await ctx.reply("Админка доступна только администраторам.");
       return;
@@ -184,11 +244,15 @@ export function createBot(deps: BotDeps): Bot {
     }
     setRemindersEnabled(db, me.id, enabled);
     await ctx.answerCallbackQuery({ text: enabled ? "Включил 🔔" : "Больше не буду 🔕" });
+    if (!enabled) {
+      // Essential: tell them where to turn these back on again. Sent before the
+      // cosmetic button-swap below so a transient Telegram failure on that edit
+      // can never cost them this.
+      await ctx.reply("Напоминания о сменах выключены. Вернуть — командой /notifications или в мини-аппе, «Мои смены».");
+    }
     // Only the buttons are rewritten: the reminder itself is still the useful part
     // of the message, and replacing it would delete tomorrow's shift time.
-    await ctx.editMessageReplyMarkup({ reply_markup: remindersKeyboard(enabled) });
-    if (enabled) return;
-    await ctx.reply("Напоминания о сменах выключены. Вернуть — командой /notifications или в мини-аппе, «Мои смены».");
+    await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: remindersKeyboard(enabled) }));
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {
@@ -209,15 +273,37 @@ export function createBot(deps: BotDeps): Bot {
     }
 
     await ctx.answerCallbackQuery({ text: action === "accept" ? "Принято ✅" : "Отклонено" });
-    await ctx.editMessageText(action === "accept" ? "✅ Обмен принят — смены поменялись." : "✖ Обмен отклонён.");
 
+    // Journal it exactly like the mini-app's own accept/decline route does
+    // (same event type, same payload shape) — tapping the Telegram button is
+    // the easier, more likely path, and it used to leave no trail at all.
+    recordAudit(db, action === "accept" ? "swap_accepted" : "swap_declined", me.id, swapAuditPayload(db, res.request));
+
+    // Essential notifications happen before the cosmetic edit further down —
+    // a transient Telegram failure on that edit must never suppress the
+    // initiator hearing about their swap, the admins hearing it happened, or a
+    // bumped sibling proposal's counterparty hearing why their buttons died.
     const initiatorTg = getEmployeeById(db, res.counterpartyId)?.telegramUserId;
     if (initiatorTg != null) {
-      await notifyUser(bot, initiatorTg, action === "accept" ? "Твой обмен приняли ✅ Смены поменялись." : "Твой обмен отклонили.");
+      await notifyUser(bot, initiatorTg, action === "accept" ? swapAcceptedText() : swapDeclinedText());
     }
     if (action === "accept") {
-      await notifyAdmins(bot, db, "Обмен сменами состоялся.");
+      await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(db, res.request)));
+      // Accepting can silently auto-cancel other pending swaps that touched the
+      // same shift(s) — their counterparty otherwise only learns about it by
+      // tapping a now-stale button and getting a bare "Уже обработано".
+      for (const sibling of res.cancelledSiblings ?? []) {
+        const siblingTg = getEmployeeById(db, sibling.toEmployeeId)?.telegramUserId;
+        if (siblingTg != null) {
+          await notifyUser(bot, siblingTg, swapAutoCancelledText(swapAuditPayload(db, sibling)));
+        }
+      }
     }
+
+    // Only the buttons go stale here — the proposal text (who offered what) is
+    // still exactly what the person needs to make sense of what just happened,
+    // so leave it and just drop Принять/Отклонить.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
   });
 
   bot.callbackQuery(/^weekend:interest:(\d+)$/, async (ctx) => {
@@ -251,8 +337,20 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     await ctx.answerCallbackQuery({ text: action === "confirm" ? "Беру ✅" : "Отказ" });
-    await ctx.editMessageText(action === "confirm" ? "✅ Ты подтвердил работу в выходной." : "✖ Ты отказался от работы в выходной.");
-    await notifyAdmins(bot, db, action === "confirm" ? "Работник подтвердил работу в выходной ✅" : "Работник отказался от работы в выходной.");
+
+    // Essential: admins need to know, before the cosmetic edit below — a
+    // transient Telegram failure on that edit must never swallow this.
+    const slot = getVacantSlot(db, res.slotId);
+    const slotLine = slot ? slotLineOf(slot) : "выходную смену";
+    await notifyAdmins(
+      bot,
+      db,
+      action === "confirm" ? weekendConfirmedAdminText(me.displayName, slotLine) : weekendDeclinedAdminText(me.displayName, slotLine),
+    );
+
+    // Only the buttons go stale — the offer text (which slot, which hours) is
+    // still what the person needs, so leave it and just drop Беру/Не смогу.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
   });
 
   bot.catch((err) => {

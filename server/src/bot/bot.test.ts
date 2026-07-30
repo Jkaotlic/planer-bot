@@ -3,9 +3,10 @@ import { decodeJwt } from "jose";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getByTelegramId } from "../repo/employees";
-import { createShift, getShift } from "../repo/shifts";
+import { createEmployee, linkTelegramAccount, getByTelegramId, archiveEmployee } from "../repo/employees";
+import { createShift, getShift, updateShift } from "../repo/shifts";
 import { createSwap } from "../swap/swap-service";
+import { auditLog } from "../db/schema";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 
@@ -25,6 +26,26 @@ function testBot(db: Db) {
   const calls: { method: string; payload: unknown }[] = [];
   bot.api.config.use((_prev, method, payload) => {
     calls.push({ method, payload });
+    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
+    return { ok: true, result: {} } as any;
+  });
+  return { bot, sent, calls };
+}
+
+/** Like testBot, but the given API method throws for every call — used to prove
+ *  a transient Telegram failure on a cosmetic edit doesn't swallow the essential
+ *  notification that was already sent before it. */
+function testBotFailingMethod(db: Db, failingMethod: string) {
+  const bot = createBot({ db, config });
+  bot.botInfo = {
+    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
+    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
+  } as unknown as typeof bot.botInfo;
+  const sent: { chat_id: number | string; text: string }[] = [];
+  const calls: { method: string; payload: unknown }[] = [];
+  bot.api.config.use((_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === failingMethod) throw new Error("telegram down");
     if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
     return { ok: true, result: {} } as any;
   });
@@ -170,6 +191,55 @@ describe("bot /start", () => {
     expect(sent[0]?.text.toLowerCase()).toContain("администратор");
   });
 
+  it("/start tells an archived, non-allowlisted person honestly instead of inviting them into a mini app that would 403 them", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Петров Игорь", inviteToken: "arch-1" });
+    linkTelegramAccount(db, "arch-1", 888);
+    archiveEmployee(db, w.id, "2026-01-01");
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(888, "/start"));
+    expect(sent[0]?.text.toLowerCase()).toContain("архив");
+    expect(sent[0]?.text).not.toContain("Открой мини-апп");
+  });
+
+  it("/start still greets an archived person normally when their Telegram id is allowlisted — POST /api/auth restores them by design", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Босс", inviteToken: "arch-2" });
+    linkTelegramAccount(db, "arch-2", 111); // 111 ∈ config.adminTelegramIds
+    archiveEmployee(db, w.id, "2026-01-01");
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(111, "/start"));
+    expect(sent[0]?.text.toLowerCase()).not.toContain("архив");
+    expect(sent[0]?.text).toContain("Открой мини-апп");
+  });
+
+  it("/admin tells an archived, non-allowlisted former admin honestly instead of handing out a token that would 401 on every request", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "arch-3", isAdmin: true });
+    linkTelegramAccount(db, "arch-3", 889);
+    archiveEmployee(db, w.id, "2026-01-01");
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(889, "/admin"));
+    expect(sent[0]?.text.toLowerCase()).toContain("архив");
+    expect(sent[0]?.text).not.toContain("#token=");
+  });
+
+  it("/admin restores an archived allowlisted admin (like POST /api/auth does) and hands them a working token", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Босс", inviteToken: "arch-4" });
+    linkTelegramAccount(db, "arch-4", 111); // 111 ∈ config.adminTelegramIds
+    archiveEmployee(db, w.id, "2026-01-01");
+    expect(getByTelegramId(db, 111)?.isActive).toBe(false);
+
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(startUpdate(111, "/admin"));
+
+    expect(sent[0]?.text).toContain("#token=");
+    const restored = getByTelegramId(db, 111);
+    expect(restored?.isActive).toBe(true);
+    expect(restored?.isAdmin).toBe(true);
+  });
+
   it("keeps running when a reply fails (error boundary)", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const db = makeTestDb();
@@ -225,7 +295,7 @@ function setupPendingSwap(db: Db) {
 }
 
 describe("bot swap callback buttons", () => {
-  it("accept callback from the counterparty exchanges shifts, edits the message, and notifies the initiator", async () => {
+  it("accept callback from the counterparty exchanges shifts, preserves the proposal text, and notifies the initiator", async () => {
     const db = makeTestDb();
     const { igor, sa, sb, requestId } = setupPendingSwap(db);
     const { bot, sent, calls } = testBot(db);
@@ -235,11 +305,15 @@ describe("bot swap callback buttons", () => {
     expect(getShift(db, sa.id)?.employeeId).toBe(igor.id);
     expect(getShift(db, sb.id)?.employeeId).not.toBe(igor.id);
     expect(calls.some((c) => c.method === "answerCallbackQuery")).toBe(true);
-    expect(calls.some((c) => c.method === "editMessageText" || c.method === "editMessageCaption")).toBe(true);
+    // Only the buttons go stale — rewriting the text would wipe the shift
+    // details the person needs, exactly what the reminders handler's comment
+    // already warns against.
+    expect(calls.some((c) => c.method === "editMessageText" || c.method === "editMessageCaption")).toBe(false);
+    expect(calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
     expect(sent.some((s) => s.chat_id === 201)).toBe(true); // Аня (initiator) notified
   });
 
-  it("decline callback from the counterparty declines without exchanging shifts", async () => {
+  it("decline callback from the counterparty declines without exchanging shifts, and preserves the proposal text", async () => {
     const db = makeTestDb();
     const { sa, sb, requestId } = setupPendingSwap(db);
     const { bot, calls } = testBot(db);
@@ -251,7 +325,85 @@ describe("bot swap callback buttons", () => {
     expect(getShift(db, sa.id)?.employeeId).toBe(before);
     expect(getShift(db, sb.id)?.employeeId).toBe(beforeB);
     expect(calls.some((c) => c.method === "answerCallbackQuery")).toBe(true);
-    expect(calls.some((c) => c.method === "editMessageText" || c.method === "editMessageCaption")).toBe(true);
+    expect(calls.some((c) => c.method === "editMessageText" || c.method === "editMessageCaption")).toBe(false);
+    expect(calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
+  });
+
+  it("accept journals swap_accepted with the actor and a readable payload", async () => {
+    const db = makeTestDb();
+    const { anya, igor, requestId } = setupPendingSwap(db);
+    const { bot } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`));
+
+    const row = db.select().from(auditLog).all().find((r) => r.type === "swap_accepted");
+    expect(row).toBeDefined();
+    expect(row!.actorEmployeeId).toBe(igor.id); // Игорь tapped Принять — he's the actor
+    expect(row!.payload).toMatchObject({ requestId, fromEmployeeId: anya.id, fromName: "Аня", toEmployeeId: igor.id, toName: "Игорь" });
+    expect(typeof (row!.payload as { fromShift: unknown }).fromShift).toBe("string"); // reads without a join
+  });
+
+  it("decline journals swap_declined with the actor", async () => {
+    const db = makeTestDb();
+    const { igor, requestId } = setupPendingSwap(db);
+    const { bot } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(202, `swap:decline:${requestId}`));
+
+    const row = db.select().from(auditLog).all().find((r) => r.type === "swap_declined");
+    expect(row).toBeDefined();
+    expect(row!.actorEmployeeId).toBe(igor.id);
+  });
+
+  it("admin broadcast on accept names both people and their shifts", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Босс", inviteToken: "boss", isAdmin: true });
+    linkTelegramAccount(db, "boss", 111); // 111 ∈ config.adminTelegramIds
+    const { requestId } = setupPendingSwap(db);
+    const { bot, sent } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`));
+
+    const adminMsg = sent.find((s) => s.chat_id === 111);
+    expect(adminMsg).toBeDefined();
+    expect(adminMsg!.text).toContain("Аня");
+    expect(adminMsg!.text).toContain("Игорь");
+  });
+
+  it("notifies the sibling counterparty when their pending swap is auto-cancelled by an accept", async () => {
+    const db = makeTestDb();
+    const { anya, sa, requestId } = setupPendingSwap(db);
+    // A third person, Марк, also has a shift, and proposes trading it for Ани's sa —
+    // that proposal is pending and touches the same shift as the swap below accepts.
+    const mark = createEmployee(db, { displayName: "Марк", inviteToken: "mk" });
+    linkTelegramAccount(db, "mk", 203);
+    const sm = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: mark.id });
+    const sibling = createSwap(db, { fromEmployeeId: mark.id, fromShiftId: sm.id, toShiftId: sa.id });
+    if (!sibling.ok) throw new Error("setup");
+    expect(sibling.request.toEmployeeId).toBe(anya.id); // Аня holds the live buttons for this one
+
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`)); // Игорь accepts the main swap
+
+    // Аня is notified her pending decision on Марк's offer is now moot, even
+    // though she never tapped anything. She also gets the regular "your swap
+    // was accepted" message on the same chat, so check among all of them.
+    const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
+    expect(anyaMessages.some((t) => t.toLowerCase().includes("отменил"))).toBe(true);
+    expect(anyaMessages.some((t) => t.includes("Марк"))).toBe(true);
+  });
+
+  it("a failing cosmetic edit does not suppress the initiator's notification", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const db = makeTestDb();
+    const { requestId } = setupPendingSwap(db);
+    const { bot, sent } = testBotFailingMethod(db, "editMessageReplyMarkup");
+    try {
+      await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`));
+      expect(sent.some((s) => s.chat_id === 201)).toBe(true); // Аня still notified despite the edit throwing
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("rejects an accept callback from a non-counterparty without exchanging shifts", async () => {
@@ -269,5 +421,20 @@ describe("bot swap callback buttons", () => {
     expect(ack).toBeDefined();
     expect((ack?.payload as { text?: string })?.text).toBeTruthy();
     expect(calls.some((c) => c.method === "editMessageText")).toBe(false);
+  });
+
+  it("explains an ownership conflict rather than a bare «Не получилось» when the shift moved out from under a pending swap", async () => {
+    const db = makeTestDb();
+    const { sa, requestId } = setupPendingSwap(db);
+    // The shift already went to someone else (e.g. a different, unrelated
+    // completed swap, or an admin edit) while this proposal was still pending.
+    const outsider = createEmployee(db, { displayName: "Марк" });
+    updateShift(db, sa.id, { employeeId: outsider.id });
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`));
+
+    const ack = calls.find((c) => c.method === "answerCallbackQuery");
+    expect((ack?.payload as { text?: string })?.text).toBe("Смена уже досталась другому человеку");
   });
 });
