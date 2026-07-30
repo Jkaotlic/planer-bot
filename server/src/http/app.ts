@@ -755,11 +755,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapAcceptedText());
       await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(res.request)));
       // Accepting can silently auto-cancel other pending swaps that touched the
-      // same shift(s) — their counterparty otherwise only learns about it by
-      // tapping a now-stale button and getting a bare "not_pending" error.
+      // same shift(s). Both of their sides are told: the counterparty otherwise
+      // only learns by tapping a now-stale button and getting a bare "not_pending",
+      // and the initiator — who has been waiting and did nothing — otherwise sees
+      // «Отменено» indistinguishable from having withdrawn it themselves.
       for (const sibling of res.cancelledSiblings ?? []) {
-        const siblingTg = tgOf(sibling.toEmployeeId);
-        if (siblingTg != null) await notifyUser(bot, siblingTg, swapAutoCancelledText(swapAuditPayload(sibling)));
+        const text = swapAutoCancelledText(swapAuditPayload(sibling));
+        for (const employeeId of [sibling.fromEmployeeId, sibling.toEmployeeId]) {
+          const siblingTg = tgOf(employeeId);
+          if (siblingTg != null) await notifyUser(bot, siblingTg, text);
+        }
       }
     }
     return c.json({ ok: true });

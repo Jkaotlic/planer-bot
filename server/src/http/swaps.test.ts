@@ -92,6 +92,11 @@ describe("swap endpoints", () => {
     // it's now moot instead of just finding out by tapping a stale button.
     const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
     expect(anyaMessages.some((t) => t.toLowerCase().includes("отменил"))).toBe(true);
+
+    // So is Марк, who proposed that offer and has been waiting on it — he'd
+    // otherwise see only «Отменено», identical to having withdrawn it himself.
+    const markMessages = sent.filter((s) => s.chat_id === 203).map((s) => s.text);
+    expect(markMessages.some((t) => t.toLowerCase().includes("отменил"))).toBe(true);
   });
 
   it("rejects a swap the caller doesn't own (400) and lists my swaps", async () => {

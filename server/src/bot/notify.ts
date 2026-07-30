@@ -28,16 +28,19 @@ export function swapAcceptedAdminText(p: SwapAuditPayload): string {
 }
 
 /**
- * Sent to the counterparty of a *different*, still-pending swap proposal that
- * got silently auto-cancelled because one of its two shifts already changed
- * hands via the swap above being accepted first.
+ * Sent to *both* sides of a different, still-pending proposal that got silently
+ * auto-cancelled because one of its two shifts already changed hands via another
+ * swap being accepted first.
  *
- * Without this the only sign anything happened is a message whose Принять/
- * Отклонить buttons quietly stopped working — tapping later just answers
- * "Уже обработано" with no explanation.
+ * For the person holding the Принять/Отклонить buttons, without this the only
+ * sign anything happened is that the buttons quietly stopped working — tapping
+ * later just answers "Уже обработано". For the person who *proposed* it, it's
+ * worse: they see «Отменено» on their own request, the very same pill they'd see
+ * if they had withdrawn it themselves. Hence one text naming both sides, which
+ * reads correctly whichever of the two is holding the phone.
  */
 export function swapAutoCancelledText(p: SwapAuditPayload): string {
-  return `Обмен с ${p.fromName} (${p.fromShift} ↔ ${p.toShift}) отменился — смена уже досталась другому человеку.`;
+  return `Заявка на обмен отменилась — смена уже досталась другому человеку. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
 }
 
 /** Why a pending swap stopped being possible without anybody involved doing
