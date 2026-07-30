@@ -39,7 +39,7 @@ export function RemindersSwitch({ enabled, onChanged }: { enabled: boolean; onCh
         multiline
         description={
           enabled
-            ? "Вечером накануне напишу про утреннюю и ночную смену"
+            ? "Вечером накануне напишу про утреннюю, вечернюю и ночную смену"
             : "Про смены писать не буду — можно включить обратно в любой момент"
         }
       >
