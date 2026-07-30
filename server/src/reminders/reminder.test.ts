@@ -4,7 +4,7 @@ import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { employees } from "../db/schema";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { createShift, updateShift } from "../repo/shifts";
+import { createShift, updateShift, deleteShift } from "../repo/shifts";
 import { hasReminder } from "../repo/reminders";
 import { listRecentAudit } from "../repo/audit";
 import { runReminderTick } from "./reminder-service";
@@ -327,5 +327,41 @@ describe("which shifts get a reminder at all", () => {
 
     expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(0);
     expect(sent).toEqual([]);
+  });
+});
+
+describe("one bad shift does not end the evening", () => {
+  // The tick reads tomorrow's shifts once, then awaits Telegram for each in turn.
+  // An admin deleting a shift during that gap made the write-down of «reminder
+  // sent» hit a dead foreign key — which threw out of the loop, so everybody
+  // further down the list got nothing that evening, and nothing said so.
+  it("keeps going when a shift is deleted while its reminder is in flight", async () => {
+    const db = makeTestDb();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const first = linkedEmployee(db, "Первый Работник", 701);
+      const second = linkedEmployee(db, "Второй Работник", 702);
+      const doomed = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: first.id });
+      createShift(db, { date: TOMORROW, start: "08:30", end: "17:30", employeeId: second.id });
+
+      const bot = new Bot("12345:tok");
+      bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
+        can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+      const sent: { chat_id: number | string }[] = [];
+      bot.api.config.use((_prev, method, payload) => {
+        if (method === "sendMessage") {
+          const p = payload as { chat_id: number };
+          sent.push(p);
+          // The admin removes tomorrow's shift right as its reminder goes out.
+          if (p.chat_id === 701) deleteShift(db, doomed.id);
+        }
+        return { ok: true, result: {} } as any;
+      });
+
+      await expect(runReminderTick(db, bot, { date: TODAY, time: "20:05" })).resolves.toBeTypeOf("number");
+      expect(sent.map((s) => s.chat_id)).toContain(702);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });
