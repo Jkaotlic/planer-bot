@@ -3,7 +3,7 @@ import { decodeJwt } from "jose";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getByTelegramId, archiveEmployee } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getByTelegramId, getEmployeeById, archiveEmployee } from "../repo/employees";
 import { createShift, getShift, updateShift } from "../repo/shifts";
 import { createSwap } from "../swap/swap-service";
 import { teamNow } from "../util/team-time";
@@ -258,6 +258,21 @@ describe("bot /start", () => {
     await bot.handleUpdate(startUpdate(889, "/admin"));
     expect(sent[0]?.text.toLowerCase()).toContain("архив");
     expect(sent[0]?.text).not.toContain("#token=");
+  });
+
+  // Same gap the mini-app's /api/auth had: the link carried `isAdmin: true` while
+  // the row said otherwise, and every request behind it 403'd at `requireAdmin`.
+  it("/admin promotes an active allowlisted worker instead of handing out a link that 403s", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "act-1" }); // isAdmin: false
+    linkTelegramAccount(db, "act-1", 111); // 111 ∈ config.adminTelegramIds
+    const { bot, sent } = testBot(db);
+
+    await bot.handleUpdate(startUpdate(111, "/admin"));
+
+    expect(sent[0]?.text).toContain("#token=");
+    expect(getByTelegramId(db, 111)?.isAdmin).toBe(true);
+    expect(getEmployeeById(db, w.id)?.isAdmin).toBe(true);
   });
 
   it("/admin restores an archived allowlisted admin (like POST /api/auth does) and hands them a working token", async () => {

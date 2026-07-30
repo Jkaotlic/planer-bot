@@ -97,6 +97,27 @@ describe("app auth", () => {
     expect(getEmployeeById(db, w.id)?.isAdmin).toBe(true);
   });
 
+  // The odd one out: an *archived* allowlisted worker is promoted (above), a new
+  // one is created as an admin — but an active worker already in the database was
+  // only told `isAdmin: true` in the response, while the guards read the row and
+  // 403'd every admin request. Fail-closed, and a lie in the contract.
+  it("grants admin to an active allowlisted employee instead of only claiming to", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "tok-active" }); // isAdmin: false
+    linkTelegramAccount(db, "tok-active", 111); // 111 ∈ adminTelegramIds
+    const app = createApp({ db, config });
+
+    const res = await app.request(authReq(111));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.employee.isAdmin).toBe(true);
+    expect(getEmployeeById(db, w.id)?.isAdmin).toBe(true);
+
+    // And the token it just handed out actually opens an admin route.
+    const admin = await app.request("/api/admin/employees", { headers: { Authorization: `Bearer ${body.token}` } });
+    expect(admin.status).toBe(200);
+  });
+
   it("/api/me needs a token and returns the caller", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

@@ -213,9 +213,23 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // People rename themselves in Telegram, and `tgFirstName` is what the bot
     // greets them with — refresh it here rather than freezing it at link time.
     rememberTelegramProfile(db, employee.id, { tgUsername: user.username, tgFirstName: user.firstName });
-    const isAdmin = employee.isAdmin || allowlisted;
-    const token = await issueToken({ employeeId: employee.id, isAdmin }, config.jwtSecret);
-    return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin } });
+    // ADMIN_TELEGRAM_IDS means admin — that is its only meaning, and every other
+    // branch here already acts on it: a new allowlisted person is created as an
+    // admin, an archived one is restored and promoted. An *active* worker already
+    // in the database was the one case left out: the response said `isAdmin: true`
+    // while the row said otherwise, and `requireAdmin` reads the row — so the app
+    // showed them the admin tabs and 403'd every request behind them.
+    if (allowlisted && !employee.isAdmin) {
+      employee = setEmployeeAdmin(db, employee.id, true) ?? employee;
+      recordAudit(db, "employee_admin_changed", employee.id, {
+        employeeId: employee.id,
+        displayName: employee.displayName,
+        isAdmin: true,
+        via: "allowlist",
+      });
+    }
+    const token = await issueToken({ employeeId: employee.id, isAdmin: employee.isAdmin }, config.jwtSecret);
+    return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin: employee.isAdmin } });
   });
 
   app.get("/api/me", requireAuth(db, config.jwtSecret), (c) => {
