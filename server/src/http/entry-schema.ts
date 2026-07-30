@@ -22,14 +22,27 @@ export function entryTimesError(v: { category: EntryCategory; start?: string | n
 }
 
 /**
- * Category↔date coherence: "работа в выходной" is by definition a day off that got
- * worked, so it can't land on a weekday. (Weekend = Sat/Sun — there's no holiday
- * calendar, so a public holiday on a weekday isn't recognised as a day off yet.)
+ * Category↔date coherence.
+ *
+ * "Работа в выходной" is by definition a day off that got worked, so it can't land
+ * on a weekday. (Weekend = Sat/Sun — there's no holiday calendar, so a public
+ * holiday on a weekday isn't recognised as a day off yet.)
+ *
+ * And only the three absences live as a range: both consoles offer «по какой день»
+ * for those alone (`isMultiDay`), and the update path already drops `endDate` from
+ * anything that counts as work. Creation was the one entry point that let a range through,
+ * and a shift carrying one draws itself into every day of the span in both grids
+ * and in the team schedule while the balance and the report count it once — the
+ * same one shift, shown as five.
+ *
  * Returns an error message, or null if coherent.
  */
-export function entryDateError(v: { category: EntryCategory; date: string }): string | null {
+export function entryDateError(v: { category: EntryCategory; date: string; endDate?: string | null }): string | null {
   if (v.category === "weekend_work" && !isWeekend(v.date)) {
     return "«Работа в выходной» может стоять только на субботу или воскресенье";
+  }
+  if (v.endDate && v.endDate !== v.date && !isAbsence(v.category)) {
+    return "диапазоном записываются только отпуск, больничный и командировка";
   }
   return null;
 }

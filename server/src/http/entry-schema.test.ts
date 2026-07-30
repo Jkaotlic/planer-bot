@@ -60,6 +60,24 @@ describe("entry input schema", () => {
   });
 
   /**
+   * Диапазоном живут только три отсутствия — так говорят обе консоли (`isMultiDay`)
+   * и так же считает правка: PATCH сбивает `endDate` в null у всего, что считается
+   * работой. Создание — единственный вход, который это пропускал.
+   */
+  it("refuses a day range on a category that is one day's work", () => {
+    const spanning = createEntrySchema.safeParse({
+      date: "2026-07-20", endDate: "2026-07-24", category: "shift", start: "09:00", end: "18:00",
+    });
+    expect(spanning.success).toBe(false);
+    const oneDay = createEntrySchema.safeParse({
+      date: "2026-07-20", endDate: "2026-07-20", category: "shift", start: "09:00", end: "18:00",
+    });
+    expect(oneDay.success).toBe(true);
+    const vacation = createEntrySchema.safeParse({ date: "2026-07-20", endDate: "2026-07-24", category: "vacation" });
+    expect(vacation.success).toBe(true);
+  });
+
+  /**
    * «Работа в выходной» = только суббота или воскресенье. Государственные
    * праздники в будни днями отдыха не считаются — календаря праздников в системе
    * нет (`calendar_days` пуста и никем не пишется), и до тех пор это правило надо
