@@ -2,6 +2,62 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins, listActive } from "../repo/employees";
 import { safeErrorMessage } from "../util/safe-error";
+import type { SwapAuditPayload } from "../util/message-lines";
+
+// --- Swap text builders ------------------------------------------------------
+//
+// Hand-copied into both `bot.ts` (the Telegram-button path) and `app.ts` (the
+// mini-app path) used to be how these read — two literal strings that happened
+// to agree today and had nothing keeping them that way. Both call sites import
+// these instead, so a wording change can never land on only one path.
+
+/** Sent to a swap's original initiator once the counterparty accepts it. */
+export function swapAcceptedText(): string {
+  return "Твой обмен приняли ✅ Смены поменялись.";
+}
+
+/** Sent to a swap's original initiator once the counterparty declines it. */
+export function swapDeclinedText(): string {
+  return "Твой обмен отклонили.";
+}
+
+/** Admin broadcast once a swap actually goes through. Named and dated, so with
+ *  30 people on the team an admin can tell which swap this was. */
+export function swapAcceptedAdminText(p: SwapAuditPayload): string {
+  return `Обмен сменами состоялся: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
+}
+
+/**
+ * Sent to the counterparty of a *different*, still-pending swap proposal that
+ * got silently auto-cancelled because one of its two shifts already changed
+ * hands via the swap above being accepted first.
+ *
+ * Without this the only sign anything happened is a message whose Принять/
+ * Отклонить buttons quietly stopped working — tapping later just answers
+ * "Уже обработано" with no explanation.
+ */
+export function swapAutoCancelledText(p: SwapAuditPayload): string {
+  return `Обмен с ${p.fromName} (${p.fromShift} ↔ ${p.toShift}) отменился — смена уже досталась другому человеку.`;
+}
+
+// --- Weekend-offer text builders ---------------------------------------------
+
+/** Admin broadcast once a worker confirms an offered weekend shift. */
+export function weekendConfirmedAdminText(name: string, slotLine: string): string {
+  return `${name} подтвердил(а) работу в выходной ✅ — ${slotLine}`;
+}
+
+/** Admin broadcast once a worker turns down an offered weekend shift. */
+export function weekendDeclinedAdminText(name: string, slotLine: string): string {
+  return `${name} отказался(лась) от работы в выходной — ${slotLine}`;
+}
+
+/** Sent to a worker an admin just took off a weekend slot — the reverse
+ *  direction (worker declines) already notifies the admin; this closes the
+ *  loop so the worker doesn't just find their shift gone. */
+export function weekendUnassignedText(slotLine: string): string {
+  return `Тебя сняли с выходной смены: ${slotLine}. Если это неожиданно — спроси у админа.`;
+}
 
 export async function notifyUser(bot: Bot, telegramUserId: number, text: string): Promise<boolean> {
   try {
