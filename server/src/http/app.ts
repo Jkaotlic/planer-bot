@@ -18,6 +18,7 @@ import {
   createAdminEmployee,
   createEmployee,
   listActive,
+  listForAdmin,
   listActiveInRosterOrder,
   archiveEmployee,
   restoreEmployee,
@@ -316,7 +317,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // `address` is computed, not stored: the admin card shows what the bot will
   // actually say, so it is obvious whose greeting still needs setting.
   app.get("/api/admin/employees", requireAdmin(db, config.jwtSecret), (c) =>
-    c.json({ employees: listActive(db).map((employee) => ({ ...employee, address: addressOf(employee) })) }));
+    c.json({ employees: listForAdmin(db).map((employee) => ({ ...employee, address: addressOf(employee) })) }));
 
   app.post("/api/admin/employees", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
