@@ -1,4 +1,4 @@
-import { toMinutes, isNightShift } from "./time";
+import { toMinutes, isNightShift, nextDate } from "./time";
 import { shiftsOverlap } from "./overlap";
 
 export interface FillSlot {
@@ -75,6 +75,20 @@ function preferenceOf(slot: FillSlot, employeeId: number): number {
 }
 
 /**
+ * Every date a slot actually occupies — two of them when it runs past midnight.
+ *
+ * An absence is a whole day off, so a 22:00→06:00 slot has to clear the *next*
+ * day too: otherwise the first morning of somebody's vacation or sick leave is
+ * spent at work. The seeding side already reaches across midnight for `busy`
+ * (see seedWorkerLoad in the server's distribute-service); this is the same reach
+ * on the absence side, which was the asymmetry.
+ */
+function datesOf(slot: FillSlot): string[] {
+  const overnight = toMinutes(slot.end) < toMinutes(slot.start);
+  return overnight ? [slot.date, nextDate(slot.date)] : [slot.date];
+}
+
+/**
  * Fills each open slot with the eligible (allowed, free, not absent,
  * non-overlapping) worker who holds the fewest shifts **of that same kind** — so
  * mornings, days, evenings and nights each even out on their own, instead of one
@@ -108,10 +122,11 @@ export function distributeFairly(slots: FillSlot[], workers: WorkerLoad[]): Assi
 
   const out: Assignment[] = [];
   for (const slot of order) {
+    const occupies = datesOf(slot);
     const free = load.filter(
       (w) =>
         allowedBy(slot, w.employeeId) &&
-        !w.absentDates.includes(slot.date) &&
+        !occupies.some((date) => w.absentDates.includes(date)) &&
         !w.busy.some((b) => shiftsOverlap(b, slot)),
     );
     if (free.length === 0) continue;
