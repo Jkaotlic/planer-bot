@@ -33,6 +33,27 @@ describe("swap service", () => {
     expect(second).toEqual({ ok: false, reason: "duplicate" });
   });
 
+  // Two people agree in person and each opens a request from their own side. It is
+  // one and the same trade, and letting both exist meant whoever accepted first
+  // sent the other person two contradicting messages: «Твой обмен приняли ✅» and,
+  // a line later, «отменился — смена уже досталась другому».
+  it("createSwap rejects the mirror of a pending swap, pointing at the request that already exists", () => {
+    const { db, a, b, sa, sb } = setup();
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    expect(first.ok).toBe(true);
+    const mirrored = createSwap(db, { fromEmployeeId: b.id, fromShiftId: sb.id, toShiftId: sa.id });
+    expect(mirrored).toEqual({ ok: false, reason: "mirror" });
+  });
+
+  it("createSwap allows the mirror once the original is no longer pending", () => {
+    const { db, a, b, sa, sb } = setup();
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    if (!first.ok) throw new Error("setup");
+    expect(cancelSwap(db, first.request.id, a.id).ok).toBe(true);
+    // Аня withdrew hers; Игорь proposing the same trade is a new offer, not a duplicate.
+    expect(createSwap(db, { fromEmployeeId: b.id, fromShiftId: sb.id, toShiftId: sa.id }).ok).toBe(true);
+  });
+
   it("accept exchanges the shifts atomically and cancels siblings", () => {
     const { db, a, b, sa, sb } = setup();
     const c = createEmployee(db, { displayName: "Марк" });

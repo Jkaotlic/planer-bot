@@ -156,6 +156,21 @@ describe("swap endpoints", () => {
     expect((await res.json()).error).toBe("identical-shift");
   });
 
+  it("refuses the mirror of a swap the colleague already proposed (400, mirror)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    // They agreed in person, so both open a request from their own side. It's one
+    // trade; two rows for it made the accept contradict itself in chat.
+    expect((await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }))).status).toBe(201);
+    const mirrored = await app.request("/api/swaps", authed(igor.token, { fromShiftId: sb.id, toShiftId: sa.id }));
+    expect(mirrored.status).toBe(400);
+    expect((await mirrored.json()).error).toBe("mirror");
+  });
+
   it("rejects a non-string message (400)", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

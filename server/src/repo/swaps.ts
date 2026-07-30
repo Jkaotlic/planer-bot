@@ -28,13 +28,34 @@ export function setSwapStatus(db: Db, id: number, status: SwapStatus): void {
   db.update(swapRequests).set({ status, resolvedAt: new Date() }).where(eq(swapRequests.id, id)).run();
 }
 
-export function hasPendingSwap(db: Db, fromShiftId: number, toShiftId: number): boolean {
-  return db
-    .select({ id: swapRequests.id })
+/**
+ * Is this exact pair of shifts already up for trade?
+ *
+ * Direction-blind on purpose: «A отдаёт SA, хочет SB» and «B отдаёт SB, хочет SA»
+ * are the same trade written from the two ends, and two rows for it meant that
+ * accepting one auto-cancelled the other and sent its people «приняли ✅» and
+ * «отменилось» within the same second. `pairing` says which of the two it found,
+ * so the caller can tell somebody «дождись ответа» from «ответь ему».
+ */
+export function findPendingSwapForPair(
+  db: Db,
+  fromShiftId: number,
+  toShiftId: number,
+): { pairing: "same" | "mirror" } | null {
+  const rows = db
+    .select({ from: swapRequests.fromShiftId, to: swapRequests.toShiftId })
     .from(swapRequests)
-    .where(and(eq(swapRequests.status, "pending"), eq(swapRequests.fromShiftId, fromShiftId), eq(swapRequests.toShiftId, toShiftId)))
-    .limit(1)
-    .all().length > 0;
+    .where(and(
+      eq(swapRequests.status, "pending"),
+      or(
+        and(eq(swapRequests.fromShiftId, fromShiftId), eq(swapRequests.toShiftId, toShiftId)),
+        and(eq(swapRequests.fromShiftId, toShiftId), eq(swapRequests.toShiftId, fromShiftId)),
+      ),
+    ))
+    .all();
+  const exact = rows.find((r) => r.from === fromShiftId && r.to === toShiftId);
+  if (exact) return { pairing: "same" };
+  return rows.length > 0 ? { pairing: "mirror" } : null;
 }
 
 /** Still-open requests that would be invalidated by this shift going away — read
