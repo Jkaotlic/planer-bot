@@ -31,6 +31,15 @@ export interface ShiftCountsReport {
 /** A one-off entry with no preset behind it — grouped under a single column. */
 const CUSTOM_KIND = "Своё время";
 
+/**
+ * A roster cell the import could not read (see `unrecognisedCode` on the shifts
+ * table). It is a shift of unknown kind — real work, so it must count — but it is
+ * not the same thing as somebody hand-timing a shift, so it gets its own column
+ * rather than hiding inside «Своё время». The «?» matches how the mini app already
+ * marks such a cell.
+ */
+const UNRECOGNISED_KIND = "Не распознано (?)";
+
 export function buildShiftCountsReport(db: Db, from: string, to: string): ShiftCountsReport {
   const templates = listActiveTemplates(db);
   const nameById = new Map(templates.map((template) => [template.id, template.name] as const));
@@ -50,7 +59,9 @@ export function buildShiftCountsReport(db: Db, from: string, to: string): ShiftC
     const row = rows.get(shift.employeeId);
     if (!row) continue; // archived: their history stays, but they're off the report
 
-    const kind = (shift.templateId != null ? nameById.get(shift.templateId) : undefined) ?? shift.title ?? CUSTOM_KIND;
+    const kind = shift.unrecognisedCode != null
+      ? UNRECOGNISED_KIND
+      : (shift.templateId != null ? nameById.get(shift.templateId) : undefined) ?? shift.title ?? CUSTOM_KIND;
     row.byKind[kind] = (row.byKind[kind] ?? 0) + 1;
     row.total += 1;
     seenKinds.add(kind);

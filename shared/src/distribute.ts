@@ -34,7 +34,13 @@ export interface WorkerLoad {
   /** Total shifts held — a tiebreak so the overall count stays even too. */
   total: number;
   busy: { date: string; start: string; end: string }[]; // their timed shifts (overlap check), seeded + grown
-  absentDates: string[]; // dates (YYYY-MM-DD) they're away: vacation / sick leave / business trip
+  /**
+   * Dates (YYYY-MM-DD) they must not be given anything on: away (vacation / sick
+   * leave / business trip), or — from a caller with no interval to check, such as a
+   * roster cell nobody could read — some other reason the whole day is spoken for.
+   * A hard block, not a preference.
+   */
+  absentDates: string[];
 }
 
 export interface Assignment {
