@@ -30,3 +30,19 @@ export function splitSwaps(swaps: readonly SwapRequest[]): SwapBuckets {
   buckets.archived.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return buckets;
 }
+
+/**
+ * Has this shift already begun?
+ *
+ * The server refuses a swap proposal on a shift that has started (the same rule
+ * it has always applied when accepting one), so the picker must not offer it —
+ * same principle as the identical-shift filter next to it: a rejection after the
+ * tap is worse than not showing the option.
+ *
+ * A `shift` row with no time comes from an unreadable roster cell; there is
+ * nothing to hand over, and the server calls it `not_swappable`.
+ */
+export function hasStarted(shift: { date: string; start: string | null }, now: Date): boolean {
+  if (!shift.start) return true;
+  return new Date(`${shift.date}T${shift.start}`).getTime() <= now.getTime();
+}

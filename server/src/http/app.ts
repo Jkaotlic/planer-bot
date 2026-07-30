@@ -733,7 +733,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
     if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
-    const res = createSwap(db, { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message });
+    const res = createSwap(
+      db,
+      { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message },
+      teamNow(config.teamTz),
+    );
     if (!res.ok) return c.json({ error: res.reason }, 400);
     // The initiator proposed it — record before notifying, since the notification is
     // best-effort and shouldn't gate the journal entry either way.

@@ -31,6 +31,10 @@ const SWAP_ERROR_MESSAGES: Record<string, string> = {
   same_person: "Нельзя предложить обмен самому себе.",
   not_swappable: "Такими сменами нельзя меняться.",
   shift_not_found: "Смена не найдена — возможно, её уже изменили.",
+  // The picker filters these out, so seeing one means the page has been open a
+  // while and the shift started in the meantime.
+  "from-shift-in-past": "Твоя смена уже началась — меняться поздно.",
+  "to-shift-in-past": "Та смена уже началась — меняться поздно.",
 };
 
 function describeSwapError(err: unknown): string {
