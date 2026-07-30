@@ -280,6 +280,22 @@ describe("a vacant slot in the past", () => {
 
   // A mistyped year, and the team gets a «нужен человек» broadcast with a button
   // that would have written a weekend_work entry into the past.
+  it("cannot be opened on a weekday either, holiday or not (400)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    // The next Monday — and the same answer would come for a public holiday, since
+    // the system has no holiday calendar. Both write paths into a weekend_work
+    // entry say this; nothing used to check that they still did.
+    const monday = new Date();
+    monday.setUTCDate(monday.getUTCDate() + ((1 - monday.getUTCDay() + 7) % 7 || 7));
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(monday);
+
+    const res = await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("субботой или воскресеньем");
+  });
+
   it("cannot be opened (400)", async () => {
     const db = makeTestDb();
     const { bot, sent } = testBot();
