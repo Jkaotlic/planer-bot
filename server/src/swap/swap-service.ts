@@ -1,5 +1,5 @@
 import { and, eq, ne, or } from "drizzle-orm";
-import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
+import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, shiftInterval, absMinutes, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
@@ -23,6 +23,7 @@ function timedOthers(db: Db, employeeId: number, excludeShiftId: number): Domain
 export function createSwap(
   db: Db,
   input: { fromEmployeeId: number; fromShiftId: number; toShiftId: number; message?: string },
+  now: SwapNow,
 ): SwapOutcome {
   const fromShift = getShift(db, input.fromShiftId);
   const toShift = getShift(db, input.toShiftId);
@@ -31,6 +32,17 @@ export function createSwap(
   if (toShift.employeeId == null) return { ok: false, reason: "target_unassigned" };
   if (toShift.employeeId === input.fromEmployeeId) return { ok: false, reason: "same_person" };
   if (!isSwappable(fromShift.category) || !isSwappable(toShift.category)) return { ok: false, reason: "not_swappable" };
+  // A roster import writes an unreadable cell as a `shift` with no clock times.
+  // There's nothing to hand over and nothing to compare against "now".
+  if (fromShift.start == null || fromShift.end == null || toShift.start == null || toShift.end == null) {
+    return { ok: false, reason: "not_swappable" };
+  }
+  // The same rule accept-time already enforces, applied where it costs nothing:
+  // a request on a shift that has started can only ever answer «Смена уже прошла»,
+  // after pinging the counterparty with buttons that look live.
+  const nowAbs = absMinutes(now.date, now.time);
+  if (shiftInterval(toDomain(fromShift)).start <= nowAbs) return { ok: false, reason: "from-shift-in-past" };
+  if (shiftInterval(toDomain(toShift)).start <= nowAbs) return { ok: false, reason: "to-shift-in-past" };
   // A no-op swap: same day, same kind of shift — nothing would actually change hands.
   if (isIdenticalShift(fromShift, toShift)) return { ok: false, reason: "identical-shift" };
   // Same trade already open — either this person's own request («дождись ответа»)

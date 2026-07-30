@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SwapRequest } from "../api/client";
-import { splitSwaps } from "./swaps";
+import { splitSwaps, hasStarted } from "./swaps";
 
 const swap = (id: number, direction: SwapRequest["direction"], status: SwapRequest["status"]): SwapRequest => ({
   id,
@@ -46,5 +46,20 @@ describe("splitSwaps", () => {
 
   it("handles an empty list", () => {
     expect(splitSwaps([])).toEqual({ incoming: [], outgoing: [], archived: [] });
+  });
+});
+
+describe("hasStarted", () => {
+  const now = new Date("2026-07-10T14:00:00");
+
+  it("is true for a shift that already began, false for one still ahead", () => {
+    expect(hasStarted({ date: "2026-07-10", start: "08:00" }, now)).toBe(true);
+    expect(hasStarted({ date: "2026-07-10", start: "18:00" }, now)).toBe(false);
+    expect(hasStarted({ date: "2026-07-09", start: "23:00" }, now)).toBe(true);
+    expect(hasStarted({ date: "2026-07-11", start: "06:00" }, now)).toBe(false);
+  });
+
+  it("treats a timeless entry as untradeable — the server calls it not_swappable", () => {
+    expect(hasStarted({ date: "2026-12-31", start: null }, now)).toBe(true);
   });
 });

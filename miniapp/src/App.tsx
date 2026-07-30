@@ -11,6 +11,7 @@ import { WeekendScreen } from "./screens/WeekendScreen";
 import { AdminScreen } from "./screens/AdminScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
+import { hasStarted } from "./lib/swaps";
 
 interface AppData {
   me: Me;
@@ -207,8 +208,11 @@ export function App() {
     // the one being given up) — the server would reject it anyway, but not
     // offering it is better than a rejection after the tap. Same predicate the
     // server uses, so the two never drift apart.
+    // A shift that has already started is refused by the server for the same
+    // reason, so it doesn't belong in the picker either.
+    const now = new Date();
     const colleagueShifts = data.teamShifts.filter(
-      (s) => s.category === "shift" && s.employeeId !== data.me.id && !isIdenticalShift(proposingFor, s),
+      (s) => s.category === "shift" && s.employeeId !== data.me.id && !isIdenticalShift(proposingFor, s) && !hasStarted(s, now),
     );
     return (
       <ProposeSwapScreen

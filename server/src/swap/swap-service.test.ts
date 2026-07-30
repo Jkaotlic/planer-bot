@@ -19,18 +19,41 @@ function setup() {
 describe("swap service", () => {
   it("createSwap validates ownership + swappability", () => {
     const { db, a, b, sa, sb } = setup();
-    expect(createSwap(db, { fromEmployeeId: b.id, fromShiftId: sa.id, toShiftId: sb.id }).ok).toBe(false); // sa isn't b's
-    const ok = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    expect(createSwap(db, { fromEmployeeId: b.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW).ok).toBe(false); // sa isn't b's
+    const ok = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.counterpartyId).toBe(b.id);
   });
 
   it("createSwap rejects a duplicate (fromShiftId,toShiftId) pending swap", () => {
     const { db, a, sa, sb } = setup();
-    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     expect(first.ok).toBe(true);
-    const second = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const second = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     expect(second).toEqual({ ok: false, reason: "duplicate" });
+  });
+
+  // The recheck at accept-time already refuses a shift that has started, so a
+  // request created on one is born dead: it only ever answers «Смена уже прошла»,
+  // after having pinged the counterparty with live-looking buttons.
+  it("createSwap refuses a shift that has already started, on either side", () => {
+    const { db, a, b, sa, sb } = setup();
+    const past = createShift(db, { date: "2026-06-01", start: "08:00", end: "17:00", employeeId: b.id });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: past.id }, NOW))
+      .toEqual({ ok: false, reason: "to-shift-in-past" });
+
+    const myPast = createShift(db, { date: "2026-06-02", start: "08:00", end: "17:00", employeeId: a.id });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: myPast.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "from-shift-in-past" });
+  });
+
+  // Roster import writes an unreadable cell as a `shift` row with no clock times —
+  // there is nothing to compare against "now" and nothing to hand over.
+  it("createSwap refuses a shift with no times", () => {
+    const { db, a, b, sa } = setup();
+    const timeless = createShift(db, { date: "2026-07-12", start: null, end: null, employeeId: b.id, unrecognisedCode: "Ко" });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: timeless.id }, NOW))
+      .toEqual({ ok: false, reason: "not_swappable" });
   });
 
   // Two people agree in person and each opens a request from their own side. It is
@@ -39,27 +62,27 @@ describe("swap service", () => {
   // a line later, «отменился — смена уже досталась другому».
   it("createSwap rejects the mirror of a pending swap, pointing at the request that already exists", () => {
     const { db, a, b, sa, sb } = setup();
-    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     expect(first.ok).toBe(true);
-    const mirrored = createSwap(db, { fromEmployeeId: b.id, fromShiftId: sb.id, toShiftId: sa.id });
+    const mirrored = createSwap(db, { fromEmployeeId: b.id, fromShiftId: sb.id, toShiftId: sa.id }, NOW);
     expect(mirrored).toEqual({ ok: false, reason: "mirror" });
   });
 
   it("createSwap allows the mirror once the original is no longer pending", () => {
     const { db, a, b, sa, sb } = setup();
-    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!first.ok) throw new Error("setup");
     expect(cancelSwap(db, first.request.id, a.id).ok).toBe(true);
     // Аня withdrew hers; Игорь proposing the same trade is a new offer, not a duplicate.
-    expect(createSwap(db, { fromEmployeeId: b.id, fromShiftId: sb.id, toShiftId: sa.id }).ok).toBe(true);
+    expect(createSwap(db, { fromEmployeeId: b.id, fromShiftId: sb.id, toShiftId: sa.id }, NOW).ok).toBe(true);
   });
 
   it("accept exchanges the shifts atomically and cancels siblings", () => {
     const { db, a, b, sa, sb } = setup();
     const c = createEmployee(db, { displayName: "Марк" });
     const sc = createShift(db, { date: "2026-07-12", start: "09:00", end: "18:00", employeeId: c.id });
-    const main = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
-    const sibling = createSwap(db, { fromEmployeeId: c.id, fromShiftId: sc.id, toShiftId: sa.id }); // also wants sa
+    const main = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
+    const sibling = createSwap(db, { fromEmployeeId: c.id, fromShiftId: sc.id, toShiftId: sa.id }, NOW); // also wants sa
     if (!main.ok || !sibling.ok) throw new Error("setup");
 
     const res = acceptSwap(db, main.request.id, b.id, NOW);
@@ -81,7 +104,7 @@ describe("swap service", () => {
 
   it("accept exposes no cancelled siblings when there aren't any", () => {
     const { db, a, b, sa, sb } = setup();
-    const main = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const main = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!main.ok) throw new Error("setup");
     const res = acceptSwap(db, main.request.id, b.id, NOW);
     expect(res.ok).toBe(true);
@@ -90,7 +113,7 @@ describe("swap service", () => {
 
   it("accept only by the counterparty, only while pending", () => {
     const { db, a, b, sa, sb } = setup();
-    const req = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const req = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!req.ok) throw new Error("setup");
     expect(acceptSwap(db, req.request.id, a.id, NOW).ok).toBe(false); // initiator can't accept
     expect(acceptSwap(db, req.request.id, b.id, NOW).ok).toBe(true);
@@ -101,7 +124,7 @@ describe("swap service", () => {
     const { db, a, b, sa, sb } = setup();
     // b already has a shift overlapping sa (2026-07-10 08:00-17:00)
     createShift(db, { date: "2026-07-10", start: "09:00", end: "12:00", employeeId: b.id });
-    const req = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const req = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!req.ok) throw new Error("setup");
     const res = acceptSwap(db, req.request.id, b.id, NOW);
     expect(res.ok).toBe(false);
@@ -111,11 +134,11 @@ describe("swap service", () => {
 
   it("decline and cancel are role-gated", () => {
     const { db, a, b, sa, sb } = setup();
-    const r1 = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const r1 = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!r1.ok) throw new Error("s");
     expect(declineSwap(db, r1.request.id, a.id).ok).toBe(false); // initiator can't decline
     expect(declineSwap(db, r1.request.id, b.id).ok).toBe(true);
-    const r2 = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    const r2 = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!r2.ok) throw new Error("s");
     expect(cancelSwap(db, r2.request.id, b.id).ok).toBe(false); // counterparty can't cancel
     expect(cancelSwap(db, r2.request.id, a.id).ok).toBe(true);
