@@ -107,40 +107,49 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
     return { ok: true, assignment: existing, changed: false };
   }
 
-  const shift = createShift(db, {
-    date: slot.date,
-    start: slot.start,
-    end: slot.end,
-    category: "weekend_work",
-    employeeId,
-    title: slot.title ?? "Работа в выходной",
-    location: slot.location,
-  });
+  // The schedule entry and the assignment that explains it are one fact written to
+  // two tables: an entry no assignment accounts for shows the slot as unstaffed
+  // while the person's calendar says they work it.
+  return db.transaction(() => {
+    const shift = createShift(db, {
+      date: slot.date,
+      start: slot.start,
+      end: slot.end,
+      category: "weekend_work",
+      employeeId,
+      title: slot.title ?? "Работа в выходной",
+      location: slot.location,
+    });
 
-  if (existing) {
-    if (existing.status === "declined") {
-      // Re-offering someone who previously declined reuses their row (slot+employee is unique).
-      reofferAssignment(db, existing.id, shift.id);
-      return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null }, changed: true };
+    if (existing) {
+      if (existing.status === "declined") {
+        // Re-offering someone who previously declined reuses their row (slot+employee is unique).
+        reofferAssignment(db, existing.id, shift.id);
+        return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null }, changed: true };
+      }
+      // offered/confirmed but its shift link had gone missing (e.g. the schedule entry was
+      // deleted directly) — repair the link without touching status or creating a duplicate.
+      setAssignmentShift(db, existing.id, shift.id);
+      return { ok: true, assignment: { ...existing, shiftId: shift.id }, changed: true };
     }
-    // offered/confirmed but its shift link had gone missing (e.g. the schedule entry was
-    // deleted directly) — repair the link without touching status or creating a duplicate.
-    setAssignmentShift(db, existing.id, shift.id);
-    return { ok: true, assignment: { ...existing, shiftId: shift.id }, changed: true };
-  }
 
-  const hours = shiftDurationHours({ start: slot.start, end: slot.end });
-  const assignment = createAssignment(db, { slotId, employeeId, hours });
-  setAssignmentShift(db, assignment.id, shift.id);
-  return { ok: true, assignment: { ...assignment, shiftId: shift.id }, changed: true };
+    const hours = shiftDurationHours({ start: slot.start, end: slot.end });
+    const assignment = createAssignment(db, { slotId, employeeId, hours });
+    setAssignmentShift(db, assignment.id, shift.id);
+    return { ok: true, assignment: { ...assignment, shiftId: shift.id }, changed: true };
+  });
 }
 
 /** Admin removes someone from a slot: drops their schedule entry and the assignment. */
 export function unassign(db: Db, assignmentId: number): UnassignOutcome {
   const assignment = getAssignment(db, assignmentId);
   if (!assignment) return { ok: false, reason: "not_found" };
-  if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
-  deleteAssignment(db, assignmentId);
+  // Both or neither: an assignment whose entry is gone puts somebody on the slot
+  // with nothing in their schedule.
+  db.transaction(() => {
+    if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
+    deleteAssignment(db, assignmentId);
+  });
   return { ok: true, employeeId: assignment.employeeId, slotId: assignment.slotId };
 }
 
@@ -170,16 +179,21 @@ export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: num
   }
   const slot = getVacantSlot(db, assignment.slotId);
   if (!slot) return { ok: false, reason: "slot_missing" };
-  const shift = createShift(db, {
-    date: slot.date,
-    start: slot.start,
-    end: slot.end,
-    category: "weekend_work",
-    employeeId: actingEmployeeId,
-    title: slot.title ?? "Работа в выходной",
-    location: slot.location,
+  // Both or neither. Half of this leaves the offer `offered` with no shift link and
+  // an orphan entry in the schedule — and the next «Назначить» writes a *second*
+  // entry for the same day.
+  db.transaction(() => {
+    const shift = createShift(db, {
+      date: slot.date,
+      start: slot.start,
+      end: slot.end,
+      category: "weekend_work",
+      employeeId: actingEmployeeId,
+      title: slot.title ?? "Работа в выходной",
+      location: slot.location,
+    });
+    confirmAssignment(db, assignmentId, shift.id);
   });
-  confirmAssignment(db, assignmentId, shift.id);
   return { ok: true, slotId: assignment.slotId };
 }
 
@@ -189,11 +203,13 @@ export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: num
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
   // Turning it down pulls the entry back out of the schedule; the slot itself stays
   // open for someone else (it was never closed by assigning).
-  if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
-  db.update(weekendAssignments)
-    .set({ status: "declined", shiftId: null })
-    .where(eq(weekendAssignments.id, assignmentId))
-    .run();
+  db.transaction(() => {
+    if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
+    db.update(weekendAssignments)
+      .set({ status: "declined", shiftId: null })
+      .where(eq(weekendAssignments.id, assignmentId))
+      .run();
+  });
   return { ok: true, slotId: assignment.slotId };
 }
 
