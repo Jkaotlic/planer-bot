@@ -89,7 +89,10 @@ describe("weekend-market endpoints", () => {
     expect(confirmed.status).toBe(200);
     const shifts = listShiftsInRange(db, date, date);
     expect(shifts.some((s) => s.category === "weekend_work" && s.employeeId === anya.w.id && s.start === "10:00")).toBe(true);
-    expect(sent.some((s) => /подтвердил/i.test(s.text))).toBe(true);
+    const confirmMsg = sent.find((s) => /подтвердил/i.test(s.text));
+    expect(confirmMsg).toBeDefined();
+    expect(confirmMsg!.text).toContain("Аня"); // named, not a bare "Работник подтвердил"
+    expect(confirmMsg!.text).toContain("Ярмарка"); // and which slot
 
     // payroll JSON + CSV reflect the confirmed work
     const payroll = await app.request(`/api/admin/weekend/payroll?from=${daysFromNow(0)}&to=${daysFromNow(30)}`, bearer(admin));
@@ -123,6 +126,29 @@ describe("weekend-market endpoints", () => {
     expect((await app.request(`/api/weekend/offers/${assignmentId}/decline`, authed(anya.token))).status).toBe(200);
     expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.w.id)).toBe(false);
     expect((await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots.some((s: any) => s.slot.id === slotId)).toBe(true);
+  });
+
+  it("unassign notifies the worker, naming the slot they were taken off", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 201);
+
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+    const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }))).json()).assignment.id as number;
+
+    const unassigned = await app.request(`/api/admin/weekend/assignments/${assignmentId}/unassign`, authed(admin));
+    expect(unassigned.status).toBe(200);
+    expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.w.id)).toBe(false);
+
+    // Previously silent: the worker only found out by noticing the entry had
+    // vanished. Now they're told, with which slot and a next step.
+    const msg = sent.find((s) => s.chat_id === 201 && /сняли/i.test(s.text));
+    expect(msg).toBeDefined();
+    expect(msg!.text).toContain("Ярмарка");
   });
 
   it("a repeat assign of an already-assigned worker sends no second Telegram nudge", async () => {
