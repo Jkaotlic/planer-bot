@@ -26,6 +26,7 @@ import {
   swapDeclinedText,
   swapAcceptedAdminText,
   swapAutoCancelledText,
+  swapExpiredText,
   weekendConfirmedAdminText,
   weekendDeclinedAdminText,
 } from "./notify";
@@ -305,6 +306,15 @@ export function createBot(deps: BotDeps): Bot {
     const res = action === "accept" ? acceptSwap(db, id, me.id, teamNow(config.teamTz)) : declineSwap(db, id, me.id);
     if (!res.ok) {
       await ctx.answerCallbackQuery({ text: reasonToRu(res.reason) });
+      // The tapper just read why in that toast. The initiator proposed this and
+      // did nothing since — without a word here their request just turns
+      // «Истекло» in the archive with no cause attached.
+      if (res.expired) {
+        const payload = swapAuditPayload(db, res.expired);
+        recordAudit(db, "swap_expired", me.id, payload);
+        const initiatorTg = getEmployeeById(db, res.expired.fromEmployeeId)?.telegramUserId;
+        if (initiatorTg != null) await notifyUser(bot, initiatorTg, swapExpiredText(payload, "shift_changed"));
+      }
       return;
     }
 

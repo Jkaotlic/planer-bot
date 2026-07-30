@@ -8,7 +8,10 @@ import { createSwapRequest, getSwapRequest, setSwapStatus, findPendingSwapForPai
 export type SwapNow = { date: string; time: string };
 export type SwapOutcome =
   | { ok: true; request: SwapRequest; counterpartyId: number; cancelledSiblings?: SwapRequest[] }
-  | { ok: false; reason: string };
+  /** `expired` is set when the failure also moved the request to `expired` for
+   *  good. The person who tapped learns it from `reason`; the other side learns
+   *  nothing unless the caller tells them, which is what this is for. */
+  | { ok: false; reason: string; expired?: SwapRequest };
 
 function toDomain(s: DbShift): DomainShift & { category: DbShift["category"] } {
   return { id: s.id, date: s.date, start: s.start as string, end: s.end as string, templateId: s.templateId, title: s.title, employeeId: s.employeeId, note: s.note, category: s.category };
@@ -77,7 +80,7 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
     !isSwappable(fromShift.category) || !isSwappable(toShift.category)
   ) {
     setSwapStatus(db, requestId, expired);
-    return { ok: false, reason: "unavailable" };
+    return { ok: false, reason: "unavailable", expired: getSwapRequest(db, requestId) ?? { ...req, status: expired } };
   }
 
   const validation = validateSwap({
@@ -91,7 +94,7 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
   });
   if (!validation.ok) {
     setSwapStatus(db, requestId, expired);
-    return { ok: false, reason: validation.reason };
+    return { ok: false, reason: validation.reason, expired: getSwapRequest(db, requestId) ?? { ...req, status: expired } };
   }
 
   const accepted = nextSwapStatus("pending", "accept");

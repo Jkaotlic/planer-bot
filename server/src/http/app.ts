@@ -11,7 +11,7 @@ import { rateLimiter } from "./rate-limit";
 import { listActiveTemplates } from "../repo/templates";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
-import type { Shift } from "../db/schema";
+import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
   getEmployeeById,
@@ -729,6 +729,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number | null; toShiftId: number | null }) =>
     swapAuditPayloadDb(db, request);
 
+  /** Journals a swap that expired on its own and tells the side that wasn't
+   *  looking — the initiator, who proposed it and did nothing since. */
+  const announceExpiredSwap = async (request: SwapRequest, actorEmployeeId: number): Promise<void> => {
+    const payload = swapAuditPayload(request);
+    recordAudit(db, "swap_expired", actorEmployeeId, payload);
+    if (!bot) return;
+    const tg = tgOf(request.fromEmployeeId);
+    if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
+  };
+
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
@@ -755,7 +765,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.post("/api/swaps/:id/accept", requireAuth(db, config.jwtSecret), async (c) => {
     const res = acceptSwap(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz));
-    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (!res.ok) {
+      // A failure that also retired the request for good: the tapper reads why in
+      // this response, the initiator hears nothing unless we say so here.
+      if (res.expired) await announceExpiredSwap(res.expired, c.get("auth").employeeId);
+      return c.json({ error: res.reason }, 400);
+    }
     // The caller is the counterparty — acceptSwap only succeeds when req.toEmployeeId
     // === the acting employee — so they are the actor of "accepted", not the initiator.
     recordAudit(db, "swap_accepted", c.get("auth").employeeId, swapAuditPayload(res.request));
