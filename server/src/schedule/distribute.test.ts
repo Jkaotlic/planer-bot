@@ -69,6 +69,65 @@ describe("buildDistribution", () => {
     expect(assignment?.employeeId).toBe(igor.id);
   });
 
+  it("counts an unread roster cell toward total load, so it isn't handed extra shifts on the strength of an undercount", () => {
+    const db = makeTestDb();
+    // Created first, so a broken tiebreak (equal totals -> lower id wins) would
+    // wrongly favour her over Igor; only an honest total count fixes that.
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // An unread roster cell: the import could not decode it, so it has no times —
+    // but it is still a "shift" category entry, not an absence.
+    createShift(db, {
+      date: "2026-07-01", start: null, end: null, category: "shift",
+      employeeId: anya.id, unrecognisedCode: "Ко",
+    });
+
+    // A single custom-time slot, on a different day so it can't collide with the
+    // unread cell's date; both workers are otherwise tied (0 of this kind).
+    const slot = createShift(db, { date: "2026-07-05", start: "09:00", end: "17:00" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    // Igor has the lower total (0 vs Anya's 1 from the unread cell) and must win it.
+    expect(assignment?.employeeId).toBe(igor.id);
+  });
+
+  it("does not double-book a worker on the day of an unread roster cell", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // Anya has something on 2026-07-02 the roster import could not read.
+    createShift(db, {
+      date: "2026-07-02", start: null, end: null, category: "shift",
+      employeeId: anya.id, unrecognisedCode: "Ко",
+    });
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    expect(assignment?.employeeId).not.toBe(anya.id);
+    expect(assignment?.employeeId).toBe(igor.id);
+  });
+
+  it("does not double-book a worker across the boundary of a window, when a shift dated the day before crosses midnight into it", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // A genuinely overnight custom-time entry dated the day BEFORE the window;
+    // its tail (up to 07:00) still lands inside [from, to].
+    createShift(db, { date: "2026-06-30", start: "23:00", end: "07:00", employeeId: anya.id });
+    // Overlaps only the tail of that overnight shift.
+    const slot = createShift(db, { date: "2026-07-01", start: "06:00", end: "08:00" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    expect(assignment?.employeeId).not.toBe(anya.id);
+    expect(assignment?.employeeId).toBe(igor.id);
+  });
+
   it("does not double-book a worker across overlapping unassigned slots at the same time", () => {
     const db = makeTestDb();
     createEmployee(db, { displayName: "Аня" });

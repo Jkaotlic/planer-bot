@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { distributeFairly, countsForBalance, isAbsence, type FillSlot, type WorkerLoad } from "@planer/shared";
+import { distributeFairly, countsForBalance, isAbsence, nextDate, toMinutes, type FillSlot, type WorkerLoad } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts } from "../db/schema";
 import { listUnassignedShifts, listShiftsByEmployee } from "../repo/shifts";
@@ -49,6 +49,21 @@ function shiftKind(
   return s.title ?? "Своё время";
 }
 
+/**
+ * A roster cell the import could not read (`unrecognisedCode` set, no times — see
+ * the column comment on `shifts`). It is real work of an unknown kind, so it must
+ * add to the total the same as any other shift, but it must never be filed under a
+ * named kind (that would claim to know what it was) or under the custom-time
+ * bucket (that means somebody hand-timed a shift, which this is not). Keep this in
+ * sync with the identical bucket in reports/shift-counts.ts — same meaning, same
+ * label, so the report and the balance never disagree about what this is.
+ */
+const UNRECOGNISED_KIND = "Не распознано (?)";
+
+function crossesMidnight(start: string, end: string): boolean {
+  return toMinutes(end) < toMinutes(start);
+}
+
 function seedWorkerLoad(
   db: Db,
   employeeId: number,
@@ -66,7 +81,29 @@ function seedWorkerLoad(
     byKind[kind] = (byKind[kind] ?? 0) + 1;
     total += 1;
   }
-  const busy = timed.map((s) => ({ date: s.date, start: s.start as string, end: s.end as string }));
+
+  // An unread cell has no times, so it never reaches `timed` above and would
+  // otherwise vanish from the count entirely — undercounting this person for
+  // every kind of fairness comparison. It still counts toward the total.
+  const unrecognised = employeeShifts.filter((s) => s.unrecognisedCode != null && inRange(s.date, from, to));
+  for (const s of unrecognised) {
+    if (!countsForBalance(s.category)) continue;
+    byKind[UNRECOGNISED_KIND] = (byKind[UNRECOGNISED_KIND] ?? 0) + 1;
+    total += 1;
+  }
+
+  // Busy also needs a genuinely overnight shift dated the day *before* `from` —
+  // its tail still lands inside the window even though its own date does not.
+  // shiftsOverlap/shiftInterval already do the cross-midnight maths correctly once
+  // a shift reaches `busy`; this only widens which shifts make it there. Counting
+  // (above) deliberately stays keyed on the shift's own date, so a boundary shift
+  // is never counted twice by two adjacent periods.
+  const busyTimed = employeeShifts.filter(
+    (s) =>
+      s.start != null && s.end != null &&
+      (inRange(s.date, from, to) || (nextDate(s.date) === from && crossesMidnight(s.start, s.end))),
+  );
+  const busy = busyTimed.map((s) => ({ date: s.date, start: s.start as string, end: s.end as string }));
 
   const absences = employeeShifts.filter((s) => isAbsence(s.category) && overlapsRange(s, from, to));
   const absentDatesSet = new Set<string>();
@@ -74,6 +111,15 @@ function seedWorkerLoad(
     const end = s.endDate ?? s.date;
     for (const d of expandDateRange(s.date, end, from, to)) absentDatesSet.add(d);
   }
+  // An unread cell has no times, so there is no interval to compare for overlap —
+  // "busy" can't express it. Blocking the whole day is the safe reading: we know
+  // this person has *something* that day, so a second commitment could collide at
+  // any hour. `absentDates` is reused rather than inventing a fabricated all-day
+  // busy interval because it is already exactly "assign this person nothing on
+  // this date", and its only reader is distributeFairly below — nothing else in
+  // the codebase interprets WorkerLoad.absentDates as "on vacation", so widening
+  // its source doesn't leak a wrong meaning anywhere.
+  for (const s of unrecognised) absentDatesSet.add(s.date);
   const absentDates = [...absentDatesSet];
 
   return { employeeId, byKind, total, busy, absentDates };

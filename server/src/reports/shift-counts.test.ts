@@ -76,6 +76,25 @@ describe("buildShiftCountsReport", () => {
     expect(buildShiftCountsReport(db, JUNE.from, JUNE.to).rows[0]!.byKind).toEqual({ "Своё время": 1 });
   });
 
+  it("labels an unread roster cell apart from a hand-timed «Своё время» shift, but still counts it", () => {
+    const db = makeTestDb();
+    const a = createEmployee(db, { displayName: "Соколов" }).id;
+    // An unread roster cell: no times, the original code kept verbatim.
+    createShift(db, {
+      employeeId: a, date: "2026-06-01", endDate: null, category: "shift",
+      templateId: null, start: null, end: null, title: null, unrecognisedCode: "Ко",
+    });
+    const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
+    const row = report.rows[0]!;
+    expect(row.total).toBe(1);
+    expect(row.byKind["Своё время"]).toBeUndefined();
+    expect(Object.keys(row.byKind)).not.toContain("Своё время");
+    // Whatever the label, it must not be the custom-time bucket, and it must carry the count.
+    const [label, count] = Object.entries(row.byKind)[0]!;
+    expect(label).not.toBe("Своё время");
+    expect(count).toBe(1);
+  });
+
   it("stays inside the period", () => {
     const db = makeTestDb();
     const a = createEmployee(db, { displayName: "Кто-то" }).id;

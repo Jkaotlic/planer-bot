@@ -4,7 +4,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { applyRosterImport, buildRosterCsv } from "./roster-service";
-import { parseRosterCsv, decodeRoster, NON_WORKING_CODE, type DecodeResult } from "./roster-codec";
+import { parseRosterCsv, decodeRoster, type DecodeResult } from "./roster-codec";
 
 /**
  * The acceptance proof for the whole import/export feature: take a REAL roster file,
@@ -23,9 +23,11 @@ const REAL_ROSTER = process.env.ROSTER_CSV;
 const available = Boolean(REAL_ROSTER && existsSync(REAL_ROSTER));
 
 /**
- * The source file with every undecodable cell rewritten to the non-working code —
- * the one difference a lossless round trip is still allowed to have, because an
- * unknown code is deliberately not stored. Operates on raw fields to keep the
+ * The source file, byte-exact — an unreadable cell round-trips to the very same
+ * text (see `unrecognisedCode` on the shifts table), so a real round trip needs no
+ * rewriting at all. This still walks `decoded.unknowns` and writes each cell back
+ * verbatim, both to prove the export loses nothing and to document the one kind of
+ * cell the matrix cannot otherwise explain. Operates on raw fields to keep the
  * comparison byte-exact; quoted fields would break the naive split, so the suite
  * bails out loudly rather than comparing something it mangled.
  */
@@ -40,7 +42,7 @@ function expectedExport(source: string, parsed: ReturnType<typeof parseRosterCsv
     const column = columnOf.get(unknown.date);
     if (row === undefined || column === undefined) throw new Error("unknown cell not found in the source");
     const fields = lines[row]!.split(";");
-    fields[column] = NON_WORKING_CODE;
+    fields[column] = unknown.code;
     lines[row] = fields.join(";");
   }
   return "﻿" + lines.filter((l) => l.length > 0).join(eol);
