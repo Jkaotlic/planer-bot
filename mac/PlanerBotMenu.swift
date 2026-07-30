@@ -20,15 +20,41 @@ import AppKit
 // MARK: - Configuration
 
 private enum Config {
-    static let publicURL = "https://<PUBLIC_URL из server/.env>"
     static let serverLabel = "com.planerbot.server"
     static let backupLabel = "com.planerbot.backup"
     static let port: UInt16 = 8090
     static let logPath = NSString(string: "~/planer-bot.log").expandingTildeInPath
     static let backupDir = NSString(string: "~/planer-bot-backups").expandingTildeInPath
+    static let envPath = NSString(string: "~/planer-bot/server/.env").expandingTildeInPath
     /// How often the status is re-checked. Five seconds is responsive enough to
     /// feel live without waking the CPU for nothing.
     static let pollSeconds: TimeInterval = 5
+
+    /// Where «Открыть приложение» goes — read from the server's own `.env`, not
+    /// written here.
+    ///
+    /// This repository is public, and the address is a home server: hard-coding it
+    /// published a pointer straight at that network, in a file that has no reason
+    /// to carry one. `PUBLIC_URL` is already the server's single source of truth
+    /// for the same value, and `server/.env` is gitignored — so reading it keeps
+    /// the two from ever disagreeing *and* keeps the address off GitHub.
+    ///
+    /// Falls back to the local port: without the file there is no address to know,
+    /// and a menu item that opens localhost is honest, where one that opens nothing
+    /// looks broken.
+    static let publicURL: String = readPublicURL() ?? "http://localhost:\(port)"
+
+    private static func readPublicURL() -> String? {
+        guard let text = try? String(contentsOfFile: envPath, encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("PUBLIC_URL=") else { continue }
+            let value = trimmed.dropFirst("PUBLIC_URL=".count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+            if !value.isEmpty { return value.hasSuffix("/") ? String(value.dropLast()) : value }
+        }
+        return nil
+    }
 }
 
 // MARK: - Shell helpers
