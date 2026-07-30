@@ -79,6 +79,24 @@ describe("reorderEmployee", () => {
     expect(reorderEmployee(db, 9999, 1)).toBeNull();
   });
 
+  // The number an archived person keeps is frozen while the active list gets
+  // renumbered around them — sooner or later somebody active holds the same one.
+  // Then restoring them puts two people on one number and the order between them
+  // falls back to id, i.e. wherever they happen to land.
+  it("restoring somebody never leaves two people on the same number", () => {
+    const db = makeTestDb();
+    const ids = team(db);
+    archiveEmployee(db, ids[5]!, "2026-06-01");           // keeps 5
+    const hired = createEmployee(db, { displayName: "Новенький" }).id;
+    reorderEmployee(db, hired, 6);                        // actives renumbered 0..5 — the new one takes 5
+
+    restoreEmployee(db, ids[5]!);
+
+    const orders = listActive(db).map((e) => e.rosterOrder);
+    expect(new Set(orders).size).toBe(orders.length);      // no duplicates
+    expect(orders).toEqual([0, 1, 2, 3, 4, 5, 6]);         // and no holes
+  });
+
   it("straightens out numbers left skewed by an archive and a restore", () => {
     const db = makeTestDb();
     const ids = team(db);

@@ -177,13 +177,32 @@ export function archiveEmployee(db: Db, id: number, fromDate: string): Employee 
   });
 }
 
+/**
+ * Brings somebody back onto the roster, at the position their old number implies.
+ *
+ * That number was frozen while they were away and the active list was renumbered
+ * around them, so by the time they return somebody else may well be holding it —
+ * two people on one number, with the order between them decided by row id. So the
+ * whole active column is renumbered on the way back, exactly as `reorderEmployee`
+ * does: sorted by the number they had, ties by id, then handed 0..n-1.
+ */
 export function restoreEmployee(db: Db, id: number): Employee | undefined {
-  return db
-    .update(employees)
-    .set({ isActive: true, archivedAt: null })
-    .where(eq(employees.id, id))
-    .returning()
-    .all()[0];
+  return db.transaction((tx) => {
+    const restored = tx
+      .update(employees)
+      .set({ isActive: true, archivedAt: null })
+      .where(eq(employees.id, id))
+      .returning()
+      .all()[0];
+    if (!restored) return undefined;
+    tx.select().from(employees).where(eq(employees.isActive, true)).orderBy(...ROSTER_ORDER).all()
+      .forEach((employee, index) => {
+        if (employee.rosterOrder !== index) {
+          tx.update(employees).set({ rosterOrder: index }).where(eq(employees.id, employee.id)).run();
+        }
+      });
+    return tx.select().from(employees).where(eq(employees.id, id)).get();
+  });
 }
 
 export function listArchived(db: Db): Employee[] {
