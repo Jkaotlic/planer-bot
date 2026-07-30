@@ -22,6 +22,18 @@ function monthRange(d: Date): { from: string; to: string } {
  * volunteers to assign in one tap, plus a payroll ledger with CSV export.
  * Mirrors the desktop `WeekendAdminScreen`, rebuilt as a mobile column.
  */
+/**
+ * What to say after opening a weekend slot.
+ *
+ * The call for volunteers only reaches people who have linked Telegram, and a
+ * bare «смена открыта» reads as «спросил команду» even when it asked a third of
+ * it. Mirrored in the desktop console — see WeekendAdminScreen.tsx.
+ */
+export function reachNotice(delivered: number, intended: number): string {
+  if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
+  return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
+}
+
 export function AdminWeekendScreen() {
   const [slots, setSlots] = useState<AdminSlotView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +42,7 @@ export function AdminWeekendScreen() {
   // state while A's own request is still running.
   const [busySlotIds, setBusySlotIds] = useState<ReadonlySet<number>>(new Set());
   const [showPost, setShowPost] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function reload() {
     setSlots(await apiClient.getAdminWeekendSlots());
@@ -84,8 +97,9 @@ export function AdminWeekendScreen() {
             {showPost ? (
               <PostSlotForm
                 onCancel={() => setShowPost(false)}
-                onCreated={async () => {
+                onCreated={async (reach) => {
                   setShowPost(false);
+                  setNotice(reachNotice(reach.delivered, reach.intended));
                   await reload();
                 }}
               />
@@ -100,6 +114,12 @@ export function AdminWeekendScreen() {
         {error && (
           <Section>
             <div style={{ padding: "8px 20px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>
+          </Section>
+        )}
+
+        {notice && (
+          <Section>
+            <div style={{ padding: "8px 20px", color: "var(--tgui--hint_color)", fontSize: 14 }} role="status">{notice}</div>
           </Section>
         )}
 
@@ -233,7 +253,7 @@ function FairBadge() {
   );
 }
 
-function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => Promise<void> }) {
+function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (reach: { delivered: number; intended: number }) => Promise<void> }) {
   const [date, setDate] = useState("");
   const [start, setStart] = useState("10:00");
   const [end, setEnd] = useState("18:00");
@@ -255,8 +275,8 @@ function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
     setSaving(true);
     setLocalError(null);
     try {
-      await apiClient.postSlot({ date, start, end, title: title || undefined, location: location || undefined, note: note || undefined });
-      await onCreated();
+      const created = await apiClient.postSlot({ date, start, end, title: title || undefined, location: location || undefined, note: note || undefined });
+      await onCreated(created);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : "Не удалось открыть смену");
     } finally {

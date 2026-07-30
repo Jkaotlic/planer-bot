@@ -246,3 +246,27 @@ describe("the admin cannot put an archived worker on a weekend slot", () => {
     expect(listShiftsInRange(db, date, date)).toHaveLength(0);
   });
 });
+
+describe("posting a vacant slot says how far the broadcast actually got", () => {
+  // Only people who have linked Telegram can be reached. With a third of the team
+  // linked, «опубликовано» reads as «спросил команду» when it asked nine of them.
+  it("returns delivered and intended alongside the slot", async () => {
+    const db = makeTestDb();
+    const { bot } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    await worker(db, app, "Первый Работник", 201);   // linked
+    await worker(db, app, "Второй Работник", 202);   // linked
+    createEmployee(db, { displayName: "Третий Работник" }); // никогда не заходил в бота
+
+    const posted = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00", title: "Ярмарка" }),
+    );
+    expect(posted.status).toBe(201);
+    const body = await posted.json();
+    // The admin (111) is on the roster too and did link, so they are counted.
+    expect(body.intended).toBe(4);
+    expect(body.delivered).toBe(3);
+  });
+});

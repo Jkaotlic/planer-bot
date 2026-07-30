@@ -344,7 +344,9 @@ export interface ApiClient {
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
   getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getWeekendSlots(): Promise<AdminSlotView[]>;
-  postSlot(input: NewSlotInput): Promise<VacantSlot>;
+  /** The slot, plus how many of the team the «нужен человек» broadcast reached —
+   *  only people who linked Telegram can be told at all. */
+  postSlot(input: NewSlotInput): Promise<VacantSlot & { delivered: number; intended: number }>;
   assignSlot(slotId: number, employeeId: number): Promise<void>;
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
@@ -676,8 +678,11 @@ const realClient: ApiClient = {
   },
 
   async postSlot(input) {
-    const { slot } = await authorizedPostJson<{ slot: VacantSlot }>("/api/admin/weekend/slots", input);
-    return slot;
+    const { slot, delivered, intended } = await authorizedPostJson<{ slot: VacantSlot; delivered: number; intended: number }>(
+      "/api/admin/weekend/slots",
+      input,
+    );
+    return { ...slot, delivered, intended };
   },
 
   async assignSlot(slotId, employeeId) {
