@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, like, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
+  shifts,
   vacantSlots,
   slotInterest,
   weekendAssignments,
@@ -116,22 +117,33 @@ export function listAssignmentsForEmployee(db: Db, employeeId: number): WeekendA
   return db.select().from(weekendAssignments).where(eq(weekendAssignments.employeeId, employeeId)).all();
 }
 
-/** Confirmed assignments in a slot-date range. The caller resolves slot date+hours via the slot. */
-export function listConfirmedInRange(db: Db, from: string, to: string): WeekendAssignment[] {
+/**
+ * Confirmed weekend work as the schedule actually holds it: one row per
+ * assignment that still has an entry, dated and timed by that entry.
+ *
+ * The schedule is the source of truth for pay (his decision, 2026-07-30). It used
+ * to be the slot's date plus `weekendAssignments.hours` — a snapshot taken at
+ * assign time — so an admin shortening or moving the entry changed the schedule
+ * and nothing else, and the payroll export quietly kept paying the old figure.
+ *
+ * An assignment whose entry an admin deleted produces no row: the work is not in
+ * the schedule. That deletion is a journalled `entry_deleted`, so it is findable.
+ */
+export function listConfirmedWorkInRange(
+  db: Db,
+  from: string,
+  to: string,
+): { employeeId: number; date: string; start: string | null; end: string | null }[] {
   return db
     .select({
-      id: weekendAssignments.id,
-      slotId: weekendAssignments.slotId,
       employeeId: weekendAssignments.employeeId,
-      status: weekendAssignments.status,
-      hours: weekendAssignments.hours,
-      shiftId: weekendAssignments.shiftId,
-      createdAt: weekendAssignments.createdAt,
-      confirmedAt: weekendAssignments.confirmedAt,
+      date: shifts.date,
+      start: shifts.start,
+      end: shifts.end,
     })
     .from(weekendAssignments)
-    .innerJoin(vacantSlots, eq(weekendAssignments.slotId, vacantSlots.id))
-    .where(and(eq(weekendAssignments.status, "confirmed"), gte(vacantSlots.date, from), lte(vacantSlots.date, to)))
+    .innerJoin(shifts, eq(weekendAssignments.shiftId, shifts.id))
+    .where(and(eq(weekendAssignments.status, "confirmed"), gte(shifts.date, from), lte(shifts.date, to)))
     .all();
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee } from "../repo/employees";
-import { createShift, listShiftsByEmployee } from "../repo/shifts";
+import { createShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
 
 /** Fixtures use fixed 2026-07 dates, so «today» has to sit before them. */
@@ -340,5 +340,50 @@ describe("assignSlot only ever writes a weekend entry on a weekend", () => {
 
     expect(assignSlot(db, monday.id, worker.id, "2026-07-30")).toEqual({ ok: false, reason: "not_weekend" });
     expect(listShiftsByEmployee(db, worker.id)).toHaveLength(0);
+  });
+});
+
+/**
+ * Расписание — источник правды (решение Антона, 2026-07-30). Часы и дата в
+ * выгрузке на оплату берутся из записи в расписании, а не из снимка, сделанного
+ * в момент назначения: админ правит смену там, где на неё смотрит.
+ */
+describe("payroll follows the schedule, not the snapshot taken at assign time", () => {
+  const SATURDAY = "2026-08-01";
+  const SUNDAY = "2026-08-02";
+
+  function confirmedOn(db: ReturnType<typeof makeTestDb>, date: string) {
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00" });
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
+    if (!assigned.ok) throw new Error("setup");
+    confirmOffer(db, assigned.assignment.id, worker.id);
+    return { worker, slot, shiftId: assigned.assignment.shiftId! };
+  }
+
+  it("takes the hours from the entry after an admin shortens it", () => {
+    const db = makeTestDb();
+    const { shiftId } = confirmedOn(db, SATURDAY);
+    expect(payrollRows(db, SATURDAY, SUNDAY)[0]!.hours).toBe(8);
+
+    updateShift(db, shiftId, { start: "10:00", end: "13:00" });
+    expect(payrollRows(db, SATURDAY, SUNDAY)[0]!.hours).toBe(3);
+  });
+
+  it("follows the entry to another day, in and out of the range", () => {
+    const db = makeTestDb();
+    const { shiftId } = confirmedOn(db, SATURDAY);
+    updateShift(db, shiftId, { date: SUNDAY });
+
+    expect(payrollRows(db, SUNDAY, SUNDAY).map((r) => r.date)).toEqual([SUNDAY]);
+    expect(payrollRows(db, SATURDAY, SATURDAY)).toEqual([]);
+  });
+
+  it("drops work the admin took out of the schedule — the deletion is in the journal", () => {
+    const db = makeTestDb();
+    const { shiftId } = confirmedOn(db, SATURDAY);
+    deleteShift(db, shiftId);
+    expect(payrollRows(db, SATURDAY, SUNDAY)).toEqual([]);
   });
 });
