@@ -26,6 +26,7 @@ const EMITTED_TYPES = [
   "swap_accepted",
   "swap_cancelled",
   "swap_declined",
+  "swap_expired",
   "swap_proposed",
   "template_roles_changed",
   "template_rotation_changed",

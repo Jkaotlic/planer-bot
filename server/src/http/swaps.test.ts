@@ -221,6 +221,43 @@ describe("swap endpoints", () => {
     expect(acceptedRow.payload).toMatchObject({ requestId: reqId, fromEmployeeId: anya.w.id, toEmployeeId: igor.w.id });
   });
 
+  it("deleting a shift expires the swap hanging on it, tells both sides, and journals it", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const adminToken = (await (await app.request(new Request("http://x/api/auth", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(111) }),
+    }))).json()).token as string;
+
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    // The admin deletes Игорь's shift out from under the pending request.
+    const del = await app.request(`/api/admin/entries/${sb.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${adminToken}` } });
+    expect(del.status).toBe(200);
+
+    // The request survives as history, in the state the spec reserves for this.
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("expired");
+
+    // Both sides hear about it — including Аня, who never touched anything.
+    for (const chat of [201, 202]) {
+      const text = sent.filter((s) => s.chat_id === chat).map((s) => s.text).join("\n");
+      expect(text.toLowerCase()).toContain("обмен");
+    }
+
+    const expired = db.select().from(auditLog).all().find((r) => r.type === "swap_expired");
+    expect(expired).toBeDefined();
+    expect(expired!.payload).toMatchObject({ requestId: reqId, fromName: "Аня", toName: "Игорь" });
+  });
+
   it("journals swap_declined for the decliner and swap_cancelled for the initiator who withdraws", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

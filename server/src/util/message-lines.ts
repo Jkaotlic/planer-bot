@@ -10,8 +10,8 @@ import { getEmployeeById } from "../repo/employees";
  * Shared by the HTTP layer and the bot's own callback handlers so a swap
  * resolved either way produces the exact same wording.
  */
-export function shiftLineOf(db: Db, shiftId: number): string {
-  const shift = getShift(db, shiftId);
+export function shiftLineOf(db: Db, shiftId: number | null): string {
+  const shift = shiftId == null ? undefined : getShift(db, shiftId);
   if (!shift) return "смену";
   const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
     .formatToParts(new Date(`${shift.date}T00:00:00Z`));
@@ -50,7 +50,7 @@ export function nameOf(db: Db, employeeId: number): string | null {
  */
 export function swapAuditPayload(
   db: Db,
-  request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number; toShiftId: number },
+  request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number | null; toShiftId: number | null },
 ) {
   return {
     requestId: request.id,

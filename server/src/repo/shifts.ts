@@ -1,6 +1,6 @@
 import { and, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { shifts, swapRequests, reminderLog, type Shift, type NewShift, weekendAssignments } from "../db/schema";
+import { shifts, swapRequests, reminderLog, type Shift, type NewShift, type SwapRequest, weekendAssignments } from "../db/schema";
 
 export function createShift(db: Db, data: NewShift): Shift {
   return db.insert(shifts).values(data).returning().all()[0]!;
@@ -43,14 +43,37 @@ export function updateShift(db: Db, id: number, patch: Partial<NewShift>): Shift
   return db.update(shifts).set(patch).where(eq(shifts.id, id)).returning().all()[0];
 }
 
-export function deleteShift(db: Db, id: number): boolean {
+/**
+ * Removes an entry, taking the rows that point at it with it — except the swap
+ * requests, which outlive it.
+ *
+ * A swap request is a record of something two people agreed (or were about to
+ * agree) between themselves; the admin deleting one of the two shifts doesn't
+ * make that conversation not have happened. So a still-`pending` request becomes
+ * `expired` — the state the spec's machine reserves for «смена изменена/удалена»
+ * — and anything already resolved keeps its status. Either way the pointer at the
+ * vanished shift is nulled, which is the whole reason the column is nullable.
+ *
+ * The expired ones come back to the caller, which is the only place that can tell
+ * both sides their swap is off — this function has no bot and shouldn't get one.
+ */
+export function deleteShift(db: Db, id: number): { deleted: boolean; expiredSwaps: SwapRequest[] } {
   return db.transaction((tx) => {
-    tx.delete(swapRequests).where(or(eq(swapRequests.fromShiftId, id), eq(swapRequests.toShiftId, id))).run();
+    const touching = or(eq(swapRequests.fromShiftId, id), eq(swapRequests.toShiftId, id));
+    const expiredSwaps = tx
+      .update(swapRequests)
+      .set({ status: "expired", resolvedAt: new Date() })
+      .where(and(eq(swapRequests.status, "pending"), touching))
+      .returning()
+      .all();
+    tx.update(swapRequests).set({ fromShiftId: null }).where(eq(swapRequests.fromShiftId, id)).run();
+    tx.update(swapRequests).set({ toShiftId: null }).where(eq(swapRequests.toShiftId, id)).run();
     tx.delete(reminderLog).where(eq(reminderLog.shiftId, id)).run();
     // A weekend assignment points at the entry it created; drop the link (keeping the
     // assignment itself) or the delete trips the foreign key.
     tx.update(weekendAssignments).set({ shiftId: null }).where(eq(weekendAssignments.shiftId, id)).run();
-    return tx.delete(shifts).where(eq(shifts.id, id)).returning().all().length > 0;
+    const deleted = tx.delete(shifts).where(eq(shifts.id, id)).returning().all().length > 0;
+    return { deleted, expiredSwaps };
   });
 }
 

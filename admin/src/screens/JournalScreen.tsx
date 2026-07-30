@@ -21,6 +21,7 @@ const TYPE_LABELS: Record<string, string> = {
   swap_accepted: "Обмен состоялся",
   swap_declined: "Обмен отклонён",
   swap_cancelled: "Обмен отменён",
+  swap_expired: "Обмен стал неактуален",
   weekend_slot_created: "Открыта смена на выходной",
   weekend_assigned: "Выходная смена назначена",
   birthday_sent: "Разослан сбор на день рождения",

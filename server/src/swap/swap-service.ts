@@ -51,8 +51,10 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
   if (req.status !== "pending") return { ok: false, reason: "not_pending" };
 
   const expired = nextSwapStatus("pending", "expire");
-  const fromShift = getShift(db, req.fromShiftId);
-  const toShift = getShift(db, req.toShiftId);
+  // A null pointer means the entry was deleted out from under the request — the
+  // «unavailable» branch below already knows what to do with a missing shift.
+  const fromShift = req.fromShiftId == null ? undefined : getShift(db, req.fromShiftId);
+  const toShift = req.toShiftId == null ? undefined : getShift(db, req.toShiftId);
   if (
     !fromShift || !toShift ||
     fromShift.start == null || fromShift.end == null ||

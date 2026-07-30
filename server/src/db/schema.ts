@@ -92,9 +92,20 @@ export const shifts = sqliteTable("shifts", {
 export const swapRequests = sqliteTable("swap_requests", {
   id: integer().primaryKey({ autoIncrement: true }),
   fromEmployeeId: integer().notNull().references(() => employees.id),
-  fromShiftId: integer().notNull().references(() => shifts.id),
+  /**
+   * Nullable so the request outlives the shift it pointed at.
+   *
+   * Deleting an entry used to `DELETE FROM swap_requests` to satisfy this foreign
+   * key, which erased both halves of the record: a pending request vanished with
+   * nobody told, and a swap that had actually happened disappeared from both
+   * people's archive. The spec instead wants «смена удалена → expired, уведомить
+   * обе стороны», and history to stay history — both need the row to survive, so
+   * the pointer is what gives way. Null means «that shift no longer exists»; the
+   * journal row written at the same moment still carries its date and time.
+   */
+  fromShiftId: integer().references(() => shifts.id),
   toEmployeeId: integer().notNull().references(() => employees.id),
-  toShiftId: integer().notNull().references(() => shifts.id),
+  toShiftId: integer().references(() => shifts.id),
   status: text().$type<SwapStatus>().notNull().default("pending"),
   message: text(),
   createdAt: createdAt(),
