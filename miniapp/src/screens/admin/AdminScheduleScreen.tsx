@@ -61,6 +61,30 @@ export function showsWeekSwitcher(state: {
 }
 
 /**
+ * What «⚖ Распределить честно» reports back.
+ *
+ * The count alone was a half-truth: a slot nobody could take is skipped by design,
+ * so «Распределено смен: 3» over five empty cells read as success. A skipped slot
+ * now gets said out loud, and the two reasons are kept apart — an emptied pool is a
+ * setting to fix on «кто что может», everyone being away is just the week.
+ */
+export function distributeNotice(
+  assigned: number,
+  unfilled: readonly { kind: string; reason: "empty_pool" | "nobody_free" }[],
+): string {
+  const head = assigned > 0 ? `Распределено смен: ${assigned}.` : "Не распределено ни одной смены.";
+  if (unfilled.length === 0) {
+    return assigned > 0 ? head : "Все смены уже распределены — свободных не было.";
+  }
+  const brokenPools = [...new Set(unfilled.filter((s) => s.reason === "empty_pool").map((s) => s.kind))];
+  if (brokenPools.length > 0) {
+    const kinds = brokenPools.map((kind) => `«${kind}»`).join(", ");
+    return `${head} Не удалось: ${unfilled.length}. У ${kinds} в пуле не осталось активных людей — проверь «кто что может».`;
+  }
+  return `${head} Не удалось: ${unfilled.length} — все, кто может, заняты или в отпуске.`;
+}
+
+/**
  * "Расписание" (admin, mobile): a day-at-a-time editor. Pick a day from the
  * week strip, see everyone working it, tap an entry to edit or delete it, add
  * new entries, and fairly auto-distribute the visible week. The desktop's
@@ -178,8 +202,7 @@ export function AdminScheduleScreen() {
     try {
       const result = await apiClient.distribute(from, to, true);
       await loadWeek(from, to);
-      const n = result.assignments.length;
-      setNotice(n === 0 ? "Все смены уже распределены — свободных не было." : `Распределено смен: ${n}.`);
+      setNotice(distributeNotice(result.assignments.length, result.unfilled ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось распределить");
     } finally {

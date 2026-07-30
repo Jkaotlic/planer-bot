@@ -1,8 +1,54 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee } from "../repo/employees";
+import { createEmployee, archiveEmployee } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
+import { setTemplateRoles } from "../repo/template-roles";
 import { buildDistribution, applyDistribution } from "./distribute-service";
+
+// A slot nobody can take used to vanish from the result with no trace: the admin
+// pressed «Распределить честно», saw a smaller number than there were empty cells,
+// and had nothing to go on. These pin that every skipped slot comes back with a
+// reason — and that the two reasons are told apart, because one is a misconfigured
+// pool (fixable on the «кто что может» screen) and the other is ordinary life.
+describe("buildDistribution — slots it could not fill", () => {
+  it("reports a slot whose pool has nobody active left, and names the reason", () => {
+    const db = makeTestDb();
+    const duty = createEmployee(db, { displayName: "Дежурный Пула" });
+    createEmployee(db, { displayName: "Свободный Работник" });
+    setTemplateRoles(db, 1, { pool: [duty.id], preference: {} });
+    archiveEmployee(db, duty.id, "2026-07-01");
+
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", templateId: 1 });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(result.assignments).toEqual([]);
+    expect(result.unfilled).toEqual([
+      { shiftId: slot.id, date: "2026-07-02", kind: "Утро", reason: "empty_pool" },
+    ]);
+  });
+
+  it("reports a slot everybody is away for as ordinary, not as a broken pool", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-07-02", endDate: "2026-07-04", category: "vacation", employeeId: anya.id });
+
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", templateId: 1 });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(result.assignments).toEqual([]);
+    expect(result.unfilled).toEqual([
+      { shiftId: slot.id, date: "2026-07-02", kind: "Утро", reason: "nobody_free" },
+    ]);
+  });
+
+  it("reports nothing when every slot found somebody", () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", templateId: 1 });
+
+    expect(buildDistribution(db, "2026-07-01", "2026-07-10").unfilled).toEqual([]);
+  });
+});
 
 describe("buildDistribution", () => {
   it("proposes assignments only for unassigned shift slots in range, never double-booking", () => {

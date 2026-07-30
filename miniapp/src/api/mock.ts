@@ -3,6 +3,7 @@ import type {
   AdminSlotView,
   CreateEmployeeResult,
   DistributeResult,
+  UnfilledSlot,
   Employee,
   Me,
   NewEntryInput,
@@ -590,9 +591,15 @@ export async function mockDistribute(from: string, to: string, apply: boolean): 
     }
   }
   const assignments: { shiftId: number; employeeId: number }[] = [];
+  // Same contract as the server's: a slot it could not place comes back said out
+  // loud, so the dev screen shows the real notice rather than a silent shortfall.
+  const unfilled: UnfilledSlot[] = [];
   for (const shift of ALL_ENTRIES.filter((s) => s.employeeId == null && overlapsRange(s, from, to))) {
     let best = activeIds[0];
-    if (best == null) break; // no active workers to distribute to
+    if (best == null) {
+      unfilled.push({ shiftId: shift.id, date: shift.date, kind: shift.title ?? "Своё время", reason: "nobody_free" });
+      continue;
+    }
     for (const id of activeIds) {
       if ((load.get(id) ?? 0) < (load.get(best) ?? 0)) best = id;
     }
@@ -603,7 +610,7 @@ export async function mockDistribute(from: string, to: string, apply: boolean): 
       shift.employeeName = personName(best);
     }
   }
-  return { applied: apply, assignments };
+  return { applied: apply, assignments, unfilled };
 }
 
 // --- Работа в выходные дни (admin) + учёт часов ------------------------------
