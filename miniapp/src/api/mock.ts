@@ -1145,6 +1145,7 @@ export async function mockApplyRosterImport(
     entriesInserted: preview.entryCount,
     entriesDeleted,
     cellsPreserved: preview.preservedCount,
+    swapsExpired: 0,
     unknowns: [],
   };
 }

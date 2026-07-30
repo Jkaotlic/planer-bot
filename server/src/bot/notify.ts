@@ -40,16 +40,22 @@ export function swapAutoCancelledText(p: SwapAuditPayload): string {
   return `Обмен с ${p.fromName} (${p.fromShift} ↔ ${p.toShift}) отменился — смена уже досталась другому человеку.`;
 }
 
+/** Why a pending swap stopped being possible without anybody involved doing
+ *  anything — an admin removed the entry under it, or replaced the whole month. */
+export type SwapExpiryCause = "entry_deleted" | "roster_reimported";
+
 /**
- * Sent to *both* sides of a pending swap whose shift an admin just deleted.
+ * Sent to *both* sides of a pending swap an admin's edit just invalidated.
  *
  * Goes out to the initiator too, and that's the point: they proposed it and did
  * nothing since, so without this the request just turns «Истекло» in the archive
  * with no cause attached. Names both shifts because the row itself no longer can
- * — the pointer at the deleted entry is null from here on.
+ * — the pointer at the vanished entry is null from here on. One builder, one
+ * clause that varies, because two near-identical strings are how these drift.
  */
-export function swapExpiredByDeleteText(p: SwapAuditPayload): string {
-  return `Обмен неактуален: смену удалили из расписания. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
+export function swapExpiredText(p: SwapAuditPayload, cause: SwapExpiryCause): string {
+  const why = cause === "entry_deleted" ? "смену удалили из расписания" : "график за этот период загрузили заново";
+  return `Обмен неактуален: ${why}. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
 }
 
 // --- Weekend-offer text builders ---------------------------------------------

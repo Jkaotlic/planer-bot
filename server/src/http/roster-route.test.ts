@@ -177,6 +177,7 @@ describe("admin roster CSV import", () => {
         employeesCreated: 1,
         entriesInserted: 2,
         entriesDeleted: 0,
+        swapsExpired: 0,
         cellsPreserved: 0,
         unknowns: [],
       },

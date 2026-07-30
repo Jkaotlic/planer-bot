@@ -5,6 +5,7 @@ import { createEntrySchema } from "../http/entry-schema";
 import { listActive, getEmployeeById } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsOverlapping } from "../repo/shifts";
+import { swapAuditPayload, type SwapAuditPayload } from "../util/message-lines";
 import { datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, UNENCODABLE_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
 
 export type PersonResolution =
@@ -17,8 +18,15 @@ export type ImportSummary = {
   entriesInserted: number;
   entriesDeleted: number;
   cellsPreserved: number;
+  /** Pending swaps the overwrite invalidated — the admin replaced a month people
+   *  had open requests on, which is worth a number rather than silence. */
+  swapsExpired: number;
   unknowns: UnknownCell[];
 };
+
+/** The summary plus the material only the caller can act on: who to tell that
+ *  their swap is off, described while the shifts it names still existed. */
+export type ImportResult = ImportSummary & { expiredSwaps: SwapAuditPayload[] };
 
 export interface ApplyOptions {
   /** Replace what is already in the span instead of refusing. */
@@ -44,7 +52,7 @@ export function applyRosterImport(
   resolutions: PersonResolution[],
   actorEmployeeId: number | null,
   options: ApplyOptions = {},
-): ImportSummary {
+): ImportResult {
   const byName = new Map(resolutions.map((r) => [r.csvName, r] as const));
   for (const p of decoded.perPerson) {
     if (!byName.has(p.name)) throw new Error(`нет сверки для «${p.name}»`);
@@ -81,6 +89,7 @@ export function applyRosterImport(
 
   return db.transaction((tx) => {
     let deleted = 0;
+    let expiredSwaps: SwapAuditPayload[] = [];
     // Re-import guard: a second pass over an already-imported month must never
     // silently double every entry (Stage 3 reads these counts for fairness proposals).
     // With `overwrite` the admin has explicitly chosen to replace it instead.
@@ -117,8 +126,20 @@ export function applyRosterImport(
         const ids = encodable.map((s) => s.id);
         if (ids.length > 0) {
           // Same foreign-key cleanup deleteShift() does, batched — it opens its own
-          // transaction, which cannot nest inside this one.
-          tx.delete(swapRequests).where(or(inArray(swapRequests.fromShiftId, ids), inArray(swapRequests.toShiftId, ids))).run();
+          // transaction, which cannot nest inside this one. Same rule about swaps
+          // too: a file replacing a month doesn't erase what people arranged on it.
+          // Describe them first — a moment later their shifts are gone and the line
+          // would read "смену".
+          const touched = or(inArray(swapRequests.fromShiftId, ids), inArray(swapRequests.toShiftId, ids));
+          const stillPending = tx.select().from(swapRequests)
+            .where(and(eq(swapRequests.status, "pending"), touched)).all();
+          expiredSwaps = stillPending.map((r) => swapAuditPayload(db, r));
+          if (stillPending.length > 0) {
+            tx.update(swapRequests).set({ status: "expired", resolvedAt: new Date() })
+              .where(inArray(swapRequests.id, stillPending.map((r) => r.id))).run();
+          }
+          tx.update(swapRequests).set({ fromShiftId: null }).where(inArray(swapRequests.fromShiftId, ids)).run();
+          tx.update(swapRequests).set({ toShiftId: null }).where(inArray(swapRequests.toShiftId, ids)).run();
           tx.delete(reminderLog).where(inArray(reminderLog.shiftId, ids)).run();
           tx.update(weekendAssignments).set({ shiftId: null }).where(inArray(weekendAssignments.shiftId, ids)).run();
           tx.delete(shifts).where(inArray(shifts.id, ids)).run();
@@ -198,12 +219,14 @@ export function applyRosterImport(
         employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted,
         entriesDeleted: deleted, overwrite: options.overwrite === true,
         cellsPreserved: decoded.preserved.length, unknowns: decoded.unknowns.length,
+        swapsExpired: expiredSwaps.length,
         from: importSpan?.from ?? null, to: importSpan?.to ?? null,
       },
     }).run();
     return {
       employeesRenamed: renamed, employeesCreated: created, entriesInserted: inserted,
       entriesDeleted: deleted, cellsPreserved: decoded.preserved.length, unknowns: decoded.unknowns,
+      swapsExpired: expiredSwaps.length, expiredSwaps,
     };
   });
 }

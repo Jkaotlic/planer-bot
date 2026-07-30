@@ -5,6 +5,7 @@ import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "./roster-service";
 import type { DecodeResult } from "./roster-codec";
+import { swapRequests } from "../db/schema";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
   return { perPerson, unknowns: [], preserved: [], proposedHolidays: [] };
@@ -120,6 +121,39 @@ describe("applyRosterImport", () => {
     expect(after).toHaveLength(1);
     expect(after[0]!.title).toBe("Вечер");
     expect(listActive(db)).toHaveLength(1); // no duplicate person
+  });
+
+  // Same rule as deleting a single entry: the file replacing a month doesn't get to
+  // pretend the swaps on it never happened. Re-importing used to DELETE the rows.
+  it("overwrite expires the swaps on the entries it replaces, keeping resolved ones", () => {
+    const db = makeTestDb();
+    const a = createEmployee(db, { displayName: "Первый Работник" });
+    const b = createEmployee(db, { displayName: "Второй Работник" });
+    const sa = createShift(db, { ...dayShift("2026-06-01"), employeeId: a.id });
+    const sb = createShift(db, { ...dayShift("2026-06-02"), employeeId: b.id });
+    const pending = db.insert(swapRequests)
+      .values({ fromEmployeeId: a.id, fromShiftId: sa.id, toEmployeeId: b.id, toShiftId: sb.id })
+      .returning().all()[0]!;
+    const done = db.insert(swapRequests)
+      .values({ fromEmployeeId: b.id, fromShiftId: sb.id, toEmployeeId: a.id, toShiftId: sa.id, status: "accepted" })
+      .returning().all()[0]!;
+
+    const decoded = decode([{ name: "Первый Работник", entries: [dayShift("2026-06-01")] }]);
+    const result = applyRosterImport(
+      db, decoded, [{ csvName: "Первый Работник", action: "rename", employeeId: a.id }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+    );
+
+    expect(result.swapsExpired).toBe(1);
+    expect(result.expiredSwaps.map((p) => p.requestId)).toEqual([pending.id]);
+    // Both rows are still there; only the pending one changed state.
+    const rows = db.select().from(swapRequests).all();
+    expect(rows.map((r) => r.id).sort()).toEqual([pending.id, done.id].sort());
+    expect(rows.find((r) => r.id === pending.id)!.status).toBe("expired");
+    expect(rows.find((r) => r.id === done.id)!.status).toBe("accepted");
+    expect(rows.every((r) => r.fromShiftId === null && r.toShiftId === null)).toBe(true);
+    // The line was captured before the entry went away, so the notice can still name it.
+    expect(result.expiredSwaps[0]!.fromShift).not.toBe("смену");
   });
 
   it("overwrite keeps entries the CSV cannot express — weekend work survives a re-import", () => {

@@ -78,6 +78,7 @@ export function summaryLine(summary: {
   entriesDeleted: number;
   cellsPreserved: number;
   employeesCreated: number;
+  swapsExpired?: number;
   unknowns?: { name: string; date: string; code: string }[];
 }): string {
   const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
@@ -89,9 +90,16 @@ export function summaryLine(summary: {
   // success notice — otherwise «загружено» is the last thing said about a file that
   // put question marks in the grid.
   const unreadable = summary.unknowns?.length ?? 0;
-  return unreadable > 0
+  const withUnknowns = unreadable > 0
     ? `${line}. ⚠ Не понял ${unreadable} ${unreadable === 1 ? "клетку" : "клеток"} — они стоят со знаком «?»`
     : line;
+  // Replacing a month can invalidate swaps people were still waiting on. They get
+  // told in chat; the admin who caused it should see it here rather than find out
+  // from the person asking why their request says «Истекло».
+  const expired = summary.swapsExpired ?? 0;
+  return expired > 0
+    ? `${withUnknowns}. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
+    : withUnknowns;
 }
 
 interface Props {

@@ -45,7 +45,7 @@ import {
   swapDeclinedText,
   swapAcceptedAdminText,
   swapAutoCancelledText,
-  swapExpiredByDeleteText,
+  swapExpiredText,
   weekendConfirmedAdminText,
   weekendDeclinedAdminText,
   weekendUnassignedText,
@@ -701,7 +701,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       if (!bot) continue;
       for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
         const tg = tgOf(employeeId);
-        if (tg != null) await notifyUser(bot, tg, swapExpiredByDeleteText(payload));
+        if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "entry_deleted"));
       }
     }
     return c.json({ ok: true });
@@ -1193,12 +1193,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     try {
-      const summary = applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId, {
+      // `expiredSwaps` is the caller's to act on, not the browser's to read — the
+      // count it needs is already in the summary.
+      const { expiredSwaps, ...summary } = applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId, {
         overwrite: body.overwrite === true,
         // The file's own header dates, not the decoded entries' extent: a month that is
         // entirely 'holiday' decodes to nothing yet still means "this month is empty".
         span: { from: result.parsed.dates[0]!, to: result.parsed.dates.at(-1)! },
       });
+      for (const payload of expiredSwaps) {
+        recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
+        if (!bot) continue;
+        for (const employeeId of [payload.fromEmployeeId, payload.toEmployeeId]) {
+          const tg = tgOf(employeeId);
+          if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "roster_reimported"));
+        }
+      }
       return c.json({
         summary,
         // Repeated on the way out, because the admin may never have looked at the
