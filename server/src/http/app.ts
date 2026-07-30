@@ -284,29 +284,38 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return c.json({ error: "the range must span at most 31 days" }, 400);
     }
 
-    const employees = listActiveInRosterOrder(db).map((employee) => ({
+    const active = listActiveInRosterOrder(db);
+    const employees = active.map((employee) => ({
       id: employee.id,
       displayName: employee.displayName,
       rosterOrder: employee.rosterOrder,
     }));
+    // Archiving only unassigns shifts from the archive date onward, so an archived
+    // person keeps their past ones — real history, and the reports still read it.
+    // The grid, though, draws its rows from the `employees` above, so those entries
+    // could never appear on screen: they were shipped to every worker in the team
+    // to be dropped on arrival.
+    const activeIds = new Set(active.map((e) => e.id));
     return c.json({
       employees,
       // Shaped, not the raw row: this goes to every authenticated worker, and `note`
       // is a free-text admin field nobody outside the admin screens should read. Keep
       // this in sync with what the miniapp/admin `Shift` types actually declare.
-      shifts: listShiftsOverlapping(db, from, to).map((shift) => ({
-        id: shift.id,
-        date: shift.date,
-        start: shift.start,
-        end: shift.end,
-        endDate: shift.endDate,
-        category: shift.category,
-        title: shift.title,
-        location: shift.location,
-        unrecognisedCode: shift.unrecognisedCode,
-        templateId: shift.templateId,
-        employeeId: shift.employeeId,
-      })),
+      shifts: listShiftsOverlapping(db, from, to)
+        .filter((shift) => shift.employeeId == null || activeIds.has(shift.employeeId))
+        .map((shift) => ({
+          id: shift.id,
+          date: shift.date,
+          start: shift.start,
+          end: shift.end,
+          endDate: shift.endDate,
+          category: shift.category,
+          title: shift.title,
+          location: shift.location,
+          unrecognisedCode: shift.unrecognisedCode,
+          templateId: shift.templateId,
+          employeeId: shift.employeeId,
+        })),
     });
   });
 
