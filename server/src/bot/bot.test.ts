@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { decodeJwt } from "jose";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
@@ -137,6 +138,27 @@ describe("bot /start", () => {
     const { bot, sent } = testBot(db);
     await bot.handleUpdate(startUpdate(111, "/admin", "boss"));
     expect(sent[0]?.text).toContain(`${config.publicUrl}/admin/#token=`);
+  });
+
+  it("/admin link expires in 12 hours, not the old 30-day window, and says so", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot(db);
+    const before = Math.floor(Date.now() / 1000);
+    await bot.handleUpdate(startUpdate(111, "/admin", "boss"));
+
+    // The link text should tell him it goes stale, so he isn't left guessing
+    // why it stopped working days later.
+    expect(sent[0]?.text).toContain("12 час");
+
+    const token = sent[0]!.text.split("#token=")[1]!.trim();
+    const { exp, iat } = decodeJwt(token);
+    expect(exp).toBeDefined();
+    expect(iat).toBeDefined();
+    const ttlSec = exp! - iat!;
+    expect(ttlSec).toBe(12 * 3600);
+    expect(ttlSec).toBeLessThan(30 * 24 * 3600); // strictly shorter than the old 30-day window
+    // Sanity check against wall-clock too, with slack for test runtime.
+    expect(exp!).toBeGreaterThanOrEqual(before + 12 * 3600 - 5);
   });
 
   it("/admin refuses a non-admin", async () => {

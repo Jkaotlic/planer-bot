@@ -107,3 +107,27 @@ describe("app auth", () => {
     expect(no.status).toBe(401);
   });
 });
+
+describe("rate limiting", () => {
+  it("/api/auth trips its own tight limiter well before the general one", async () => {
+    const app = createApp({ db: makeTestDb(), config });
+    // The route's limiter allows 20/min; the 21st in the same window gets 429.
+    let last!: Response;
+    for (let i = 0; i < 21; i++) last = await app.request(authReq(111 + i));
+    expect(last.status).toBe(429);
+    expect(await last.json()).toEqual({ error: "too_many_requests" });
+    expect(last.headers.get("Retry-After")).toBeTruthy();
+  });
+
+  it("a normal admin-console-style burst of parallel authenticated GETs never trips the general limiter", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = (await (await app.request(authReq(111))).json()).token as string;
+    // Mirrors the console firing off a batch of parallel reads on open — well
+    // under the general 300/min budget.
+    const results = await Promise.all(
+      Array.from({ length: 25 }, () => app.request("/api/me", { headers: { Authorization: `Bearer ${token}` } })),
+    );
+    for (const res of results) expect(res.status).toBe(200);
+  });
+});
