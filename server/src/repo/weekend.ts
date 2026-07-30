@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, like, ne } from "drizzle-orm";
+import { and, eq, gte, lte, like, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   vacantSlots,
@@ -136,16 +136,33 @@ export function listConfirmedInRange(db: Db, from: string, to: string): WeekendA
 }
 
 /**
- * How many times this worker raised their hand for a weekend slot that then went
- * to somebody else. Being passed over repeatedly earns priority next time, so a
- * keen volunteer isn't skipped forever.
+ * How many weekend slots this worker raised their hand for and did not get.
+ * Being passed over repeatedly earns priority next time, so a keen volunteer
+ * isn't skipped forever.
+ *
+ * Counted per *slot*, not per rival assignment: a slot needing three people
+ * produces three assignment rows, and joining against «somebody else got it»
+ * scored each of its own winners as passed over twice — sharing a slot earned
+ * priority instead of spending it.
+ *
+ * Having any assignment on the slot ends the question, `declined` included: they
+ * were asked and said no, which is the opposite of being skipped.
  */
 export function countPassedOver(db: Db, employeeId: number): number {
+  const mine = db
+    .select({ slotId: weekendAssignments.slotId })
+    .from(weekendAssignments)
+    .where(eq(weekendAssignments.employeeId, employeeId))
+    .all()
+    .map((r) => r.slotId);
   return db
-    .select({ slotId: slotInterest.slotId })
+    .selectDistinct({ slotId: slotInterest.slotId })
     .from(slotInterest)
     .innerJoin(weekendAssignments, eq(weekendAssignments.slotId, slotInterest.slotId))
-    .where(and(eq(slotInterest.employeeId, employeeId), ne(weekendAssignments.employeeId, employeeId)))
+    .where(and(
+      eq(slotInterest.employeeId, employeeId),
+      mine.length > 0 ? notInArray(slotInterest.slotId, mine) : undefined,
+    ))
     .all().length;
 }
 
