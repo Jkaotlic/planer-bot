@@ -270,3 +270,28 @@ describe("posting a vacant slot says how far the broadcast actually got", () => 
     expect(body.delivered).toBe(3);
   });
 });
+
+describe("a vacant slot in the past", () => {
+  const lastSaturday = (): string => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7 || 7));
+    return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
+  };
+
+  // A mistyped year, and the team gets a «нужен человек» broadcast with a button
+  // that would have written a weekend_work entry into the past.
+  it("cannot be opened (400)", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date: lastSaturday(), start: "10:00", end: "18:00", title: "Ярмарка" }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("прошла");
+    expect(sent).toHaveLength(0); // and nobody was asked
+  });
+});

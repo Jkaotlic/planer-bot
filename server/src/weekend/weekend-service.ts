@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { shiftDurationHours } from "@planer/shared";
+import { shiftDurationHours, isWeekend } from "@planer/shared";
 import type { Db } from "../db/client";
 import { weekendAssignments, type VacantSlot, type WeekendAssignment } from "../db/schema";
 import {
@@ -62,10 +62,31 @@ function isOnStaff(db: Db, employeeId: number): boolean {
   return getEmployeeById(db, employeeId)?.isActive === true;
 }
 
-export function expressInterest(db: Db, slotId: number, employeeId: number): Outcome {
+/**
+ * Whether this slot can still be acted on at all, or `null` if it can.
+ *
+ * A day off that has already been and gone can't be volunteered for or handed to
+ * anybody — and every posted slot leaves a «🙋 Хочу» button sitting in everybody's
+ * Telegram chat, where it stays live forever. The mini-app stops listing a slot
+ * once its date passes; the button doesn't, so the rule has to be here.
+ *
+ * The weekend check is here for the same reason: writing the `weekend_work` entry
+ * is the marketplace's own path into the schedule, and it never passes through
+ * `createEntrySchema`, which is what enforces «только суббота или воскресенье» on
+ * the other path. Two ways in, one rule each.
+ */
+function slotUnusableReason(slot: VacantSlot, today: string): string | null {
+  if (slot.date < today) return "slot_passed";
+  if (!isWeekend(slot.date)) return "not_weekend";
+  return null;
+}
+
+export function expressInterest(db: Db, slotId: number, employeeId: number, today: string): Outcome {
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status !== "open") return { ok: false, reason: "not_open" };
+  const unusable = slotUnusableReason(slot, today);
+  if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
   addInterest(db, slotId, employeeId);
   return { ok: true };
@@ -106,10 +127,12 @@ export function interestedForSlot(
  * The weekend_work entry is created immediately, so the assignment shows up in the
  * schedule straight away; confirm/decline only settles whether the worker accepts.
  */
-export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOutcome {
+export function assignSlot(db: Db, slotId: number, employeeId: number, today: string): AssignOutcome {
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status === "closed") return { ok: false, reason: "not_open" };
+  const unusable = slotUnusableReason(slot, today);
+  if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
 

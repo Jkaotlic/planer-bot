@@ -540,8 +540,8 @@ describe("archived people and the buttons still sitting in their chat", () => {
     const anya = createEmployee(db, { displayName: "Аня Тестова", inviteToken: "t-a" });
     linkTelegramAccount(db, "t-a", 901);
     const slot = createVacantSlot(db, { date: "2099-01-03", start: "10:00", end: "18:00", title: "Ярмарка" });
-    expressInterest(db, slot.id, anya.id);
-    const assigned = assignSlot(db, slot.id, anya.id);
+    expressInterest(db, slot.id, anya.id, "2026-07-30");
+    const assigned = assignSlot(db, slot.id, anya.id, "2026-07-30");
     expect(assigned.ok).toBe(true);
 
     archiveEmployee(db, anya.id, "2026-01-01");

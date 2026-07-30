@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee } from "../repo/employees";
 import { createShift, listShiftsByEmployee } from "../repo/shifts";
-import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus } from "../repo/weekend";
+import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
+
+/** Fixtures use fixed 2026-07 dates, so «today» has to sit before them. */
+const TEST_TODAY = "2026-07-01";
 import {
   postSlot,
   expressInterest,
@@ -33,15 +36,15 @@ describe("weekend market service", () => {
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00", title: "Суббота" });
     expect(slot.status).toBe("open");
 
-    expect(expressInterest(db, slot.id, fair.id).ok).toBe(true);
-    expect(expressInterest(db, slot.id, busy.id).ok).toBe(true);
+    expect(expressInterest(db, slot.id, fair.id, TEST_TODAY).ok).toBe(true);
+    expect(expressInterest(db, slot.id, busy.id, TEST_TODAY).ok).toBe(true);
 
     const interested = interestedForSlot(db, slot.id);
     expect(interested.map((i) => i.employeeId)).toEqual([fair.id, busy.id]);
     expect(interested[0]!.confirmedThisMonth).toBe(0);
     expect(interested[1]!.confirmedThisMonth).toBe(1);
 
-    const assigned = assignSlot(db, slot.id, fair.id);
+    const assigned = assignSlot(db, slot.id, fair.id, TEST_TODAY);
     expect(assigned.ok).toBe(true);
     if (!assigned.ok) throw new Error("unreachable");
     expect(assigned.assignment.hours).toBe(8);
@@ -71,12 +74,12 @@ describe("weekend market service", () => {
     const worker = createEmployee(db, { displayName: "Игорь" });
     const other = createEmployee(db, { displayName: "Аня" });
     const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, other.id);
-    expect(assignSlot(db, slot.id, other.id).ok).toBe(true);
+    expressInterest(db, slot.id, other.id, TEST_TODAY);
+    expect(assignSlot(db, slot.id, other.id, TEST_TODAY).ok).toBe(true);
 
     // Still open: someone else can volunteer and be assigned alongside.
-    expect(expressInterest(db, slot.id, worker.id).ok).toBe(true);
-    expect(assignSlot(db, slot.id, worker.id).ok).toBe(true);
+    expect(expressInterest(db, slot.id, worker.id, TEST_TODAY).ok).toBe(true);
+    expect(assignSlot(db, slot.id, worker.id, TEST_TODAY).ok).toBe(true);
     expect(assigneesForSlot(db, slot.id).map((a) => a.employeeId).sort()).toEqual([other.id, worker.id].sort());
     expect(openSlotsForWorker(db, worker.id, "2026-07-01").map((s) => s.slot.id)).toContain(slot.id);
   });
@@ -86,15 +89,15 @@ describe("weekend market service", () => {
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
     setSlotStatus(db, slot.id, "closed");
-    expect(expressInterest(db, slot.id, worker.id).ok).toBe(false);
+    expect(expressInterest(db, slot.id, worker.id, TEST_TODAY).ok).toBe(false);
   });
 
   it("assigning puts the entry in the schedule right away; unassigning takes it back out", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00", title: "Суббота" });
-    expressInterest(db, slot.id, worker.id);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
 
     const scheduled = listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work");
@@ -118,8 +121,8 @@ describe("weekend market service", () => {
     const worker = createEmployee(db, { displayName: "Игорь" });
     const other = createEmployee(db, { displayName: "Аня" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, worker.id);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
     const res = confirmOffer(db, assigned.assignment.id, other.id);
     expect(res.ok).toBe(false);
@@ -129,8 +132,8 @@ describe("weekend market service", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, worker.id);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
 
@@ -148,11 +151,11 @@ describe("weekend market service", () => {
     let open = openSlotsForWorker(db, worker.id, "2026-07-01");
     expect(open.find((s) => s.slot.id === slot.id)?.interested).toBe(false);
 
-    expressInterest(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
     open = openSlotsForWorker(db, worker.id, "2026-07-01");
     expect(open.find((s) => s.slot.id === slot.id)?.interested).toBe(true);
 
-    const assigned = assignSlot(db, slot.id, worker.id);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
     const offers = myOffers(db, worker.id);
     expect(offers.map((o) => o.assignment.id)).toContain(assigned.assignment.id);
@@ -163,12 +166,12 @@ describe("weekend market service", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
 
-    const first = assignSlot(db, slot.id, worker.id);
+    const first = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!first.ok) throw new Error("unreachable");
     // Admin double-taps "Назначить" on the same person.
-    const second = assignSlot(db, slot.id, worker.id);
+    const second = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!second.ok) throw new Error("unreachable");
 
     expect(second.assignment.id).toBe(first.assignment.id);
@@ -180,12 +183,12 @@ describe("weekend market service", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, worker.id);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
     expect(confirmOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
 
-    const reassigned = assignSlot(db, slot.id, worker.id);
+    const reassigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!reassigned.ok) throw new Error("unreachable");
     expect(reassigned.assignment.status).toBe("confirmed");
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
@@ -195,9 +198,9 @@ describe("weekend market service", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, worker.id);
-    assignSlot(db, slot.id, worker.id);
-    const reassigned = assignSlot(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    assignSlot(db, slot.id, worker.id, TEST_TODAY);
+    const reassigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!reassigned.ok) throw new Error("unreachable");
 
     expect(unassign(db, reassigned.assignment.id).ok).toBe(true);
@@ -208,12 +211,12 @@ describe("weekend market service", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, worker.id);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
     expect(declineOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
 
-    const reoffered = assignSlot(db, slot.id, worker.id);
+    const reoffered = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!reoffered.ok) throw new Error("unreachable");
     expect(reoffered.assignment.status).toBe("offered");
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
@@ -226,13 +229,13 @@ describe("weekend market service", () => {
 
     // Both wanted an earlier slot; it went to Борис, so Аня was passed over once.
     const earlier = postSlot(db, { date: "2026-07-11", start: "09:00", end: "17:00" });
-    expressInterest(db, earlier.id, passedOver.id);
-    expressInterest(db, earlier.id, chosen.id);
-    assignSlot(db, earlier.id, chosen.id);
+    expressInterest(db, earlier.id, passedOver.id, TEST_TODAY);
+    expressInterest(db, earlier.id, chosen.id, TEST_TODAY);
+    assignSlot(db, earlier.id, chosen.id, TEST_TODAY);
 
     const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
-    expressInterest(db, slot.id, passedOver.id);
-    expressInterest(db, slot.id, chosen.id);
+    expressInterest(db, slot.id, passedOver.id, TEST_TODAY);
+    expressInterest(db, slot.id, chosen.id, TEST_TODAY);
 
     const ranked = interestedForSlot(db, slot.id);
     // Neither has actually *worked* a weekend yet, so the tiebreak decides.
@@ -255,10 +258,10 @@ describe("the weekend market and archived people", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Первый Работник" });
     const slot = createVacantSlot(db, SLOT);
-    expressInterest(db, slot.id, worker.id);
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
     archiveEmployee(db, worker.id, "2026-01-01");
 
-    expect(assignSlot(db, slot.id, worker.id)).toEqual({ ok: false, reason: "not_active" });
+    expect(assignSlot(db, slot.id, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_active" });
     expect(listShiftsByEmployee(db, worker.id)).toHaveLength(0);
   });
 
@@ -267,8 +270,8 @@ describe("the weekend market and archived people", () => {
     const staying = createEmployee(db, { displayName: "Первый Работник" });
     const leaving = createEmployee(db, { displayName: "Второй Работник" });
     const slot = createVacantSlot(db, SLOT);
-    expressInterest(db, slot.id, staying.id);
-    expressInterest(db, slot.id, leaving.id);
+    expressInterest(db, slot.id, staying.id, TEST_TODAY);
+    expressInterest(db, slot.id, leaving.id, TEST_TODAY);
     archiveEmployee(db, leaving.id, "2026-01-01");
 
     // Otherwise the admin sees a name with no mark on it and picks it.
@@ -281,7 +284,61 @@ describe("the weekend market and archived people", () => {
     const slot = createVacantSlot(db, SLOT);
     archiveEmployee(db, worker.id, "2026-01-01");
 
-    expect(expressInterest(db, slot.id, worker.id)).toEqual({ ok: false, reason: "not_active" });
+    expect(expressInterest(db, slot.id, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_active" });
     expect(interestedForSlot(db, slot.id)).toHaveLength(0);
+  });
+});
+
+/**
+ * Every posted slot leaves a «🙋 Хочу» button in twenty-eight Telegram chats, and
+ * a Telegram button lives forever. The mini-app stops showing a slot once its date
+ * has passed; the button doesn't, and neither did the code behind it.
+ */
+describe("a slot that has already passed", () => {
+  const PAST_SATURDAY = "2020-01-04";
+  const TODAY = "2026-07-30";
+
+  it("refuses «хочу» from a stale button", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, { date: PAST_SATURDAY, start: "10:00", end: "18:00" });
+
+    expect(expressInterest(db, slot.id, worker.id, TODAY)).toEqual({ ok: false, reason: "slot_passed" });
+    expect(interestedForSlot(db, slot.id)).toHaveLength(0);
+  });
+
+  it("refuses an assignment, so nobody gets a weekend_work entry in the past", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, { date: PAST_SATURDAY, start: "10:00", end: "18:00" });
+    // Interest recorded back when the slot was still ahead.
+    expect(expressInterest(db, slot.id, worker.id, PAST_SATURDAY).ok).toBe(true);
+
+    expect(assignSlot(db, slot.id, worker.id, TODAY)).toEqual({ ok: false, reason: "slot_passed" });
+    expect(listShiftsByEmployee(db, worker.id)).toHaveLength(0);
+  });
+
+  it("still lets the day itself be worked — «today» is not «passed»", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, { date: "2026-08-01", start: "10:00", end: "18:00" });
+    expect(expressInterest(db, slot.id, worker.id, "2026-08-01").ok).toBe(true);
+    expect(assignSlot(db, slot.id, worker.id, "2026-08-01").ok).toBe(true);
+  });
+});
+
+/** The second write path for a `weekend_work` entry: the marketplace, which never
+ *  goes through `createEntrySchema`. Its own check, not the route's. */
+describe("assignSlot only ever writes a weekend entry on a weekend", () => {
+  it("refuses a slot that somehow sits on a weekday", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const monday = createVacantSlot(db, { date: "2026-08-03", start: "10:00", end: "18:00" });
+    // Seeded straight into the table: «хочу» is refused on a weekday slot by the
+    // same rule, so this is the state a slot created before the guard would be in.
+    addInterest(db, monday.id, worker.id);
+
+    expect(assignSlot(db, monday.id, worker.id, "2026-07-30")).toEqual({ ok: false, reason: "not_weekend" });
+    expect(listShiftsByEmployee(db, worker.id)).toHaveLength(0);
   });
 });

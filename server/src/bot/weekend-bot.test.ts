@@ -62,6 +62,9 @@ function callbackUpdate(tgId: number, data: string) {
   };
 }
 
+/** Real wall-clock today, in the team's zone — the same thing the routes pass in. */
+const TODAY = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
+
 /** Vacant slots only exist on days off, so fixtures must land on a weekend. */
 const nextSaturday = (): string => {
   const d = new Date();
@@ -93,8 +96,8 @@ describe("weekend bot callbacks", () => {
     const anya = worker(db, "Аня", 201);
     const date = nextSaturday();
     const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00", title: "Ярмарка" });
-    expressInterest(db, slot.id, anya.id);
-    const assigned = assignSlot(db, slot.id, anya.id);
+    expressInterest(db, slot.id, anya.id, TODAY);
+    const assigned = assignSlot(db, slot.id, anya.id, TODAY);
     if (!assigned.ok) throw new Error("assign failed");
 
     const { bot, sent, calls } = testBot(db);
@@ -118,8 +121,8 @@ describe("weekend bot callbacks", () => {
     const anya = worker(db, "Аня", 201);
     const date = nextSaturday();
     const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00" });
-    expressInterest(db, slot.id, anya.id);
-    const assigned = assignSlot(db, slot.id, anya.id);
+    expressInterest(db, slot.id, anya.id, TODAY);
+    const assigned = assignSlot(db, slot.id, anya.id, TODAY);
     if (!assigned.ok) throw new Error("assign failed");
 
     const { bot, sent } = testBotFailingMethod(db, "editMessageReplyMarkup");
@@ -136,8 +139,8 @@ describe("weekend bot callbacks", () => {
     const anya = worker(db, "Аня", 201);
     const date = nextSaturday();
     const slot = createVacantSlot(db, { date, start: "10:00", end: "18:00" });
-    expressInterest(db, slot.id, anya.id);
-    const assigned = assignSlot(db, slot.id, anya.id);
+    expressInterest(db, slot.id, anya.id, TODAY);
+    const assigned = assignSlot(db, slot.id, anya.id, TODAY);
     if (!assigned.ok) throw new Error("assign failed");
     // Assigning puts it straight in the schedule and leaves the slot open for others.
     expect(listShiftsInRange(db, date, date).some((s) => s.employeeId === anya.id)).toBe(true);
