@@ -441,6 +441,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const emp = getEmployeeById(db, id);
     if (!emp) return c.json({ error: "not_found" }, 404);
     if (emp.telegramUserId != null) return c.json({ error: "already_linked" }, 400);
+    // An archived row can't be claimed (see `linkTelegramAccount`), so handing out a
+    // link for one is handing out a dead end. Restore them first.
+    if (!emp.isActive) return c.json({ error: "archived" }, 400);
     let inviteToken = emp.inviteToken;
     if (!inviteToken || body.regenerate === true) {
       inviteToken = randomBytes(16).toString("hex");

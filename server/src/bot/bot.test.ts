@@ -204,6 +204,20 @@ describe("bot /start", () => {
     expect(sent[0]?.text).not.toContain("Открой мини-апп");
   });
 
+  // The invite is a door into a system this row is no longer part of: linking used
+  // to succeed and answer «Ты в системе ✅», and the mini app then 403'd them.
+  it("/start with the invite of an archived worker refuses to link them", async () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Петров Игорь", inviteToken: "arch-invite" });
+    archiveEmployee(db, w.id, "2026-01-01");
+    const { bot, sent } = testBot(db);
+
+    await bot.handleUpdate(startUpdate(890, "/start arch-invite"));
+
+    expect(sent[0]?.text).not.toContain("Ты в системе");
+    expect(getByTelegramId(db, 890)).toBeUndefined();   // nothing was linked
+  });
+
   it("/start still greets an archived person normally when their Telegram id is allowlisted — POST /api/auth restores them by design", async () => {
     const db = makeTestDb();
     const w = createEmployee(db, { displayName: "Босс", inviteToken: "arch-2" });
