@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
+import { allowedByPool, countsForBalance } from "@planer/shared";
 import {
   apiClient,
   type Employee,
@@ -108,9 +109,9 @@ export function nextPickByKind(
     const pool = kindRoles?.pool;
     const preferenceOf = (employeeId: number) => kindRoles?.preference[employeeId] ?? 0;
     const ranked = loads
-      // Hand-mirrored `allowedByPool` from shared — an empty pool means everyone. The
-      // Mini App deliberately doesn't import @planer/shared; change both together.
-      .filter((l) => !pool || pool.length === 0 || pool.includes(l.employeeId))
+      // An empty pool means everyone — the server's own rule, imported rather than
+      // restated, so it cannot drift.
+      .filter((l) => allowedByPool(pool, l.employeeId))
       .sort(
         (a, b) =>
           (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) ||
@@ -793,16 +794,6 @@ interface WorkerLoad {
   employee: Employee;
   byKind: Record<string, number>;
   total: number;
-}
-
-/**
- * Work entries that count toward fairness — absences don't. Mirrors
- * `countsForBalance` in @planer/shared, which the mini-app doesn't depend on.
- * Same set as `needsTime` today, but a separate rule on purpose: a timed
- * category that shouldn't skew the balance must not have to change both.
- */
-function countsForBalance(category: Category): boolean {
-  return category === "shift" || category === "duty" || category === "offsite" || category === "weekend_work";
 }
 
 /**
