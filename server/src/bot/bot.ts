@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
+import type { Employee } from "../db/schema";
 import {
   linkTelegramAccount,
   getByTelegramId,
@@ -108,6 +109,29 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
 export function createBot(deps: BotDeps): Bot {
   const { db, config } = deps;
   const bot = new Bot(config.botToken);
+
+  /**
+   * Whoever tapped, if they may still act.
+   *
+   * A button lives in a Telegram chat forever, so somebody archived *after* a
+   * message was delivered kept a working entrance: they could record «хочу» on a
+   * vacant weekend slot, confirm an offer, land in the payroll CSV and even have a
+   * fresh `weekend_work` shift written for them — the very schedule archiving had
+   * just taken them off. The HTTP layer refuses them at the door
+   * (`middleware.ts`); this was the second, unguarded one.
+   *
+   * Allowlisted ids are the documented exception, exactly as in `/start` above:
+   * `/api/auth` un-archives them on sight, so locking them out of a button would
+   * be a dead end rather than a guard.
+   */
+  function acting(tgId: number): { ok: true; me: Employee } | { ok: false; text: string } {
+    const me = getByTelegramId(db, tgId);
+    if (!me) return { ok: false, text: "Ты не в системе" };
+    if (!me.isActive && !config.adminTelegramIds.includes(tgId)) {
+      return { ok: false, text: "Ты в архиве — напиши админу" };
+    }
+    return { ok: true, me };
+  }
 
   bot.command("start", async (ctx) => {
     const from = ctx.from;
@@ -223,11 +247,12 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("notifications", async (ctx) => {
     const from = ctx.from;
     if (!from) return;
-    const me = getByTelegramId(db, from.id);
-    if (!me) {
-      await ctx.reply("Сначала отправь /start.");
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
       return;
     }
+    const me = who.me;
     await ctx.reply(remindersStateText(me.remindersEnabled), { reply_markup: remindersKeyboard(me.remindersEnabled) });
   });
 
@@ -237,11 +262,12 @@ export function createBot(deps: BotDeps): Bot {
    */
   bot.callbackQuery(/^reminders:(on|off)$/, async (ctx) => {
     const enabled = ctx.match[1] === "on";
-    const me = getByTelegramId(db, ctx.from.id);
-    if (!me) {
-      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
       return;
     }
+    const me = who.me;
     setRemindersEnabled(db, me.id, enabled);
     await ctx.answerCallbackQuery({ text: enabled ? "Включил 🔔" : "Больше не буду 🔕" });
     if (!enabled) {
@@ -260,11 +286,12 @@ export function createBot(deps: BotDeps): Bot {
     const action = m[1] as "accept" | "decline";
     const id = Number(m[2]);
 
-    const me = getByTelegramId(db, ctx.from.id);
-    if (!me) {
-      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
       return;
     }
+    const me = who.me;
 
     const res = action === "accept" ? acceptSwap(db, id, me.id, teamNow(config.teamTz)) : declineSwap(db, id, me.id);
     if (!res.ok) {
@@ -308,11 +335,12 @@ export function createBot(deps: BotDeps): Bot {
 
   bot.callbackQuery(/^weekend:interest:(\d+)$/, async (ctx) => {
     const slotId = Number(ctx.match[1]);
-    const me = getByTelegramId(db, ctx.from.id);
-    if (!me) {
-      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
       return;
     }
+    const me = who.me;
     const res = expressInterest(db, slotId, me.id);
     if (!res.ok) {
       await ctx.answerCallbackQuery({ text: res.reason === "not_open" ? "Уже разобрали" : "Слот не найден" });
@@ -325,11 +353,12 @@ export function createBot(deps: BotDeps): Bot {
   bot.callbackQuery(/^weekend:(confirm|decline):(\d+)$/, async (ctx) => {
     const action = ctx.match[1] as "confirm" | "decline";
     const id = Number(ctx.match[2]);
-    const me = getByTelegramId(db, ctx.from.id);
-    if (!me) {
-      await ctx.answerCallbackQuery({ text: "Ты не в системе" });
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
       return;
     }
+    const me = who.me;
     const res = action === "confirm" ? confirmOffer(db, id, me.id) : declineOffer(db, id, me.id);
     if (!res.ok) {
       const text = res.reason === "not_yours" ? "Это не твой оффер" : res.reason === "not_offered" ? "Уже обработано" : "Не получилось";
