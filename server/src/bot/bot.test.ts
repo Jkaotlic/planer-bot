@@ -6,6 +6,8 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getByTelegramId, archiveEmployee } from "../repo/employees";
 import { createShift, getShift, updateShift } from "../repo/shifts";
 import { createSwap } from "../swap/swap-service";
+import { expressInterest, assignSlot, payrollRows, interestedForSlot } from "../weekend/weekend-service";
+import { createVacantSlot, getAssignment } from "../repo/weekend";
 import { auditLog } from "../db/schema";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -436,5 +438,63 @@ describe("bot swap callback buttons", () => {
 
     const ack = calls.find((c) => c.method === "answerCallbackQuery");
     expect((ack?.payload as { text?: string })?.text).toBe("Смена уже досталась другому человеку");
+  });
+});
+
+describe("archived people and the buttons still sitting in their chat", () => {
+  // The HTTP layer refuses an archived person outright (middleware.ts). The bot's
+  // callbacks only asked «знаю ли я этот telegram id», so every button already
+  // delivered to someone's chat stayed live after they left — a second, unguarded
+  // entrance to the very same services. `/start` got this right and said «Ты в
+  // архиве»; the action handlers did not.
+  it("refuses a weekend confirm from somebody who has been archived", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня Тестова", inviteToken: "t-a" });
+    linkTelegramAccount(db, "t-a", 901);
+    const slot = createVacantSlot(db, { date: "2099-01-03", start: "10:00", end: "18:00", title: "Ярмарка" });
+    expressInterest(db, slot.id, anya.id);
+    const assigned = assignSlot(db, slot.id, anya.id);
+    expect(assigned.ok).toBe(true);
+
+    archiveEmployee(db, anya.id, "2026-01-01");
+    const { bot, sent, calls } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(901, `weekend:confirm:${assigned.ok ? assigned.assignment.id : 0}`));
+
+    const toast = calls.find((c) => c.method === "answerCallbackQuery")?.payload as { text?: string } | undefined;
+    expect(toast?.text).toMatch(/архив/i);
+    expect(getAssignment(db, assigned.ok ? assigned.assignment.id : 0)?.status).toBe("offered");
+    expect(payrollRows(db, "2099-01-03", "2099-01-03")).toEqual([]);
+    expect(sent.some((s) => /подтвердил/i.test(s.text))).toBe(false);
+  });
+
+  it("refuses «хочу» on a vacant slot from somebody who has been archived", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня Тестова", inviteToken: "t-b" });
+    linkTelegramAccount(db, "t-b", 902);
+    const slot = createVacantSlot(db, { date: "2099-01-03", start: "10:00", end: "18:00", title: "Ярмарка" });
+
+    archiveEmployee(db, anya.id, "2026-01-01");
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(902, `weekend:interest:${slot.id}`));
+
+    const toast = calls.find((c) => c.method === "answerCallbackQuery")?.payload as { text?: string } | undefined;
+    expect(toast?.text).toMatch(/архив/i);
+    expect(interestedForSlot(db, slot.id)).toEqual([]);
+  });
+
+  it("still lets an allowlisted admin act while archived — /api/auth restores them on sight", async () => {
+    // Same exception `/start` already makes: an allowlisted id un-archives itself
+    // at the next login, so locking them out of a button would be a dead end.
+    const db = makeTestDb();
+    const boss = createEmployee(db, { displayName: "Босс Тестовый", inviteToken: "t-c", isAdmin: true });
+    linkTelegramAccount(db, "t-c", 111); // 111 ∈ adminTelegramIds
+    archiveEmployee(db, boss.id, "2026-01-01");
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(111, "reminders:off"));
+
+    const toast = calls.find((c) => c.method === "answerCallbackQuery")?.payload as { text?: string } | undefined;
+    expect(toast?.text).not.toMatch(/архив/i);
+    expect(getByTelegramId(db, 111)?.remindersEnabled).toBe(false);
   });
 });
