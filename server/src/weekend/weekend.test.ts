@@ -48,6 +48,7 @@ describe("weekend market service", () => {
 
     const confirmed = confirmOffer(db, assigned.assignment.id, fair.id);
     expect(confirmed.ok).toBe(true);
+    if (confirmed.ok) expect(confirmed.slotId).toBe(slot.id); // callers build "<name> confirmed <slot>" without a second lookup
 
     const fairShifts = listShiftsByEmployee(db, fair.id);
     expect(fairShifts.length).toBe(1);
@@ -100,7 +101,14 @@ describe("weekend market service", () => {
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0]!.date).toBe("2026-07-18");
 
-    expect(unassign(db, assigned.assignment.id).ok).toBe(true);
+    const unassigned = unassign(db, assigned.assignment.id);
+    expect(unassigned.ok).toBe(true);
+    // Callers (the unassign HTTP route) need this to notify the worker who was
+    // just taken off — the assignment row is gone the moment this returns.
+    if (unassigned.ok) {
+      expect(unassigned.employeeId).toBe(worker.id);
+      expect(unassigned.slotId).toBe(slot.id);
+    }
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(0);
     expect(assigneesForSlot(db, slot.id)).toHaveLength(0);
   });

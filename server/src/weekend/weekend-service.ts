@@ -30,6 +30,12 @@ export type Outcome = { ok: true } | { ok: false; reason: string };
 /** `changed` is false only for the true no-op branch below (already assigned, nothing
  *  written) — callers use it to skip re-notifying the worker on a repeat "Назначить". */
 export type AssignOutcome = { ok: true; assignment: WeekendAssignment; changed: boolean } | { ok: false; reason: string };
+/** `slotId` lets callers build a "<name> confirmed/declined <slot>" admin
+ *  broadcast without a second lookup. */
+export type ConfirmOutcome = { ok: true; slotId: number } | { ok: false; reason: string };
+/** `employeeId`/`slotId` let callers notify the worker who was just taken off
+ *  the slot — their assignment row is gone the moment this returns. */
+export type UnassignOutcome = { ok: true; employeeId: number; slotId: number } | { ok: false; reason: string };
 
 /** "2026-07-14" -> "2026-07". */
 function monthOf(date: string): string {
@@ -130,12 +136,12 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
 }
 
 /** Admin removes someone from a slot: drops their schedule entry and the assignment. */
-export function unassign(db: Db, assignmentId: number): Outcome {
+export function unassign(db: Db, assignmentId: number): UnassignOutcome {
   const assignment = getAssignment(db, assignmentId);
   if (!assignment) return { ok: false, reason: "not_found" };
   if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
   deleteAssignment(db, assignmentId);
-  return { ok: true };
+  return { ok: true, employeeId: assignment.employeeId, slotId: assignment.slotId };
 }
 
 /** Who is on this slot right now (declined people drop off), for admins and workers alike. */
@@ -153,14 +159,14 @@ export function assigneesForSlot(
     }));
 }
 
-export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: number): Outcome {
+export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: number): ConfirmOutcome {
   const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
   // The entry was created when the admin assigned it; accepting just records that.
   if (assignment.shiftId != null) {
     confirmAssignment(db, assignmentId, assignment.shiftId);
-    return { ok: true };
+    return { ok: true, slotId: assignment.slotId };
   }
   const slot = getVacantSlot(db, assignment.slotId);
   if (!slot) return { ok: false, reason: "slot_missing" };
@@ -174,10 +180,10 @@ export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: num
     location: slot.location,
   });
   confirmAssignment(db, assignmentId, shift.id);
-  return { ok: true };
+  return { ok: true, slotId: assignment.slotId };
 }
 
-export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: number): Outcome {
+export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: number): ConfirmOutcome {
   const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
@@ -188,7 +194,7 @@ export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: num
     .set({ status: "declined", shiftId: null })
     .where(eq(weekendAssignments.id, assignmentId))
     .run();
-  return { ok: true };
+  return { ok: true, slotId: assignment.slotId };
 }
 
 export function payrollRows(
