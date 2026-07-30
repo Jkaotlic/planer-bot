@@ -180,6 +180,26 @@ describe("read endpoints", () => {
     expect(shift.note).toBeUndefined();
   });
 
+  // Archiving only unassigns shifts from the archive date onward — everything
+  // before it keeps the archived id, by design (that history is real). But the
+  // grid draws its rows from the active people this same response lists, so those
+  // entries went out to every worker in the team and rendered nowhere.
+  it("leaves an archived worker's past shifts out of /api/team/schedule", async () => {
+    const db = makeTestDb();
+    const staying = worker(db, "Первый Работник", 333);
+    const leaving = worker(db, "Второй Работник", 334);
+    createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", employeeId: staying.id });
+    createShift(db, { date: "2026-07-03", start: "08:00", end: "17:00", employeeId: leaving.id });
+    const app = createApp({ db, config });
+    // Archived as of a later date, so the July entry is untouched history.
+    db.update(employees).set({ isActive: false }).where(eq(employees.id, leaving.id)).run();
+
+    const res = await app.request("/api/team/schedule?from=2026-07-01&to=2026-07-07", bearer(await tokenFor(app, 333)));
+    const body = await res.json();
+    expect(body.employees.map((e: { id: number }) => e.id)).toEqual([staying.id]);
+    expect(body.shifts.map((s: { employeeId: number | null }) => s.employeeId)).toEqual([staying.id]);
+  });
+
   it("still marks an unreadable roster-import cell as «?» on /api/team/schedule", async () => {
     const db = makeTestDb();
     worker(db, "Игорь", 333);
