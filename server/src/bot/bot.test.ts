@@ -480,6 +480,23 @@ describe("bot swap callback buttons", () => {
     expect((ack?.payload as { text?: string })?.text).toBe("Смена уже досталась другому человеку");
   });
 
+  // Both overlap reasons used to read «Пересекается с твоей сменой» to whoever
+  // tapped — even when the overlap belonged to the person who proposed the swap.
+  it("names whose calendar the overlap is in", async () => {
+    const db = makeTestDb();
+    const { anya, sa, sb, requestId } = setupPendingSwap(db);
+    // Аня picks up something clashing with Игоря's shift after proposing, so the
+    // conflict is hers; Игорь is the one tapping Принять.
+    createShift(db, { date: sb.date, start: "10:00", end: "14:00", employeeId: anya.id });
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`));
+
+    const text = (calls.find((c) => c.method === "answerCallbackQuery")?.payload as { text?: string })?.text;
+    expect(text).toBe("У коллеги теперь пересечение по времени");
+    expect(getShift(db, sa.id)?.employeeId).toBe(anya.id); // nothing exchanged
+  });
+
   // The tapping side gets its answer in the button toast. The initiator gets
   // nothing at all — their request silently turns «Истекло» in the archive.
   it("tells the initiator when their pending swap expires under an accept", async () => {

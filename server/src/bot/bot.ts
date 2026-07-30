@@ -50,7 +50,10 @@ export interface BotDeps {
 function reasonToRu(reason: string): string {
   if (reason === "not_pending") return "Уже обработано";
   if (reason === "not_yours") return "Это не твоя заявка";
-  if (reason.startsWith("double-booking")) return "Пересекается с твоей сменой";
+  // Only the counterparty ever taps these buttons, so «твоей» is right for the
+  // `-to` half and a lie for the `-from` half — that overlap is the initiator's.
+  if (reason === "double-booking-to") return "Пересекается с твоей сменой";
+  if (reason === "double-booking-from") return "У коллеги теперь пересечение по времени";
   if (reason === "not_found") return "Заявка не найдена";
   if (reason === "unavailable") return "Смена больше недоступна";
   if (reason === "from-shift-in-past" || reason === "to-shift-in-past") return "Смена уже прошла";

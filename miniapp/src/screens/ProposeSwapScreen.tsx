@@ -35,6 +35,10 @@ const SWAP_ERROR_MESSAGES: Record<string, string> = {
   // while and the shift started in the meantime.
   "from-shift-in-past": "Твоя смена уже началась — меняться поздно.",
   "to-shift-in-past": "Та смена уже началась — меняться поздно.",
+  // Checked when proposing now, not only when accepting — so these are addressed
+  // to the initiator, who is the one reading this screen.
+  "double-booking-from": "У тебя в это время уже стоит другая смена.",
+  "double-booking-to": "У коллеги в это время уже стоит другая смена.",
 };
 
 function describeSwapError(err: unknown): string {
