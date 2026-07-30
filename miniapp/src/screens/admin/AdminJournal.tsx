@@ -10,6 +10,7 @@ const TYPE_LABELS: Record<string, string> = {
   entry_created: "Добавлена запись",
   entry_updated: "Изменена запись",
   entry_deleted: "Удалена запись",
+  distribution_applied: "Смены распределены честно",
   employee_reordered: "Изменён порядок людей",
   template_roles_changed: "Изменено «кто что может»",
   template_rotation_changed: "Изменена очередь",
@@ -18,6 +19,7 @@ const TYPE_LABELS: Record<string, string> = {
   swap_accepted: "Обмен состоялся",
   swap_declined: "Обмен отклонён",
   swap_cancelled: "Обмен отменён",
+  employee_updated: "Изменены данные работника",
   employee_archived: "Работник архивирован",
   employee_restored: "Работник восстановлен",
   employee_admin_changed: "Изменены права админа",
@@ -25,6 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
   weekend_assigned: "Выходная смена назначена",
   birthday_sent: "Разослан сбор на день рождения",
   birthday_admin_notice: "Напоминание админам о дне рождения",
+  birthday_schedule_notice: "Напоминание админам о сборе",
 };
 
 export function typeLabel(type: string): string {
