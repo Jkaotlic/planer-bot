@@ -1,5 +1,5 @@
 import { and, eq, ne, or } from "drizzle-orm";
-import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, shiftInterval, absMinutes, type Shift as DomainShift } from "@planer/shared";
+import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
@@ -40,14 +40,21 @@ export function createSwap(
   if (fromShift.start == null || fromShift.end == null || toShift.start == null || toShift.end == null) {
     return { ok: false, reason: "not_swappable" };
   }
-  // The same rule accept-time already enforces, applied where it costs nothing:
-  // a request on a shift that has started can only ever answer «Смена уже прошла»,
-  // after pinging the counterparty with buttons that look live.
-  const nowAbs = absMinutes(now.date, now.time);
-  if (shiftInterval(toDomain(fromShift)).start <= nowAbs) return { ok: false, reason: "from-shift-in-past" };
-  if (shiftInterval(toDomain(toShift)).start <= nowAbs) return { ok: false, reason: "to-shift-in-past" };
-  // A no-op swap: same day, same kind of shift — nothing would actually change hands.
-  if (isIdenticalShift(fromShift, toShift)) return { ok: false, reason: "identical-shift" };
+  // From here on it is the *same* rule set the accept applies — shifts still in the
+  // future, not a no-op, and neither side left double-booked. Enforcing it only at
+  // accept-time meant an impossible trade still pinged the counterparty with
+  // live-looking buttons whose one possible answer was an error; when the conflict
+  // was the initiator's, an error phrased as if it were the counterparty's.
+  const validation = validateSwap({
+    fromShift: toDomain(fromShift),
+    toShift: toDomain(toShift),
+    fromEmployeeId: input.fromEmployeeId,
+    toEmployeeId: toShift.employeeId,
+    fromOtherShifts: timedOthers(db, input.fromEmployeeId, fromShift.id),
+    toOtherShifts: timedOthers(db, toShift.employeeId, toShift.id),
+    now,
+  });
+  if (!validation.ok) return { ok: false, reason: validation.reason };
   // Same trade already open — either this person's own request («дождись ответа»)
   // or the counterparty's request for the very same pair («ответь ему»).
   const open = findPendingSwapForPair(db, input.fromShiftId, input.toShiftId);

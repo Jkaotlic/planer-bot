@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee } from "../repo/employees";
-import { createShift, getShift } from "../repo/shifts";
+import { createShift, getShift, updateShift } from "../repo/shifts";
 import { getSwapRequest, createSwapRequest } from "../repo/swaps";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "./swap-service";
 
@@ -45,6 +45,23 @@ describe("swap service", () => {
     const myPast = createShift(db, { date: "2026-06-02", start: "08:00", end: "17:00", employeeId: a.id });
     expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: myPast.id, toShiftId: sb.id }, NOW))
       .toEqual({ ok: false, reason: "from-shift-in-past" });
+  });
+
+  // The overlap rule was only enforced when accepting. Proposing an impossible
+  // trade still pinged the counterparty with live-looking buttons whose only
+  // possible answer was an error — and, when the conflict was the initiator's,
+  // an error phrased as if it were the counterparty's.
+  it("createSwap refuses a trade that would double-book either side", () => {
+    const { db, a, b, sa, sb } = setup();
+    // Аня already works something that overlaps Игоря's shift — she can't take it.
+    const hers = createShift(db, { date: sb.date, start: "10:00", end: "14:00", employeeId: a.id });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "double-booking-from" });
+
+    updateShift(db, hers.id, { employeeId: b.id, date: sa.date, start: "09:00", end: "12:00" });
+    // Now the overlap is on Игоря's side: he can't take Ани's shift.
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "double-booking-to" });
   });
 
   // Roster import writes an unreadable cell as a `shift` row with no clock times —
@@ -122,10 +139,12 @@ describe("swap service", () => {
 
   it("accept rejected + expired when it would double-book the counterparty", () => {
     const { db, a, b, sa, sb } = setup();
-    // b already has a shift overlapping sa (2026-07-10 08:00-17:00)
-    createShift(db, { date: "2026-07-10", start: "09:00", end: "12:00", employeeId: b.id });
     const req = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     if (!req.ok) throw new Error("setup");
+    // The conflict appears only *after* the proposal — b picks up a shift that
+    // overlaps sa (2026-07-10 08:00–17:00). Creating it in this state is refused
+    // outright now, so this is the one way the accept-time check still fires.
+    createShift(db, { date: "2026-07-10", start: "09:00", end: "12:00", employeeId: b.id });
     const res = acceptSwap(db, req.request.id, b.id, NOW);
     expect(res.ok).toBe(false);
     expect(getShift(db, sa.id)?.employeeId).toBe(a.id); // NOT exchanged
