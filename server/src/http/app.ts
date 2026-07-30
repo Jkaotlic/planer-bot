@@ -33,7 +33,7 @@ import {
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
-import { listSwapsForEmployee } from "../repo/swaps";
+import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import {
   notifyUser,
@@ -45,6 +45,7 @@ import {
   swapDeclinedText,
   swapAcceptedAdminText,
   swapAutoCancelledText,
+  swapExpiredByDeleteText,
   weekendConfirmedAdminText,
   weekendDeclinedAdminText,
   weekendUnassignedText,
@@ -682,20 +683,35 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ entry });
   });
 
-  app.delete("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), (c) => {
+  app.delete("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     // Read it before it's gone — the feed has to be able to say what was deleted.
     const existing = getShift(db, id);
-    if (!deleteShift(db, id)) return c.json({ error: "not_found" }, 404);
+    // Same reason, for the swaps hanging on it: `deleteShift` expires them and nulls
+    // their pointer at this entry, so a line naming the shift can only be built now.
+    const linesBefore = new Map(listPendingSwapsForShift(db, id).map((r) => [r.id, swapAuditPayload(r)]));
+    const { deleted, expiredSwaps } = deleteShift(db, id);
+    if (!deleted) return c.json({ error: "not_found" }, 404);
     if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, auditShape(existing));
+    for (const request of expiredSwaps) {
+      const payload = linesBefore.get(request.id) ?? swapAuditPayload(request);
+      // The admin who deleted the entry is the actor — nobody involved in the swap
+      // did anything, which is exactly why they both have to be told.
+      recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
+      if (!bot) continue;
+      for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
+        const tg = tgOf(employeeId);
+        if (tg != null) await notifyUser(bot, tg, swapExpiredByDeleteText(payload));
+      }
+    }
     return c.json({ ok: true });
   });
 
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
 
   type ShiftSummary = { date: string; start: string | null; end: string | null; title: string | null };
-  const shiftSummaryOf = (shiftId: number): ShiftSummary | null => {
-    const shift: Shift | undefined = getShift(db, shiftId);
+  const shiftSummaryOf = (shiftId: number | null): ShiftSummary | null => {
+    const shift: Shift | undefined = shiftId == null ? undefined : getShift(db, shiftId);
     if (!shift) return null;
     return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
   };
@@ -705,8 +721,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // produces byte-identical journal rows and chat text. Keep the short local
   // names so the many call sites below don't change.
   const nameOf = (employeeId: number): string | null => nameOfDb(db, employeeId);
-  const shiftLineOf = (shiftId: number): string => shiftLineOfDb(db, shiftId);
-  const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number; toShiftId: number }) =>
+  const shiftLineOf = (shiftId: number | null): string => shiftLineOfDb(db, shiftId);
+  const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number | null; toShiftId: number | null }) =>
     swapAuditPayloadDb(db, request);
 
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {

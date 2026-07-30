@@ -37,6 +37,19 @@ export function hasPendingSwap(db: Db, fromShiftId: number, toShiftId: number): 
     .all().length > 0;
 }
 
+/** Still-open requests that would be invalidated by this shift going away — read
+ *  before the deletion, while their shift lines can still be built. */
+export function listPendingSwapsForShift(db: Db, shiftId: number): SwapRequest[] {
+  return db
+    .select()
+    .from(swapRequests)
+    .where(and(
+      eq(swapRequests.status, "pending"),
+      or(eq(swapRequests.fromShiftId, shiftId), eq(swapRequests.toShiftId, shiftId)),
+    ))
+    .all();
+}
+
 export function listSwapsForEmployee(db: Db, employeeId: number): SwapRequest[] {
   return db
     .select()

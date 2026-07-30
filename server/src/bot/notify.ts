@@ -40,6 +40,18 @@ export function swapAutoCancelledText(p: SwapAuditPayload): string {
   return `Обмен с ${p.fromName} (${p.fromShift} ↔ ${p.toShift}) отменился — смена уже досталась другому человеку.`;
 }
 
+/**
+ * Sent to *both* sides of a pending swap whose shift an admin just deleted.
+ *
+ * Goes out to the initiator too, and that's the point: they proposed it and did
+ * nothing since, so without this the request just turns «Истекло» in the archive
+ * with no cause attached. Names both shifts because the row itself no longer can
+ * — the pointer at the deleted entry is null from here on.
+ */
+export function swapExpiredByDeleteText(p: SwapAuditPayload): string {
+  return `Обмен неактуален: смену удалили из расписания. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
+}
+
 // --- Weekend-offer text builders ---------------------------------------------
 
 /** Admin broadcast once a worker confirms an offered weekend shift. */

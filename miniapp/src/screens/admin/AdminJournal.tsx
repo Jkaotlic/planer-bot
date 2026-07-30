@@ -20,6 +20,7 @@ const TYPE_LABELS: Record<string, string> = {
   swap_accepted: "Обмен состоялся",
   swap_declined: "Обмен отклонён",
   swap_cancelled: "Обмен отменён",
+  swap_expired: "Обмен стал неактуален",
   employee_updated: "Изменены данные работника",
   employee_archived: "Работник архивирован",
   employee_restored: "Работник восстановлен",
