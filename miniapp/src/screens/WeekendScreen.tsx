@@ -32,7 +32,7 @@ export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, action
           Работа в выходные дни
         </Title>
         <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
-          Свободные смены в выходные и праздники. Нажми «Хочу» — админ распределит по-честному.
+          Свободные смены по субботам и воскресеньям. Нажми «Хочу» — админ распределит по-честному.
         </p>
       </header>
 

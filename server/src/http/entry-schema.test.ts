@@ -44,4 +44,18 @@ describe("entry input schema", () => {
         .success,
     ).toBe(true);
   });
+
+  /**
+   * «Работа в выходной» = только суббота или воскресенье. Государственные
+   * праздники в будни днями отдыха не считаются — календаря праздников в системе
+   * нет (`calendar_days` пуста и никем не пишется), и до тех пор это правило надо
+   * называть вслух: мини-апп обещал команде «выходные и праздники».
+   */
+  it("refuses weekend work on a weekday, holiday or not", () => {
+    // 2026-06-12 — День России, пятница.
+    const holiday = createEntrySchema.safeParse({ date: "2026-06-12", category: "weekend_work", start: "10:00", end: "18:00" });
+    expect(holiday.success).toBe(false);
+    const saturday = createEntrySchema.safeParse({ date: "2026-06-13", category: "weekend_work", start: "10:00", end: "18:00" });
+    expect(saturday.success).toBe(true);
+  });
 });
