@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 import { formatDayLabel } from "../lib/week";
+import { CategoryChip } from "../categories";
 
 /** First & last calendar day of the month containing `d`, as "YYYY-MM-DD". */
 function monthRange(d: Date): { from: string; to: string } {
@@ -197,6 +198,9 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
       </span>
       <span className="weekend-interest-name">{person.name}</span>
       {recommended && <span className="weekend-fair-badge">★ реже всех работал</span>}
+      {/* Away on the slot's day. A mark, not a block — the admin decides, but only
+          if they can see it. Mirrored in miniapp AdminWeekendScreen's AbsenceBadge. */}
+      {person.absence && <CategoryChip category={person.absence} className="weekend-fair-badge" />}
       <span className={`weekend-month-count${n === 0 ? " zero" : n >= 2 ? " high" : ""}`}>
         {n === 0 ? "ещё не работал в этом месяце" : `${n} ${pluralizeRu(n, "раз", "раза", "раз")} в этом месяце`}
         {person.passedOver > 0 &&

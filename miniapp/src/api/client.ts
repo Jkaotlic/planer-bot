@@ -243,6 +243,9 @@ export interface SlotInterest {
   confirmedThisMonth: number;
   /** Times they volunteered for a slot that went to someone else — breaks ties in their favour. */
   passedOver: number;
+  /** Отпуск/больничный/командировка, накрывающие день слота, или null. Пометка, а
+   *  не запрет: назначить можно, но админ должен это видеть. */
+  absence: Category | null;
 }
 
 

@@ -7,6 +7,7 @@ import { formatDayLabel } from "../../lib/week";
 import { pluralizeRu } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
+import { categoryLabel, useCategoryPalette, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
 
 /** First & last calendar day of the month containing `d`, as "YYYY-MM-DD". */
@@ -232,6 +233,7 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontWeight: 500, fontSize: 14.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{person.name}</span>
           {recommended && <FairBadge />}
+          {person.absence && <AbsenceBadge category={person.absence} />}
         </div>
         <div style={{ fontSize: 12.5, color: n === 0 ? "var(--tgui--hint_color)" : "var(--tgui--text_color)" }}>{countLabel}{passedLabel}</div>
       </div>
@@ -239,6 +241,22 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
         Назначить
       </Button>
     </div>
+  );
+}
+
+/**
+ * «Отпуск» / «Больничный» / «Командировка» — this volunteer is away on the day of
+ * the slot. A mark, not a block: somebody can raise their hand in May and have a
+ * June vacation land on it, and sometimes a person asks to come in anyway. The
+ * admin decides — but only if they can see it, and the list used to say nothing.
+ * Mirrored in admin/src/screens/WeekendAdminScreen.tsx.
+ */
+function AbsenceBadge({ category }: { category: Category }) {
+  const palette = useCategoryPalette(category);
+  return (
+    <span style={{ flex: "none", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap" }}>
+      {categoryLabel(category)}
+    </span>
   );
 }
 
