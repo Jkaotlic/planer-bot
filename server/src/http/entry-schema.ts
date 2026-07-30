@@ -34,11 +34,30 @@ export function entryDateError(v: { category: EntryCategory; date: string }): st
   return null;
 }
 
+/**
+ * Range coherence: a multi-day entry cannot end before it starts.
+ *
+ * A backwards range is not a bad-looking row, it is an invisible one. Every reader
+ * of a period asks the same question — `date <= d && (endDate ?? date) >= d` — and
+ * for `20-е .. 10-е` no day answers yes: the entry is in neither console's grid,
+ * nor the team schedule, nor the roster export. It still occupies a row, and fair
+ * distribution reads the person as free, so the «отпуск» the admin just entered is
+ * exactly when the bot books them.
+ *
+ * Returns an error message, or null if coherent.
+ */
+export function entryRangeError(v: { date: string; endDate?: string | null }): string | null {
+  if (v.endDate && v.endDate < v.date) return "запись не может кончаться раньше, чем начинается";
+  return null;
+}
+
 export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
   const err = entryTimesError(v);
   if (err) ctx.addIssue({ code: "custom", path: ["start"], message: err });
   const dateErr = entryDateError(v);
   if (dateErr) ctx.addIssue({ code: "custom", path: ["date"], message: dateErr });
+  const rangeErr = entryRangeError(v);
+  if (rangeErr) ctx.addIssue({ code: "custom", path: ["endDate"], message: rangeErr });
 });
 
 export const updateEntrySchema = baseEntry.partial();

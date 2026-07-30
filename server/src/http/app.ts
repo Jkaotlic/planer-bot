@@ -32,7 +32,7 @@ import {
   setPreferredName,
   rememberTelegramProfile,
 } from "../repo/employees";
-import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
@@ -699,10 +699,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const merged = {
       category,
       date: patch.date ?? existing.date,
+      endDate: patch.endDate !== undefined ? patch.endDate : existing.endDate,
       start: patch.start !== undefined ? patch.start : existing.start,
       end: patch.end !== undefined ? patch.end : existing.end,
     };
-    const err = entryTimesError(merged) ?? entryDateError(merged);
+    const err = entryTimesError(merged) ?? entryDateError(merged) ?? entryRangeError(merged);
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
     const entry = updateShift(db, id, patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
