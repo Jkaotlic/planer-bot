@@ -284,10 +284,22 @@ export interface DistributionAssignment {
   employeeId: number;
 }
 
-/** Result of `POST /api/admin/distribute`: whether it was applied, plus the chosen assignments. */
+/** A slot the pass walked past: nobody in its pool is still on the roster
+ *  (`empty_pool` — a setting to fix), or everyone eligible was busy or away
+ *  (`nobody_free` — just the week). */
+export interface UnfilledSlot {
+  shiftId: number;
+  date: string;
+  kind: string;
+  reason: "empty_pool" | "nobody_free";
+}
+
+/** Result of `POST /api/admin/distribute`: whether it was applied, the chosen
+ *  assignments, and the slots it could not fill. */
 export interface DistributeResult {
   applied: boolean;
   assignments: DistributionAssignment[];
+  unfilled: UnfilledSlot[];
 }
 
 /** A preset plus who may take it and who asked for it. An empty pool means everyone. */

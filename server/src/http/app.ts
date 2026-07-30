@@ -868,11 +868,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // A quarter is already far beyond how far ahead this team plans.
     const err = rangeError(body.from, body.to, 92);
     if (err) return c.json({ error: err }, 400);
-    const { assignments } = buildDistribution(db, body.from as string, body.to as string);
+    const { assignments, unfilled } = buildDistribution(db, body.from as string, body.to as string);
     if (body.apply === true) {
       applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId })));
+      // One press moves a whole week of shifts, so it belongs in «кто когда что
+      // менял» like every other schedule change. A preview writes nothing and is
+      // recorded as nothing — the log is for what happened, not what was looked at.
+      recordAudit(db, "distribution_applied", c.get("auth").employeeId, {
+        from: body.from as string,
+        to: body.to as string,
+        count: assignments.length,
+      });
     }
-    return c.json({ applied: body.apply === true, assignments });
+    // `unfilled` rides along on a preview too: an empty cell nobody can take is worth
+    // knowing about before applying anything, not after.
+    return c.json({ applied: body.apply === true, assignments, unfilled });
   });
 
   app.get("/api/swaps", requireAuth(db, config.jwtSecret), (c) => {

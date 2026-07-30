@@ -3,6 +3,7 @@ import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
+import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 
@@ -41,6 +42,26 @@ describe("POST /api/admin/distribute", () => {
     expect(appliedBody.applied).toBe(true);
     expect(appliedBody.assignments.length).toBe(1);
     expect(getShift(db, s1.id)?.employeeId).not.toBeNull(); // applied
+  });
+
+  // Every other way the schedule changes lands in «кто когда что менял» — an entry
+  // typed in, a weekend slot assigned, a pool edited. Distribution moves a whole week
+  // at once, so it is the last thing that should be invisible there.
+  it("records the applied distribution in the journal, and a preview records nothing", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-01", to: "2026-07-10" }));
+    expect(listRecentAudit(db, 10)).toEqual([]);
+
+    await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-01", to: "2026-07-10", apply: true }));
+    const [event, ...rest] = listRecentAudit(db, 10);
+    expect(rest).toEqual([]);
+    expect(event?.type).toBe("distribution_applied");
+    expect(event?.payload).toEqual({ from: "2026-07-01", to: "2026-07-10", count: 1 });
   });
 
   it("rejects a worker (403) and validates from/to (400)", async () => {

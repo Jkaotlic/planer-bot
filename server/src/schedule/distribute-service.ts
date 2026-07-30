@@ -13,6 +13,27 @@ export interface DistributionAssignment {
   employeeName: string;
 }
 
+/**
+ * Why a slot came back empty.
+ *
+ * `empty_pool` is a misconfigured preset — its pool lists only people who are no
+ * longer on the roster, so nobody at all may take this kind. Archiving does not
+ * clear pool rows (deliberately: an empty pool would then read as «все», handing a
+ * duty to anyone, and a restore would silently lose the membership), which is
+ * exactly why this has to be *said* rather than fixed behind the admin's back.
+ *
+ * `nobody_free` is ordinary life: everyone eligible is away or already busy at
+ * that hour. Nothing to fix, and nothing to worry about.
+ */
+export type UnfilledReason = "empty_pool" | "nobody_free";
+
+export interface UnfilledSlot {
+  shiftId: number;
+  date: string;
+  kind: string;
+  reason: UnfilledReason;
+}
+
 function inRange(date: string, from: string, to: string): boolean {
   return date >= from && date <= to;
 }
@@ -136,7 +157,11 @@ function overlapsRange(s: { date: string; endDate: string | null }, from: string
  * per shift kind (Утро/День/Вечер/Ночь), not by hours — so nobody collects all the
  * nights while the hour totals still look even.
  */
-export function buildDistribution(db: Db, from: string, to: string): { assignments: DistributionAssignment[] } {
+export function buildDistribution(
+  db: Db,
+  from: string,
+  to: string,
+): { assignments: DistributionAssignment[]; unfilled: UnfilledSlot[] } {
   const nameById = new Map(listActiveTemplates(db).map((t) => [t.id, t.name]));
   // Who may take each preset, and who asked for it. Read once for the whole run
   // rather than per slot. A slot with no preset behind it has no roles to apply,
@@ -159,13 +184,31 @@ export function buildDistribution(db: Db, from: string, to: string): { assignmen
 
   const workers = listActive(db).map((e) => seedWorkerLoad(db, e.id, from, to, nameById));
 
-  const assignments = distributeFairly(slots, workers).map((a) => ({
+  const chosen = distributeFairly(slots, workers);
+  const assignments = chosen.map((a) => ({
     shiftId: a.shiftId,
     employeeId: a.employeeId,
     employeeName: getEmployeeById(db, a.employeeId)?.displayName ?? "",
   }));
 
-  return { assignments };
+  // Whatever distributeFairly walked past. It leaves such a slot alone by design;
+  // the admin still has to hear about it, or «Распределено смен: 3» over five empty
+  // cells is the only clue that anything went wrong.
+  const filled = new Set(chosen.map((a) => a.shiftId));
+  const unfilled: UnfilledSlot[] = slots
+    .filter((slot) => !filled.has(slot.id))
+    .map((slot) => ({
+      shiftId: slot.id,
+      date: slot.date,
+      kind: slot.kind,
+      // Told apart on eligibility alone — being busy or away is a fact about a day,
+      // being outside every pool is a fact about the preset.
+      reason: workers.some((w) => !slot.pool || slot.pool.length === 0 || slot.pool.includes(w.employeeId))
+        ? "nobody_free"
+        : "empty_pool",
+    }));
+
+  return { assignments, unfilled };
 }
 
 /** Applies a proposed distribution, writing employeeId on each shift in one transaction. */
