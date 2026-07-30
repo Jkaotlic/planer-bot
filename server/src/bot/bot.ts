@@ -247,6 +247,19 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply("Сначала отправь /start.");
       return;
     }
+    // The link below claims `isAdmin: true`, and `requireAdmin` believes the row,
+    // not the token — so an allowlisted worker who was never promoted got a link
+    // that 403'd on every request behind it. ADMIN_TELEGRAM_IDS means admin; make
+    // the row say so, exactly as the restore branch above and POST /api/auth do.
+    if (isAllowlisted && !admin.isAdmin) {
+      admin = setEmployeeAdmin(db, admin.id, true) ?? admin;
+      recordAudit(db, "employee_admin_changed", admin.id, {
+        employeeId: admin.id,
+        displayName: admin.displayName,
+        isAdmin: true,
+        via: "allowlist",
+      });
+    }
     const token = await issueToken({ employeeId: admin.id, isAdmin: true }, config.jwtSecret, ADMIN_LINK_TTL_SEC);
     const url = `${config.publicUrl}/admin/#token=${token}`;
     await ctx.reply(
