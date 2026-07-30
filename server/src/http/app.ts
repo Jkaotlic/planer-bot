@@ -103,11 +103,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Coarse flood protection for the whole app — see rate-limit.ts for keying
   // details and why the numbers are sized as a shared ceiling rather than a
-  // strict per-visitor budget. 300 req/min comfortably covers a burst of
-  // parallel loads (the admin console firing off a dozen-odd GETs on open)
-  // many times over, while still capping a runaway client well below what
-  // could bother the same process's Telegram long-poll.
-  app.use("*", rateLimiter({ windowMs: 60_000, max: 300 }));
+  // strict per-visitor budget.
+  //
+  // Sized against the actual worst realistic minute, not a guess: opening the
+  // mini app fires 7 requests (getMe + 6 parallel — see miniapp/src/App.tsx's
+  // bootstrap effect), and every tab switch / refocus fires 6 more
+  // (reloadData). Shift reminders go out after 20:00 and predictably cause
+  // several people to open the app within the same minute — the worst
+  // plausible cluster today is the whole 30-person team, each bootstrapping
+  // and switching tabs at least once: 30 × (7 + 6) = 390 req/min. Sized for
+  // roughly double that headcount (team growth): 60 × 13 = 780 req/min. The
+  // limit below is >10x that grown worst case (~20x today's), while still
+  // capping a real flood — which runs orders of magnitude higher than
+  // this, not a few percent higher — well short of anything that could
+  // bother the same process's Telegram long-poll. See the hardening report
+  // for the full arithmetic.
+  app.use("*", rateLimiter({ windowMs: 60_000, max: 8_000 }));
 
   // API responses are live data — never let a browser / Telegram webview serve
   // a cached copy, or an admin's edits won't show up until the app is reopened.
@@ -130,13 +141,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get("/api/health", (c) => c.json({ ok: true }));
 
-  // Tighter budget than the app-wide limiter above: this endpoint is normally
-  // called once per session (the frontend caches the token it gets back), so
-  // there's no legitimate reason for one client to hit it often. 20/min still
-  // comfortably covers several teammates opening the app around the same
-  // moment (e.g. everyone arriving at the start of a shift) while stopping a
-  // login-flood well short of anything that could bother the bot's long-poll.
-  app.post("/api/auth", rateLimiter({ windowMs: 60_000, max: 20 }), async (c) => {
+  // Tighter budget than the app-wide limiter above — this endpoint is
+  // normally called once per session (the frontend caches the token it gets
+  // back) — but "tight" still has to swallow the whole team logging in at
+  // once, since that's exactly what happens right after an evening reminder.
+  // Worst realistic minute: the grown ~60-person team (see above), each
+  // allowed one retry for a flaky connection or an impatient re-tap — 60 × 2
+  // = 120 req/min. The limit below is >10x that, and still a full order of
+  // magnitude below the app-wide ceiling, so a login-flood specifically is
+  // caught well before it could ever touch the general budget.
+  app.post("/api/auth", rateLimiter({ windowMs: 60_000, max: 1_200 }), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { initData?: unknown };
     const initData = typeof body.initData === "string" ? body.initData : (c.req.header("X-Init-Data") ?? "");
     let user: TelegramUser;
