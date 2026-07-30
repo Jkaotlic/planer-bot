@@ -44,3 +44,6 @@ logs/
 
 # Compiled menu-bar app — rebuilt by mac/build.sh
 mac/build/
+
+# Claude Code — местные разрешения и кэш, у каждого свои
+.claude/settings.local.json
