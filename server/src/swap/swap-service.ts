@@ -7,7 +7,7 @@ import { createSwapRequest, getSwapRequest, setSwapStatus, hasPendingSwap } from
 
 export type SwapNow = { date: string; time: string };
 export type SwapOutcome =
-  | { ok: true; request: SwapRequest; counterpartyId: number }
+  | { ok: true; request: SwapRequest; counterpartyId: number; cancelledSiblings?: SwapRequest[] }
   | { ok: false; reason: string };
 
 function toDomain(s: DbShift): DomainShift & { category: DbShift["category"] } {
@@ -82,6 +82,7 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
   // Journaling this swap happens in the HTTP layer, after this transaction returns —
   // never inside it, so a bookkeeping failure can never roll back a swap that already
   // succeeded.
+  let cancelledSiblings: SwapRequest[] = [];
   db.transaction((tx) => {
     tx.update(shifts).set({ employeeId: req.toEmployeeId }).where(eq(shifts.id, fromShift.id)).run();
     tx.update(shifts).set({ employeeId: req.fromEmployeeId }).where(eq(shifts.id, toShift.id)).run();
@@ -103,8 +104,17 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
     for (const s of siblings) {
       tx.update(swapRequests).set({ status: "cancelled", resolvedAt: new Date() }).where(eq(swapRequests.id, s.id)).run();
     }
+    cancelledSiblings = siblings;
   });
-  return { ok: true, request: getSwapRequest(db, requestId) ?? { ...req, status: accepted }, counterpartyId: req.fromEmployeeId };
+  // Callers notify each sibling's counterparty — the person still looking at a
+  // now-stale Принять/Отклонить message — since neither shift they were about
+  // to trade is theirs to trade anymore.
+  return {
+    ok: true,
+    request: getSwapRequest(db, requestId) ?? { ...req, status: accepted },
+    counterpartyId: req.fromEmployeeId,
+    cancelledSiblings,
+  };
 }
 
 export function declineSwap(db: Db, requestId: number, actingEmployeeId: number): SwapOutcome {

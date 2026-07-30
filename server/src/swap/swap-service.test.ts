@@ -47,7 +47,24 @@ describe("swap service", () => {
     expect(getShift(db, sb.id)?.employeeId).toBe(a.id);
     expect(getSwapRequest(db, main.request.id)?.status).toBe("accepted");
     expect(getSwapRequest(db, sibling.request.id)?.status).toBe("cancelled"); // sibling touching sa auto-cancelled
-    if (res.ok) expect(res.counterpartyId).toBe(a.id);
+    if (res.ok) {
+      expect(res.counterpartyId).toBe(a.id);
+      // Callers need to know who to notify about the auto-cancellation — the
+      // sibling's own counterparty (a, who held the live Принять/Отклонить
+      // message for c's proposal) is left holding a now-stale message.
+      expect(res.cancelledSiblings).toHaveLength(1);
+      expect(res.cancelledSiblings?.[0]?.id).toBe(sibling.request.id);
+      expect(res.cancelledSiblings?.[0]?.toEmployeeId).toBe(a.id);
+    }
+  });
+
+  it("accept exposes no cancelled siblings when there aren't any", () => {
+    const { db, a, b, sa, sb } = setup();
+    const main = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id });
+    if (!main.ok) throw new Error("setup");
+    const res = acceptSwap(db, main.request.id, b.id, NOW);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.cancelledSiblings).toEqual([]);
   });
 
   it("accept only by the counterparty, only while pending", () => {
