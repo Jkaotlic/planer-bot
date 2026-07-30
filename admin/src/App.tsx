@@ -223,7 +223,12 @@ export function App() {
       if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
       if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
       if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
-      setRosterNotice({ kind: "success", text: `CSV загружен: ${parts.join(", ")}` });
+      // Mirror of `summaryLine` in miniapp/src/screens/admin/AdminRosterCsv.tsx.
+      const expired = summary.swapsExpired;
+      const tail = expired > 0
+        ? `. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
+        : "";
+      setRosterNotice({ kind: "success", text: `CSV загружен: ${parts.join(", ")}${tail}` });
       await Promise.all([
         refreshEmployees(),
         refreshSchedule(),

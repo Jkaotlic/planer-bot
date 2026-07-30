@@ -96,6 +96,17 @@ describe("formatPeriod / summaryLine", () => {
     expect(summaryLine({ entriesInserted: 42, entriesDeleted: 5, cellsPreserved: 2, employeesCreated: 21 }))
       .toBe("CSV загружен: добавлено 42 записи, заменено 5 записей, не тронуто 2 записи, новых сотрудников — 21");
   });
+
+  // Replacing a month can invalidate swaps somebody was still waiting on. Silence
+  // here means the admin only learns about it when that person comes asking.
+  it("says out loud that the overwrite invalidated pending swaps", () => {
+    expect(summaryLine({ entriesInserted: 4, entriesDeleted: 4, cellsPreserved: 0, employeesCreated: 0, swapsExpired: 1 }))
+      .toContain("1 заявка на обмен стала неактуальной — обеим сторонам написали");
+    expect(summaryLine({ entriesInserted: 4, entriesDeleted: 4, cellsPreserved: 0, employeesCreated: 0, swapsExpired: 3 }))
+      .toContain("3 заявок на обмен стали неактуальны");
+    expect(summaryLine({ entriesInserted: 4, entriesDeleted: 4, cellsPreserved: 0, employeesCreated: 0, swapsExpired: 0 }))
+      .not.toContain("обмен");
+  });
 });
 
 describe("the screen as rendered", () => {

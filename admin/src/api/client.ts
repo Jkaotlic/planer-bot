@@ -217,6 +217,9 @@ export interface RosterImportSummary {
   entriesInserted: number;
   entriesDeleted: number;
   cellsPreserved: number;
+  /** Pending swaps this import invalidated — people had open requests on entries
+   *  the file replaced, and were told so. */
+  swapsExpired: number;
   unknowns: RosterUnknownCell[];
 }
 
