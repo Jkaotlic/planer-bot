@@ -479,6 +479,22 @@ describe("bot swap callback buttons", () => {
     const ack = calls.find((c) => c.method === "answerCallbackQuery");
     expect((ack?.payload as { text?: string })?.text).toBe("Смена уже досталась другому человеку");
   });
+
+  // The tapping side gets its answer in the button toast. The initiator gets
+  // nothing at all — their request silently turns «Истекло» in the archive.
+  it("tells the initiator when their pending swap expires under an accept", async () => {
+    const db = makeTestDb();
+    const { sa, requestId } = setupPendingSwap(db);
+    const outsider = createEmployee(db, { displayName: "Марк" });
+    updateShift(db, sa.id, { employeeId: outsider.id });
+    const { bot, sent } = testBot(db);
+
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${requestId}`));
+
+    const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
+    expect(anyaMessages.some((t) => t.toLowerCase().includes("обмен"))).toBe(true);
+    expect(db.select().from(auditLog).all().some((r) => r.type === "swap_expired")).toBe(true);
+  });
 });
 
 describe("archived people and the buttons still sitting in their chat", () => {

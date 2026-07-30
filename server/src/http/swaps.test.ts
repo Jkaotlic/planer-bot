@@ -3,7 +3,7 @@ import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, createAdminEmployee } from "../repo/employees";
-import { createShift, getShift } from "../repo/shifts";
+import { createShift, getShift, updateShift } from "../repo/shifts";
 import { auditLog } from "../db/schema";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
@@ -276,6 +276,32 @@ describe("swap endpoints", () => {
     const expired = db.select().from(auditLog).all().find((r) => r.type === "swap_expired");
     expect(expired).toBeDefined();
     expect(expired!.payload).toMatchObject({ requestId: reqId, fromName: "Аня", toName: "Игорь" });
+  });
+
+  it("tells the initiator when their pending swap expires under an accept, and journals it", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const mark = await worker(db, app, "Марк", 203);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+
+    // The shift moved out from under the proposal — an admin edit, or another swap.
+    updateShift(db, sa.id, { employeeId: mark.w.id });
+    sent.length = 0;
+
+    const accepted = await app.request(`/api/swaps/${reqId}/accept`, authed(igor.token));
+    expect(accepted.status).toBe(400);
+
+    // Игорь saw the reason in the response. Аня, who proposed it and has been
+    // waiting, would otherwise just find «Истекло» in her archive one day.
+    const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
+    expect(anyaMessages.some((t) => t.toLowerCase().includes("обмен"))).toBe(true);
+    expect(db.select().from(auditLog).all().some((r) => r.type === "swap_expired")).toBe(true);
   });
 
   it("journals swap_declined for the decliner and swap_cancelled for the initiator who withdraws", async () => {
