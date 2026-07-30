@@ -26,6 +26,7 @@ const authReq = (id: number) =>
     body: JSON.stringify({ initData: initDataFor(id) }),
   });
 
+
 describe("app auth", () => {
   it("serves public health", async () => {
     const res = await createApp({ db: makeTestDb(), config }).request("/api/health");
@@ -109,25 +110,69 @@ describe("app auth", () => {
 });
 
 describe("rate limiting", () => {
-  it("/api/auth trips its own tight limiter well before the general one", async () => {
+  it("/api/auth trips its own tight limiter (1,200/min) well before the general one (8,000/min)", async () => {
     const app = createApp({ db: makeTestDb(), config });
-    // The route's limiter allows 20/min; the 21st in the same window gets 429.
+    // A real flood still gets capped: the 1,201st POST /api/auth in the same
+    // 60s window is rejected. See app.ts for the arithmetic behind 1,200 —
+    // it's >10x the worst realistic minute (the whole grown team logging in
+    // at once, each with a retry), so nothing short of an actual flood can
+    // reach this.
     let last!: Response;
-    for (let i = 0; i < 21; i++) last = await app.request(authReq(111 + i));
+    for (let i = 0; i < 1_201; i++) last = await app.request(authReq(111 + i));
     expect(last.status).toBe(429);
     expect(await last.json()).toEqual({ error: "too_many_requests" });
     expect(last.headers.get("Retry-After")).toBeTruthy();
   });
 
-  it("a normal admin-console-style burst of parallel authenticated GETs never trips the general limiter", async () => {
+  it("the whole team opening the mini app within the same minute never trips the general limiter", async () => {
+    // This is the actual scenario the general limit is sized against: shift
+    // reminders go out after 20:00, and that predictably lands a burst of
+    // people opening the app within the same minute. Every request in this
+    // test lands on the same rate-limit key — like the real deployment
+    // behind KeenDNS, which likely presents every external client as one
+    // address (see rate-limit.ts) — so this is the realistic worst case, not
+    // an understatement of it.
+    //
+    // 30 employees (today's full roster), each doing exactly what
+    // miniapp/src/App.tsx's bootstrap effect does — getMe + 6 parallel calls
+    // — plus two tab switches worth of reloadData (6 calls each, everything
+    // but getMe): 1 login + 7 + 12 = 20 requests per person, 600 total.
     const db = makeTestDb();
     const app = createApp({ db, config });
-    const token = (await (await app.request(authReq(111))).json()).token as string;
-    // Mirrors the console firing off a batch of parallel reads on open — well
-    // under the general 300/min budget.
-    const results = await Promise.all(
-      Array.from({ length: 25 }, () => app.request("/api/me", { headers: { Authorization: `Bearer ${token}` } })),
-    );
+
+    const from = "2026-01-05";
+    const to = "2026-01-11";
+    const bootstrapPaths = [
+      "/api/me",
+      `/api/my/shifts?from=${from}`,
+      `/api/team/schedule?from=${from}&to=${to}`,
+      "/api/templates",
+      "/api/swaps",
+      "/api/weekend/slots",
+      "/api/weekend/offers",
+    ];
+    const reloadPaths = bootstrapPaths.slice(1); // reloadData re-pulls everything but getMe
+
+    const employees = Array.from({ length: 30 }, (_, i) => {
+      const tgId = 5000 + i;
+      const inviteToken = `inv-rl-${i}`;
+      createEmployee(db, { displayName: `Сотрудник ${i}`, inviteToken });
+      linkTelegramAccount(db, inviteToken, tgId);
+      return tgId;
+    });
+
+    const oneEmployeeSession = async (tgId: number): Promise<Response[]> => {
+      // Logging in is part of "opening the app" too, and counts against the
+      // same general limiter — captured here so it's included below.
+      const loginRes = await app.request(authReq(tgId));
+      const token = ((await loginRes.json()) as { token: string }).token;
+      const auth = { headers: { Authorization: `Bearer ${token}` } };
+      const calls = [...bootstrapPaths, ...reloadPaths, ...reloadPaths].map((path) => app.request(path, auth));
+      return [loginRes, ...(await Promise.all(calls))];
+    };
+
+    const results = (await Promise.all(employees.map(oneEmployeeSession))).flat();
+    expect(results.length).toBe(30 * 20);
     for (const res of results) expect(res.status).toBe(200);
   });
 });
