@@ -278,6 +278,34 @@ describe("swap endpoints", () => {
     expect(expired!.payload).toMatchObject({ requestId: reqId, fromName: "Аня", toName: "Игорь" });
   });
 
+  // Without its own event the journal shows the sibling as `swap_cancelled` —
+  // nothing, in other words, which reads exactly like the initiator withdrawing it.
+  it("journals an auto-cancelled sibling as its own event, with the accepter as actor", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const mark = await worker(db, app, "Марк", 203);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sm = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: mark.w.id });
+
+    const main = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const mainId = (await main.json()).request.id as number;
+    const sibling = await app.request("/api/swaps", authed(mark.token, { fromShiftId: sm.id, toShiftId: sa.id }));
+    const siblingId = (await sibling.json()).request.id as number;
+
+    expect((await app.request(`/api/swaps/${mainId}/accept`, authed(igor.token))).status).toBe(200);
+
+    const rows = db.select().from(auditLog).all();
+    const auto = rows.find((r) => r.type === "swap_auto_cancelled");
+    expect(auto).toBeDefined();
+    expect(auto!.actorEmployeeId).toBe(igor.w.id); // whose accept knocked it out
+    expect(auto!.payload).toMatchObject({ requestId: siblingId, fromName: "Марк", toName: "Аня" });
+    // And it is not filed as a withdrawal — nobody withdrew anything.
+    expect(rows.some((r) => r.type === "swap_cancelled")).toBe(false);
+  });
+
   it("tells the initiator when their pending swap expires under an accept, and journals it", async () => {
     const db = makeTestDb();
     const { bot, sent } = testBot();

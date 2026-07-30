@@ -340,7 +340,11 @@ export function createBot(deps: BotDeps): Bot {
       // just died, and the initiator who has been waiting and would otherwise
       // read «Отменено» as their own doing. Same rule as the mini-app route.
       for (const sibling of res.cancelledSiblings ?? []) {
-        const text = swapAutoCancelledText(swapAuditPayload(db, sibling));
+        // Its own journal event, not `swap_cancelled` — nobody withdrew these,
+        // this accept knocked them out, and it is filed under whoever tapped.
+        const payload = swapAuditPayload(db, sibling);
+        recordAudit(db, "swap_auto_cancelled", me.id, payload);
+        const text = swapAutoCancelledText(payload);
         for (const employeeId of [sibling.fromEmployeeId, sibling.toEmployeeId]) {
           const siblingTg = getEmployeeById(db, employeeId)?.telegramUserId;
           if (siblingTg != null) await notifyUser(bot, siblingTg, text);
