@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { EntryCategory } from "@planer/shared";
 import type { Employee, NewEntryInput, Shift, Template } from "../api/client";
 import { ALL_CATEGORIES, categoryLabel } from "../categories";
-import { formatDayLabel, weekdayIndex } from "../lib/week";
+import { dayOptions, formatDayLabel, weekdayIndex } from "../lib/week";
 
 export interface AddEntryPanelProps {
   employees: readonly Employee[];
@@ -187,7 +187,7 @@ export function AddEntryPanel({
                 setEndDate(e.target.value);
               }}
             >
-              {weekDates.map((iso) => (
+              {dayOptions(weekDates, date).map((iso) => (
                 <option key={iso} value={iso}>
                   {formatDayLabel(iso)}
                 </option>
@@ -261,7 +261,7 @@ export function AddEntryPanel({
               По какой день
             </label>
             <select id="entry-end-date" value={endDate} onChange={(e) => setEndDate(e.target.value)}>
-              {weekDates
+              {dayOptions(weekDates, endDate)
                 .filter((iso) => iso >= date)
                 .map((iso) => (
                   <option key={iso} value={iso}>
