@@ -387,3 +387,41 @@ describe("payroll follows the schedule, not the snapshot taken at assign time", 
     expect(payrollRows(db, SATURDAY, SUNDAY)).toEqual([]);
   });
 });
+
+/**
+ * Его решение: не блокировать, а показать. Человек мог поднять руку в мае, а
+ * отпуск на эту субботу появиться в июне — админ смотрит в список и не видит
+ * ничего. «Распределить честно» отсутствие считает жёстким запретом; здесь
+ * запрета нет, но и молчания быть не должно.
+ */
+describe("«кто хочет» marks a volunteer who is away that day", () => {
+  const SATURDAY = "2026-08-01";
+
+  it("names the absence, and назначить всё равно можно", () => {
+    const db = makeTestDb();
+    const away = createEmployee(db, { displayName: "Первый Работник" });
+    const here = createEmployee(db, { displayName: "Второй Работник" });
+    const slot = createVacantSlot(db, { date: SATURDAY, start: "10:00", end: "18:00" });
+    expressInterest(db, slot.id, away.id, TEST_TODAY);
+    expressInterest(db, slot.id, here.id, TEST_TODAY);
+    // Отпуск заведён позже и накрывает эту субботу.
+    createShift(db, { date: "2026-07-28", endDate: "2026-08-05", category: "vacation", employeeId: away.id, start: null, end: null });
+
+    const listed = interestedForSlot(db, slot.id);
+    expect(listed.find((i) => i.employeeId === away.id)?.absence).toBe("vacation");
+    expect(listed.find((i) => i.employeeId === here.id)?.absence).toBeNull();
+
+    // Пометка, а не запрет — иногда человек сам просит выйти из отпуска.
+    expect(assignSlot(db, slot.id, away.id, TEST_TODAY).ok).toBe(true);
+  });
+
+  it("only marks an absence that actually covers the slot's day", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, { date: SATURDAY, start: "10:00", end: "18:00" });
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    createShift(db, { date: "2026-07-20", endDate: "2026-07-24", category: "sick_leave", employeeId: worker.id, start: null, end: null });
+
+    expect(interestedForSlot(db, slot.id)[0]!.absence).toBeNull();
+  });
+});

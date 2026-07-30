@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { shiftDurationHours, isWeekend } from "@planer/shared";
+import { shiftDurationHours, isWeekend, isAbsence, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { weekendAssignments, type VacantSlot, type WeekendAssignment } from "../db/schema";
 import {
@@ -23,7 +23,7 @@ import {
   reofferAssignment,
   setAssignmentShift,
 } from "../repo/weekend";
-import { createShift, deleteShift } from "../repo/shifts";
+import { createShift, deleteShift, listShiftsOverlapping } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
@@ -101,10 +101,18 @@ export function expressInterest(db: Db, slotId: number, employeeId: number, toda
 export function interestedForSlot(
   db: Db,
   slotId: number,
-): { employeeId: number; name: string; confirmedThisMonth: number; passedOver: number }[] {
+): { employeeId: number; name: string; confirmedThisMonth: number; passedOver: number; absence: EntryCategory | null }[] {
   const slot = getVacantSlot(db, slotId);
   if (!slot) return [];
   const month = monthOf(slot.date);
+  // Who is away that day. Not a filter and not a block: somebody can volunteer in
+  // May and have a June vacation land on the slot, and sometimes a person asks to
+  // come in anyway — that is the admin's call. But making it their call requires
+  // showing it, and the list said nothing at all.
+  const awayThatDay = new Map<number, EntryCategory>();
+  for (const entry of listShiftsOverlapping(db, slot.date, slot.date)) {
+    if (entry.employeeId != null && isAbsence(entry.category)) awayThatDay.set(entry.employeeId, entry.category);
+  }
   return listInterestedEmployeeIds(db, slotId)
     // Somebody who volunteered and has since been archived is not a candidate;
     // showing the name unmarked invites the admin to pick it.
@@ -114,6 +122,7 @@ export function interestedForSlot(
       name: getEmployeeById(db, employeeId)?.displayName ?? "Неизвестно",
       confirmedThisMonth: countConfirmedByEmployeeInMonth(db, employeeId, month),
       passedOver: countPassedOver(db, employeeId),
+      absence: awayThatDay.get(employeeId) ?? null,
     }))
     .sort(
       (a, b) =>

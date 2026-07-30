@@ -283,17 +283,17 @@ const WEEKEND_SLOTS: AdminSlotView[] = [
   {
     slot: { id: 201, date: dayIso(5), start: "10:00", end: "18:00", title: "Ярмарка выходного дня", location: "ТЦ Авиапарк", note: "Нужен один человек на стенд", status: "open" },
     interested: [
-      { employeeId: 3, name: nameOf(3), confirmedThisMonth: 0, passedOver: 2 },
-      { employeeId: 2, name: nameOf(2), confirmedThisMonth: 1, passedOver: 0 },
-      { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2, passedOver: 0 },
+      { employeeId: 3, name: nameOf(3), confirmedThisMonth: 0, passedOver: 2, absence: null },
+      { employeeId: 2, name: nameOf(2), confirmedThisMonth: 1, passedOver: 0, absence: null },
+      { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2, passedOver: 0, absence: "vacation" },
     ],
     assignees: [],
   },
   {
     slot: { id: 202, date: dayIso(6), start: "11:00", end: "19:00", title: null, location: "Склад на Вавилова", note: null, status: "open" },
     interested: [
-      { employeeId: 4, name: nameOf(4), confirmedThisMonth: 0, passedOver: 2 },
-      { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2, passedOver: 0 },
+      { employeeId: 4, name: nameOf(4), confirmedThisMonth: 0, passedOver: 2, absence: null },
+      { employeeId: 5, name: nameOf(5), confirmedThisMonth: 2, passedOver: 0, absence: null },
     ],
     assignees: [],
   },
