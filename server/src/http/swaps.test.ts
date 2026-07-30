@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, createAdminEmployee } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { auditLog } from "../db/schema";
 import { signInitData } from "../auth/telegram";
@@ -58,6 +58,40 @@ describe("swap endpoints", () => {
     expect(getShift(db, sa.id)?.employeeId).toBe(igor.w.id);
     expect(getShift(db, sb.id)?.employeeId).toBe(anya.w.id);
     expect(sent.some((s) => s.chat_id === 201)).toBe(true); // Аня notified of acceptance
+  });
+
+  it("accept notifies admins by name and notifies the counterparty of a sibling swap it auto-cancels", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" }); // 111 ∈ config.adminTelegramIds
+
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const mark = await worker(db, app, "Марк", 203);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sm = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: mark.w.id });
+
+    const main = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const mainId = (await main.json()).request.id as number;
+    // Марк also proposes to trade his own shift for Ани's sa — still pending,
+    // and about to be invalidated by the accept below.
+    const siblingRes = await app.request("/api/swaps", authed(mark.token, { fromShiftId: sm.id, toShiftId: sa.id }));
+    expect(siblingRes.status).toBe(201);
+
+    const accepted = await app.request(`/api/swaps/${mainId}/accept`, authed(igor.token));
+    expect(accepted.status).toBe(200);
+
+    const adminMsg = sent.find((s) => s.chat_id === 111);
+    expect(adminMsg).toBeDefined();
+    expect(adminMsg!.text).toContain("Аня");
+    expect(adminMsg!.text).toContain("Игорь");
+
+    // Аня held the live Принять/Отклонить buttons for Марк's offer — she's told
+    // it's now moot instead of just finding out by tapping a stale button.
+    const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
+    expect(anyaMessages.some((t) => t.toLowerCase().includes("отменил"))).toBe(true);
   });
 
   it("rejects a swap the caller doesn't own (400) and lists my swaps", async () => {

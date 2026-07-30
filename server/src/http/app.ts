@@ -35,7 +35,26 @@ import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError }
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { listSwapsForEmployee } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
-import { notifyUser, notifyAdmins, notifySwapProposal, notifyVacantSlot, notifyWeekendOffer } from "../bot/notify";
+import {
+  notifyUser,
+  notifyAdmins,
+  notifySwapProposal,
+  notifyVacantSlot,
+  notifyWeekendOffer,
+  swapAcceptedText,
+  swapDeclinedText,
+  swapAcceptedAdminText,
+  swapAutoCancelledText,
+  weekendConfirmedAdminText,
+  weekendDeclinedAdminText,
+  weekendUnassignedText,
+} from "../bot/notify";
+import {
+  shiftLineOf as shiftLineOfDb,
+  slotLineOf,
+  nameOf as nameOfDb,
+  swapAuditPayload as swapAuditPayloadDb,
+} from "../util/message-lines";
 import { teamNow } from "../util/team-time";
 import {
   isWeekend,
@@ -680,43 +699,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!shift) return null;
     return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
   };
-  const nameOf = (employeeId: number): string | null => getEmployeeById(db, employeeId)?.displayName ?? null;
-
-  /** "Пн 13 июл · 08:00–17:00"-style short line describing a shift, for chat notifications. */
-  const shiftLineOf = (shiftId: number): string => {
-    const shift = getShift(db, shiftId);
-    if (!shift) return "смену";
-    const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
-      .formatToParts(new Date(`${shift.date}T00:00:00Z`));
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-    const weekday = get("weekday");
-    const dateLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${get("day")} ${get("month").replace(/\.$/, "")}`;
-    const time = shift.start != null && shift.end != null ? ` · ${shift.start}–${shift.end}` : "";
-    return `${dateLabel}${time}`;
-  };
-
-  /** "Сб 19 июл · 10:00–18:00 · Ярмарка" — short line describing a vacant slot for chat. */
-  const slotLineOf = (s: { date: string; start: string; end: string; title?: string | null }): string => {
-    const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
-      .formatToParts(new Date(`${s.date}T00:00:00Z`));
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-    const weekday = get("weekday");
-    const dateLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${get("day")} ${get("month").replace(/\.$/, "")}`;
-    const title = s.title ? ` · ${s.title}` : "";
-    return `${dateLabel} · ${s.start}–${s.end}${title}`;
-  };
-
-  // Both sides of a swap, by name and by shift line — a journal row built from this
-  // reads on its own, with no join back to employees or shifts.
-  const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number; toShiftId: number }) => ({
-    requestId: request.id,
-    fromEmployeeId: request.fromEmployeeId,
-    fromName: nameOf(request.fromEmployeeId) ?? "Неизвестно",
-    fromShift: shiftLineOf(request.fromShiftId),
-    toEmployeeId: request.toEmployeeId,
-    toName: nameOf(request.toEmployeeId) ?? "Неизвестно",
-    toShift: shiftLineOf(request.toShiftId),
-  });
+  // Formatting + payload helpers below are thin `db`-bound wrappers around
+  // ../util/message-lines — shared verbatim with the bot's own callback
+  // handlers (bot.ts) so a swap or weekend action resolved on either surface
+  // produces byte-identical journal rows and chat text. Keep the short local
+  // names so the many call sites below don't change.
+  const nameOf = (employeeId: number): string | null => nameOfDb(db, employeeId);
+  const shiftLineOf = (shiftId: number): string => shiftLineOfDb(db, shiftId);
+  const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number; toShiftId: number }) =>
+    swapAuditPayloadDb(db, request);
 
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
@@ -745,8 +736,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // === the acting employee — so they are the actor of "accepted", not the initiator.
     recordAudit(db, "swap_accepted", c.get("auth").employeeId, swapAuditPayload(res.request));
     if (bot) {
-      const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Твой обмен приняли ✅ Смены поменялись.");
-      await notifyAdmins(bot, db, "Обмен сменами состоялся.");
+      const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapAcceptedText());
+      await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(res.request)));
+      // Accepting can silently auto-cancel other pending swaps that touched the
+      // same shift(s) — their counterparty otherwise only learns about it by
+      // tapping a now-stale button and getting a bare "not_pending" error.
+      for (const sibling of res.cancelledSiblings ?? []) {
+        const siblingTg = tgOf(sibling.toEmployeeId);
+        if (siblingTg != null) await notifyUser(bot, siblingTg, swapAutoCancelledText(swapAuditPayload(sibling)));
+      }
     }
     return c.json({ ok: true });
   });
@@ -755,7 +753,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const res = declineSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     recordAudit(db, "swap_declined", c.get("auth").employeeId, swapAuditPayload(res.request));
-    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Твой обмен отклонили."); }
+    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapDeclinedText()); }
     return c.json({ ok: true });
   });
 
@@ -922,7 +920,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/weekend/offers/:id/confirm", requireAuth(db, config.jwtSecret), async (c) => {
     const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
-    if (bot) await notifyAdmins(bot, db, "Работник подтвердил работу в выходной ✅");
+    if (bot) {
+      const slot = getVacantSlot(db, res.slotId);
+      const name = nameOf(c.get("auth").employeeId) ?? "Работник";
+      await notifyAdmins(bot, db, weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
+    }
     return c.json({ ok: true });
   });
 
@@ -930,7 +932,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/weekend/offers/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
     const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
-    if (bot) await notifyAdmins(bot, db, "Работник отказался от работы в выходной.");
+    if (bot) {
+      const slot = getVacantSlot(db, res.slotId);
+      const name = nameOf(c.get("auth").employeeId) ?? "Работник";
+      await notifyAdmins(bot, db, weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
+    }
     return c.json({ ok: true });
   });
 
@@ -1000,6 +1006,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/weekend/assignments/:id/unassign", requireAdmin(db, config.jwtSecret), async (c) => {
     const res = unassign(db, Number(c.req.param("id")));
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    // The reverse direction (worker declines) already notifies the admin —
+    // close the loop here so the worker doesn't just find their shift gone.
+    if (bot) {
+      const tg = tgOf(res.employeeId);
+      if (tg != null) {
+        const slot = getVacantSlot(db, res.slotId);
+        await notifyUser(bot, tg, weekendUnassignedText(slot ? slotLineOf(slot) : "выходную смену"));
+      }
+    }
     return c.json({ ok: true });
   });
 
