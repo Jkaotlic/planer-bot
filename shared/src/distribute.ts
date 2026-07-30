@@ -65,9 +65,21 @@ function countOf(load: WorkerLoad, kind: string): number {
   return load.byKind[kind] ?? 0;
 }
 
-/** An empty pool is an unconfigured one: everybody may take the slot. */
+/**
+ * An empty pool is an unconfigured one: everybody may take the slot.
+ *
+ * Exported because this one line is the whole difference between «этот вид могут
+ * только эти люди» and «может любой», and it is asked in four places — here, the
+ * server's unfilled-slot reason, the console's ★ hint, and the Mini App's copy of
+ * that hint. Three of them can import it; the Mini App mirrors it by hand, as it
+ * mirrors everything else it can't take from shared.
+ */
+export function allowedByPool(pool: readonly number[] | null | undefined, employeeId: number): boolean {
+  return !pool || pool.length === 0 || pool.includes(employeeId);
+}
+
 function allowedBy(slot: FillSlot, employeeId: number): boolean {
-  return !slot.pool || slot.pool.length === 0 || slot.pool.includes(employeeId);
+  return allowedByPool(slot.pool, employeeId);
 }
 
 function preferenceOf(slot: FillSlot, employeeId: number): number {

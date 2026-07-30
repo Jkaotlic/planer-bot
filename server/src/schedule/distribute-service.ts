@@ -1,5 +1,14 @@
 import { eq } from "drizzle-orm";
-import { distributeFairly, countsForBalance, isAbsence, nextDate, toMinutes, type FillSlot, type WorkerLoad } from "@planer/shared";
+import {
+  allowedByPool,
+  distributeFairly,
+  countsForBalance,
+  isAbsence,
+  nextDate,
+  toMinutes,
+  type FillSlot,
+  type WorkerLoad,
+} from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts } from "../db/schema";
 import { listUnassignedShifts, listShiftsByEmployee } from "../repo/shifts";
@@ -203,9 +212,7 @@ export function buildDistribution(
       kind: slot.kind,
       // Told apart on eligibility alone — being busy or away is a fact about a day,
       // being outside every pool is a fact about the preset.
-      reason: workers.some((w) => !slot.pool || slot.pool.length === 0 || slot.pool.includes(w.employeeId))
-        ? "nobody_free"
-        : "empty_pool",
+      reason: workers.some((w) => allowedByPool(slot.pool, w.employeeId)) ? "nobody_free" : "empty_pool",
     }));
 
   return { assignments, unfilled };
