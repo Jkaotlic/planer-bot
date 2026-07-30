@@ -774,6 +774,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // The caller is the counterparty — acceptSwap only succeeds when req.toEmployeeId
     // === the acting employee — so they are the actor of "accepted", not the initiator.
     recordAudit(db, "swap_accepted", c.get("auth").employeeId, swapAuditPayload(res.request));
+    // Its own event, not `swap_cancelled`: nobody withdrew these, an accept knocked
+    // them out. Filed under the accepter, who caused it. Journalled whether or not
+    // there is a bot to notify anyone with.
+    const siblingPayloads = new Map((res.cancelledSiblings ?? []).map((s) => [s.id, swapAuditPayload(s)]));
+    for (const [, payload] of siblingPayloads) {
+      recordAudit(db, "swap_auto_cancelled", c.get("auth").employeeId, payload);
+    }
     if (bot) {
       const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapAcceptedText());
       await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(res.request)));
@@ -783,7 +790,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // and the initiator — who has been waiting and did nothing — otherwise sees
       // «Отменено» indistinguishable from having withdrawn it themselves.
       for (const sibling of res.cancelledSiblings ?? []) {
-        const text = swapAutoCancelledText(swapAuditPayload(sibling));
+        const text = swapAutoCancelledText(siblingPayloads.get(sibling.id)!);
         for (const employeeId of [sibling.fromEmployeeId, sibling.toEmployeeId]) {
           const siblingTg = tgOf(employeeId);
           if (siblingTg != null) await notifyUser(bot, siblingTg, text);

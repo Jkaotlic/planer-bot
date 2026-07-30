@@ -24,6 +24,7 @@ const EMITTED_TYPES = [
   "reminder_undeliverable",
   "roster_import",
   "swap_accepted",
+  "swap_auto_cancelled",
   "swap_cancelled",
   "swap_declined",
   "swap_expired",
