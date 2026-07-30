@@ -14,7 +14,7 @@ import {
   confirmAssignment,
   listAssignmentsForEmployee,
   listAssignmentsForSlot,
-  listConfirmedInRange,
+  listConfirmedWorkInRange,
   countConfirmedByEmployeeInMonth,
   countPassedOver,
   getAssignment,
@@ -253,20 +253,27 @@ export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: num
   return { ok: true, slotId: assignment.slotId };
 }
 
+/**
+ * What to pay for, read off the schedule.
+ *
+ * Date and hours come from the entry, not from `weekendAssignments.hours` — that
+ * column is the figure at the moment of assigning, and an admin who shortens or
+ * moves the shift edits the schedule, which is where they look and what they
+ * expect to matter. See `listConfirmedWorkInRange`.
+ */
 export function payrollRows(
   db: Db,
   from: string,
   to: string,
 ): { employeeId: number; employeeName: string; date: string; hours: number }[] {
-  const rows = listConfirmedInRange(db, from, to).map((a) => {
-    const slot = getVacantSlot(db, a.slotId);
-    return {
-      employeeId: a.employeeId,
-      employeeName: getEmployeeById(db, a.employeeId)?.displayName ?? "Неизвестно",
-      date: slot?.date ?? "",
-      hours: a.hours,
-    };
-  });
+  const rows = listConfirmedWorkInRange(db, from, to).map((work) => ({
+    employeeId: work.employeeId,
+    employeeName: getEmployeeById(db, work.employeeId)?.displayName ?? "Неизвестно",
+    date: work.date,
+    // A weekend entry always carries times (both write paths insist on it), so a
+    // null here would be a row nobody can price — count it as nothing rather than NaN.
+    hours: work.start != null && work.end != null ? shiftDurationHours({ start: work.start, end: work.end }) : 0,
+  }));
   return rows.sort((a, b) => a.employeeName.localeCompare(b.employeeName) || a.date.localeCompare(b.date));
 }
 

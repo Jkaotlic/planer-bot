@@ -14,7 +14,7 @@ import {
   getAssignmentForSlot,
   confirmAssignment,
   listAssignmentsForEmployee,
-  listConfirmedInRange,
+  listConfirmedWorkInRange,
   countConfirmedByEmployeeInMonth,
   countPassedOver,
 } from "./weekend";
@@ -106,9 +106,11 @@ describe("weekend market repos", () => {
     expect(countConfirmedByEmployeeInMonth(db, worker.id, "2026-08")).toBe(0);
     expect(countConfirmedByEmployeeInMonth(db, other.id, "2026-07")).toBe(0);
 
-    const inRange = listConfirmedInRange(db, "2026-07-01", "2026-07-31");
-    expect(inRange.map((a) => a.id)).toEqual([julyAssignment.id]);
+    // Ranged by the schedule entry, which is what pay is read off.
+    const inRange = listConfirmedWorkInRange(db, "2026-07-01", "2026-07-31");
+    expect(inRange.map((w) => [w.employeeId, w.date])).toEqual([[worker.id, julySlot.date]]);
     void augAssignment;
+    void julyAssignment;
   });
 });
 
