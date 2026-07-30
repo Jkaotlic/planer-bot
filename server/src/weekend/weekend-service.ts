@@ -50,10 +50,23 @@ export function postSlot(
   return createVacantSlot(db, data);
 }
 
+/**
+ * Whether this person may still take part in the weekend market at all.
+ *
+ * The bot's buttons and the HTTP middleware each refuse an archived person at
+ * their own door, but the door they guard is the *actor's*: an admin assigning
+ * somebody is an active actor picking a target, and nothing looked at the target.
+ * The rule belongs where the decision is made, not only where the request enters.
+ */
+function isOnStaff(db: Db, employeeId: number): boolean {
+  return getEmployeeById(db, employeeId)?.isActive === true;
+}
+
 export function expressInterest(db: Db, slotId: number, employeeId: number): Outcome {
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status !== "open") return { ok: false, reason: "not_open" };
+  if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
   addInterest(db, slotId, employeeId);
   return { ok: true };
 }
@@ -72,6 +85,9 @@ export function interestedForSlot(
   if (!slot) return [];
   const month = monthOf(slot.date);
   return listInterestedEmployeeIds(db, slotId)
+    // Somebody who volunteered and has since been archived is not a candidate;
+    // showing the name unmarked invites the admin to pick it.
+    .filter((employeeId) => isOnStaff(db, employeeId))
     .map((employeeId) => ({
       employeeId,
       name: getEmployeeById(db, employeeId)?.displayName ?? "Неизвестно",
@@ -94,6 +110,7 @@ export function assignSlot(db: Db, slotId: number, employeeId: number): AssignOu
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status === "closed") return { ok: false, reason: "not_open" };
+  if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
 
   // slotId+employeeId is unique, so a second assign for the same pair always lands here.
