@@ -14,6 +14,7 @@ const TYPE_LABELS: Record<string, string> = {
   employee_reordered: "Изменён порядок людей",
   template_roles_changed: "Изменено «кто что может»",
   template_rotation_changed: "Изменена очередь",
+  reminder_undeliverable: "Напоминание не дошло — бот заблокирован",
   roster_import: "Загрузка графика из CSV",
   swap_proposed: "Предложен обмен",
   swap_accepted: "Обмен состоялся",

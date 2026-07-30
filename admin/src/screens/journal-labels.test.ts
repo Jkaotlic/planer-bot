@@ -26,6 +26,7 @@ const EMITTED_TYPES = [
   "entry_created",
   "entry_deleted",
   "entry_updated",
+  "reminder_undeliverable",
   "roster_import",
   "swap_accepted",
   "swap_cancelled",

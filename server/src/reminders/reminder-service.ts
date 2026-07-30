@@ -4,6 +4,7 @@ import type { Db } from "../db/client";
 import { listShiftsInRange } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 import { hasReminder, addReminder } from "../repo/reminders";
+import { recordAudit } from "../repo/audit";
 import { notifyReminder } from "../bot/notify";
 
 const REMINDER_KIND = "evening_before";
@@ -36,9 +37,26 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
       wake: kind === "morning" ? wakeTime(start, owner.prepBufferMin) : undefined,
     });
 
-    if (await notifyReminder(bot, owner.telegramUserId, text)) {
+    const outcome = await notifyReminder(bot, owner.telegramUserId, text);
+    if (outcome.ok) {
       addReminder(db, shift.id, REMINDER_KIND);
       count++;
+      continue;
+    }
+    if (outcome.permanent) {
+      // A blocked bot or a deleted account refuses every time, and this tick runs
+      // every five minutes all evening — so retrying is ~48 hopeless calls a night,
+      // forever. Mark it done to stop the loop, and record it: somebody quietly no
+      // longer hearing from the bot is a fact an admin needs, and the journal is
+      // where this system already tells them things. A busy Telegram (429, 5xx, a
+      // dropped connection) is NOT marked and is retried on the next tick, which is
+      // the behaviour the test above pins.
+      addReminder(db, shift.id, REMINDER_KIND);
+      recordAudit(db, "reminder_undeliverable", null, {
+        employeeId: owner.id,
+        shiftId: shift.id,
+        errorCode: outcome.errorCode,
+      });
     }
   }
   return count;
