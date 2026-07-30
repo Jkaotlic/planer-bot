@@ -218,6 +218,25 @@ describe("bot /start", () => {
     expect(getByTelegramId(db, 890)).toBeUndefined();   // nothing was linked
   });
 
+  // Somebody comes back after leaving. The admin hands them a fresh link, and their
+  // old archived row still carries the same Telegram id — the cheerful «Ты уже
+  // привязан» was both untrue and a dead end.
+  it("/start with a new invite tells a returning archived person what to ask for", async () => {
+    const db = makeTestDb();
+    const old = createEmployee(db, { displayName: "Петров Игорь", inviteToken: "old-invite" });
+    linkTelegramAccount(db, "old-invite", 891);
+    archiveEmployee(db, old.id, "2026-01-01");
+    createEmployee(db, { displayName: "Петров Игорь", inviteToken: "new-invite" });
+    const { bot, sent } = testBot(db);
+
+    await bot.handleUpdate(startUpdate(891, "/start new-invite"));
+
+    expect(sent[0]?.text).not.toContain("уже привязан");
+    expect(sent[0]?.text.toLowerCase()).toContain("архив");
+    // And nothing moved: the unique Telegram id still belongs to the old row.
+    expect(getByTelegramId(db, 891)?.id).toBe(old.id);
+  });
+
   it("/start still greets an archived person normally when their Telegram id is allowlisted — POST /api/auth restores them by design", async () => {
     const db = makeTestDb();
     const w = createEmployee(db, { displayName: "Босс", inviteToken: "arch-2" });

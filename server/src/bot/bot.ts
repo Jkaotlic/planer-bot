@@ -141,6 +141,15 @@ export function createBot(deps: BotDeps): Bot {
     if (token) {
       const already = getByTelegramId(db, from.id);
       if (already) {
+        // Somebody who left and came back: their old row still holds this Telegram
+        // id (and the unique index on it means no new row can take it), so a fresh
+        // invite link cannot work no matter how many are issued. «Ты уже привязан»
+        // was both untrue — they are not in the system in any usable sense — and a
+        // dead end. The way out is the admin's «Восстановить», so say that.
+        if (!already.isActive && !config.adminTelegramIds.includes(from.id)) {
+          await ctx.reply("Ты в архиве — новая ссылка не поможет. Попроси админа восстановить твою запись, история и смены сохранятся.");
+          return;
+        }
         await ctx.reply(`Ты уже привязан, ${addressOf(already)} 👋`);
         return;
       }
