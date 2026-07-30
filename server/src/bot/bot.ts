@@ -383,9 +383,16 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const me = who.me;
-    const res = expressInterest(db, slotId, me.id);
+    const res = expressInterest(db, slotId, me.id, teamNow(config.teamTz).date);
     if (!res.ok) {
-      await ctx.answerCallbackQuery({ text: res.reason === "not_open" ? "Уже разобрали" : "Слот не найден" });
+      // This button is months old by the time some of these fire — «Слот не найден»
+      // for every refusal told people the wrong thing about a slot that exists.
+      const text =
+        res.reason === "not_open" ? "Уже разобрали"
+        : res.reason === "slot_passed" ? "Эта смена уже прошла"
+        : res.reason === "not_active" ? "Ты в архиве — напиши админу"
+        : "Слот не найден";
+      await ctx.answerCallbackQuery({ text });
       return;
     }
     await ctx.answerCallbackQuery({ text: "Записал 🙋" });

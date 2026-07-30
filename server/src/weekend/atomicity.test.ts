@@ -22,11 +22,13 @@ function raiseOn(db: Db, name: string, event: string, table: string): void {
 }
 
 const SLOT = { date: "2099-01-03", start: "10:00", end: "18:00", title: "Ярмарка" };
+/** Well before SLOT's date — these tests are about writes, not about the calendar. */
+const TODAY = "2026-07-30";
 
 function slotWithVolunteer(db: Db) {
   const worker = createEmployee(db, { displayName: "Первый Работник" });
   const slot = createVacantSlot(db, SLOT);
-  expressInterest(db, slot.id, worker.id);
+  expressInterest(db, slot.id, worker.id, TODAY);
   return { worker, slot };
 }
 
@@ -36,7 +38,7 @@ describe("weekend assignment writes are all-or-nothing", () => {
     const { worker, slot } = slotWithVolunteer(db);
     raiseOn(db, "no_assignments", "INSERT", "weekend_assignments");
 
-    expect(() => assignSlot(db, slot.id, worker.id)).toThrow();
+    expect(() => assignSlot(db, slot.id, worker.id, TODAY)).toThrow();
 
     // Otherwise: a weekend_work entry in the schedule that no assignment explains,
     // so the slot shows nobody on it while the person's calendar says they work.
@@ -47,7 +49,7 @@ describe("weekend assignment writes are all-or-nothing", () => {
   it("unassign keeps the schedule entry when the assignment row can't be deleted", () => {
     const db = makeTestDb();
     const { worker, slot } = slotWithVolunteer(db);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    const assigned = assignSlot(db, slot.id, worker.id, TODAY);
     if (!assigned.ok) throw new Error("setup");
     raiseOn(db, "no_unassign", "DELETE", "weekend_assignments");
 
@@ -61,7 +63,7 @@ describe("weekend assignment writes are all-or-nothing", () => {
   it("confirmOffer writes no orphan entry when the confirmation can't be recorded", () => {
     const db = makeTestDb();
     const { worker, slot } = slotWithVolunteer(db);
-    const assigned = assignSlot(db, slot.id, worker.id);
+    const assigned = assignSlot(db, slot.id, worker.id, TODAY);
     if (!assigned.ok) throw new Error("setup");
     // The link to the schedule entry went missing — an admin deleted it directly.
     // confirmOffer then re-creates the entry and marks the offer confirmed.

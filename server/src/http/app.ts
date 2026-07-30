@@ -990,7 +990,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: express interest in a slot (idempotent)
   app.post("/api/weekend/slots/:id/interest", requireAuth(db, config.jwtSecret), (c) => {
-    const res = expressInterest(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    const res = expressInterest(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     return c.json({ ok: true }, 201);
   });
@@ -1037,6 +1037,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!isWeekend(body.date)) {
       return c.json({ error: "Вакантный день может быть только субботой или воскресеньем" }, 400);
     }
+    // A slot in the past can't be volunteered for or handed to anybody (see
+    // `slotUnusableReason`), so posting one only broadcasts a question nobody can
+    // answer. A mistyped year is the way this happens.
+    if (body.date < teamNow(config.teamTz).date) {
+      return c.json({ error: "Эта дата уже прошла — вакантную смену можно открыть только на будущее" }, 400);
+    }
     const slot = postSlot(db, {
       date: body.date,
       start: body.start,
@@ -1074,7 +1080,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/weekend/slots/:id/assign", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { employeeId?: unknown };
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
-    const res = assignSlot(db, Number(c.req.param("id")), body.employeeId);
+    const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     const slot = getVacantSlot(db, res.assignment.slotId);
     recordAudit(db, "weekend_assigned", c.get("auth").employeeId, {
