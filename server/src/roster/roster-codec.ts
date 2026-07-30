@@ -48,12 +48,39 @@ function parseRosterLine(line: string): string[] {
   return fields;
 }
 
+/**
+ * The header must be one unbroken run of days, ascending — the shape the export
+ * always writes.
+ *
+ * The import trusts that header twice over. The span it governs is first..last,
+ * and every cell is filed under its own column, so each way of breaking the run
+ * costs data silently: a duplicated column imports that day twice; a moved one
+ * turns the span inside out, so the «this period already holds entries» guard
+ * matches nothing and the month lands a second time on top of itself; a deleted
+ * one leaves a day *inside* the span that the file never describes, which an
+ * overwrite then wipes. In Excel all three are one drag, and none of them look
+ * wrong in the grid afterwards — which is the same reason a ragged row is
+ * refused above rather than padded.
+ */
+function assertConsecutive(dates: string[]): void {
+  for (let i = 1; i < dates.length; i++) {
+    const expected = nextDate(dates[i - 1]!);
+    if (dates[i] !== expected) {
+      throw new Error(
+        `шапка ростера: после ${toRuDate(dates[i - 1]!)} идёт ${toRuDate(dates[i]!)}, ` +
+          `а должно быть ${toRuDate(expected)} — колонка продублирована, переставлена или удалена`,
+      );
+    }
+  }
+}
+
 export function parseRosterCsv(text: string): ParsedRoster {
   const clean = text.replace(/^﻿/, "");
   const lines = clean.split(/\r\n|\r|\n/).filter((l) => l.length > 0);
   if (lines.length === 0) throw new Error("пустой файл ростера");
   const header = parseRosterLine(lines[0]);
   const dates = header.slice(1).map(parseRuDate); // header[0] is the empty name column
+  assertConsecutive(dates);
   const people = lines.slice(1).map((line, index) => {
     const fields = parseRosterLine(line);
     const name = fields[0].trim();

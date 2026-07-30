@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { createShift } from "../repo/shifts";
+import { createEmployee, linkTelegramAccount, listActive } from "../repo/employees";
+import { createShift, listShiftsInRange } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -191,6 +191,35 @@ describe("admin roster CSV import", () => {
     const body = new TextDecoder().decode(await exported.arrayBuffer());
     expect(body).toContain("Игорь Петров;k32;holiday");
     expect(body).toContain("Новый Сотрудник;k32-7;holiday");
+  });
+
+  it("refuses a file whose columns were reordered instead of importing the month twice", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const apply = (text: string, resolutions: unknown[]) =>
+      app.request("/api/admin/roster/import/apply", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ csv: text, resolutions }),
+      });
+
+    const august = ";01.08.2026;02.08.2026\r\nИгорь Петров;k32;k32";
+    const first = await apply(august, [{ csvName: "Игорь Петров", action: "create" }]);
+    expect(first.status).toBe(201);
+    const worker = listActive(db).find((e) => e.displayName === "Игорь Петров")!;
+    expect(listShiftsInRange(db, "2026-08-01", "2026-08-02")).toHaveLength(2);
+
+    // The same two days, columns swapped — one drag in Excel. The import reads the
+    // span it governs off the header's first and last date, so this file claims
+    // 02.08..01.08: backwards, therefore matching no existing row. The "this period
+    // already holds entries" guard finds nothing to warn about and the whole month
+    // lands a second time, on top of itself, without `overwrite` ever being asked for.
+    const swapped = ";02.08.2026;01.08.2026\r\nИгорь Петров;k32;k32";
+    const second = await apply(swapped, [{ csvName: "Игорь Петров", action: "rename", employeeId: worker.id }]);
+
+    expect(listShiftsInRange(db, "2026-08-01", "2026-08-02")).toHaveLength(2);
+    expect(second.status).toBe(400);
   });
 
   it("warns about an unreadable cell in the preview instead of refusing the file", async () => {

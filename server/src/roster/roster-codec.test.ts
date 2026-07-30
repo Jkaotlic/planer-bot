@@ -54,6 +54,20 @@ describe("parseRosterCsv", () => {
     expect(() => parseRosterCsv(text)).toThrow(/строка 3/);
   });
 
+  it("rejects a header whose columns are duplicated, reordered or missing", () => {
+    // The header is the file's calendar and the import trusts it twice: the span it
+    // governs is first..last, and every cell is filed under its own column. Each of
+    // these is one drag in Excel and none of them looks wrong in the grid afterwards.
+    expect(() => parseRosterCsv(";01.08.2026;01.08.2026\nИван;k32;k32")).toThrow(/02\.08\.2026/);
+    expect(() => parseRosterCsv(";02.08.2026;01.08.2026\nИван;k32;k32")).toThrow(/03\.08\.2026/);
+    expect(() => parseRosterCsv(";01.08.2026;03.08.2026\nИван;k32;k32")).toThrow(/02\.08\.2026/);
+  });
+
+  it("accepts a header that runs over a month boundary", () => {
+    const parsed = parseRosterCsv(";31.07.2026;01.08.2026\nИван;k32;k32");
+    expect(parsed.dates).toEqual(["2026-07-31", "2026-08-01"]);
+  });
+
   it("parses the synthetic fixture: 8 dates, 6 people, BOM stripped", () => {
     const parsed = parseRosterCsv(FIXTURE);
     expect(parsed.dates).toEqual([
