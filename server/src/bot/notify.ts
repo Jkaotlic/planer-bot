@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins, listActive } from "../repo/employees";
 import { safeErrorMessage } from "../util/safe-error";
@@ -70,20 +70,46 @@ export async function notifyUser(bot: Bot, telegramUserId: number, text: string)
 }
 
 /**
+ * How a send ended, for callers that retry.
+ *
+ * `permanent` separates «Telegram is busy, ask again» from «this chat will never
+ * open». Only the caller knows what to do with each, so the distinction is
+ * reported rather than acted on here.
+ */
+export type SendOutcome = { ok: true } | { ok: false; permanent: boolean; errorCode?: number };
+
+/**
+ * Whether repeating this exact call could ever succeed.
+ *
+ * 403 is a blocked bot or a deleted account; 400 is «chat not found» and friends.
+ * Both are answers about the chat, not about the moment — a retry sends the same
+ * request to the same closed door. Everything else (429 «too many requests», 5xx,
+ * a dropped connection) is worth another try, which is why a plain network error
+ * deliberately reads as non-permanent.
+ */
+export function isPermanentSendFailure(err: unknown): boolean {
+  return err instanceof GrammyError && (err.error_code === 403 || err.error_code === 400);
+}
+
+/**
  * Sends a shift reminder with the button that turns these off.
  *
  * The switch also lives in the Mini App, but nobody goes looking for a setting
  * they didn't know existed — the moment somebody wants these to stop is the
  * moment one is in front of them, so that is where the button belongs.
  */
-export async function notifyReminder(bot: Bot, telegramUserId: number, text: string): Promise<boolean> {
+export async function notifyReminder(bot: Bot, telegramUserId: number, text: string): Promise<SendOutcome> {
   const kb = new InlineKeyboard().text("🔕 Отключить напоминания", "reminders:off");
   try {
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error(`notifyReminder: failed for ${telegramUserId}:`, safeErrorMessage(err));
-    return false;
+    return {
+      ok: false,
+      permanent: isPermanentSendFailure(err),
+      errorCode: err instanceof GrammyError ? err.error_code : undefined,
+    };
   }
 }
 

@@ -6,6 +6,7 @@ import { employees } from "../db/schema";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift, updateShift } from "../repo/shifts";
 import { hasReminder } from "../repo/reminders";
+import { listRecentAudit } from "../repo/audit";
 import { runReminderTick } from "./reminder-service";
 import type { Db } from "../db/client";
 
@@ -20,6 +21,31 @@ function testBot() {
     return { ok: true, result: {} } as any;
   });
   return { bot, sent };
+}
+
+/**
+ * Bot whose sendMessage is refused by Telegram with a real API error, so grammY
+ * raises the same `GrammyError` production sees. `attempts` counts how many calls
+ * actually reached the wire — the point of the permanent-failure tests.
+ */
+function refusingBot(errorCode: number, description: string) {
+  const bot = new Bot("12345:tok");
+  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
+    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+  const state = { attempts: 0 };
+  bot.api.config.use((_prev, method) => {
+    if (method === "sendMessage") {
+      state.attempts += 1;
+      return { ok: false, error_code: errorCode, description } as any;
+    }
+    return { ok: true, result: {} } as any;
+  });
+  return {
+    bot,
+    get attempts() {
+      return state.attempts;
+    },
+  };
 }
 
 function linkedEmployee(db: Db, name: string, tgId: number) {
@@ -145,6 +171,55 @@ describe("runReminderTick", () => {
       expect(sent).toHaveLength(1);
       expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
       expect(errorLog).toHaveBeenCalledTimes(1);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("gives up after Telegram refuses for good, and says so in the journal", async () => {
+    // A blocked or deleted account refuses every time. The tick runs every five
+    // minutes from 20:00, so retrying a hopeless send meant ~48 futile calls a night,
+    // for as long as that person stays on the roster — and nobody ever found out they
+    // stopped hearing from the bot. The birthday tick already marks-either-way for
+    // exactly this reason; this path did not.
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+
+    try {
+      const blocked = refusingBot(403, "Forbidden: bot was blocked by the user");
+      expect(await runReminderTick(db, blocked.bot, { date: TODAY, time: "20:30" })).toBe(0);
+      expect(blocked.attempts).toBe(1);
+      expect(hasReminder(db, shift.id, "evening_before")).toBe(true); // won't be retried
+
+      const event = listRecentAudit(db, 10).find((row) => row.type === "reminder_undeliverable");
+      expect(event?.payload).toEqual({ employeeId: anya.id, shiftId: shift.id, errorCode: 403 });
+
+      // A later tick stays quiet instead of hammering a chat that will never open.
+      const again = refusingBot(403, "Forbidden: bot was blocked by the user");
+      expect(await runReminderTick(db, again.bot, { date: TODAY, time: "20:35" })).toBe(0);
+      expect(again.attempts).toBe(0);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("keeps retrying when Telegram is merely busy (429), and journals nothing", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+
+    try {
+      const busy = refusingBot(429, "Too Many Requests: retry after 5");
+      expect(await runReminderTick(db, busy.bot, { date: TODAY, time: "20:30" })).toBe(0);
+      expect(hasReminder(db, shift.id, "evening_before")).toBe(false); // still owed
+      expect(listRecentAudit(db, 10)).toEqual([]);
+
+      const { bot, sent } = testBot();
+      expect(await runReminderTick(db, bot, { date: TODAY, time: "20:35" })).toBe(1);
+      expect(sent).toHaveLength(1);
     } finally {
       errorLog.mockRestore();
     }
