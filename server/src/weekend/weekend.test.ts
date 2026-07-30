@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee } from "../repo/employees";
+import { createEmployee, archiveEmployee } from "../repo/employees";
 import { createShift, listShiftsByEmployee } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus } from "../repo/weekend";
 import {
@@ -240,5 +240,48 @@ describe("weekend market service", () => {
     expect(ranked[0]!.employeeId).toBe(passedOver.id);
     expect(ranked[0]!.passedOver).toBe(1);
     expect(ranked[1]!.passedOver).toBe(0);
+  });
+});
+
+// The bot's buttons and the HTTP middleware both refuse an archived person at the
+// door — but the door they guard is the *actor's*. An admin assigning somebody
+// else is an active actor picking an archived target, and that path had no check
+// at all: the person was written into a `weekend_work` shift on a schedule they
+// had just been taken off.
+describe("the weekend market and archived people", () => {
+  const SLOT = { date: "2099-01-03", start: "10:00", end: "18:00", title: "Ярмарка" };
+
+  it("refuses to assign an archived worker to a slot", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, SLOT);
+    expressInterest(db, slot.id, worker.id);
+    archiveEmployee(db, worker.id, "2026-01-01");
+
+    expect(assignSlot(db, slot.id, worker.id)).toEqual({ ok: false, reason: "not_active" });
+    expect(listShiftsByEmployee(db, worker.id)).toHaveLength(0);
+  });
+
+  it("drops an archived volunteer from the «кто хочет» list", () => {
+    const db = makeTestDb();
+    const staying = createEmployee(db, { displayName: "Первый Работник" });
+    const leaving = createEmployee(db, { displayName: "Второй Работник" });
+    const slot = createVacantSlot(db, SLOT);
+    expressInterest(db, slot.id, staying.id);
+    expressInterest(db, slot.id, leaving.id);
+    archiveEmployee(db, leaving.id, "2026-01-01");
+
+    // Otherwise the admin sees a name with no mark on it and picks it.
+    expect(interestedForSlot(db, slot.id).map((i) => i.employeeId)).toEqual([staying.id]);
+  });
+
+  it("refuses to record interest from an archived worker", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Первый Работник" });
+    const slot = createVacantSlot(db, SLOT);
+    archiveEmployee(db, worker.id, "2026-01-01");
+
+    expect(expressInterest(db, slot.id, worker.id)).toEqual({ ok: false, reason: "not_active" });
+    expect(interestedForSlot(db, slot.id)).toHaveLength(0);
   });
 });

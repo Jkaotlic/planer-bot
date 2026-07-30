@@ -219,3 +219,30 @@ describe("weekend-market endpoints", () => {
     expect((await res.json()).error).toBe("not_found");
   });
 });
+
+describe("the admin cannot put an archived worker on a weekend slot", () => {
+  it("refuses the assign (400, not_active) and stops showing them as a candidate", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 201);
+
+    const date = nextSaturday();
+    const posted = await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }));
+    const slotId = (await posted.json()).slot.id as number;
+    expect((await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token))).status).toBe(201);
+
+    await app.request(`/api/admin/employees/${anya.w.id}/archive`, authed(admin, {}));
+
+    // She volunteered before leaving; the admin's list must not still offer her.
+    const adminSlots = await app.request("/api/admin/weekend/slots", bearer(admin));
+    const entry = (await adminSlots.json()).slots.find((s: any) => s.slot.id === slotId);
+    expect(entry.interested).toHaveLength(0);
+
+    // And a direct call — the admin console keeps a stale list, or somebody scripts it.
+    const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
+    expect(assigned.status).toBe(400);
+    expect((await assigned.json()).error).toBe("not_active");
+    expect(listShiftsInRange(db, date, date)).toHaveLength(0);
+  });
+});
