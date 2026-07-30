@@ -3,7 +3,7 @@ import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, type Shift
 import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
-import { createSwapRequest, getSwapRequest, setSwapStatus, hasPendingSwap } from "../repo/swaps";
+import { createSwapRequest, getSwapRequest, setSwapStatus, findPendingSwapForPair } from "../repo/swaps";
 
 export type SwapNow = { date: string; time: string };
 export type SwapOutcome =
@@ -33,7 +33,10 @@ export function createSwap(
   if (!isSwappable(fromShift.category) || !isSwappable(toShift.category)) return { ok: false, reason: "not_swappable" };
   // A no-op swap: same day, same kind of shift — nothing would actually change hands.
   if (isIdenticalShift(fromShift, toShift)) return { ok: false, reason: "identical-shift" };
-  if (hasPendingSwap(db, input.fromShiftId, input.toShiftId)) return { ok: false, reason: "duplicate" };
+  // Same trade already open — either this person's own request («дождись ответа»)
+  // or the counterparty's request for the very same pair («ответь ему»).
+  const open = findPendingSwapForPair(db, input.fromShiftId, input.toShiftId);
+  if (open) return { ok: false, reason: open.pairing === "same" ? "duplicate" : "mirror" };
   const request = createSwapRequest(db, {
     fromEmployeeId: input.fromEmployeeId,
     fromShiftId: input.fromShiftId,

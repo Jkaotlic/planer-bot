@@ -23,6 +23,9 @@ export interface ProposeSwapScreenProps {
 const SWAP_ERROR_MESSAGES: Record<string, string> = {
   "identical-shift": "Это та же самая смена — обмен ничего не изменит.",
   duplicate: "Ты уже предложил обмен на эту смену — дождись ответа.",
+  // Not the same as `duplicate`: the request exists, but it's theirs, so the
+  // person is one tap from finishing this instead of proposing it again.
+  mirror: "Коллега уже предложил тебе ровно этот обмен — ответь на его заявку в «Обменах».",
   not_your_shift: "Эта смена больше не твоя — обнови страницу.",
   target_unassigned: "На эту смену сейчас никто не назначен.",
   same_person: "Нельзя предложить обмен самому себе.",
