@@ -16,7 +16,10 @@ import {
   listAssignmentsForEmployee,
   listConfirmedInRange,
   countConfirmedByEmployeeInMonth,
+  countPassedOver,
 } from "./weekend";
+import { weekendAssignments } from "../db/schema";
+import { eq } from "drizzle-orm";
 
 describe("weekend market repos", () => {
   it("creates a vacant slot and lists it among open slots", () => {
@@ -106,5 +109,57 @@ describe("weekend market repos", () => {
     const inRange = listConfirmedInRange(db, "2026-07-01", "2026-07-31");
     expect(inRange.map((a) => a.id)).toEqual([julyAssignment.id]);
     void augAssignment;
+  });
+});
+
+/**
+ * «Обойдён» = поднял руку, слот ушёл другим, а тебе места не досталось. Это
+ * второй ключ справедливости: кого раз за разом обходят, тот идёт выше в списке.
+ */
+describe("countPassedOver", () => {
+  const SLOT = { date: "2099-01-03", start: "10:00", end: "18:00" };
+
+  it("does not count a slot the person actually got, however many others got it too", () => {
+    const db = makeTestDb();
+    const [first, second, third] = ["Первый Работник", "Второй Работник", "Третий Работник"]
+      .map((displayName) => createEmployee(db, { displayName }));
+    const slot = createVacantSlot(db, SLOT);
+    for (const person of [first!, second!, third!]) {
+      addInterest(db, slot.id, person.id);
+      createAssignment(db, { slotId: slot.id, employeeId: person.id, hours: 8 });
+    }
+
+    // The slot needed three people and all three volunteers got it. Counting the
+    // other two assignments as «passed over» made sharing a slot *earn* priority.
+    expect(countPassedOver(db, first!.id)).toBe(0);
+    expect(countPassedOver(db, third!.id)).toBe(0);
+  });
+
+  it("counts a slot that went to somebody else", () => {
+    const db = makeTestDb();
+    const missed = createEmployee(db, { displayName: "Первый Работник" });
+    const got = createEmployee(db, { displayName: "Второй Работник" });
+    const slot = createVacantSlot(db, SLOT);
+    addInterest(db, slot.id, missed.id);
+    addInterest(db, slot.id, got.id);
+    createAssignment(db, { slotId: slot.id, employeeId: got.id, hours: 8 });
+
+    expect(countPassedOver(db, missed.id)).toBe(1);
+    expect(countPassedOver(db, got.id)).toBe(0);
+  });
+
+  it("does not count a slot the person was offered and turned down", () => {
+    const db = makeTestDb();
+    const declined = createEmployee(db, { displayName: "Первый Работник" });
+    const other = createEmployee(db, { displayName: "Второй Работник" });
+    const slot = createVacantSlot(db, SLOT);
+    addInterest(db, slot.id, declined.id);
+    addInterest(db, slot.id, other.id);
+    const offer = createAssignment(db, { slotId: slot.id, employeeId: declined.id, hours: 8 });
+    db.update(weekendAssignments).set({ status: "declined" }).where(eq(weekendAssignments.id, offer.id)).run();
+    createAssignment(db, { slotId: slot.id, employeeId: other.id, hours: 8 });
+
+    // They were asked and said no — that is not being passed over.
+    expect(countPassedOver(db, declined.id)).toBe(0);
   });
 });
