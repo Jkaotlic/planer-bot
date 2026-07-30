@@ -6,6 +6,8 @@ import { getEmployeeById } from "../repo/employees";
 import { hasReminder, addReminder } from "../repo/reminders";
 import { recordAudit } from "../repo/audit";
 import { notifyReminder } from "../bot/notify";
+import { safeErrorMessage } from "../util/safe-error";
+import type { Shift } from "../db/schema";
 
 const REMINDER_KIND = "evening_before";
 const QUIET_HOUR_CUTOFF = "20:00";
@@ -21,9 +23,26 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
 
   let count = 0;
   for (const shift of shifts) {
-    if (hasReminder(db, shift.id, REMINDER_KIND)) continue;
+    try {
+      count += await remindFor(db, bot, shift);
+    } catch (err) {
+      // The list of shifts was read once, up front, and each send below awaits
+      // Telegram — an admin deleting tomorrow's shift in that gap leaves the
+      // «reminder sent» write pointing at a row that no longer exists. That used
+      // to throw out of this loop, so everybody further down the list got nothing
+      // that evening and nothing said why. One person's shift going wrong is not
+      // a reason for the other twenty to stay unreminded.
+      console.error(`runReminderTick: shift ${shift.id} skipped:`, safeErrorMessage(err));
+    }
+  }
+  return count;
+}
+
+/** One shift's reminder. Returns 1 if it went out, 0 otherwise. */
+async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
+    if (hasReminder(db, shift.id, REMINDER_KIND)) return 0;
     const owner = getEmployeeById(db, shift.employeeId!);
-    if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) continue;
+    if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) return 0;
 
     const start = shift.start!;
     const end = shift.end!;
@@ -40,8 +59,7 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
     const outcome = await notifyReminder(bot, owner.telegramUserId, text);
     if (outcome.ok) {
       addReminder(db, shift.id, REMINDER_KIND);
-      count++;
-      continue;
+      return 1;
     }
     if (outcome.permanent) {
       // A blocked bot or a deleted account refuses every time, and this tick runs
@@ -58,6 +76,5 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
         errorCode: outcome.errorCode,
       });
     }
-  }
-  return count;
+    return 0;
 }
