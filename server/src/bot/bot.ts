@@ -17,6 +17,14 @@ import { addressOf } from "@planer/shared";
 import { notifyUser, notifyAdmins } from "./notify";
 import { safeErrorMessage } from "../util/safe-error";
 
+// How long an /admin magic link stays valid. It carries a full admin JWT in
+// plain Telegram chat text — Telegram syncs history to every signed-in device
+// and includes it in chat exports, so a copy sitting around for weeks is a
+// standing liability. 12 hours covers a single working day (open it in the
+// morning, still good after lunch) without needing single-use tokens or a
+// revocation store; re-requesting is one more `/admin` message to the bot.
+const ADMIN_LINK_TTL_SEC = 12 * 3600;
+
 export interface BotDeps {
   db: Db;
   config: Config;
@@ -142,10 +150,10 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply("Сначала отправь /start.");
       return;
     }
-    const token = await issueToken({ employeeId: admin.id, isAdmin: true }, config.jwtSecret, 30 * 24 * 3600);
+    const token = await issueToken({ employeeId: admin.id, isAdmin: true }, config.jwtSecret, ADMIN_LINK_TTL_SEC);
     const url = `${config.publicUrl}/admin/#token=${token}`;
     await ctx.reply(
-      `Вход в админку (ссылка личная, действует 30 дней — не пересылай):\n${url}`,
+      `Вход в админку (ссылка личная, не пересылай — действует 12 часов, потом попроси новую через /admin):\n${url}`,
       { link_preview_options: { is_disabled: true } },
     );
   });
