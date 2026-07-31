@@ -143,10 +143,19 @@ describe("applyRosterImport", () => {
       .values({ fromEmployeeId: b.id, fromShiftId: sb.id, toEmployeeId: a.id, toShiftId: sa.id, status: "accepted" })
       .returning().all()[0]!;
 
-    const decoded = decode([{ name: "Первый Работник", entries: [dayShift("2026-06-01")] }]);
+    // Both rows, the way a real export writes them — the import replaces the month
+    // of the people the file names, so a file about this swap has to name both.
+    const decoded = decode([
+      { name: "Первый Работник", entries: [dayShift("2026-06-01")] },
+      { name: "Второй Работник", entries: [] },
+    ]);
     const result = applyRosterImport(
-      db, decoded, [{ csvName: "Первый Работник", action: "rename", employeeId: a.id }], null,
-      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+      db, decoded,
+      [
+        { csvName: "Первый Работник", action: "rename", employeeId: a.id },
+        { csvName: "Второй Работник", action: "rename", employeeId: b.id },
+      ],
+      null, { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
     );
 
     expect(result.swapsExpired).toBe(1);
@@ -249,6 +258,49 @@ describe("applyRosterImport", () => {
 
     expect(summary.entriesDeleted).toBe(1); // only 06-02, the day the file actually describes
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
+  });
+
+  // Deleting a row in Excel is one keystroke, and nothing on the confirm screen
+  // mentions the person afterwards — «Кто есть чей» lists only the rows the file
+  // carries. His call: a missing row means the file said nothing about them, so
+  // their month stands. Clearing somebody's month is done by keeping their row and
+  // filling it with 'holiday', which is what the export writes anyway.
+  it("overwrite leaves alone somebody whose row is not in the file", () => {
+    const db = makeTestDb();
+    const kept = createEmployee(db, { displayName: "Оставшийся Роман" });
+    const dropped = createEmployee(db, { displayName: "Вырезанный Виктор" });
+    createShift(db, { ...dayShift("2026-06-01"), employeeId: kept.id });
+    createShift(db, { ...dayShift("2026-06-02"), employeeId: dropped.id });
+    createShift(db, { ...dayShift("2026-06-03"), employeeId: dropped.id });
+
+    const csv = buildRosterCsv(db, "2026-06-01", "2026-06-30");
+    const trimmed = csv.split("\r\n").filter((line) => !line.startsWith("Вырезанный Виктор")).join("\r\n");
+    const parsed = parseRosterCsv(trimmed);
+    expect(parsed.people.map((p) => p.name)).toEqual(["Оставшийся Роман"]);
+
+    const summary = applyRosterImport(
+      db, decodeRoster(parsed, listActiveTemplates(db)),
+      [{ csvName: "Оставшийся Роман", action: "rename", employeeId: kept.id }], null,
+      { overwrite: true, span: { from: parsed.dates[0]!, to: parsed.dates.at(-1)! } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1); // Роман's day, the only one the file describes
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-30").filter((s) => s.employeeId === dropped.id)).toHaveLength(2);
+  });
+
+  it("still clears the month of somebody whose row IS in the file and empty", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Пустая Строка" });
+    createShift(db, { ...dayShift("2026-06-15"), employeeId: w.id });
+
+    const summary = applyRosterImport(
+      db, decode([{ name: "Пустая Строка", entries: [] }]),
+      [{ csvName: "Пустая Строка", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1);
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-30")).toHaveLength(0);
   });
 
   it("overwrite refuses when an existing range reaches outside the file's span", () => {
