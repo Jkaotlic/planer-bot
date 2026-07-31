@@ -311,3 +311,58 @@ describe("a vacant slot in the past", () => {
     expect(sent).toHaveLength(0); // and nobody was asked
   });
 });
+
+// The one write path into `shifts` that never went through `createEntrySchema`: the
+// slot's own times are copied into the schedule entry when somebody is assigned.
+// Nothing checked they were times at all — `typeof === "string"` was the whole guard.
+describe("вакантный слот проверяет время, а не просто «строка»", () => {
+  it("отказывает нечасам, и никого об этом не спрашивает", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date: nextSaturday(), start: "абв", end: "по обстоятельствам" }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/ЧЧ:ММ/);
+    expect(sent).toHaveLength(0); // the team is not asked about a slot that can't exist
+  });
+
+  it("отказывает и одиночной цифре часа — сортировка расписания идёт по строке", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const res = await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "9:00", end: "18:00" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("отказывает дате, которая не дата, тем же 400 — а не мимо проверки выходного", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const res = await app.request("/api/admin/weekend/slots", authed(admin, { date: "31.02.2026", start: "10:00", end: "18:00" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/ГГГГ-ММ-ДД/);
+  });
+
+  // What the missing check actually cost: the slot went out to the whole team, and
+  // the failure surfaced two steps later as an opaque 500 on «Назначить» —
+  // `hours` is computed from those times, and NaN violates NOT NULL.
+  it("нормальные часы по-прежнему проходят и назначаются", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const { w, token } = await worker(db, app, "Волонтёр Вова", 999);
+
+    const posted = await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }));
+    expect(posted.status).toBe(201);
+    const slotId = (await posted.json()).slot.id as number;
+
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(token));
+    const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: w.id }));
+    expect(assigned.status).toBe(201);
+  });
+});

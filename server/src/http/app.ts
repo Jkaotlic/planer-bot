@@ -64,6 +64,7 @@ import {
   isAbsence,
   countsForBalance,
   dateStr,
+  timeStr,
   dayNumber,
   rotationQueue,
   describeTurn,
@@ -1054,6 +1055,20 @@ export function createApp(deps: AppDeps): Hono<Env> {
     };
     if (typeof body.date !== "string" || typeof body.start !== "string" || typeof body.end !== "string") {
       return c.json({ error: "date, start and end are required" }, 400);
+    }
+    // The slot's own times are copied verbatim into a `weekend_work` entry when
+    // somebody is assigned — the one write into `shifts` that never passes through
+    // `createEntrySchema`. «Строка» was the whole guard, so «абв» went into the
+    // database, went out to the whole team as «нужен человек на выходной», and
+    // surfaced two steps later as a bare 500 on «Назначить»: `hours` is derived from
+    // these times, and NaN violates NOT NULL. Same schemas the entry API uses.
+    if (!dateStr.safeParse(body.date).success) {
+      return c.json({ error: "Дата должна быть в виде ГГГГ-ММ-ДД" }, 400);
+    }
+    for (const [label, value] of [["Начало", body.start], ["Конец", body.end]] as const) {
+      if (!timeStr.safeParse(value).success) {
+        return c.json({ error: `${label} смены должно быть временем в виде ЧЧ:ММ` }, 400);
+      }
     }
     // Assigning a slot writes a weekend_work entry, so a weekday slot could never
     // produce a coherent one — reject it here rather than at assign time.
