@@ -8,6 +8,31 @@ import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
 
 /**
+ * Причина отказа — человеческой фразой.
+ *
+ * Сервер отдаёт часть причин кодами (`last_admin`, `archived`, …), а клиент
+ * кладёт их в `Error.message` как есть. Правило проекта давно записано в `App`:
+ * код отказа — не то, что показывают человеку. Пока такой ответ рисовался за
+ * верхним краем экрана, этого не было видно; теперь он в строке, и читать его
+ * должен человек. Всё, что сервер уже написал по-русски (сторож тёзок, проверки
+ * полей), проходит насквозь.
+ */
+export function refusalText(message: string): string {
+  switch (message) {
+    case "last_admin":
+      return "Это последний админ — сначала назначь админом кого-то ещё.";
+    case "archived":
+      return "Работник в архиве — сначала верни его из архива.";
+    case "already_linked":
+      return "Телеграм уже привязан — ссылка больше не нужна.";
+    case "not_found":
+      return "Такой записи больше нет — обнови экран.";
+    default:
+      return message;
+  }
+}
+
+/**
  * "Работники" (admin): active/archived rosters with archive/restore, plus an
  * inline "add worker" form that hands back a copyable invite link. Mirrors the
  * desktop `EmployeesScreen`, rebuilt as a single mobile column.
@@ -68,7 +93,7 @@ export function AdminEmployeesScreen() {
       await action();
       await reload();
     } catch (err) {
-      setRowError({ employeeId: id, message: err instanceof Error ? err.message : "Не удалось выполнить действие" });
+      setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось выполнить действие" });
     } finally {
       setBusyId(null);
     }
@@ -109,7 +134,7 @@ export function AdminEmployeesScreen() {
       const info = await apiClient.getEmployeeInvite(employee.id, false);
       setRowInvite({ employeeId: employee.id, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
     } catch (err) {
-      setRowError({ employeeId: employee.id, message: err instanceof Error ? err.message : "Не удалось получить ссылку" });
+      setRowError({ employeeId: employee.id, message: err instanceof Error ? refusalText(err.message) : "Не удалось получить ссылку" });
     } finally {
       setBusyId(null);
     }

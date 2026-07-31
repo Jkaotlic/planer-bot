@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { apiClient } from "../../api/client";
-import { AdminEmployeesScreen } from "./AdminEmployeesScreen";
+import { AdminEmployeesScreen, refusalText } from "./AdminEmployeesScreen";
 
 /**
  * Тот же дефект, что был у «🔗 Ссылка», только с отказом вместо ссылки.
@@ -26,8 +26,9 @@ import { AdminEmployeesScreen } from "./AdminEmployeesScreen";
 // React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** Что вернёт отказавший сервер — код, который клиент отдаёт как есть. */
-const REFUSAL = "last_admin";
+/** Что вернёт отказавший сервер, и что из этого обязан прочитать человек. */
+const REFUSAL_CODE = "last_admin";
+const REFUSAL = refusalText(REFUSAL_CODE);
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -82,7 +83,7 @@ describe("отказ на действие в строке остаётся в �
     const rows = archiveButtons(el);
     expect(rows.length).toBeGreaterThan(1);
 
-    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL));
+    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL_CODE));
 
     // Последняя строка: именно там верхний блок ошибки уже вне экрана.
     const target = rows[rows.length - 1]!;
@@ -97,7 +98,7 @@ describe("отказ на действие в строке остаётся в �
     const rows = archiveButtons(el);
     expect(rows.length).toBeGreaterThan(1);
 
-    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL));
+    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL_CODE));
 
     const target = rows[rows.length - 1]!;
     const neighbour = rows[0]!;
@@ -113,7 +114,7 @@ describe("отказ на действие в строке остаётся в �
     const rows = archiveButtons(el);
     const target = rows[rows.length - 1]!;
 
-    const spy = vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL));
+    const spy = vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL_CODE));
     await act(async () => target.click());
     await settle();
     expect(rowOf(target).textContent ?? "").toContain(REFUSAL);
@@ -124,5 +125,24 @@ describe("отказ на действие в строке остаётся в �
     await settle();
 
     expect(el.textContent ?? "").not.toContain(REFUSAL);
+  });
+});
+
+describe("refusalText — код отказа превращается в фразу", () => {
+  it("переводит коды, которые сервер отдаёт как есть", () => {
+    expect(refusalText("last_admin")).toBe("Это последний админ — сначала назначь админом кого-то ещё.");
+    expect(refusalText("archived")).toBe("Работник в архиве — сначала верни его из архива.");
+    expect(refusalText("already_linked")).toBe("Телеграм уже привязан — ссылка больше не нужна.");
+    expect(refusalText("not_found")).toBe("Такой записи больше нет — обнови экран.");
+  });
+
+  it("пропускает насквозь то, что сервер уже написал по-русски", () => {
+    // Сторож тёзок отвечает готовой фразой — переводить её нечем и незачем.
+    const taken = "Уже есть работник с ФИО «Смирнова Анна»";
+    expect(refusalText(taken)).toBe(taken);
+  });
+
+  it("никогда не отдаёт пустоту вместо незнакомой причины", () => {
+    expect(refusalText("что-то новое")).toBe("что-то новое");
   });
 });
