@@ -17,8 +17,20 @@ export function AdminEmployeesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
-  /** The most recently created worker's invite, shown until dismissed. */
+  /** The invite for a worker just added — the card sits under the form that made them. */
   const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
+  /**
+   * The invite re-shown from a row's «🔗 Ссылка», kept apart from the one above.
+   *
+   * They are two different moments and they belong in two different places. The
+   * created one has the form right above it, so a card at the top reads correctly.
+   * A row's button is somewhere down a list of thirty, and putting its answer at the
+   * top of that list meant the screen changed only outside the visible area: no
+   * link, no error, no sign anything had happened at all. It is the same request
+   * either way — the server answers 200 with a live t.me link — so what was broken
+   * was where the answer landed.
+   */
+  const [rowInvite, setRowInvite] = useState<{ employeeId: number; inviteToken: string; inviteLink: string | null } | null>(null);
 
   async function reload() {
     setEmployees(await apiClient.getAdminEmployees());
@@ -66,13 +78,30 @@ export function AdminEmployeesScreen() {
     }
   }
 
-  async function showInvite(employee: Employee, regenerate = false) {
+  /** From the top card: the worker was created a moment ago, the card is right there. */
+  async function refreshCreatedInvite(employee: Employee) {
     setError(null);
     try {
-      const info = await apiClient.getEmployeeInvite(employee.id, regenerate);
+      const info = await apiClient.getEmployeeInvite(employee.id, true);
       setInvite({ employee, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось получить ссылку");
+    }
+  }
+
+  /** From a row's «🔗 Ссылка»: the answer goes back into that row. Tapping it again
+   *  folds it away, so the button is never a no-op in either direction. */
+  async function showRowInvite(employee: Employee) {
+    if (rowInvite?.employeeId === employee.id) { setRowInvite(null); return; }
+    setError(null);
+    setBusyId(employee.id);
+    try {
+      const info = await apiClient.getEmployeeInvite(employee.id, false);
+      setRowInvite({ employeeId: employee.id, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось получить ссылку");
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -101,7 +130,7 @@ export function AdminEmployeesScreen() {
           <CardStack>
             <AddEmployeeForm busy={adding} onAdd={handleAdd} />
             {invite && (
-              <InviteCard invite={invite} onRegenerate={() => void showInvite(invite.employee, true)} onDismiss={() => setInvite(null)} />
+              <InviteCard invite={invite} onRegenerate={() => void refreshCreatedInvite(invite.employee)} onDismiss={() => setInvite(null)} />
             )}
           </CardStack>
         </Section>
@@ -129,7 +158,8 @@ export function AdminEmployeesScreen() {
                 onToggleAdmin={() => withBusy(e.id, () => apiClient.setEmployeeAdmin(e.id, !e.isAdmin))}
                 onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
                 onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
-                onShowInvite={() => void showInvite(e)}
+                onShowInvite={() => void showRowInvite(e)}
+                invite={rowInvite?.employeeId === e.id ? rowInvite : null}
               />
             ))
           )}
@@ -148,7 +178,8 @@ export function AdminEmployeesScreen() {
                 onAction={() => withBusy(e.id, () => apiClient.restoreEmployee(e.id))}
                 onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
                 onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
-                onShowInvite={() => void showInvite(e)}
+                onShowInvite={() => void showRowInvite(e)}
+                invite={rowInvite?.employeeId === e.id ? rowInvite : null}
               />
             ))
           )}
@@ -158,8 +189,9 @@ export function AdminEmployeesScreen() {
   );
 }
 
-function EmployeeRow({
+export function EmployeeRow({
   employee,
+  invite,
   actionLabel,
   busy,
   onAction,
@@ -172,6 +204,8 @@ function EmployeeRow({
   onBirthDate,
 }: {
   employee: Employee;
+  /** The link this row asked for, shown right here — see the note on `rowInvite`. */
+  invite?: { inviteToken: string; inviteLink: string | null } | null;
   actionLabel: string;
   busy: boolean;
   onAction: () => void;
@@ -315,7 +349,29 @@ function EmployeeRow({
           {actionLabel}
         </Button>
       </div>
+      {invite && !linked && <RowInviteLink invite={invite} />}
     </CardShell>
+  );
+}
+
+/** The invite link, in the row that asked for it. Selectable rather than only
+ *  copyable: the Mini App webview has no clipboard in an insecure context, and a
+ *  link nobody can get out of the screen is the same as no link. */
+function RowInviteLink({ invite }: { invite: { inviteToken: string; inviteLink: string | null } }) {
+  const link = invite.inviteLink ?? invite.inviteToken;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <MetaLine icon="🔗">Отправь ссылку — по ней работник привяжет Telegram.</MetaLine>
+      <div
+        style={{
+          marginTop: 6, padding: "8px 10px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.4,
+          wordBreak: "break-all", userSelect: "all",
+          background: "var(--tgui--secondary_fill, rgba(128,128,128,.12))",
+        }}
+      >
+        {link}
+      </div>
+    </div>
   );
 }
 
