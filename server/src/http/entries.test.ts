@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { getShift } from "../repo/shifts";
+import { getShift, createShift } from "../repo/shifts";
+import { buildRosterCsv } from "../roster/roster-service";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
@@ -284,5 +285,54 @@ describe("записи на архивного сотрудника", () => {
       date: "2026-09-01", category: "shift", start: "09:00", end: "18:00", employeeId: null, title: "День",
     }));
     expect(res.status).toBe(201);
+  });
+});
+
+// Он правит нераспознанную клетку в обычную смену — и клетка остаётся прежней.
+// `unrecognisedCode` не описан в `updateEntrySchema`, поэтому снять его было нечем,
+// а читатели ставят его выше всего: `encodeEntryCode` возвращает сырой текст первым,
+// отчёт кладёт запись в ведро «не распознано», обе сетки рисуют её тем же.
+describe("нераспознанная клетка чинится правкой", () => {
+  const unread = { date: "2026-08-12", category: "shift" as const, employeeId: null, unrecognisedCode: "Ко" };
+
+  it("правка, называющая смену, снимает пометку «не распознано»", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const entry = createShift(db, unread);
+
+    const res = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      templateId: 2, title: "День", start: "09:00", end: "18:00",
+    }, "PATCH"));
+
+    expect(res.status).toBe(200);
+    expect(getShift(db, entry.id)!.unrecognisedCode).toBeNull();
+  });
+
+  it("после этого выгрузка пишет нормальный код, а не сырой текст из файла", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Правленый Пётр" });
+    const entry = createShift(db, { ...unread, employeeId: w.id });
+    expect(buildRosterCsv(db, "2026-08-12", "2026-08-12")).toContain("Ко");
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      templateId: 2, title: "День", start: "09:00", end: "18:00",
+    }, "PATCH"));
+
+    const csv = buildRosterCsv(db, "2026-08-12", "2026-08-12");
+    expect(csv).toContain("k32");
+    expect(csv).not.toContain("Ко");
+  });
+
+  it("а перенос клетки на другой день её не «дочитывает»", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const entry = createShift(db, unread);
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: "2026-08-13" }, "PATCH"));
+    expect(getShift(db, entry.id)!.unrecognisedCode).toBe("Ко");
   });
 });
