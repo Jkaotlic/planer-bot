@@ -4,7 +4,7 @@ import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archi
 import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "./roster-service";
-import type { DecodeResult } from "./roster-codec";
+import { parseRosterCsv, type DecodeResult } from "./roster-codec";
 import { swapRequests } from "../db/schema";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
@@ -287,6 +287,29 @@ describe("buildRosterCsv", () => {
     const codes = rowFor(csv, "Рыночный Игорь");
     expect(codes[0]).toBe("?");        // worked — must not be masked as a day off
     expect(codes[1]).toBe("holiday");  // genuinely no covering entry
+  });
+
+  // The one cell whose text is not from our own vocabulary: an earlier import kept
+  // a cell it could not read, verbatim, and the export has to write it back out.
+  // Excel writes a cell containing the delimiter as one quoted field, so that text
+  // really can carry ';' and '"' — and an unescaped one makes the row wider than the
+  // header, i.e. the export produces a file its own import refuses.
+  it("quotes an unreadable code carrying the delimiter, so the file it writes can be read back", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Странный Стас" });
+    createShift(db, { date: "2026-06-01", category: "shift", employeeId: w.id, unrecognisedCode: "отпуск; с 5-го" });
+
+    const parsed = parseRosterCsv(buildRosterCsv(db, "2026-06-01", "2026-06-02"));
+    expect(parsed.people[0]!.cells.map((c) => c.code)).toEqual(["отпуск; с 5-го", "holiday"]);
+  });
+
+  it("quotes an unreadable code carrying a quote character", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Кавычка Кирилл" });
+    createShift(db, { date: "2026-06-01", category: "shift", employeeId: w.id, unrecognisedCode: 'вых"' });
+
+    const parsed = parseRosterCsv(buildRosterCsv(db, "2026-06-01", "2026-06-01"));
+    expect(parsed.people[0]!.cells[0]!.code).toBe('вых"');
   });
 
   it("listShiftsOverlapping paints a multi-day absence that started before the export window", () => {
