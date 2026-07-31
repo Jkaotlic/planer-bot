@@ -117,11 +117,23 @@ export function applyRosterImport(
         // no standing to say he didn't.
         const crowded = crowdedCells(existing);
         const inTheGrid = new Set(listActive(db).map((employee) => employee.id));
+        // And the cells the FILE marks '?'. Both admin screens promise «клеток "?" —
+        // N, их импорт не тронет», so a '?' typed by hand has to mean it too, not
+        // just one written by the export.
+        const spared = new Set(
+          decoded.preserved.flatMap((cell) => {
+            const res = byName.get(cell.name);
+            return res?.action === "rename" ? [cellKey(res.employeeId, cell.date)] : [];
+          }),
+        );
+        const untouchable = (s: { employeeId: number | null; date: string; endDate: string | null }) =>
+          datesInRange(s.date, s.endDate ?? s.date)
+            .some((d) => crowded.has(cellKey(s.employeeId, d)) || spared.has(cellKey(s.employeeId, d)));
         const encodable = existing.filter(
           (s) =>
             s.employeeId != null && inTheGrid.has(s.employeeId) &&
             encodeEntryCode(s, templatesById) !== UNENCODABLE_CODE &&
-            !datesInRange(s.date, s.endDate ?? s.date).some((d) => crowded.has(cellKey(s.employeeId, d))),
+            !untouchable(s),
         );
 
         // A range that starts before or ends after the span reaches outside the file's
