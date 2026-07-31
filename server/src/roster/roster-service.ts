@@ -110,9 +110,16 @@ export function applyRosterImport(
         // recreate them, so overwriting must leave them exactly where they are. Same
         // for a day carrying two entries: the export writes '?' over the whole cell,
         // so neither half is the file's to delete.
+        //
+        // Same rule one level up, about rows rather than cells: the export writes a
+        // row per ACTIVE worker, so an archived person's past month is not in the
+        // file at all. The file has no way to say «he worked that Tuesday», so it has
+        // no standing to say he didn't.
         const crowded = crowdedCells(existing);
+        const inTheGrid = new Set(listActive(db).map((employee) => employee.id));
         const encodable = existing.filter(
           (s) =>
+            s.employeeId != null && inTheGrid.has(s.employeeId) &&
             encodeEntryCode(s, templatesById) !== UNENCODABLE_CODE &&
             !datesInRange(s.date, s.endDate ?? s.date).some((d) => crowded.has(cellKey(s.employeeId, d))),
         );

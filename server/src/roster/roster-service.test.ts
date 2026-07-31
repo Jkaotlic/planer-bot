@@ -198,6 +198,31 @@ describe("applyRosterImport", () => {
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01").map((s) => s.title).sort()).toEqual(["Вечер", "День"]);
   });
 
+  // The export writes one row per ACTIVE worker, so an archived person's past month
+  // is not in the file at all — and what the file cannot describe it cannot delete.
+  // In the live DB one archived worker holds 21 June entries; re-uploading a
+  // corrected June used to wipe them, changing history the reports read.
+  it("overwrite keeps the entries of somebody the export cannot write a row for", () => {
+    const db = makeTestDb();
+    const stays = createEmployee(db, { displayName: "Работающий Роман" });
+    const gone = createEmployee(db, { displayName: "Уволенный Олег" });
+    createShift(db, { ...dayShift("2026-06-10"), employeeId: gone.id });
+    createShift(db, { ...dayShift("2026-06-11"), employeeId: stays.id });
+    archiveEmployee(db, gone.id, "2026-07-01"); // archiving only clears FUTURE shifts
+
+    const csv = buildRosterCsv(db, "2026-06-01", "2026-06-30");
+    expect(csv).not.toContain("Уволенный Олег"); // the file has no way to name him
+    const parsed = parseRosterCsv(csv);
+    const summary = applyRosterImport(
+      db, decodeRoster(parsed, listActiveTemplates(db)),
+      [{ csvName: "Работающий Роман", action: "rename", employeeId: stays.id }], null,
+      { overwrite: true, span: { from: parsed.dates[0]!, to: parsed.dates.at(-1)! } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1); // only the row the file actually carries
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-30").filter((s) => s.employeeId === gone.id)).toHaveLength(1);
+  });
+
   it("overwrite refuses when an existing range reaches outside the file's span", () => {
     const db = makeTestDb();
     const w = createEmployee(db, { displayName: "Отпускник Олег" });
