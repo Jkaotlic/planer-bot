@@ -10,6 +10,7 @@
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p server/tsconfig.json && tsc -p admin/tsconfig.json && tsc -p miniapp/tsconfig.json"
   },
   "devDependencies": {
+    "jsdom": "^30.0.1",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

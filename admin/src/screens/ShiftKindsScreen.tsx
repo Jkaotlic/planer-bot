@@ -154,6 +154,23 @@ function KindCard({
     };
   }, [open, kind.templateId, kind.pool.length]);
 
+  /**
+   * The select is controlled off `queue`, and `queue` is only re-read when the
+   * card opens — so saving alone left React putting the old value straight back:
+   * the admin picked «по неделям», the control snapped to «по дням», and the
+   * setting looked like it hadn't taken even though the server had already
+   * written it. Show the choice at once, then re-read the queue: the «Следующие:
+   * …» labels are folded into words server-side by this very unit, so they are
+   * stale until the whole queue comes back.
+   * MIRRORS `changeUnit` in the Mini App's AdminShiftKinds.
+   */
+  async function changeUnit(unit: "day" | "week") {
+    setQueue((prev) => (prev ? { ...prev, rotationUnit: unit } : prev));
+    await onRotationUnit(unit);
+    const fresh = await apiClient.getTemplateQueue(kind.templateId).catch(() => null);
+    if (fresh) setQueue(fresh);
+  }
+
   return (
     <section className="kind-card">
       <button type="button" className="kind-card-head" onClick={onToggleOpen} aria-expanded={open}>
@@ -176,7 +193,7 @@ function KindCard({
               <select
                 value={queue?.rotationUnit ?? "day"}
                 disabled={busy || !queue}
-                onChange={(e) => void onRotationUnit(e.target.value as "day" | "week")}
+                onChange={(e) => void changeUnit(e.target.value as "day" | "week")}
               >
                 <option value="day">по дням</option>
                 <option value="week">по неделям</option>
