@@ -241,7 +241,8 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
             )}
             {state.preview.preservedCount > 0 && (
               <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 8 }}>
-                Клеток «?» — {state.preview.preservedCount}: работа в выходной и своё время. Их импорт не тронет.
+                Клеток «?» — {state.preview.preservedCount}: работа в выходной, своё время, две записи в один день. Их
+                импорт не тронет.
               </div>
             )}
           </CardShell>

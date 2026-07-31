@@ -233,6 +233,38 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
   return { perPerson, unknowns, preserved, proposedHolidays };
 }
 
+/** One (person, day) cell of the roster grid. */
+export function cellKey(employeeId: number | null, date: string): string {
+  return `${employeeId ?? "—"}|${date}`;
+}
+
+/**
+ * The cells the grid cannot describe: a cell holds exactly one code, so a day
+ * carrying two entries is as inexpressible as an entry the vocabulary has no code
+ * for. Two non-overlapping entries in one day are legal and do happen (a short
+ * duty in the morning, a shift in the evening).
+ *
+ * Both halves of the round trip read this: the export writes '?' there, and an
+ * overwrite leaves those entries where they are. They have to agree — '?' means
+ * «there is something here, leave it alone», and an entry the file cannot re-create
+ * must not be deleted on the file's word. Until such a day is fixed in the app it
+ * stays outside the CSV's reach, exactly like weekend work.
+ */
+export function crowdedCells(
+  entries: { employeeId: number | null; date: string; endDate: string | null }[],
+): Set<string> {
+  const seen = new Set<string>();
+  const crowded = new Set<string>();
+  for (const entry of entries) {
+    for (const date of datesInRange(entry.date, entry.endDate ?? entry.date)) {
+      const key = cellKey(entry.employeeId, date);
+      if (seen.has(key)) crowded.add(key);
+      else seen.add(key);
+    }
+  }
+  return crowded;
+}
+
 export function datesInRange(from: string, to: string): string[] {
   const out: string[] = [];
   for (let d = from; d <= to; d = nextDate(d)) out.push(d);

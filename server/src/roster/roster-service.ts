@@ -6,7 +6,7 @@ import { listActive, getEmployeeById } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { swapAuditPayload, type SwapAuditPayload } from "../util/message-lines";
-import { datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, UNENCODABLE_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
+import { cellKey, crowdedCells, datesInRange, serializeRosterCsv, encodeEntryCode, NON_WORKING_CODE, UNENCODABLE_CODE, type DecodeResult, type UnknownCell } from "./roster-codec";
 
 export type PersonResolution =
   | { csvName: string; action: "rename"; employeeId: number }
@@ -107,8 +107,15 @@ export function applyRosterImport(
       if (existing.length > 0) {
         // Only entries the roster vocabulary can express are the import's to replace.
         // Weekend work and one-off custom times export as '?' — the file cannot
-        // recreate them, so overwriting must leave them exactly where they are.
-        const encodable = existing.filter((s) => encodeEntryCode(s, templatesById) !== UNENCODABLE_CODE);
+        // recreate them, so overwriting must leave them exactly where they are. Same
+        // for a day carrying two entries: the export writes '?' over the whole cell,
+        // so neither half is the file's to delete.
+        const crowded = crowdedCells(existing);
+        const encodable = existing.filter(
+          (s) =>
+            encodeEntryCode(s, templatesById) !== UNENCODABLE_CODE &&
+            !datesInRange(s.date, s.endDate ?? s.date).some((d) => crowded.has(cellKey(s.employeeId, d))),
+        );
 
         // A range that starts before or ends after the span reaches outside the file's
         // authority: deleting it would destroy a month the CSV never described, and
@@ -242,9 +249,13 @@ export function buildRosterCsv(db: Db, from: string, to: string): string {
   );
   const rosterShifts = listShiftsOverlapping(db, from, to);
   const templatesById = new Map(listActiveTemplates(db).map((t) => [t.id, t] as const));
+  const crowded = crowdedCells(rosterShifts);
   const rows = workers.map((w) => ({
     name: w.displayName,
     codes: dates.map((date) => {
+      // A day with two entries has no single code. Writing the first one would
+      // report half the day and, on the way back, delete the other half.
+      if (crowded.has(cellKey(w.id, date))) return UNENCODABLE_CODE;
       const covering = rosterShifts.find((s) => s.employeeId === w.id && s.date <= date && (s.endDate ?? s.date) >= date);
       return covering ? encodeEntryCode(covering, templatesById) : NON_WORKING_CODE;
     }),

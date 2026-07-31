@@ -4,7 +4,8 @@ import { createEmployee, linkTelegramAccount, getEmployeeById, listActive, archi
 import { listShiftsInRange, createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "./roster-service";
-import { parseRosterCsv, type DecodeResult } from "./roster-codec";
+import { parseRosterCsv, decodeRoster, type DecodeResult } from "./roster-codec";
+import { listActiveTemplates } from "../repo/templates";
 import { swapRequests } from "../db/schema";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
@@ -176,6 +177,27 @@ describe("applyRosterImport", () => {
     expect(after.find((s) => s.category === "weekend_work")!.date).toBe("2026-06-06");
   });
 
+  // The round trip that changes nothing must change nothing. Before this, the export
+  // wrote one of the two codes and the overwrite deleted both and re-inserted that
+  // one — the second entry disappeared without a word, from a file the admin only
+  // downloaded and uploaded back.
+  it("a round trip through overwrite leaves a two-entry day exactly as it was", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Двойной Дмитрий" });
+    createShift(db, { ...dayShift("2026-06-01"), employeeId: w.id });
+    createShift(db, { ...dayShift("2026-06-01"), templateId: 3, title: "Вечер", start: "18:00", end: "22:00", employeeId: w.id });
+
+    const parsed = parseRosterCsv(buildRosterCsv(db, "2026-06-01", "2026-06-30"));
+    const summary = applyRosterImport(
+      db, decodeRoster(parsed, listActiveTemplates(db)),
+      [{ csvName: "Двойной Дмитрий", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: parsed.dates[0]!, to: parsed.dates.at(-1)! } },
+    );
+
+    expect(summary.entriesDeleted).toBe(0); // neither is the file's to replace
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-01").map((s) => s.title).sort()).toEqual(["Вечер", "День"]);
+  });
+
   it("overwrite refuses when an existing range reaches outside the file's span", () => {
     const db = makeTestDb();
     const w = createEmployee(db, { displayName: "Отпускник Олег" });
@@ -310,6 +332,29 @@ describe("buildRosterCsv", () => {
 
     const parsed = parseRosterCsv(buildRosterCsv(db, "2026-06-01", "2026-06-01"));
     expect(parsed.people[0]!.cells[0]!.code).toBe('вых"');
+  });
+
+  // Two non-overlapping entries in one day are legal and do happen. A cell holds
+  // one code, so such a day is exactly as inexpressible as weekend work — and must
+  // be written the same way, or the export quietly reports half of it.
+  it("exports a day carrying two entries as '?', not as whichever one came first", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Двойной Дмитрий" });
+    createShift(db, { ...dayShift("2026-06-01"), employeeId: w.id });
+    createShift(db, { ...dayShift("2026-06-01"), templateId: 3, title: "Вечер", start: "18:00", end: "22:00", employeeId: w.id });
+    createShift(db, { ...dayShift("2026-06-02"), employeeId: w.id });
+
+    expect(rowFor(buildRosterCsv(db, "2026-06-01", "2026-06-02"), "Двойной Дмитрий")).toEqual(["?", "k32"]);
+  });
+
+  it("marks the whole span of an absence that shares a day with a shift", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Отпускник Олег" });
+    createShift(db, { date: "2026-06-01", endDate: "2026-06-02", category: "vacation", employeeId: w.id });
+    createShift(db, { ...dayShift("2026-06-02"), employeeId: w.id });
+
+    // 06-02 carries two entries, so it cannot be written; 06-01 is plain vacation.
+    expect(rowFor(buildRosterCsv(db, "2026-06-01", "2026-06-03"), "Отпускник Олег")).toEqual(["otp", "?", "holiday"]);
   });
 
   it("listShiftsOverlapping paints a multi-day absence that started before the export window", () => {
