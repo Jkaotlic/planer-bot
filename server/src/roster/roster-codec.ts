@@ -269,6 +269,11 @@ export function encodeEntryCode(
 
 export function serializeRosterCsv(dates: string[], rows: { name: string; codes: string[] }[]): string {
   const header = ["", ...dates.map(toRuDate)].join(";");
-  const lines = rows.map((r) => [rosterField(r.name), ...r.codes].join(";"));
+  // Codes are escaped for the same reason names are. Our own vocabulary never
+  // needs it, but an unread cell is written back verbatim (`unrecognisedCode`), and
+  // that text came from a quoted Excel field — so it really can carry ';' or '"'.
+  // Unescaped, the row grows a column and the export produces a file its own import
+  // refuses with «строка 2: 3 клеток, а в шапке 2 дат».
+  const lines = rows.map((r) => [rosterField(r.name), ...r.codes.map(rosterField)].join(";"));
   return [header, ...lines].join("\r\n");
 }
