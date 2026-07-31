@@ -128,12 +128,15 @@ export function applyRosterImport(
         // for a day carrying two entries: the export writes '?' over the whole cell,
         // so neither half is the file's to delete.
         //
-        // Same rule one level up, about rows rather than cells: the export writes a
-        // row per ACTIVE worker, so an archived person's past month is not in the
-        // file at all. The file has no way to say «he worked that Tuesday», so it has
-        // no standing to say he didn't.
+        // Same rule one level up, about rows rather than cells: the import replaces
+        // the month of the people the file NAMES, and nobody else. An archived
+        // person has no row in the export at all; an active one can lose theirs to a
+        // single keystroke in Excel, and nothing on the confirm screen would mention
+        // them afterwards. Either way the file said nothing about that person, so it
+        // has no standing to say they didn't work. Clearing somebody's month is done
+        // by keeping their row and filling it with 'holiday' — which is exactly what
+        // the export writes for an empty month anyway. (His call, 2026-07-31.)
         const crowded = crowdedCells(existing);
-        const inTheGrid = new Set(listActive(db).map((employee) => employee.id));
         // And the cells the FILE marks '?'. Both admin screens promise «клеток "?" —
         // N, их импорт не тронет», so a '?' typed by hand has to mean it too, not
         // just one written by the export.
@@ -148,7 +151,7 @@ export function applyRosterImport(
             .some((d) => crowded.has(cellKey(s.employeeId, d)) || spared.has(cellKey(s.employeeId, d)));
         const encodable = existing.filter(
           (s) =>
-            s.employeeId != null && inTheGrid.has(s.employeeId) &&
+            s.employeeId != null && claimedBy.has(s.employeeId) &&
             encodeEntryCode(s, templatesById) !== UNENCODABLE_CODE &&
             !untouchable(s),
         );
