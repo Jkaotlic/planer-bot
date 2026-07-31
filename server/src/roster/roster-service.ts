@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, auditLog, swapRequests, reminderLog, weekendAssignments } from "../db/schema";
 import { createEntrySchema } from "../http/entry-schema";
-import { listActive, getEmployeeById } from "../repo/employees";
+import { listActive, getEmployeeById, normalizeFullName } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { swapAuditPayload, type SwapAuditPayload } from "../util/message-lines";
@@ -75,6 +75,23 @@ export function applyRosterImport(
       throw new Error(`сверки «${other}» и «${res.csvName}» указывают на одного и того же сотрудника #${res.employeeId}`);
     }
     claimedBy.set(res.employeeId, res.csvName);
+  }
+
+  // The file names one person per row, so the roster it leaves behind must too. A
+  // «создать нового» for somebody already on staff, or a rename landing on a
+  // colleague's ФИО, both end with two identical rows in the next export — and the
+  // import after that refuses the whole file. Checked before anything is written.
+  const claimedNames = new Map<string, string>(); // normalized ФИО -> the csvName that holds it
+  for (const person of decoded.perPerson) claimedNames.set(normalizeFullName(person.name), person.name);
+  for (const employee of listActive(db)) {
+    if (claimedBy.has(employee.id)) continue; // the file is renaming this row anyway
+    const taken = claimedNames.get(normalizeFullName(employee.displayName));
+    if (taken !== undefined) {
+      throw new Error(
+        `«${taken}» уже есть в списке — двух одинаковых ФИО быть не может, ` +
+          `график файлом сверяется по ним. Сверьте эту строку с ним, а не создавайте нового.`,
+      );
+    }
   }
 
   // The span the import governs. An explicit span (the CSV's own header dates) wins;

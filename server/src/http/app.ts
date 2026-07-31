@@ -25,6 +25,7 @@ import {
   setEmployeeAdmin,
   countActiveAdmins,
   renameEmployee,
+  findActiveByDisplayName,
   reorderEmployee,
   setBirthDate,
   setInviteToken,
@@ -109,6 +110,13 @@ export interface AppDeps {
 function displayNameOf(u: TelegramUser): string {
   const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
   return name || u.username || "Без имени";
+}
+
+/** Said at every door that could put two identical ФИО in the active list. Names the
+ *  row already holding it, because the fix is to rename one of the two. */
+function nameTakenError(taken: string): string {
+  return `«${taken}» уже есть в списке. График файлом сверяется по ФИО, поэтому двух одинаковых быть не может — ` +
+    `добавьте отчество или инициал, чтобы их было видно врозь.`;
 }
 
 export function createApp(deps: AppDeps): Hono<Env> {
@@ -347,6 +355,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
       return c.json({ error: "displayName is required" }, 400);
     }
+    const clash = findActiveByDisplayName(db, body.displayName);
+    if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
     const inviteToken = randomBytes(16).toString("hex");
     const employee = createEmployee(db, { displayName: body.displayName, inviteToken });
     const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
@@ -377,6 +387,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    if (hasName) {
+      const clash = findActiveByDisplayName(db, body.displayName as string, id);
+      if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
+    }
     if (hasName) employee = renameEmployee(db, id, (body.displayName as string).trim()) ?? employee;
     if (hasBirthday) employee = setBirthDate(db, id, body.birthDate as string | null) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
@@ -429,6 +443,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.post("/api/admin/employees/:id/restore", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
+    // While he was in the archive somebody took his ФИО. Bringing him back would put
+    // two identical rows in the roster export — say so instead, and let the admin
+    // decide which of the two gets renamed.
+    const archived = getEmployeeById(db, id);
+    if (archived) {
+      const clash = findActiveByDisplayName(db, archived.displayName, id);
+      if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
+    }
     const employee = restoreEmployee(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "employee_restored", c.get("auth").employeeId, { employeeId: id, displayName: employee.displayName });

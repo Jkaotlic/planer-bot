@@ -226,6 +226,31 @@ export function setEmployeeAdmin(db: Db, id: number, isAdmin: boolean): Employee
   return db.update(employees).set({ isAdmin }).where(eq(employees.id, id)).returning().all()[0];
 }
 
+/** ФИО as it is compared for «этот человек уже есть»: trimmed, case-folded. */
+export function normalizeFullName(displayName: string): string {
+  return displayName.trim().toLocaleLowerCase("ru");
+}
+
+/**
+ * The active worker already using this ФИО, if there is one — `exceptId` is the row
+ * being edited, so re-saving your own name is not a clash.
+ *
+ * The roster CSV is keyed by ФИО and nothing else. Two active namesakes make the
+ * export write two identical rows and the import then refuse the whole file with «в
+ * CSV повторяется ФИО» — the график-файлом feature dies and the message blames the
+ * file. He says the team has no namesakes; this is that rule, written down.
+ *
+ * Archived rows don't count: the export writes no row for them, so they cannot
+ * collide with anything. Restoring one is checked at the door instead.
+ *
+ * Compared in JS, not SQL: SQLite's `lower()` is ASCII-only, so «ИВАНОВ» and
+ * «иванов» would come out different there.
+ */
+export function findActiveByDisplayName(db: Db, displayName: string, exceptId?: number): Employee | undefined {
+  const wanted = normalizeFullName(displayName);
+  return listActive(db).find((e) => e.id !== exceptId && normalizeFullName(e.displayName) === wanted);
+}
+
 export function renameEmployee(db: Db, id: number, displayName: string): Employee | undefined {
   return db.update(employees).set({ displayName }).where(eq(employees.id, id)).returning().all()[0];
 }

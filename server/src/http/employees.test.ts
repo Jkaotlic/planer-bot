@@ -103,6 +103,71 @@ describe("POST /api/admin/employees", () => {
   });
 });
 
+// The roster CSV is keyed by ФИО and nothing else: two active namesakes make the
+// export write two identical rows, and the import then refuses the whole file with
+// «в CSV повторяется ФИО» — the график-файлом feature dies, and the message blames
+// the file. He says the team has no namesakes, so the three doors say so too.
+describe("ФИО среди активных — одно на одного", () => {
+  it("refuses to create a second active worker with the same name", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Иванов Иван" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const dupe = await app.request("/api/admin/employees", authedJson(admin, { displayName: "  Иванов Иван " }));
+    expect(dupe.status).toBe(409);
+    expect((await dupe.json()).error).toMatch(/Иванов Иван/);
+    expect((await (await app.request("/api/admin/employees", bearer(admin))).json()).employees).toHaveLength(2); // admin + the one
+  });
+
+  it("compares case-insensitively — a namesake in lower case is still a namesake", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Иванов Иван" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    expect((await app.request("/api/admin/employees", authedJson(admin, { displayName: "иванов иван" }))).status).toBe(409);
+  });
+
+  it("lets an archived namesake exist — the export writes no row for them", async () => {
+    const db = makeTestDb();
+    const gone = createEmployee(db, { displayName: "Иванов Иван" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    await app.request(`/api/admin/employees/${gone.id}/archive`, authedJson(admin, {}));
+
+    expect((await app.request("/api/admin/employees", authedJson(admin, { displayName: "Иванов Иван" }))).status).toBe(201);
+  });
+
+  it("refuses a rename onto somebody else's name, but allows re-saving your own", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Иванов Иван" });
+    const me = createEmployee(db, { displayName: "Петров Пётр" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const clash = await app.request(`/api/admin/employees/${me.id}`, authedJson(admin, { displayName: "Иванов Иван" }, "PATCH"));
+    expect(clash.status).toBe(409);
+    expect(getEmployeeById(db, me.id)!.displayName).toBe("Петров Пётр");
+
+    const same = await app.request(`/api/admin/employees/${me.id}`, authedJson(admin, { displayName: "Петров Пётр" }, "PATCH"));
+    expect(same.status).toBe(200);
+  });
+
+  it("refuses to restore an archived worker whose name is taken now", async () => {
+    const db = makeTestDb();
+    const gone = createEmployee(db, { displayName: "Иванов Иван" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    await app.request(`/api/admin/employees/${gone.id}/archive`, authedJson(admin, {}));
+    await app.request("/api/admin/employees", authedJson(admin, { displayName: "Иванов Иван" }));
+
+    const restored = await app.request(`/api/admin/employees/${gone.id}/restore`, authedJson(admin, {}));
+    expect(restored.status).toBe(409);
+    expect((await restored.json()).error).toMatch(/Иванов Иван/);
+    expect(getEmployeeById(db, gone.id)!.isActive).toBe(false);
+  });
+});
+
 describe("invite links", () => {
   // `linkTelegramAccount` refuses archived rows, so a link for one can only ever
   // answer «ссылка недействительна». Say so here instead of minting it.

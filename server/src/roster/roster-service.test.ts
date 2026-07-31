@@ -73,7 +73,11 @@ describe("applyRosterImport", () => {
     applyRosterImport(db, decoded, resolutions, null); // first import succeeds
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
 
-    expect(() => applyRosterImport(db, decoded, resolutions, null)).toThrow(/2026-06-01\.\.2026-06-01/);
+    // The second pass carries what the preview actually suggests once the person
+    // exists — a rename onto them. («create» twice is a namesake attempt, refused
+    // earlier and on its own grounds.)
+    const again: PersonResolution[] = [{ csvName: "Один Человек", action: "rename", employeeId: listActive(db)[0]!.id }];
+    expect(() => applyRosterImport(db, decoded, again, null)).toThrow(/2026-06-01\.\.2026-06-01/);
     // Nothing doubled — the transaction rolled back the second attempt entirely.
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
     expect(listActive(db)).toHaveLength(1);
@@ -86,7 +90,7 @@ describe("applyRosterImport", () => {
     applyRosterImport(db, decoded, resolutions, null);
 
     try {
-      applyRosterImport(db, decoded, resolutions, null);
+      applyRosterImport(db, decoded, [{ csvName: "Один Человек", action: "rename", employeeId: listActive(db)[0]!.id }], null);
       expect.unreachable("second import must conflict");
     } catch (err) {
       expect(err).toBeInstanceOf(RosterImportConflictError);
@@ -319,6 +323,41 @@ describe("applyRosterImport", () => {
     expect(() => applyRosterImport(db, decoded, resolutions, null)).toThrow(/Уволенный Олег 2/);
     expect(getEmployeeById(db, archived.id)!.displayName).toBe("Уволенный Олег"); // untouched
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(0);
+  });
+
+  // The import is the fourth door into a namesake pair: «＋ Создать нового» for a row
+  // whose ФИО is already on staff, or a rename that lands on somebody else's name.
+  // Either way the next export writes two identical rows and the file stops loading.
+  it("refuses to create somebody who is already on staff under that ФИО", () => {
+    const db = makeTestDb();
+    const existing = createEmployee(db, { displayName: "Иванов Иван" });
+    const decoded = decode([{ name: "Иванов Иван", entries: [dayShift("2026-06-01")] }]);
+
+    expect(() => applyRosterImport(db, decoded, [{ csvName: "Иванов Иван", action: "create" }], null))
+      .toThrow(/Иванов Иван/);
+    expect(listActive(db)).toHaveLength(1);
+    expect(getEmployeeById(db, existing.id)!.displayName).toBe("Иванов Иван");
+  });
+
+  it("refuses a rename that would make two active people namesakes", () => {
+    const db = makeTestDb();
+    const taken = createEmployee(db, { displayName: "Иванов Иван" });
+    const renamed = createEmployee(db, { displayName: "Петров Пётр" });
+    const decoded = decode([{ name: "Иванов Иван", entries: [dayShift("2026-06-01")] }]);
+
+    expect(() => applyRosterImport(db, decoded, [{ csvName: "Иванов Иван", action: "rename", employeeId: renamed.id }], null))
+      .toThrow(/Иванов Иван/);
+    expect(getEmployeeById(db, renamed.id)!.displayName).toBe("Петров Пётр");
+    expect(getEmployeeById(db, taken.id)!.displayName).toBe("Иванов Иван");
+  });
+
+  it("still lets the file rename the very person who already holds that ФИО", () => {
+    const db = makeTestDb();
+    const same = createEmployee(db, { displayName: "Иванов Иван" });
+    const decoded = decode([{ name: "Иванов Иван", entries: [dayShift("2026-06-01")] }]);
+
+    const summary = applyRosterImport(db, decoded, [{ csvName: "Иванов Иван", action: "rename", employeeId: same.id }], null);
+    expect(summary.employeesRenamed).toBe(1);
   });
 
   it("throws if two csvNames claim the same employeeId, and writes nothing", () => {
