@@ -31,6 +31,16 @@ export function AdminEmployeesScreen() {
    * was where the answer landed.
    */
   const [rowInvite, setRowInvite] = useState<{ employeeId: number; inviteToken: string; inviteLink: string | null } | null>(null);
+  /**
+   * A refusal earned by a row's own button, kept with that row — same reasoning
+   * as `rowInvite`, and the same bug it fixes. `error` above is the whole
+   * screen's, drawn under the «Новый работник» form; that is right for the form
+   * and for a failed load, and wrong for everything else, because the buttons
+   * that can fail are down a list of thirty. «В архив» на последнем админе,
+   * «✎ Имя» в занятое ФИО, «🔗 Ссылка» у архивного — сервер отказывает всем
+   * трём, и все три ответа уезжали за верхний край экрана.
+   */
+  const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
 
   async function reload() {
     setEmployees(await apiClient.getAdminEmployees());
@@ -53,12 +63,12 @@ export function AdminEmployeesScreen() {
 
   async function withBusy(id: number, action: () => Promise<void>) {
     setBusyId(id);
-    setError(null);
+    setRowError(null);
     try {
       await action();
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось выполнить действие");
+      setRowError({ employeeId: id, message: err instanceof Error ? err.message : "Не удалось выполнить действие" });
     } finally {
       setBusyId(null);
     }
@@ -93,13 +103,13 @@ export function AdminEmployeesScreen() {
    *  folds it away, so the button is never a no-op in either direction. */
   async function showRowInvite(employee: Employee) {
     if (rowInvite?.employeeId === employee.id) { setRowInvite(null); return; }
-    setError(null);
+    setRowError(null);
     setBusyId(employee.id);
     try {
       const info = await apiClient.getEmployeeInvite(employee.id, false);
       setRowInvite({ employeeId: employee.id, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось получить ссылку");
+      setRowError({ employeeId: employee.id, message: err instanceof Error ? err.message : "Не удалось получить ссылку" });
     } finally {
       setBusyId(null);
     }
@@ -160,6 +170,7 @@ export function AdminEmployeesScreen() {
                 onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
                 onShowInvite={() => void showRowInvite(e)}
                 invite={rowInvite?.employeeId === e.id ? rowInvite : null}
+                error={rowError?.employeeId === e.id ? rowError.message : null}
               />
             ))
           )}
@@ -180,6 +191,7 @@ export function AdminEmployeesScreen() {
                 onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
                 onShowInvite={() => void showRowInvite(e)}
                 invite={rowInvite?.employeeId === e.id ? rowInvite : null}
+                error={rowError?.employeeId === e.id ? rowError.message : null}
               />
             ))
           )}
@@ -192,6 +204,7 @@ export function AdminEmployeesScreen() {
 export function EmployeeRow({
   employee,
   invite,
+  error,
   actionLabel,
   busy,
   onAction,
@@ -206,6 +219,8 @@ export function EmployeeRow({
   employee: Employee;
   /** The link this row asked for, shown right here — see the note on `rowInvite`. */
   invite?: { inviteToken: string; inviteLink: string | null } | null;
+  /** Why this row's last action was refused, shown right here — see `rowError`. */
+  error?: string | null;
   actionLabel: string;
   busy: boolean;
   onAction: () => void;
@@ -349,6 +364,13 @@ export function EmployeeRow({
           {actionLabel}
         </Button>
       </div>
+      {/* The refusal belongs where the finger was — a message at the top of a
+          list of thirty is a message nobody sees. */}
+      {error && (
+        <div role="alert" style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.4 }}>
+          {error}
+        </div>
+      )}
       {invite && !linked && <RowInviteLink invite={invite} />}
     </CardShell>
   );
