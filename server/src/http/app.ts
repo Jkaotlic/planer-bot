@@ -750,7 +750,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     };
     const err = entryTimesError(merged) ?? entryDateError(merged) ?? entryRangeError(merged);
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
-    const entry = updateShift(db, id, patch);
+
+    // `unrecognisedCode` means «импорт не смог прочитать эту клетку», and every
+    // reader puts it above everything else: `encodeEntryCode` writes the raw text
+    // back out first, the report files the entry under «не распознано», and both
+    // grids draw it that way. The column is not in `updateEntrySchema`, so nothing
+    // could ever take it off — an admin turning such a cell into a normal shift got
+    // a 200, the row got its preset and its hours, and the cell went on saying «Ко»
+    // for good. An edit that says what the entry IS has read it, so the mark goes.
+    // Moving the cell to another day has not read it, so that one keeps it.
+    // Cleared alongside the patch rather than through the schema on purpose: the
+    // column stays un-settable from outside, which is what keeps the import the only
+    // thing that can mark a cell unread (pinned by its own API test).
+    const namesTheEntry = ["templateId", "title", "start", "end", "category"] as const;
+    const clearsUnread = existing.unrecognisedCode != null && namesTheEntry.some((field) => patch[field] !== undefined);
+    const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: auditShape(existing), after: auditShape(entry) });
     return c.json({ entry });
