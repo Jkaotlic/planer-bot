@@ -19,30 +19,39 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
   const [error, setError] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
+  /**
+   * A refusal earned by a row's own button, kept with that row. `error` above is
+   * the whole screen's and is drawn under the title — right for a failed load,
+   * wrong for a row: with 28 active workers plus the archive the list is far
+   * taller than the window, so «Архивировать» на нижней строке отвечало за
+   * пределами видимой области. Same fix, and same reasoning, as the Mini App's
+   * `rowError` in AdminEmployeesScreen.
+   */
+  const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
 
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
 
   async function withBusy(id: number, action: () => Promise<void>) {
     setBusyId(id);
-    setError(null);
+    setRowError(null);
     try {
       await action();
       await onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось выполнить действие");
+      setRowError({ employeeId: id, message: err instanceof Error ? err.message : "Не удалось выполнить действие" });
     } finally {
       setBusyId(null);
     }
   }
 
   async function showInvite(employee: Employee, regenerate = false) {
-    setError(null);
+    setRowError(null);
     try {
       const info = await apiClient.getEmployeeInvite(employee.id, regenerate);
       setInvite({ employee, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось получить ссылку");
+      setRowError({ employeeId: employee.id, message: err instanceof Error ? err.message : "Не удалось получить ссылку" });
     }
   }
 
@@ -63,6 +72,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         emptyLabel="Пока нет активных работников"
         actionLabel="Архивировать"
         busyId={busyId}
+        rowError={rowError}
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
         onToggleAdmin={(id, makeAdmin) => withBusy(id, () => apiClient.setEmployeeAdmin(id, makeAdmin))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
@@ -77,6 +87,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         emptyLabel="Архив пуст"
         actionLabel="Восстановить"
         busyId={busyId}
+        rowError={rowError}
         onAction={(id) => withBusy(id, () => apiClient.restoreEmployee(id))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
       />
@@ -105,6 +116,8 @@ interface EmployeesSectionProps {
   emptyLabel: string;
   actionLabel: string;
   busyId: number | null;
+  /** Why the last action failed, and on whose row — see `rowError`. */
+  rowError: { employeeId: number; message: string } | null;
   onAction: (id: number) => void;
   /** When provided (active section), each row gets a make-admin / remove-admin toggle. */
   onToggleAdmin?: (id: number, makeAdmin: boolean) => void;
@@ -118,7 +131,7 @@ interface EmployeesSectionProps {
   onBirthDate?: (id: number, birthDate: string | null) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -135,6 +148,7 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, o
               onBirthDate={onBirthDate ? (birthDate) => onBirthDate(employee.id, birthDate) : undefined}
               actionLabel={actionLabel}
               busy={busyId === employee.id}
+              error={rowError?.employeeId === employee.id ? rowError.message : null}
               onAction={() => onAction(employee.id)}
               onToggleAdmin={onToggleAdmin ? () => onToggleAdmin(employee.id, !employee.isAdmin) : undefined}
               onRename={onRename ? (name) => onRename(employee.id, name) : undefined}
@@ -151,6 +165,7 @@ function EmployeeRow({
   employee,
   actionLabel,
   busy,
+  error,
   position,
   onAction,
   onToggleAdmin,
@@ -162,6 +177,8 @@ function EmployeeRow({
   employee: Employee;
   actionLabel: string;
   busy: boolean;
+  /** Why this row's last action was refused, shown right here — see `rowError`. */
+  error?: string | null;
   /** 1-based place in the list, shown and editable. Absent for archived workers. */
   position?: number;
   onAction: () => void;
@@ -260,6 +277,13 @@ function EmployeeRow({
             {busy ? "…" : actionLabel}
           </button>
         </>
+      )}
+      {/* The refusal belongs where the click was. `flex-basis: 100%` puts it on
+          its own line inside the card — the card already wraps. */}
+      {error && (
+        <div className="error-text" role="alert" style={{ flexBasis: "100%", marginTop: 0 }}>
+          {error}
+        </div>
       )}
     </div>
   );
