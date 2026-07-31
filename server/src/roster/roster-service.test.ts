@@ -223,6 +223,30 @@ describe("applyRosterImport", () => {
     expect(listShiftsInRange(db, "2026-06-01", "2026-06-30").filter((s) => s.employeeId === gone.id)).toHaveLength(1);
   });
 
+  // Both screens promise it in as many words: «клеток "?" — N, их импорт не тронет».
+  // `preserved` was counted for that notice and then ignored by the writer, so a '?'
+  // typed over a day meaning «don't touch this one» deleted it instead — the exact
+  // opposite of what the admin was told.
+  it("leaves a day alone when the file marks it '?', instead of clearing it", () => {
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Осторожный Олег" });
+    createShift(db, { ...dayShift("2026-06-01"), employeeId: w.id });
+    createShift(db, { ...dayShift("2026-06-02"), employeeId: w.id });
+
+    const csv = buildRosterCsv(db, "2026-06-01", "2026-06-02").replace("Осторожный Олег;k32", "Осторожный Олег;?");
+    const parsed = parseRosterCsv(csv);
+    const decoded = decodeRoster(parsed, listActiveTemplates(db));
+    expect(decoded.preserved).toEqual([{ name: "Осторожный Олег", date: "2026-06-01" }]);
+
+    const summary = applyRosterImport(
+      db, decoded, [{ csvName: "Осторожный Олег", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: parsed.dates[0]!, to: parsed.dates.at(-1)! } },
+    );
+
+    expect(summary.entriesDeleted).toBe(1); // only 06-02, the day the file actually describes
+    expect(listShiftsInRange(db, "2026-06-01", "2026-06-01")).toHaveLength(1);
+  });
+
   it("overwrite refuses when an existing range reaches outside the file's span", () => {
     const db = makeTestDb();
     const w = createEmployee(db, { displayName: "Отпускник Олег" });
