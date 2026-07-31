@@ -691,9 +691,29 @@ export function createApp(deps: AppDeps): Hono<Env> {
     category: s.category, title: s.title, start: s.start, end: s.end,
   });
 
+  /**
+   * The target of a schedule edit, when there is one, has to still be on staff.
+   *
+   * The middleware guards the ACTOR — an active admin — and nothing looked at whom
+   * they were writing about. An entry on an archived person is invisible the moment
+   * it exists: `/api/team/schedule` filters those rows out and both grids draw their
+   * people from that same response, so the admin got a cheerful 201 for a write that
+   * shows up nowhere. Same rule the weekend market already carries, same place: at
+   * the decision, not only at the door. `null` is fine — a vacant entry belongs to
+   * nobody by design.
+   */
+  const archivedTargetError = (employeeId: number | null | undefined): string | null => {
+    if (employeeId == null) return null;
+    const target = getEmployeeById(db, employeeId);
+    if (!target) return null; // the foreign key answers this one, as `invalid_reference`
+    return target.isActive ? null : `«${target.displayName}» в архиве — восстановите его, прежде чем ставить записи`;
+  };
+
   app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    const archived = archivedTargetError(parsed.data.employeeId);
+    if (archived) return c.json({ error: archived }, 400);
     const entry = createShift(db, parsed.data);
     recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
     return c.json({ entry }, 201);
@@ -705,6 +725,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     const existing = getShift(db, id);
     if (!existing) return c.json({ error: "not_found" }, 404);
+    const archived = archivedTargetError(parsed.data.employeeId);
+    if (archived) return c.json({ error: archived }, 400);
     const patch = parsed.data;
     const category = patch.category ?? existing.category;
 
