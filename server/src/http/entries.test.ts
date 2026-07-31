@@ -232,3 +232,57 @@ describe("admin entry endpoints", () => {
     expect(created.status).toBe(400);
   });
 });
+
+// Same rule the weekend market already learned: the middleware guards the ACTOR,
+// and nothing looked at the target. An entry written onto an archived person is
+// invisible everywhere — `/api/team/schedule` filters those rows out and both grids
+// draw their people from that same response — so the admin gets a cheerful 201 for
+// a write that shows up nowhere.
+describe("записи на архивного сотрудника", () => {
+  it("не создаются (400), и в базе ничего не остаётся", async () => {
+    const db = makeTestDb();
+    const gone = createEmployee(db, { displayName: "Уволенный Олег" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    await app.request(`/api/admin/employees/${gone.id}/archive`, authedJson(admin, {}));
+
+    const res = await app.request("/api/admin/entries", authedJson(admin, {
+      date: "2026-09-01", category: "shift", start: "09:00", end: "18:00", employeeId: gone.id, title: "День",
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/архив/i);
+
+    const list = await app.request(`/api/team/schedule?from=2026-09-01&to=2026-09-01`, {
+      headers: { Authorization: `Bearer ${admin}` },
+    });
+    expect((await list.json()).shifts).toHaveLength(0);
+  });
+
+  it("и не переносятся на архивного правкой (400)", async () => {
+    const db = makeTestDb();
+    const active = createEmployee(db, { displayName: "Активный Антон" });
+    const gone = createEmployee(db, { displayName: "Уволенный Олег" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    await app.request(`/api/admin/employees/${gone.id}/archive`, authedJson(admin, {}));
+
+    const created = await app.request("/api/admin/entries", authedJson(admin, {
+      date: "2026-09-01", category: "shift", start: "09:00", end: "18:00", employeeId: active.id, title: "День",
+    }));
+    const entryId = (await created.json()).entry.id as number;
+
+    const moved = await app.request(`/api/admin/entries/${entryId}`, authedJson(admin, { employeeId: gone.id }, "PATCH"));
+    expect(moved.status).toBe(400);
+    expect(getShift(db, entryId)!.employeeId).toBe(active.id);
+  });
+
+  it("вакантную запись без сотрудника это не трогает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const res = await app.request("/api/admin/entries", authedJson(admin, {
+      date: "2026-09-01", category: "shift", start: "09:00", end: "18:00", employeeId: null, title: "День",
+    }));
+    expect(res.status).toBe(201);
+  });
+});
