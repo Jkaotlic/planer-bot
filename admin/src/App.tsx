@@ -430,7 +430,7 @@ export function App() {
             {rosterImport.preview.preservedCount > 0 && (
               <p className="roster-import-hint">
                 Клеток «?» — {rosterImport.preview.preservedCount}. Это записи, которые CSV не умеет описать (работа в
-                выходной, своё время). Импорт их не тронет.
+                выходной, своё время, две записи в один день). Импорт их не тронет.
               </p>
             )}
 
