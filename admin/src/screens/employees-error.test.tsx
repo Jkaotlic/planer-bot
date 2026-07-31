@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient, type Employee } from "../api/client";
-import { EmployeesScreen } from "./EmployeesScreen";
+import { EmployeesScreen, refusalText } from "./EmployeesScreen";
 
 /**
  * Зеркало теста мини-аппа (`miniapp/src/screens/admin/admin-employees-error.test.tsx`):
@@ -18,8 +18,9 @@ import { EmployeesScreen } from "./EmployeesScreen";
 // React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** Что вернёт отказавший сервер — код, который клиент отдаёт как есть. */
-const REFUSAL = "last_admin";
+/** Что вернёт отказавший сервер, и что из этого обязан прочитать человек. */
+const REFUSAL_CODE = "last_admin";
+const REFUSAL = refusalText(REFUSAL_CODE);
 
 const EMPLOYEES: Employee[] = [
   { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, address: "Аня" },
@@ -74,7 +75,7 @@ describe("отказ на действие в строке остаётся в �
     const rows = archiveButtons(el);
     expect(rows.length).toBe(EMPLOYEES.length);
 
-    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL));
+    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL_CODE));
 
     const target = rows[rows.length - 1]!;
     await act(async () => target.click());
@@ -87,7 +88,7 @@ describe("отказ на действие в строке остаётся в �
     const el = await mount();
     const rows = archiveButtons(el);
 
-    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL));
+    vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL_CODE));
 
     const target = rows[rows.length - 1]!;
     const neighbour = rows[0]!;
@@ -96,5 +97,24 @@ describe("отказ на действие в строке остаётся в �
 
     expect(rowOf(target).textContent ?? "").toContain(REFUSAL);
     expect(rowOf(neighbour).textContent ?? "").not.toContain(REFUSAL);
+  });
+});
+
+describe("refusalText — код отказа превращается в фразу", () => {
+  it("переводит коды, которые сервер отдаёт как есть", () => {
+    expect(refusalText("last_admin")).toBe("Это последний админ — сначала назначь админом кого-то ещё.");
+    expect(refusalText("archived")).toBe("Работник в архиве — сначала верни его из архива.");
+    expect(refusalText("already_linked")).toBe("Телеграм уже привязан — ссылка больше не нужна.");
+    expect(refusalText("not_found")).toBe("Такой записи больше нет — обнови экран.");
+  });
+
+  it("пропускает насквозь то, что сервер уже написал по-русски", () => {
+    // Сторож тёзок отвечает готовой фразой — переводить её нечем и незачем.
+    const taken = "Уже есть работник с ФИО «Смирнова Анна»";
+    expect(refusalText(taken)).toBe(taken);
+  });
+
+  it("никогда не отдаёт пустоту вместо незнакомой причины", () => {
+    expect(refusalText("что-то новое")).toBe("что-то новое");
   });
 });
