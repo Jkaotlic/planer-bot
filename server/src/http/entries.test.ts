@@ -336,3 +336,104 @@ describe("нераспознанная клетка чинится правко�
     expect(getShift(db, entry.id)!.unrecognisedCode).toBe("Ко");
   });
 });
+
+// Он поменял смену на «Отпуск» из админки в телеграме — и на экране не изменилось
+// ничего. Правка доходила: в базе `category` = `vacation`, часы сняты. А вот `title`
+// («Утро») и `template_id` (пресет «Утро») оставались от прежней категории, и обе
+// сетки рисуют клетку по ним: подпись это `title ?? categoryLabel(category)`, цвет —
+// по пресету. То есть клетка оставалась ровно той же смены и того же цвета.
+// Хуже того, `encodeEntryCode` ставит пресет ВЫШЕ категории отсутствия: выгрузка
+// писала в CSV код смены, и круг «скачал → поправил → залил» стирал отпуск обратно
+// в смену. Обе морды шлют при смене категории только её (`isMultiDay`-ветка в
+// `buildInput`), поэтому чинится на сервере — там, где решение, а не у одной двери.
+describe("смена категории не тащит за собой прежний вид смены", () => {
+  const morning = { date: "2026-08-04", category: "shift" as const, start: "08:00", end: "17:00", title: "Утро", templateId: 1 };
+
+  it("«Утро» → «Отпуск»: подпись и пресет уходят вместе с часами", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Отпускной Олег" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    // Ровно то, что шлёт форма записи в обеих мордах при выборе «Отпуск».
+    const res = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: morning.date, category: "vacation" }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    const after = getShift(db, entry.id)!;
+    expect(after.category).toBe("vacation");
+    expect(after.start).toBeNull();
+    // Подпись «Утро» — это то, что человек читает в клетке вместо «Отпуск».
+    expect(after.title).toBeNull();
+    // Пресет — это цвет клетки и код в выгрузке.
+    expect(after.templateId).toBeNull();
+  });
+
+  it("выгрузка после такой правки пишет отпуск, а не смену", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Отпускной Олег" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: morning.date, category: "vacation" }, "PATCH"));
+
+    const csv = buildRosterCsv(db, morning.date, morning.date);
+    expect(csv).toContain("otp");
+    // Пресет «Утро» в этой строке означал бы, что круг «скачал → залил» вернул смену.
+    expect(csv).not.toContain("k32-8");
+  });
+
+  it("но подпись, присланную вместе со сменой категории, не трогает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Дежурный Дмитрий" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      date: morning.date, category: "duty", start: "09:00", end: "18:00", title: "Вавилова",
+    }, "PATCH"));
+
+    const after = getShift(db, entry.id)!;
+    expect(after.category).toBe("duty");
+    expect(after.title).toBe("Вавилова");
+  });
+
+  it("правка внутри той же категории подпись не теряет", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Обычный Олег" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: "2026-08-05" }, "PATCH"));
+
+    const after = getShift(db, entry.id)!;
+    expect(after.title).toBe("Утро");
+    expect(after.templateId).toBe(1);
+  });
+});
+
+// Уже испорченные записи (он сделал две таких живьём до починки) обязаны лечиться
+// простым пересохранением: если снимать подпись только при СМЕНЕ категории,
+// «отпуск → отпуск» ничего не поправит, и клетка так и останется «Утро».
+describe("запись, уже испорченная прежним поведением, чинится пересохранением", () => {
+  it("«отпуск», сохранённый отпуском, теряет чужую подпись и пресет", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Отпускной Олег" });
+    // Ровно то, что лежит в живой базе: отпуск с подписью и пресетом «Утро».
+    const entry = createShift(db, {
+      date: "2026-08-04", category: "vacation", start: null, end: null,
+      title: "Утро", templateId: 1, employeeId: w.id,
+    });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: "2026-08-04", category: "vacation" }, "PATCH"));
+
+    const after = getShift(db, entry.id)!;
+    expect(after.title).toBeNull();
+    expect(after.templateId).toBeNull();
+  });
+});

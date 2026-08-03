@@ -737,8 +737,28 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (isAbsence(category)) {
       patch.start = null;
       patch.end = null;
+      // Тот же довод — про то, чем запись НАЗЫВАЕТСЯ. Подпись и пресет описывают
+      // прежнюю категорию, и оба читателя ставят их выше самой категории: клетка
+      // подписана `title ?? categoryLabel(category)` и покрашена по пресету, а
+      // `encodeEntryCode` пишет в CSV код пресета раньше кода отсутствия. Поэтому
+      // «Утро» → «Отпуск» доезжало до базы и не меняло на экране ничего: та же
+      // подпись, тот же цвет, — а выгрузка потом писала туда смену, и круг через
+      // Excel стирал отпуск обратно в смену.
+      // Безусловно, а не «если категория поменялась»: иначе уже испорченную
+      // запись нельзя вылечить, пересохранив её отпуском. Отнимать тут нечего —
+      // подпись отсутствию не ставит никто: ни форма записи в обеих мордах, ни
+      // импорт ростера (там у отсутствий `title: null, templateId: null`).
+      patch.templateId = null;
+      patch.title = null;
     } else if (countsForBalance(category)) {
       patch.endDate = null;
+    }
+
+    // Работа сменилась на другую работу: пресет и подпись прежней уходят, если
+    // правка не назвала запись сама («стало дежурством на Вавилова» — называет).
+    if (patch.category !== undefined && patch.category !== existing.category) {
+      if (patch.templateId === undefined) patch.templateId = null;
+      if (patch.title === undefined) patch.title = null;
     }
 
     const merged = {
