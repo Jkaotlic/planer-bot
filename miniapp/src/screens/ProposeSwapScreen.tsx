@@ -1,17 +1,21 @@
 import { useState } from "react";
-import { Avatar, Button, Cell, IconButton, List, Placeholder, Section, Selectable, Textarea, Title } from "@telegram-apps/telegram-ui";
+import { Avatar, Button, Cell, IconButton, Input, List, Placeholder, Section, Selectable, Spinner, Textarea, Title } from "@telegram-apps/telegram-ui";
 import type { Shift } from "../api/client";
 import { DayBadge } from "../components/DayBadge";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { categoryLabel } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
-import { formatTimeRange } from "../lib/shift";
+import { formatTimeRange, pluralizeRu } from "../lib/shift";
 
 export interface ProposeSwapScreenProps {
   /** The caller's own shift being offered up — opened from its "Обменять" affordance. */
   fromShift: Shift;
-  /** Colleagues' upcoming swappable shifts to choose from (already excludes the caller's own). */
-  colleagueShifts: Shift[];
+  /** Colleagues working the SAME day, already filtered to those a swap can succeed with. */
+  candidates: Shift[];
+  /** How many people work exactly this shift that day — hidden from the list, but named. */
+  sameKindCount: number;
+  loading: boolean;
+  loadError: string | null;
   onCancel: () => void;
   onConfirm: (toShiftId: number, message: string) => Promise<void>;
 }
@@ -39,6 +43,9 @@ const SWAP_ERROR_MESSAGES: Record<string, string> = {
   // to the initiator, who is the one reading this screen.
   "double-booking-from": "У тебя в это время уже стоит другая смена.",
   "double-booking-to": "У коллеги в это время уже стоит другая смена.",
+  // Экран предлагает только смены того же дня, так что это видно, лишь если
+  // страница провисела открытой и день под ней успел смениться.
+  "different-day": "Меняться можно только сменами в один и тот же день.",
 };
 
 function describeSwapError(err: unknown): string {
@@ -46,14 +53,29 @@ function describeSwapError(err: unknown): string {
   return SWAP_ERROR_MESSAGES[code] ?? "Не получилось предложить обмен. Попробуй ещё раз.";
 }
 
-/** "Предложить обмен": pick a colleague's shift to swap for the one you're giving up, add an optional note, confirm. */
-export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConfirm }: ProposeSwapScreenProps) {
+/** "Предложить обмен": найти человека, который работает в тот же день, добавить
+ *  записку и подтвердить. День задан отдаваемой сменой — меняться можно только
+ *  внутри одного дня, поэтому выбирают здесь человека, а не смену. */
+export function ProposeSwapScreen({
+  fromShift,
+  candidates,
+  sameKindCount,
+  loading,
+  loadError,
+  onCancel,
+  onConfirm,
+}: ProposeSwapScreenProps) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selected = colleagueShifts.find((s) => s.id === selectedId) ?? null;
+  const needle = query.trim().toLowerCase();
+  const shown = needle
+    ? candidates.filter((s) => (s.employeeName ?? "").toLowerCase().includes(needle))
+    : candidates;
+  const selected = candidates.find((s) => s.id === selectedId) ?? null;
   // `employeeName` is the roster's «Фамилия Имя», not an address — we only have the
   // full display name here (no `address` on a team-schedule row), so show it whole
   // rather than guess at a first name. See `addressOf` in @planer/shared.
@@ -99,23 +121,45 @@ export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConf
       <SwapDivider />
 
       <List>
-        <Section header="Взамен берёшь смену коллеги">
-          {colleagueShifts.length === 0 ? (
-            <Placeholder description="На этой неделе нет доступных смен коллег для обмена." />
+        <Section header="Кто ещё работает в этот день">
+          {candidates.length > 3 && (
+            <div style={{ padding: "2px 12px 8px" }}>
+              <Input
+                type="search"
+                placeholder="Поиск по имени"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          )}
+          {loading ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+              <Spinner size="m" />
+            </div>
+          ) : loadError ? (
+            <Placeholder description={loadError} />
+          ) : candidates.length === 0 ? (
+            <Placeholder description={emptyText(sameKindCount)} />
+          ) : shown.length === 0 ? (
+            <Placeholder description="Никого с таким именем в этот день нет." />
           ) : (
-            colleagueShifts.map((shift) => {
+            shown.map((shift) => {
               const name = shift.employeeName ?? "Без имени";
               const palette = personPalette(shift.employeeId);
+              const selectedHere = selectedId === shift.id;
               return (
+                // Выбор пишется на самой строке: мини-апп — один длинный скролл,
+                // и кнопка внизу для того, кто листает список, не видна.
                 <Cell
                   key={shift.id}
+                  data-testid="swap-candidate"
                   before={<Avatar acronym={initialsOf(name)} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-                  subtitle={`${formatTimeRange(shift)} · ${shift.title ?? categoryLabel(shift.category)}`}
+                  subtitle={`${formatTimeRange(shift)} · ${shift.title ?? categoryLabel(shift.category)}${selectedHere ? " · Выбрано" : ""}`}
                   after={
                     <Selectable
                       type="radio"
                       name="colleague-shift"
-                      checked={selectedId === shift.id}
+                      checked={selectedHere}
                       onChange={() => setSelectedId(shift.id)}
                     />
                   }
@@ -125,6 +169,12 @@ export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConf
                 </Cell>
               );
             })
+          )}
+          {!loading && !loadError && sameKindCount > 0 && candidates.length > 0 && (
+            <div style={{ padding: "6px 16px 12px", color: "var(--tgui--hint_color)", fontSize: 13 }}>
+              Ещё {sameKindCount} {pluralizeRu(sameKindCount, "человек", "человека", "человек")} в этот день на такой
+              же смене — с ними обмен ничего не изменит.
+            </div>
           )}
         </Section>
       </List>
@@ -154,6 +204,13 @@ export function ProposeSwapScreen({ fromShift, colleagueShifts, onCancel, onConf
       </div>
     </ScreenScroll>
   );
+}
+
+/** Пусто бывает по двум разным причинам, и человеку важно, по какой именно. */
+function emptyText(sameKindCount: number): string {
+  return sameKindCount > 0
+    ? "В этот день все остальные на такой же смене — меняться не с кем."
+    : "В этот день больше никто не работает — меняться не с кем.";
 }
 
 /** A centered "⇄" divider between the "give" and "take" halves of the propose flow. */
