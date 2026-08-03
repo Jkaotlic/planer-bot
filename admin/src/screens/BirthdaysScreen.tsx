@@ -7,6 +7,7 @@ import {
   type UpcomingBirthday,
 } from "../api/client";
 import { initialsOf, personPalette } from "../lib/people";
+import { withNotifyNotice } from "../lib/notify-text";
 
 /**
  * «Дни рождения»: who is next, and the collection that goes with one.
@@ -96,9 +97,14 @@ export function BirthdaysScreen() {
           setOpenId(openId === birthday.employeeId ? null : birthday.employeeId);
         }}
         onChanged={reload}
-        onSent={(delivered) => {
+        onSent={(delivered, intended) => {
           setOpenId(null);
-          setNotice(`Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`);
+          setNotice(
+            withNotifyNotice(
+              `Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`,
+              { delivered, intended },
+            ),
+          );
           void reload();
         }}
       />
@@ -149,7 +155,7 @@ interface RowProps {
   open: boolean;
   onToggle: () => void;
   onChanged: () => Promise<void>;
-  onSent: (delivered: number) => void;
+  onSent: (delivered: number, intended: number) => void;
 }
 
 function BirthdayRow({ birthday, open, onToggle, onChanged, onSent }: RowProps) {
@@ -223,7 +229,7 @@ function CampaignEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
     try {
       const result = await apiClient.sendBirthday(birthday.employeeId);
       setConfirming(false);
-      onSent(result.delivered);
+      onSent(result.delivered, result.intended);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось разослать");
       setConfirming(false);

@@ -24,6 +24,7 @@ import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
 import { BOT_USERNAME } from "./lib/bot";
+import { withNotifyNotice } from "./lib/notify-text";
 
 interface PanelTarget {
   employeeId: number;
@@ -79,19 +80,6 @@ export function pluralRecords(count: number): string {
   if (mod10 === 1) return `${count} запись`;
   if (mod10 >= 2 && mod10 <= 4) return `${count} записи`;
   return `${count} записей`;
-}
-
-/**
- * Дописывается к уже существующему сообщению об успехе (импорт CSV, сохранение
- * записи) — отдельного места на экране для неё не заводим. Правило то же, что
- * у `reachNotice` (WeekendAdminScreen.tsx): молчим, когда дошло до всех или
- * уведомлять было некого, говорим вслух, когда часть команды не подключила
- * телеграм. Дублирует одноимённую функцию в miniapp/src/lib/shift.ts — эта
- * консоль не делит фронтенд-код с мини-аппом, ровно как reachNotice.
- */
-export function notifyNotice(reach: { delivered: number; intended: number }): string | null {
-  if (reach.intended === 0 || reach.delivered >= reach.intended) return null;
-  return `Уведомление дошло до ${reach.delivered} из ${reach.intended}: остальные не подключили телеграм.`;
 }
 
 /** App shell: sidebar nav + top bar + the schedule grid (this task's scope). */
@@ -281,8 +269,7 @@ export function App() {
       ? `. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
       : "";
     const base = `CSV загружен: ${parts.join(", ")}${tail}`;
-    const extra = notifyNotice(summary.notified);
-    setRosterNotice({ kind: "success", text: extra ? `${base} ${extra}` : base });
+    setRosterNotice({ kind: "success", text: withNotifyNotice(base, summary.notified) });
     try {
       await Promise.all([
         refreshEmployees(),

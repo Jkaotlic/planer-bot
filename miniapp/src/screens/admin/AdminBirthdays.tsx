@@ -6,6 +6,7 @@ import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
 import { toISODate } from "../../lib/week";
+import { withNotifyNotice } from "../../lib/shift";
 
 /**
  * «Дни рождения» (admin, mobile): who is next, and the collection that goes
@@ -185,9 +186,14 @@ export function AdminBirthdays() {
                     setOpenId(openId === birthday.employeeId ? null : birthday.employeeId);
                   }}
                   onChanged={reloadEverything}
-                  onSent={(delivered) => {
+                  onSent={(delivered, intended) => {
                     setOpenId(null);
-                    setNotice(`Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`);
+                    setNotice(
+                      withNotifyNotice(
+                        `Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`,
+                        { delivered, intended },
+                      ),
+                    );
                     void reloadEverything();
                   }}
                 />
@@ -318,7 +324,7 @@ interface CardProps {
   open: boolean;
   onToggle: () => void;
   onChanged: () => Promise<void>;
-  onSent: (delivered: number) => void;
+  onSent: (delivered: number, intended: number) => void;
 }
 
 function BirthdayCard({ birthday, open, onToggle, onChanged, onSent }: CardProps) {
@@ -404,7 +410,7 @@ function CampaignEditor({ birthday, onChanged, onSent }: Omit<CardProps, "open" 
     try {
       const result = await apiClient.sendBirthday(birthday.employeeId);
       setConfirming(false);
-      onSent(result.delivered);
+      onSent(result.delivered, result.intended);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось разослать");
       setConfirming(false);
