@@ -35,7 +35,7 @@ import {
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
-import { notifyEntryChange } from "../schedule/change-notice";
+import { notifyEntryChange, notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import {
@@ -1049,8 +1049,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const err = rangeError(body.from, body.to, 92);
     if (err) return c.json({ error: err }, 400);
     const { assignments, unfilled } = buildDistribution(db, body.from as string, body.to as string);
+    let notified: { delivered: number; intended: number } = { delivered: 0, intended: 0 };
     if (body.apply === true) {
-      applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId })));
+      const { diffs } = withScheduleDiff(db, { from: body.from as string, to: body.to as string }, () =>
+        applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId }))),
+      );
       // One press moves a whole week of shifts, so it belongs in «кто когда что
       // менял» like every other schedule change. A preview writes nothing and is
       // recorded as nothing — the log is for what happened, not what was looked at.
@@ -1059,10 +1062,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
         to: body.to as string,
         count: assignments.length,
       });
+      notified = await notifyScheduleChange(db, bot, {
+        actorEmployeeId: c.get("auth").employeeId, diffs, cause: "distribute", now: teamNow(config.teamTz),
+      });
     }
     // `unfilled` rides along on a preview too: an empty cell nobody can take is worth
     // knowing about before applying anything, not after.
-    return c.json({ applied: body.apply === true, assignments, unfilled });
+    return c.json({ applied: body.apply === true, assignments, unfilled, notified });
   });
 
   app.get("/api/swaps", requireAuth(db, config.jwtSecret), (c) => {
@@ -1386,14 +1392,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     try {
+      // The file's own header dates, not the decoded entries' extent: a month that is
+      // entirely 'holiday' decodes to nothing yet still means "this month is empty".
+      const span = { from: result.parsed.dates[0]!, to: result.parsed.dates.at(-1)! };
       // `expiredSwaps` is the caller's to act on, not the browser's to read — the
       // count it needs is already in the summary.
-      const { expiredSwaps, ...summary } = applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId, {
-        overwrite: body.overwrite === true,
-        // The file's own header dates, not the decoded entries' extent: a month that is
-        // entirely 'holiday' decodes to nothing yet still means "this month is empty".
-        span: { from: result.parsed.dates[0]!, to: result.parsed.dates.at(-1)! },
-      });
+      const { result: importResult, diffs } = withScheduleDiff(db, span, () =>
+        applyRosterImport(db, result.decoded, resolutions, c.get("auth").employeeId, {
+          overwrite: body.overwrite === true,
+          span,
+        }),
+      );
+      const { expiredSwaps, ...summary } = importResult;
       for (const payload of expiredSwaps) {
         recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
         if (!bot) continue;
@@ -1402,11 +1412,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
           if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "roster_reimported"));
         }
       }
+      const notified = await notifyScheduleChange(db, bot, {
+        actorEmployeeId: c.get("auth").employeeId, diffs, cause: "file", now: teamNow(config.teamTz),
+      });
       return c.json({
         summary,
         // Repeated on the way out, because the admin may never have looked at the
         // preview — the file can be applied straight from a saved resolution set.
         unknownsMessage: summary.unknowns.length > 0 ? describeUnknowns(summary.unknowns) : null,
+        notified,
       }, 201);
     } catch (err) {
       if (err instanceof RosterImportConflictError) {
