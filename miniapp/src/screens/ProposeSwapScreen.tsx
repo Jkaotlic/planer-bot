@@ -154,7 +154,13 @@ export function ProposeSwapScreen({
                   key={shift.id}
                   data-testid="swap-candidate"
                   before={<Avatar acronym={initialsOf(name)} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-                  subtitle={`${formatTimeRange(shift)} · ${shift.title ?? categoryLabel(shift.category)}${selectedHere ? " · Выбрано" : ""}`}
+                  subtitle={`${formatTimeRange(shift)} · ${shift.title ?? categoryLabel(shift.category)}`}
+                  // Отдельной строкой, а не приклеено к subtitle: subtitle обрезается
+                  // многоточием («Cell» режет его как единую строку), и «· Выбрано»
+                  // на узком экране становилось «· Выбр…» — тот же класс дефекта,
+                  // что уже не раз чинили в этом мини-аппе. Чекмарк справа тоже
+                  // сигнализирует выбор, но раз пишем словами — пусть будет видно целиком.
+                  description={selectedHere ? "Выбрано" : undefined}
                   after={
                     <Selectable
                       type="radio"
