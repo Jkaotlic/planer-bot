@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Bot } from "grammy";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
@@ -809,6 +810,31 @@ export function createApp(deps: AppDeps): Hono<Env> {
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
     });
     return c.json({ entry, notified });
+  });
+
+  /**
+   * Много записей одним запросом — иначе «Заполнить неделю» это семь
+   * `POST /api/admin/entries` подряд, семь строк в журнале и семь отдельных писем
+   * человеку за одно нажатие. Атомарно: ссылка на архивного отклоняет ВСЮ пачку
+   * ДО записи, а сама запись идёт одной транзакцией — либо все семь, либо ни одной.
+   */
+  app.post("/api/admin/entries/bulk", requireAdmin(db, config.jwtSecret), async (c) => {
+    const parsed = z.object({ entries: z.array(createEntrySchema).min(1).max(200) })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    for (const input of parsed.data.entries) {
+      const archived = archivedTargetError(input.employeeId);
+      if (archived) return c.json({ error: archived }, 400);
+    }
+    const dates = parsed.data.entries.map((e) => e.date).sort();
+    const { result: entries, diffs } = withScheduleDiff(db, { from: dates[0]!, to: dates.at(-1)! }, () =>
+      db.transaction(() => parsed.data.entries.map((input) => createShift(db, input))),
+    );
+    for (const entry of entries) recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
+    const notified = await notifyScheduleChange(db, bot, {
+      actorEmployeeId: c.get("auth").employeeId, diffs, cause: "fill_week", now: teamNow(config.teamTz),
+    });
+    return c.json({ created: entries.length, entries, notified }, 201);
   });
 
   app.delete("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {

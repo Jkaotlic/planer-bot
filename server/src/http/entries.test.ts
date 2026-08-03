@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { getShift, createShift } from "../repo/shifts";
+import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/employees";
+import { getShift, createShift, listShiftsInRange } from "../repo/shifts";
 import { buildRosterCsv } from "../roster/roster-service";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
@@ -563,5 +563,52 @@ describe("уведомление о правке записи", () => {
     const res = await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, { date: "2099-09-12" }, "PATCH"));
     expect(res.status, "правка графика не зависит от Telegram").toBe(200);
     expect(getShift(db, created.entry.id)!.date).toBe("2099-09-12");
+  });
+});
+
+describe("POST /api/admin/entries/bulk", () => {
+  async function stage() {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const worker = createEmployee(db, { displayName: "Работник", inviteToken: "inv-w" });
+    linkTelegramAccount(db, "inv-w", 555);
+    return { db, app, token, sent, workerId: worker.id };
+  }
+  const weekOf = (employeeId: number, count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      employeeId, date: `2099-09-${String(10 + i).padStart(2, "0")}`,
+      start: "08:00", end: "17:00", category: "shift", title: "Утро",
+    }));
+
+  it("bulk пишет все записи в одной транзакции", async () => {
+    const { db, app, token, workerId } = await stage();
+    const archived = createEmployee(db, { displayName: "Уволенный" });
+    archiveEmployee(db, archived.id, "2026-01-01");
+    const entries = weekOf(workerId, 6);
+    entries.push({
+      employeeId: archived.id, date: "2099-09-16", start: "08:00", end: "17:00", category: "shift", title: "Утро",
+    });
+
+    const res = await app.request("/api/admin/entries/bulk", authedJson(token, { entries }, "POST"));
+
+    expect(res.status).toBe(400);
+    expect(listShiftsInRange(db, "2099-09-10", "2099-09-16")).toEqual([]);
+  });
+
+  it("bulk шлёт одно письмо на человека, а не семь", async () => {
+    const { app, token, sent, workerId } = await stage();
+    const entries = weekOf(workerId, 7);
+
+    const res = await app.request("/api/admin/entries/bulk", authedJson(token, { entries }, "POST"));
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.created).toBe(7);
+    expect(body.notified).toEqual({ delivered: 1, intended: 1 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe(555);
+    expect(sent[0]!.text).toContain("заполнение недели");
   });
 });

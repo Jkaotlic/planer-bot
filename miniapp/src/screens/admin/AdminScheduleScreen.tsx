@@ -857,7 +857,6 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
     Object.fromEntries(weekDates.map((iso) => [iso, ""])),
   );
   const [saving, setSaving] = useState(false);
-  const [savedCount, setSavedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const chosenDays = weekDates.filter((iso) => byDay[iso]);
@@ -929,42 +928,43 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
     }
     setError(null);
     setSaving(true);
-    setSavedCount(0);
-    let filled = 0;
-    try {
-      for (const iso of chosenDays) {
-        const choice = byDay[iso]!;
-        let input: NewEntryInput;
-        if (choice.startsWith("p:")) {
-          const template = templates.find((t) => t.id === Number(choice.slice(2)));
-          if (!template) continue;
-          const times = templateTimesFor(template, iso);
-          // Same preset→entry mapping as EntryForm: category/times from the preset,
-          // title = preset name (which carries the place for a duty preset).
-          input = {
-            date: iso,
-            category: template.category,
-            employeeId,
-            templateId: template.id,
-            start: times.start,
-            end: times.end,
-            title: template.name,
-          };
-        } else {
-          // A category with no preset: absences carry no times; a timed one gets
-          // sensible defaults the admin can refine on the entry afterwards.
-          const category = choice.slice(2) as Category;
-          input = { date: iso, category, employeeId };
-          if (needsTime(category)) {
-            input.start = "09:00";
-            input.end = "18:00";
-          }
+    const inputs: NewEntryInput[] = [];
+    for (const iso of chosenDays) {
+      const choice = byDay[iso]!;
+      let input: NewEntryInput;
+      if (choice.startsWith("p:")) {
+        const template = templates.find((t) => t.id === Number(choice.slice(2)));
+        if (!template) continue;
+        const times = templateTimesFor(template, iso);
+        // Same preset→entry mapping as EntryForm: category/times from the preset,
+        // title = preset name (which carries the place for a duty preset).
+        input = {
+          date: iso,
+          category: template.category,
+          employeeId,
+          templateId: template.id,
+          start: times.start,
+          end: times.end,
+          title: template.name,
+        };
+      } else {
+        // A category with no preset: absences carry no times; a timed one gets
+        // sensible defaults the admin can refine on the entry afterwards.
+        const category = choice.slice(2) as Category;
+        input = { date: iso, category, employeeId };
+        if (needsTime(category)) {
+          input.start = "09:00";
+          input.end = "18:00";
         }
-        await apiClient.createEntry(input);
-        filled += 1;
-        setSavedCount(filled);
       }
-      await onFilled(filled);
+      inputs.push(input);
+    }
+    try {
+      // Один запрос, а не цикл: семь `POST /api/admin/entries` подряд — это семь
+      // писем человеку за одно нажатие «Заполнить». Bulk-роут атомарен и шлёт
+      // одно сводное письмо независимо от числа дней.
+      const { created } = await apiClient.createEntries(inputs);
+      await onFilled(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось заполнить неделю");
     } finally {
@@ -1066,11 +1066,10 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
       ))}
 
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
-      {saving && (
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
-          Сохранение… {savedCount} из {chosenDays.length}
-        </div>
-      )}
+      {/* Один запрос вместо цикла — заполняется не по одному дню, поэтому
+          "N из M" посреди сохранения было бы враньём: savedCount равен нулю
+          до самого ответа сервера, а не растёт по ходу. */}
+      {saving && <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>Сохранение…</div>}
 
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <Button size="m" mode="filled" stretched loading={saving} disabled={saving} onClick={() => void handleFill()}>

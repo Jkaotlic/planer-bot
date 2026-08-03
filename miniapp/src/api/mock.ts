@@ -551,6 +551,34 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
   return created;
 }
 
+/** Один запрос вместо цикла — DEV-мок отвечает так же, чтобы «Заполнить неделю»
+ *  вело себя в разработке так же, как на живом сервере: одно письмо на человека,
+ *  не письмо на каждый созданный день. Реального `notifyEntryChange` здесь нет,
+ *  поэтому `intended`/`delivered` — по числу людей, у кого есть телеграм в моке. */
+export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: { delivered: number; intended: number } }> {
+  await delay(300);
+  const employeeIds = new Set<number>();
+  for (const input of inputs) {
+    const created: Shift = {
+      id: nextId++,
+      date: input.date,
+      start: input.start ?? null,
+      end: input.end ?? null,
+      endDate: input.endDate ?? null,
+      category: input.category,
+      title: input.title ?? null,
+      location: input.location ?? null,
+      templateId: input.templateId ?? null,
+      employeeId: input.employeeId ?? null,
+      employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
+    };
+    ALL_ENTRIES.push(created);
+    if (input.employeeId != null) employeeIds.add(input.employeeId);
+  }
+  const withTelegram = [...employeeIds].filter((id) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId != null);
+  return { created: inputs.length, notified: { delivered: withTelegram.length, intended: employeeIds.size } };
+}
+
 export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<Shift> {
   await delay(250);
   const shift = ALL_ENTRIES.find((s) => s.id === id);

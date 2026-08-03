@@ -28,6 +28,7 @@ import {
   mockGetEmployeeInvite,
   mockGetTemplates,
   mockCreateEntry,
+  mockCreateEntries,
   mockUpdateEntry,
   mockDeleteEntry,
   mockDistribute,
@@ -234,6 +235,12 @@ export interface NewEntryInput {
   location?: string;
   /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
   title?: string | null;
+}
+
+/** До скольких из скольких дошло письмо о правке графика. */
+export interface NotifyReach {
+  delivered: number;
+  intended: number;
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
@@ -456,6 +463,9 @@ export interface ApiClient {
   getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getTemplates(): Promise<Template[]>;
   createEntry(input: NewEntryInput): Promise<Shift>;
+  /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
+   *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
+  createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
   updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
   deleteEntry(id: number): Promise<void>;
   distribute(from: string, to: string, apply: boolean): Promise<DistributeResult>;
@@ -819,6 +829,8 @@ export const realClient: ApiClient = {
     const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/admin/entries", input);
     return entry;
   },
+  createEntries: (inputs) =>
+    authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
   async updateEntry(id, input) {
     const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/admin/entries/${id}`, input);
     return entry;
@@ -984,6 +996,7 @@ const devClient: ApiClient = {
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
+  createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
   distribute: (from, to, apply) => mockDistribute(from, to, apply),
