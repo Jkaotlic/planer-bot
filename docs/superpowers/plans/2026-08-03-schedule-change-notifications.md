@@ -15,16 +15,22 @@
 | 1. `categoryLabel` в shared | ✅ сделана | `5b35986` |
 | 2. `entryLineOf` | ✅ сделана | `79da1ea` |
 | 3. `diffSchedules` | ✅ сделана | `1493485` |
-| 4. тексты и `notifyEntryChange` | ⬜ следующая | — |
-| 5. роуты создания / правки / удаления | ⬜ | — |
+| 4. тексты и `notifyEntryChange` | ✅ сделана | `7d41fd0` |
+| 5. роуты создания / правки / удаления | ⬜ следующая | — |
 | 6. сводное письмо и `withScheduleDiff` | ⬜ | — |
 | 7. импорт CSV и «Распределить честно» | ⬜ | — |
 | 8. bulk-роут и переезд «Заполнить неделю» | ⬜ | — |
 | 9. «дошло до N из M» в обеих админках | ⬜ | — |
 
-Ничего из сделанного пока не видно снаружи: три задачи — это фундамент
-(подпись категории, строка про запись, чистый диф). Первое письмо человеку
-уходит в задаче 5.
+Ничего из сделанного пока не видно снаружи: четыре задачи — это фундамент
+(подпись категории, строка про запись, чистый диф) и готовая отправка, которую
+ещё никто не зовёт. Первое письмо человеку уходит в задаче 5.
+
+Задача 4 разошлась с планом в одном: глаголы пишутся формой `поставил(а)`, а не
+женским родом. Рода в базе нет, правит график чаще мужчина — «Антон поставила
+тебе смену» ушло бы первым же письмом. Спека поправлена там же (решение 2).
+И сверх плана в задаче 4 два теста на ветку «прошлое»: правка внутри прошлого
+молчит, перенос из прошлого в будущее — пишет. Итог 10 тестов, а не 8.
 
 ## Global Constraints
 
@@ -429,15 +435,15 @@ import { entryAddedText, entryRemovedText, entryChangedText } from "./change-not
 describe("тексты одиночной правки", () => {
   it("поставили", () => {
     expect(entryAddedText("Аня", "Пт 7 авг · 15:00–23:00 · Вечер"))
-      .toBe("Аня поставила тебе смену: Пт 7 авг · 15:00–23:00 · Вечер.");
+      .toBe("Аня поставил(а) тебе смену: Пт 7 авг · 15:00–23:00 · Вечер.");
   });
   it("сняли", () => {
     expect(entryRemovedText("Аня", "Ср 5 авг · 08:00–17:00 · Утро"))
-      .toBe("Аня сняла с тебя смену: Ср 5 авг · 08:00–17:00 · Утро.");
+      .toBe("Аня снял(а) с тебя смену: Ср 5 авг · 08:00–17:00 · Утро.");
   });
   it("изменили — называет и было, и стало", () => {
     expect(entryChangedText("Аня", "Ср 5 авг · 08:00–17:00 · Утро", "Пт 7 авг · 15:00–23:00 · Вечер"))
-      .toBe("Аня изменила твою смену: было Ср 5 авг · 08:00–17:00 · Утро → стало Пт 7 авг · 15:00–23:00 · Вечер.");
+      .toBe("Аня изменил(а) твою смену: было Ср 5 авг · 08:00–17:00 · Утро → стало Пт 7 авг · 15:00–23:00 · Вечер.");
   });
 });
 ```
@@ -451,13 +457,13 @@ Expected: FAIL — модуля нет.
 
 ```ts
 export function entryAddedText(actorName: string, line: string): string {
-  return `${actorName} поставила тебе смену: ${line}.`;
+  return `${actorName} поставил(а) тебе смену: ${line}.`;
 }
 export function entryRemovedText(actorName: string, line: string): string {
-  return `${actorName} сняла с тебя смену: ${line}.`;
+  return `${actorName} снял(а) с тебя смену: ${line}.`;
 }
 export function entryChangedText(actorName: string, before: string, after: string): string {
-  return `${actorName} изменила твою смену: было ${before} → стало ${after}.`;
+  return `${actorName} изменил(а) твою смену: было ${before} → стало ${after}.`;
 }
 ```
 
@@ -499,7 +505,7 @@ describe("notifyEntryChange", () => {
     const reach = await notifyEntryChange(db, bot, { actorEmployeeId: adminId, before: null, after: shift({ employeeId: workerId }), now });
     expect(reach).toEqual({ delivered: 1, intended: 1 });
     expect(sent[0]!.to).toBe(555);
-    expect(sent[0]!.text).toContain("поставила тебе смену");
+    expect(sent[0]!.text).toContain("поставил(а) тебе смену");
   });
 
   it("молчит про день, который уже прошёл", async () => {
@@ -539,8 +545,8 @@ describe("notifyEntryChange", () => {
     await notifyEntryChange(db, bot, {
       actorEmployeeId: adminId, before: shift({ employeeId: workerId }), after: shift({ employeeId: other.id }), now,
     });
-    expect(sent.find((m) => m.to === 555)!.text).toContain("сняла с тебя смену");
-    expect(sent.find((m) => m.to === 777)!.text).toContain("поставила тебе смену");
+    expect(sent.find((m) => m.to === 555)!.text).toContain("снял(а) с тебя смену");
+    expect(sent.find((m) => m.to === 777)!.text).toContain("поставил(а) тебе смену");
   });
 });
 ```
@@ -619,7 +625,7 @@ function isPast(s: Shift, today: string): boolean {
 - [ ] **Step 8: Прогнать — зелено**
 
 Run: `npx vitest run change-notice`
-Expected: PASS (8 тестов)
+Expected: PASS (10 тестов — 8 по плану плюс два на ветку «прошлое»)
 
 - [ ] **Step 9: Полный гейт и коммит**
 
@@ -668,7 +674,7 @@ describe("уведомление о правке записи", () => {
     expect(await res.json()).toMatchObject({ notified: { delivered: 1, intended: 1 } });
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(555);
-    expect(sent[0]!.text).toContain("поставила тебе смену");
+    expect(sent[0]!.text).toContain("поставил(а) тебе смену");
   });
 
   it("перенос даты пишет «было → стало»", async () => {
@@ -681,13 +687,13 @@ describe("уведомление о правке записи", () => {
     expect(sent[0]!.text).toContain("стало");
   });
 
-  it("удаление пишет «сняла с тебя смену»", async () => {
+  it("удаление пишет «снял(а) с тебя смену»", async () => {
     const { app, token, sent, workerId } = await stage();
     const created = await (await app.request("/api/admin/entries", send(token, entryBody({ employeeId: workerId }), "POST"))).json();
     sent.length = 0;
     await app.request(`/api/admin/entries/${created.entry.id}`, send(token, {}, "DELETE"));
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toContain("сняла с тебя смену");
+    expect(sent[0]!.text).toContain("снял(а) с тебя смену");
   });
 
   it("правка только заметки никого не будит", async () => {
@@ -769,7 +775,7 @@ describe("сводное письмо", () => {
 
   it("считает и перечисляет", () => {
     const text = scheduleSummaryText("Аня", "file", diff);
-    expect(text).toContain("Аня обновила твой график (загрузка файла)");
+    expect(text).toContain("Аня обновил(а) твой график (загрузка файла)");
     expect(text).toContain("+3 смены");
     expect(text).toContain("−1");
     expect(text).toContain("изменено 2");
@@ -846,7 +852,7 @@ export function scheduleSummaryText(actorName: string, cause: ChangeCause, diff:
   ];
   const shown = lines.slice(0, MAX_LINES).map((l) => `\n• ${l}`).join("");
   const rest = lines.length > MAX_LINES ? `\n…и ещё ${lines.length - MAX_LINES}` : "";
-  return `${actorName} обновила твой график (${CAUSE_LABEL[cause]}): ${counts.join(", ")}.${shown}${rest}`;
+  return `${actorName} обновил(а) твой график (${CAUSE_LABEL[cause]}): ${counts.join(", ")}.${shown}${rest}`;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {
@@ -904,9 +910,9 @@ git commit -m "feat(server): сводное письмо о массовой п�
 
 ```ts
 it("импорт месяца пишет каждому по одному письму, а не по письму на запись", async () => {
-  // файл на двоих × месяц; ожидание: sent.length === 2, в каждом «обновила твой график»
+  // файл на двоих × месяц; ожидание: sent.length === 2, в каждом «обновил(а) твой график»
   expect(sent).toHaveLength(2);
-  expect(sent[0]!.text).toContain("обновила твой график (загрузка файла)");
+  expect(sent[0]!.text).toContain("обновил(а) твой график (загрузка файла)");
   expect(body.notified.intended).toBe(2);
 });
 
