@@ -5,8 +5,9 @@ import { notifyUser } from "../bot/notify";
 import type { Db } from "../db/client";
 import type { Shift } from "../db/schema";
 import { getEmployeeById } from "../repo/employees";
+import { listShiftsOverlapping } from "../repo/shifts";
 import { entryLineOf } from "../util/message-lines";
-import { diffSchedules } from "./schedule-diff";
+import { diffSchedules, type EmployeeDiff } from "./schedule-diff";
 
 /**
  * Род автора правки неизвестен: у работника есть имя, но не пол, и заводить
@@ -64,14 +65,12 @@ export async function notifyEntryChange(
 
   for (const [employeeId, d] of diff) {
     if (employeeId === opts.actorEmployeeId) continue; // себе не пишем
-    const texts: string[] = [];
-    for (const s of d.added) if (!isPast(s, opts.now.date)) texts.push(entryAddedText(actorName, entryLineOf(s)));
-    for (const s of d.removed) if (!isPast(s, opts.now.date)) texts.push(entryRemovedText(actorName, entryLineOf(s)));
-    for (const c of d.changed) {
-      // Перенос ИЗ прошлого в будущее — это про будущее, о нём сказать надо.
-      if (isPast(c.before, opts.now.date) && isPast(c.after, opts.now.date)) continue;
-      texts.push(entryChangedText(actorName, entryLineOf(c.before), entryLineOf(c.after)));
-    }
+    const future = filterFutureDiff(d, opts.now.date);
+    const texts: string[] = [
+      ...future.added.map((s) => entryAddedText(actorName, entryLineOf(s))),
+      ...future.removed.map((s) => entryRemovedText(actorName, entryLineOf(s))),
+      ...future.changed.map((c) => entryChangedText(actorName, entryLineOf(c.before), entryLineOf(c.after))),
+    ];
     if (texts.length === 0) continue;
 
     intended += 1;
@@ -87,4 +86,130 @@ export async function notifyEntryChange(
 /** Запись целиком в прошлом: даже её последний день раньше сегодняшнего. */
 function isPast(s: Shift, today: string): boolean {
   return (s.endDate ?? s.date) < today;
+}
+
+/**
+ * Тот же диф, но без событий, которые уже никого не будят.
+ *
+ * Перенос ИЗ прошлого в будущее остаётся — это про будущее, о нём сказать надо;
+ * молчит только правка, целиком лежащая в прошлом. Общая функция для
+ * `notifyEntryChange` и `notifyScheduleChange`: правило одно, и ему не дано
+ * разойтись между одиночным письмом и сводкой.
+ */
+function filterFutureDiff(diff: EmployeeDiff, today: string): EmployeeDiff {
+  return {
+    added: diff.added.filter((s) => !isPast(s, today)),
+    removed: diff.removed.filter((s) => !isPast(s, today)),
+    changed: diff.changed.filter((c) => !(isPast(c.before, today) && isPast(c.after, today))),
+  };
+}
+
+export type ChangeCause = "file" | "distribute" | "fill_week";
+
+const CAUSE_LABEL: Record<ChangeCause, string> = {
+  file: "загрузка файла",
+  distribute: "распределение смен",
+  fill_week: "заполнение недели",
+};
+
+const MAX_LINES = 10;
+
+/**
+ * Одно письмо на человека вместо письма на запись.
+ *
+ * Импорт августа — это 538 записей; поштучно это лавина в чат и гарантированный
+ * 429 от Telegram. Одна запись сводкой не оформляется — там нечего сводить, и
+ * обычный одиночный текст точнее.
+ */
+export function scheduleSummaryText(actorName: string, cause: ChangeCause, diff: EmployeeDiff): string {
+  const total = diff.added.length + diff.removed.length + diff.changed.length;
+  if (total === 1) {
+    if (diff.added[0]) return entryAddedText(actorName, entryLineOf(diff.added[0]));
+    if (diff.removed[0]) return entryRemovedText(actorName, entryLineOf(diff.removed[0]));
+    const c = diff.changed[0]!;
+    return entryChangedText(actorName, entryLineOf(c.before), entryLineOf(c.after));
+  }
+
+  const counts: string[] = [];
+  if (diff.added.length) counts.push(`+${diff.added.length} ${plural(diff.added.length, "смена", "смены", "смен")}`);
+  if (diff.removed.length) counts.push(`−${diff.removed.length}`);
+  if (diff.changed.length) counts.push(`изменено ${diff.changed.length}`);
+
+  const lines = [
+    ...diff.added.map((s) => `+ ${entryLineOf(s)}`),
+    ...diff.removed.map((s) => `− ${entryLineOf(s)}`),
+    ...diff.changed.map((c) => `→ ${entryLineOf(c.before)} → ${entryLineOf(c.after)}`),
+  ];
+  const shown = lines.slice(0, MAX_LINES).map((l) => `\n• ${l}`).join("");
+  const rest = lines.length > MAX_LINES ? `\n…и ещё ${lines.length - MAX_LINES}` : "";
+  return `${actorName} обновил(а) твой график (${CAUSE_LABEL[cause]}): ${counts.join(", ")}.${shown}${rest}`;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = n % 100;
+  const mod10 = n % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+interface ScheduleChangeOpts {
+  actorEmployeeId: number;
+  diffs: Map<number, EmployeeDiff>;
+  cause: ChangeCause;
+  now: { date: string; time: string };
+}
+
+/**
+ * Одно сводное письмо на человека для массовой правки: импорта, «Распределить
+ * честно», «Заполнить неделю». Тот же фильтр «прошлое молчит» и то же правило
+ * «себе не пишем», что в `notifyEntryChange`, но вместо отдельного текста на
+ * каждое событие — один `scheduleSummaryText` на всё, что у человека изменилось.
+ */
+export async function notifyScheduleChange(
+  db: Db,
+  bot: Bot | undefined,
+  opts: ScheduleChangeOpts,
+): Promise<NotifyReach> {
+  if (!bot) return { delivered: 0, intended: 0 };
+
+  const actor = getEmployeeById(db, opts.actorEmployeeId);
+  const actorName = actor ? addressOf(actor) : "Админ";
+  let delivered = 0;
+  let intended = 0;
+
+  for (const [employeeId, d] of opts.diffs) {
+    if (employeeId === opts.actorEmployeeId) continue; // себе не пишем
+    const future = filterFutureDiff(d, opts.now.date);
+    const total = future.added.length + future.removed.length + future.changed.length;
+    if (total === 0) continue;
+
+    intended += 1;
+    const target = getEmployeeById(db, employeeId);
+    if (target?.telegramUserId == null) continue;
+    const text = scheduleSummaryText(actorName, opts.cause, future);
+    if (await notifyUser(bot, target.telegramUserId, text)) delivered += 1;
+  }
+  return { delivered, intended };
+}
+
+/**
+ * Снимок расписания диапазона до и после операции.
+ *
+ * Считаем изменение по базе, а не по отчёту сервиса о самом себе: одна механика
+ * на импорт, распределение и заполнение недели, и она не может разойтись с тем,
+ * что реально легло в базу. `listShiftsOverlapping`, а не диапазонный запрос по
+ * `date` — иначе многодневное отсутствие, начавшееся до `from`, в снимке
+ * отсутствует и его удаление выглядит как «ничего не менялось».
+ */
+export function withScheduleDiff<T>(
+  db: Db,
+  range: { from: string; to: string },
+  work: () => T,
+): { result: T; diffs: Map<number, EmployeeDiff> } {
+  const before = listShiftsOverlapping(db, range.from, range.to);
+  const result = work();
+  const after = listShiftsOverlapping(db, range.from, range.to);
+  return { result, diffs: diffSchedules(before, after) };
 }
