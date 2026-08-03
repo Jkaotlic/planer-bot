@@ -42,3 +42,28 @@ export function isAbsence(category: EntryCategory): boolean {
 export function countsForBalance(category: EntryCategory): boolean {
   return BALANCE_COUNTED.has(category);
 }
+
+/**
+ * Русская подпись категории.
+ *
+ * Живёт здесь, потому что её просит сервер: письмо об изменении графика
+ * называет вид записи словами, и человек должен прочитать в чате ровно то, что
+ * увидит в клетке — там подпись это `title ?? categoryLabel(category)`.
+ *
+ * Мини-апп продолжает держать свою копию (`miniapp/src/categories.tsx`): он
+ * намеренно не зависит от `@planer/shared` в рантайме. Копию сторожит
+ * `miniapp/src/category-labels.test.ts` — он импортирует shared только в тесте.
+ */
+const CATEGORY_LABELS: Record<EntryCategory, string> = {
+  shift: "Смена",
+  vacation: "Отпуск",
+  sick_leave: "Больничный",
+  duty: "Дежурство",
+  offsite: "Выездное мероприятие",
+  business_trip: "Командировка",
+  weekend_work: "Работа в выходной",
+};
+
+export function categoryLabel(category: EntryCategory): string {
+  return CATEGORY_LABELS[category];
+}

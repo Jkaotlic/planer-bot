@@ -3,6 +3,7 @@ import {
   entryCategorySchema,
   isSwappable,
   isAbsence,
+  categoryLabel,
   countsForBalance,
   templateAccents,
   type EntryCategory,
@@ -40,5 +41,17 @@ describe("templateAccents", () => {
   it("has a distinct colour slot for every preset", () => {
     expect(templateAccents).toEqual(["gold", "blue", "violet", "indigo", "teal", "green", "rose", "amber", "emerald"]);
     expect(new Set(templateAccents).size).toBe(templateAccents.length);
+  });
+});
+
+describe("categoryLabel", () => {
+  it("называет каждую категорию по-русски", () => {
+    expect(categoryLabel("shift")).toBe("Смена");
+    expect(categoryLabel("vacation")).toBe("Отпуск");
+    expect(categoryLabel("sick_leave")).toBe("Больничный");
+    expect(categoryLabel("duty")).toBe("Дежурство");
+    expect(categoryLabel("offsite")).toBe("Выездное мероприятие");
+    expect(categoryLabel("business_trip")).toBe("Командировка");
+    expect(categoryLabel("weekend_work")).toBe("Работа в выходной");
   });
 });
