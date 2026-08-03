@@ -112,15 +112,30 @@ function CardShell({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Почему нажатие на этой карточке не сработало. Ответ живёт рядом с кнопкой,
+ * на которую нажали: мини-апп — один длинный скролл, и общий блок над списком
+ * при нажатии на карточку ниже оказывается за верхним краем экрана.
+ */
+function ActionError({ message }: { message: string }) {
+  return (
+    <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
+      {message}
+    </div>
+  );
+}
+
 export interface IncomingSwapCardProps {
   request: SwapRequest;
   onAccept: () => void;
   onDecline: () => void;
   busy?: boolean;
+  /** Отказ на последнее нажатие именно этой карточки. */
+  error?: string;
 }
 
 /** A pending swap a colleague proposed to the current user: what they're offering, what they want in return. */
-export function IncomingSwapCard({ request, onAccept, onDecline, busy }: IncomingSwapCardProps) {
+export function IncomingSwapCard({ request, onAccept, onDecline, busy, error }: IncomingSwapCardProps) {
   return (
     <CardShell>
       <div style={{ fontWeight: 600, fontSize: 15 }}>{request.counterpartyName}</div>
@@ -135,6 +150,7 @@ export function IncomingSwapCard({ request, onAccept, onDecline, busy }: Incomin
           Отклонить
         </Button>
       </div>
+      {error && <ActionError message={error} />}
     </CardShell>
   );
 }
@@ -143,10 +159,12 @@ export interface OutgoingSwapCardProps {
   request: SwapRequest;
   onCancel: () => void;
   busy?: boolean;
+  /** Отказ на последнее нажатие именно этой карточки. */
+  error?: string;
 }
 
 /** A swap the current user proposed: its current status, and a cancel action while it's still pending. */
-export function OutgoingSwapCard({ request, onCancel, busy }: OutgoingSwapCardProps) {
+export function OutgoingSwapCard({ request, onCancel, busy, error }: OutgoingSwapCardProps) {
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -163,6 +181,7 @@ export function OutgoingSwapCard({ request, onCancel, busy }: OutgoingSwapCardPr
           </Button>
         </div>
       )}
+      {error && <ActionError message={error} />}
     </CardShell>
   );
 }

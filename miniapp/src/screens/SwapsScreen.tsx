@@ -13,12 +13,17 @@ export interface SwapsScreenProps {
   /** Ids of requests currently being mutated — each row disables only its own
    *  buttons while its own request is in flight, regardless of what else is tapped. */
   busyIds: ReadonlySet<number>;
-  /** Set when the last accept/decline/cancel tap failed — cleared on the next attempt. */
-  actionError: string | null;
+  /**
+   * Why a tap on this request failed, by request id — the answer belongs in the
+   * card that was tapped. A single message above the list is off-screen for
+   * every card the reader had to scroll to (замер: третья «Принять» на y=846
+   * при окне 844). Cleared on the next attempt on that same card.
+   */
+  actionErrors: ReadonlyMap<number, string>;
 }
 
 /** "Обмены": what still needs an answer, split from what is already settled. */
-export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, actionError }: SwapsScreenProps) {
+export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, actionErrors }: SwapsScreenProps) {
   const { incoming, outgoing, archived } = splitSwaps(swaps);
   // Collapsed by default — the whole point is that finished swaps stop competing
   // for attention with the ones that still need something.
@@ -32,10 +37,6 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, act
         </Title>
       </header>
 
-      {actionError && (
-        <div style={{ margin: "0 4px 16px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{actionError}</div>
-      )}
-
       <List>
         <Section header="Входящие">
           {incoming.length === 0 ? (
@@ -47,6 +48,7 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, act
                   key={request.id}
                   request={request}
                   busy={busyIds.has(request.id)}
+                  error={actionErrors.get(request.id)}
                   onAccept={() => onAccept(request.id)}
                   onDecline={() => onDecline(request.id)}
                 />
@@ -65,6 +67,7 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, act
                   key={request.id}
                   request={request}
                   busy={busyIds.has(request.id)}
+                  error={actionErrors.get(request.id)}
                   onCancel={() => onCancel(request.id)}
                 />
               ))}
