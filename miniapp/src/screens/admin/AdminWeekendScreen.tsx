@@ -146,7 +146,7 @@ export function AdminWeekendScreen() {
           )}
         </Section>
 
-        <PayrollSection onError={setError} />
+        <PayrollSection />
       </List>
     </ScreenScroll>
   );
@@ -334,20 +334,28 @@ function hoursLabel(hours: number): string {
   return `${rounded} ${pluralizeRu(Math.round(hours), "час", "часа", "часов")}`;
 }
 
-function PayrollSection({ onError }: { onError: (msg: string | null) => void }) {
+/**
+ * Учёт часов — самая нижняя секция экрана, и её отказы уходили в общий `error`
+ * наверху. Замер на 390×844: чтобы дотянуться до «Показать», экран надо
+ * прокрутить на 552px, и блок ошибки оказывается на y=−368 — сотни пикселей выше
+ * края. Нажал, ничего не обновилось, почему — не сказано нигде. Ответ живёт
+ * здесь же. Зеркалится в консоли — см. `admin/src/screens/WeekendAdminScreen.tsx`.
+ */
+function PayrollSection() {
   const initial = monthRange(new Date());
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [rows, setRows] = useState<PayrollRow[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
-    onError(null);
+    setError(null);
     try {
       setRows(await apiClient.getPayroll(from, to));
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Не удалось загрузить учёт часов");
+      setError(err instanceof Error ? err.message : "Не удалось загрузить учёт часов");
     } finally {
       setLoading(false);
     }
@@ -360,7 +368,7 @@ function PayrollSection({ onError }: { onError: (msg: string | null) => void }) 
   }, []);
 
   async function exportCsv() {
-    onError(null);
+    setError(null);
     try {
       const csv = await apiClient.getPayrollCsv(from, to);
       // Leading BOM so Excel reads UTF-8 (Cyrillic) correctly.
@@ -374,7 +382,7 @@ function PayrollSection({ onError }: { onError: (msg: string | null) => void }) 
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Не удалось выгрузить CSV");
+      setError(err instanceof Error ? err.message : "Не удалось выгрузить CSV");
     }
   }
 
@@ -400,6 +408,11 @@ function PayrollSection({ onError }: { onError: (msg: string | null) => void }) 
               ⬇ Экспорт CSV
             </Button>
           </div>
+          {error && (
+            <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
+              {error}
+            </div>
+          )}
         </CardShell>
 
         {rows && rows.length > 0 && (
