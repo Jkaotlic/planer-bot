@@ -204,13 +204,19 @@ function History() {
   const [types, setTypes] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped by «Повторить». Без него перечитать журнал нечем: эффект зависит от
+   *  фильтра и страницы, а их органы управления при ошибке исчезают с экрана. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     apiClient
       .getJournal({ types, limit: PAGE, offset })
       .then((next) => {
-        if (!cancelled) setPage(next);
+        if (cancelled) return;
+        setPage(next);
+        // Прошлая неудача больше не про то, что сейчас на экране.
+        setError(null);
       })
       .catch((err: unknown) => {
         if (cancelled || err instanceof AuthRequiredError) return;
@@ -219,9 +225,18 @@ function History() {
     return () => {
       cancelled = true;
     };
-  }, [types, offset]);
+  }, [types, offset, attempt]);
 
-  if (error) return <div className="employees-error">{error}</div>;
+  if (error) {
+    return (
+      <div className="journal-controls">
+        <span className="employees-error">{error}</span>
+        <button type="button" className="btn btn-secondary" onClick={() => setAttempt((n) => n + 1)}>
+          Повторить
+        </button>
+      </div>
+    );
+  }
   if (!page) return <div className="employees-empty">Загрузка…</div>;
 
   const shown = page.offset + page.events.length;

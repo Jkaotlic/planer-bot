@@ -173,13 +173,19 @@ function History() {
   const [actor, setActor] = useState("");
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped by «Повторить». Без него перечитать журнал нечем: эффект зависит от
+   *  фильтров и страницы, а их органы управления при ошибке исчезают с экрана. */
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     apiClient
       .getJournal({ types: type ? [type] : [], actor: actor ? Number(actor) : undefined, limit: PAGE, offset })
       .then((next) => {
-        if (!cancelled) setPage(next);
+        if (cancelled) return;
+        setPage(next);
+        // Прошлая неудача больше не про то, что сейчас на экране.
+        setError(null);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить журнал");
@@ -187,12 +193,19 @@ function History() {
     return () => {
       cancelled = true;
     };
-  }, [type, actor, offset]);
+  }, [type, actor, offset, attempt]);
 
   if (error) {
     return (
       <Section header="Кто что менял">
-        <div style={{ padding: 16, color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>
+        <CardStack>
+          <CardShell>
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>
+            <Button size="s" mode="gray" stretched style={{ marginTop: 8 }} onClick={() => setAttempt((n) => n + 1)}>
+              Повторить
+            </Button>
+          </CardShell>
+        </CardStack>
       </Section>
     );
   }
