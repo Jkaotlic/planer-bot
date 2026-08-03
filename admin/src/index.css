@@ -1245,8 +1245,15 @@ input[type="time"] {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   color: var(--hint);
   font-size: 15px;
+}
+
+/* Тот же блок, но внутри уже нарисованного раздела — под шапкой недели, а не
+   вместо всего экрана, поэтому во весь рост тянуться ему незачем. */
+.centered-fill.in-section {
+  min-height: 40vh;
 }
 
 /* ── Работа в выходные дни (weekend marketplace) ────────────────────────── */

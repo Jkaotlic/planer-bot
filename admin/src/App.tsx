@@ -92,7 +92,13 @@ export function App() {
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Две разные беды, и раньше они лежали в одном поле, которое рисовалось вместо
+  // всей `main-column`. Загрузка людей и пресетов не удалась — показывать
+  // действительно нечего, ни один раздел без них не работает. Не подгрузилась
+  // неделя расписания — это беда одного раздела, и «Работники», «Журнал»,
+  // «Выходные», «Дни рождения» обязаны открываться как ни в чём не бывало.
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
@@ -107,29 +113,34 @@ export function App() {
   // Employees + presets + events load once; the schedule reloads whenever the visible week changes.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      apiClient.getEmployees(),
-      apiClient.getTemplates(),
-      apiClient.getEvents(),
-      apiClient.getTemplateRoles(),
-    ])
-      .then(([e, t, ev, roles]) => {
-        if (!cancelled) {
-          setEmployees(e);
-          setTemplates(t);
-          setEvents(ev);
-          setTemplateRoles(roles);
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        if (err instanceof AuthRequiredError) setNeedLogin(true);
-        else setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
-      });
+    void loadBootstrap(() => cancelled);
     return () => {
       cancelled = true;
     };
+    // loadBootstrap only closes over stable setters; safe to bind once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function loadBootstrap(cancelled: () => boolean = () => false) {
+    setBootError(null);
+    try {
+      const [e, t, ev, roles] = await Promise.all([
+        apiClient.getEmployees(),
+        apiClient.getTemplates(),
+        apiClient.getEvents(),
+        apiClient.getTemplateRoles(),
+      ]);
+      if (cancelled()) return;
+      setEmployees(e);
+      setTemplates(t);
+      setEvents(ev);
+      setTemplateRoles(roles);
+    } catch (err) {
+      if (cancelled()) return;
+      if (err instanceof AuthRequiredError) setNeedLogin(true);
+      else setBootError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+    }
+  }
 
   async function refreshEmployees() {
     setEmployees(await apiClient.getEmployees());
@@ -137,24 +148,30 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    const from = weekDates[0]!;
-    const to = weekDates[6]!;
-    apiClient
-      .getTeamSchedule(from, to)
-      .then((s) => {
-        if (!cancelled) setShifts(s);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        if (err instanceof AuthRequiredError) setNeedLogin(true);
-        else setError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
-      });
+    void loadWeek(() => cancelled);
     return () => {
       cancelled = true;
     };
     // weekDates is derived fresh each render from weekMonday; depend on the Monday itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekMonday]);
+
+  /** The visible week's entries. `shifts` is dropped first: a failed reload must not
+   *  leave the previous week's rows standing under the new week's dates. */
+  async function loadWeek(cancelled: () => boolean = () => false) {
+    const from = weekDates[0]!;
+    const to = weekDates[6]!;
+    setScheduleError(null);
+    try {
+      const s = await apiClient.getTeamSchedule(from, to);
+      if (!cancelled()) setShifts(s);
+    } catch (err) {
+      if (cancelled()) return;
+      setShifts(null);
+      if (err instanceof AuthRequiredError) setNeedLogin(true);
+      else setScheduleError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
+    }
+  }
 
   async function refreshSchedule() {
     const from = weekDates[0]!;
@@ -296,8 +313,13 @@ export function App() {
     <div className="app-shell">
       <Sidebar active={nav} onChange={setNav} adminLabel={admin ? `${admin.address} · админ` : "Админ"} />
       <div className="main-column">
-        {error ? (
-          <div className="centered-fill">{error}</div>
+        {bootError ? (
+          <div className="centered-fill">
+            <span>{bootError}</span>
+            <button type="button" className="btn btn-secondary" onClick={() => void loadBootstrap()}>
+              Повторить
+            </button>
+          </div>
         ) : !employees || !templates ? (
           <div className="centered-fill">Загрузка…</div>
         ) : nav === "employees" ? (
@@ -310,7 +332,7 @@ export function App() {
           <BirthdaysScreen />
         ) : nav === "log" ? (
           <JournalScreen />
-        ) : !activeEmployees || !shifts ? (
+        ) : !activeEmployees ? (
           <div className="centered-fill">Загрузка…</div>
         ) : (
           <>
@@ -339,20 +361,34 @@ export function App() {
                 <button type="button" onClick={() => setRosterNotice(null)} aria-label="Закрыть сообщение">×</button>
               </div>
             )}
-            <div className="schedule-layout">
-              <ScheduleGrid
-                employees={activeEmployees}
-                shifts={shifts}
-                templates={templates}
-                weekDates={weekDates}
-                onAddClick={openAddPanel}
-                onEntryClick={setEditingEntry}
-              />
-              <aside className="right-rail">
-                <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
-                <EventsFeed events={events} />
-              </aside>
-            </div>
+            {scheduleError ? (
+              // Неделя не пришла — сетку не рисуем вовсе: пустые клетки читались бы
+              // как «на этой неделе никто не работает». Переключатель недель и левое
+              // меню остаются на месте, так что выход отсюда есть и без F5.
+              <div className="centered-fill in-section">
+                <span>{scheduleError}</span>
+                <button type="button" className="btn btn-secondary" onClick={() => void loadWeek()}>
+                  Повторить
+                </button>
+              </div>
+            ) : !shifts ? (
+              <div className="centered-fill in-section">Загрузка…</div>
+            ) : (
+              <div className="schedule-layout">
+                <ScheduleGrid
+                  employees={activeEmployees}
+                  shifts={shifts}
+                  templates={templates}
+                  weekDates={weekDates}
+                  onAddClick={openAddPanel}
+                  onEntryClick={setEditingEntry}
+                />
+                <aside className="right-rail">
+                  <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
+                  <EventsFeed events={events} />
+                </aside>
+              </div>
+            )}
           </>
         )}
       </div>
