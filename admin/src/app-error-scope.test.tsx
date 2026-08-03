@@ -59,6 +59,32 @@ async function click(el: HTMLElement) {
 }
 
 describe("отказ одного запроса не уносит всю консоль", () => {
+  it("упавшая подгрузка расписания оставляет доступными другие разделы", async () => {
+    const el = await mount();
+    expect(el.querySelector(".schedule-table")).not.toBeNull();
+
+    vi.spyOn(apiClient, "getTeamSchedule").mockRejectedValue(new Error("Failed to fetch"));
+    await click(el.querySelector("[aria-label='Следующая неделя']") as HTMLElement);
+    expect(el.textContent ?? "").toContain("Failed to fetch");
+
+    // «Работники» ходит своим запросом и к упавшему расписанию отношения не имеет.
+    await click(byText(el, ".sidebar-nav-item", "Работники"));
+    expect(el.querySelector(".employees-screen")).not.toBeNull();
+  });
+
+  it("упавшее расписание можно перезагрузить, не перезагружая страницу", async () => {
+    const el = await mount();
+    const failing = vi.spyOn(apiClient, "getTeamSchedule").mockRejectedValue(new Error("Failed to fetch"));
+    await click(el.querySelector("[aria-label='Следующая неделя']") as HTMLElement);
+    expect(el.querySelector(".schedule-table")).toBeNull();
+
+    failing.mockRestore();
+    await click(byText(el, "button", "Повторить"));
+
+    expect(el.querySelector(".schedule-table")).not.toBeNull();
+    expect(el.textContent ?? "").not.toContain("Failed to fetch");
+  });
+
   it("отказ «Выгрузить CSV» не стирает расписание с экрана", async () => {
     const el = await mount();
     expect(el.querySelector(".schedule-table")).not.toBeNull();
