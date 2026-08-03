@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { isIdenticalShift } from "@planer/shared";
 import { apiClient, type Me, type Shift, type SwapRequest, type Template, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -12,7 +11,7 @@ import { AdminScreen } from "./screens/AdminScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
-import { hasStarted } from "./lib/swaps";
+import { swapCandidates } from "./lib/swap-candidates";
 
 interface AppData {
   me: Me;
@@ -50,6 +49,12 @@ export function App() {
   const [swapErrors, setSwapErrors] = useState<ReadonlyMap<number, string>>(new Map());
   const [slotErrors, setSlotErrors] = useState<ReadonlyMap<number, string>>(new Map());
   const [offerErrors, setOfferErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  // Расписание за день отдаваемой смены. Грузится отдельно от недельного:
+  // «Обменять» доступно и на смене через три недели, а недельная выборка про неё
+  // ничего не знает — раньше в этом случае экран показывал пустой список.
+  const [dayShifts, setDayShifts] = useState<{ date: string; shifts: Shift[] } | null>(null);
+  const [dayLoading, setDayLoading] = useState(false);
+  const [dayError, setDayError] = useState<string | null>(null);
   // reloadData is a background refresh (tab switch, regained focus) the user
   // never asked for directly, so its failure gets a quieter, app-wide notice
   // instead of a per-screen error — nothing to retry by hand, it just says the
@@ -86,6 +91,33 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!proposingFor) {
+      setDayShifts(null);
+      setDayError(null);
+      return;
+    }
+    let cancelled = false;
+    const date = proposingFor.date;
+    setDayLoading(true);
+    setDayError(null);
+    apiClient
+      .getTeamSchedule(date, date)
+      .then((schedule) => {
+        if (!cancelled) setDayShifts({ date, shifts: schedule.shifts });
+      })
+      .catch((err: unknown) => {
+        console.error("Day schedule failed:", err);
+        if (!cancelled) setDayError("Не удалось загрузить, кто работает в этот день.");
+      })
+      .finally(() => {
+        if (!cancelled) setDayLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [proposingFor]);
 
   async function refreshSwaps() {
     const swaps = await apiClient.getSwaps();
@@ -209,20 +241,17 @@ export function App() {
   }
 
   if (proposingFor) {
-    // Don't offer a swap that would be a no-op (same day, same kind of shift as
-    // the one being given up) — the server would reject it anyway, but not
-    // offering it is better than a rejection after the tap. Same predicate the
-    // server uses, so the two never drift apart.
-    // A shift that has already started is refused by the server for the same
-    // reason, so it doesn't belong in the picker either.
-    const now = new Date();
-    const colleagueShifts = data.teamShifts.filter(
-      (s) => s.category === "shift" && s.employeeId !== data.me.id && !isIdenticalShift(proposingFor, s) && !hasStarted(s, now),
-    );
+    // Только свой день: пока грузится другой, показывать прежние строки нельзя —
+    // это чужой день, и человек предложит обмен не туда.
+    const day = dayShifts?.date === proposingFor.date ? dayShifts.shifts : [];
+    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, new Date());
     return (
       <ProposeSwapScreen
         fromShift={proposingFor}
-        colleagueShifts={colleagueShifts}
+        candidates={candidates}
+        sameKindCount={sameKindCount}
+        loading={dayLoading}
+        loadError={dayError}
         onCancel={() => setProposingFor(null)}
         onConfirm={handleConfirmSwap}
       />
