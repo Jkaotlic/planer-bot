@@ -396,7 +396,12 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     await ctx.answerCallbackQuery({ text: "Записал 🙋" });
-    await ctx.editMessageReplyMarkup(); // drop the button — interest recorded
+    // drop the button — interest recorded. Через safeEdit, как и три других
+    // косметических edit'а в файле: без него сбой этого вызова долетал бы до
+    // bot.catch и логировался общей строкой «bot handler error», а не понятной
+    // «cosmetic edit failed» — процесс не падает в любом случае, разница только
+    // в том, что написано в логе.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
   });
 
   bot.callbackQuery(/^weekend:(confirm|decline):(\d+)$/, async (ctx) => {
