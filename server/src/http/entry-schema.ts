@@ -74,6 +74,3 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
 });
 
 export const updateEntrySchema = baseEntry.partial();
-
-export type CreateEntryInput = z.infer<typeof createEntrySchema>;
-export type UpdateEntryInput = z.infer<typeof updateEntrySchema>;

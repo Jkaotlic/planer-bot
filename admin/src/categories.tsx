@@ -2,8 +2,6 @@ import type { CSSProperties, ReactNode } from "react";
 import { exactSchedulePalette, UNRECOGNISED_SCHEDULE_PALETTE, type EntryCategory, type TemplateAccent } from "@planer/shared";
 import { useIsDark } from "./lib/theme";
 
-export type { EntryCategory as Category } from "@planer/shared";
-
 const CATEGORY_LABELS: Record<EntryCategory, string> = {
   shift: "Смена",
   vacation: "Отпуск",
