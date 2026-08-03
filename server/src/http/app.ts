@@ -482,6 +482,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof body.isAdmin !== "boolean") return c.json({ error: "isAdmin (boolean) required" }, 400);
     const target = getEmployeeById(db, id);
     if (!target) return c.json({ error: "not_found" }, 404);
+    // Раньше: демоут архивного админа мог упереться в last_admin по чужой
+    // причине (countActiveAdmins их не считает — реальному последнему активному
+    // админу ничего не грозило), а промоут архивного в админы проходил
+    // безусловно — запись в никуда, войти он всё равно не мог. Та же проверка,
+    // что уже стоит у записей и распределения: с архивным целевым человеком
+    // ничего не меняем, пока его не восстановили.
+    if (!target.isActive) {
+      return c.json({ error: `«${target.displayName}» в архиве — восстановите его, прежде чем менять права` }, 400);
+    }
     if (!body.isAdmin && target.isAdmin && countActiveAdmins(db) <= 1) {
       return c.json({ error: "last_admin" }, 400);
     }
