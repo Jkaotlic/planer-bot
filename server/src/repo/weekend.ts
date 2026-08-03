@@ -100,10 +100,6 @@ export function createAssignment(
   return db.insert(weekendAssignments).values(data).returning().all()[0]!;
 }
 
-export function getAssignmentForSlot(db: Db, slotId: number): WeekendAssignment | undefined {
-  return db.select().from(weekendAssignments).where(eq(weekendAssignments.slotId, slotId)).get();
-}
-
 /** Every assignment on a slot — a slot can need several people. */
 export function listAssignmentsForSlot(db: Db, slotId: number): WeekendAssignment[] {
   return db.select().from(weekendAssignments).where(eq(weekendAssignments.slotId, slotId)).all();
