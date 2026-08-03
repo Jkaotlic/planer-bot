@@ -167,6 +167,14 @@ export function AdminScheduleScreen() {
    *  the server does, and cannot do that without them. */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
+   * которая не загрузилась, обязана сказать это на месте дня: иначе она либо
+   * выдаёт день за пустой (`shifts` остались от прежней недели, ни одна запись
+   * не совпадает с новым днём), либо крутит спиннер вечно (`loadWeek` снимает
+   * записи первой строкой). Тот же довод, что в консоли — `admin/src/App.tsx`.
+   */
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [distributing, setDistributing] = useState(false);
   /** null = closed, "new" = add form, a Shift = editing that entry. */
@@ -193,11 +201,20 @@ export function AdminScheduleScreen() {
   // newest one.
   const gate = useRef(createLatestRequestGate());
 
+  /** Отказ не пробрасывается: зовущие («Сохранить», «Заполнить неделю», импорт,
+   *  «Распределить честно») своё дело уже сделали, и провалившееся перечитывание
+   *  не повод говорить им, что не удалось сохранить. Оно докладывает о себе само —
+   *  на месте дня, с кнопкой «Повторить». */
   async function loadWeek(fromIso: string, toIso: string) {
     const id = gate.current.begin();
     setShifts(null);
-    const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
-    if (gate.current.isLatest(id)) setShifts(schedule.shifts);
+    setScheduleError(null);
+    try {
+      const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
+      if (gate.current.isLatest(id)) setShifts(schedule.shifts);
+    } catch (err) {
+      if (gate.current.isLatest(id)) setScheduleError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
+    }
   }
 
   /** A CSV import renames and creates people and rewrites entries, so both the
@@ -235,10 +252,17 @@ export function AdminScheduleScreen() {
     apiClient
       .getTeamSchedule(from, to)
       .then((schedule) => {
-        if (!cancelled && gate.current.isLatest(id)) setShifts(schedule.shifts);
+        if (cancelled || !gate.current.isLatest(id)) return;
+        setShifts(schedule.shifts);
+        setScheduleError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
+        if (cancelled) return;
+        // Записи прежней недели снимаем: выбранный день уже другой, ни одна из них
+        // с ним не совпадёт, и экран сказал бы «в этот день ничего не запланировано»
+        // про день, который просто не прочитали.
+        setShifts(null);
+        setScheduleError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
       });
     return () => {
       cancelled = true;
@@ -361,7 +385,14 @@ export function AdminScheduleScreen() {
           </Section>
         ) : (
           <Section header={formatDayLabel(selectedDate)}>
-            {shifts === null ? (
+            {scheduleError ? (
+              <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{scheduleError}</span>
+                <Button size="s" mode="gray" stretched onClick={() => void loadWeek(from, to)}>
+                  Повторить
+                </Button>
+              </div>
+            ) : shifts === null ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
                 <Spinner size="m" />
               </div>
