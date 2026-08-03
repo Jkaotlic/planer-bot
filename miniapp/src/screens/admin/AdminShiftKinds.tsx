@@ -5,6 +5,7 @@ import { apiClient, type Employee, type TemplateQueue, type TemplateRolesView } 
 import { CardShell, CardStack } from "../../components/Card";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useEntryPalette } from "../../categories";
+import { withError, withoutError } from "../../lib/error-map";
 
 /**
  * "все (26)" or "5 из 26". An empty pool is not "nobody" — it is an unconfigured
@@ -36,37 +37,54 @@ export function togglePreference(
  */
 export function AdminShiftKinds({
   employees,
-  onError,
   onClose,
 }: {
   employees: Employee[];
-  onError: (message: string | null) => void;
   /** Back to the day view — without it this screen is a dead end. */
   onClose: () => void;
 }) {
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  /**
+   * Отказ по id вида смены, а не один на экран. Экран выше окна даже свёрнутым
+   * (замер на 390×844: высота 970, последняя карточка на y=747), а развёрнутая
+   * карточка добавляет по строке на каждого активного — отказ, нарисованный
+   * родителем над `ScreenScroll`, для нажавшего в такой карточке невидим.
+   */
+  const [errors, setErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  /** Упавшая начальная загрузка: без неё показывать нечего, и «Повторить» — единственный выход. */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const active = employees.filter((employee) => employee.isActive);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadError(null);
     apiClient
       .getTemplateRoles()
-      .then(setKinds)
-      .catch((err: unknown) => onError(err instanceof Error ? err.message : "Не удалось загрузить виды смен"));
-  }, [onError]);
+      .then((next) => {
+        if (!cancelled) setKinds(next);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Не удалось загрузить виды смен");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
 
   async function save(kind: TemplateRolesView, patch: Partial<TemplateRolesView>) {
     const next = { ...kind, ...patch };
     setKinds((current) => current?.map((item) => (item.templateId === kind.templateId ? next : item)) ?? current);
     setBusyId(kind.templateId);
-    onError(null);
+    setErrors((prev) => withoutError(prev, kind.templateId));
     try {
       await apiClient.saveTemplateRoles(next.templateId, next.pool, next.preference);
     } catch (err) {
       // Put the server's version back rather than leaving a lie on screen.
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
-      onError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить"));
     } finally {
       setBusyId(null);
     }
@@ -74,14 +92,29 @@ export function AdminShiftKinds({
 
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
     setBusyId(kind.templateId);
-    onError(null);
+    setErrors((prev) => withoutError(prev, kind.templateId));
     try {
       await apiClient.setRotationUnit(kind.templateId, unit);
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Не удалось сохранить очередь");
+      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить очередь"));
     } finally {
       setBusyId(null);
     }
+  }
+
+  if (loadError) {
+    return (
+      <Section header="Кто что может">
+        <CardStack>
+          <CardShell>
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{loadError}</div>
+            <Button size="s" mode="gray" stretched style={{ marginTop: 8 }} onClick={() => setAttempt((n) => n + 1)}>
+              Повторить
+            </Button>
+          </CardShell>
+        </CardStack>
+      </Section>
+    );
   }
 
   if (!kinds) {
@@ -111,6 +144,7 @@ export function AdminShiftKinds({
             employees={active}
             open={openId === kind.templateId}
             busy={busyId === kind.templateId}
+            error={errors.get(kind.templateId)}
             onToggleOpen={() => setOpenId(openId === kind.templateId ? null : kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
@@ -134,6 +168,7 @@ function KindCard({
   employees,
   open,
   busy,
+  error,
   onToggleOpen,
   onChange,
   onRotationUnit,
@@ -142,6 +177,8 @@ function KindCard({
   employees: Employee[];
   open: boolean;
   busy: boolean;
+  /** Отказ на последнее действие именно в этой карточке. */
+  error?: string;
   onToggleOpen: () => void;
   onChange: (patch: Partial<TemplateRolesView>) => void;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
@@ -311,6 +348,13 @@ function KindCard({
               Сбросить на «все»
             </Button>
           )}
+        </div>
+      )}
+      {/* Свёрнутую карточку отказ тоже касается: сохранение могло не дойти уже
+          после того, как её закрыли. */}
+      {error && (
+        <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
+          {error}
         </div>
       )}
     </CardShell>
