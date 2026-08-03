@@ -35,6 +35,7 @@ import {
 } from "../repo/employees";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
+import { notifyEntryChange } from "../schedule/change-notice";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import {
@@ -722,7 +723,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (archived) return c.json({ error: archived }, 400);
     const entry = createShift(db, parsed.data);
     recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
-    return c.json({ entry }, 201);
+    const notified = await notifyEntryChange(db, bot, {
+      actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now: teamNow(config.teamTz),
+    });
+    return c.json({ entry, notified }, 201);
   });
 
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -801,7 +805,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: auditShape(existing), after: auditShape(entry) });
-    return c.json({ entry });
+    const notified = await notifyEntryChange(db, bot, {
+      actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
+    });
+    return c.json({ entry, notified });
   });
 
   app.delete("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -825,7 +832,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
         if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "entry_deleted"));
       }
     }
-    return c.json({ ok: true });
+    const notified = existing
+      ? await notifyEntryChange(db, bot, {
+          actorEmployeeId: c.get("auth").employeeId, before: existing, after: null, now: teamNow(config.teamTz),
+        })
+      : { delivered: 0, intended: 0 };
+    return c.json({ ok: true, notified });
   });
 
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
