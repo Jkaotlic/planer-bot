@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, like, notInArray } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, like, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   shifts,
@@ -14,6 +14,37 @@ export function createVacantSlot(
   data: { date: string; start: string; end: string; title?: string | null; location?: string | null; note?: string | null },
 ): VacantSlot {
   return db.insert(vacantSlots).values(data).returning().all()[0]!;
+}
+
+/**
+ * An already-open slot with exactly these details, or `null`.
+ *
+ * Guards against a double-click on «Опубликовать»: the button posts a broadcast
+ * to the whole team, and unlike most creates in this app (where a duplicate row
+ * is harmless clutter), a second identical slot means a second «Нужен человек на
+ * выходной» DM to everyone who linked Telegram. Exact match only — `location`/
+ * `note` differing means the admin meant something else by it, not a repeat tap.
+ */
+export function findOpenSlotLike(
+  db: Db,
+  data: { date: string; start: string; end: string; title?: string | null; location?: string | null },
+): VacantSlot | null {
+  return (
+    db
+      .select()
+      .from(vacantSlots)
+      .where(
+        and(
+          eq(vacantSlots.status, "open"),
+          eq(vacantSlots.date, data.date),
+          eq(vacantSlots.start, data.start),
+          eq(vacantSlots.end, data.end),
+          data.title != null ? eq(vacantSlots.title, data.title) : isNull(vacantSlots.title),
+          data.location != null ? eq(vacantSlots.location, data.location) : isNull(vacantSlots.location),
+        ),
+      )
+      .get() ?? null
+  );
 }
 
 export function listOpenSlots(db: Db, fromDate: string): VacantSlot[] {
