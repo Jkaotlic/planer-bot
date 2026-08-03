@@ -152,6 +152,47 @@ describe("POST /api/admin/birthdays/:id/send", () => {
     expect(sent).toHaveLength(3);
   });
 
+  /**
+   * «Разослано» ставится только ПОСЛЕ цикла отправки (`markSent` — последняя строка
+   * роута), а блокер на статусе `sent` читается ДО него. Между чтением и записью —
+   * цикл из `await notifyUser(...)` на каждого получателя: реальное окно, в которое
+   * помещается второй запрос. Отправка сделана через `setTimeout`, а не мгновенный
+   * резолв: без задержки оба запроса проходят через микротаски настолько плотно, что
+   * тест не давал бы гонке случиться детерминированно.
+   */
+  it("гонка: два одновременных «Разослать» не должны удвоить рассылку", async () => {
+    const db = makeTestDb();
+    const sentRaces: { to: number; text: string }[] = [];
+    const bot = {
+      api: {
+        sendMessage: vi.fn(
+          (to: number, text: string) =>
+            new Promise<void>((resolve) => {
+              setTimeout(() => {
+                sentRaces.push({ to, text });
+                resolve();
+              }, 5);
+            }),
+        ),
+      },
+    } as unknown as Bot;
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const id = await ready(db, app, token);
+
+    const [first, second] = await Promise.all([
+      app.request(`/api/admin/birthdays/${id}/send?${ASOF}`, send(token, { confirm: true }, "POST")),
+      app.request(`/api/admin/birthdays/${id}/send?${ASOF}`, send(token, { confirm: true }, "POST")),
+    ]);
+    const statuses = [first.status, second.status].sort();
+
+    expect(statuses, "ровно один запрос должен пройти, второй — 409").toEqual([200, 409]);
+    // Трое получателей — если гонка не перекрыта, каждый получит письмо дважды.
+    expect(sentRaces.filter((m) => m.to === 2)).toHaveLength(1);
+    expect(sentRaces.filter((m) => m.to === 3)).toHaveLength(1);
+    expect(sentRaces.filter((m) => m.to === 111)).toHaveLength(1);
+  });
+
   it("refuses to send with no link, however confirmed", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();

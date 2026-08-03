@@ -126,6 +126,20 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const { db, config, bot } = deps;
   const app = new Hono<Env>();
 
+  /**
+   * Кампании ДР, для которых прямо сейчас идёт рассылка.
+   *
+   * `previewCampaign`'s `blocker` смотрит на статус `sent`, а он ставится только
+   * ПОСЛЕ цикла `await notifyUser(...)` на каждого получателя — то есть между
+   * чтением блокера и записью статуса лежит настоящее окно на секунды. Два
+   * одновременных «Разослать» (двойной тап, два открытых админом устройства, повтор
+   * сети) оба проходят проверку и оба шлют всей команде — «задвоенное поздравление
+   * хуже недосланного», как и говорит комментарий у `markSent`, но раньше это не
+   * было ничем защищено. Клеймится синхронно, до первого `await`, поэтому окна для
+   * второго запроса нет — тот же принцип, что у `status !== "pending"` в обменах.
+   */
+  const birthdaySending = new Set<number>();
+
   // Registered first (= outermost) so it runs for every response this process
   // serves, including the static /app and /admin bundles mounted later in
   // index.ts — Hono composes "*" middleware around whatever else is
@@ -611,24 +625,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
 
     const campaign = ensureCampaign(db, employeeId, asOf)!;
-    let delivered = 0;
-    for (const recipient of teamRecipients(db, employeeId)) {
-      if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+    // Клейм синхронный: между этой строкой и первым `await` ниже другому запросу
+    // некуда вклиниться (сингл-тредный Node), так что второй одновременный «Разослать»
+    // всегда видит кампанию уже занятой.
+    if (birthdaySending.has(campaign.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
+    birthdaySending.add(campaign.id);
+    try {
+      let delivered = 0;
+      for (const recipient of teamRecipients(db, employeeId)) {
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+      }
+      // «Разослано» закрывает кнопку навсегда (`blocker`: «повторная отправка
+      // отключена»), поэтому ставится, только если сообщение дошло хоть до кого-то.
+      // Ноль доставленных — это не рассылка, а её отсутствие: Telegram ответил 429
+      // всей пачке или сеть отвалилась, и запирать единственную кнопку не за что.
+      // Никого не задваиваем — до людей ничего не дошло. Как только дошло хотя бы до
+      // одного, повтор снова закрыт: задвоенное поздравление хуже недосланного.
+      if (delivered > 0) markSent(db, campaign.id, delivered, new Date());
+      recordAudit(db, "birthday_sent", c.get("auth").employeeId, {
+        employeeId,
+        displayName: preview.displayName,
+        delivered,
+        intended: preview.recipients.length,
+      });
+      return c.json({ delivered, intended: preview.recipients.length });
+    } finally {
+      birthdaySending.delete(campaign.id);
     }
-    // «Разослано» закрывает кнопку навсегда (`blocker`: «повторная отправка
-    // отключена»), поэтому ставится, только если сообщение дошло хоть до кого-то.
-    // Ноль доставленных — это не рассылка, а её отсутствие: Telegram ответил 429
-    // всей пачке или сеть отвалилась, и запирать единственную кнопку не за что.
-    // Никого не задваиваем — до людей ничего не дошло. Как только дошло хотя бы до
-    // одного, повтор снова закрыт: задвоенное поздравление хуже недосланного.
-    if (delivered > 0) markSent(db, campaign.id, delivered, new Date());
-    recordAudit(db, "birthday_sent", c.get("auth").employeeId, {
-      employeeId,
-      displayName: preview.displayName,
-      delivered,
-      intended: preview.recipients.length,
-    });
-    return c.json({ delivered, intended: preview.recipients.length });
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */
