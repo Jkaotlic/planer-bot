@@ -12,7 +12,7 @@ function setup() {
   const a = createEmployee(db, { displayName: "Аня" });
   const b = createEmployee(db, { displayName: "Игорь" });
   const sa = createShift(db, { date: "2026-07-10", start: "08:00", end: "17:00", employeeId: a.id });
-  const sb = createShift(db, { date: "2026-07-11", start: "11:00", end: "20:00", employeeId: b.id });
+  const sb = createShift(db, { date: "2026-07-10", start: "11:00", end: "20:00", employeeId: b.id });
   return { db, a, b, sa, sb };
 }
 
@@ -36,14 +36,18 @@ describe("swap service", () => {
   // The recheck at accept-time already refuses a shift that has started, so a
   // request created on one is born dead: it only ever answers «Смена уже прошла»,
   // after having pinged the counterparty with live-looking buttons.
+  // Меняться можно только внутри дня, поэтому «уже началась» — это про сегодня:
+  // NOW = 12:00, утренняя смена началась, вечерняя ещё впереди.
   it("createSwap refuses a shift that has already started, on either side", () => {
-    const { db, a, b, sa, sb } = setup();
-    const past = createShift(db, { date: "2026-06-01", start: "08:00", end: "17:00", employeeId: b.id });
-    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: past.id }, NOW))
+    const { db, a, b } = setup();
+    const myEvening = createShift(db, { date: NOW.date, start: "15:00", end: "23:00", employeeId: a.id });
+    const theirMorning = createShift(db, { date: NOW.date, start: "08:00", end: "17:00", employeeId: b.id });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: myEvening.id, toShiftId: theirMorning.id }, NOW))
       .toEqual({ ok: false, reason: "to-shift-in-past" });
 
-    const myPast = createShift(db, { date: "2026-06-02", start: "08:00", end: "17:00", employeeId: a.id });
-    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: myPast.id, toShiftId: sb.id }, NOW))
+    const myMorning = createShift(db, { date: NOW.date, start: "09:00", end: "18:00", employeeId: a.id });
+    const theirEvening = createShift(db, { date: NOW.date, start: "16:00", end: "23:00", employeeId: b.id });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: myMorning.id, toShiftId: theirEvening.id }, NOW))
       .toEqual({ ok: false, reason: "from-shift-in-past" });
   });
 
@@ -97,7 +101,8 @@ describe("swap service", () => {
   it("accept exchanges the shifts atomically and cancels siblings", () => {
     const { db, a, b, sa, sb } = setup();
     const c = createEmployee(db, { displayName: "Марк" });
-    const sc = createShift(db, { date: "2026-07-12", start: "09:00", end: "18:00", employeeId: c.id });
+    // Тот же день, что sa и sb, — иначе обмен Марка невозможен в принципе.
+    const sc = createShift(db, { date: "2026-07-10", start: "18:00", end: "22:00", employeeId: c.id });
     const main = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
     const sibling = createSwap(db, { fromEmployeeId: c.id, fromShiftId: sc.id, toShiftId: sa.id }, NOW); // also wants sa
     if (!main.ok || !sibling.ok) throw new Error("setup");

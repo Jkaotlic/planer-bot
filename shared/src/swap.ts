@@ -20,6 +20,7 @@ export function nextSwapStatus(current: SwapStatus, event: SwapEvent): SwapStatu
 }
 
 export type SwapRejectReason =
+  | "different-day"
   | "from-shift-not-owned"
   | "to-shift-not-owned"
   | "from-shift-in-past"
@@ -56,9 +57,12 @@ export interface ShiftKind {
  * - only when BOTH shifts are hand-made (no preset) do we fall back to
  *   `category` + `start` + `end`.
  *
- * Deliberately NOT flagged: the same preset on a *different* day (trading
- * which day you work is the whole point of swaps), or two different presets
- * on the same day (that changes both people's hours).
+ * Deliberately NOT flagged: two different presets on the same day — that
+ * changes both people's hours, which is the point.
+ *
+ * A pair on two different days never reaches this function through
+ * `validateSwap`: since 2026-08-03 swaps live inside a single day, and
+ * `different-day` is answered several checks earlier.
  */
 export function isIdenticalShift(a: ShiftKind, b: ShiftKind): boolean {
   if (a.date !== b.date) return false;
@@ -84,6 +88,13 @@ export function validateSwap(ctx: SwapContext): SwapValidation {
 
   if (fromShift.employeeId !== fromEmployeeId) return { ok: false, reason: "from-shift-not-owned" };
   if (toShift.employeeId !== toEmployeeId) return { ok: false, reason: "to-shift-not-owned" };
+
+  // Обмен существует только внутри одного дня (его решение, 2026-08-03): отдаёшь
+  // четверг — берёшь смену коллеги в этот же четверг. Правило стоит здесь, а не
+  // в экране, потому что через этот валидатор проходят оба входа — предложение
+  // из мини-аппа и кнопка «Принять» в боте. И стоит до проверок «в прошлом» и
+  // «та же самая смена»: человеку надо назвать причину, которая ближе к делу.
+  if (fromShift.date !== toShift.date) return { ok: false, reason: "different-day" };
 
   const nowAbs = absMinutes(now.date, now.time);
   if (shiftInterval(fromShift).start <= nowAbs) return { ok: false, reason: "from-shift-in-past" };
