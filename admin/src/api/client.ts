@@ -491,6 +491,27 @@ function clearAuth(): void {
 
 let tokenPromise: Promise<string> | null = null;
 
+
+/**
+ * Сетевой сбой — это не ответ сервера, а его отсутствие: `fetch` бросает
+ * `TypeError: Failed to fetch` (в Chrome) или «NetworkError…» (в Firefox), и
+ * именно эта английская строка доезжала до человека — она кладётся в
+ * `Error.message`, а экраны показывают его как есть. Повод дёрнуть эту ветку
+ * будничный: рестарт сервера при выкладке или лифт с плохим интернетом.
+ *
+ * То же правило, что у `refusalText`: то, что читает человек, пишется
+ * по-русски. Ответ сервера с кодом мы не трогаем — у него свои переводы.
+ */
+export const OFFLINE_MESSAGE = "Нет связи с сервером — проверь интернет и попробуй ещё раз.";
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(OFFLINE_MESSAGE);
+  }
+}
+
 async function requestToken(): Promise<string> {
   const browserToken = storedToken();
   if (browserToken) return browserToken;
@@ -505,7 +526,7 @@ async function requestToken(): Promise<string> {
   if (!initData) {
     throw new AuthRequiredError("Требуется вход");
   }
-  const res = await fetch(`${API_BASE}/api/auth`, {
+  const res = await apiFetch(`${API_BASE}/api/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ initData }),
@@ -540,7 +561,7 @@ async function toError(path: string, res: Response): Promise<Error> {
 
 async function authorizedGet<T>(path: string): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -551,7 +572,7 @@ async function authorizedGet<T>(path: string): Promise<T> {
 
 async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -564,7 +585,7 @@ async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T>
 
 async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -577,7 +598,7 @@ async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> 
 
 async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -590,7 +611,7 @@ async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T
 
 async function authorizedDelete(path: string): Promise<void> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -599,7 +620,8 @@ async function authorizedDelete(path: string): Promise<void> {
   }
 }
 
-const realClient: ApiClient = {
+/** Экспортируется ради теста про сетевой сбой — в приложение уходит `apiClient` ниже. */
+export const realClient: ApiClient = {
   async getEmployees() {
     const { employees } = await authorizedGet<EmployeesResponse>("/api/admin/employees");
     return employees;
@@ -704,7 +726,7 @@ const realClient: ApiClient = {
   async getPayrollCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const res = await fetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiFetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw await toError("/api/admin/weekend/payroll.csv", res);
     return res.text();
   },
@@ -712,7 +734,7 @@ const realClient: ApiClient = {
   async getRosterCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const res = await fetch(`${API_BASE}/api/admin/roster.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiFetch(`${API_BASE}/api/admin/roster.csv?${q}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw await toError("/api/admin/roster.csv", res);
     return res.text();
   },
@@ -726,7 +748,7 @@ const realClient: ApiClient = {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
     const path = `/api/admin/reports/shift-counts.csv?${q}`;
-    const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await apiFetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw await toError(path, res);
     return res.text();
   },
@@ -773,7 +795,7 @@ const realClient: ApiClient = {
   async setRotationUnit(templateId, rotationUnit) {
     const token = await authToken();
     const path = `/api/admin/templates/${templateId}/rotation`;
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await apiFetch(`${API_BASE}${path}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ rotationUnit }),

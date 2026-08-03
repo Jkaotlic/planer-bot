@@ -580,6 +580,27 @@ const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 let tokenPromise: Promise<string> | null = null;
 
+
+/**
+ * Сетевой сбой — это не ответ сервера, а его отсутствие: `fetch` бросает
+ * `TypeError: Failed to fetch` (в Chrome) или «NetworkError…» (в Firefox), и
+ * именно эта английская строка доезжала до человека — она кладётся в
+ * `Error.message`, а экраны показывают его как есть. Повод дёрнуть эту ветку
+ * будничный: рестарт сервера при выкладке или лифт с плохим интернетом.
+ *
+ * То же правило, что у `refusalText`: то, что читает человек, пишется
+ * по-русски. Ответ сервера с кодом мы не трогаем — у него свои переводы.
+ */
+export const OFFLINE_MESSAGE = "Нет связи с сервером — проверь интернет и попробуй ещё раз.";
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(OFFLINE_MESSAGE);
+  }
+}
+
 async function requestToken(): Promise<string> {
   try {
     restoreInitData();
@@ -588,7 +609,7 @@ async function requestToken(): Promise<string> {
     // through and let the /api/auth call below fail with a clear 401
     // rather than hanging on a signal that will never populate.
   }
-  const res = await fetch(`${API_BASE}/api/auth`, {
+  const res = await apiFetch(`${API_BASE}/api/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ initData: initDataRaw() ?? "" }),
@@ -608,7 +629,7 @@ function authToken(): Promise<string> {
 
 async function authorizedGet<T>(path: string): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -625,7 +646,7 @@ async function errorMessage(path: string, res: Response): Promise<string> {
 
 async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -639,7 +660,7 @@ async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T>
 /** A `{ok: true}`-shaped POST with no body (accept/decline/cancel). */
 async function authorizedPostAction(path: string): Promise<void> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -650,7 +671,7 @@ async function authorizedPostAction(path: string): Promise<void> {
 
 async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -663,7 +684,7 @@ async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T
 
 async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -676,7 +697,7 @@ async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> 
 
 async function authorizedDelete(path: string): Promise<void> {
   const token = await authToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await apiFetch(`${API_BASE}${path}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -835,7 +856,7 @@ export const realClient: ApiClient = {
     // screen wraps it in a Blob + download link (see `AdminWeekendScreen`).
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const res = await fetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, {
+    const res = await apiFetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(await errorMessage("/api/admin/weekend/payroll.csv", res));
@@ -893,7 +914,7 @@ export const realClient: ApiClient = {
   async setRotationUnit(templateId, rotationUnit) {
     const token = await authToken();
     const path = `/api/admin/templates/${templateId}/rotation`;
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await apiFetch(`${API_BASE}${path}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ rotationUnit }),
@@ -904,7 +925,7 @@ export const realClient: ApiClient = {
   async saveTemplateRoles(templateId, pool, preference) {
     const token = await authToken();
     const path = `/api/admin/templates/${templateId}/roles`;
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await apiFetch(`${API_BASE}${path}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ pool, preference }),
@@ -915,7 +936,7 @@ export const realClient: ApiClient = {
   async getRosterCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const res = await fetch(`${API_BASE}/api/admin/roster.csv?${q}`, {
+    const res = await apiFetch(`${API_BASE}/api/admin/roster.csv?${q}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(await errorMessage("/api/admin/roster.csv", res));
