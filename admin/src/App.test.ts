@@ -25,7 +25,6 @@ const app = appModule as unknown as {
     resolutions: RosterPersonResolution[];
   }) => string | null;
   pluralRecords: (count: number) => string;
-  notifyNotice: (reach: { delivered: number; intended: number }) => string | null;
 };
 
 describe("roster import reconciliation", () => {
@@ -81,11 +80,4 @@ describe("pluralRecords", () => {
       "101 запись", "111 записей",
     ]);
   });
-});
-
-describe("notifyNotice", () => {
-  it("молчит, когда дошло до всех", () => expect(app.notifyNotice({ delivered: 3, intended: 3 })).toBeNull());
-  it("говорит, когда дошло не до всех", () =>
-    expect(app.notifyNotice({ delivered: 1, intended: 3 })).toBe("Уведомление дошло до 1 из 3: остальные не подключили телеграм."));
-  it("молчит, когда уведомлять было некого", () => expect(app.notifyNotice({ delivered: 0, intended: 0 })).toBeNull());
 });
