@@ -11,6 +11,7 @@ import { WeekendScreen } from "./screens/WeekendScreen";
 import { AdminScreen } from "./screens/AdminScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
+import { withError, withoutError } from "./lib/error-map";
 import { hasStarted } from "./lib/swaps";
 
 interface AppData {
@@ -40,11 +41,15 @@ export function App() {
   const [busySlotIds, setBusySlotIds] = useState<ReadonlySet<number>>(new Set());
   const [busyOfferIds, setBusyOfferIds] = useState<ReadonlySet<number>>(new Set());
   // Errors from a user's own tap (Принять/Отклонить/…) — shown right on the
-  // screen they tapped from, in human Russian regardless of what the server
-  // actually said (its reason codes, e.g. "not_pending", are not meant for
-  // display). Cleared on every new attempt and on leaving the tab.
-  const [swapError, setSwapError] = useState<string | null>(null);
-  const [weekendError, setWeekendError] = useState<string | null>(null);
+  // card they tapped, in human Russian regardless of what the server actually
+  // said (its reason codes, e.g. "not_pending", are not meant for display).
+  // Keyed by id for the same reason the busy sets are: this is one long scroll
+  // with no overlay anywhere, so a message drawn above the list is off-screen
+  // for every card the reader had to scroll to. Cleared on the next attempt on
+  // that card and on leaving the tab.
+  const [swapErrors, setSwapErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  const [slotErrors, setSlotErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  const [offerErrors, setOfferErrors] = useState<ReadonlyMap<number, string>>(new Map());
   // reloadData is a background refresh (tab switch, regained focus) the user
   // never asked for directly, so its failure gets a quieter, app-wide notice
   // instead of a per-screen error — nothing to retry by hand, it just says the
@@ -101,13 +106,13 @@ export function App() {
    *  not something to show a worker verbatim. */
   async function runSwapAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusySwapIds((prev) => withBusy(prev, id));
-    setSwapError(null);
+    setSwapErrors((prev) => withoutError(prev, id));
     try {
       await action(id);
       await refreshSwaps();
     } catch (err) {
       console.error("Swap action failed:", err);
-      setSwapError(failureMessage);
+      setSwapErrors((prev) => withError(prev, id, failureMessage));
     } finally {
       setBusySwapIds((prev) => withoutBusy(prev, id));
     }
@@ -160,13 +165,13 @@ export function App() {
 
   async function handleInterest(slotId: number) {
     setBusySlotIds((prev) => withBusy(prev, slotId));
-    setWeekendError(null);
+    setSlotErrors((prev) => withoutError(prev, slotId));
     try {
       await apiClient.expressInterest(slotId);
       await refreshWeekend();
     } catch (err) {
       console.error("Interest action failed:", err);
-      setWeekendError("Не получилось записаться на смену. Попробуй ещё раз.");
+      setSlotErrors((prev) => withError(prev, slotId, "Не получилось записаться на смену. Попробуй ещё раз."));
     } finally {
       setBusySlotIds((prev) => withoutBusy(prev, slotId));
     }
@@ -175,13 +180,13 @@ export function App() {
   /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`. */
   async function runOfferAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusyOfferIds((prev) => withBusy(prev, id));
-    setWeekendError(null);
+    setOfferErrors((prev) => withoutError(prev, id));
     try {
       await action(id);
       await refreshWeekend();
     } catch (err) {
       console.error("Offer action failed:", err);
-      setWeekendError(failureMessage);
+      setOfferErrors((prev) => withError(prev, id, failureMessage));
     } finally {
       setBusyOfferIds((prev) => withoutBusy(prev, id));
     }
@@ -245,7 +250,7 @@ export function App() {
         <SwapsScreen
           swaps={data.swaps}
           busyIds={busySwapIds}
-          actionError={swapError}
+          actionErrors={swapErrors}
           onAccept={(id) =>
             void runSwapAction(id, apiClient.acceptSwap, "Не получилось принять обмен — возможно, его уже обработали. Обнови экран и попробуй снова.")
           }
@@ -263,7 +268,8 @@ export function App() {
           offers={data.weekendOffers}
           busySlotIds={busySlotIds}
           busyOfferIds={busyOfferIds}
-          actionError={weekendError}
+          slotErrors={slotErrors}
+          offerErrors={offerErrors}
           onInterest={(id) => void handleInterest(id)}
           onConfirm={(id) =>
             void runOfferAction(id, apiClient.confirmOffer, "Не получилось подтвердить смену — возможно, её уже забрали. Обнови экран и попробуй снова.")
@@ -294,8 +300,9 @@ export function App() {
           setTab(t);
           // A stale action error from wherever we're leaving shouldn't greet us
           // on the next visit to that tab.
-          setSwapError(null);
-          setWeekendError(null);
+          setSwapErrors(new Map());
+          setSlotErrors(new Map());
+          setOfferErrors(new Map());
           // Leaving the Админ tab (or any switch) re-pulls data so edits show immediately.
           void reloadData();
         }}

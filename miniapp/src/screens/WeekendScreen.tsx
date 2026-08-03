@@ -14,15 +14,22 @@ export interface WeekendScreenProps {
    *  own buttons while its own request is in flight. */
   busySlotIds: ReadonlySet<number>;
   busyOfferIds: ReadonlySet<number>;
-  /** Set when the last interest/confirm/decline tap failed — cleared on the next attempt. */
-  actionError: string | null;
+  /**
+   * Why a tap on this card failed, by slot / assignment id — the answer belongs
+   * in the card that was tapped. A single message above the list is off-screen
+   * for every card the reader had to scroll to (замер на 390×844: вторая
+   * «🙋 Хочу» на y=690 при прокрутке 267, блок ошибки при этом на y=−134).
+   * Cleared on the next attempt on that same card.
+   */
+  slotErrors: ReadonlyMap<number, string>;
+  offerErrors: ReadonlyMap<number, string>;
   onInterest: (slotId: number) => void;
   onConfirm: (offerId: number) => void;
   onDecline: (offerId: number) => void;
 }
 
 /** "Работа в выходные дни": weekend/holiday shifts up for grabs, and offers an admin addressed to you. */
-export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, actionError, onInterest, onConfirm, onDecline }: WeekendScreenProps) {
+export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, slotErrors, offerErrors, onInterest, onConfirm, onDecline }: WeekendScreenProps) {
   const liveOffers = offers.filter((o) => o.assignment.status !== "declined");
 
   return (
@@ -36,10 +43,6 @@ export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, action
         </p>
       </header>
 
-      {actionError && (
-        <div style={{ margin: "12px 4px 0", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{actionError}</div>
-      )}
-
       <List>
         {liveOffers.length > 0 && (
           <Section header="Мои назначения">
@@ -49,6 +52,7 @@ export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, action
                   key={offer.assignment.id}
                   offer={offer}
                   busy={busyOfferIds.has(offer.assignment.id)}
+                  error={offerErrors.get(offer.assignment.id)}
                   onConfirm={() => onConfirm(offer.assignment.id)}
                   onDecline={() => onDecline(offer.assignment.id)}
                 />
@@ -67,6 +71,7 @@ export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, action
                   key={view.slot.id}
                   view={view}
                   busy={busySlotIds.has(view.slot.id)}
+                  error={slotErrors.get(view.slot.id)}
                   onInterest={() => onInterest(view.slot.id)}
                 />
               ))}
@@ -88,7 +93,7 @@ function hoursLabel(hours: number): string {
   return `${rounded} ${pluralizeRu(Math.round(hours), "час", "часа", "часов")}`;
 }
 
-function SlotCard({ view, busy, onInterest }: { view: WeekendSlotView; busy: boolean; onInterest: () => void }) {
+function SlotCard({ view, busy, error, onInterest }: { view: WeekendSlotView; busy: boolean; error?: string; onInterest: () => void }) {
   const { slot, interested, assignees } = view;
   return (
     <CardShell>
@@ -110,11 +115,25 @@ function SlotCard({ view, busy, onInterest }: { view: WeekendSlotView; busy: boo
           </Button>
         )}
       </div>
+      {error && <ActionError message={error} />}
     </CardShell>
   );
 }
 
-function OfferCard({ offer, busy, onConfirm, onDecline }: { offer: WeekendOffer; busy: boolean; onConfirm: () => void; onDecline: () => void }) {
+/**
+ * Почему нажатие на этой карточке не сработало. Ответ живёт рядом с кнопкой, на
+ * которую нажали: мини-апп — один длинный скролл, и общий блок над списком при
+ * нажатии на карточку ниже оказывается за верхним краем экрана.
+ */
+function ActionError({ message }: { message: string }) {
+  return (
+    <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
+      {message}
+    </div>
+  );
+}
+
+function OfferCard({ offer, busy, error, onConfirm, onDecline }: { offer: WeekendOffer; busy: boolean; error?: string; onConfirm: () => void; onDecline: () => void }) {
   const { slot, assignment } = offer;
   const confirmed = assignment.status === "confirmed";
   return (
@@ -141,6 +160,7 @@ function OfferCard({ offer, busy, onConfirm, onDecline }: { offer: WeekendOffer;
           </Button>
         </div>
       )}
+      {error && <ActionError message={error} />}
     </CardShell>
   );
 }
