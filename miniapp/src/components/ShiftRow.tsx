@@ -41,12 +41,25 @@ export function ShiftRow({ shift, templates, onSwap, isToday }: ShiftRowProps) {
       // the old category chip it shows on every row, since a work shift's preset
       // is exactly what the colour is here to tell apart.
       description={<EntryChip entry={shift} templates={templates} />}
-      after={isSwappable && onSwap ? <SwapChip onClick={() => onSwap(shift)} /> : undefined}
+      // «Сегодня» стоит здесь, а не рядом со временем, потому что рядом со
+      // временем для него нет места. `Cell` режет заголовок
+      // (`overflow: hidden; text-overflow: ellipsis`), а средней колонке достаётся
+      // то, что осталось от бейджа дня и «Обменять»: на Android telegram-ui даёт
+      // «base»-метрики (gap 24, padding 24), и это 58px из 240 при ширине экрана
+      // 320 и 98px при 360 — при нужных 127. Чип рисовался за границей отсечения и
+      // просто не появлялся. Правая колонка растягивается по содержимому, а её
+      // ширину и так задаёт «Обменять» (90px), поэтому этот столбик ничего у
+      // строки не отнимает — ни на одной ширине.
+      after={
+        isToday || (isSwappable && onSwap) ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            {isToday && <TodayChip />}
+            {isSwappable && onSwap && <SwapChip onClick={() => onSwap(shift)} />}
+          </div>
+        ) : undefined
+      }
     >
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-        {formatTimeRange(shift)}
-        {isToday && <TodayChip />}
-      </span>
+      {formatTimeRange(shift)}
     </Cell>
   );
 }
@@ -63,6 +76,7 @@ function TodayChip() {
         padding: "2px 8px",
         color: "var(--tgui--button_text_color)",
         background: "var(--tgui--link_color)",
+        whiteSpace: "nowrap",
       }}
     >
       Сегодня
