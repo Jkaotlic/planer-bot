@@ -90,7 +90,7 @@ import {
   openSlotsForWorker,
   myOffers,
 } from "../weekend/weekend-service";
-import { listOpenSlots, getVacantSlot } from "../repo/weekend";
+import { listOpenSlots, getVacantSlot, findOpenSlotLike } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
@@ -1218,12 +1218,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (body.date < teamNow(config.teamTz).date) {
       return c.json({ error: "Эта дата уже прошла — вакантную смену можно открыть только на будущее" }, 400);
     }
+    const title = typeof body.title === "string" ? body.title : null;
+    const location = typeof body.location === "string" ? body.location : null;
+
+    // Двойной тап по «Опубликовать» шлёт этот POST дважды с одинаковым телом — без
+    // этой проверки вторая копия ушла бы всей команде вторым «Нужен человек на
+    // выходной» про ту же самую смену. Точное совпадение: другое время или другое
+    // место — это законно новая смена, а не повтор клика.
+    const duplicate = findOpenSlotLike(db, { date: body.date, start: body.start, end: body.end, title, location });
+    if (duplicate) {
+      return c.json({ slot: duplicate, delivered: 0, intended: 0 }, 200);
+    }
+
     const slot = postSlot(db, {
       date: body.date,
       start: body.start,
       end: body.end,
-      title: typeof body.title === "string" ? body.title : null,
-      location: typeof body.location === "string" ? body.location : null,
+      title,
+      location,
       note: typeof body.note === "string" ? body.note : null,
     });
     // How many of the team the call for volunteers actually reached — a slot posted

@@ -271,6 +271,53 @@ describe("posting a vacant slot says how far the broadcast actually got", () => 
   });
 });
 
+describe("двойной клик по «Опубликовать» не должен плодить одинаковые слоты", () => {
+  it("второй пост той же смены возвращает существующий слот, а не создаёт второй", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    await worker(db, app, "Работник", 201);
+
+    const date = nextSaturday();
+    const input = { date, start: "10:00", end: "18:00", title: "Ярмарка", location: "Точка" };
+
+    const first = await app.request("/api/admin/weekend/slots", authed(admin, input));
+    expect(first.status).toBe(201);
+    const firstBody = await first.json();
+
+    const second = await app.request("/api/admin/weekend/slots", authed(admin, input));
+    expect(second.status).toBe(200);
+    const secondBody = await second.json();
+
+    expect(secondBody.slot.id).toBe(firstBody.slot.id);
+    const listed = await (await app.request("/api/admin/weekend/slots", bearer(admin))).json();
+    expect(listed.slots.filter((s: any) => s.slot.date === date)).toHaveLength(1);
+    // Broadcast ушёл ровно один раз — второй "пост" никого не будит заново.
+    expect(sent).toHaveLength(2); // admin + Работник, один раз
+    expect(secondBody.delivered).toBe(0);
+    expect(secondBody.intended).toBe(0);
+  });
+
+  it("другой день или другое время — это законно новый слот, не дубль", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const date = nextSaturday();
+
+    const first = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }),
+    );
+    const second = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date, start: "12:00", end: "20:00", title: "Ярмарка" }),
+    );
+    expect(second.status).toBe(201);
+    expect((await second.json()).slot.id).not.toBe((await first.json()).slot.id);
+  });
+});
+
 describe("a vacant slot in the past", () => {
   const lastSaturday = (): string => {
     const d = new Date();
