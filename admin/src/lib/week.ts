@@ -114,3 +114,22 @@ export function formatShortDateRange(startIso: string, endIso: string): string {
 export function formatWeekRangeLabel(monday: Date, sunday: Date): string {
   return monthDayFormatter.formatRange(monday, sunday);
 }
+
+/**
+ * The whole month around `iso`, as the [from, to] the roster export asks for.
+ * Mirrors `monthRangeOf` in the Mini App's `AdminRosterCsv` — the file is a
+ * month-wide matrix, so the export always widens whatever day it is given.
+ */
+export function monthRangeOf(iso: string): { from: string; to: string } {
+  const year = Number(iso.slice(0, 4));
+  const month = Number(iso.slice(5, 7));
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(lastDay)}` };
+}
+
+/** "01.09.2026 — 30.09.2026", the way the roster file itself writes dates. */
+export function formatPeriod(from: string, to: string): string {
+  const ru = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+  return `${ru(from)} — ${ru(to)}`;
+}
