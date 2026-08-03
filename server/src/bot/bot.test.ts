@@ -339,7 +339,7 @@ function setupPendingSwap(db: Db) {
   const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "i" });
   linkTelegramAccount(db, "i", 202);
   const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.id });
-  const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.id });
+  const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.id });
   const created = createSwap(db, { fromEmployeeId: anya.id, fromShiftId: sa.id, toShiftId: sb.id }, teamNow(config.teamTz));
   if (!created.ok) throw new Error("setup failed to create swap");
   return { anya, igor, sa, sb, requestId: created.request.id };
@@ -428,7 +428,7 @@ describe("bot swap callback buttons", () => {
     // that proposal is pending and touches the same shift as the swap below accepts.
     const mark = createEmployee(db, { displayName: "Марк", inviteToken: "mk" });
     linkTelegramAccount(db, "mk", 203);
-    const sm = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: mark.id });
+    const sm = createShift(db, { date: daysFromNow(2), start: "09:00", end: "18:00", employeeId: mark.id });
     const sibling = createSwap(db, { fromEmployeeId: mark.id, fromShiftId: sm.id, toShiftId: sa.id }, teamNow(config.teamTz));
     if (!sibling.ok) throw new Error("setup");
     expect(sibling.request.toEmployeeId).toBe(anya.id); // Аня holds the live buttons for this one

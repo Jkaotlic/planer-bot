@@ -13,8 +13,10 @@ const shift = (over: Partial<TestShift>): TestShift => ({
 const now = { date: "2026-07-01", time: "12:00" };
 
 describe("validateSwap", () => {
-  const from = shift({ id: 1, date: "2026-07-10", employeeId: 100 });
-  const to = shift({ id: 2, date: "2026-07-11", employeeId: 200 });
+  // Меняться можно только внутри одного дня, поэтому базовая пара — один день и
+  // разное время: иначе сработал бы «identical-shift», и тесты проверяли бы не то.
+  const from = shift({ id: 1, date: "2026-07-10", start: "09:00", end: "18:00", employeeId: 100 });
+  const to = shift({ id: 2, date: "2026-07-10", start: "19:00", end: "23:00", employeeId: 200 });
 
   it("accepts a clean swap", () => {
     const r = validateSwap({
@@ -22,6 +24,24 @@ describe("validateSwap", () => {
       fromOtherShifts: [], toOtherShifts: [], now,
     });
     expect(r).toEqual({ ok: true });
+  });
+
+  it("отказывает в обмене между разными днями", () => {
+    const r = validateSwap({
+      fromShift: from, toShift: shift({ id: 2, date: "2026-07-11", employeeId: 200 }),
+      fromEmployeeId: 100, toEmployeeId: 200,
+      fromOtherShifts: [], toOtherShifts: [], now,
+    });
+    expect(r).toEqual({ ok: false, reason: "different-day" });
+  });
+
+  it("день важнее прочих причин: кросс-дневный обмен называется днём, а не прошлым", () => {
+    const r = validateSwap({
+      fromShift: from, toShift: shift({ id: 2, date: "2026-06-01", employeeId: 200 }),
+      fromEmployeeId: 100, toEmployeeId: 200,
+      fromOtherShifts: [], toOtherShifts: [], now,
+    });
+    expect(r).toEqual({ ok: false, reason: "different-day" });
   });
 
   it("rejects when the shift is no longer owned by the initiator", () => {
@@ -35,7 +55,7 @@ describe("validateSwap", () => {
 
   it("rejects a swap of a past shift", () => {
     const r = validateSwap({
-      fromShift: { ...from, date: "2026-06-01" }, toShift: to,
+      fromShift: { ...from, date: "2026-06-01" }, toShift: { ...to, date: "2026-06-01" },
       fromEmployeeId: 100, toEmployeeId: 200,
       fromOtherShifts: [], toOtherShifts: [], now,
     });
@@ -43,8 +63,8 @@ describe("validateSwap", () => {
   });
 
   it("rejects when the initiator would be double-booked", () => {
-    // initiator (100) already has a shift on 2026-07-11 that overlaps `to`
-    const clash = shift({ id: 3, date: "2026-07-11", start: "10:00", end: "16:00", employeeId: 100 });
+    // initiator (100) already has a shift that evening, overlapping `to`
+    const clash = shift({ id: 3, date: "2026-07-10", start: "20:00", end: "22:00", employeeId: 100 });
     const r = validateSwap({
       fromShift: from, toShift: to, fromEmployeeId: 100, toEmployeeId: 200,
       fromOtherShifts: [clash], toOtherShifts: [], now,
@@ -61,9 +81,13 @@ describe("validateSwap", () => {
     expect(r).toEqual({ ok: false, reason: "to-shift-not-owned" });
   });
 
+  // Внутри одного дня «его смена уже прошла» — это утро, которое началось, пока
+  // моя вечерняя ещё впереди. Ради этого случая проверка и существует.
   it("rejects a swap where the counterparty's shift is in the past", () => {
+    const today = { date: now.date, start: "15:00", end: "23:00" };
     const r = validateSwap({
-      fromShift: from, toShift: { ...to, date: "2026-06-01" },
+      fromShift: { ...from, ...today },
+      toShift: { ...to, date: now.date, start: "09:00", end: "11:00" },
       fromEmployeeId: 100, toEmployeeId: 200,
       fromOtherShifts: [], toOtherShifts: [], now,
     });
@@ -71,7 +95,7 @@ describe("validateSwap", () => {
   });
 
   it("rejects when the counterparty would be double-booked", () => {
-    // counterparty (200) already has a shift on 2026-07-10 that overlaps `from`
+    // counterparty (200) already has a daytime shift that overlaps `from`
     const clash = shift({ id: 4, date: "2026-07-10", start: "10:00", end: "16:00", employeeId: 200 });
     const r = validateSwap({
       fromShift: from, toShift: to, fromEmployeeId: 100, toEmployeeId: 200,
@@ -92,16 +116,18 @@ describe("validateSwap", () => {
       expect(r).toEqual({ ok: false, reason: "identical-shift" });
     });
 
-    // «Утро 5 августа» ↔ «Утро 12 августа» — trading which day you work is the
-    // whole point of a swap; the same preset on a different day must stay allowed.
-    it("allows the same preset swapped across different days", () => {
+    // «Утро 5 августа» ↔ «Утро 12 августа» когда-то было разрешено — «поменяться
+    // днями» считалось смыслом обмена. С 2026-08-03 это не так: меняться можно
+    // только внутри одного дня, и такой обмен отсекается раньше, чем дело дойдёт
+    // до сравнения видов смен.
+    it("rejects the same preset on different days — day comes first", () => {
       const augFive = shift({ id: 1, date: "2026-08-05", employeeId: 100, templateId: 7 });
       const augTwelve = shift({ id: 2, date: "2026-08-12", employeeId: 200, templateId: 7 });
       const r = validateSwap({
         fromShift: augFive, toShift: augTwelve, fromEmployeeId: 100, toEmployeeId: 200,
         fromOtherShifts: [], toOtherShifts: [], now,
       });
-      expect(r).toEqual({ ok: true });
+      expect(r).toEqual({ ok: false, reason: "different-day" });
     });
 
     // «Утро» ↔ «Ночь» on the same day changes both people's hours — allowed.

@@ -46,7 +46,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
 
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id, message: "выручи" }));
     expect(created.status).toBe(201);
@@ -77,8 +77,8 @@ describe("swap endpoints", () => {
     const igor = await worker(db, app, "Игорь", 202);
     const mark = await worker(db, app, "Марк", 203);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
-    const sm = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: mark.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sm = createShift(db, { date: daysFromNow(2), start: "09:00", end: "18:00", employeeId: mark.w.id });
 
     const main = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const mainId = (await main.json()).request.id as number;
@@ -112,7 +112,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     // Игорь tries to swap Аня's shift (not his)
     const bad = await app.request("/api/swaps", authed(igor.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     expect(bad.status).toBe(400);
@@ -128,7 +128,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id, title: "Смена Ани" });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id, title: "Смена Игоря" });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id, title: "Смена Игоря" });
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id, message: "выручи" }));
     expect(created.status).toBe(201);
 
@@ -169,7 +169,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     // They agreed in person, so both open a request from their own side. It's one
     // trade; two rows for it made the accept contradict itself in chat.
     expect((await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }))).status).toBe(201);
@@ -184,7 +184,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     const res = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id, message: {} }));
     expect(res.status).toBe(400);
   });
@@ -196,7 +196,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const reqId = (await created.json()).request.id as number;
     const declined = await app.request(`/api/swaps/${reqId}/decline`, authed(igor.token));
@@ -212,7 +212,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const reqId = (await created.json()).request.id as number;
     const cancelled = await app.request(`/api/swaps/${reqId}/cancel`, authed(anya.token));
@@ -225,7 +225,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
 
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const reqId = (await created.json()).request.id as number;
@@ -264,7 +264,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const reqId = (await created.json()).request.id as number;
     sent.length = 0;
@@ -298,8 +298,8 @@ describe("swap endpoints", () => {
     const igor = await worker(db, app, "Игорь", 202);
     const mark = await worker(db, app, "Марк", 203);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
-    const sm = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: mark.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sm = createShift(db, { date: daysFromNow(2), start: "09:00", end: "18:00", employeeId: mark.w.id });
 
     const main = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const mainId = (await main.json()).request.id as number;
@@ -325,7 +325,7 @@ describe("swap endpoints", () => {
     const igor = await worker(db, app, "Игорь", 202);
     const mark = await worker(db, app, "Марк", 203);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
     const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const reqId = (await created.json()).request.id as number;
 
@@ -349,7 +349,7 @@ describe("swap endpoints", () => {
     const anya = await worker(db, app, "Аня", 201);
     const igor = await worker(db, app, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
 
     const first = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
     const firstId = (await first.json()).request.id as number;

@@ -305,7 +305,8 @@ describe("GET /api/admin/events", () => {
     const anya = worker(db, "Аня", 201);
     const igor = worker(db, "Игорь", 202);
     const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.id });
-    const sb = createShift(db, { date: daysFromNow(3), start: "11:00", end: "20:00", employeeId: igor.id });
+    // Тот же день, что и у Ани: меняться можно только внутри одного дня.
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.id });
     const app = createApp({ db, config });
     const anyaToken = await tokenFor(app, 201);
     const igorToken = await tokenFor(app, 202);
