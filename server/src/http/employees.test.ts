@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, reorderEmployee } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, reorderEmployee, archiveEmployee, setEmployeeAdmin } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
@@ -390,6 +390,40 @@ describe("POST /api/admin/employees/:id/role", () => {
     const app = createApp({ db, config });
     const res = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(await tokenFor(app, 333), { isAdmin: true }));
     expect(res.status).toBe(403);
+  });
+
+  // Тот же guard, что уже стоит у записей и распределения (archivedTargetError):
+  // с архивным целевым человеком ничего не делаем, а не отвечаем ему левой
+  // причиной. Раньше промоут архивного в админы проходил безусловно — запись
+  // в никуда, войти он всё равно не мог (403 на requireAdmin по isActive), но
+  // правило «архивного не трогаем» было закрыто везде, кроме этой двери.
+  it("отказывает промоутить архивного, а не пишет права в никуда", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    archiveEmployee(db, w.id, "2026-01-01");
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111);
+
+    const res = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: true }));
+    expect(res.status).toBe(400);
+    expect(getEmployeeById(db, w.id)?.isAdmin).toBe(false);
+  });
+
+  // Демоут архивного админа раньше упирался в last_admin по чужой причине:
+  // countActiveAdmins не считает архивных, так что реального «последнего
+  // активного админа» никто бы не остался без прав. Архивная проверка теперь
+  // стоит раньше и называет настоящую причину.
+  it("отказывает демоутить архивного по правильной причине, не last_admin", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    setEmployeeAdmin(db, w.id, true);
+    archiveEmployee(db, w.id, "2026-01-01");
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111); // остаётся активным админом — last_admin тут ни при чём
+
+    const res = await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: false }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).not.toBe("last_admin");
   });
 });
 
