@@ -8,6 +8,7 @@ import {
 } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { readCsvFile, type CsvEncoding } from "../../lib/csv-encoding";
+import { withNotifyNotice } from "../../lib/shift";
 
 /** Everything the confirm step needs, held together so a stale piece can't be applied. */
 export interface RosterImportState {
@@ -180,7 +181,7 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
     try {
       const summary = await apiClient.applyRosterImport(state.csv, state.resolutions, state.overwrite);
       setState(null);
-      onNotice(summaryLine(summary));
+      onNotice(withNotifyNotice(summaryLine(summary), summary.notified));
       await onImported();
     } catch (err) {
       setState((current) =>

@@ -532,7 +532,15 @@ export async function mockGetTemplates(): Promise<Template[]> {
   return [...TEMPLATES];
 }
 
-export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
+/** Реального `notifyEntryChange` в DEV-моке нет, поэтому «дошло до N из M» —
+ *  по числу людей из `employeeIds`, у кого в моке есть телеграм. */
+function mockReach(employeeIds: readonly number[]): { delivered: number; intended: number } {
+  const unique = [...new Set(employeeIds)];
+  const withTelegram = unique.filter((id) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId != null);
+  return { delivered: withTelegram.length, intended: unique.length };
+}
+
+export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {
   await delay(250);
   const created: Shift = {
     id: nextId++,
@@ -548,16 +556,15 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
     employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
   };
   ALL_ENTRIES.push(created);
-  return created;
+  return { entry: created, notified: mockReach(input.employeeId != null ? [input.employeeId] : []) };
 }
 
 /** Один запрос вместо цикла — DEV-мок отвечает так же, чтобы «Заполнить неделю»
  *  вело себя в разработке так же, как на живом сервере: одно письмо на человека,
- *  не письмо на каждый созданный день. Реального `notifyEntryChange` здесь нет,
- *  поэтому `intended`/`delivered` — по числу людей, у кого есть телеграм в моке. */
+ *  не письмо на каждый созданный день. */
 export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: { delivered: number; intended: number } }> {
   await delay(300);
-  const employeeIds = new Set<number>();
+  const employeeIds: number[] = [];
   for (const input of inputs) {
     const created: Shift = {
       id: nextId++,
@@ -573,13 +580,12 @@ export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ crea
       employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
     };
     ALL_ENTRIES.push(created);
-    if (input.employeeId != null) employeeIds.add(input.employeeId);
+    if (input.employeeId != null) employeeIds.push(input.employeeId);
   }
-  const withTelegram = [...employeeIds].filter((id) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId != null);
-  return { created: inputs.length, notified: { delivered: withTelegram.length, intended: employeeIds.size } };
+  return { created: inputs.length, notified: mockReach(employeeIds) };
 }
 
-export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<Shift> {
+export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {
   await delay(250);
   const shift = ALL_ENTRIES.find((s) => s.id === id);
   if (!shift) throw new Error(`Unknown entry id ${id}`);
@@ -594,13 +600,15 @@ export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise
     shift.employeeId = input.employeeId;
     shift.employeeName = personName(input.employeeId);
   }
-  return shift;
+  return { entry: shift, notified: mockReach(shift.employeeId != null ? [shift.employeeId] : []) };
 }
 
-export async function mockDeleteEntry(id: number): Promise<void> {
+export async function mockDeleteEntry(id: number): Promise<{ notified: { delivered: number; intended: number } }> {
   await delay(150);
   const index = ALL_ENTRIES.findIndex((s) => s.id === id);
-  if (index !== -1) ALL_ENTRIES.splice(index, 1);
+  if (index === -1) return { notified: { delivered: 0, intended: 0 } };
+  const [removed] = ALL_ENTRIES.splice(index, 1);
+  return { notified: mockReach(removed?.employeeId != null ? [removed.employeeId] : []) };
 }
 
 /**
@@ -638,7 +646,9 @@ export async function mockDistribute(from: string, to: string, apply: boolean): 
       shift.employeeName = personName(best);
     }
   }
-  return { applied: apply, assignments, unfilled };
+  // Превью ничего не пишет, поэтому и не уведомляет — тот же контракт, что у сервера.
+  const notified = apply ? mockReach(assignments.map((a) => a.employeeId)) : { delivered: 0, intended: 0 };
+  return { applied: apply, assignments, unfilled, notified };
 }
 
 // --- Работа в выходные дни (admin) + учёт часов ------------------------------
@@ -1128,7 +1138,7 @@ export async function mockApplyRosterImport(
   csv: string,
   resolutions: RosterPersonResolution[],
   overwrite = false,
-): Promise<RosterImportSummary> {
+): Promise<RosterImportSummary & { notified: { delivered: number; intended: number } }> {
   const preview = await mockPreviewRosterImport(csv);
   await delay(250);
   if (preview.existingCount > 0 && !overwrite) {
@@ -1178,5 +1188,8 @@ export async function mockApplyRosterImport(
     cellsPreserved: preview.preservedCount,
     swapsExpired: 0,
     unknowns: [],
+    // Мок не пишет по-дневные записи из файла в ALL_ENTRIES, поэтому не знает,
+    // кому реально досталось что-то новое — молчаливый {0,0} честнее выдумки.
+    notified: { delivered: 0, intended: 0 },
   };
 }
