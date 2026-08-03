@@ -356,7 +356,7 @@ export function AdminScheduleScreen() {
             </CardStack>
           </Section>
         ) : kindsOpen ? (
-          <AdminShiftKinds employees={employees} onError={setError} onClose={() => setKindsOpen(false)} />
+          <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
         ) : csvOpen ? (
           <AdminRosterCsv
             employees={employees}

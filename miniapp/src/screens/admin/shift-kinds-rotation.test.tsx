@@ -48,7 +48,7 @@ async function mount() {
   await act(async () => {
     // telegram-ui требует свой провайдер; проверяем мы то, что внутри.
     root!.render(
-      createElement(AppRoot, null, createElement(AdminShiftKinds, { employees: EMPLOYEES, onError: () => {}, onClose: () => {} })),
+      createElement(AppRoot, null, createElement(AdminShiftKinds, { employees: EMPLOYEES, onClose: () => {} })),
     );
   });
   await settle();
