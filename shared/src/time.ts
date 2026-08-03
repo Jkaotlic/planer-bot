@@ -56,12 +56,3 @@ export function isWeekend(date: string): boolean {
   const dow = dayOfWeek(date);
   return dow === 0 || dow === 6;
 }
-
-/** A shift is "late" (evening/night, less desirable) if it runs overnight, ends at/after 20:00, or its template is flagged late. Used for fair-distribution balancing. */
-export function isLateShift(shift: { start: string; end: string }, templateIsLate = false): boolean {
-  if (templateIsLate) return true;
-  const start = toMinutes(shift.start);
-  const end = toMinutes(shift.end);
-  if (end < start) return true; // overnight
-  return end >= 20 * 60;
-}
