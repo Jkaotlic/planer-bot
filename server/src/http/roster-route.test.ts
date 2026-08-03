@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, listActive } from "../repo/employees";
@@ -6,6 +7,13 @@ import { createShift, listShiftsInRange } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
+
+/** A bot that records what it was asked to send instead of talking to Telegram. */
+function fakeBot() {
+  const sent: { to: number; text: string }[] = [];
+  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  return { bot: bot as unknown as Bot, sent };
+}
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -182,6 +190,9 @@ describe("admin roster CSV import", () => {
         unknowns: [],
       },
       unknownsMessage: null,
+      // Файл датирован августом 2026, а тест выполняется позже — обе записи в
+      // прошлом по правилу «прошедшие дни молчат», письма не уходят никому.
+      notified: { delivered: 0, intended: 0 },
     });
 
     const exported = await app.request(
@@ -415,6 +426,101 @@ describe("admin roster CSV import", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "в CSV повторяется ФИО «Игорь Петров»" });
+  });
+});
+
+describe("уведомление о правке из импорта", () => {
+  // Даты намеренно в 2099 году: правило «про прошедшие дни молчим» иначе погасило
+  // бы письма, и тест бы врал.
+  const futureCsv =
+    "﻿;01.09.2099;02.09.2099;03.09.2099\r\n" +
+    "Аня Иванова;k32;k32;k32\r\n" +
+    "Игорь Соколов;k32;k32;k32";
+
+  it("импорт месяца пишет каждому по одному письму, а не по письму на запись", async () => {
+    const db = makeTestDb();
+    const anya = worker(db, "Аня Иванова", 501);
+    const igor = worker(db, "Игорь Соколов", 502);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/roster/import/apply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        csv: futureCsv,
+        resolutions: [
+          { csvName: "Аня Иванова", action: "rename", employeeId: anya.id },
+          { csvName: "Игорь Соколов", action: "rename", employeeId: igor.id },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.notified).toEqual({ delivered: 2, intended: 2 });
+    // Три дня на человека — одно письмо, не три.
+    expect(sent).toHaveLength(2);
+    expect(sent.find((m) => m.to === 501)!.text).toContain("обновил(а) твой график (загрузка файла)");
+    expect(sent.find((m) => m.to === 502)!.text).toContain("обновил(а) твой график (загрузка файла)");
+  });
+});
+
+describe("уведомление о «Распределить честно»", () => {
+  it("пишет тем, кому достались смены", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня Иванова", 501);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    // Allowlisted-админ сам заводится активным сотрудником при первом входе и
+    // тоже участвует в честном распределении — без отпуска он забрал бы вторую
+    // смену себе (счётчик по виду смены у него ниже после первого назначения
+    // Ане), и письмо ушло бы Ане на одну запись, а не на две.
+    const adminId = (await (await app.request("/api/me", { headers: { Authorization: `Bearer ${token}` } })).json()).id as number;
+    createShift(db, { date: "2099-09-01", start: null, end: null, endDate: "2099-09-10", category: "vacation", employeeId: adminId });
+
+    // Две вакантные смены разных дней — единственный СВОБОДНЫЙ кандидат получает
+    // обе, и scheduleSummaryText показывает сводку с причиной, а не одиночный
+    // текст («одна запись — не сводка», задача 6): при одном назначении текст
+    // был бы «поставил(а) тебе смену» без слов «распределение смен».
+    createShift(db, { date: "2099-09-05", start: "08:00", end: "17:00" });
+    createShift(db, { date: "2099-09-06", start: "08:00", end: "17:00" });
+
+    const res = await app.request("/api/admin/distribute", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ from: "2099-09-01", to: "2099-09-10", apply: true }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.assignments).toHaveLength(2);
+    expect(body.notified).toEqual({ delivered: 1, intended: 1 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe(501);
+    expect(sent[0]!.text).toContain("распределение смен");
+  });
+
+  it("превью (apply не передан) не пишет никому", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня Иванова", 501);
+    createShift(db, { date: "2099-09-05", start: "08:00", end: "17:00" });
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/distribute", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ from: "2099-09-01", to: "2099-09-10" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.notified).toEqual({ delivered: 0, intended: 0 });
+    expect(sent).toEqual([]);
   });
 });
 
