@@ -651,7 +651,7 @@ export async function mockGetShiftCountsCsv(from: string, to: string): Promise<s
   return [header, ...lines].join("\r\n");
 }
 
-const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);
+const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "rezerv", "otp", "event"]);
 
 function mockIsoDate(value: string): string {
   const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());

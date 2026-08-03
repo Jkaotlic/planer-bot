@@ -1042,7 +1042,7 @@ export async function mockGetShiftCounts(from: string, to: string): Promise<Shif
   return { from, to, kinds: [...ordered, ...kinds.filter((k) => !ordered.includes(k))], rows };
 }
 
-const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "otp", "event"]);
+const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "rezerv", "otp", "event"]);
 /** What the export writes for an entry the matrix can't express. Never "bad code". */
 const MOCK_PRESERVE_CODE = "?";
 const PRESET_NAME_TO_CODE: Record<string, string> = {
