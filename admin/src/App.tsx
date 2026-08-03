@@ -21,7 +21,7 @@ import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { BirthdaysScreen } from "./screens/BirthdaysScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
-import { addDays, formatWeekRangeLabel, mondayOf, toISODate } from "./lib/week";
+import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
 import { BOT_USERNAME } from "./lib/bot";
 
@@ -272,15 +272,15 @@ export function App() {
     setPanelTarget({ employeeId, date });
   }
 
-  /** Downloads the current calendar month's roster as CSV — same Blob+anchor pattern as the weekend payroll export. */
+  /** Downloads the shown week's month as CSV — same Blob+anchor pattern as the weekend payroll export. */
   async function exportRoster() {
     setRosterNotice(null);
     try {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = now.getMonth();
-      const from = `${y}-${String(m + 1).padStart(2, "0")}-01`;
-      const to = `${y}-${String(m + 1).padStart(2, "0")}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, "0")}`;
+      // Месяц показанной недели, а не по системным часам: кнопка стоит в одной
+      // полосе с переключателем недель, и качают файл ровно затем, чтобы
+      // расписать СЛЕДУЮЩИЙ месяц. По часам его было не выгрузить вовсе.
+      // Мобильное зеркало (`monthRangeOf` в `AdminRosterCsv`) так и делает.
+      const { from, to } = monthRangeOf(weekDates[0]!);
       const csv = await apiClient.getRosterCsv(from, to);
       // BOM so Excel reads UTF-8 (Cyrillic) correctly.
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
@@ -292,6 +292,9 @@ export function App() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      // Какой месяц уехал в файл — вслух: неделя на экране и месяц в файле
+      // совпадают не всегда (неделя на стыке принадлежит месяцу понедельника).
+      setRosterNotice({ kind: "success", text: `Выгружен график за ${formatPeriod(from, to)}` });
     } catch (err) {
       // В ту же полосу, что и отказы «Загрузить CSV» рядом: скачивание не удалось —
       // на экране от этого ничего не изменилось, и уносить с собой всю консоль
