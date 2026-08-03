@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
@@ -7,6 +8,13 @@ import { buildRosterCsv } from "../roster/roster-service";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
+
+/** A bot that records what it was asked to send instead of talking to Telegram. */
+function fakeBot() {
+  const sent: { to: number; text: string }[] = [];
+  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  return { bot: bot as unknown as Bot, sent };
+}
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -492,5 +500,68 @@ describe("своё время снимает пресет", () => {
     await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: "2026-08-05" }, "PATCH"));
 
     expect(getShift(db, entry.id)!.templateId).toBe(1);
+  });
+});
+
+describe("уведомление о правке записи", () => {
+  /** Админ (allowlisted, id 111) и привязанный работник. Возвращает всё, что нужно роутам. */
+  async function stage() {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const worker = createEmployee(db, { displayName: "Работник", inviteToken: "inv-w" });
+    linkTelegramAccount(db, "inv-w", 555);
+    return { db, app, token, sent, workerId: worker.id, bot };
+  }
+  const entryBody = (over: object = {}) => ({
+    employeeId: 0, date: "2099-09-10", start: "08:00", end: "17:00", category: "shift", title: "Утро", ...over,
+  });
+
+  it("создание записи пишет её владельцу", async () => {
+    const { app, token, sent, workerId } = await stage();
+    const res = await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ notified: { delivered: 1, intended: 1 } });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe(555);
+    expect(sent[0]!.text).toContain("поставил(а) тебе смену");
+  });
+
+  it("перенос даты пишет «было → стало»", async () => {
+    const { app, token, sent, workerId } = await stage();
+    const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    sent.length = 0;
+    await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, { date: "2099-09-12" }, "PATCH"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("было");
+    expect(sent[0]!.text).toContain("стало");
+  });
+
+  it("удаление пишет «снял(а) с тебя смену»", async () => {
+    const { app, token, sent, workerId } = await stage();
+    const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    sent.length = 0;
+    await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, {}, "DELETE"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("снял(а) с тебя смену");
+  });
+
+  it("правка только заметки никого не будит", async () => {
+    const { app, token, sent, workerId } = await stage();
+    const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    sent.length = 0;
+    const res = await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, { note: "привёз ключи" }, "PATCH"));
+    expect(await res.json()).toMatchObject({ notified: { delivered: 0, intended: 0 } });
+    expect(sent).toEqual([]);
+  });
+
+  it("упавший Telegram не отменяет правку", async () => {
+    const { db, app, token, workerId, bot } = await stage();
+    const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    (bot.api.sendMessage as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("429: Too Many Requests"));
+    const res = await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, { date: "2099-09-12" }, "PATCH"));
+    expect(res.status, "правка графика не зависит от Telegram").toBe(200);
+    expect(getShift(db, created.entry.id)!.date).toBe("2099-09-12");
   });
 });
