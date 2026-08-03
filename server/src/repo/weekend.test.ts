@@ -11,7 +11,7 @@ import {
   listInterestedEmployeeIds,
   listMyInterestSlotIds,
   createAssignment,
-  getAssignmentForSlot,
+  listAssignmentsForSlot,
   confirmAssignment,
   listAssignmentsForEmployee,
   listConfirmedWorkInRange,
@@ -62,12 +62,12 @@ describe("weekend market repos", () => {
 
     const assignment = createAssignment(db, { slotId: slot.id, employeeId: worker.id, hours: 8 });
     expect(assignment.status).toBe("offered");
-    expect(getAssignmentForSlot(db, slot.id)?.id).toBe(assignment.id);
+    expect(listAssignmentsForSlot(db, slot.id).map((a) => a.id)).toEqual([assignment.id]);
 
     const shift = createShift(db, { date: slot.date, start: slot.start, end: slot.end, category: "weekend_work", employeeId: worker.id });
     confirmAssignment(db, assignment.id, shift.id);
 
-    const confirmed = getAssignmentForSlot(db, slot.id)!;
+    const confirmed = listAssignmentsForSlot(db, slot.id)[0]!;
     expect(confirmed.status).toBe("confirmed");
     expect(confirmed.shiftId).toBe(shift.id);
     expect(confirmed.confirmedAt).toBeInstanceOf(Date);
