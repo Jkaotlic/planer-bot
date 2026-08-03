@@ -8,21 +8,6 @@
 /** Monday-first weekday abbreviations, index 0 = Monday. */
 export const WEEKDAY_SHORT_RU: readonly string[] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-const MONTH_SHORT_RU: readonly string[] = [
-  "янв",
-  "фев",
-  "мар",
-  "апр",
-  "май",
-  "июн",
-  "июл",
-  "авг",
-  "сен",
-  "окт",
-  "ноя",
-  "дек",
-];
-
 const monthDayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" });
 
 function pad2(n: number): string {
@@ -68,12 +53,6 @@ export function dayOfMonth(iso: string): string {
   return String(parseISODate(iso).getDate());
 }
 
-/** Compact "1 июл" form used by the day badge (deliberately period-free, unlike Intl's "июл."). */
-export function formatShortDate(iso: string): string {
-  const d = parseISODate(iso);
-  return `${d.getDate()} ${MONTH_SHORT_RU[d.getMonth()]}`;
-}
-
 export function isWeekendIso(iso: string): boolean {
   const idx = weekdayIndex(iso);
   return idx === 5 || idx === 6;
@@ -98,16 +77,6 @@ export function dayOptions(weekDates: readonly string[], current: string): strin
 /** "Пн, 14 июля" */
 export function formatDayLabel(iso: string): string {
   return `${weekdayShort(iso)}, ${monthDayFormatter.format(parseISODate(iso))}`;
-}
-
-/** "16–17 июл", or "28 июл – 3 авг" across a month boundary — for the day badge. */
-export function formatShortDateRange(startIso: string, endIso: string): string {
-  const start = parseISODate(startIso);
-  const end = parseISODate(endIso);
-  if (start.getMonth() === end.getMonth()) {
-    return `${start.getDate()}–${end.getDate()} ${MONTH_SHORT_RU[start.getMonth()]}`;
-  }
-  return `${formatShortDate(startIso)} – ${formatShortDate(endIso)}`;
 }
 
 /** "13–19 июля" (or "28 июля – 3 августа" across a month boundary). */
