@@ -257,6 +257,7 @@ export function App() {
 
   /** Downloads the current calendar month's roster as CSV — same Blob+anchor pattern as the weekend payroll export. */
   async function exportRoster() {
+    setRosterNotice(null);
     try {
       const now = new Date();
       const y = now.getFullYear();
@@ -275,8 +276,11 @@ export function App() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
+      // В ту же полосу, что и отказы «Загрузить CSV» рядом: скачивание не удалось —
+      // на экране от этого ничего не изменилось, и уносить с собой всю консоль
+      // (`error` рисуется вместо любого раздела) ему не за что.
       if (err instanceof AuthRequiredError) setNeedLogin(true);
-      else setError(err instanceof Error ? err.message : "Не удалось выгрузить ростер");
+      else setRosterNotice({ kind: "error", text: err instanceof Error ? err.message : "Не удалось выгрузить ростер" });
     }
   }
 
