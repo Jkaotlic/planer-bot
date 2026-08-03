@@ -761,6 +761,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
       if (patch.title === undefined) patch.title = null;
     }
 
+    // Та же семья, ветка «Своё время»: обе формы шлют часы и `title: null`, но
+    // пресет снять забывают, а он — цвет клетки и код в выгрузке. Смена, которой
+    // руками поставили 10:00–19:00, оставалась цвета «Утро» и выгружалась кодом
+    // «Утро», то есть круг через Excel возвращал ей 08:00–17:00. Правка, которая
+    // называет часы и не называет пресет, пресетом больше не описывается: режим
+    // пресета в обеих формах всегда шлёт `templateId` вместе с часами.
+    if (patch.start !== undefined && patch.templateId === undefined) patch.templateId = null;
+
     const merged = {
       category,
       date: patch.date ?? existing.date,
