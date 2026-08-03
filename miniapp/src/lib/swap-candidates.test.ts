@@ -1,0 +1,78 @@
+import { describe, expect, it } from "vitest";
+import type { Shift } from "../api/client";
+import { swapCandidates } from "./swap-candidates";
+
+const DAY = "2026-09-10";
+const NOW = new Date("2026-09-01T10:00:00");
+
+const shift = (over: Partial<Shift> & { id: number }): Shift =>
+  ({
+    date: DAY,
+    endDate: null,
+    start: "09:00",
+    end: "18:00",
+    category: "shift",
+    title: "День",
+    templateId: 2,
+    employeeId: 2,
+    employeeName: "Коллега А",
+    location: null,
+    note: null,
+    unrecognisedCode: null,
+    ...over,
+  }) as Shift;
+
+const mine = shift({
+  id: 1,
+  employeeId: 1,
+  employeeName: undefined,
+  start: "15:00",
+  end: "23:00",
+  templateId: 4,
+  title: "Вечер",
+});
+
+describe("swapCandidates", () => {
+  it("берёт только чужие смены того же дня", () => {
+    const other = shift({ id: 2 });
+    const otherDay = shift({ id: 3, date: "2026-09-11" });
+    const { candidates } = swapCandidates(mine, [mine, other, otherDay], 1, NOW);
+    expect(candidates.map((s) => s.id)).toEqual([2]);
+  });
+
+  it("не предлагает вакантную запись — меняться не с кем", () => {
+    const vacant = shift({ id: 2, employeeId: null, employeeName: undefined });
+    const { candidates } = swapCandidates(mine, [vacant], 1, NOW);
+    expect(candidates).toEqual([]);
+  });
+
+  it("не предлагает дежурство, отпуск и клетку без времени", () => {
+    const duty = shift({ id: 2, category: "duty", title: "Дежурство" });
+    const vacation = shift({ id: 3, category: "vacation", start: null, end: null, employeeId: 3 });
+    const unreadable = shift({ id: 4, start: null, end: null, templateId: null, employeeId: 4 });
+    const { candidates } = swapCandidates(mine, [duty, vacation, unreadable], 1, NOW);
+    expect(candidates).toEqual([]);
+  });
+
+  it("не предлагает начавшуюся смену", () => {
+    const started = shift({ id: 2 });
+    const { candidates } = swapCandidates(mine, [started], 1, new Date("2026-09-10T12:00:00"));
+    expect(candidates).toEqual([]);
+  });
+
+  it("такую же смену прячет, но считает", () => {
+    const same = shift({ id: 2, templateId: 4, start: "15:00", end: "23:00", title: "Вечер" });
+    const same2 = shift({ id: 3, employeeId: 3, templateId: 4, start: "15:00", end: "23:00", title: "Вечер" });
+    const different = shift({ id: 4, employeeId: 4 });
+    const { candidates, sameKindCount } = swapCandidates(mine, [same, same2, different], 1, NOW);
+    expect(candidates.map((s) => s.id)).toEqual([4]);
+    expect(sameKindCount).toBe(2);
+  });
+
+  it("сортирует по имени — человека ищут глазами, а не по времени", () => {
+    const late = shift({ id: 2, employeeId: 2, employeeName: "Яшин Пётр" });
+    const early = shift({ id: 3, employeeId: 3, employeeName: "Волков Илья" });
+    const { candidates } = swapCandidates(mine, [late, early], 1, NOW);
+    expect(candidates.map((s) => s.employeeName)).toEqual(["Волков Илья", "Яшин Пётр"]);
+  });
+});
