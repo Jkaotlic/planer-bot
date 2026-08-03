@@ -165,6 +165,14 @@ describe("roster CSV development mock", () => {
       .rejects.toThrow(/строка 2/);
   });
 
+  // Живой пресет «Дежурство · Резерв» кодируется «rezerv», но MOCK_ROSTER_CODES
+  // о нём не знал — DEV-мок бросал на файле, который реальный сервер принимает
+  // предупреждением (unrecognisedCode), а не отказом.
+  it("знает код «rezerv» — не отказывает на живом пресете «Дежурство · Резерв»", async () => {
+    const preview = await mockPreviewRosterImport(";01.09.2026\r\nИгорь Петров;rezerv");
+    expect(preview.unknowns).toEqual([]);
+  });
+
   it("refuses an occupied period until overwrite is confirmed", async () => {
     const { from, to } = thisMonth();
     const csv = await mockGetRosterCsv(from, to);

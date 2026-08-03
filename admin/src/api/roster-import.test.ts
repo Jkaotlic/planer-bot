@@ -46,6 +46,14 @@ describe("development roster import client", () => {
     ).rejects.toThrow(/строка 2/);
   });
 
+  // Живой пресет «Дежурство · Резерв» кодируется «rezerv», но MOCK_ROSTER_CODES
+  // о нём не знал — DEV-мок отказывал на файле, который реальный сервер
+  // принимает предупреждением (unrecognisedCode), а не отказом.
+  it("знает код «rezerv» — не отказывает на живом пресете «Дежурство · Резерв»", async () => {
+    const preview = await apiClient.previewRosterImport(`;${ru(emptyPeriod[0]!)}\r\nИгорь Петров;rezerv`);
+    expect(preview.unknowns).toEqual([]);
+  });
+
   it("refuses to apply over an occupied period unless overwrite is confirmed", async () => {
     const occupied = `;${ru(seededMonday)}\r\nИгорь Петров;k32`;
 
