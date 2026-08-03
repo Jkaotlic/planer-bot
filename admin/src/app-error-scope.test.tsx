@@ -2,8 +2,12 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiClient } from "./api/client";
+import { apiClient, type RosterImportPreview } from "./api/client";
 import { App } from "./App";
+
+vi.mock("./lib/csv-encoding", () => ({
+  readCsvFile: vi.fn(async () => ({ text: "csv-text", encoding: "utf-8" })),
+}));
 
 /**
  * Отказ одного запроса не должен уносить всю консоль.
@@ -95,5 +99,37 @@ describe("отказ одного запроса не уносит всю кон
     // Скачивание не состоялось — сказать об этом надо, но расписание тут ни при чём.
     expect(el.textContent ?? "").toContain("Failed to fetch");
     expect(el.querySelector(".schedule-table")).not.toBeNull();
+  });
+
+  it("импорт CSV прошёл, а перезагрузка после него упала — отказ виден, а не потерян", async () => {
+    const el = await mount();
+    const preview: RosterImportPreview = {
+      from: "2026-09-01", to: "2026-09-30", entryCount: 1,
+      people: [{ csvName: "Волков Илья", suggestedEmployeeId: null }],
+      unknowns: [], unknownsMessage: null, preservedCount: 0, existingCount: 0,
+    };
+    vi.spyOn(apiClient, "previewRosterImport").mockResolvedValue(preview);
+    vi.spyOn(apiClient, "applyRosterImport").mockResolvedValue({
+      employeesRenamed: 0, employeesCreated: 1, entriesInserted: 1, entriesDeleted: 0,
+      cellsPreserved: 0, swapsExpired: 0, unknowns: [], notified: { delivered: 0, intended: 0 },
+    });
+    // Импорт сам прошёл; беда — в том, что случается СРАЗУ после него.
+    vi.spyOn(apiClient, "getEmployees").mockRejectedValue(new Error("Не удалось обновить сотрудников"));
+
+    const input = el.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["csv-text"], "roster.csv", { type: "text/csv" });
+    const fileList = { 0: file, length: 1, item: (i: number) => (i === 0 ? file : null) } as unknown as FileList;
+    await act(async () => {
+      Object.defineProperty(input, "files", { value: fileList, configurable: true });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+
+    await click(byText(el, "button", "Применить CSV"));
+
+    // Успех импорта не теряется...
+    expect(el.textContent ?? "").toContain("CSV загружен");
+    // ...и отказ перезагрузки после него — тоже, а не молчит.
+    expect(el.textContent ?? "").toContain("Не удалось обновить сотрудников");
   });
 });
