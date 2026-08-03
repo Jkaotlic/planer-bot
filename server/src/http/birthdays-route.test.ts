@@ -165,6 +165,53 @@ describe("POST /api/admin/birthdays/:id/send", () => {
     expect(sent).toEqual([]);
   });
 
+  it("does not call it sent when nobody got it — the admin can try again", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    // Телеграм отвечает 429 всей рассылке: ни одно сообщение не ушло.
+    (bot.api.sendMessage as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("429: Too Many Requests"));
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const id = await ready(db, app, token);
+
+    const first = await app.request(`/api/admin/birthdays/${id}/send?${ASOF}`, send(token, { confirm: true }, "POST"));
+    expect(await first.json()).toEqual({ delivered: 0, intended: 3 });
+    expect(sent, "ни одно сообщение не ушло").toEqual([]);
+
+    // Кампания не «разослана»: рассылки не было, а «повторная отправка отключена»
+    // навсегда закрыла бы единственную кнопку. Никого не задваиваем — до людей
+    // ничего не дошло.
+    const listed = await (await app.request(`/api/admin/birthdays?${ASOF}`, auth(token))).json();
+    const mine = listed.birthdays.find((b: { employeeId: number }) => b.employeeId === id);
+    expect(mine.campaign.status, "нулевая доставка — не «sent»").not.toBe("sent");
+
+    (bot.api.sendMessage as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (to: number, text: string) => {
+      sent.push({ to, text });
+    });
+    const retry = await app.request(`/api/admin/birthdays/${id}/send?${ASOF}`, send(token, { confirm: true }, "POST"));
+    expect(retry.status, "вторая попытка должна пройти").toBe(200);
+    expect(await retry.json()).toEqual({ delivered: 3, intended: 3 });
+  });
+
+  it("still refuses a repeat when somebody did get it", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const id = await ready(db, app, token);
+    // Двое из троих в отказе — но один человек поздравление уже прочитал.
+    (bot.api.sendMessage as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (to: number, text: string) => {
+      if (to !== 2) throw new Error("403: bot was blocked by the user");
+      sent.push({ to, text });
+    });
+
+    const res = await app.request(`/api/admin/birthdays/${id}/send?${ASOF}`, send(token, { confirm: true }, "POST"));
+    expect(await res.json()).toEqual({ delivered: 1, intended: 3 });
+    const again = await app.request(`/api/admin/birthdays/${id}/send?${ASOF}`, send(token, { confirm: true }, "POST"));
+    expect(again.status, "повтор задвоил бы поздравление тому, кто его получил").toBe(409);
+    expect(sent).toHaveLength(1);
+  });
+
   it("records who sent it and to how many", async () => {
     const db = makeTestDb();
     const { bot } = fakeBot();

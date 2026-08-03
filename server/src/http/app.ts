@@ -613,7 +613,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     for (const recipient of teamRecipients(db, employeeId)) {
       if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
     }
-    markSent(db, campaign.id, delivered, new Date());
+    // «Разослано» закрывает кнопку навсегда (`blocker`: «повторная отправка
+    // отключена»), поэтому ставится, только если сообщение дошло хоть до кого-то.
+    // Ноль доставленных — это не рассылка, а её отсутствие: Telegram ответил 429
+    // всей пачке или сеть отвалилась, и запирать единственную кнопку не за что.
+    // Никого не задваиваем — до людей ничего не дошло. Как только дошло хотя бы до
+    // одного, повтор снова закрыт: задвоенное поздравление хуже недосланного.
+    if (delivered > 0) markSent(db, campaign.id, delivered, new Date());
     recordAudit(db, "birthday_sent", c.get("auth").employeeId, {
       employeeId,
       displayName: preview.displayName,
