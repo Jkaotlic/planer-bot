@@ -437,3 +437,60 @@ describe("запись, уже испорченная прежним повед�
     expect(after.templateId).toBeNull();
   });
 });
+
+// Та же семья, что находка про категорию, только другая ветка формы: «своё время».
+// Обе морды в этой ветке пишут `title: null` (комментарий рядом прямо говорит —
+// «снять устаревшее имя пресета»), но `templateId` не снимают. Пресет — это цвет
+// клетки и код в выгрузке: смена, которой руками поставили 10:00–19:00, оставалась
+// цвета «Утро» и выгружалась кодом «Утро», то есть круг через Excel возвращал ей
+// 08:00–17:00. Правка, назвавшая часы и не назвавшая пресет, пресетом больше не
+// описывается.
+describe("своё время снимает пресет", () => {
+  const morning = { date: "2026-08-04", category: "shift" as const, start: "08:00", end: "17:00", title: "Утро", templateId: 1 };
+
+  it("часы, поставленные руками, отвязывают запись от пресета", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Свойвремя Семён" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    // Ровно то, что шлёт форма в режиме «Своё время».
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      date: morning.date, category: "shift", start: "10:00", end: "19:00", title: null,
+    }, "PATCH"));
+
+    const after = getShift(db, entry.id)!;
+    expect(after.start).toBe("10:00");
+    expect(after.templateId).toBeNull();
+    // Выгрузка обязана сказать «такое клеткой не опишешь», а не «Утро».
+    expect(buildRosterCsv(db, morning.date, morning.date)).toContain("?");
+  });
+
+  it("а выбранный пресет правку переживает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Пресетный Пётр" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    // Ровно то, что шлёт форма в режиме пресета.
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      date: morning.date, category: "shift", templateId: 2, start: "09:00", end: "18:00", title: "День",
+    }, "PATCH"));
+
+    expect(getShift(db, entry.id)!.templateId).toBe(2);
+  });
+
+  it("перенос записи на другой день пресет не трогает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Переносный Пётр" });
+    const entry = createShift(db, { ...morning, employeeId: w.id });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: "2026-08-05" }, "PATCH"));
+
+    expect(getShift(db, entry.id)!.templateId).toBe(1);
+  });
+});
