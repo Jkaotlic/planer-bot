@@ -6,7 +6,6 @@ import {
   createVacantSlot,
   listOpenSlots,
   getVacantSlot,
-  setSlotStatus,
   addInterest,
   listInterestedEmployeeIds,
   listMyInterestSlotIds,
