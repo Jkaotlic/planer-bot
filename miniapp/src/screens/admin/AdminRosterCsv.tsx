@@ -178,15 +178,25 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
       return;
     }
     setState({ ...state, busy: true, error: null });
+    let summary;
     try {
-      const summary = await apiClient.applyRosterImport(state.csv, state.resolutions, state.overwrite);
-      setState(null);
-      onNotice(withNotifyNotice(summaryLine(summary), summary.notified));
-      await onImported();
+      summary = await apiClient.applyRosterImport(state.csv, state.resolutions, state.overwrite);
     } catch (err) {
       setState((current) =>
         current ? { ...current, busy: false, error: err instanceof Error ? err.message : "Не удалось применить CSV" } : current,
       );
+      return;
+    }
+    // Импорт уже прошёл — панель закрывается и успех говорится безусловно. Отказ
+    // ниже (перечитать неделю и список сотрудников) — это другая беда: местное
+    // поле ошибки к этому моменту уже не существует (`setState(null)` только что
+    // его убрал), поэтому идёт через `onError`, а не теряется молча.
+    setState(null);
+    onNotice(withNotifyNotice(summaryLine(summary), summary.notified));
+    try {
+      await onImported();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Импорт прошёл, но не удалось обновить список — обновите страницу");
     }
   }
 

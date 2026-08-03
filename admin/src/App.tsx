@@ -242,30 +242,13 @@ export function App() {
       return;
     }
     setRosterImport({ ...rosterImport, busy: true, error: null });
+    let summary;
     try {
-      const summary = await apiClient.applyRosterImport(
+      summary = await apiClient.applyRosterImport(
         rosterImport.csv,
         rosterImport.resolutions,
         rosterImport.overwrite,
       );
-      setRosterImport(null);
-      const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
-      if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
-      if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
-      if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
-      // Mirror of `summaryLine` in miniapp/src/screens/admin/AdminRosterCsv.tsx.
-      const expired = summary.swapsExpired;
-      const tail = expired > 0
-        ? `. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
-        : "";
-      const base = `CSV загружен: ${parts.join(", ")}${tail}`;
-      const extra = notifyNotice(summary.notified);
-      setRosterNotice({ kind: "success", text: extra ? `${base} ${extra}` : base });
-      await Promise.all([
-        refreshEmployees(),
-        refreshSchedule(),
-        apiClient.getEvents().then(setEvents),
-      ]);
     } catch (err) {
       if (err instanceof AuthRequiredError) {
         setNeedLogin(true);
@@ -279,6 +262,40 @@ export function App() {
               error: err instanceof Error ? err.message : "Не удалось применить CSV",
             }
           : current,
+      );
+      return;
+    }
+    // Импорт уже прошёл — панель закрывается и успех говорится безусловно. Отказ
+    // ниже (перечитать сотрудников/расписание/журнал) — другая беда: `rosterImport`
+    // уже null, писать туда `error` было бы `current ? {...} : current` на null,
+    // то есть в никуда. `scheduleError` — то же место, где уже показывают отказ
+    // загрузки расписания, поэтому отказ здесь не теряется молча, как раньше.
+    setRosterImport(null);
+    const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
+    if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
+    if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
+    if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
+    // Mirror of `summaryLine` in miniapp/src/screens/admin/AdminRosterCsv.tsx.
+    const expired = summary.swapsExpired;
+    const tail = expired > 0
+      ? `. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
+      : "";
+    const base = `CSV загружен: ${parts.join(", ")}${tail}`;
+    const extra = notifyNotice(summary.notified);
+    setRosterNotice({ kind: "success", text: extra ? `${base} ${extra}` : base });
+    try {
+      await Promise.all([
+        refreshEmployees(),
+        refreshSchedule(),
+        apiClient.getEvents().then(setEvents),
+      ]);
+    } catch (err) {
+      if (err instanceof AuthRequiredError) {
+        setNeedLogin(true);
+        return;
+      }
+      setScheduleError(
+        err instanceof Error ? err.message : "Импорт прошёл, но не удалось обновить список — обновите страницу",
       );
     }
   }
