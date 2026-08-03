@@ -74,7 +74,7 @@ describe("team schedule development mock", () => {
   });
 
   it("preserves a supplied location when creating a schedule entry", async () => {
-    const created = await mockCreateEntry({
+    const { entry: created } = await mockCreateEntry({
       date: "2099-01-10",
       start: "09:00",
       end: "18:00",
@@ -89,7 +89,7 @@ describe("team schedule development mock", () => {
   });
 
   it("preserves an updated location and clears it when the field is omitted", async () => {
-    const created = await mockCreateEntry({
+    const { entry: created } = await mockCreateEntry({
       date: "2099-01-11",
       start: "09:00",
       end: "18:00",
@@ -100,7 +100,7 @@ describe("team schedule development mock", () => {
     });
     createdEntryIds.push(created.id);
 
-    const updated = await mockUpdateEntry(created.id, {
+    const { entry: updated } = await mockUpdateEntry(created.id, {
       date: created.date,
       start: created.start ?? undefined,
       end: created.end ?? undefined,
@@ -111,7 +111,7 @@ describe("team schedule development mock", () => {
     });
     expect(updated.location).toBe("Новое место");
 
-    const cleared = await mockUpdateEntry(created.id, {
+    const { entry: cleared } = await mockUpdateEntry(created.id, {
       date: created.date,
       start: created.start ?? undefined,
       end: created.end ?? undefined,

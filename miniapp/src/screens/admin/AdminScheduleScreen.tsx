@@ -15,7 +15,7 @@ import { CardShell, CardStack } from "../../components/Card";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
 import { ScreenScroll } from "../../components/ScreenScroll";
-import { formatTimeRange } from "../../lib/shift";
+import { formatTimeRange, notifyNotice, withNotifyNotice } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import { createLatestRequestGate } from "../../lib/request-gate";
@@ -296,7 +296,7 @@ export function AdminScheduleScreen() {
     try {
       const result = await apiClient.distribute(from, to, true);
       await loadWeek(from, to);
-      setNotice(distributeNotice(result.assignments.length, result.unfilled ?? []));
+      setNotice(withNotifyNotice(distributeNotice(result.assignments.length, result.unfilled ?? []), result.notified));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось распределить");
     } finally {
@@ -304,15 +304,19 @@ export function AdminScheduleScreen() {
     }
   }
 
-  async function handleSaved() {
+  async function handleSaved(notified: { delivered: number; intended: number }) {
     setEditing(null);
     await loadWeek(from, to);
+    // Своего сообщения об успехе у сохранения записи нет — «дошло не до всех»
+    // говорим, только когда есть что сказать, иначе экран молчит, как раньше.
+    setNotice(notifyNotice(notified));
   }
 
-  async function handleFilled(count: number) {
+  async function handleFilled(count: number, notified: { delivered: number; intended: number }) {
     setFillOpen(false);
     await loadWeek(from, to);
-    setNotice(count === 0 ? "Ни одного дня не выбрано — ничего не добавлено." : `Заполнено дней: ${count}.`);
+    const base = count === 0 ? "Ни одного дня не выбрано — ничего не добавлено." : `Заполнено дней: ${count}.`;
+    setNotice(count === 0 ? base : withNotifyNotice(base, notified));
   }
 
   return (
@@ -560,7 +564,7 @@ interface EntryFormProps {
   existing: Shift | null;
   defaultDate: string;
   onCancel: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (notified: { delivered: number; intended: number }) => Promise<void>;
 }
 
 /**
@@ -668,9 +672,10 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
     if (!input) return;
     setSaving(true);
     try {
-      if (existing) await apiClient.updateEntry(existing.id, input);
-      else await apiClient.createEntry(input);
-      await onSaved();
+      const { notified } = existing
+        ? await apiClient.updateEntry(existing.id, input)
+        : await apiClient.createEntry(input);
+      await onSaved(notified);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Не удалось сохранить запись");
     } finally {
@@ -683,8 +688,8 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
     setDeleting(true);
     setFormError(null);
     try {
-      await apiClient.deleteEntry(existing.id);
-      await onSaved();
+      const { notified } = await apiClient.deleteEntry(existing.id);
+      await onSaved(notified);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Не удалось удалить запись");
     } finally {
@@ -818,7 +823,7 @@ interface FillWeekPanelProps {
    *  believes is worse than no hint at all. */
   roles: readonly TemplateRolesView[];
   onCancel: () => void;
-  onFilled: (count: number) => Promise<void>;
+  onFilled: (count: number, notified: { delivered: number; intended: number }) => Promise<void>;
 }
 
 /** A worker's load on the visible week, in the very terms «Распределить честно» ranks them by. */
@@ -963,8 +968,8 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
       // Один запрос, а не цикл: семь `POST /api/admin/entries` подряд — это семь
       // писем человеку за одно нажатие «Заполнить». Bulk-роут атомарен и шлёт
       // одно сводное письмо независимо от числа дней.
-      const { created } = await apiClient.createEntries(inputs);
-      await onFilled(created);
+      const { created, notified } = await apiClient.createEntries(inputs);
+      await onFilled(created, notified);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось заполнить неделю");
     } finally {

@@ -327,14 +327,20 @@ export interface BirthdayPreview {
   alreadySentAt: string | null;
 }
 
+/** До скольких из скольких дошло письмо о правке графика. */
+export interface NotifyReach {
+  delivered: number;
+  intended: number;
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
   getTemplates(): Promise<Template[]>;
   getEvents(): Promise<FeedEvent[]>;
-  createEntry(input: NewEntryInput): Promise<Shift>;
-  updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
-  deleteEntry(id: number): Promise<void>;
+  createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
+  updateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
+  deleteEntry(id: number): Promise<{ notified: NotifyReach }>;
   createEmployee(name: string): Promise<CreateEmployeeResult>;
   archiveEmployee(id: number): Promise<void>;
   restoreEmployee(id: number): Promise<void>;
@@ -368,7 +374,7 @@ export interface ApiClient {
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
-  applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
+  applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
 }
 
 interface EmployeesResponse {
@@ -609,7 +615,7 @@ async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T
   return (await res.json()) as T;
 }
 
-async function authorizedDelete(path: string): Promise<void> {
+async function authorizedDelete<T>(path: string): Promise<T> {
   const token = await authToken();
   const res = await apiFetch(`${API_BASE}${path}`, {
     method: "DELETE",
@@ -618,6 +624,7 @@ async function authorizedDelete(path: string): Promise<void> {
   if (!res.ok) {
     throw await toError(path, res);
   }
+  return (await res.json()) as T;
 }
 
 /** Экспортируется ради теста про сетевой сбой — в приложение уходит `apiClient` ниже. */
@@ -647,19 +654,12 @@ export const realClient: ApiClient = {
     return events.map((raw) => toFeedEvent(raw, namesById));
   },
 
-  async createEntry(input) {
-    const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/admin/entries", input);
-    return entry;
-  },
+  createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
 
-  async updateEntry(id, input) {
-    const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/admin/entries/${id}`, input);
-    return entry;
-  },
+  updateEntry: (id, input) =>
+    authorizedPatchJson<{ entry: Shift; notified: NotifyReach }>(`/api/admin/entries/${id}`, input),
 
-  async deleteEntry(id) {
-    await authorizedDelete(`/api/admin/entries/${id}`);
-  },
+  deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
   async createEmployee(name) {
     return authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name });
@@ -812,11 +812,11 @@ export const realClient: ApiClient = {
   },
 
   async applyRosterImport(csv, resolutions, overwrite = false) {
-    const { summary } = await authorizedPostJson<{ summary: RosterImportSummary }>(
+    const { summary, notified } = await authorizedPostJson<{ summary: RosterImportSummary; notified: NotifyReach }>(
       "/api/admin/roster/import/apply",
       { csv, resolutions, overwrite },
     );
-    return summary;
+    return { ...summary, notified };
   },
 };
 

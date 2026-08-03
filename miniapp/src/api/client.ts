@@ -310,6 +310,7 @@ export interface DistributeResult {
   applied: boolean;
   assignments: DistributionAssignment[];
   unfilled: UnfilledSlot[];
+  notified: NotifyReach;
 }
 
 /** A preset plus who may take it and who asked for it. An empty pool means everyone. */
@@ -462,12 +463,12 @@ export interface ApiClient {
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
   getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getTemplates(): Promise<Template[]>;
-  createEntry(input: NewEntryInput): Promise<Shift>;
+  createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
    *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
-  updateEntry(id: number, input: NewEntryInput): Promise<Shift>;
-  deleteEntry(id: number): Promise<void>;
+  updateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
+  deleteEntry(id: number): Promise<{ notified: NotifyReach }>;
   distribute(from: string, to: string, apply: boolean): Promise<DistributeResult>;
   getAdminWeekendSlots(): Promise<AdminSlotView[]>;
   /** The slot, plus how many of the team the «нужен человек» broadcast reached —
@@ -495,7 +496,7 @@ export interface ApiClient {
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
-  applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary>;
+  applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -705,7 +706,7 @@ async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> 
   return (await res.json()) as T;
 }
 
-async function authorizedDelete(path: string): Promise<void> {
+async function authorizedDelete<T>(path: string): Promise<T> {
   const token = await authToken();
   const res = await apiFetch(`${API_BASE}${path}`, {
     method: "DELETE",
@@ -714,6 +715,7 @@ async function authorizedDelete(path: string): Promise<void> {
   if (!res.ok) {
     throw new Error(await errorMessage(path, res));
   }
+  return (await res.json()) as T;
 }
 
 /** Fetches and maps `GET /api/swaps` to the enriched UI shape. Shared by
@@ -825,17 +827,12 @@ export const realClient: ApiClient = {
     return templates;
   },
 
-  async createEntry(input) {
-    const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/admin/entries", input);
-    return entry;
-  },
+  createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
   createEntries: (inputs) =>
     authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
-  async updateEntry(id, input) {
-    const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/admin/entries/${id}`, input);
-    return entry;
-  },
-  deleteEntry: (id) => authorizedDelete(`/api/admin/entries/${id}`),
+  updateEntry: (id, input) =>
+    authorizedPatchJson<{ entry: Shift; notified: NotifyReach }>(`/api/admin/entries/${id}`, input),
+  deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
   distribute: (from, to, apply) =>
     authorizedPostJson<DistributeResult>("/api/admin/distribute", { from, to, apply }),
@@ -959,11 +956,11 @@ export const realClient: ApiClient = {
     authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv }),
 
   async applyRosterImport(csv, resolutions, overwrite = false) {
-    const { summary } = await authorizedPostJson<{ summary: RosterImportSummary }>(
+    const { summary, notified } = await authorizedPostJson<{ summary: RosterImportSummary; notified: NotifyReach }>(
       "/api/admin/roster/import/apply",
       { csv, resolutions, overwrite },
     );
-    return summary;
+    return { ...summary, notified };
   },
 };
 

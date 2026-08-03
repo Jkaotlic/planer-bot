@@ -148,7 +148,15 @@ export async function mockGetTemplates(): Promise<Template[]> {
   return [...TEMPLATES];
 }
 
-export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
+/** Реального `notifyEntryChange` в DEV-моке нет, поэтому «дошло до N из M» —
+ *  по числу людей из `employeeIds`, у кого в моке есть телеграм. */
+function mockReach(employeeIds: readonly number[]): { delivered: number; intended: number } {
+  const unique = [...new Set(employeeIds)];
+  const withTelegram = unique.filter((id) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId != null);
+  return { delivered: withTelegram.length, intended: unique.length };
+}
+
+export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {
   await delay(250);
   const created = entry({
     date: input.date,
@@ -160,10 +168,10 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<Shift> {
     employeeId: input.employeeId ?? null,
   });
   ENTRIES.push(created);
-  return created;
+  return { entry: created, notified: mockReach(input.employeeId != null ? [input.employeeId] : []) };
 }
 
-export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<Shift> {
+export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {
   await delay(200);
   const index = ENTRIES.findIndex((s) => s.id === id);
   if (index === -1) throw new Error(`Unknown entry ${id}`);
@@ -178,13 +186,15 @@ export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise
     employeeId: input.employeeId ?? null,
   };
   ENTRIES[index] = updated;
-  return updated;
+  return { entry: updated, notified: mockReach(updated.employeeId != null ? [updated.employeeId] : []) };
 }
 
-export async function mockDeleteEntry(id: number): Promise<void> {
+export async function mockDeleteEntry(id: number): Promise<{ notified: { delivered: number; intended: number } }> {
   await delay(150);
   const index = ENTRIES.findIndex((s) => s.id === id);
-  if (index !== -1) ENTRIES.splice(index, 1);
+  if (index === -1) return { notified: { delivered: 0, intended: 0 } };
+  const [removed] = ENTRIES.splice(index, 1);
+  return { notified: mockReach(removed?.employeeId != null ? [removed.employeeId] : []) };
 }
 
 const EVENTS: readonly FeedEvent[] = [
@@ -722,7 +732,7 @@ export async function mockApplyRosterImport(
   csv: string,
   resolutions: RosterPersonResolution[],
   overwrite = false,
-): Promise<RosterImportSummary> {
+): Promise<RosterImportSummary & { notified: { delivered: number; intended: number } }> {
   const preview = await mockPreviewRosterImport(csv);
   await delay(250);
   if (preview.existingCount > 0 && !overwrite) {
@@ -771,5 +781,8 @@ export async function mockApplyRosterImport(
     cellsPreserved: preview.preservedCount,
     swapsExpired: 0,
     unknowns: [],
+    // Мок не пишет по-дневные записи из файла в ENTRIES, поэтому не знает,
+    // кому реально досталось что-то новое — молчаливый {0,0} честнее выдумки.
+    notified: { delivered: 0, intended: 0 },
   };
 }

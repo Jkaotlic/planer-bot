@@ -36,3 +36,23 @@ export function pluralizeRu(n: number, one: string, few: string, many: string): 
   if (mod10 >= 2 && mod10 <= 4) return few;
   return many;
 }
+
+/**
+ * Дописывается к уже существующему сообщению об успехе — сохранение записи,
+ * импорт, распределение, заполнение недели, — а не заводит своё место на экране.
+ * Правило то же, что у `reachNotice` (AdminWeekendScreen.tsx): молчим, когда
+ * дошло до всех или уведомлять было некого, говорим вслух, когда часть команды
+ * не подключила телеграм. Живёт здесь, а не в конкретном экране, потому что
+ * нужна и «Расписанию», и «Графику файлом» — раздельный импорт друг у друга
+ * дал бы цикл между их модулями.
+ */
+export function notifyNotice(reach: { delivered: number; intended: number }): string | null {
+  if (reach.intended === 0 || reach.delivered >= reach.intended) return null;
+  return `Уведомление дошло до ${reach.delivered} из ${reach.intended}: остальные не подключили телеграм.`;
+}
+
+/** Приписывает `notifyNotice` к базовому сообщению, если есть что сказать. */
+export function withNotifyNotice(base: string, reach: { delivered: number; intended: number }): string {
+  const extra = notifyNotice(reach);
+  return extra ? `${base} ${extra}` : base;
+}
