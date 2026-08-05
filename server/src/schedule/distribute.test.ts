@@ -198,6 +198,39 @@ describe("buildDistribution", () => {
     expect(assignment?.employeeId).toBe(igor.id);
   });
 
+  // Seeding counts unread cells in a second pass, on the premise that they have no
+  // times and so never reached the first one. The import does write them that way —
+  // but a cell edited before the «правка снимает пометку» fix landed kept its mark
+  // AND gained times, and the live schedule holds exactly one such row. It was then
+  // counted twice: once under its real kind, once under «Не распознано (?)», with
+  // `total` inflated by one. An inflated total reads as «этот уже загружен», so fair
+  // distribution quietly hands that person fewer shifts than they are owed.
+  it("counts a cell that is both unread and timed once, not twice", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // The shape the live row is in: an unread mark that never got cleared, on an
+    // entry that has since been given real hours and a name.
+    createShift(db, {
+      date: "2026-07-02", start: "09:00", end: "18:00", title: "День",
+      category: "shift", employeeId: anya.id, unrecognisedCode: "Ко",
+    });
+    createShift(db, {
+      date: "2026-07-02", start: "09:00", end: "18:00", title: "День",
+      category: "shift", employeeId: igor.id,
+    });
+
+    // Neither holds this kind, so the pick falls through to `total` and then to id.
+    const slot = createShift(db, { date: "2026-07-05", start: "10:00", end: "19:00", title: "Вечер" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    // Both hold exactly one shift, so the lower id wins. Double-counted, Anya's
+    // total reads 2 and the slot goes to Igor instead.
+    expect(assignment?.employeeId).toBe(anya.id);
+  });
+
   it("does not double-book a worker across overlapping unassigned slots at the same time", () => {
     const db = makeTestDb();
     createEmployee(db, { displayName: "Аня" });
