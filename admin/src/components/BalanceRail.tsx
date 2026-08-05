@@ -37,9 +37,33 @@ interface Load {
   total: number;
 }
 
-/** Only timed work entries count toward fairness — absences don't (mirrors the server's seeding). */
-function isBalanceable(s: Shift): s is Shift & { employeeId: number; start: string; end: string } {
-  return s.employeeId != null && s.start != null && s.end != null && countsForBalance(s.category);
+/**
+ * A roster cell the import could not read. Real work of an unknown kind, so it
+ * counts — but under its own name, never under a preset's and never inside the
+ * custom-time bucket. Same string as the server's `seedWorkerLoad` and the report,
+ * on purpose: one entry must not read as «День» here and «не распознано» there.
+ */
+const UNRECOGNISED_KIND = "Не распознано (?)";
+
+/**
+ * Which bucket an entry counts toward, or `null` when it counts toward none —
+ * the reading half of the ★, mirroring the server's seeding.
+ *
+ * The unread mark is checked **before** the times, because the two are not
+ * exclusive: the import writes such a cell with no times at all, but a cell edited
+ * before «правка снимает пометку» kept its mark and gained hours, and the live
+ * schedule holds one. Checking times first dropped the untimed ones from the count
+ * entirely and filed the timed one under its title — two different disagreements
+ * with the server, on the same column.
+ */
+export function balanceKindOf(
+  s: Pick<Shift, "category" | "start" | "end" | "templateId" | "title" | "unrecognisedCode">,
+  nameById: ReadonlyMap<number, string>,
+): string | null {
+  if (!countsForBalance(s.category)) return null;
+  if (s.unrecognisedCode != null) return UNRECOGNISED_KIND;
+  if (s.start == null || s.end == null) return null;
+  return shiftKind(s, nameById);
 }
 
 /**
@@ -111,10 +135,11 @@ export function BalanceRail({ employees, shifts, templates, roles }: BalanceRail
   /** Kinds actually present this period — an all-zero column would be noise. */
   const kinds: string[] = [];
   for (const s of shifts) {
-    if (!isBalanceable(s)) continue;
+    if (s.employeeId == null) continue;
+    const kind = balanceKindOf(s, nameById);
+    if (kind == null) continue;
     const load = byId.get(s.employeeId);
     if (!load) continue; // entry left on an archived worker — not a candidate for new slots
-    const kind = shiftKind(s, nameById);
     load.byKind[kind] = (load.byKind[kind] ?? 0) + 1;
     load.total += 1;
     if (!kinds.includes(kind)) kinds.push(kind);

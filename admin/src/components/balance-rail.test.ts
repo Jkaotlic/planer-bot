@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextPickByKind, type KindRoles } from "./BalanceRail";
+import { balanceKindOf, nextPickByKind, type KindRoles } from "./BalanceRail";
 
 const load = (employeeId: number, byKind: Record<string, number>, total = Object.values(byKind).reduce((a, b) => a + b, 0)) => ({
   employeeId,
@@ -69,5 +69,47 @@ describe("nextPickByKind", () => {
   it("has no roles for a kind that is not a preset (a one-off time), so everyone counts", () => {
     const loads = [load(1, { "Своё время": 1 }), load(2, {})];
     expect(nextPickByKind(loads, ["Своё время"], roles({ "Утро": { pool: [1] } })).get("Своё время")).toBe(2);
+  });
+});
+
+/**
+ * Which bucket an entry counts toward — the half of the ★ that reads the schedule,
+ * as opposed to the half that ranks people. It has to agree with the server's
+ * `seedWorkerLoad` and with the report, or the rail explains a button that then
+ * does something else.
+ */
+describe("balanceKindOf", () => {
+  const nameById = new Map([[1, "Утро"]]);
+  const entry = (over: Partial<Parameters<typeof balanceKindOf>[0]>) => ({
+    category: "shift" as const, start: "09:00", end: "18:00",
+    templateId: null, title: null, unrecognisedCode: null, ...over,
+  });
+
+  it("names an entry by the preset it came from", () => {
+    expect(balanceKindOf(entry({ templateId: 1 }), nameById)).toBe("Утро");
+  });
+
+  it("falls back to the title, then to the custom-time bucket", () => {
+    expect(balanceKindOf(entry({ title: "День" }), nameById)).toBe("День");
+    expect(balanceKindOf(entry({}), nameById)).toBe("Своё время");
+  });
+
+  // The live schedule holds one cell that is both unread and timed — edited before
+  // the «правка снимает пометку» fix landed. The rail filed it under its title while
+  // the server and the report file it under «не распознано»: same entry, two answers.
+  it("files an unread cell under its own bucket even when it has times and a name", () => {
+    expect(balanceKindOf(entry({ title: "День", unrecognisedCode: "Ко" }), nameById)).toBe("Не распознано (?)");
+  });
+
+  // The shape the import actually writes. The rail dropped it for having no times,
+  // so the person looked less loaded here than they are to «Распределить честно».
+  it("counts an unread cell that has no times at all", () => {
+    expect(balanceKindOf(entry({ start: null, end: null, unrecognisedCode: "Ко" }), nameById))
+      .toBe("Не распознано (?)");
+  });
+
+  it("counts nothing for an absence, or for an ordinary entry with no times", () => {
+    expect(balanceKindOf(entry({ category: "vacation", start: null, end: null }), nameById)).toBeNull();
+    expect(balanceKindOf(entry({ start: null, end: null }), nameById)).toBeNull();
   });
 });
