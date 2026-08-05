@@ -102,23 +102,29 @@ function seedWorkerLoad(
   nameById: ReadonlyMap<number, string>,
 ): WorkerLoad {
   const employeeShifts = listShiftsByEmployee(db, employeeId);
-  const timed = employeeShifts.filter((s) => s.start != null && s.end != null && inRange(s.date, from, to));
   const byKind: Record<string, number> = {};
   let total = 0;
-  for (const s of timed) {
-    if (!countsForBalance(s.category)) continue;
-    const kind = shiftKind(s, nameById);
-    byKind[kind] = (byKind[kind] ?? 0) + 1;
-    total += 1;
-  }
 
-  // An unread cell has no times, so it never reaches `timed` above and would
-  // otherwise vanish from the count entirely — undercounting this person for
-  // every kind of fairness comparison. It still counts toward the total.
-  const unrecognised = employeeShifts.filter((s) => s.unrecognisedCode != null && inRange(s.date, from, to));
-  for (const s of unrecognised) {
+  // One shift, one count — filed under «не распознано» when it carries that mark,
+  // exactly as reports/shift-counts.ts files it, so the balance and the report can
+  // never disagree about what an unread cell is.
+  //
+  // An unread cell normally has no times (the import is the only thing that may
+  // create one, and it deliberately invents none), which is why it has to be let in
+  // here despite failing the times check — otherwise it vanishes from the count and
+  // undercounts this person against every kind of comparison. But «unread» and
+  // «timed» are not exclusive in practice: a cell edited before the «правка снимает
+  // пометку» fix kept its mark and gained hours, and the live schedule holds one
+  // such row. Counting it in a second pass added it twice, and an inflated total
+  // reads as «этот уже загружен» — so fair distribution handed that person fewer
+  // shifts than they were owed.
+  const counted = employeeShifts.filter(
+    (s) => inRange(s.date, from, to) && (s.unrecognisedCode != null || (s.start != null && s.end != null)),
+  );
+  for (const s of counted) {
     if (!countsForBalance(s.category)) continue;
-    byKind[UNRECOGNISED_KIND] = (byKind[UNRECOGNISED_KIND] ?? 0) + 1;
+    const kind = s.unrecognisedCode != null ? UNRECOGNISED_KIND : shiftKind(s, nameById);
+    byKind[kind] = (byKind[kind] ?? 0) + 1;
     total += 1;
   }
 
@@ -150,15 +156,22 @@ function seedWorkerLoad(
     const end = s.endDate ?? s.date;
     for (const d of expandDateRange(s.date, end, from, absenceTo)) absentDatesSet.add(d);
   }
-  // An unread cell has no times, so there is no interval to compare for overlap —
-  // "busy" can't express it. Blocking the whole day is the safe reading: we know
-  // this person has *something* that day, so a second commitment could collide at
-  // any hour. `absentDates` is reused rather than inventing a fabricated all-day
-  // busy interval because it is already exactly "assign this person nothing on
-  // this date", and its only reader is distributeFairly below — nothing else in
-  // the codebase interprets WorkerLoad.absentDates as "on vacation", so widening
-  // its source doesn't leak a wrong meaning anywhere.
-  for (const s of unrecognised) absentDatesSet.add(s.date);
+  // An unread cell with no times has no interval to compare for overlap — "busy"
+  // can't express it. Blocking the whole day is the safe reading: we know this
+  // person has *something* that day, so a second commitment could collide at any
+  // hour. `absentDates` is reused rather than inventing a fabricated all-day busy
+  // interval because it is already exactly "assign this person nothing on this
+  // date", and its only reader is distributeFairly below — nothing else in the
+  // codebase interprets WorkerLoad.absentDates as "on vacation", so widening its
+  // source doesn't leak a wrong meaning anywhere.
+  //
+  // One that *does* carry times is a different matter: it is already in `busy` with
+  // a real interval, which is strictly more precise than blocking the whole day.
+  for (const s of employeeShifts) {
+    if (s.unrecognisedCode != null && s.start == null && s.end == null && inRange(s.date, from, to)) {
+      absentDatesSet.add(s.date);
+    }
+  }
   const absentDates = [...absentDatesSet];
 
   return { employeeId, byKind, total, busy, absentDates };
