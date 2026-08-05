@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { showsWeekSwitcher, distributeNotice, nextPickByKind, type KindRoles } from "./AdminScheduleScreen";
+import { showsWeekSwitcher, distributeNotice, nextPickByKind, balanceKindOf, type KindRoles } from "./AdminScheduleScreen";
 
 const load = (employeeId: number, byKind: Record<string, number>, total = Object.values(byKind).reduce((a, b) => a + b, 0)) => ({
   employeeId,
@@ -135,5 +135,41 @@ describe("showsWeekSwitcher", () => {
     const allOpen = { csvOpen: true, kindsOpen: true, fillOpen: true, editing: "new" as const };
     expect(showsWeekSwitcher(allOpen)).toBe(false);
     expect(showsWeekSwitcher({ ...allOpen, csvOpen: false, kindsOpen: false, fillOpen: false, editing: null })).toBe(true);
+  });
+});
+
+/**
+ * Mirror of `balanceKindOf` in admin/src/components/BalanceRail.tsx — the reading
+ * half of the ★. Duplicated by hand, as the Mini App duplicates everything it does
+ * not take from shared, so it needs its own test to catch the drift.
+ */
+describe("balanceKindOf", () => {
+  const nameById = new Map([[1, "Утро"]]);
+  const entry = (over: Partial<Parameters<typeof balanceKindOf>[0]>) => ({
+    category: "shift" as const, start: "09:00", end: "18:00",
+    templateId: null, title: null, unrecognisedCode: null, ...over,
+  });
+
+  it("names an entry by the preset it came from", () => {
+    expect(balanceKindOf(entry({ templateId: 1 }), nameById)).toBe("Утро");
+  });
+
+  it("falls back to the title, then to the custom-time bucket", () => {
+    expect(balanceKindOf(entry({ title: "День" }), nameById)).toBe("День");
+    expect(balanceKindOf(entry({}), nameById)).toBe("Своё время");
+  });
+
+  it("files an unread cell under its own bucket even when it has times and a name", () => {
+    expect(balanceKindOf(entry({ title: "День", unrecognisedCode: "Ко" }), nameById)).toBe("Не распознано (?)");
+  });
+
+  it("counts an unread cell that has no times at all", () => {
+    expect(balanceKindOf(entry({ start: null, end: null, unrecognisedCode: "Ко" }), nameById))
+      .toBe("Не распознано (?)");
+  });
+
+  it("counts nothing for an absence, or for an ordinary entry with no times", () => {
+    expect(balanceKindOf(entry({ category: "vacation", start: null, end: null }), nameById)).toBeNull();
+    expect(balanceKindOf(entry({ start: null, end: null }), nameById)).toBeNull();
   });
 });
