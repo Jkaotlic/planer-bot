@@ -135,11 +135,20 @@ function seedWorkerLoad(
   );
   const busy = busyTimed.map((s) => ({ date: s.date, start: s.start as string, end: s.end as string }));
 
-  const absences = employeeShifts.filter((s) => isAbsence(s.category) && overlapsRange(s, from, to));
+  // Absences reach one day PAST `to`, mirroring the way `busy` above reaches one
+  // day back before `from`. A slot dated `to` that crosses midnight occupies `to`+1
+  // as well (see datesOf in shared/distribute), and distributeFairly does check
+  // both dates — but it can only see what seeding hands it. Clamped at `to`, the
+  // window's last night fell back into exactly the bug the overnight fix closed:
+  // a vacation starting the next morning is not merely un-expanded, it fails
+  // `overlapsRange` and is never loaded at all. Widening only ever adds `to`+1,
+  // and nothing but an overnight slot dated `to` can match it.
+  const absenceTo = nextDate(to);
+  const absences = employeeShifts.filter((s) => isAbsence(s.category) && overlapsRange(s, from, absenceTo));
   const absentDatesSet = new Set<string>();
   for (const s of absences) {
     const end = s.endDate ?? s.date;
-    for (const d of expandDateRange(s.date, end, from, to)) absentDatesSet.add(d);
+    for (const d of expandDateRange(s.date, end, from, absenceTo)) absentDatesSet.add(d);
   }
   // An unread cell has no times, so there is no interval to compare for overlap —
   // "busy" can't express it. Blocking the whole day is the safe reading: we know
