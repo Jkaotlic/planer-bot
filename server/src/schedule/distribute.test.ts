@@ -174,6 +174,30 @@ describe("buildDistribution", () => {
     expect(assignment?.employeeId).toBe(igor.id);
   });
 
+  // `distributeFairly` already refuses to give an overnight slot to somebody absent
+  // the next morning — but it can only see the absences seeding hands it, and
+  // seeding clamped them to [from, to]. A slot dated `to` reaches into `to`+1, so
+  // the very last night of a window fell straight back into the bug the overnight
+  // fix was written to close: the absence starting the next day isn't even loaded
+  // (`overlapsRange` rejects it), let alone expanded into `absentDates`.
+  it("keeps an overnight slot on the last day of the window away from somebody whose vacation starts the next morning", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+
+    // Vacation begins the day AFTER the window closes — invisible to a [from, to] clamp.
+    createShift(db, { date: "2026-07-11", endDate: "2026-07-20", category: "vacation", employeeId: anya.id });
+    // The window's last night, ending at 06:00 on the first morning of that vacation.
+    const slot = createShift(db, { date: "2026-07-10", start: "22:00", end: "06:00" });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    const assignment = result.assignments.find((a) => a.shiftId === slot.id);
+    // Anya sorts first on every tiebreak (same counts, lower id), so without the
+    // next-day reach she wins the slot and works the first morning of her holiday.
+    expect(assignment?.employeeId).not.toBe(anya.id);
+    expect(assignment?.employeeId).toBe(igor.id);
+  });
+
   it("does not double-book a worker across overlapping unassigned slots at the same time", () => {
     const db = makeTestDb();
     createEmployee(db, { displayName: "Аня" });
