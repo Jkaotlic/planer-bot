@@ -365,6 +365,17 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: who.text });
       return;
     }
+    // Mirrors /week's own guard above. `ctx.chat` here comes from the message
+    // the tapped button is attached to, not from whoever tapped it — so this
+    // is exactly the check that closes the hole /week's guard alone leaves
+    // open: a photo a group received before that guard existed would, without
+    // this, still redraw the team's roster into the group on every tap.
+    // `?.` covers the (documented but rare) case where Telegram hands back a
+    // callback whose original message is gone — that's never a private chat.
+    if (ctx.chat?.type !== "private") {
+      await ctx.answerCallbackQuery({ text: "Только в личном чате" });
+      return;
+    }
     // The out-of-range button is never drawn, but the message lives forever —
     // the data can come from anything, so the limit is checked here too.
     // (`!Number.isInteger(offset)` would be redundant: the regex only ever
