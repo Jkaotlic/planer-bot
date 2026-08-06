@@ -1759,11 +1759,24 @@ describe("buildWeekImage", () => {
     expect(result).toEqual({ kind: "text", text: "В расписании пока никого." });
   });
 
-  it("человек без записей на этой неделе всё равно рисуется строкой", () => {
-    const db = makeTestDb();
-    createEmployee(db, { displayName: "Иванов Иван" });
-    const result = buildWeekImage(db, MONDAY, TODAY);
-    expect(result.kind).toBe("photo");
+  it("каждый человек добавляет картинке ровно одну строку высоты", () => {
+    // Ширина картинки равна ширине SVG, значит масштаб единица и высота PNG —
+    // это высота вёрстки байт в байт. Высота лежит в IHDR с 20-го байта.
+    const один = makeTestDb();
+    createEmployee(один, { displayName: "Иванов Иван" });
+    const двое = makeTestDb();
+    createEmployee(двое, { displayName: "Иванов Иван" });
+    createEmployee(двое, { displayName: "Петров Пётр" });
+
+    const a = buildWeekImage(один, MONDAY, TODAY);
+    const b = buildWeekImage(двое, MONDAY, TODAY);
+
+    expect(a.kind).toBe("photo");
+    expect(b.kind).toBe("photo");
+    if (a.kind !== "photo" || b.kind !== "photo") return;
+    // ROW_H из week-svg.ts. Человек без записей всё равно получает свою строку —
+    // пустая строка это факт «на этой неделе он не работает», а не отсутствие.
+    expect(b.png.readUInt32BE(20) - a.png.readUInt32BE(20)).toBe(56);
   });
 
   it("подпись называет ту неделю, которую нарисовал", () => {
@@ -1779,19 +1792,27 @@ describe("buildWeekImage", () => {
     expect(result.caption).toContain("августа");
   });
 
-  it("остаётся картинкой, когда активные есть, а архивный со сменой — нет", () => {
-    const db = makeTestDb();
-    createEmployee(db, { displayName: "Иванов Иван" });
-    const ушедший = createEmployee(db, { displayName: "Петров Пётр" });
-    createShift(db, { employeeId: ушедший.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
+  it("смена архивного человека не оставляет на картинке ни следа", () => {
+    // Две базы, отличающиеся ровно призраком: в первой архивный Петров со
+    // сменой, во второй его нет вовсе. Картинка обязана выйти побайтово той же —
+    // это и значит «не попал»: ни своей клеткой, ни строкой «Не назначено».
+    const сПризраком = makeTestDb();
+    createEmployee(сПризраком, { displayName: "Иванов Иван" });
+    const ушедший = createEmployee(сПризраком, { displayName: "Петров Пётр" });
+    createShift(сПризраком, { employeeId: ушедший.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
     // Дата архива ПОСЛЕ смены: смена остаётся за архивным, строки у него уже нет.
-    archiveEmployee(db, ушедший.id, "2026-08-06");
+    archiveEmployee(сПризраком, ушедший.id, "2026-08-06");
 
-    const result = buildWeekImage(db, MONDAY, TODAY);
+    const чистая = makeTestDb();
+    createEmployee(чистая, { displayName: "Иванов Иван" });
 
-    // Рисуется один Иванов; смена Петрова не превращается ни в его клетку, ни в
-    // строку «Не назначено» — она отсеяна ещё в readTeamSchedule.
-    expect(result.kind).toBe("photo");
+    const a = buildWeekImage(сПризраком, MONDAY, TODAY);
+    const b = buildWeekImage(чистая, MONDAY, TODAY);
+
+    expect(a.kind).toBe("photo");
+    expect(b.kind).toBe("photo");
+    if (a.kind !== "photo" || b.kind !== "photo") return;
+    expect(a.png.equals(b.png)).toBe(true);
   });
 });
 ```
