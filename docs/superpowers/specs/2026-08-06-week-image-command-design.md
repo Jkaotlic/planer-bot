@@ -66,9 +66,13 @@ headless-браузером (см. «Отвергнутые варианты»).
 - функции `coversDate`, `splitDisplayName`, `compareShifts`, `toEntryView`,
   `weekCell`, `buildWeekModel`, `buildWeekLegend`.
 
-Переезжает в **`shared/src/time.ts`** (к существующим датовым хелперам):
-`toISODate`, `parseISODate`, `addDays`, `mondayOf`, `weekdayShort`,
-`formatWeekRangeLabel`.
+Переезжает в новый **`shared/src/week-dates.ts`**: `toISODate`, `parseISODate`,
+`addDays`, `mondayOf`, `weekdayIndex`, `weekdayShort`, `formatWeekRangeLabel`.
+Отдельный модуль, а не существующий `time.ts`: тот про часы смены
+(`toMinutes`, `isNightShift`, `resolveShiftTimes`), а это про календарь недели.
+Добавляются строковые двойники — `mondayOfIso`, `addDaysIso`,
+`formatWeekRangeLabelIso`: на сервере объект `Date` затащил бы в арифметику
+часовой пояс машины вместо часового пояса команды.
 
 Переезжает в **`shared/src/schedule-palette.ts`** (к точным палитрам):
 `LIGHT_PALETTE` под именем `CATEGORY_PALETTES_LIGHT` и функция
@@ -113,6 +117,7 @@ headless-браузером (см. «Отвергнутые варианты»).
 | Поля слева и справа | 16 + 16 |
 | Колонка фамилий | 244 |
 | Колонка дня | 132 (7 × 132 = 924; 244 + 924 = 1168 = 1200 − поля) |
+| Заголовок недели | 44 |
 | Шапка с днями | 64 |
 | Строка сотрудника | 56 |
 | Строка легенды | 40, по две в ряд |
@@ -153,7 +158,9 @@ headless-браузером (см. «Отвергнутые варианты»).
 → `renderWeekSvg` → `svgToPng`. Возвращает `{ png, caption }`.
 
 Подпись: `Команда · 10–16 августа` (через `formatWeekRangeLabel`, тот же формат,
-что в шапке мини-аппа).
+что в шапке мини-аппа). Та же строка печатается **внутри** картинки заголовком:
+пересланное фото подпись сообщения теряет, и без заголовка неясно, какая это
+неделя.
 
 **`server/src/bot/bot.ts`**:
 
