@@ -322,6 +322,12 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("week", async (ctx) => {
     const from = ctx.from;
     if (!from) return;
+    // Private chats only. Every other answer this bot gives concerns whoever
+    // asked; this one is the whole team's roster, and it would go wherever the
+    // update came from. Should the bot ever land in a group, one command would
+    // publish the roster there. The guarantee belongs in the code, not in a
+    // BotFather checkbox somebody can untick.
+    if (ctx.chat?.type !== "private") return;
     const who = acting(from.id);
     if (!who.ok) {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
@@ -380,8 +386,11 @@ export function createBot(deps: BotDeps): Bot {
     try {
       const image: WeekImage = buildWeekImage(db, monday, today);
       if (image.kind === "text") {
-        await ctx.answerCallbackQuery({ text: image.text });
+        // Set before the call, not after: here the answer *is* the useful
+        // action, so retrying it in the catch would be a second live answer for
+        // one tap — the very hole the flag exists to close.
         answered = true;
+        await ctx.answerCallbackQuery({ text: image.text });
         return;
       }
       await ctx.editMessageMedia(
