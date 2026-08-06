@@ -1,11 +1,20 @@
 import {
-  exactSchedulePalette,
-  UNRECOGNISED_SCHEDULE_PALETTE,
+  buildWeekLegend,
+  buildWeekModel,
+  compareShifts,
+  coversDate,
   isAbsence,
-  type EntryCategory,
+  splitDisplayName,
+  toEntryView,
   type SchedulePalette,
+  type SchedulePresetLike,
+  type TeamEntryView as SharedTeamEntryView,
+  type WeekCell as SharedWeekCell,
+  type WeekLegendItem,
+  type WeekModel as SharedWeekModel,
+  type WeekRow as SharedWeekRow,
 } from "@planer/shared";
-import type { Shift, TeamEmployee, TeamSchedule, Template } from "../api/client";
+import type { Shift, TeamEmployee, TeamSchedule } from "../api/client";
 import { addDays, mondayOf, toISODate } from "./week";
 import { createLatestRequestGate, type LatestRequestGate } from "./request-gate";
 
@@ -14,6 +23,16 @@ import { createLatestRequestGate, type LatestRequestGate } from "./request-gate"
 // (e.g. `AdminScheduleScreen`) can reuse it without importing team-specific code.
 export { createLatestRequestGate };
 export type { LatestRequestGate };
+
+// Сетка недели переехала в @planer/shared: ею же сервер рисует картинку для
+// бота. Здесь остаются только псевдонимы под конкретный `Shift` мини-аппа,
+// чтобы компоненты не переписывать.
+export { buildWeekLegend, buildWeekModel, compareShifts, coversDate, splitDisplayName, toEntryView };
+export type { WeekLegendItem };
+export type TeamEntryView = SharedTeamEntryView<Shift>;
+export type WeekCell = SharedWeekCell<Shift>;
+export type WeekRow = SharedWeekRow<Shift>;
+export type WeekModel = SharedWeekModel<Shift>;
 
 export type TeamMode = "today" | "week";
 
@@ -26,12 +45,6 @@ export interface TeamPerson {
   employeeId: number | null;
   displayName: string;
   rosterOrder: number;
-}
-
-export interface TeamEntryView {
-  shift: Shift;
-  title: string;
-  palette: SchedulePalette | null;
 }
 
 export interface TodayGroup {
@@ -51,44 +64,7 @@ export interface TodayModel {
   absentCount: number;
 }
 
-export interface WeekCell {
-  date: string;
-  entries: TeamEntryView[];
-  primary: TeamEntryView | null;
-  extraCount: number;
-}
-
-export interface WeekRow {
-  employeeId: number | null;
-  displayName: string;
-  cells: WeekCell[];
-}
-
-export interface WeekModel {
-  days: string[];
-  rows: WeekRow[];
-}
-
-type ScheduleTemplate = Pick<Template, "id" | "name" | "accent" | "sortOrder">;
-
-const CATEGORY_TITLES: Record<EntryCategory, string> = {
-  shift: "Смена",
-  vacation: "Отпуск",
-  sick_leave: "Больничный",
-  duty: "Дежурство",
-  offsite: "Выездное мероприятие",
-  business_trip: "Командировка",
-  weekend_work: "Работа в выходной",
-};
-
-export function coversDate(shift: Shift, date: string): boolean {
-  return shift.date <= date && (shift.endDate ?? shift.date) >= date;
-}
-
-export function splitDisplayName(displayName: string): { surname: string; rest: string } {
-  const [surname = displayName, ...rest] = displayName.trim().split(/\s+/);
-  return { surname, rest: rest.join(" ") };
-}
+type ScheduleTemplate = SchedulePresetLike;
 
 export function teamRange(mode: TeamMode, selectedDate: string): TeamRange {
   if (mode === "today") return { from: selectedDate, to: selectedDate };
@@ -105,32 +81,6 @@ export function moveTeamDate(
   return toISODate(addDays(new Date(`${selectedDate}T12:00:00`), step));
 }
 
-function templateFor(
-  shift: Shift,
-  templates: readonly ScheduleTemplate[],
-): ScheduleTemplate | undefined {
-  return shift.templateId == null
-    ? undefined
-    : templates.find((template) => template.id === shift.templateId);
-}
-
-function toEntryView(
-  shift: Shift,
-  templates: readonly ScheduleTemplate[],
-): TeamEntryView {
-  const template = templateFor(shift, templates);
-  // A cell the import could not read keeps its own grey «?» square and says so in
-  // words — «Смена» would claim we know what it is, and we do not.
-  if (shift.unrecognisedCode) {
-    return { shift, title: `Не распознано: «${shift.unrecognisedCode}»`, palette: UNRECOGNISED_SCHEDULE_PALETTE };
-  }
-  return {
-    shift,
-    title: template?.name ?? shift.title ?? CATEGORY_TITLES[shift.category],
-    palette: exactSchedulePalette(template?.accent, shift.category),
-  };
-}
-
 function groupingKey(shift: Shift): string {
   if (shift.templateId != null) return `template:${shift.templateId}`;
   return JSON.stringify([
@@ -141,19 +91,6 @@ function groupingKey(shift: Shift): string {
     shift.end,
     shift.location,
   ]);
-}
-
-function compareShifts(
-  a: Shift,
-  b: Shift,
-  templates: readonly ScheduleTemplate[],
-): number {
-  const byStart = (a.start ?? "99:99").localeCompare(b.start ?? "99:99");
-  if (byStart !== 0) return byStart;
-  const aOrder = templateFor(a, templates)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-  const bOrder = templateFor(b, templates)?.sortOrder ?? Number.MAX_SAFE_INTEGER;
-  if (aOrder !== bOrder) return aOrder - bOrder;
-  return toEntryView(a, templates).title.localeCompare(toEntryView(b, templates).title, "ru");
 }
 
 function employeeRank(employee: TeamEmployee, index: number): number {
@@ -236,116 +173,6 @@ export function buildTodayModel(
     workingCount: working.size,
     absentCount: absent.size,
   };
-}
-
-function weekCell(
-  date: string,
-  employeeId: number | null,
-  shifts: readonly Shift[],
-  templates: readonly ScheduleTemplate[],
-): WeekCell {
-  const entries = shifts
-    .filter((shift) => shift.employeeId === employeeId && coversDate(shift, date))
-    .sort((a, b) => compareShifts(a, b, templates))
-    .map((shift) => toEntryView(shift, templates));
-  return {
-    date,
-    entries,
-    primary: entries[0] ?? null,
-    extraCount: Math.max(0, entries.length - 1),
-  };
-}
-
-export function buildWeekModel(
-  mondayIso: string,
-  schedule: TeamSchedule,
-  templates: readonly ScheduleTemplate[],
-): WeekModel {
-  const monday = new Date(`${mondayIso}T12:00:00`);
-  const days = Array.from({ length: 7 }, (_, index) => toISODate(addDays(monday, index)));
-  const employees = [...schedule.employees].sort((a, b) => {
-    const aOrder = a.rosterOrder ?? Number.MAX_SAFE_INTEGER;
-    const bOrder = b.rosterOrder ?? Number.MAX_SAFE_INTEGER;
-    return aOrder - bOrder || a.id - b.id;
-  });
-  const rows: WeekRow[] = employees.map((employee) => ({
-    employeeId: employee.id,
-    displayName: employee.displayName,
-    cells: days.map((date) => weekCell(date, employee.id, schedule.shifts, templates)),
-  }));
-  if (
-    schedule.shifts.some(
-      (shift) => shift.employeeId == null && days.some((date) => coversDate(shift, date)),
-    )
-  ) {
-    rows.push({
-      employeeId: null,
-      displayName: "Не назначено",
-      cells: days.map((date) => weekCell(date, null, schedule.shifts, templates)),
-    });
-  }
-  return { days, rows };
-}
-
-/** One entry in the week grid's key: the coloured square, and what it stands for. */
-export interface WeekLegendItem {
-  /** The letter drawn in the cell — «У», «Н», «ВА», «07», or «•» for a one-off. */
-  code: string;
-  /** What that letter means, in the preset's own words. */
-  label: string;
-  /** The preset's exact colours, or null when the cell falls back to its category's —
-   *  those depend on the theme, so the component resolves them the same way the grid does. */
-  palette: SchedulePalette | null;
-  /** Only set alongside a null palette: which category's colour the cell used. */
-  category: EntryCategory | null;
-}
-
-/** A one-off entry with no preset behind it; the grid draws it as a dot. */
-const FALLBACK_LEGEND_CODE = "•";
-
-/**
- * The key for a week grid, built from the week actually on screen rather than from
- * a fixed list of presets. A single letter in a coloured square is unguessable —
- * «П» is Поклонка and «Т» is Телефон, and nothing on the screen said so.
- *
- * Only the squares that are drawn count: a cell shows its primary entry and hides
- * the rest behind «+N», so listing those would explain colours nobody can see.
- * Names come from the entries themselves, so a renamed preset renames its own key
- * line, with no mapping here to drift out of date.
- *
- * Presetless entries all read «•» but are coloured by category, so they are keyed
- * per category — one line per distinct square, never one line for two colours.
- */
-export function buildWeekLegend(model: WeekModel): WeekLegendItem[] {
-  const seen = new Map<string, { item: WeekLegendItem; titles: Set<string> }>();
-  for (const row of model.rows) {
-    for (const cell of row.cells) {
-      const entry = cell.primary;
-      if (!entry) continue;
-      const key = entry.palette ? entry.palette.code : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}`;
-      const existing = seen.get(key);
-      if (existing) {
-        existing.titles.add(entry.title);
-        continue;
-      }
-      seen.set(key, {
-        item: {
-          code: entry.palette?.code ?? FALLBACK_LEGEND_CODE,
-          label: entry.title,
-          palette: entry.palette,
-          category: entry.palette ? null : entry.shift.category,
-        },
-        titles: new Set([entry.title]),
-      });
-    }
-  }
-  return [...seen.values()]
-    .map(({ item, titles }) => ({ ...item, label: [...titles].sort((a, b) => a.localeCompare(b, "ru")).join(" · ") }))
-    // The presetless ones are the catch-all, so they read last however the week is shaped.
-    .sort(
-      (a, b) =>
-        (a.palette ? 0 : 1) - (b.palette ? 0 : 1) || a.label.localeCompare(b.label, "ru"),
-    );
 }
 
 export type TeamLoadResult =
