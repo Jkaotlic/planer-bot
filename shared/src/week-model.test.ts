@@ -68,16 +68,16 @@ describe("модель недели", () => {
   });
 
   it("строка «Не назначено» появляется только когда есть ничейная смена", () => {
-    const без = buildWeekModel(MONDAY, { employees: TEAM, shifts: [] }, PRESETS);
-    expect(без.rows.map((row) => row.employeeId)).toEqual([1, 2]);
+    const withoutUnassigned = buildWeekModel(MONDAY, { employees: TEAM, shifts: [] }, PRESETS);
+    expect(withoutUnassigned.rows.map((row) => row.employeeId)).toEqual([1, 2]);
 
-    const с = buildWeekModel(
+    const withUnassigned = buildWeekModel(
       MONDAY,
       { employees: TEAM, shifts: [entry({ date: "2026-08-05", employeeId: null })] },
       PRESETS,
     );
-    expect(с.rows.at(-1)!.employeeId).toBeNull();
-    expect(с.rows.at(-1)!.displayName).toBe("Не назначено");
+    expect(withUnassigned.rows.at(-1)!.employeeId).toBeNull();
+    expect(withUnassigned.rows.at(-1)!.displayName).toBe("Не назначено");
   });
 
   it("нераспознанная клетка говорит об этом словами и своим серым", () => {
