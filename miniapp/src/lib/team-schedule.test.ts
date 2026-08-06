@@ -626,28 +626,9 @@ describe("buildWeekLegend", () => {
     expect(buildWeekLegend(model)).toHaveLength(1);
   });
 
-  it("keeps presetless entries apart: one line per colour, not one per «•»", () => {
-    // Both fall back to «•», but they are coloured by category, so merging them
-    // into a single key would show one swatch standing for two different squares.
-    const model = buildWeekModel(MONDAY, scheduleOf([
-      shift({ id: 1, employeeId: 1, date: MONDAY, templateId: null, category: "offsite", title: "Ярмарка" }),
-      shift({ id: 2, employeeId: 2, date: MONDAY, templateId: null, category: "sick_leave", title: "Больничный", start: null, end: null }),
-    ]), templates);
-
-    const legend = buildWeekLegend(model);
-    expect(legend).toHaveLength(2);
-    expect(legend.every((i) => i.code === "•")).toBe(true);
-    expect(legend.map((i) => i.category).sort()).toEqual(["offsite", "sick_leave"]);
-    expect(legend.map((i) => i.label).sort()).toEqual(["Больничный", "Ярмарка"]);
-  });
-
-  it("puts the presetless catch-all last", () => {
-    const model = buildWeekModel(MONDAY, scheduleOf([
-      shift({ id: 1, employeeId: 1, date: MONDAY, templateId: null, category: "offsite", title: "Ярмарка" }),
-      shift({ id: 2, employeeId: 2, date: MONDAY }),
-    ]), templates);
-    expect(buildWeekLegend(model).map((i) => i.code)).toEqual(["Д", "•"]);
-  });
+  // Ветка «•» и порядок сортировки легенды переехали в `shared/src/week-model.test.ts`,
+  // к самой функции: они про shared, а не про мини-апп, и держаться на здешнем
+  // реэкспорте им незачем.
 
   it("is empty for a week with nothing in it", () => {
     expect(buildWeekLegend(buildWeekModel(MONDAY, scheduleOf([]), templates))).toEqual([]);
