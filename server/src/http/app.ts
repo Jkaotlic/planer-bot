@@ -322,8 +322,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (dayNumber(to) - dayNumber(from) > 30) {
       return c.json({ error: "the range must span at most 31 days" }, 400);
     }
-    // Формой ответа заведует repo/team-schedule: тем же шейпером сервер строит
-    // картинку недели для бота, и расходиться они не должны.
+    // Response shape now lives in repo/team-schedule: the server builds the
+    // week image for the bot with that same shaper, and the two must not drift apart.
     return c.json(readTeamSchedule(db, from, to));
   });
 

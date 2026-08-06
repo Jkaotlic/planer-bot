@@ -3,7 +3,7 @@ import type { EntryCategory } from "@planer/shared";
 import { listActiveInRosterOrder } from "./employees";
 import { listShiftsOverlapping } from "./shifts";
 
-/** Запись расписания в том виде, в каком её можно показывать любому работнику. */
+/** A schedule entry shaped so it's safe to show to any worker. */
 export interface TeamScheduleEntry {
   id: number;
   date: string;
@@ -24,19 +24,20 @@ export interface TeamScheduleView {
 }
 
 /**
- * Расписание команды за окно дат — один источник и для `/api/team/schedule`, и
- * для картинки недели, которую бот шлёт по `/week`.
+ * Team schedule for a date window — the one source both `/api/team/schedule`
+ * and the week image the bot sends for `/week` read from.
  *
- * Две вещи, ради которых это не «просто select»:
+ * Two things keep this from being "just a select":
  *
- * 1. Архивирование снимает человека со смен только начиная с даты архива, так
- *    что прошлые за ним остаются — это настоящая история, и отчёты её читают.
- *    Но сетку рисуют по активным людям, поэтому такая запись не может попасть
- *    ни в одну строку: раньше она доезжала до клиента только чтобы там быть
- *    выброшенной.
- * 2. `note` — свободное админское поле, и за пределами админских экранов его
- *    никто читать не должен. Поэтому здесь именно перечисление полей, а не
- *    сырая строка.
+ * 1. Archiving only unassigns shifts from the archive date onward, so an
+ *    archived person keeps their past ones — real history, and the reports
+ *    still read it. The grid, though, draws its rows from the active
+ *    employees, so such an entry can never land in a row: it used to reach
+ *    the client only to be dropped on arrival.
+ * 2. `note` is a free-text admin field nobody outside the admin screens
+ *    should read. That's why this lists fields explicitly instead of
+ *    spreading the raw row — keep this in sync with what the miniapp/admin
+ *    `Shift` types actually declare.
  */
 export function readTeamSchedule(db: Db, from: string, to: string): TeamScheduleView {
   const active = listActiveInRosterOrder(db);
