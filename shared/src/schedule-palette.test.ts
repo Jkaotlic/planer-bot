@@ -4,8 +4,11 @@ import {
   VACATION_SCHEDULE_PALETTE,
   UNRECOGNISED_SCHEDULE_PALETTE,
   exactSchedulePalette,
+  CATEGORY_PALETTES_DARK,
+  CATEGORY_PALETTES_LIGHT,
+  categoryPalette,
 } from "./schedule-palette";
-import { templateAccents } from "./category";
+import { templateAccents, entryCategorySchema } from "./category";
 
 describe("working schedule palette", () => {
   it("matches every sampled colour and visible code", () => {
@@ -68,5 +71,25 @@ describe("working schedule palette", () => {
     expect(exactSchedulePalette(undefined, "business_trip")).toBeNull();
     expect(exactSchedulePalette(undefined, "offsite")).toBeNull();
     expect(exactSchedulePalette(undefined, "weekend_work")).toBeNull();
+  });
+});
+
+describe("палитра категорий", () => {
+  it("покрывает каждую категорию в обеих темах", () => {
+    for (const category of entryCategorySchema.options) {
+      expect(CATEGORY_PALETTES_LIGHT[category], category).toBeDefined();
+      expect(CATEGORY_PALETTES_DARK[category], category).toBeDefined();
+    }
+  });
+
+  it("отпуск берёт свой точный цвет, а не категорийный", () => {
+    // exactSchedulePalette знает отпуск в лицо — «О» на красном; категорийная
+    // амбра сюда попасть не должна ни в светлой теме, ни в тёмной.
+    expect(categoryPalette("vacation", false).bg).toBe("#FD0100");
+    expect(categoryPalette("vacation", true).bg).toBe("#FD0100");
+  });
+
+  it("остальные категории различаются по теме", () => {
+    expect(categoryPalette("shift", false)).not.toEqual(categoryPalette("shift", true));
   });
 });
