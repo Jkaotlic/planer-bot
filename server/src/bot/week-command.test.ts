@@ -89,6 +89,25 @@ function callbackUpdate(tgId: number, data: string) {
   } as unknown as Parameters<Bot["handleUpdate"]>[0];
 }
 
+/** Like callbackUpdate, but the message the tapped button is attached to sits
+ *  in a group rather than a DM — the message.chat is what the handler's guard
+ *  reads, not who tapped it, so this is the case that guard exists for. */
+function groupCallbackUpdate(tgId: number, data: string) {
+  return {
+    update_id: 2,
+    callback_query: {
+      id: "cbq-1",
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      message: {
+        message_id: 5, date: 1_712_803_046,
+        chat: { id: -1_001_234_567, title: "Смены", type: "supergroup" as const },
+      },
+      chat_instance: "x",
+      data,
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
 /** Creates a linked worker with a Telegram account and one shift this week. */
 function linkedWorker(db: Db, tgId: number) {
   const employee = createEmployee(db, { displayName: "Иванов Иван", inviteToken: `tok-${tgId}` });
@@ -231,5 +250,15 @@ describe("/week", () => {
 
     expect(calls.some((call) => call.method === "editMessageMedia")).toBe(false);
     expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toContain("Дальше не листаю");
+  });
+
+  it("тап в группе не перерисовывает ростер — только тост", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1313); // a real worker, so it is the chat guard that stops this, not acting()
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(groupCallbackUpdate(1313, "week:1"));
+
+    expect(calls.some((call) => call.method === "editMessageMedia")).toBe(false);
+    expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toBe("Только в личном чате");
   });
 });
