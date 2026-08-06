@@ -12,6 +12,7 @@
   "dependencies": {
     "@hono/node-server": "^2.0.8",
     "@planer/shared": "*",
+    "@resvg/resvg-js": "^2.6.2",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "grammy": "^1.44.0",
