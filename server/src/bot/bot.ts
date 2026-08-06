@@ -19,7 +19,7 @@ import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
-import { buildWeekImage } from "./week-image";
+import { buildWeekImage, type WeekImage } from "./week-image";
 import {
   notifyUser,
   notifyAdmins,
@@ -53,7 +53,10 @@ export const WEEK_OFFSET_LIMIT = 26;
  * The buttons under the picture. The offset in the callback data is absolute —
  * weeks from TODAY, not from the week the picture showed: the message lives in
  * the chat forever, and a button tapped a month later has to count from the day
- * it's tapped, not from whatever day it was when the message was sent.
+ * it's tapped, not from whatever day it was when the message was sent. Telegram
+ * itself will only let editMessageMedia touch a message younger than 48 hours,
+ * though — past that window a tap can't redraw anything, and a fresh /week is
+ * the only way back in.
  */
 function weekKeyboard(offset: number): InlineKeyboard {
   const keyboard = new InlineKeyboard();
@@ -325,22 +328,23 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const { monday, today } = mondayForOffset(0);
-    let image;
     try {
-      image = buildWeekImage(db, monday, today);
+      const image: WeekImage = buildWeekImage(db, monday, today);
+      if (image.kind === "text") {
+        await ctx.reply(image.text);
+        return;
+      }
+      await ctx.replyWithPhoto(new InputFile(image.png, "week.png"), {
+        caption: image.caption,
+        reply_markup: weekKeyboard(0),
+      });
     } catch (err) {
-      console.error("week: render failed:", safeErrorMessage(err));
+      // Covers a failed render and a failed send alike — either way the
+      // person got nothing, and both deserve the same clear answer rather
+      // than one of them failing silently into the log.
+      console.error("week: send failed:", safeErrorMessage(err));
       await ctx.reply("Не смог нарисовать график, открой мини-апп.");
-      return;
     }
-    if (image.kind === "text") {
-      await ctx.reply(image.text);
-      return;
-    }
-    await ctx.replyWithPhoto(new InputFile(image.png, "week.png"), {
-      caption: image.caption,
-      reply_markup: weekKeyboard(0),
-    });
   });
 
   /**
@@ -357,25 +361,41 @@ export function createBot(deps: BotDeps): Bot {
     }
     // The out-of-range button is never drawn, but the message lives forever —
     // the data can come from anything, so the limit is checked here too.
-    if (!Number.isInteger(offset) || Math.abs(offset) > WEEK_OFFSET_LIMIT) {
+    // (`!Number.isInteger(offset)` would be redundant: the regex only ever
+    // hands `Number()` a run of digits, and the sole non-integer it can
+    // produce that way is ±Infinity — already caught by the `Math.abs` check.)
+    if (Math.abs(offset) > WEEK_OFFSET_LIMIT) {
       await ctx.answerCallbackQuery({ text: "Дальше не листаю" });
       return;
     }
     const { monday, today } = mondayForOffset(offset);
+    // True once the picture on screen has actually changed — set before the
+    // closing answerCallbackQuery, not after it. If that closing call is what
+    // throws, retrying it in the catch below would be a second live call for
+    // the same tap: Telegram either rejects it (the exception would then
+    // escape uncaught) or, worse, delivers it — flashing "Не получилось" over
+    // a picture that in fact just updated. Once the redraw itself is done,
+    // failing to also clear the button's spinner isn't worth either risk.
+    let answered = false;
     try {
-      const image = buildWeekImage(db, monday, today);
+      const image: WeekImage = buildWeekImage(db, monday, today);
       if (image.kind === "text") {
         await ctx.answerCallbackQuery({ text: image.text });
+        answered = true;
         return;
       }
       await ctx.editMessageMedia(
         { type: "photo", media: new InputFile(image.png, "week.png"), caption: image.caption },
         { reply_markup: weekKeyboard(offset) },
       );
+      answered = true;
       await ctx.answerCallbackQuery();
     } catch (err) {
       console.error("week: redraw failed:", safeErrorMessage(err));
-      await ctx.answerCallbackQuery({ text: "Не получилось, попробуй ещё раз" });
+      // Also what a person sees once the message crosses Telegram's 48-hour
+      // edit window (see weekKeyboard's comment) — the toast has to point
+      // somewhere that still works, so it names the way back in.
+      if (!answered) await ctx.answerCallbackQuery({ text: "Не получилось — пришли /week заново" });
     }
   });
 
