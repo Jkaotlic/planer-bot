@@ -64,8 +64,13 @@ describe("buildWeekImage", () => {
   it("смена архивного человека не оставляет на картинке ни следа", () => {
     // Two databases differing by exactly one ghost: the first has an archived
     // Petrov with a shift, the second doesn't have him at all. The image must
-    // come out byte-for-byte identical — that's what "didn't land" means: neither
-    // its own cell nor an "Не назначено" row.
+    // come out byte-for-byte identical — neither a cell of his own, nor an
+    // "Не назначено" row, nor a pixel anywhere else.
+    //
+    // This is the end-to-end statement, not a test of the filter: the filter
+    // itself is `readTeamSchedule`'s, and `server/src/repo/team-schedule.test.ts`
+    // checks it directly. What lives here is that nothing further down the
+    // chain — model, layout, rasteriser — reintroduces the ghost.
     const withGhost = makeTestDb();
     createEmployee(withGhost, { displayName: "Иванов Иван" });
     const departed = createEmployee(withGhost, { displayName: "Петров Пётр" });

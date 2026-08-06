@@ -50,9 +50,13 @@ export function countsForBalance(category: EntryCategory): boolean {
  * называет вид записи словами, и человек должен прочитать в чате ровно то, что
  * увидит в клетке — там подпись это `title ?? categoryLabel(category)`.
  *
- * Мини-апп продолжает держать свою копию (`miniapp/src/categories.tsx`): он
- * намеренно не зависит от `@planer/shared` в рантайме. Копию сторожит
- * `miniapp/src/category-labels.test.ts` — он импортирует shared только в тесте.
+ * У мини-аппа есть своя копия этой таблицы (`miniapp/src/categories.tsx`), и
+ * сейчас обе живут одновременно. Не потому, что мини-апп независим от shared:
+ * он импортирует shared в рантайме в доброй половине своих экранов и утилит, а
+ * с этой ветки ещё и зовёт `categoryLabel` через `toEntryView` для подписи
+ * каждой записи. Копию держит в согласии с этой таблицей сторож
+ * `miniapp/src/category-labels.test.ts`; объединять таблицы или нет —
+ * отдельное решение, которое пока не принято.
  */
 const CATEGORY_LABELS: Record<EntryCategory, string> = {
   shift: "Смена",
