@@ -5,8 +5,29 @@
  * timezone context anyway.
  */
 
-/** Monday-first weekday abbreviations, index 0 = Monday. */
-export const WEEKDAY_SHORT_RU: readonly string[] = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+import {
+  addDays,
+  formatWeekRangeLabel,
+  mondayOf,
+  parseISODate,
+  toISODate,
+  weekdayIndex,
+  weekdayShort,
+  WEEKDAY_SHORT_RU,
+} from "@planer/shared";
+
+// Переехало в @planer/shared: тем же календарём сервер рисует картинку недели
+// для бота, и расходиться две копии не должны.
+export {
+  addDays,
+  formatWeekRangeLabel,
+  mondayOf,
+  parseISODate,
+  toISODate,
+  weekdayIndex,
+  weekdayShort,
+  WEEKDAY_SHORT_RU,
+};
 
 const MONTH_SHORT_RU: readonly string[] = [
   "янв",
@@ -24,45 +45,6 @@ const MONTH_SHORT_RU: readonly string[] = [
 ];
 
 const monthDayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" });
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
-}
-
-/** Formats a local `Date` as "YYYY-MM-DD" (no timezone conversion). */
-export function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-/** Parses a "YYYY-MM-DD" string as a local-midnight `Date`. */
-export function parseISODate(iso: string): Date {
-  const [y, m, day] = iso.split("-").map(Number);
-  return new Date(y ?? 1970, (m ?? 1) - 1, day ?? 1);
-}
-
-export function addDays(d: Date, days: number): Date {
-  const copy = new Date(d);
-  copy.setDate(copy.getDate() + days);
-  return copy;
-}
-
-/** Midnight Monday of the week containing `d` (ISO week start). */
-export function mondayOf(d: Date): Date {
-  const dow = d.getDay(); // 0 Sun .. 6 Sat
-  const sinceMonday = (dow + 6) % 7;
-  const monday = addDays(d, -sinceMonday);
-  monday.setHours(0, 0, 0, 0);
-  return monday;
-}
-
-/** 0 = Monday .. 6 = Sunday, for a "YYYY-MM-DD" date. */
-export function weekdayIndex(iso: string): number {
-  return (parseISODate(iso).getDay() + 6) % 7;
-}
-
-export function weekdayShort(iso: string): string {
-  return WEEKDAY_SHORT_RU[weekdayIndex(iso)] ?? "";
-}
 
 export function dayOfMonth(iso: string): string {
   return String(parseISODate(iso).getDate());
@@ -119,11 +101,6 @@ export function formatShortDateRange(startIso: string, endIso: string): string {
     return `${start.getDate()}–${end.getDate()} ${MONTH_SHORT_RU[start.getMonth()]}`;
   }
   return `${formatShortDate(startIso)} – ${formatShortDate(endIso)}`;
-}
-
-/** "13–19 июля" (or "28 июля – 3 августа" across a month boundary). */
-export function formatWeekRangeLabel(monday: Date, sunday: Date): string {
-  return monthDayFormatter.formatRange(monday, sunday);
 }
 
 /**
