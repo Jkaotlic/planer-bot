@@ -103,6 +103,23 @@ describe("renderWeekSvg", () => {
     expect(escapeXml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&apos;");
   });
 
+  it("escapeXml вырезает управляющие символы C0, но не трогает разрешённые", () => {
+    // XML forbids them outright, so escaping wouldn't help: `&#1;` is just as
+    // invalid as the raw byte. Tab, LF and CR are the three it does allow.
+    expect(escapeXml("Ива\u0001нов\u001F")).toBe("Иванов");
+    expect(escapeXml("\u0000\u0008\u000B\u000C\u000E")).toBe("");
+    expect(escapeXml("а\tб\nв\r")).toBe("а\tб\nв\r");
+  });
+
+  it("управляющий символ в имени не убивает картинку целиком", () => {
+    // One such byte — from a CSV exported out of Excel, say — used to make the
+    // whole document unparsable: nobody in the team got a picture, and the
+    // parser error named no row.
+    const svg = svgFor([{ id: 1, displayName: "Ива\u0001нов Иван", rosterOrder: 0 }], []);
+    expect(svg).toContain("Иванов");
+    expect(svg).not.toContain("\u0001");
+  });
+
   it("пустой ростер всё равно рисует валидный SVG", () => {
     const svg = svgFor([], []);
     expect(svg.startsWith("<svg")).toBe(true);
