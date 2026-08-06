@@ -31,6 +31,34 @@ const TEAM = [
   { id: 2, displayName: "Петров Пётр", rosterOrder: 1 },
 ];
 
+// The name column's geometry, copied from week-svg.ts: usable width, the widest
+// character each of the two sizes is budgeted at, and the gap between them.
+// What the tests below assert is that whatever is drawn still fits this box —
+// the two halves of the name spend one budget, not one each.
+const NAME_COL_W = 244 - 16;
+const SURNAME_CHAR_W = 15;
+const GIVEN_CHAR_W = 11;
+const NAME_GAP = 8;
+
+/**
+ * Every row label as it is actually drawn: the surname, and the given name that
+ * shares the very same `<text>` with it — empty when there was no room for it.
+ * Sharing one element is the guarantee: the renderer, not our arithmetic, puts
+ * the given name behind the surname, so the two cannot land on one another.
+ */
+function nameCells(svg: string): { surname: string; given: string }[] {
+  return [...svg.matchAll(/<text x="24" y="\d+">(.*?)<\/text>/g)].map((row) => {
+    const spans = [...row[1]!.matchAll(/<tspan[^>]*>(.*?)<\/tspan>/g)].map((span) => span[1]!);
+    return { surname: spans[0] ?? "", given: spans[1] ?? "" };
+  });
+}
+
+/** Width the label is budgeted at — must never exceed the column. */
+function nameWidth(cell: { surname: string; given: string }): number {
+  return cell.surname.length * SURNAME_CHAR_W
+    + (cell.given ? NAME_GAP + cell.given.length * GIVEN_CHAR_W : 0);
+}
+
 describe("renderWeekSvg", () => {
   it("возвращает корректный SVG заданной ширины", () => {
     const svg = svgFor(TEAM, []);
@@ -72,6 +100,32 @@ describe("renderWeekSvg", () => {
     const svg = svgFor(longSurname, []);
     expect(svg).not.toContain("Мегадлиннофамильев");
     expect(svg).toContain("…");
+    // The clipping above says nothing about where the pieces landed. A surname
+    // this long spends the whole column, so the given name is not drawn at all:
+    // the old layout still drew it, anchored to the column's right edge, and it
+    // came out on top of the clipped surname — both "within their limit".
+    expect(nameCells(svg)).toEqual([{ surname: "Мегадлиннофами…", given: "" }]);
+    expect(svg).not.toContain("Иван");
+  });
+
+  it("фамилия и имя делят один бюджет колонки, а не по своему на каждого", () => {
+    // The same given name after surnames of growing length: it gets whatever
+    // the surname left, and nothing once the surname has taken the column.
+    const cells = ["Ким", "Сидоренко", "Христорождественский"].map(
+      (surname) => nameCells(svgFor([{ id: 1, displayName: `${surname} Иннокентий`, rosterOrder: 0 }], []))[0]!,
+    );
+    expect(cells.map((cell) => cell.given)).toEqual(["Иннокентий", "Инноке…", ""]);
+    for (const cell of cells) {
+      expect(nameWidth(cell), `${cell.surname} ${cell.given}`).toBeLessThanOrEqual(NAME_COL_W);
+    }
+  });
+
+  it("«Не назначено» — это не фамилия с именем, и рисуется одним стилем", () => {
+    const svg = svgFor(TEAM, [entry({ date: "2026-08-05", employeeId: null })]);
+    expect(nameCells(svg).at(-1)).toEqual({ surname: "Не назначено", given: "" });
+    // Split like a name it renders as a bold «Не» beside a muted «назначено» —
+    // in a PNG that reads as a bug, not as a row label.
+    expect(svg).not.toContain(">Не</tspan>");
   });
 
   it("обводит сегодняшнюю колонку и только когда сегодня внутри недели", () => {

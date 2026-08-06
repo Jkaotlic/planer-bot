@@ -6,6 +6,7 @@ import {
   type ScheduleEntryLike,
   type WeekLegendItem,
   type WeekModel,
+  type WeekRow,
 } from "@planer/shared";
 
 /**
@@ -29,9 +30,28 @@ const HEADER_H = 64;
 const ROW_H = 56;
 const LEGEND_TITLE_H = 32;
 const LEGEND_ROW_H = 40;
-const MAX_SURNAME_CHARS = 16;
-const MAX_GIVEN_CHARS = 12;
 const MAX_LEGEND_CHARS = 40;
+
+/** Usable width of the name column: the column minus the padding on either side. */
+const NAME_TEXT_W = NAME_COL - 16;
+/** Breathing room between the surname and the given name. */
+const NAME_GAP = 8;
+const SURNAME_SIZE = 19;
+const GIVEN_SIZE = 16;
+/**
+ * Width of one Cyrillic character in the bundled DejaVu at the two sizes the
+ * name column uses, in pixels. Measured off the rendered font, not derived from
+ * its tables: DejaVu is a wide face and its bold cut wider still — at 19 bold a
+ * real surname runs ~13.0–13.7 px per character in mixed case and ~15.0–15.6 in
+ * capitals, which an Excel export produces often enough to budget for.
+ *
+ * These are what let the two halves of the name column share one budget. They
+ * have to share it: budgeted apart, a long surname and a given name are each
+ * "within its own limit" and still land on the same pixels — and that happens
+ * to ordinary Russian surnames, not exotic ones.
+ */
+const SURNAME_CHAR_W = 15;
+const GIVEN_CHAR_W = 11;
 
 const INK = {
   canvas: "#FFFFFF",
@@ -78,6 +98,53 @@ function clip(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
+/**
+ * Clipping for text that is allowed to disappear: a budget too small to hold
+ * anything but the ellipsis prints nothing at all. A lone «…» takes the same
+ * room as a couple of letters and says less.
+ */
+function clipOrDrop(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return max >= 2 ? clip(value, max) : "";
+}
+
+/** How many characters `width` pixels hold, at `charWidth` pixels each. */
+function fitChars(width: number, charWidth: number): number {
+  return Math.max(0, Math.floor(width / charWidth));
+}
+
+/**
+ * The name column as the inside of a single `<text>`: the surname, then — only
+ * if the surname left room — the given name right behind it in a `<tspan>`,
+ * rather than a second element anchored to the column's right edge.
+ *
+ * One element is the point. It hands the renderer, not our character
+ * arithmetic, the job of deciding where the given name starts, so the two can
+ * never end up drawn over each other however long the surname turns out to be;
+ * the budget below only decides how much of each still fits in the column.
+ */
+function rowLabelSpans(row: WeekRow<ScheduleEntryLike>): string {
+  const surnameMax = fitChars(NAME_TEXT_W, SURNAME_CHAR_W);
+  // «Не назначено» is not somebody's name, and `splitDisplayName` cannot know
+  // that: as a bold «Не» beside a muted «назначено» the row reads like a broken
+  // render. One style for the whole line.
+  if (row.employeeId === null) {
+    return `<tspan font-size="${SURNAME_SIZE}" fill="${INK.muted}">`
+      + `${escapeXml(clip(row.displayName, surnameMax))}</tspan>`;
+  }
+  const name = splitDisplayName(row.displayName);
+  const surname = clip(name.surname, surnameMax);
+  const rest = clipOrDrop(
+    name.rest,
+    fitChars(NAME_TEXT_W - surname.length * SURNAME_CHAR_W - NAME_GAP, GIVEN_CHAR_W),
+  );
+  const head = `<tspan font-size="${SURNAME_SIZE}" font-weight="bold" fill="${INK.text}">`
+    + `${escapeXml(surname)}</tspan>`;
+  return rest
+    ? `${head}<tspan dx="${NAME_GAP}" font-size="${GIVEN_SIZE}" fill="${INK.muted}">${escapeXml(rest)}</tspan>`
+    : head;
+}
+
 export function renderWeekSvg({ model, legend, weekLabel, today }: WeekSvgInput): string {
   const gridTop = PAD + TITLE_H;
   const bodyTop = gridTop + HEADER_H;
@@ -93,6 +160,15 @@ export function renderWeekSvg({ model, legend, weekLabel, today }: WeekSvgInput)
       + ` viewBox="0 0 ${WEEK_SVG_WIDTH} ${height}" font-family="DejaVu Sans">`,
   );
   out.push(`<rect width="${WEEK_SVG_WIDTH}" height="${height}" fill="${INK.canvas}"/>`);
+
+  // SVG has no `overflow: hidden`, and this is the stand-in for it. The name
+  // column's character budget keeps the ordinary name inside the column, but it
+  // is an estimate over a proportional face: rather than make everyone pay for
+  // the widest name anybody could have, the column is simply made uncrossable.
+  out.push(
+    `<defs><clipPath id="name-col"><rect x="${PAD}" y="${bodyTop}" width="${NAME_COL}"`
+      + ` height="${bodyHeight}"/></clipPath></defs>`,
+  );
 
   // Title inside the image, not only in the message caption: a forwarded photo
   // loses its caption, and without this there is no way to tell which week it is.
@@ -121,17 +197,10 @@ export function renderWeekSvg({ model, legend, weekLabel, today }: WeekSvgInput)
 
   model.rows.forEach((row, rowIndex) => {
     const y = bodyTop + rowIndex * ROW_H;
-    const name = splitDisplayName(row.displayName);
     out.push(
-      `<text x="${PAD + 8}" y="${y + 34}" font-size="19" font-weight="bold" fill="${INK.text}">`
-        + `${escapeXml(clip(name.surname, MAX_SURNAME_CHARS))}</text>`,
+      `<g clip-path="url(#name-col)"><text x="${PAD + 8}" y="${y + 34}">`
+        + `${rowLabelSpans(row)}</text></g>`,
     );
-    if (name.rest) {
-      out.push(
-        `<text x="${PAD + NAME_COL - 8}" y="${y + 34}" font-size="16" text-anchor="end"`
-          + ` fill="${INK.muted}">${escapeXml(clip(name.rest, MAX_GIVEN_CHARS))}</text>`,
-      );
-    }
     row.cells.forEach((cell, dayIndex) => {
       const entry = cell.primary;
       if (!entry) return;
