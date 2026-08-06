@@ -17,7 +17,9 @@
 - **Тесты:** `npm test` из корня репозитория (vitest, `include: ["**/src/**/*.test.{ts,tsx}"]`). Типы: `npm run typecheck`. Оба должны быть зелёными перед каждым коммитом.
 - **CI — ubuntu-latest**, поэтому картинка не имеет права зависеть от шрифтов конкретной машины: `loadSystemFonts: false` и шрифт из репозитория.
 - **Никаких настоящих имён в фикстурах.** Репозиторий публичный, в нём есть сторож `server/src/db/no-real-names.test.ts`. Используй «Иванов Иван», «Петров Пётр», «Сидоров Сидор».
-- **Русские строки для человека.** Комментарии — как в файле, который правишь: репозиторий смешанный намеренно (`shared/src/category.ts` и `shared/src/schedule-palette.ts` объясняют доменные решения по-русски, `shared/src/overlap.ts` и большая часть `server/src/bot/bot.ts` — по-английски). Язык комментария дефектом не считается.
+- **Идентификаторы — только латиница.** До этой работы в репозитории не было ни одного кириллического имени переменной или функции (`git grep -nE "(const|let|function) [а-яА-ЯёЁ]"` по всем тестам пуст). Русскими остаются только строки для человека и названия тестов в `it("...")`.
+- **В `server/src/**` комментарии по-английски — и в коде, и в тестах.** Соседние файлы (`bot/bot.test.ts`, `repo/*.test.ts`) пишут пояснения по-английски, вставляя русские доменные термины в «ёлочках» внутри английской фразы. Блоки кода ниже приводят комментарии по-русски: **переводи их, сохраняя смысл целиком.** Это правило нарушалось трижды подряд именно в тестовых файлах — проверяй их наравне с реализацией.
+- **Русские строки для человека.** В остальных пакетах комментарии — как в файле, который правишь: репозиторий смешанный намеренно (`shared/src/category.ts` и `shared/src/schedule-palette.ts` объясняют доменные решения по-русски, `shared/src/overlap.ts` и большая часть `server/src/bot/bot.ts` — по-английски). Язык комментария дефектом не считается.
 - **Коммиты** — Conventional Commits с русским описанием (`feat(week): …`), в конце сообщения строка
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
 - **Не менять** поведение мини-аппа. Переезды кода в `shared/` делаются через реэкспорт, ни один компонент не переписывается; зелёный набор тестов мини-аппа — доказательство чистоты переезда.
@@ -587,16 +589,16 @@ describe("модель недели", () => {
   });
 
   it("строка «Не назначено» появляется только когда есть ничейная смена", () => {
-    const без = buildWeekModel(MONDAY, { employees: TEAM, shifts: [] }, PRESETS);
-    expect(без.rows.map((row) => row.employeeId)).toEqual([1, 2]);
+    const withoutUnassigned = buildWeekModel(MONDAY, { employees: TEAM, shifts: [] }, PRESETS);
+    expect(withoutUnassigned.rows.map((row) => row.employeeId)).toEqual([1, 2]);
 
-    const с = buildWeekModel(
+    const withUnassigned = buildWeekModel(
       MONDAY,
       { employees: TEAM, shifts: [entry({ date: "2026-08-05", employeeId: null })] },
       PRESETS,
     );
-    expect(с.rows.at(-1)!.employeeId).toBeNull();
-    expect(с.rows.at(-1)!.displayName).toBe("Не назначено");
+    expect(withUnassigned.rows.at(-1)!.employeeId).toBeNull();
+    expect(withUnassigned.rows.at(-1)!.displayName).toBe("Не назначено");
   });
 
   it("нераспознанная клетка говорит об этом словами и своим серым", () => {
@@ -1779,14 +1781,14 @@ describe("buildWeekImage", () => {
   it("каждый человек добавляет картинке ровно одну строку высоты", () => {
     // Ширина картинки равна ширине SVG, значит масштаб единица и высота PNG —
     // это высота вёрстки байт в байт. Высота лежит в IHDR с 20-го байта.
-    const один = makeTestDb();
-    createEmployee(один, { displayName: "Иванов Иван" });
-    const двое = makeTestDb();
-    createEmployee(двое, { displayName: "Иванов Иван" });
-    createEmployee(двое, { displayName: "Петров Пётр" });
+    const onePerson = makeTestDb();
+    createEmployee(onePerson, { displayName: "Иванов Иван" });
+    const twoPeople = makeTestDb();
+    createEmployee(twoPeople, { displayName: "Иванов Иван" });
+    createEmployee(twoPeople, { displayName: "Петров Пётр" });
 
-    const a = buildWeekImage(один, MONDAY, TODAY);
-    const b = buildWeekImage(двое, MONDAY, TODAY);
+    const a = buildWeekImage(onePerson, MONDAY, TODAY);
+    const b = buildWeekImage(twoPeople, MONDAY, TODAY);
 
     expect(a.kind).toBe("photo");
     expect(b.kind).toBe("photo");
@@ -1813,18 +1815,18 @@ describe("buildWeekImage", () => {
     // Две базы, отличающиеся ровно призраком: в первой архивный Петров со
     // сменой, во второй его нет вовсе. Картинка обязана выйти побайтово той же —
     // это и значит «не попал»: ни своей клеткой, ни строкой «Не назначено».
-    const сПризраком = makeTestDb();
-    createEmployee(сПризраком, { displayName: "Иванов Иван" });
-    const ушедший = createEmployee(сПризраком, { displayName: "Петров Пётр" });
-    createShift(сПризраком, { employeeId: ушедший.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
+    const withGhost = makeTestDb();
+    createEmployee(withGhost, { displayName: "Иванов Иван" });
+    const departed = createEmployee(withGhost, { displayName: "Петров Пётр" });
+    createShift(withGhost, { employeeId: departed.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
     // Дата архива ПОСЛЕ смены: смена остаётся за архивным, строки у него уже нет.
-    archiveEmployee(сПризраком, ушедший.id, "2026-08-06");
+    archiveEmployee(withGhost, departed.id, "2026-08-06");
 
-    const чистая = makeTestDb();
-    createEmployee(чистая, { displayName: "Иванов Иван" });
+    const clean = makeTestDb();
+    createEmployee(clean, { displayName: "Иванов Иван" });
 
-    const a = buildWeekImage(сПризраком, MONDAY, TODAY);
-    const b = buildWeekImage(чистая, MONDAY, TODAY);
+    const a = buildWeekImage(withGhost, MONDAY, TODAY);
+    const b = buildWeekImage(clean, MONDAY, TODAY);
 
     expect(a.kind).toBe("photo");
     expect(b.kind).toBe("photo");
@@ -2018,12 +2020,12 @@ describe("/week", () => {
     const { bot, calls } = testBot(db);
 
     await bot.handleUpdate(commandUpdate(444, "/week"));
-    const первое = calls.find((call) => call.method === "sendPhoto")!;
-    expect(JSON.stringify(первое.payload.reply_markup)).not.toContain("week:0");
+    const firstPhoto = calls.find((call) => call.method === "sendPhoto")!;
+    expect(JSON.stringify(firstPhoto.payload.reply_markup)).not.toContain("week:0");
 
     await bot.handleUpdate(callbackUpdate(444, "week:1"));
-    const правка = calls.find((call) => call.method === "editMessageMedia")!;
-    expect(JSON.stringify(правка.payload.reply_markup)).toContain("week:0");
+    const redrawn = calls.find((call) => call.method === "editMessageMedia")!;
+    expect(JSON.stringify(redrawn.payload.reply_markup)).toContain("week:0");
   });
 
   it("листание перерисовывает фото, а не шлёт новое", async () => {
