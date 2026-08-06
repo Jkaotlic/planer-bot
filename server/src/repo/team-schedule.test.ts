@@ -19,14 +19,15 @@ describe("readTeamSchedule", () => {
 
   it("не отдаёт смены архивных — их некуда рисовать", () => {
     const db = makeTestDb();
-    const ушедший = createEmployee(db, { displayName: "Петров Пётр" });
-    createShift(db, { employeeId: ушедший.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
-    // Третий аргумент обязателен: архивирование снимает человека со смен только
-    // начиная с этой даты. Дата взята ПОСЛЕ смены нарочно — тогда смена остаётся
-    // за архивным, и это ровно тот случай, который сетке нечем нарисовать:
-    // строки у человека уже нет. Архивируй мы датой раньше смены, она стала бы
-    // ничейной, и тест проверял бы совсем другое.
-    archiveEmployee(db, ушедший.id, "2026-08-06");
+    const departed = createEmployee(db, { displayName: "Петров Пётр" });
+    createShift(db, { employeeId: departed.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
+    // The third argument is required: archiving only drops the person from
+    // shifts starting on that date. The date is deliberately AFTER the shift —
+    // that way the shift stays attributed to the archived employee, which is
+    // exactly the case the grid has nothing to draw: there's no row left for
+    // that person. If we archived with a date before the shift, it would
+    // become ownerless, and the test would check something else entirely.
+    archiveEmployee(db, departed.id, "2026-08-06");
 
     const view = readTeamSchedule(db, "2026-08-03", "2026-08-09");
 
@@ -53,9 +54,9 @@ describe("readTeamSchedule", () => {
 
     const view = readTeamSchedule(db, "2026-08-03", "2026-08-09");
 
-    // Отпуск начался в прошлой неделе, но три её дня закрывает — выпасть он не
-    // имеет права. Это и есть причина, по которой здесь listShiftsOverlapping,
-    // а не listShiftsInRange.
+    // The vacation started last week, but it covers three days of this one —
+    // it has no right to drop out. That's exactly why this uses
+    // listShiftsOverlapping, not listShiftsInRange.
     expect(view.shifts).toHaveLength(1);
   });
 
