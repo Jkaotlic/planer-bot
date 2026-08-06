@@ -97,6 +97,33 @@ describe("модель недели", () => {
     expect(legend[0]!.label).toBe("День");
   });
 
+  it("записи без пресета ключуются по категории: строка легенды на цвет, а не на «•»", () => {
+    // Обе рисуются одной «•», но красятся по категории — слить их в один ключ
+    // значило бы показать один квадрат за два разных.
+    const shifts = [
+      entry({ date: MONDAY, templateId: null, category: "offsite", title: "Ярмарка" }),
+      entry({
+        date: MONDAY, employeeId: 2, templateId: null,
+        category: "sick_leave", title: "Больничный", start: null, end: null,
+      }),
+    ];
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
+    expect(legend).toHaveLength(2);
+    expect(legend.every((item) => item.code === "•")).toBe(true);
+    expect(legend.map((item) => item.category).sort()).toEqual(["offsite", "sick_leave"]);
+    expect(legend.map((item) => item.label).sort()).toEqual(["Больничный", "Ярмарка"]);
+  });
+
+  it("легенда идёт по алфавиту, а записи без пресета — последними", () => {
+    const shifts = [
+      entry({ date: "2026-08-04", templateId: 2, start: "20:00", end: "08:00" }), // Ночь
+      entry({ date: "2026-08-03" }), // День
+      entry({ date: "2026-08-05", templateId: null, category: "offsite", title: "Ярмарка" }),
+    ];
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
+    expect(legend.map((item) => item.code)).toEqual(["Д", "Н", "•"]);
+  });
+
   it("splitDisplayName отделяет фамилию от остального", () => {
     expect(splitDisplayName("Иванов Иван Иванович")).toEqual({ surname: "Иванов", rest: "Иван Иванович" });
     expect(splitDisplayName("Иванов")).toEqual({ surname: "Иванов", rest: "" });
