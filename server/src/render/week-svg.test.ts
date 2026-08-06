@@ -55,7 +55,7 @@ describe("renderWeekSvg", () => {
 
   it("заливает клетку цветом пресета и подписывает его буквой", () => {
     const svg = svgFor(TEAM, [entry({ date: "2026-08-05" })]);
-    expect(svg).toContain('fill="#EAF0F0"'); // blue-слот палитры смен
+    expect(svg).toContain('fill="#EAF0F0"'); // blue slot of the shift palette
     expect(svg).toContain(">Д<");
   });
 
@@ -101,5 +101,30 @@ describe("renderWeekSvg", () => {
 
   it("escapeXml закрывает все пять спецсимволов", () => {
     expect(escapeXml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&apos;");
+  });
+
+  it("пустой ростер всё равно рисует валидный SVG", () => {
+    const svg = svgFor([], []);
+    expect(svg.startsWith("<svg")).toBe(true);
+    expect(svg.endsWith("</svg>")).toBe(true);
+    expect(svg).toContain('width="1200"');
+    for (const day of ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]) {
+      expect(svg, day).toContain(`>${day}<`);
+    }
+    const height = Number(svg.match(/height="(\d+)"/)?.[1]);
+    expect(height).toBeGreaterThan(0);
+  });
+
+  it("переносит легенду на вторую строку, когда пунктов больше двух", () => {
+    const svg = svgFor(TEAM, [
+      entry({ date: "2026-08-03", employeeId: 1, templateId: 1 }),
+      entry({ date: "2026-08-04", employeeId: 1, templateId: 2, start: "20:00", end: "08:00" }),
+      entry({ date: "2026-08-05", employeeId: 2, templateId: null, category: "vacation", start: null, end: null }),
+    ]);
+    const swatches = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="34" height="28"/g)];
+    expect(swatches).toHaveLength(3);
+    const [first, , third] = swatches;
+    expect(third[1]).toBe(first[1]); // third item starts in the same column as the first
+    expect(Number(third[2]) - Number(first[2])).toBe(40); // ...and exactly one legend row below it
   });
 });

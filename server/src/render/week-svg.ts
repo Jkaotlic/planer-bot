@@ -103,7 +103,7 @@ export function renderWeekSvg({ model, legend, weekLabel, today }: WeekSvgInput)
     const centre = x + DAY_COL / 2;
     out.push(
       `<text x="${centre}" y="${gridTop + 26}" font-size="20" font-weight="bold"`
-        + ` text-anchor="middle" fill="${INK.text}">${weekdayShort(day)}</text>`,
+        + ` text-anchor="middle" fill="${INK.text}">${escapeXml(weekdayShort(day))}</text>`,
     );
     out.push(
       `<text x="${centre}" y="${gridTop + 50}" font-size="18" text-anchor="middle"`
