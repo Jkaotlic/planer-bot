@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { Bot } from "grammy";
-import { createBot } from "./bot";
+import { createBot, WEEK_OFFSET_LIMIT } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee, getByTelegramId } from "../repo/employees";
 import { createShift } from "../repo/shifts";
+import { addDaysIso, mondayOfIso, formatWeekRangeLabelIso } from "@planer/shared";
+import { teamNow } from "../util/team-time";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 
@@ -39,6 +41,24 @@ function commandUpdate(tgId: number, text: string) {
   } as unknown as Parameters<Bot["handleUpdate"]>[0];
 }
 
+/** Like testBot, but the given API method throws on every call — used to prove
+ *  a failed acknowledgement after a successful redraw doesn't turn into a
+ *  second, live answerCallbackQuery call for the same tap. */
+function testBotFailingMethod(db: Db, failingMethod: string) {
+  const bot = createBot({ db, config });
+  bot.botInfo = {
+    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
+    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
+  } as unknown as typeof bot.botInfo;
+  const calls: { method: string; payload: any }[] = [];
+  bot.api.config.use((_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === failingMethod) throw new Error("telegram down");
+    return { ok: true, result: {} } as any;
+  });
+  return { bot, calls };
+}
+
 function callbackUpdate(tgId: number, data: string) {
   return {
     update_id: 2,
@@ -62,6 +82,20 @@ function linkedWorker(db: Db, tgId: number) {
   const linked = getByTelegramId(db, tgId)!;
   createShift(db, { employeeId: linked.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });
   return linked;
+}
+
+/**
+ * The caption `buildWeekImage` produces for the week `offsetWeeks` away from
+ * today, computed with the same date functions the handler itself uses. This
+ * mirrors the handler's own arithmetic rather than a hardcoded date, so the
+ * test still tells the truth on any day it happens to run, and it fails if
+ * the handler's `offset * 7` multiplier ever regresses to a flat `0`.
+ */
+function expectedCaption(offsetWeeks: number): string {
+  const today = teamNow(config.teamTz).date;
+  const monday = addDaysIso(mondayOfIso(today), offsetWeeks * 7);
+  const sunday = addDaysIso(monday, 6);
+  return `Команда · ${formatWeekRangeLabelIso(monday, sunday)}`;
 }
 
 describe("/week", () => {
@@ -109,6 +143,21 @@ describe("/week", () => {
     expect(JSON.stringify(redrawn.payload.reply_markup)).toContain("week:0");
   });
 
+  it("подпись картинки соответствует показанной неделе, а не неделе отправки", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 777);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(commandUpdate(777, "/week"));
+    const photo = calls.find((call) => call.method === "sendPhoto")!;
+    expect(photo.payload.caption).toBe(expectedCaption(0));
+
+    await bot.handleUpdate(callbackUpdate(777, "week:1"));
+    const redrawn = calls.find((call) => call.method === "editMessageMedia")!;
+    expect(redrawn.payload.media.caption).toBe(expectedCaption(1));
+    expect(redrawn.payload.media.caption).not.toBe(photo.payload.caption);
+  });
+
   it("листание перерисовывает фото, а не шлёт новое", async () => {
     const db = makeTestDb();
     linkedWorker(db, 555);
@@ -124,6 +173,39 @@ describe("/week", () => {
     linkedWorker(db, 666);
     const { bot, calls } = testBot(db);
     await bot.handleUpdate(callbackUpdate(666, "week:99"));
+
+    expect(calls.some((call) => call.method === "editMessageMedia")).toBe(false);
+    expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toContain("Дальше не листаю");
+  });
+
+  it("подтверждение после успешной перерисовки падает — второй раз не отвечает и не роняет обработчик", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1010);
+    const { bot, calls } = testBotFailingMethod(db, "answerCallbackQuery");
+
+    // Must not reject: a thrown answerCallbackQuery here used to fall into the
+    // catch block, which retried the same call and either threw again
+    // (escaping the handler) or answered a second time for one tap.
+    await bot.handleUpdate(callbackUpdate(1010, "week:1"));
+
+    expect(calls.some((call) => call.method === "editMessageMedia")).toBe(true);
+    expect(calls.filter((call) => call.method === "answerCallbackQuery")).toHaveLength(1);
+  });
+
+  it("на самой границе диапазона ещё перерисовывает", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 888);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(888, `week:${WEEK_OFFSET_LIMIT}`));
+
+    expect(calls.some((call) => call.method === "editMessageMedia")).toBe(true);
+  });
+
+  it("на один шаг за границей уже отказывает", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 999);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(999, `week:${WEEK_OFFSET_LIMIT + 1}`));
 
     expect(calls.some((call) => call.method === "editMessageMedia")).toBe(false);
     expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toContain("Дальше не листаю");
