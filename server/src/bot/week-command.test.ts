@@ -41,6 +41,20 @@ function commandUpdate(tgId: number, text: string) {
   } as unknown as Parameters<Bot["handleUpdate"]>[0];
 }
 
+/** The same command, but arriving from a group the bot was added to. */
+function groupCommandUpdate(tgId: number, text: string) {
+  return {
+    update_id: 1,
+    message: {
+      message_id: 4, date: 1_712_803_046,
+      chat: { id: -1_001_234_567, title: "Смены", type: "supergroup" as const },
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      text,
+      entities: [{ type: "bot_command" as const, offset: 0, length: text.length }],
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
 /** Like testBot, but the given API method throws on every call — used to prove
  *  a failed acknowledgement after a successful redraw doesn't turn into a
  *  second, live answerCallbackQuery call for the same tap. */
@@ -115,6 +129,14 @@ describe("/week", () => {
     await bot.handleUpdate(commandUpdate(222, "/week"));
     expect(calls.some((call) => call.method === "sendPhoto")).toBe(false);
     expect(calls.find((call) => call.method === "sendMessage")?.payload.text).toContain("архиве");
+  });
+
+  it("в группе не отвечает ничем — весь ростер туда не выкладывается", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1212); // a real worker, so it is the chat type that stops it
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(groupCommandUpdate(1212, "/week"));
+    expect(calls).toEqual([]);
   });
 
   it("работнику шлёт фото с кнопками листания", async () => {
