@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./time";
 export * from "./week-dates";
+export * from "./week-model";
 export * from "./overlap";
 export * from "./swap";
 export * from "./category";
