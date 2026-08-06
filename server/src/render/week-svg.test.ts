@@ -68,8 +68,8 @@ describe("renderWeekSvg", () => {
   });
 
   it("обрезает длинную фамилию, а не выпускает её за колонку", () => {
-    const длинный = [{ id: 1, displayName: "Мегадлиннофамильев Иван", rosterOrder: 0 }];
-    const svg = svgFor(длинный, []);
+    const longSurname = [{ id: 1, displayName: "Мегадлиннофамильев Иван", rosterOrder: 0 }];
+    const svg = svgFor(longSurname, []);
     expect(svg).not.toContain("Мегадлиннофамильев");
     expect(svg).toContain("…");
   });
@@ -93,8 +93,8 @@ describe("renderWeekSvg", () => {
   });
 
   it("экранирует спецсимволы в именах — иначе одна фамилия ломает документ", () => {
-    const опасный = [{ id: 1, displayName: "Иванов&Ко <b>", rosterOrder: 0 }];
-    const svg = svgFor(опасный, []);
+    const unsafeName = [{ id: 1, displayName: "Иванов&Ко <b>", rosterOrder: 0 }];
+    const svg = svgFor(unsafeName, []);
     expect(svg).toContain("Иванов&amp;Ко");
     expect(svg).not.toContain("Иванов&Ко");
   });
