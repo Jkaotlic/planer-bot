@@ -55,9 +55,17 @@ export interface WeekSvgInput {
 /**
  * Escaping is mandatory: one surname with an ampersand would otherwise make
  * the document invalid, and the image would fail to render for everyone.
+ *
+ * Control characters are dropped rather than escaped, because XML forbids them
+ * outright — `&#1;` is just as invalid as the raw byte. One of them anywhere in
+ * a name or a preset's title kills the whole picture for the whole team, with a
+ * parser message that names no row. They reach us in real life: input is only
+ * `.trim()`-ed, and the roster import reads CSV exported from Excel.
  */
 export function escapeXml(value: string): string {
   return value
+    // Everything in C0 except the three XML allows: tab, LF, CR.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
