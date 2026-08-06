@@ -17,7 +17,7 @@
 - **Тесты:** `npm test` из корня репозитория (vitest, `include: ["**/src/**/*.test.{ts,tsx}"]`). Типы: `npm run typecheck`. Оба должны быть зелёными перед каждым коммитом.
 - **CI — ubuntu-latest**, поэтому картинка не имеет права зависеть от шрифтов конкретной машины: `loadSystemFonts: false` и шрифт из репозитория.
 - **Никаких настоящих имён в фикстурах.** Репозиторий публичный, в нём есть сторож `server/src/db/no-real-names.test.ts`. Используй «Иванов Иван», «Петров Пётр», «Сидоров Сидор».
-- **Русские строки для человека, английские комментарии в коде** — как в соседних файлах (`server/src/bot/bot.ts`).
+- **Русские строки для человека.** Комментарии — как в файле, который правишь: репозиторий смешанный намеренно (`shared/src/category.ts` и `shared/src/schedule-palette.ts` объясняют доменные решения по-русски, `shared/src/overlap.ts` и большая часть `server/src/bot/bot.ts` — по-английски). Язык комментария дефектом не считается.
 - **Коммиты** — Conventional Commits с русским описанием (`feat(week): …`), в конце сообщения строка
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
 - **Не менять** поведение мини-аппа. Переезды кода в `shared/` делаются через реэкспорт, ни один компонент не переписывается; зелёный набор тестов мини-аппа — доказательство чистоты переезда.
@@ -289,6 +289,13 @@ EOF
 - Modify: `shared/src/schedule-palette.ts` (добавить в конец)
 - Modify: `shared/src/schedule-palette.test.ts` (добавить блок)
 - Modify: `miniapp/src/categories.tsx:23-58`
+- Modify: `admin/src/categories.tsx:30-56`
+
+Копий этой таблицы в репозитории две, а не одна: `admin/src/categories.tsx`
+держит побайтово такую же и честно признаётся в комментарии — «Mirrors
+miniapp/src/categories.tsx so the two apps read consistently». Ручное зеркало
+существовало потому, что общего места не было; теперь оно есть, и обе копии
+уходят в него.
 
 **Interfaces:**
 - Consumes: `EntryCategory` из `shared/src/category.ts`.
@@ -416,20 +423,30 @@ export function categoryPaletteForTheme(category: Category, isDark: boolean): Ca
 
 `useEntryPalette`, `categoryLabel`, `CategoryChip` и всё остальное в файле не трогай.
 
-- [ ] **Step 6: Прогнать весь набор**
+- [ ] **Step 6: То же самое в админке**
+
+`admin/src/categories.tsx` держит побайтово ту же пару таблиц (строки 30-56), и комментарий над ними прямо говорит, что это ручное зеркало мини-аппа. Удали локальные `CategoryPalette`, `LIGHT_PALETTE`, `DARK_PALETTE` и перепиши `useCategoryPalette`/`useEntryPalette` на `categoryPalette` из `@planer/shared` — ровно так же, как в мини-аппе, сохранив имена и сигнатуры всех экспортов файла. Админка уже зависит от `@planer/shared` (он импортируется в девяти её файлах), новой зависимости не появляется.
+
+Если у админки своя функция разрешения темы (`useIsDark` или аналог) — она остаётся, меняется только источник таблицы.
+
+- [ ] **Step 7: Прогнать весь набор**
 
 Run: `npm test && npm run typecheck`
-Expected: PASS.
+Expected: PASS. Тесты админки (`admin/src/**`) зелёные без правок — доказательство, что цвета не поехали.
 
-- [ ] **Step 7: Коммит**
+- [ ] **Step 8: Коммит**
 
 ```bash
-git add shared/src/schedule-palette.ts shared/src/schedule-palette.test.ts miniapp/src/categories.tsx
+git add shared/src/schedule-palette.ts shared/src/schedule-palette.test.ts miniapp/src/categories.tsx admin/src/categories.tsx
 git commit -m "$(cat <<'EOF'
-refactor(shared): палитры категорий переезжают из мини-аппа в shared
+refactor(shared): палитры категорий переезжают в shared из обеих админок
 
 Записи без пресета красятся по категории, и эта таблица нужна серверу, чтобы
 красить клетки картинки недели теми же цветами, что видит человек на экране.
+
+Копий было две: admin держал побайтово такую же и признавался в комментарии, что
+это ручное зеркало мини-аппа. Зеркало существовало из-за отсутствия общего места
+— теперь оно есть.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
