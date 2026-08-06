@@ -10,6 +10,7 @@ import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { listActiveTemplates } from "../repo/templates";
+import { readTeamSchedule } from "../repo/team-schedule";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
@@ -20,7 +21,6 @@ import {
   createEmployee,
   listActive,
   listForAdmin,
-  listActiveInRosterOrder,
   archiveEmployee,
   restoreEmployee,
   setEmployeeAdmin,
@@ -322,40 +322,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (dayNumber(to) - dayNumber(from) > 30) {
       return c.json({ error: "the range must span at most 31 days" }, 400);
     }
-
-    const active = listActiveInRosterOrder(db);
-    const employees = active.map((employee) => ({
-      id: employee.id,
-      displayName: employee.displayName,
-      rosterOrder: employee.rosterOrder,
-    }));
-    // Archiving only unassigns shifts from the archive date onward, so an archived
-    // person keeps their past ones — real history, and the reports still read it.
-    // The grid, though, draws its rows from the `employees` above, so those entries
-    // could never appear on screen: they were shipped to every worker in the team
-    // to be dropped on arrival.
-    const activeIds = new Set(active.map((e) => e.id));
-    return c.json({
-      employees,
-      // Shaped, not the raw row: this goes to every authenticated worker, and `note`
-      // is a free-text admin field nobody outside the admin screens should read. Keep
-      // this in sync with what the miniapp/admin `Shift` types actually declare.
-      shifts: listShiftsOverlapping(db, from, to)
-        .filter((shift) => shift.employeeId == null || activeIds.has(shift.employeeId))
-        .map((shift) => ({
-          id: shift.id,
-          date: shift.date,
-          start: shift.start,
-          end: shift.end,
-          endDate: shift.endDate,
-          category: shift.category,
-          title: shift.title,
-          location: shift.location,
-          unrecognisedCode: shift.unrecognisedCode,
-          templateId: shift.templateId,
-          employeeId: shift.employeeId,
-        })),
-    });
+    // Формой ответа заведует repo/team-schedule: тем же шейпером сервер строит
+    // картинку недели для бота, и расходиться они не должны.
+    return c.json(readTeamSchedule(db, from, to));
   });
 
   app.get("/api/employees", requireAuth(db, config.jwtSecret), (c) =>
