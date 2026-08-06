@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, InputFile } from "grammy";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import type { Employee } from "../db/schema";
@@ -18,7 +18,8 @@ import { getVacantSlot } from "../repo/weekend";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
+import { buildWeekImage } from "./week-image";
 import {
   notifyUser,
   notifyAdmins,
@@ -40,6 +41,28 @@ import { safeErrorMessage } from "../util/safe-error";
 // morning, still good after lunch) without needing single-use tokens or a
 // revocation store; re-requesting is one more `/admin` message to the bot.
 const ADMIN_LINK_TTL_SEC = 12 * 3600;
+
+/**
+ * How far a person can page away from the current week. Half a year each way
+ * covers everything the picture is ever opened for; without a limit the button
+ * would walk someone into 2043, where there's no schedule and never will be.
+ */
+export const WEEK_OFFSET_LIMIT = 26;
+
+/**
+ * The buttons under the picture. The offset in the callback data is absolute —
+ * weeks from TODAY, not from the week the picture showed: the message lives in
+ * the chat forever, and a button tapped a month later has to count from the day
+ * it's tapped, not from whatever day it was when the message was sent.
+ */
+function weekKeyboard(offset: number): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  if (offset > -WEEK_OFFSET_LIMIT) keyboard.text("‹ Пред.", `week:${offset - 1}`);
+  // One tap back home: from week 26, walking back on foot is 26 taps.
+  if (offset !== 0) keyboard.text("⌂ Текущая", "week:0");
+  if (offset < WEEK_OFFSET_LIMIT) keyboard.text("След. ›", `week:${offset + 1}`);
+  return keyboard;
+}
 
 export interface BotDeps {
   db: Db;
@@ -78,7 +101,7 @@ async function safeEdit(fn: () => Promise<unknown>): Promise<void> {
 }
 
 /**
- * The command menu Telegram shows next to the input field. Only the two commands
+ * The command menu Telegram shows next to the input field. Only the three commands
  * everybody has: `/admin` is checked server-side anyway, and listing it for the
  * whole team would just invite taps that answer «только для администраторов».
  *
@@ -89,6 +112,7 @@ export async function publishBotCommands(bot: Bot): Promise<void> {
   try {
     await bot.api.setMyCommands([
       { command: "start", description: "Начать и открыть смены" },
+      { command: "week", description: "График команды на неделю" },
       { command: "notifications", description: "Напоминания о сменах — включить или выключить" },
     ]);
   } catch (err) {
@@ -280,6 +304,79 @@ export function createBot(deps: BotDeps): Bot {
     }
     const me = who.me;
     await ctx.reply(remindersStateText(me.remindersEnabled), { reply_markup: remindersKeyboard(me.remindersEnabled) });
+  });
+
+  /** Monday of the week `offset` weeks from the current one, in team time. */
+  function mondayForOffset(offset: number): { monday: string; today: string } {
+    const today = teamNow(config.teamTz).date;
+    return { monday: addDaysIso(mondayOfIso(today), offset * 7), today };
+  }
+
+  // /week — the team's schedule as a picture. Visible to everyone in the menu:
+  // it's the same data /api/team/schedule already gives any authorized worker,
+  // just on a different medium — no need to open the mini app, it's already
+  // in the chat.
+  bot.command("week", async (ctx) => {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    const { monday, today } = mondayForOffset(0);
+    let image;
+    try {
+      image = buildWeekImage(db, monday, today);
+    } catch (err) {
+      console.error("week: render failed:", safeErrorMessage(err));
+      await ctx.reply("Не смог нарисовать график, открой мини-апп.");
+      return;
+    }
+    if (image.kind === "text") {
+      await ctx.reply(image.text);
+      return;
+    }
+    await ctx.replyWithPhoto(new InputFile(image.png, "week.png"), {
+      caption: image.caption,
+      reply_markup: weekKeyboard(0),
+    });
+  });
+
+  /**
+   * Paging through weeks. Unlike the cosmetic edits elsewhere in this file,
+   * redrawing the picture is the useful action itself, so its failure is
+   * reported to the person as a toast, not just to the log.
+   */
+  bot.callbackQuery(/^week:(-?\d+)$/, async (ctx) => {
+    const offset = Number(ctx.match[1]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    // The out-of-range button is never drawn, but the message lives forever —
+    // the data can come from anything, so the limit is checked here too.
+    if (!Number.isInteger(offset) || Math.abs(offset) > WEEK_OFFSET_LIMIT) {
+      await ctx.answerCallbackQuery({ text: "Дальше не листаю" });
+      return;
+    }
+    const { monday, today } = mondayForOffset(offset);
+    try {
+      const image = buildWeekImage(db, monday, today);
+      if (image.kind === "text") {
+        await ctx.answerCallbackQuery({ text: image.text });
+        return;
+      }
+      await ctx.editMessageMedia(
+        { type: "photo", media: new InputFile(image.png, "week.png"), caption: image.caption },
+        { reply_markup: weekKeyboard(offset) },
+      );
+      await ctx.answerCallbackQuery();
+    } catch (err) {
+      console.error("week: redraw failed:", safeErrorMessage(err));
+      await ctx.answerCallbackQuery({ text: "Не получилось, попробуй ещё раз" });
+    }
   });
 
   /**
