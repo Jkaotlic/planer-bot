@@ -78,7 +78,7 @@ export function splitDisplayName(displayName: string): { surname: string; rest: 
   return { surname, rest: rest.join(" ") };
 }
 
-export function templateFor<E extends ScheduleEntryLike>(
+function templateFor<E extends ScheduleEntryLike>(
   shift: E,
   templates: readonly SchedulePresetLike[],
 ): SchedulePresetLike | undefined {

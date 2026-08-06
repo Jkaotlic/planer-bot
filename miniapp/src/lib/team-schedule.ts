@@ -27,7 +27,11 @@ export type { LatestRequestGate };
 // Сетка недели переехала в @planer/shared: ею же сервер рисует картинку для
 // бота. Здесь остаются только псевдонимы под конкретный `Shift` мини-аппа,
 // чтобы компоненты не переписывать.
-export { buildWeekLegend, buildWeekModel, compareShifts, coversDate, splitDisplayName, toEntryView };
+//
+// Наружу отдаётся только то, что снаружи и зовут. `toEntryView` и
+// `compareShifts` до переезда были приватными и нужны по-прежнему лишь внутри
+// этого файла — импорт выше их и даёт.
+export { buildWeekLegend, buildWeekModel, coversDate, splitDisplayName };
 export type { WeekLegendItem };
 export type TeamEntryView = SharedTeamEntryView<Shift>;
 export type WeekCell = SharedWeekCell<Shift>;
