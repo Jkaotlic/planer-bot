@@ -18,10 +18,10 @@ afterEach(async () => {
   host = null;
 });
 
-const me = {
+const me: Me = {
   id: 7, displayName: "Игорь Петров", address: "Игорь", preferredName: null,
-  isAdmin: false, remindersEnabled: true,
-} as Me;
+  isAdmin: false, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
+};
 
 let nextId = 1;
 function entry(date: string, title: string): Shift {

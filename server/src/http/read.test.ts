@@ -8,6 +8,7 @@ import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { employees } from "../db/schema";
 import { eq } from "drizzle-orm";
+import { setSwapsLocked } from "../repo/settings";
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -114,11 +115,11 @@ describe("read endpoints", () => {
 
     const body = await res.json();
     expect(body.employees).toEqual([
-      { id: first.id, displayName: "Первая", rosterOrder: 0 },
-      { id: second.id, displayName: "Вторая", rosterOrder: 1 },
-      { id: tied.id, displayName: "Равная", rosterOrder: 1 },
-      { id: late.id, displayName: "Без порядка", rosterOrder: null },
-      { id: laterNull.id, displayName: "Ещё без порядка", rosterOrder: null },
+      { id: first.id, displayName: "Первая", rosterOrder: 0, excludedFromSwaps: false },
+      { id: second.id, displayName: "Вторая", rosterOrder: 1, excludedFromSwaps: false },
+      { id: tied.id, displayName: "Равная", rosterOrder: 1, excludedFromSwaps: false },
+      { id: late.id, displayName: "Без порядка", rosterOrder: null, excludedFromSwaps: false },
+      { id: laterNull.id, displayName: "Ещё без порядка", rosterOrder: null, excludedFromSwaps: false },
     ]);
     expect(body.shifts).toHaveLength(2);
     expect(body.shifts.some((shift: { employeeId: number | null }) => shift.employeeId === null)).toBe(true);
@@ -251,5 +252,36 @@ describe("read endpoints", () => {
     const app = createApp({ db, config });
     const res = await app.request("/api/my/shifts", bearer(await tokenFor(app, 333)));
     expect(res.status).toBe(200);
+  });
+
+  it("GET /api/me carries the swap-permission facts the screen needs", async () => {
+    const db = makeTestDb();
+    const me = worker(db, "Аня Смирнова", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 333);
+
+    const open = await (await app.request("/api/me", { headers: { authorization: `Bearer ${token}` } })).json();
+    expect(open).toMatchObject({ swapsLocked: false, excludedFromSwaps: false });
+
+    setSwapsLocked(db, true, me.id);
+    const locked = await (await app.request("/api/me", { headers: { authorization: `Bearer ${token}` } })).json();
+    expect(locked).toMatchObject({ swapsLocked: true });
+  });
+
+  it("GET /api/team/schedule marks who is out of swaps", async () => {
+    const db = makeTestDb();
+    const me = worker(db, "Аня Смирнова", 333);
+    const other = worker(db, "Игорь Петров", 334);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 333);
+
+    db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, other.id)).run();
+    const res = await app.request(
+      "/api/team/schedule?from=2026-08-10&to=2026-08-16",
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    const body = await res.json();
+    expect(body.employees.find((e: { id: number }) => e.id === other.id)).toMatchObject({ excludedFromSwaps: true });
+    expect(body.employees.find((e: { id: number }) => e.id === me.id)).toMatchObject({ excludedFromSwaps: false });
   });
 });

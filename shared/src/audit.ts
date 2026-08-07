@@ -12,16 +12,18 @@ import { parseISODate, weekdayShort } from "./week-dates";
  *
  * Массив, а не просто объявление типа: `AuditType` выводится из него же
  * (`(typeof AUDIT_TYPES)[number]`), так что тест на полноту таблицы
- * описателей может реально перебрать все 33 значения в рантайме, а не
+ * описателей может реально перебрать все 35 значений в рантайме, а не
  * сверять два списка, набранных руками в разных местах.
  */
 export const AUDIT_TYPES = [
   "entry_created", "entry_updated", "entry_deleted",
   "swap_proposed", "swap_accepted", "swap_declined",
   "swap_cancelled", "swap_expired", "swap_auto_cancelled",
+  "swaps_lock_changed",
   "distribution_applied", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
+  "employee_restrictions_changed",
   "employee_invite_issued", "settings_changed",
   "template_roles_changed", "template_rotation_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
@@ -194,6 +196,15 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   swap_expired: (p) => ({ icon: "🔁", title: "Обмен стал неактуален", lines: swapLines(p) }),
   swap_auto_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён автоматически", lines: swapLines(p) }),
 
+  swaps_lock_changed: (p) => ({
+    icon: "🔒",
+    title: p.locked === true ? "Обмены смен закрыты" : "Обмены смен открыты",
+    lines: [
+      ...(p.locked === true ? [`отменено заявок: ${num(p.cancelled) ?? 0}`] : []),
+      `дошло до ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`,
+    ],
+  }),
+
   distribution_applied: (p) => ({
     icon: "⚖",
     title: "Смены распределены честно",
@@ -252,6 +263,19 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     if (lines.length === 0) lines.push(personLabel(p, "displayName"));
     else lines.unshift(str(after.displayName) ?? personLabel(p, "displayName"));
     return { icon: "👤", title: "Изменены данные работника", lines };
+  },
+  employee_restrictions_changed: (p) => {
+    const before = obj(p.before);
+    const after = obj(p.after);
+    const word = (value: unknown) => (value === true ? "не участвует" : "участвует");
+    const lines = [personLabel(p, "displayName")];
+    if (before.excludedFromAssignment !== after.excludedFromAssignment) {
+      lines.push(`назначения: ${word(before.excludedFromAssignment)} → ${word(after.excludedFromAssignment)}`);
+    }
+    if (before.excludedFromSwaps !== after.excludedFromSwaps) {
+      lines.push(`обмены: ${word(before.excludedFromSwaps)} → ${word(after.excludedFromSwaps)}`);
+    }
+    return { icon: "🚦", title: "Изменены ограничения работника", lines };
   },
   settings_changed: (p) => {
     const lines = [personLabel(p, "displayName")];

@@ -14,7 +14,8 @@
 
 - **Node ≥ 22.22.2** (`.nvmrc`, `engines`). Гейт: `npm test` и `npm run typecheck` из корня.
 - **Идентификаторы только латиницей** — включая тестовые фикстуры. В репозитории нет ни одного кириллического имени переменной, и это надо сохранить.
-- **Комментарии в `server/src/**` — по-английски**, и в коде, **и в тестах**. Русские доменные термины — только в «ёлочках» внутри английской фразы. В `shared/` и в `miniapp/` русские комментарии — намеренная конвенция, там пишем по-русски.
+- **Комментарии в `server/src/**` — по-английски**, и в коде, **и в тестах**. Русские доменные термины — только в «ёлочках» внутри английской фразы. В `shared/`, в `miniapp/` и в `admin/` русские комментарии — намеренная конвенция, там пишем по-русски (см. `admin/src/screens/employees-error.test.tsx`).
+- **Зеркальные тесты двух консолей — конвенция, а не копипаста.** `admin/` и `miniapp/` намеренно держат почти дословные пары тестовых файлов (существующий пример: `admin/src/screens/employees-error.test.tsx` — «Зеркало теста мини-аппа»). Расхождение двух фронтов должен ловить тест, а не пользователь.
 - **Репозиторий публичный.** Имена только из вымышленного ростера: `Аня Смирнова`, `Игорь Петров`, `Марк Волков`. Страж — `server/src/db/no-real-names.test.ts`.
 - **Каждый тест обязан падать без починки.** Перед коммитом задачи: `git stash push -- <файл реализации>` → прогнать тест → он **красный** → `git stash pop`. Зелёный тест на застэшенной реализации — дефект теста, а не удача.
 - **Тесты парные.** На каждое «отказывает при ограничении» — «разрешает на тех же данных без ограничения». Одиночный негативный тест зеленеет от любой другой причины отказа.
@@ -46,7 +47,7 @@
 
 ---
 
-## Задача 1: Схема и репозиторий настроек
+## Task 1: Схема и репозиторий настроек
 
 **Files:**
 - Modify: `server/src/db/schema.ts`
@@ -118,11 +119,11 @@ Expected: FAIL — `Cannot find module './settings'`.
 В `server/src/db/schema.ts` в блок `employees` (после `remindersEnabled`) добавить:
 
 ```ts
-  /** Админ вывел человека из АВТОМАТИЧЕСКИХ назначений: «Распределить честно»,
-   *  ★-очередь, рассылка выходных, назначение на выходной. Руками админ его
-   *  по-прежнему ставит — это не архивирование. */
+  /** An admin took this person out of AUTOMATIC placement: «Распределить честно»,
+   *  the ★ queue, the weekend call for volunteers, and weekend assignment. An admin
+   *  can still place them by hand — this is not archiving. */
   excludedFromAssignment: integer({ mode: "boolean" }).notNull().default(false),
-  /** Админ вывел человека из обменов — в обе стороны: ни предложить, ни принять. */
+  /** An admin took this person out of swaps, both ways: neither propose nor accept. */
   excludedFromSwaps: integer({ mode: "boolean" }).notNull().default(false),
 ```
 
@@ -130,12 +131,12 @@ Expected: FAIL — `Cannot find module './settings'`.
 
 ```ts
 /**
- * Общекомандные переключатели. Ключ-значение, а не колонки: сегодня ключ ровно
- * один (`swaps_locked`), и заводить таблицу с одной колонкой ради него, чтобы
- * следующий тумблер потребовал новой миграции, — плохая сделка.
+ * Team-wide toggles. Key-value rather than columns: today there is exactly one
+ * key (`swaps_locked`), and a single-column table for it — so that the next
+ * toggle needs a fresh migration — is a bad trade.
  *
- * ОТСУТСТВИЕ строки = значение по умолчанию. Миграция ничего не вставляет, и
- * база, никогда не видевшая этой фичи, ведёт себя ровно как раньше.
+ * An ABSENT row means the default. The migration seeds nothing, so a database
+ * that never saw this feature behaves exactly as it did before.
  */
 export const appSettings = sqliteTable("app_settings", {
   key: text().primaryKey(),
@@ -234,7 +235,7 @@ git commit -m "feat(db): app_settings и две колонки исключен�
 
 ---
 
-## Задача 2: Правило `swapBlockReason` и его применение
+## Task 2: Правило `swapBlockReason` и его применение
 
 **Files:**
 - Modify: `shared/src/swap.ts`
@@ -245,7 +246,7 @@ git commit -m "feat(db): app_settings и две колонки исключен�
 - Test: `shared/src/swap-validate.test.ts`, `server/src/swap/swap-service.test.ts`
 
 **Interfaces:**
-- Consumes: `isSwapsLocked` (Задача 1), `employees.excludedFromSwaps` (Задача 1)
+- Consumes: `isSwapsLocked` (Task 1), `employees.excludedFromSwaps` (Task 1)
 - Produces: `swapBlockReason(input: { swapsLocked: boolean; fromExcluded: boolean; toExcluded: boolean }): "swaps-locked" | "from-excluded" | "to-excluded" | null`; `SwapContext` с тремя **обязательными** полями `swapsLocked`, `fromExcluded`, `toExcluded`; три новых значения `SwapRejectReason`
 
 **Замечание про обязательность полей.** Три поля делаются обязательными, а не опциональными с дефолтом `false`. Цена — правка ~15 существующих вызовов в `shared/src/swap-validate.test.ts`. Выгода — забытый вызов даёт красный `tsc`, а не тихое «разрешено», что ровно тот класс дефекта, ради которого фича и делается.
@@ -583,14 +584,14 @@ git commit -m "feat(swaps): правило swapBlockReason закрывает о
 
 ---
 
-## Задача 3: Смена лока и гашение открытых заявок
+## Task 3: Смена лока и гашение открытых заявок
 
 **Files:**
 - Create: `server/src/swap/swap-lock.ts`
 - Test: `server/src/swap/swap-lock.test.ts`
 
 **Interfaces:**
-- Consumes: `setSwapsLocked` (Задача 1), `swapAuditPayload` из `server/src/util/message-lines.ts`
+- Consumes: `setSwapsLocked` (Task 1), `swapAuditPayload` из `server/src/util/message-lines.ts`
 - Produces: `setSwapLock(db: Db, locked: boolean, actorEmployeeId: number): SwapAuditPayload[]`, `cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPayload[]`
 
 - [ ] **Шаг 1: Написать падающий тест**
@@ -715,9 +716,9 @@ import { swapAuditPayload, type SwapAuditPayload } from "../util/message-lines";
  * Flipping the team-wide swap lock, and what it costs the people mid-trade.
  *
  * Locking cancels every still-open request: the counterparty is holding a chat
- * message with live-looking Принять/Отклонить buttons whose only possible answer
- * would now be an error. The same thing already happens when an accepted swap
- * knocks out its siblings, so this is the established shape, not a new idea.
+ * message with live-looking «Принять»/«Отклонить» buttons whose only possible
+ * answer would now be an error. The same thing already happens when an accepted
+ * swap knocks out its siblings, so this is the established shape, not a new idea.
  *
  * Everything here is synchronous and inside one transaction, and the caller does
  * the `await` messaging AFTERWARDS. That ordering is not stylistic: the `races`
@@ -737,12 +738,7 @@ export function setSwapLock(db: Db, locked: boolean, actorEmployeeId: number): S
     // and the cancellations are one fact, and half of it landing is worse than
     // neither — an admin would see «закрыто» while the buttons still worked.
     setSwapsLocked(tx, locked, actorEmployeeId);
-    for (const request of pending) {
-      tx.update(swapRequests)
-        .set({ status: "cancelled", resolvedAt: new Date() })
-        .where(eq(swapRequests.id, request.id))
-        .run();
-    }
+    cancelAll(tx, pending);
   });
 
   return payloads;
@@ -760,14 +756,7 @@ export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPay
     .all();
   const payloads = pending.map((request) => swapAuditPayload(db, request));
 
-  db.transaction((tx) => {
-    for (const request of pending) {
-      tx.update(swapRequests)
-        .set({ status: "cancelled", resolvedAt: new Date() })
-        .where(eq(swapRequests.id, request.id))
-        .run();
-    }
-  });
+  db.transaction((tx) => cancelAll(tx, pending));
 
   return payloads;
 }
@@ -775,7 +764,20 @@ export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPay
 function listPending(db: Db) {
   return db.select().from(swapRequests).where(eq(swapRequests.status, "pending")).all();
 }
+
+/** The one write both callers make. Extracted so the two paths cannot drift on
+ *  what «cancelled» means or on whether `resolvedAt` gets stamped. */
+function cancelAll(tx: DbOrTx, pending: readonly { id: number }[]): void {
+  for (const request of pending) {
+    tx.update(swapRequests)
+      .set({ status: "cancelled", resolvedAt: new Date() })
+      .where(eq(swapRequests.id, request.id))
+      .run();
+  }
+}
 ```
+
+`DbOrTx` is imported from `../repo/settings` alongside `setSwapsLocked`.
 
 - [ ] **Шаг 4: Прогнать — зелёно**
 
@@ -795,7 +797,7 @@ git commit -m "feat(swaps): включение лока гасит открыт�
 
 ---
 
-## Задача 4: Тексты уведомлений — одно письмо на человека
+## Task 4: Тексты уведомлений — одно письмо на человека
 
 **Files:**
 - Create: `server/src/swap/swap-lock-notice.ts`
@@ -830,7 +832,8 @@ const trade = (over: Partial<SwapAuditPayload> = {}): SwapAuditPayload => ({
 describe("buildSwapLockNotices", () => {
   it("tells the whole reachable team that swaps are closed", () => {
     const notices = buildSwapLockNotices({ locked: true, team: [ANYA, IGOR, MARK], cancelled: [] });
-    expect(notices.map((n) => n.telegramUserId)).toEqual([1001, 1002]); // Марк без телеграма
+    // Марк has no Telegram account, so there is nowhere to send and nothing to count.
+    expect(notices.map((n) => n.telegramUserId)).toEqual([1001, 1002]);
     expect(notices[0]!.text).toContain("🔒 Обмены смен закрыты.");
   });
 
@@ -860,7 +863,8 @@ describe("buildSwapLockNotices", () => {
     const forAnya = notices.find((n) => n.telegramUserId === 1001)!;
     const forIgor = notices.find((n) => n.telegramUserId === 1002)!;
     expect(forAnya.text).toContain("Игорь Петров");
-    expect(forAnya.text).toContain("Чт 13 авг · 09:00–18:00"); // её собственная смена
+    // Her own shift, not his — the line is written from the reader's side.
+    expect(forAnya.text).toContain("Чт 13 авг · 09:00–18:00");
     expect(forIgor.text).toContain("Аня Смирнова");
     expect(forIgor.text).toContain("Чт 13 авг · 12:00–21:00");
   });
@@ -887,6 +891,19 @@ describe("buildExclusionNotices", () => {
   it("clearing the flag writes to that person only", () => {
     const notices = buildExclusionNotices({
       excluded: false, person: ANYA, others: [IGOR], cancelled: [],
+    });
+    expect(notices).toEqual([{ telegramUserId: 1001, text: "🔓 Тебе снова доступны обмены смен." }]);
+  });
+
+  /**
+   * Guards the asymmetry that the two builders had before `linesFor` existed:
+   * the lock builder suppressed cancellation lines when unlocking, this one did
+   * not. A stale `cancelled` threaded in by a caller would have made «снова
+   * доступны» sprout a list of requests that nothing had just cancelled.
+   */
+  it("«снова доступны» never grows cancellation lines, even if some are passed in", () => {
+    const notices = buildExclusionNotices({
+      excluded: false, person: ANYA, others: [], cancelled: [trade()],
     });
     expect(notices).toEqual([{ telegramUserId: 1001, text: "🔓 Тебе снова доступны обмены смен." }]);
   });
@@ -941,12 +958,30 @@ const LOCKED_HEADER = [
 
 const UNLOCKED_HEADER = "🔓 Обмены смен снова открыты.";
 
-/** «Заявка на обмен — Игорь Петров, Чт 13 авг · 12:00–21:00 — отменена.» */
+/**
+ * One cancelled trade, from the reader's side: the OTHER person's name and the
+ * reader's OWN shift — «Заявка на обмен — Игорь Петров, Чт 13 авг · 12:00–21:00 —
+ * отменена.» On the other phone the same trade reads the other way round.
+ */
 function cancelledLine(readerId: number, trade: SwapAuditPayload): string {
   const isInitiator = readerId === trade.fromEmployeeId;
   const otherName = isInitiator ? trade.toName : trade.fromName;
   const ownShift = isInitiator ? trade.fromShift : trade.toShift;
   return `Заявка на обмен — ${otherName}, ${ownShift} — отменена.`;
+}
+
+/**
+ * Every cancelled trade this person was part of, already worded for them.
+ *
+ * All three recipient paths below need exactly this, and three copies of
+ * «filter by id, map through cancelledLine» is three chances for them to drift
+ * on who counts as involved — which is how one path ended up appending lines
+ * regardless of whether anything had actually been cancelled.
+ */
+function linesFor(personId: number, cancelled: readonly SwapAuditPayload[]): string[] {
+  return cancelled
+    .filter((trade) => trade.fromEmployeeId === personId || trade.toEmployeeId === personId)
+    .map((trade) => cancelledLine(personId, trade));
 }
 
 export function buildSwapLockNotices(input: {
@@ -957,12 +992,9 @@ export function buildSwapLockNotices(input: {
   return input.team.flatMap((person) => {
     if (person.telegramUserId == null) return [];
     const lines = [input.locked ? LOCKED_HEADER : UNLOCKED_HEADER];
-    if (input.locked) {
-      const mine = input.cancelled.filter(
-        (trade) => trade.fromEmployeeId === person.id || trade.toEmployeeId === person.id,
-      );
-      if (mine.length > 0) lines.push("", ...mine.map((trade) => cancelledLine(person.id, trade)));
-    }
+    // Unlocking cancels nothing, so there is never anything to append to it.
+    const mine = input.locked ? linesFor(person.id, input.cancelled) : [];
+    if (mine.length > 0) lines.push("", ...mine);
     return [{ telegramUserId: person.telegramUserId, text: lines.join("\n") }];
   });
 }
@@ -981,10 +1013,10 @@ export function buildExclusionNotices(input: {
         ? "🔒 Тебе закрыли обмены смен. Если это ошибка — напиши админу."
         : "🔓 Тебе снова доступны обмены смен.",
     ];
-    const mine = input.cancelled.filter(
-      (trade) => trade.fromEmployeeId === input.person.id || trade.toEmployeeId === input.person.id,
-    );
-    if (mine.length > 0) lines.push("", ...mine.map((trade) => cancelledLine(input.person.id, trade)));
+    // Same guard as the lock builder: clearing the flag cancels nothing, so
+    // «снова доступны» must never grow a list of cancelled requests under it.
+    const mine = input.excluded ? linesFor(input.person.id, input.cancelled) : [];
+    if (mine.length > 0) lines.push("", ...mine);
     notices.push({ telegramUserId: input.person.telegramUserId, text: lines.join("\n") });
   }
 
@@ -992,14 +1024,9 @@ export function buildExclusionNotices(input: {
   // person is not something the rest of the team is told.
   for (const other of input.others) {
     if (other.telegramUserId == null) continue;
-    const mine = input.cancelled.filter(
-      (trade) => trade.fromEmployeeId === other.id || trade.toEmployeeId === other.id,
-    );
+    const mine = linesFor(other.id, input.cancelled);
     if (mine.length === 0) continue;
-    notices.push({
-      telegramUserId: other.telegramUserId,
-      text: mine.map((trade) => cancelledLine(other.id, trade)).join("\n"),
-    });
+    notices.push({ telegramUserId: other.telegramUserId, text: mine.join("\n") });
   }
 
   return notices;
@@ -1020,7 +1047,7 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
 
 ---
 
-## Задача 5: Роуты настроек, рассылка и журнал
+## Task 5: Роуты настроек, рассылка и журнал
 
 **Files:**
 - Modify: `shared/src/audit.ts` (`AUDIT_TYPES` + описатель)
@@ -1028,26 +1055,59 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
 - Test: `shared/src/audit.test.ts`, `server/src/http/settings-route.test.ts` (файл существует — дописать)
 
 **Interfaces:**
-- Consumes: `setSwapLock` (Задача 3), `buildSwapLockNotices` (Задача 4), `swapsLockSetting` (Задача 1)
+- Consumes: `setSwapLock` (Task 3), `buildSwapLockNotices` (Task 4), `swapsLockSetting` (Task 1)
 - Produces: `GET /api/admin/settings` → `{ swapsLocked: boolean; swapsLockUpdatedAt: string | null; swapsLockUpdatedBy: string | null }`; `PUT /api/admin/settings/swaps-lock` тело `{ locked: boolean }` → `{ locked: boolean; cancelled: number; delivered: number; intended: number }`; тип аудита `swaps_lock_changed`
 
 - [ ] **Шаг 1: Написать падающие тесты**
 
 В `server/src/http/settings-route.test.ts` дописать (используя тот же способ поднятия приложения и выдачи админского токена, что уже применён в этом файле):
 
+**Тесты роутов обязаны стоять на непустых данных.** Прогон на базе без людей и без открытых заявок даст `cancelled: 0`, `delivered: 0`, `intended: 0` — и пройдёт при любой, в том числе сломанной, арифметике. Поэтому happy-path тест **сначала заводит двух работников с привязанным телеграмом и открытую заявку между ними**, и только потом дёргает лок.
+
 ```ts
   it("PUT /api/admin/settings/swaps-lock closes swaps and reports what it cost", async () => {
     // ... поднять app и админский токен ровно как в соседних тестах файла ...
+    // Two reachable people and one open request between them: on an empty
+    // database every count below is zero, and a zero proves nothing about the
+    // arithmetic that produced it.
+    const anya = createEmployee(db, { displayName: "Аня Смирнова", telegramUserId: 1001 });
+    const igor = createEmployee(db, { displayName: "Игорь Петров", telegramUserId: 1002 });
+    const anyaShift = createShift(db, { date: "2026-08-13", start: "09:00", end: "18:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: "2026-08-13", start: "12:00", end: "21:00", employeeId: igor.id });
+    createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id,
+      toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+
     const res = await app.request("/api/admin/settings/swaps-lock", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ locked: true }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ locked: true, cancelled: 0 });
+    const body = await res.json();
+    expect(body.locked).toBe(true);
+    expect(body.cancelled).toBe(1);
+    // `intended` counts everyone the notice was addressed to. The admin who
+    // pressed the button is an employee too, so this is the reachable headcount,
+    // not the number of people in the swap.
+    expect(body.intended).toBeGreaterThan(0);
+    expect(body.delivered).toBeLessThanOrEqual(body.intended);
 
     const state = await app.request("/api/admin/settings", { headers: { authorization: `Bearer ${token}` } });
     expect(await state.json()).toMatchObject({ swapsLocked: true, swapsLockUpdatedBy: "Игорь Петров" });
+  });
+
+  // The other half of the pair: unlocking must report an honest zero and must
+  // not reach into anybody's requests.
+  it("PUT /api/admin/settings/swaps-lock reopening cancels nothing", async () => {
+    // ... same seeding as above, then lock, then unlock ...
+    const res = await app.request("/api/admin/settings/swaps-lock", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locked: false }),
+    });
+    expect(await res.json()).toMatchObject({ locked: false, cancelled: 0 });
   });
 
   it("PUT /api/admin/settings/swaps-lock rejects a non-boolean body", async () => {
@@ -1057,19 +1117,19 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
       body: JSON.stringify({ locked: "yes" }),
     });
     expect(res.status).toBe(400);
-  });
-
-  it("GET /api/admin/settings is admin-only", async () => {
-    const res = await app.request("/api/admin/settings");
-    expect(res.status).toBe(401);
+    // Pin the wording too: a refusal a person reads must stay Russian.
+    expect((await res.json()).error).toBe("locked должен быть true или false");
   });
 
   it("locking writes one journal row naming what happened", async () => {
-    // ... after the PUT above ...
+    // ... after the seeded PUT above ...
     const events = await (await app.request("/api/admin/journal", { headers: { authorization: `Bearer ${token}` } })).json();
     expect(events.events[0]).toMatchObject({ type: "swaps_lock_changed" });
+    expect(events.events[0].payload).toMatchObject({ locked: true, cancelled: 1 });
   });
 ```
+
+**Теста «GET /api/admin/settings is admin-only» здесь НЕТ, и это осознанно.** Весь префикс `/api/admin/*` закрыт общим middleware (`app.use("/api/admin/*", requireAdmin(...))`), у которого есть свой тест — `server/src/http/admin-guard.test.ts`. Такой тест на новом роуте зеленел бы и при полностью отсутствующем роуте: `git stash push -- server/src/http/app.ts` не сделал бы его красным. Это ровно «тест, который не может упасть», и добавлять его — театр, а не проверка.
 
 В `shared/src/audit.test.ts` дописать:
 
@@ -1171,7 +1231,7 @@ git commit -m "feat(api): роуты лока обменов, рассылка �
 
 ---
 
-## Задача 6: Десктоп-консоль — раздел «Настройки»
+## Task 6: Десктоп-консоль — раздел «Настройки»
 
 **Files:**
 - Create: `admin/src/screens/SettingsScreen.tsx`
@@ -1181,7 +1241,7 @@ git commit -m "feat(api): роуты лока обменов, рассылка �
 - Modify: `admin/src/App.tsx` (ветка рендера)
 
 **Interfaces:**
-- Consumes: `GET /api/admin/settings`, `PUT /api/admin/settings/swaps-lock` (Задача 5)
+- Consumes: `GET /api/admin/settings`, `PUT /api/admin/settings/swaps-lock` (Task 5)
 - Produces: `AdminSettings { swapsLocked: boolean; swapsLockUpdatedAt: string | null; swapsLockUpdatedBy: string | null }`, `apiClient.getSettings()`, `apiClient.setSwapsLock(locked: boolean): Promise<{ locked: boolean; cancelled: number; delivered: number; intended: number }>`, `NavKey` расширен значением `"settings"`
 
 - [ ] **Шаг 1: Написать падающий DOM-тест**
@@ -1299,6 +1359,68 @@ describe("SettingsScreen", () => {
     // Тумблер обязан остаться на экране: иначе из этого состояния нет выхода без F5.
     expect(buttonWith(el, "Закрыть обмены")).toBeTruthy();
   });
+
+  /**
+   * Окно между «сервер ответил» и «экран перечитан».
+   *
+   * `confirming` сбрасывается сразу после ответа `setSwapsLock`, а `saving` —
+   * только в `finally`, после `reload()`. Между ними экран рисует состояние
+   * `confirming=false, saving=true`: подтверждения на экране уже нет, а ОСНОВНАЯ
+   * кнопка снова видна. Если она не погашена — второе нажатие уходит вторым
+   * сообщением всей команде.
+   *
+   * Поэтому тест держит незавершённым именно `reload()` (второй `getSettings`),
+   * а не `setSwapsLock`, и щупает ОСНОВНУЮ кнопку. Проверка кнопки
+   * подтверждения тут ничего не стоит: у неё `disabled` был и до починки, и до
+   * этого окна экран всё равно не доходит.
+   *
+   * Подпись основной кнопки в этом окне ещё старая («Закрыть обмены»): она
+   * считается от `settings.swapsLocked`, а `settings` обновится только после
+   * перечитывания.
+   */
+  it("в окне между ответом и перечитыванием основная кнопка погашена", async () => {
+    let releaseReload!: (value: AdminSettings) => void;
+    vi.spyOn(apiClient, "getSettings")
+      .mockResolvedValueOnce(OPEN)
+      .mockReturnValueOnce(new Promise((resolve) => { releaseReload = resolve; }));
+    vi.spyOn(apiClient, "setSwapsLock")
+      .mockResolvedValue({ locked: true, cancelled: 0, delivered: 1, intended: 1 });
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    await act(async () => buttonWith(el, "Да, закрыть").click());
+    await settle();
+
+    expect(buttonWith(el, "Закрыть обмены").disabled).toBe(true);
+
+    await act(async () => releaseReload({ ...OPEN, swapsLocked: true }));
+    await settle();
+  });
+
+  it("взведение убирает ошибку прошлой попытки", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    vi.spyOn(apiClient, "setSwapsLock").mockRejectedValue(new Error("сеть недоступна"));
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    await act(async () => buttonWith(el, "Да, закрыть").click());
+    await settle();
+    expect(el.textContent ?? "").toContain("сеть недоступна");
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    // Старый отказ рядом с новым подтверждением читается как отказ на него.
+    expect(el.textContent ?? "").not.toContain("сеть недоступна");
+  });
+
+  it("если тумблер ни разу не трогали, так и написано", async () => {
+    vi.spyOn(apiClient, "getSettings")
+      .mockResolvedValue({ swapsLocked: false, swapsLockUpdatedAt: null, swapsLockUpdatedBy: null });
+    const el = await mount();
+    expect(el.textContent ?? "").toContain("Ни разу не меняли");
+  });
 });
 ```
 
@@ -1339,6 +1461,9 @@ export interface SwapLockResult {
 - заголовок «Настройки», подзаголовок-объяснение: *закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде*;
 - состояние: «Обмены смен — Открыты / Закрыты»;
 - **подписи кнопок ровно эти** (тест ищет по тексту, и в обеих консолях они одинаковы): основная — `Закрыть обмены` либо `Открыть обмены` по текущему состоянию; кнопка подтверждения — `Да, закрыть` либо `Да, открыть`; отмена — `Отмена`;
+- **все три кнопки гасятся на время запроса** (`disabled={saving}`), как это уже сделано в `BirthdaysScreen.tsx`. Без этого есть окно: `confirming` сбрасывается сразу после ответа сервера, а `saving` — только после `reload()`, и между ними основная кнопка снова кликабельна. Взвести и подтвердить повторно в этом окне значит разослать команде второе сообщение — ровно то, ради чего подтверждение и заводилось;
+- **кнопка подтверждения на время запроса пишет `Отправляю…`** — как `BirthdaysScreen.tsx`. Погашенная кнопка без текста говорит «сломалось», погашенная с подписью — «идёт». Подпись основной кнопки при этом НЕ меняется: она считается от `settings.swapsLocked`, который обновится только после перечитывания;
+- **взведение сбрасывает и прошлую ошибку тоже**, не только прошлый результат: иначе рядом с новым подтверждением висит текст отказа от предыдущей попытки;
 - подпись «Закрыл Игорь Петров · 7 августа, 14:30» (форматировать `formatAuditMoment` из `@planer/shared` — та же функция, что рисует время в журнале, чтобы формат не разъехался); если `swapsLockUpdatedBy === null` — «Ни разу не меняли»;
 - после успеха — строка результата: `Обмены закрыты. Отменено заявок: 2. Уведомление дошло до 24 из 26.` Хвост про доставку строить через уже существующий `withNotifyNotice` из `admin/src/lib/notify-text.ts`;
 - `error` рисуется **рядом** с тумблером, никогда вместо него.
@@ -1362,7 +1487,7 @@ git commit -m "feat(admin): раздел «Настройки» с тумбле�
 
 ---
 
-## Задача 7: Мини-апп — раздел «Настройки»
+## Task 7: Мини-апп — раздел «Настройки»
 
 **Files:**
 - Create: `miniapp/src/screens/admin/AdminSettings.tsx`
@@ -1372,12 +1497,12 @@ git commit -m "feat(admin): раздел «Настройки» с тумбле�
 - Modify: `miniapp/src/screens/AdminScreen.tsx` (`AdminSection` + чип + ветка)
 
 **Interfaces:**
-- Consumes: те же два роута (Задача 5)
+- Consumes: те же два роута (Task 5)
 - Produces: `AdminSettings`, `SwapLockResult`, `apiClient.getSettings()`, `apiClient.setSwapsLock(locked)`, `AdminSection` расширен значением `"settings"`
 
 - [ ] **Шаг 1: Написать падающий DOM-тест**
 
-`miniapp/src/screens/admin/admin-settings.test.tsx` — **тот же файл теста, что в Задаче 6**, с тремя отличиями мини-аппа:
+`miniapp/src/screens/admin/admin-settings.test.tsx` — **тот же файл теста, что в Task 6**, с тремя отличиями мини-аппа:
 
 1. импорт `apiClient` из `"../../api/client"`, компонента — из `"./AdminSettings"`;
 2. компонент оборачивается в провайдер telegram-ui, как в `shift-kinds-rotation.test.tsx`:
@@ -1390,7 +1515,9 @@ import { AppRoot } from "@telegram-apps/telegram-ui";
 
 3. `settle(14)` вместо `settle(8)` — мок мини-аппа отвечает через `setTimeout`, и восьми оборотов ему местами не хватает (это уже учтено в соседних тестах мини-аппа).
 
-Все четыре `it` — дословно те же, включая проверку «тумблер остался на экране после ошибки»: два фронта показывают одно и то же, и расхождение между ними должен ловить тест, а не пользователь.
+**Все семь `it` — дословно те же**, включая «тумблер остался на экране после ошибки» и «в окне между ответом и перечитыванием основная кнопка погашена»: два фронта показывают одно и то же, и расхождение между ними должен ловить тест, а не пользователь. Смотри на **фактический** `admin/src/screens/settings.test.tsx` в репозитории, а не на код-блок Шага 1 Task 6 — файл дорос до семи тестов в ходе правок, и он же является образцом.
+
+Экран мини-аппа обязан повторить и то, что стоит за этими тестами: гашение всех трёх кнопок на время запроса, `Отправляю…` на кнопке подтверждения, сброс прошлой ошибки при взведении и «Ни разу не меняли», когда тумблер не трогали.
 
 - [ ] **Шаг 2: Прогнать — красно**
 
@@ -1442,7 +1569,7 @@ git commit -m "feat(miniapp): раздел «Настройки» с тумбл�
 
 ---
 
-## Задача 8: Две галки в `PATCH /api/admin/employees/:id`
+## Task 8: Две галки в `PATCH /api/admin/employees/:id`
 
 **Files:**
 - Modify: `shared/src/audit.ts` (`employee_restrictions_changed` + описатель)
@@ -1451,7 +1578,7 @@ git commit -m "feat(miniapp): раздел «Настройки» с тумбл�
 - Test: `server/src/http/employees.test.ts`, `shared/src/audit.test.ts`
 
 **Interfaces:**
-- Consumes: `cancelSwapsForEmployee` (Задача 3), `buildExclusionNotices` (Задача 4)
+- Consumes: `cancelSwapsForEmployee` (Task 3), `buildExclusionNotices` (Task 4)
 - Produces: `setEmployeeRestrictions(db: Db, id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Employee | undefined`; тип аудита `employee_restrictions_changed`; `PATCH /api/admin/employees/:id` принимает два новых булевых поля
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -1504,7 +1631,7 @@ git commit -m "feat(miniapp): раздел «Настройки» с тумбл�
   });
 ```
 
-Отдельно: `GET /api/admin/employees` (`server/src/http/app.ts:348`) отдаёт строку работника целиком через `{ ...employee }`, поэтому обе новые колонки попадают в ответ **сами**. Специально ничего добавлять не надо — но и «почистить» этот спред нельзя, экраны Задачи 12 читают галки именно оттуда. Написать это комментарием у роута.
+Отдельно: `GET /api/admin/employees` (`server/src/http/app.ts:348`) отдаёт строку работника целиком через `{ ...employee }`, поэтому обе новые колонки попадают в ответ **сами**. Специально ничего добавлять не надо — но и «почистить» этот спред нельзя, экраны Task 12 читают галки именно оттуда. Написать это комментарием у роута.
 
 В `shared/src/audit.test.ts`:
 
@@ -1575,7 +1702,7 @@ export function setEmployeeRestrictions(
 2. Валидация: если поле пришло и это не `boolean` → `400` с русским текстом.
 3. `beforeEdit` дополнить снимком обеих галок; `after` — тоже.
 4. После существующих мутаций — `setEmployeeRestrictions`, и **только если галки реально изменились** — `recordAudit(db, "employee_restrictions_changed", ...)` с `{ employeeId, displayName, before, after }`.
-5. Если `excludedFromSwaps` **стал** `true` — вызвать `cancelSwapsForEmployee(db, id)`; в обоих случаях (стал `true` или `false`) построить `buildExclusionNotices` и разослать **после** записи, тем же способом, что в Задаче 5. `others` — все активные, кроме самого человека.
+5. Если `excludedFromSwaps` **стал** `true` — вызвать `cancelSwapsForEmployee(db, id)`; в обоих случаях (стал `true` или `false`) построить `buildExclusionNotices` и разослать **после** записи, тем же способом, что в Task 5. `others` — все активные, кроме самого человека.
 
 Существующий `recordAudit(db, "employee_updated", ...)` **остаётся** и по-прежнему пишется только по своим трём полям: `employee_updated` про имя/ДР/обращение, `employee_restrictions_changed` — про галки. Один `PATCH` может дать обе строки, если админ поменял и то и другое — это правда о том, что он сделал.
 
@@ -1594,7 +1721,7 @@ git commit -m "feat(api): две галки ограничений на карт
 
 ---
 
-## Задача 9: Мини-апп — кнопка «Обменять» и список кандидатов
+## Task 9: Мини-апп — кнопка «Обменять» и список кандидатов
 
 **Files:**
 - Modify: `server/src/http/app.ts` (`/api/me`, ~строка 260)
@@ -1605,23 +1732,45 @@ git commit -m "feat(api): две галки ограничений на карт
 - Test: `server/src/http/read.test.ts`, `miniapp/src/lib/swap-candidates.test.ts`, `miniapp/src/components/shift-row-today.test.tsx` (или новый `shift-row-swap-lock.test.tsx`)
 
 **Interfaces:**
-- Consumes: `isSwapsLocked` (Задача 1), `employees.excludedFromSwaps` (Задача 1)
+- Consumes: `isSwapsLocked` (Task 1), `employees.excludedFromSwaps` (Task 1)
 - Produces: `Me` += `swapsLocked: boolean`, `excludedFromSwaps: boolean`; `TeamEmployee` += `excludedFromSwaps: boolean`; `swapCandidates(fromShift, dayShifts, meId, now, excludedIds: ReadonlySet<number>)`; `ShiftRowProps` += `swapBlockedReason?: string`
 
 - [ ] **Шаг 1: Написать падающие тесты**
 
-**Пятый аргумент `swapCandidates` делается обязательным**, не опциональным с дефолтом — по той же причине, что три поля в Задаче 2: забытый вызов должен валить `tsc`, а не тихо показывать в списке того, с кем меняться нельзя. Существующие вызовы в `miniapp/src/lib/swap-candidates.test.ts` дополняются `new Set()`; `tsc` покажет все.
+**Пятый аргумент `swapCandidates` делается обязательным**, не опциональным с дефолтом — по той же причине, что три поля в Task 2: забытый вызов должен валить `tsc`, а не тихо показывать в списке того, с кем меняться нельзя. Существующие вызовы в `miniapp/src/lib/swap-candidates.test.ts` дополняются `new Set()`; `tsc` покажет все.
 
 `miniapp/src/lib/swap-candidates.test.ts` — дописать:
 
+Тестов два, и они про разное. Первый закрепляет **порядок** проверок, второй — саму видимость. Порядок закрепляется только на коллеге с **такой же** сменой (`templateId` как у `mine`, то есть 4): на смене другого вида `isIdenticalShift` даст `false` при любом порядке, и `sameKindCount === 0` будет держаться, даже если проверку исключения переставить после проверки «та же смена». То есть тест на другой смене не доказывает ничего.
+
 ```ts
+  /**
+   * Исключённый коллега с ТАКОЙ ЖЕ сменой не попадает ни в кандидаты, ни в
+   * «столько же работают такую же».
+   *
+   * Смена нарочно совпадает по виду с моей: если переставить проверку исключения
+   * ПОСЛЕ `isIdenticalShift`, он утечёт в `sameKindCount`, и экран скажет «ещё 1
+   * работает такую же смену» про человека, с которым меняться нельзя. На коллеге
+   * с другой сменой этот тест был бы зелёным при любом порядке.
+   */
+  it("исключённый коллега с такой же сменой не считается и в «таких же»", () => {
+    const twin = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "15:00", end: "23:00", templateId: 4, title: "Вечер" });
+    const { candidates, sameKindCount } = swapCandidates(mine, [twin], 1, NOW, new Set([7]));
+    expect(candidates).toEqual([]);
+    expect(sameKindCount).toBe(0);
+  });
+
+  it("он же без исключения — считается как «такая же смена»", () => {
+    const twin = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "15:00", end: "23:00", templateId: 4, title: "Вечер" });
+    const { candidates, sameKindCount } = swapCandidates(mine, [twin], 1, NOW, new Set());
+    expect(candidates).toEqual([]);
+    expect(sameKindCount).toBe(1);
+  });
+
   it("исключённого из обменов коллегу в кандидатах нет", () => {
     const other = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "09:00", end: "18:00" });
-    const { candidates, sameKindCount } = swapCandidates(mine, [other], 1, NOW, new Set([7]));
+    const { candidates } = swapCandidates(mine, [other], 1, NOW, new Set([7]));
     expect(candidates).toEqual([]);
-    // И НЕ в «таких же»: он не спрятан как одинаковый, с ним нельзя меняться вообще.
-    // Иначе экран сказал бы «ещё 1 работает такую же смену» — и это была бы неправда.
-    expect(sameKindCount).toBe(0);
   });
 
   it("тот же коллега без исключения в кандидатах есть", () => {
@@ -1789,14 +1938,26 @@ export function swapCandidates(
   swapBlockedReason?: string;
 ```
 
-`MyShiftsScreen` — считать фразу один раз и раздать её строкам:
+`MyShiftsScreen` — считать фразу один раз и раздать её строкам. **Приоритет причин не переписывать руками**, а спросить у `swapBlockReason`: она для того и заведена, чтобы сервер, кнопка и список кандидатов называли причины в одном порядке. Тернарник, повторяющий её порядок, верен ровно до первой правки на сервере — и промолчит, когда разъедется.
 
 ```ts
-  const swapBlockedReason = me.swapsLocked
-    ? "Обмены сейчас закрыты"
-    : me.excludedFromSwaps
-      ? "Обмены тебе закрыты — спроси у админа"
-      : undefined;
+import { swapBlockReason } from "@planer/shared";
+
+// Причина одна на весь экран, и её порядок берётся у той же функции, что решает
+// на сервере. `toExcluded: false` — здесь речь только про меня; исключённые
+// коллеги отсеиваются отдельно, в списке кандидатов.
+const BLOCK_PHRASES = {
+  "swaps-locked": "Обмены сейчас закрыты",
+  "from-excluded": "Обмены тебе закрыты — спроси у админа",
+  "to-excluded": "Обмены тебе закрыты — спроси у админа",
+} as const;
+
+const blocked = swapBlockReason({
+  swapsLocked: me.swapsLocked,
+  fromExcluded: me.excludedFromSwaps,
+  toExcluded: false,
+});
+const swapBlockedReason = blocked ? BLOCK_PHRASES[blocked] : undefined;
 ```
 
 `miniapp/src/App.tsx` — в месте, где строится список кандидатов, собрать множество из `teamSchedule.employees` и передать пятым аргументом:
@@ -1819,7 +1980,7 @@ git commit -m "feat(miniapp): кнопка «Обменять» знает пр�
 
 ---
 
-## Задача 10: Распределение и очередь
+## Task 10: Распределение и очередь
 
 **Files:**
 - Modify: `server/src/schedule/distribute-service.ts:191-241`
@@ -1827,7 +1988,7 @@ git commit -m "feat(miniapp): кнопка «Обменять» знает пр�
 - Test: `server/src/schedule/distribute.test.ts`, `server/src/repo/template-roles.test.ts`
 
 **Interfaces:**
-- Consumes: `employees.excludedFromAssignment` (Задача 1)
+- Consumes: `employees.excludedFromAssignment` (Task 1)
 - Produces: поведение — `buildDistribution` и `rotationCandidatesFor` не видят исключённых; причина `empty_pool` считается по **всем** активным
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -1934,7 +2095,7 @@ git commit -m "feat(schedule): исключённые вне распредел�
 
 ---
 
-## Задача 11: Выходные — рассылка и назначение
+## Task 11: Выходные — рассылка и назначение
 
 **Files:**
 - Modify: `server/src/bot/notify.ts:166-185` (`notifyVacantSlot`)
@@ -1943,7 +2104,7 @@ git commit -m "feat(schedule): исключённые вне распредел�
 - Test: `server/src/bot/notify.test.ts`, `server/src/weekend/weekend.test.ts`
 
 **Interfaces:**
-- Consumes: `employees.excludedFromAssignment` (Задача 1)
+- Consumes: `employees.excludedFromAssignment` (Task 1)
 - Produces: `assignSlot` умеет отказать причиной `"excluded"`; `notifyVacantSlot` не пишет исключённым и не считает их в `intended`
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -1996,6 +2157,18 @@ Run: `npx vitest run server/src/bot/notify.test.ts server/src/weekend/weekend.te
   }
 ```
 
+И в `interestedForSlot`, рядом с уже существующим отсевом архивных (`isOnStaff`):
+
+```ts
+    // Same reason the archived filter above exists: a name shown unmarked invites
+    // the admin to pick it. Somebody can have tapped «🙋 Хочу» BEFORE an admin
+    // excluded them, and that stale row would otherwise sit in the ranked list
+    // until «Назначить» refused it. His decision, 2026-08-07: drop them from the
+    // list rather than mark them — the flag means «не участвует в выходных».
+```
+
+Фильтр по `excludedFromAssignment` ставится в то же условие, что и `isOnStaff`.
+
 Расширить union причин в типе `AssignOutcome` значением `"excluded"` и дописать русский текст отказа там же, где переводятся остальные причины этого роута (`server/src/http/app.ts`, обработчик `/api/admin/weekend/slots/:id/assign`) — например «Этот человек выведен из назначений».
 
 В `server/src/http/app.ts:1279` ветка без бота считает `intended: listActive(db).length` — применить тот же фильтр, иначе без бота счётчик разойдётся с тем, что даёт `notifyVacantSlot`.
@@ -2015,7 +2188,7 @@ git commit -m "feat(weekend): исключённых не зовут на вых
 
 ---
 
-## Задача 12: Галки на экране «Работники» в обеих консолях
+## Task 12: Галки на экране «Работники» в обеих консолях
 
 **Files:**
 - Modify: `admin/src/api/client.ts` (`Employee` += два поля, метод), `admin/src/screens/EmployeesScreen.tsx`
@@ -2024,7 +2197,7 @@ git commit -m "feat(weekend): исключённых не зовут на вых
 - Test: `admin/src/screens/employees-error.test.tsx` (дописать) или новый `admin/src/screens/employees-restrictions.test.tsx`; `miniapp/src/screens/admin/admin-employees-restrictions.test.tsx`
 
 **Interfaces:**
-- Consumes: `PATCH /api/admin/employees/:id` с двумя новыми полями (Задача 8)
+- Consumes: `PATCH /api/admin/employees/:id` с двумя новыми полями (Task 8)
 - Produces: `apiClient.setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>` в обоих клиентах
 
 - [ ] **Шаг 1: Написать падающие DOM-тесты**

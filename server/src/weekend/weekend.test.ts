@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, archiveEmployee } from "../repo/employees";
+import { createEmployee, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import { createShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
 
@@ -286,6 +286,80 @@ describe("the weekend market and archived people", () => {
 
     expect(expressInterest(db, slot.id, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_active" });
     expect(interestedForSlot(db, slot.id)).toHaveLength(0);
+  });
+});
+
+// `expressInterest` below refuses an excluded worker outright, and the mini-app
+// never shows them the slot at all (see the two tests further down) — but the
+// route takes an employeeId from the request body, and an interest row
+// recorded before the exclusion (or a direct API call) still has to hit a
+// real refusal here, not a database write.
+describe("assignSlot and excludedFromAssignment", () => {
+  it("assignSlot refuses an excluded worker even when interest exists", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    // Interest recorded before the flag is set, so the refusal below can only be
+    // the exclusion check — the pre-existing not_interested guard is already
+    // satisfied and cannot be the one firing.
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY)).toEqual({ ok: false, reason: "excluded" });
+    expect(listShiftsByEmployee(db, igor.id)).toHaveLength(0);
+
+    // Same fixture, flag cleared: the assignment now goes through.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+  });
+});
+
+// Same reason the archived filter in interestedForSlot exists: a name shown
+// unmarked invites the admin to pick it. Somebody can have tapped «🙋 Хочу»
+// BEFORE an admin excluded them, and that stale row would otherwise sit in the
+// ranked list until «Назначить» refused it. His decision, 2026-08-07: drop them
+// from the list rather than mark them — the flag means «не участвует в выходных».
+describe("interestedForSlot and excludedFromAssignment", () => {
+  it("drops an excluded volunteer from the ranked list; the flag cleared brings them back", () => {
+    const db = makeTestDb();
+    const staying = createEmployee(db, { displayName: "Аня Смирнова" });
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    expect(expressInterest(db, slot.id, staying.id, TEST_TODAY).ok).toBe(true);
+    // Interest recorded before the flag — the stale-row case: somebody tapped
+    // «🙋 Хочу», and only afterwards did an admin exclude them.
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(interestedForSlot(db, slot.id).map((i) => i.employeeId)).toEqual([staying.id]);
+
+    // Same fixture, flag cleared: back on the list.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    expect(interestedForSlot(db, slot.id).map((i) => i.employeeId).sort()).toEqual([staying.id, igor.id].sort());
+  });
+});
+
+// Found by the final branch review: an excluded worker could still open the
+// «Выходные» tab, see every open slot and tap «🙋 Хочу» — `expressInterest`
+// took the interest, the bot answered «Записал 🙋», and `interestedForSlot`
+// had already filtered them out of the admin's list. His decision,
+// 2026-08-07: the tab is empty for them, not "visible but disabled" — the
+// latter would explain machinery («не участвует в назначениях») a worker was
+// never told about.
+describe("openSlotsForWorker/expressInterest and excludedFromAssignment", () => {
+  it("shows no open slots and refuses «Хочу» while excluded; both work again once cleared", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(openSlotsForWorker(db, igor.id, TEST_TODAY)).toEqual([]);
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY)).toEqual({ ok: false, reason: "excluded" });
+
+    // Same fixture, flag cleared: the slot is visible and «Хочу» works.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    expect(openSlotsForWorker(db, igor.id, TEST_TODAY).map((s) => s.slot.id)).toContain(slot.id);
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
   });
 });
 

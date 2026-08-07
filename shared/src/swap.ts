@@ -19,15 +19,68 @@ export function nextSwapStatus(current: SwapStatus, event: SwapEvent): SwapStatu
   return next;
 }
 
-export type SwapRejectReason =
-  | "different-day"
-  | "from-shift-not-owned"
-  | "to-shift-not-owned"
-  | "from-shift-in-past"
-  | "to-shift-in-past"
-  | "double-booking-from"
-  | "double-booking-to"
-  | "identical-shift";
+/**
+ * Рантайм-массив, а не только объявление типа — по той же причине, что и
+ * `AUDIT_TYPES` в `audit.ts`: тест на полноту таблицы русских подписей может
+ * реально перебрать все значения, а не сверять два списка, набранных руками в
+ * разных файлах. Причина, показанная человеку сырым кодом, — дефект, который в
+ * этом проекте уже ловили.
+ */
+export const SWAP_REJECT_REASONS = [
+  // Запреты, не зависящие от самих смен — см. `swapBlockReason`.
+  "swaps-locked",
+  "from-excluded",
+  "to-excluded",
+  "different-day",
+  "from-shift-not-owned",
+  "to-shift-not-owned",
+  "from-shift-in-past",
+  "to-shift-in-past",
+  "double-booking-from",
+  "double-booking-to",
+  "identical-shift",
+] as const;
+
+export type SwapRejectReason = (typeof SWAP_REJECT_REASONS)[number];
+
+/**
+ * Почему обмен запрещён вне зависимости от того, какие смены выбраны, — или null.
+ *
+ * Отдельно от `validateSwap`, потому что мини-аппу это нужно ДО того, как вторая
+ * смена вообще выбрана: погасить кнопку «Обменять» и вычистить список кандидатов.
+ * Одна функция — один порядок приоритета на всех трёх поверхностях (сервер,
+ * кнопка, список), иначе экран и сервер начнут называть разные причины.
+ *
+ * Порядок: сначала общий лок, потом своё исключение, потом чужое. Человеку
+ * называют причину, которая от его действий не зависит.
+ */
+export function swapBlockReason(input: {
+  swapsLocked: boolean;
+  fromExcluded: boolean;
+  toExcluded: boolean;
+}): "swaps-locked" | "from-excluded" | "to-excluded" | null {
+  if (input.swapsLocked) return "swaps-locked";
+  if (input.fromExcluded) return "from-excluded";
+  if (input.toExcluded) return "to-excluded";
+  return null;
+}
+
+/**
+ * Отличает три причины `swapBlockReason` от остальных `SWAP_REJECT_REASONS`.
+ *
+ * Нужна `acceptSwap`: те три причины — временное состояние, выставленное
+ * админом, а не факт про сами смены. Заявка, отказанная по ним, обязана
+ * остаться `pending` — «второй замок на той же двери» не должен навсегда
+ * гасить заявку и врать инициатору, что смена куда-то делась. Вынесена сюда
+ * единой функцией, а не тройным литералом на месте вызова, чтобы набор не
+ * разъехался с самим `swapBlockReason`, если в него когда-нибудь добавят
+ * четвёртую причину.
+ */
+export function isAdminBlockReason(
+  reason: SwapRejectReason,
+): reason is "swaps-locked" | "from-excluded" | "to-excluded" {
+  return reason === "swaps-locked" || reason === "from-excluded" || reason === "to-excluded";
+}
 
 export type SwapValidation = { ok: true } | { ok: false; reason: SwapRejectReason };
 
@@ -81,6 +134,12 @@ export interface SwapContext {
   toOtherShifts: Shift[];
   /** current team wall-clock time */
   now: { date: string; time: string };
+  /** Глобальный рубильник админа: обмены закрыты для всех. */
+  swapsLocked: boolean;
+  /** Инициатор выведен админом из обменов. */
+  fromExcluded: boolean;
+  /** Вторая сторона выведена админом из обменов. */
+  toExcluded: boolean;
 }
 
 export function validateSwap(ctx: SwapContext): SwapValidation {
@@ -88,6 +147,12 @@ export function validateSwap(ctx: SwapContext): SwapValidation {
 
   if (fromShift.employeeId !== fromEmployeeId) return { ok: false, reason: "from-shift-not-owned" };
   if (toShift.employeeId !== toEmployeeId) return { ok: false, reason: "to-shift-not-owned" };
+
+  // Запреты, не зависящие от самих смен. Стоят раньше «разные дни / в прошлом /
+  // та же смена»: выбор другой смены их не снимет, а причина, которую можно
+  // «обойти», сбивает человека с толку сильнее, чем прямой запрет.
+  const blocked = swapBlockReason(ctx);
+  if (blocked) return { ok: false, reason: blocked };
 
   // Обмен существует только внутри одного дня (его решение, 2026-08-03): отдаёшь
   // четверг — берёшь смену коллеги в этот же четверг. Правило стоит здесь, а не

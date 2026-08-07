@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { decodeJwt } from "jose";
 import type { Bot } from "grammy";
-import { createBot } from "./bot";
+import { createBot, reasonToRu } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getByTelegramId, getEmployeeById, archiveEmployee } from "../repo/employees";
 import { createShift, getShift, updateShift } from "../repo/shifts";
@@ -526,6 +526,13 @@ describe("bot swap callback buttons", () => {
     const anyaMessages = sent.filter((s) => s.chat_id === 201).map((s) => s.text);
     expect(anyaMessages.some((t) => t.toLowerCase().includes("обмен"))).toBe(true);
     expect(db.select().from(auditLog).all().some((r) => r.type === "swap_expired")).toBe(true);
+  });
+
+  it("names each admin-set restriction in Russian rather than as a code", () => {
+    // The reader is always the counterparty (acceptSwap validates req.toEmployeeId === actingEmployeeId).
+    expect(reasonToRu("swaps-locked")).toBe("Обмены сейчас закрыты админом");
+    expect(reasonToRu("from-excluded")).toBe("Коллеге закрыли обмены смен");
+    expect(reasonToRu("to-excluded")).toBe("Тебе закрыли обмены смен");
   });
 });
 

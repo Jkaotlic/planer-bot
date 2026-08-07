@@ -28,8 +28,8 @@ const preview: RosterImportPreview = {
 };
 
 const employees = [
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: null, preferredName: null, address: "Игорь Петров" },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков" },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: null, preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 describe("initialResolutions", () => {

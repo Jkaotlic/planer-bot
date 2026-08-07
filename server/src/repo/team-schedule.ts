@@ -19,7 +19,7 @@ export interface TeamScheduleEntry {
 }
 
 export interface TeamScheduleView {
-  employees: { id: number; displayName: string; rosterOrder: number | null }[];
+  employees: { id: number; displayName: string; rosterOrder: number | null; excludedFromSwaps: boolean }[];
   shifts: TeamScheduleEntry[];
 }
 
@@ -45,6 +45,7 @@ export function readTeamSchedule(db: Db, from: string, to: string): TeamSchedule
     id: employee.id,
     displayName: employee.displayName,
     rosterOrder: employee.rosterOrder,
+    excludedFromSwaps: employee.excludedFromSwaps,
   }));
   const activeIds = new Set(active.map((employee) => employee.id));
   const shifts = listShiftsOverlapping(db, from, to)

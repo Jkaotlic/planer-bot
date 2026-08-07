@@ -1,5 +1,6 @@
 import type { EntryCategory } from "@planer/shared";
 import type {
+  AdminSettings,
   AdminSlotView,
   CreateEmployeeResult,
   Employee,
@@ -19,6 +20,7 @@ import type {
   RosterImportSummary,
   RosterPersonResolution,
   Shift,
+  SwapLockResult,
   Template,
   VacantSlot,
 } from "./client";
@@ -37,12 +39,12 @@ import { inviteLinkFor } from "../lib/bot";
 // have a `preferredName` set, so the server's `addressOf` would fall back to
 // `displayName` for all of them too. See the `Employee.address` doc comment.
 const SEED_EMPLOYEES: readonly Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", address: "Аня Смирнова" },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", address: "Игорь Петров" },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: "Марк Волков" },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", address: "Даша Кузнецова" },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, address: "Олег Соколов" },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, address: "Света Орлова" },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 /** In-memory employee store — mutated live by create/archive/restore so the Работники screen (and the schedule, which only shows active workers) update without a reload. */
@@ -213,7 +215,7 @@ export async function mockGetEvents(): Promise<FeedEvent[]> {
 export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
   await delay(250);
   const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: name };
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: name, excludedFromAssignment: false, excludedFromSwaps: false };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
   return { employee, inviteToken, inviteLink: null };
@@ -268,6 +270,17 @@ export async function mockSetBirthDate(id: number, birthDate: string | null): Pr
   await delay(150);
   const employee = EMPLOYEES.find((item) => item.id === id);
   if (employee) employee.birthDate = birthDate;
+}
+
+export async function mockSetEmployeeRestrictions(
+  id: number,
+  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
+): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((item) => item.id === id);
+  if (!employee) return;
+  if (patch.excludedFromAssignment !== undefined) employee.excludedFromAssignment = patch.excludedFromAssignment;
+  if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
 }
 
 export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
@@ -770,6 +783,8 @@ export async function mockApplyRosterImport(
         telegramUserId: null,
         birthDate: null,
         address: resolution.csvName,
+        excludedFromAssignment: false,
+        excludedFromSwaps: false,
       });
     }
   }
@@ -784,5 +799,38 @@ export async function mockApplyRosterImport(
     // Мок не пишет по-дневные записи из файла в ENTRIES, поэтому не знает,
     // кому реально досталось что-то новое — молчаливый {0,0} честнее выдумки.
     notified: { delivered: 0, intended: 0 },
+  };
+}
+
+// --- Настройки: замок обменов ------------------------------------------------
+
+/** DEV-хранилище тумблера. Кто менял — id, а не имя: имя может смениться позже. */
+let swapsLock: { locked: boolean; updatedAt: string | null; updatedByEmployeeId: number | null } = {
+  locked: false,
+  updatedAt: null,
+  updatedByEmployeeId: null,
+};
+
+export async function mockGetSettings(): Promise<AdminSettings> {
+  await delay(150);
+  return {
+    swapsLocked: swapsLock.locked,
+    swapsLockUpdatedAt: swapsLock.updatedAt,
+    swapsLockUpdatedBy: swapsLock.updatedByEmployeeId != null ? nameOf(swapsLock.updatedByEmployeeId) : null,
+  };
+}
+
+export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult> {
+  await delay(250);
+  const actor = EMPLOYEES.find((e) => e.isAdmin && e.isActive);
+  swapsLock = { locked, updatedAt: new Date().toISOString(), updatedByEmployeeId: actor?.id ?? null };
+  // Мок не ведёт отдельный список заявок на обмен, поэтому cancelled всегда 0 —
+  // молчаливый ноль честнее выдуманного числа (тот же приём, что у applyRosterImport выше).
+  const team = EMPLOYEES.filter((e) => e.isActive);
+  return {
+    locked,
+    cancelled: 0,
+    delivered: team.filter((e) => e.telegramUserId != null).length,
+    intended: team.length,
   };
 }

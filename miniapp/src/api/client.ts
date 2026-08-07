@@ -24,6 +24,7 @@ import {
   mockRenameEmployee,
   mockSetEmployeePreferredName,
   mockSetBirthDate,
+  mockSetEmployeeRestrictions,
   mockReorderEmployee,
   mockGetEmployeeInvite,
   mockGetTemplates,
@@ -52,6 +53,8 @@ import {
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
+  mockGetSettings,
+  mockSetSwapsLock,
 } from "./mock";
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -87,6 +90,9 @@ export interface TeamEmployee {
   id: number;
   displayName: string;
   rosterOrder: number | null;
+  /** Admin took them out of swaps — the propose-swap candidate list must not
+   *  offer them, and the "Обменять" screen shouldn't count them as a duplicate. */
+  excludedFromSwaps: boolean;
 }
 
 export interface TeamSchedule {
@@ -107,6 +113,11 @@ export interface Me {
   isAdmin: boolean;
   /** Their own shift-reminder switch. */
   remindersEnabled: boolean;
+  /** Admin's global «Обменять» switch — the screen must grey the button out
+   *  rather than show it live and get refused on tap. */
+  swapsLocked: boolean;
+  /** Admin took this person specifically out of swaps. */
+  excludedFromSwaps: boolean;
 }
 
 export type SwapStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
@@ -194,6 +205,11 @@ export interface Employee {
   preferredName: string | null;
   /** What the bot will actually call them — computed server-side by `addressOf`. */
   address: string;
+  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
+   *  выходные. Ручную постановку это не запрещает. */
+  excludedFromAssignment: boolean;
+  /** Админ вывел человека из обменов — в обе стороны. */
+  excludedFromSwaps: boolean;
 }
 
 /** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
@@ -239,6 +255,22 @@ export interface NewEntryInput {
 
 /** До скольких из скольких дошло письмо о правке графика. */
 export interface NotifyReach {
+  delivered: number;
+  intended: number;
+}
+
+/** Состояние общего замка обменов сменами — экран «Настройки». */
+export interface AdminSettings {
+  swapsLocked: boolean;
+  /** ISO-строка или null, если тумблер ни разу не трогали. */
+  swapsLockUpdatedAt: string | null;
+  swapsLockUpdatedBy: string | null;
+}
+
+/** Итог переключения замка: что стало, и какой ценой (кому дошло уведомление). */
+export interface SwapLockResult {
+  locked: boolean;
+  cancelled: number;
   delivered: number;
   intended: number;
 }
@@ -458,6 +490,10 @@ export interface ApiClient {
   setEmployeePreferredName(id: number, preferredName: string | null): Promise<void>;
   /** `null` clears the birthday. */
   setBirthDate(id: number, birthDate: string | null): Promise<void>;
+  /** Sets one or both exclusion flags. Turning on `excludedFromSwaps` cancels
+   *  this person's open swap requests and notifies them — the caller doesn't
+   *  need to do anything else for that to happen. */
+  setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
@@ -497,6 +533,8 @@ export interface ApiClient {
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
+  getSettings(): Promise<AdminSettings>;
+  setSwapsLock(locked: boolean): Promise<SwapLockResult>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -818,6 +856,9 @@ export const realClient: ApiClient = {
   async setEmployeePreferredName(id, preferredName) {
     await authorizedPatchJson(`/api/admin/employees/${id}`, { preferredName });
   },
+  async setEmployeeRestrictions(id, patch) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
+  },
   getEmployeeInvite(id, regenerate = false) {
     return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
   },
@@ -962,6 +1003,9 @@ export const realClient: ApiClient = {
     );
     return { ...summary, notified };
   },
+
+  getSettings: () => authorizedGet<AdminSettings>("/api/admin/settings"),
+  setSwapsLock: (locked) => authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked }),
 };
 
 const devClient: ApiClient = {
@@ -989,6 +1033,7 @@ const devClient: ApiClient = {
   renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
   setEmployeePreferredName: (id, preferredName) => mockSetEmployeePreferredName(id, preferredName),
   setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
+  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
   reorderEmployee: (id, position) => mockReorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getTemplates: () => mockGetTemplates(),
@@ -1017,6 +1062,8 @@ const devClient: ApiClient = {
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
+  getSettings: () => mockGetSettings(),
+  setSwapsLock: (locked) => mockSetSwapsLock(locked),
 };
 
 /**

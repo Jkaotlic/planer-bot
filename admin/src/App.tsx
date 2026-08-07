@@ -20,6 +20,7 @@ import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { BirthdaysScreen } from "./screens/BirthdaysScreen";
+import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
 import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
@@ -145,6 +146,18 @@ export function App() {
 
   async function refreshEmployees() {
     setEmployees(await apiClient.getEmployees());
+  }
+
+  /**
+   * Patches a saved restriction flag straight into local state instead of
+   * re-fetching. The server already confirmed the value by returning 200 —
+   * a `refreshEmployees()` here would be unnecessary work that reopens a
+   * stale-render window between the PATCH resolving and the GET's response
+   * landing, during which the checkbox could flash back to its old value.
+   * Mirrors the Mini App's `AdminEmployeesScreen.setRestriction`.
+   */
+  function patchEmployeeRestrictions(id: number, patch: Partial<Pick<Employee, "excludedFromAssignment" | "excludedFromSwaps">>) {
+    setEmployees((prev) => prev?.map((e) => (e.id === id ? { ...e, ...patch } : e)) ?? prev);
   }
 
   useEffect(() => {
@@ -345,7 +358,7 @@ export function App() {
         ) : !employees || !templates ? (
           <div className="centered-fill">Загрузка…</div>
         ) : nav === "employees" ? (
-          <EmployeesScreen employees={employees} onChanged={refreshEmployees} />
+          <EmployeesScreen employees={employees} onChanged={refreshEmployees} onRestrictionsSaved={patchEmployeeRestrictions} />
         ) : nav === "kinds" ? (
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "weekend" ? (
@@ -354,6 +367,8 @@ export function App() {
           <BirthdaysScreen />
         ) : nav === "log" ? (
           <JournalScreen />
+        ) : nav === "settings" ? (
+          <SettingsScreen />
         ) : !activeEmployees ? (
           <div className="centered-fill">Загрузка…</div>
         ) : (

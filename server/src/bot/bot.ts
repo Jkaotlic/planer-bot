@@ -73,7 +73,7 @@ export interface BotDeps {
 }
 
 /** Maps a swap-service failure reason to a short Russian message for the tapping user. */
-function reasonToRu(reason: string): string {
+export function reasonToRu(reason: string): string {
   if (reason === "not_pending") return "Уже обработано";
   if (reason === "not_yours") return "Это не твоя заявка";
   // Only the counterparty ever taps these buttons, so «твоей» is right for the
@@ -87,6 +87,11 @@ function reasonToRu(reason: string): string {
   // one is still pending — the shift moved out from under the swap.
   if (reason === "from-shift-not-owned" || reason === "to-shift-not-owned") return "Смена уже досталась другому человеку";
   if (reason === "identical-shift") return "Смены теперь совпадают";
+  if (reason === "swaps-locked") return "Обмены сейчас закрыты админом";
+  // Reason names are from the request POV (from/to), but the reader is always
+  // the counterparty. The reader sees: from-excluded = colleague excluded, to-excluded = you excluded.
+  if (reason === "from-excluded") return "Коллеге закрыли обмены смен";
+  if (reason === "to-excluded") return "Тебе закрыли обмены смен";
   return "Не получилось";
 }
 
