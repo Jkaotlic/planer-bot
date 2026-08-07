@@ -1,55 +1,28 @@
 import { useEffect, useState } from "react";
+import { describeAuditEvent, formatAuditMoment, auditMonthRange } from "@planer/shared";
 import { apiClient, AuthRequiredError, type JournalPage, type ShiftCountsReport } from "../api/client";
 import { initialsOf, personPalette } from "../lib/people";
 
-/** What each audit type is called in the log, in words rather than in code. */
-const TYPE_LABELS: Record<string, string> = {
-  entry_created: "Добавлена запись",
-  entry_updated: "Изменена запись",
-  entry_deleted: "Удалена запись",
-  distribution_applied: "Смены распределены честно",
-  employee_updated: "Изменены данные работника",
-  employee_reordered: "Изменён порядок людей",
-  employee_archived: "Работник архивирован",
-  employee_restored: "Работник восстановлен",
-  employee_admin_changed: "Изменены права админа",
-  template_roles_changed: "Изменено «кто что может»",
-  template_rotation_changed: "Изменена очередь",
-  reminder_undeliverable: "Напоминание не дошло — бот заблокирован",
-  roster_import: "Загрузка графика из CSV",
-  swap_proposed: "Предложен обмен",
-  swap_accepted: "Обмен состоялся",
-  swap_declined: "Обмен отклонён",
-  swap_cancelled: "Обмен отменён",
-  swap_expired: "Обмен стал неактуален",
-  swap_auto_cancelled: "Обмен отменён автоматически",
-  weekend_slot_created: "Открыта смена на выходной",
-  weekend_assigned: "Выходная смена назначена",
-  birthday_sent: "Разослан сбор на день рождения",
-  birthday_admin_notice: "Напоминание админам о дне рождения",
-  birthday_schedule_notice: "Напоминание админам о сборе",
-};
-
-export function typeLabel(type: string): string {
-  return TYPE_LABELS[type] ?? type;
-}
-
-/** "5 августа, 14:32" — a log is read by when, so the date leads. */
-export function formatMoment(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
-  }).format(date);
-}
-
-/** The month around `today`, as the [from, to] the report opens on. */
-export function monthRangeOf(today: Date): { from: string; to: string } {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
-  const last = new Date(year, month, 0).getDate();
-  return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(last)}` };
+/** Одна строка ленты «кто что менял»: значок, фраза, кто и когда, подробности.
+ *  Текст целиком приходит из `describeAuditEvent` — тот же, что видит мини-апп. */
+export function JournalEventRow({ event }: { event: JournalPage["events"][number] }) {
+  const view = describeAuditEvent(event);
+  return (
+    <div className="journal-row">
+      <span className="journal-icon" aria-hidden>{view.icon}</span>
+      <div className="journal-body">
+        <div className="journal-head">
+          <span className="journal-type">{view.title}</span>
+          <span className="journal-meta">
+            {event.actorName ?? "система"} · {formatAuditMoment(event.createdAt)}
+          </span>
+        </div>
+        {view.lines.map((line, i) => (
+          <div className="journal-line" key={i}>{line}</div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 type Tab = "report" | "history";
@@ -90,7 +63,7 @@ export function JournalScreen() {
 }
 
 function ShiftCounts() {
-  const initial = monthRangeOf(new Date());
+  const initial = auditMonthRange(new Date().toISOString().slice(0, 10));
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [report, setReport] = useState<ShiftCountsReport | null>(null);
@@ -254,7 +227,7 @@ function History() {
           <option value="">Все события</option>
           {page.availableTypes.map((type) => (
             <option value={type} key={type}>
-              {typeLabel(type)}
+              {describeAuditEvent({ type, payload: {} }).title}
             </option>
           ))}
         </select>
@@ -268,12 +241,7 @@ function History() {
       ) : (
         <div className="employees-list">
           {page.events.map((event) => (
-            <div className="journal-row" key={event.id}>
-              <span className="journal-type">{typeLabel(event.type)}</span>
-              <span className="journal-actor">{event.actorName ?? "система"}</span>
-              <span className="journal-when">{formatMoment(event.createdAt)}</span>
-              <code className="journal-payload">{JSON.stringify(event.payload)}</code>
-            </div>
+            <JournalEventRow event={event} key={event.id} />
           ))}
         </div>
       )}
