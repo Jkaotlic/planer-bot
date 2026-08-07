@@ -529,9 +529,10 @@ describe("bot swap callback buttons", () => {
   });
 
   it("names each admin-set restriction in Russian rather than as a code", () => {
+    // The reader is always the counterparty (acceptSwap validates req.toEmployeeId === actingEmployeeId).
     expect(reasonToRu("swaps-locked")).toBe("Обмены сейчас закрыты админом");
-    expect(reasonToRu("from-excluded")).toBe("Тебе закрыли обмены смен");
-    expect(reasonToRu("to-excluded")).toBe("Коллеге закрыли обмены смен");
+    expect(reasonToRu("from-excluded")).toBe("Коллеге закрыли обмены смен");
+    expect(reasonToRu("to-excluded")).toBe("Тебе закрыли обмены смен");
   });
 });
 
