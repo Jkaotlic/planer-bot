@@ -432,7 +432,7 @@ export interface ApiClient {
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
   /** `null` clears it and hands the greeting back to Telegram's name. */
   setPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }>;
-  getMyShifts(from: string): Promise<Shift[]>;
+  getMyShifts(): Promise<{ shifts: Shift[]; today: string }>;
   getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
   proposeSwap(fromShiftId: number, toShiftId: number, message?: string): Promise<SwapRequest>;
@@ -544,6 +544,8 @@ export interface RosterImportSummary {
 
 interface ShiftsResponse {
   shifts: Shift[];
+  /** Сегодняшняя дата в часовом поясе команды — её считает сервер. */
+  today: string;
 }
 
 /** `GET /api/admin/employees` — the richer admin roster (active + archived). */
@@ -737,10 +739,8 @@ export const realClient: ApiClient = {
   setPreferredName: (preferredName) =>
     authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
 
-  async getMyShifts(from) {
-    const { shifts } = await authorizedGet<ShiftsResponse>(`/api/my/shifts?from=${encodeURIComponent(from)}`);
-    return shifts;
-  },
+  // `from` не передаётся намеренно: сервер сам возьмёт сегодняшний день команды.
+  getMyShifts: () => authorizedGet<ShiftsResponse>("/api/my/shifts"),
 
   async getTeamSchedule(from, to) {
     const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -968,7 +968,7 @@ const devClient: ApiClient = {
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
-  getMyShifts: (from) => mockGetMyShifts(from),
+  getMyShifts: () => mockGetMyShifts(),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getSwaps: () => mockGetSwaps(),
   proposeSwap: (fromShiftId, toShiftId, message) => mockProposeSwap(fromShiftId, toShiftId, message),

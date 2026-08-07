@@ -224,9 +224,13 @@ export async function mockGetMe(): Promise<Me> {
   return MOCK_ME;
 }
 
-export async function mockGetMyShifts(from: string): Promise<Shift[]> {
+export async function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
   await delay(300);
-  return ALL_ENTRIES.filter((s) => s.employeeId === MOCK_ME.id && endOf(s) >= from).sort(byDateThenStart);
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    shifts: ALL_ENTRIES.filter((s) => s.employeeId === MOCK_ME.id && endOf(s) >= today).sort(byDateThenStart),
+    today,
+  };
 }
 
 export async function mockGetTeamSchedule(from: string, to: string): Promise<TeamSchedule> {
