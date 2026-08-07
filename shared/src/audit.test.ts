@@ -221,9 +221,9 @@ describe("describeAuditEvent — остальные события", () => {
     },
     {
       type: "birthday_sent",
-      payload: { employeeId: 2, displayName: "Игорь Петров", delivered: 5, intended: 5 },
+      payload: { employeeId: 2, displayName: "Игорь Петров", delivered: 4, intended: 5 },
       title: "Разослан сбор на день рождения",
-      contains: "5 из 5",
+      contains: "4 из 5",
     },
     {
       type: "birthday_admin_notice",
@@ -320,6 +320,17 @@ describe("describeAuditEvent — незнакомое и битое", () => {
       payload: { entryId: 1, employeeId: 24, date: "2026-08-12", endDate: null, category: "shift", title: "День", start: "09:00", end: "18:00" },
     });
     expect(view.lines[0]).toBe("работник #24 · ср 12 августа");
+  });
+
+  it("на старой записи employee_updated без before/after просто называет человека", () => {
+    // Живые строки в базе до бэкфилла: плоский payload без before/after —
+    // ни одна из трёх диффовых строк не соберётся, и describer падает на personLabel.
+    const view = describeAuditEvent({
+      type: "employee_updated",
+      payload: { employeeId: 9, displayName: "Света Орлова", birthDate: "05-08" },
+    });
+    expect(view.title).toBe("Изменены данные работника");
+    expect(view.lines).toEqual(["Света Орлова"]);
   });
 });
 
