@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeAuditEvent, formatAuditMoment } from "./audit";
+import { auditMonthRange, describeAuditEvent, formatAuditMoment } from "./audit";
 
 describe("describeAuditEvent — записи", () => {
   it("рассказывает, кому и на какой день поставили смену", () => {
@@ -105,6 +105,182 @@ describe("describeAuditEvent — обмены", () => {
   });
 });
 
+describe("describeAuditEvent — остальные события", () => {
+  const cases: { type: string; payload: unknown; title: string; contains: string }[] = [
+    {
+      type: "distribution_applied",
+      payload: { from: "2026-08-03", to: "2026-08-09", count: 37 },
+      title: "Смены распределены честно",
+      contains: "37",
+    },
+    {
+      type: "roster_import",
+      payload: { employeesRenamed: 5, employeesCreated: 21, entriesInserted: 482, unknowns: 1 },
+      title: "Загружен график из CSV",
+      contains: "482",
+    },
+    {
+      type: "employee_created",
+      payload: { employeeId: 9, displayName: "Света Орлова" },
+      title: "Добавлен работник",
+      contains: "Света Орлова",
+    },
+    {
+      type: "employee_updated",
+      payload: {
+        employeeId: 9,
+        before: { displayName: "Света Орлов", birthDate: null },
+        after: { displayName: "Света Орлова", birthDate: "05-08" },
+      },
+      title: "Изменены данные работника",
+      contains: "Света Орлов → Света Орлова",
+    },
+    {
+      type: "employee_reordered",
+      payload: { employeeId: 9, displayName: "Света Орлова", from: 3, to: 1 },
+      title: "Изменён порядок людей",
+      contains: "3 → 1",
+    },
+    {
+      type: "employee_archived",
+      payload: { employeeId: 9, displayName: "Света Орлова" },
+      title: "Работник архивирован",
+      contains: "Света Орлова",
+    },
+    {
+      type: "employee_restored",
+      payload: { employeeId: 9, displayName: "Света Орлова" },
+      title: "Работник восстановлен",
+      contains: "Света Орлова",
+    },
+    {
+      type: "employee_admin_changed",
+      payload: { employeeId: 9, displayName: "Света Орлова", isAdmin: true },
+      title: "Изменены права админа",
+      contains: "теперь админ",
+    },
+    {
+      type: "employee_invite_issued",
+      payload: { employeeId: 9, displayName: "Света Орлова", regenerated: true },
+      title: "Перевыпущена ссылка-приглашение",
+      contains: "Света Орлова",
+    },
+    {
+      type: "settings_changed",
+      payload: { employeeId: 9, displayName: "Света Орлова", remindersEnabled: false },
+      title: "Работник изменил настройки",
+      contains: "напоминания выключены",
+    },
+    {
+      type: "template_roles_changed",
+      payload: { templateId: 3, templateName: "Ночь", poolSize: 7, preferred: 2 },
+      title: "Изменено «кто что может»",
+      contains: "Ночь",
+    },
+    {
+      type: "template_rotation_changed",
+      payload: { templateId: 3, templateName: "Ночь", rotationUnit: "week" },
+      title: "Изменена очередь",
+      contains: "Ночь",
+    },
+    {
+      type: "weekend_slot_created",
+      payload: { slotId: 4, slot: "сб 8 авг · 10:00–19:00", delivered: 12, intended: 14 },
+      title: "Открыта смена на выходной",
+      contains: "12 из 14",
+    },
+    {
+      type: "weekend_assigned",
+      payload: { slotId: 4, slot: "сб 8 авг · 10:00–19:00", employeeId: 3, employeeName: "Марк Волков" },
+      title: "Выходная смена назначена",
+      contains: "Марк Волков",
+    },
+    {
+      type: "weekend_unassigned",
+      payload: { slotId: 4, slot: "сб 8 авг · 10:00–19:00", employeeId: 3, employeeName: "Марк Волков" },
+      title: "Назначение на выходной снято",
+      contains: "Марк Волков",
+    },
+    {
+      type: "weekend_interest",
+      payload: { slotId: 4, slot: "сб 8 авг · 10:00–19:00", employeeId: 3, employeeName: "Марк Волков" },
+      title: "Отклик на выходную смену",
+      contains: "Марк Волков",
+    },
+    {
+      type: "weekend_offer_confirmed",
+      payload: { slotId: 4, slot: "сб 8 авг · 10:00–19:00", employeeId: 3, employeeName: "Марк Волков" },
+      title: "Выходная смена подтверждена",
+      contains: "Марк Волков",
+    },
+    {
+      type: "weekend_offer_declined",
+      payload: { slotId: 4, slot: "сб 8 авг · 10:00–19:00", employeeId: 3, employeeName: "Марк Волков" },
+      title: "От выходной смены отказались",
+      contains: "Марк Волков",
+    },
+    {
+      type: "birthday_sent",
+      payload: { employeeId: 2, displayName: "Игорь Петров", delivered: 5, intended: 5 },
+      title: "Разослан сбор на день рождения",
+      contains: "5 из 5",
+    },
+    {
+      type: "birthday_admin_notice",
+      payload: { employeeId: 2, displayName: "Игорь Петров", daysUntil: 7, delivered: 2 },
+      title: "Напоминание админам о дне рождения",
+      contains: "Игорь Петров",
+    },
+    {
+      type: "birthday_schedule_notice",
+      payload: { employeeId: 2, displayName: "Игорь Петров", scheduledSendOn: "2026-08-04", delivered: 2 },
+      title: "Напоминание админам о сборе",
+      contains: "Игорь Петров",
+    },
+    {
+      type: "birthday_campaign_updated",
+      payload: { employeeId: 2, displayName: "Игорь Петров", scheduledSendOn: "2026-08-04" },
+      title: "Изменён сбор на день рождения",
+      contains: "Игорь Петров",
+    },
+    {
+      type: "reminder_undeliverable",
+      payload: { employeeId: 3, displayName: "Марк Волков", shiftId: 88, errorCode: 403 },
+      title: "Напоминание не дошло — бот заблокирован",
+      contains: "Марк Волков",
+    },
+    {
+      type: "reminders_dispatched",
+      payload: { forDate: "2026-08-07", sent: 12, considered: 13 },
+      title: "Разосланы напоминания на завтра",
+      contains: "12",
+    },
+  ];
+
+  it.each(cases)("$type говорит «$title»", ({ type, payload, title, contains }) => {
+    const view = describeAuditEvent({ type, payload });
+    expect(view.title).toBe(title);
+    expect(view.lines.join(" · ")).toContain(contains);
+    expect(view.lines.join(" ")).not.toContain("undefined");
+  });
+
+  it("у события есть иконка, а не только заголовок и строки", () => {
+    const view = describeAuditEvent({
+      type: "distribution_applied",
+      payload: { from: "2026-08-03", to: "2026-08-09", count: 37 },
+    });
+    expect(view.icon).toBe("⚖");
+  });
+
+  it("описан каждый тип, который сервер умеет писать", () => {
+    const described = new Set(cases.map((c) => c.type));
+    // Типы из Task 4 проверены выше своими тестами.
+    for (const type of ["entry_created", "entry_updated", "entry_deleted", "swap_proposed", "swap_accepted",
+      "swap_declined", "swap_cancelled", "swap_expired", "swap_auto_cancelled"]) described.add(type);
+    expect(described.size).toBe(33);
+  });
+});
+
 describe("describeAuditEvent — незнакомое и битое", () => {
   it("не прячет событие, которого не знает", () => {
     const view = describeAuditEvent({ type: "something_added_later", payload: { a: 1 } });
@@ -115,6 +291,13 @@ describe("describeAuditEvent — незнакомое и битое", () => {
   it("переживает payload не той формы, без undefined в тексте", () => {
     const view = describeAuditEvent({ type: "entry_created", payload: null });
     expect(view.lines.join(" ")).not.toContain("undefined");
+  });
+
+  it("незнакомый тип без payload всё равно отдаёт строки, а не JS-значение undefined", () => {
+    const view = describeAuditEvent({ type: "something_added_later", payload: undefined });
+    expect(view.lines).toHaveLength(1);
+    expect(typeof view.lines[0]).toBe("string");
+    expect(view.lines[0]).toBe("null");
   });
 
   it("на старой записи без имени называет работника номером", () => {
@@ -133,5 +316,23 @@ describe("formatAuditMoment", () => {
 
   it("возвращает вход как есть, если это не дата", () => {
     expect(formatAuditMoment("не дата")).toBe("не дата");
+  });
+});
+
+describe("auditMonthRange", () => {
+  it("для даты в середине месяца отдаёт его первый и последний день", () => {
+    expect(auditMonthRange("2026-08-15")).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+  });
+
+  it("не обрезает 31-дневный месяц", () => {
+    expect(auditMonthRange("2026-01-01")).toEqual({ from: "2026-01-01", to: "2026-01-31" });
+  });
+
+  it("не обрезает 30-дневный месяц", () => {
+    expect(auditMonthRange("2026-04-30")).toEqual({ from: "2026-04-01", to: "2026-04-30" });
+  });
+
+  it("февраль невисокосного года — 28 дней", () => {
+    expect(auditMonthRange("2026-02-10")).toEqual({ from: "2026-02-01", to: "2026-02-28" });
   });
 });

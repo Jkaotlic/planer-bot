@@ -134,14 +134,20 @@ function entryView(entry: Record<string, unknown>): string[] {
 
 function swapLines(p: Record<string, unknown>): string[] {
   return [
-    `${str(p.fromName) ?? personLabel(p, "fromName", "fromEmployeeId")} отдаёт: ${str(p.fromShift) ?? "—"}`,
-    `${str(p.toName) ?? personLabel(p, "toName", "toEmployeeId")} отдаёт: ${str(p.toShift) ?? "—"}`,
+    `${personLabel(p, "fromName", "fromEmployeeId")} отдаёт: ${str(p.fromShift) ?? "—"}`,
+    `${personLabel(p, "toName", "toEmployeeId")} отдаёт: ${str(p.toShift) ?? "—"}`,
   ];
 }
 
+/** Пять выходных событий отличаются только заголовком и значком. */
+function weekendView(p: Record<string, unknown>, icon: string, title: string) {
+  return { icon, title, lines: [personLabel(p), str(p.slot) ?? `слот #${num(p.slotId) ?? "?"}`] };
+}
+
 // ——— таблица описателей ———
-// В Task 5 `Partial` снимается: с этого момента полноту стережёт компилятор.
-const DESCRIBERS: Partial<Record<AuditType, Describer>> = {
+// `Partial` снят: с этого момента полноту стережёт компилятор, а не зеркальный
+// тест в каждом консоле.
+const DESCRIBERS: Record<AuditType, Describer> = {
   entry_created: (p) => ({ icon: "＋", title: entryTitle("created", p), lines: entryView(p) }),
   entry_deleted: (p) => ({ icon: "🗑", title: entryTitle("deleted", p), lines: entryView(p) }),
   entry_updated: (p) => {
@@ -166,6 +172,136 @@ const DESCRIBERS: Partial<Record<AuditType, Describer>> = {
   swap_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён", lines: swapLines(p) }),
   swap_expired: (p) => ({ icon: "🔁", title: "Обмен стал неактуален", lines: swapLines(p) }),
   swap_auto_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён автоматически", lines: swapLines(p) }),
+
+  distribution_applied: (p) => ({
+    icon: "⚖",
+    title: "Смены распределены честно",
+    lines: [`${dayLabel(p.from)} — ${dayLabel(p.to)}`, `${num(p.count) ?? 0} смен расставлено`],
+  }),
+  roster_import: (p) => ({
+    icon: "📥",
+    title: "Загружен график из CSV",
+    lines: [
+      [
+        `${num(p.entriesInserted) ?? 0} записей`,
+        num(p.employeesCreated) ? `${num(p.employeesCreated)} человек добавлено` : null,
+        num(p.employeesRenamed) ? `${num(p.employeesRenamed)} переименовано` : null,
+      ].filter(Boolean).join(" · "),
+      ...(num(p.unknowns) ? [`${num(p.unknowns)} имён не опознано`] : []),
+    ],
+  }),
+
+  employee_created: (p) => ({ icon: "👤", title: "Добавлен работник", lines: [personLabel(p, "displayName")] }),
+  employee_archived: (p) => ({ icon: "📦", title: "Работник архивирован", lines: [personLabel(p, "displayName")] }),
+  employee_restored: (p) => ({
+    icon: "📦",
+    title: "Работник восстановлен",
+    lines: [personLabel(p, "displayName"), ...(str(p.via) ? ["через список админов"] : [])],
+  }),
+  employee_admin_changed: (p) => ({
+    icon: "🔑",
+    title: "Изменены права админа",
+    lines: [`${personLabel(p, "displayName")} — ${p.isAdmin === true ? "теперь админ" : "больше не админ"}`],
+  }),
+  employee_reordered: (p) => ({
+    icon: "↕",
+    title: "Изменён порядок людей",
+    lines: [personLabel(p, "displayName"), `${num(p.from) ?? "—"} → ${num(p.to) ?? "—"}`],
+  }),
+  employee_invite_issued: (p) => ({
+    icon: "🔗",
+    title: p.regenerated === true ? "Перевыпущена ссылка-приглашение" : "Выдана ссылка-приглашение",
+    // Самой ссылки здесь нет и быть не должно: это действующий ключ к учётной записи.
+    lines: [personLabel(p, "displayName"), ...(p.regenerated === true ? ["прежняя ссылка больше не работает"] : [])],
+  }),
+  employee_updated: (p) => {
+    const before = obj(p.before);
+    const after = obj(p.after);
+    const lines: string[] = [];
+    if (str(before.displayName) !== str(after.displayName)) {
+      lines.push(`имя: ${str(before.displayName) ?? "—"} → ${str(after.displayName) ?? "—"}`);
+    }
+    if (str(before.birthDate) !== str(after.birthDate)) {
+      lines.push(`день рождения: ${str(before.birthDate) ?? "не указан"} → ${str(after.birthDate) ?? "не указан"}`);
+    }
+    if (str(before.preferredName) !== str(after.preferredName)) {
+      lines.push(`обращение: ${str(before.preferredName) ?? "по умолчанию"} → ${str(after.preferredName) ?? "по умолчанию"}`);
+    }
+    // Старые записи несут только состояние «после» — их и показываем.
+    if (lines.length === 0) lines.push(personLabel(p, "displayName"));
+    else lines.unshift(str(after.displayName) ?? personLabel(p, "displayName"));
+    return { icon: "👤", title: "Изменены данные работника", lines };
+  },
+  settings_changed: (p) => {
+    const lines = [personLabel(p, "displayName")];
+    if (typeof p.remindersEnabled === "boolean") {
+      lines.push(p.remindersEnabled ? "напоминания включены" : "напоминания выключены");
+    }
+    if (p.preferredName !== undefined) {
+      lines.push(`обращение: ${str(p.preferredName) ?? "по умолчанию"}`);
+    }
+    return { icon: "⚙", title: "Работник изменил настройки", lines };
+  },
+
+  template_roles_changed: (p) => ({
+    icon: "🎚",
+    title: "Изменено «кто что может»",
+    lines: [
+      str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`,
+      `${num(p.poolSize) ?? 0} допущено · ${num(p.preferred) ?? 0} с приоритетом`,
+    ],
+  }),
+  template_rotation_changed: (p) => ({
+    icon: "🎚",
+    title: "Изменена очередь",
+    lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, `шаг: ${str(p.rotationUnit) ?? "—"}`],
+  }),
+
+  weekend_slot_created: (p) => ({
+    icon: "📣",
+    title: "Открыта смена на выходной",
+    lines: [str(p.slot) ?? `слот #${num(p.slotId) ?? "?"}`, `предложено ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`],
+  }),
+  weekend_assigned: (p) => weekendView(p, "🎯", "Выходная смена назначена"),
+  weekend_unassigned: (p) => weekendView(p, "↩", "Назначение на выходной снято"),
+  weekend_interest: (p) => weekendView(p, "🙋", "Отклик на выходную смену"),
+  weekend_offer_confirmed: (p) => weekendView(p, "✅", "Выходная смена подтверждена"),
+  weekend_offer_declined: (p) => weekendView(p, "🚫", "От выходной смены отказались"),
+
+  birthday_sent: (p) => ({
+    icon: "🎂",
+    title: "Разослан сбор на день рождения",
+    lines: [personLabel(p, "displayName"), `доставлено ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`],
+  }),
+  birthday_admin_notice: (p) => ({
+    icon: "🎂",
+    title: "Напоминание админам о дне рождения",
+    lines: [personLabel(p, "displayName"), `через ${num(p.daysUntil) ?? 0} дн. · дошло до ${num(p.delivered) ?? 0}`],
+  }),
+  birthday_schedule_notice: (p) => ({
+    icon: "🎂",
+    title: "Напоминание админам о сборе",
+    lines: [personLabel(p, "displayName"), `сбор на ${dayLabel(p.scheduledSendOn)} · дошло до ${num(p.delivered) ?? 0}`],
+  }),
+  birthday_campaign_updated: (p) => {
+    const lines = [personLabel(p, "displayName")];
+    if (p.scheduledSendOn !== undefined) lines.push(`напомнить: ${str(p.scheduledSendOn) ? dayLabel(p.scheduledSendOn) : "не напоминать"}`);
+    if (p.collectUrl !== undefined) lines.push(str(p.collectUrl) ? "ссылка на сбор изменена" : "ссылка на сбор убрана");
+    // Сам текст поздравления в журнал не копируется — здесь только факт правки.
+    if (p.messageText !== undefined) lines.push(str(p.messageText) ? "текст изменён" : "текст сброшен на стандартный");
+    return { icon: "🎂", title: "Изменён сбор на день рождения", lines };
+  },
+
+  reminder_undeliverable: (p) => ({
+    icon: "🚫",
+    title: "Напоминание не дошло — бот заблокирован",
+    lines: [personLabel(p, "displayName"), `код ответа ${num(p.errorCode) ?? "—"}`],
+  }),
+  reminders_dispatched: (p) => ({
+    icon: "🔔",
+    title: "Разосланы напоминания на завтра",
+    lines: [`на ${dayLabel(p.forDate)}`, `${num(p.sent) ?? 0} из ${num(p.considered) ?? 0} человек`],
+  }),
 };
 
 /**
@@ -178,7 +314,7 @@ const DESCRIBERS: Partial<Record<AuditType, Describer>> = {
 export function describeAuditEvent(event: { type: string; payload: unknown }): AuditView {
   const describe = DESCRIBERS[event.type as AuditType];
   if (!describe) {
-    return { icon: "•", title: event.type, lines: [JSON.stringify(event.payload, null, 2)] };
+    return { icon: "•", title: event.type, lines: [JSON.stringify(event.payload ?? null, null, 2)] };
   }
   const view = describe(obj(event.payload));
   return { icon: view.icon ?? "•", title: view.title, lines: view.lines };
