@@ -376,7 +376,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Any field on its own is a valid edit; sending none of them is not, so an
   // empty body can't silently no-op.
   //
-  // `employee_updated` (name/birthday/обращение) and `employee_restrictions_changed`
+  // `employee_updated` (name/birthday/«обращение») and `employee_restrictions_changed`
   // (the two flags) are two different journal rows on purpose: one PATCH touching
   // both kinds writes both — that is the truth about what the admin did. Order
   // matters below and is not stylistic: every DB write (the fields, the flags, the
@@ -419,9 +419,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
-    // Снимок до правки: без него переименование не оставляет следа — в журнале
-    // оказывается новое имя, а старого нет нигде. Отдельный снимок для галок —
-    // у них своя строка журнала.
+    // Snapshot before the edit: without it a rename leaves no trace — the journal
+    // would carry only the new name, with the old one gone from everywhere. A
+    // separate snapshot for the two flags — they get their own journal row.
     const beforeEdit = { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName };
     const beforeRestrictions = { excludedFromAssignment: employee.excludedFromAssignment, excludedFromSwaps: employee.excludedFromSwaps };
     if (hasName) {
