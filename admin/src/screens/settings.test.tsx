@@ -1,0 +1,111 @@
+// @vitest-environment jsdom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { apiClient } from "../api/client";
+import { SettingsScreen } from "./SettingsScreen";
+
+/**
+ * «Настройки» — один тумблер, который пишет всей команде разом.
+ *
+ * Два требования здесь не косметические. Подтверждение второго нажатия — потому
+ * что это единственное действие в консоли, после которого 26 человек получают
+ * сообщение, и отменить его нельзя. Ошибка рядом с тумблером, а не вместо него —
+ * потому что из состояния «на экране только текст ошибки» нет выхода без F5;
+ * этот класс дефекта в проекте уже ловили дважды.
+ */
+
+// React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const OPEN = { swapsLocked: false, swapsLockUpdatedAt: "2026-08-07T11:30:00.000Z", swapsLockUpdatedBy: "Игорь Петров" };
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+afterEach(async () => {
+  if (root) await act(async () => root!.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  vi.restoreAllMocks();
+});
+
+async function settle(times = 8) {
+  for (let i = 0; i < times; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+}
+
+async function mount() {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => root!.render(createElement(SettingsScreen)));
+  await settle();
+  return host;
+}
+
+/** Кнопка по её подписи — так же, как её ищет глазами человек. */
+function buttonWith(el: HTMLElement, text: string): HTMLButtonElement {
+  const found = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes(text));
+  if (!found) throw new Error(`нет кнопки с текстом «${text}»`);
+  return found as HTMLButtonElement;
+}
+
+describe("SettingsScreen", () => {
+  it("показывает состояние обменов и кто его менял", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    const el = await mount();
+    expect(el.textContent ?? "").toContain("Открыты");
+    expect(el.textContent ?? "").toContain("Игорь Петров");
+  });
+
+  it("первое нажатие не отправляет запрос, а спрашивает подтверждение", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    const setLock = vi.spyOn(apiClient, "setSwapsLock");
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+
+    expect(setLock).not.toHaveBeenCalled();
+    expect(el.textContent ?? "").toContain("Да, закрыть");
+  });
+
+  it("подтверждение закрывает обмены и называет цену", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    const setLock = vi.spyOn(apiClient, "setSwapsLock")
+      .mockResolvedValue({ locked: true, cancelled: 2, delivered: 24, intended: 26 });
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    await act(async () => buttonWith(el, "Да, закрыть").click());
+    await settle();
+
+    expect(setLock).toHaveBeenCalledTimes(1);
+    expect(setLock).toHaveBeenCalledWith(true);
+    const shown = el.textContent ?? "";
+    expect(shown).toContain("2");   // отменённые заявки
+    expect(shown).toContain("24");  // дошло
+    expect(shown).toContain("26");  // из скольких
+  });
+
+  it("ошибка сохранения показывается рядом с тумблером, а не вместо него", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    vi.spyOn(apiClient, "setSwapsLock").mockRejectedValue(new Error("сеть недоступна"));
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    await act(async () => buttonWith(el, "Да, закрыть").click());
+    await settle();
+
+    expect(el.textContent ?? "").toContain("сеть недоступна");
+    // Тумблер обязан остаться на экране: иначе из этого состояния нет выхода без F5.
+    expect(buttonWith(el, "Закрыть обмены")).toBeTruthy();
+  });
+});
