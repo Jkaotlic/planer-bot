@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, archiveEmployee } from "../repo/employees";
+import { createEmployee, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import { createShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
 
@@ -286,6 +286,29 @@ describe("the weekend market and archived people", () => {
 
     expect(expressInterest(db, slot.id, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_active" });
     expect(interestedForSlot(db, slot.id)).toHaveLength(0);
+  });
+});
+
+// The UI cannot offer this — an excluded person never got the call and never
+// tapped «Хочу» — but the route takes an employeeId from the request body, so
+// the door has to be shut on the route itself.
+describe("assignSlot and excludedFromAssignment", () => {
+  it("assignSlot refuses an excluded worker even when interest exists", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    // Interest recorded before the flag is set, so the refusal below can only be
+    // the exclusion check — the pre-existing not_interested guard is already
+    // satisfied and cannot be the one firing.
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY)).toEqual({ ok: false, reason: "excluded" });
+    expect(listShiftsByEmployee(db, igor.id)).toHaveLength(0);
+
+    // Same fixture, flag cleared: the assignment now goes through.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
   });
 });
 

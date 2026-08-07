@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { Bot } from "grammy";
-import { notifyUser, notifyAdmins } from "./notify";
+import { notifyUser, notifyAdmins, notifyVacantSlot } from "./notify";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import type { Db } from "../db/client";
 
 function testBot() {
@@ -38,6 +38,12 @@ function admin(db: Db, name: string, tgId: number) {
   const a = createEmployee(db, { displayName: name, inviteToken: `i-${tgId}`, isAdmin: true });
   linkTelegramAccount(db, `i-${tgId}`, tgId);
   return a;
+}
+
+function worker(db: Db, name: string, tgId: number) {
+  const w = createEmployee(db, { displayName: name, inviteToken: `i-${tgId}` });
+  linkTelegramAccount(db, `i-${tgId}`, tgId);
+  return w;
 }
 
 describe("notify", () => {
@@ -100,5 +106,35 @@ describe("notify", () => {
     const { bot, sent } = testBot();
     await notifyAdmins(bot, db, "обмен состоялся");
     expect(sent.map((s) => s.chat_id)).toEqual([222]);
+  });
+
+  it("notifyVacantSlot skips excluded workers and does not count them as intended", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня Смирнова", 111);
+    const igor = worker(db, "Игорь Петров", 222);
+    worker(db, "Марк Волков", 333);
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    const { bot, sent } = testBot();
+
+    const result = await notifyVacantSlot(bot, db, 1, "Нужен человек на выходной");
+
+    expect(sent.map((s) => s.chat_id).sort()).toEqual([111, 333]);
+    expect(result).toEqual({ delivered: 2, intended: 2 });
+  });
+
+  it("the same slot reaches all three once the flag is cleared", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня Смирнова", 111);
+    const igor = worker(db, "Игорь Петров", 222);
+    worker(db, "Марк Волков", 333);
+    // Same shape as the excluded-worker test above, minus the exclusion.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    const { bot, sent } = testBot();
+
+    const result = await notifyVacantSlot(bot, db, 1, "Нужен человек на выходной");
+
+    expect(sent.map((s) => s.chat_id).sort()).toEqual([111, 222, 333]);
+    expect(result).toEqual({ delivered: 3, intended: 3 });
   });
 });

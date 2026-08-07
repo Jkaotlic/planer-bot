@@ -1392,7 +1392,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // nobody, and the admin has no other way to find that out.
     const reach = bot
       ? await notifyVacantSlot(bot, db, slot.id, `Нужен человек на выходной:\n${slotLineOf(slot)}\n\nНажми «Хочу», если готов выйти.`)
-      : { delivered: 0, intended: listActive(db).length };
+      // No bot to actually send through, but the count must still agree with what
+      // notifyVacantSlot would have reported — same exclusion filter, or an admin
+      // running without a bot configured sees a different, dishonest number.
+      : { delivered: 0, intended: listActive(db).filter((employee) => !employee.excludedFromAssignment).length };
     recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, {
       slotId: slot.id,
       slot: slotLineOf(slot),
@@ -1417,7 +1420,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const body = (await c.req.json().catch(() => ({}))) as { employeeId?: unknown };
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
-    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (!res.ok) {
+      // "excluded" is the one reason here an admin can act on directly — the worker
+      // isn't broken, someone deliberately took them out of assignments — so it gets
+      // a human phrase. The other reason codes pass through as-is, unchanged.
+      const error = res.reason === "excluded" ? "Этот человек выведен из назначений" : res.reason;
+      return c.json({ error }, 400);
+    }
     const slot = getVacantSlot(db, res.assignment.slotId);
     recordAudit(db, "weekend_assigned", c.get("auth").employeeId, {
       slotId: res.assignment.slotId,
