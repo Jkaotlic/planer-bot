@@ -312,6 +312,31 @@ describe("assignSlot and excludedFromAssignment", () => {
   });
 });
 
+// Same reason the archived filter in interestedForSlot exists: a name shown
+// unmarked invites the admin to pick it. Somebody can have tapped «🙋 Хочу»
+// BEFORE an admin excluded them, and that stale row would otherwise sit in the
+// ranked list until «Назначить» refused it. His decision, 2026-08-07: drop them
+// from the list rather than mark them — the flag means «не участвует в выходных».
+describe("interestedForSlot and excludedFromAssignment", () => {
+  it("drops an excluded volunteer from the ranked list; the flag cleared brings them back", () => {
+    const db = makeTestDb();
+    const staying = createEmployee(db, { displayName: "Аня Смирнова" });
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    expect(expressInterest(db, slot.id, staying.id, TEST_TODAY).ok).toBe(true);
+    // Interest recorded before the flag — the stale-row case: somebody tapped
+    // «🙋 Хочу», and only afterwards did an admin exclude them.
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(interestedForSlot(db, slot.id).map((i) => i.employeeId)).toEqual([staying.id]);
+
+    // Same fixture, flag cleared: back on the list.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    expect(interestedForSlot(db, slot.id).map((i) => i.employeeId).sort()).toEqual([staying.id, igor.id].sort());
+  });
+});
+
 /**
  * Every posted slot leaves a «🙋 Хочу» button in twenty-eight Telegram chats, and
  * a Telegram button lives forever. The mini-app stops showing a slot once its date

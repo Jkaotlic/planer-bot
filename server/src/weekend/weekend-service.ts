@@ -113,9 +113,14 @@ export function interestedForSlot(
     if (entry.employeeId != null && isAbsence(entry.category)) awayThatDay.set(entry.employeeId, entry.category);
   }
   return listInterestedEmployeeIds(db, slotId)
-    // Somebody who volunteered and has since been archived is not a candidate;
-    // showing the name unmarked invites the admin to pick it.
-    .filter((employeeId) => isOnStaff(db, employeeId))
+    // Somebody who volunteered and has since been archived, or excluded from
+    // assignment, is not a candidate; showing the name unmarked invites the admin
+    // to pick it. The exclusion flag can be set AFTER someone taps «🙋 Хочу», so a
+    // stale row would otherwise sit in the ranked list until «Назначить» refused
+    // it with no explanation where the admin was looking. His decision,
+    // 2026-08-07: drop them from the list rather than mark them — the flag means
+    // «не участвует в выходных».
+    .filter((employeeId) => isOnStaff(db, employeeId) && !getEmployeeById(db, employeeId)?.excludedFromAssignment)
     .map((employeeId) => ({
       employeeId,
       name: getEmployeeById(db, employeeId)?.displayName ?? "Неизвестно",
