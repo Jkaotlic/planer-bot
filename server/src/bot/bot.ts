@@ -88,8 +88,10 @@ export function reasonToRu(reason: string): string {
   if (reason === "from-shift-not-owned" || reason === "to-shift-not-owned") return "Смена уже досталась другому человеку";
   if (reason === "identical-shift") return "Смены теперь совпадают";
   if (reason === "swaps-locked") return "Обмены сейчас закрыты админом";
-  if (reason === "from-excluded") return "Тебе закрыли обмены смен";
-  if (reason === "to-excluded") return "Коллеге закрыли обмены смен";
+  // Reason names are from the request POV (from/to), but the reader is always
+  // the counterparty. The reader sees: from-excluded = colleague excluded, to-excluded = you excluded.
+  if (reason === "from-excluded") return "Коллеге закрыли обмены смен";
+  if (reason === "to-excluded") return "Тебе закрыли обмены смен";
   return "Не получилось";
 }
 
