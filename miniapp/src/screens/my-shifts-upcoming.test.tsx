@@ -66,10 +66,11 @@ describe("MyShiftsScreen", () => {
     expect(text).toContain("Осталось на этой неделе — 1 смена · 9 ч");
   });
 
-  it("прошедших дней не рисует вовсе", async () => {
-    const text = await renderScreen([entry("2026-08-06", "День")]);
-    // 3 и 4 августа — понедельник и вторник той же недели, они позади.
-    expect(text).not.toContain("3 авг");
-    expect(text).not.toContain("4 авг");
+  it("прошедшую запись не рисует вовсе", async () => {
+    // 1 августа 2026 — суббота позади среды 5-го. Без этой записи в списке
+    // нет ничего, кроме неё, поэтому любой её след в тексте выдаёт баг.
+    const text = await renderScreen([entry("2026-08-01", "Ночь")]);
+    expect(text).not.toContain("Ночь");
+    expect(text).not.toContain("1 авг");
   });
 });

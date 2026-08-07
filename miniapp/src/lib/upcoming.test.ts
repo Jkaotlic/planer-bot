@@ -49,13 +49,35 @@ describe("groupUpcomingByWeek", () => {
     expect(groupUpcomingByWeek([], WEDNESDAY)).toEqual([]);
   });
 
-  it("многодневную запись кладёт в неделю её начала, а не в обе", () => {
+  it("многодневную запись, которая ещё не началась, кладёт в неделю её начала, а не в обе", () => {
     const weeks = groupUpcomingByWeek(
       [entry({ date: "2026-08-06", endDate: "2026-08-14", category: "vacation", start: null, end: null, title: null })],
       WEDNESDAY,
     );
     expect(weeks).toHaveLength(1);
     expect(weeks[0]!.label).toBe("Эта неделя · 5–9 августа");
+  });
+
+  it("многодневную запись, начавшуюся раньше и идущую прямо сейчас, кладёт в текущую неделю, а не в прошедшую", () => {
+    // Отпуск начался в субботу прошлой недели (1 августа) и тянется до 20-го —
+    // сервер отдаёт его, потому что он ещё не кончился (Task 1: окно режет по
+    // концу записи). Неделя его начала (27 июля – 2 августа) уже прошла целиком:
+    // попади запись туда, «Мои смены» показали бы отпуск в разделе,
+    // помеченном как прошедший, выше «Эта неделя».
+    const weeks = groupUpcomingByWeek(
+      [entry({ date: "2026-08-01", endDate: "2026-08-20", category: "vacation", start: null, end: null, title: null })],
+      WEDNESDAY,
+    );
+    expect(weeks).toHaveLength(1);
+    expect(weeks[0]!.label).toBe("Эта неделя · 5–9 августа");
+  });
+
+  it("запись, уже завершившуюся до сегодня, не показывает вовсе", () => {
+    const weeks = groupUpcomingByWeek(
+      [entry({ date: "2026-07-20", endDate: "2026-08-01", category: "vacation", start: null, end: null, title: null })],
+      WEDNESDAY,
+    );
+    expect(weeks).toEqual([]);
   });
 
   it("держит смены внутри недели в порядке дат", () => {
