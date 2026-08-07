@@ -1361,17 +1361,30 @@ describe("SettingsScreen", () => {
   });
 
   /**
-   * Пока запрос в полёте, нажать ещё раз нельзя.
+   * Окно между «сервер ответил» и «экран перечитан».
    *
-   * `confirming` сбрасывается сразу после ответа сервера, а `saving` — только
-   * после `reload()`. В это окно основная кнопка снова кликабельна, и второе
-   * подтверждение уходит вторым сообщением всей команде. Тест держит запрос
-   * незавершённым и проверяет, что кнопки погашены.
+   * `confirming` сбрасывается сразу после ответа `setSwapsLock`, а `saving` —
+   * только в `finally`, после `reload()`. Между ними экран рисует состояние
+   * `confirming=false, saving=true`: подтверждения на экране уже нет, а ОСНОВНАЯ
+   * кнопка снова видна. Если она не погашена — второе нажатие уходит вторым
+   * сообщением всей команде.
+   *
+   * Поэтому тест держит незавершённым именно `reload()` (второй `getSettings`),
+   * а не `setSwapsLock`, и щупает ОСНОВНУЮ кнопку. Проверка кнопки
+   * подтверждения тут ничего не стоит: у неё `disabled` был и до починки, и до
+   * этого окна экран всё равно не доходит.
+   *
+   * Подпись основной кнопки в этом окне ещё старая («Закрыть обмены»): она
+   * считается от `settings.swapsLocked`, а `settings` обновится только после
+   * перечитывания.
    */
-  it("пока запрос идёт, кнопки погашены", async () => {
-    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
-    let release!: (value: SwapLockResult) => void;
-    vi.spyOn(apiClient, "setSwapsLock").mockReturnValue(new Promise((resolve) => { release = resolve; }));
+  it("в окне между ответом и перечитыванием основная кнопка погашена", async () => {
+    let releaseReload!: (value: AdminSettings) => void;
+    vi.spyOn(apiClient, "getSettings")
+      .mockResolvedValueOnce(OPEN)
+      .mockReturnValueOnce(new Promise((resolve) => { releaseReload = resolve; }));
+    vi.spyOn(apiClient, "setSwapsLock")
+      .mockResolvedValue({ locked: true, cancelled: 0, delivered: 1, intended: 1 });
     const el = await mount();
 
     await act(async () => buttonWith(el, "Закрыть обмены").click());
@@ -1379,8 +1392,9 @@ describe("SettingsScreen", () => {
     await act(async () => buttonWith(el, "Да, закрыть").click());
     await settle();
 
-    expect(buttonWith(el, "Да, закрыть").disabled).toBe(true);
-    await act(async () => release({ locked: true, cancelled: 0, delivered: 1, intended: 1 }));
+    expect(buttonWith(el, "Закрыть обмены").disabled).toBe(true);
+
+    await act(async () => releaseReload({ ...OPEN, swapsLocked: true }));
     await settle();
   });
 
@@ -1448,6 +1462,7 @@ export interface SwapLockResult {
 - состояние: «Обмены смен — Открыты / Закрыты»;
 - **подписи кнопок ровно эти** (тест ищет по тексту, и в обеих консолях они одинаковы): основная — `Закрыть обмены` либо `Открыть обмены` по текущему состоянию; кнопка подтверждения — `Да, закрыть` либо `Да, открыть`; отмена — `Отмена`;
 - **все три кнопки гасятся на время запроса** (`disabled={saving}`), как это уже сделано в `BirthdaysScreen.tsx`. Без этого есть окно: `confirming` сбрасывается сразу после ответа сервера, а `saving` — только после `reload()`, и между ними основная кнопка снова кликабельна. Взвести и подтвердить повторно в этом окне значит разослать команде второе сообщение — ровно то, ради чего подтверждение и заводилось;
+- **кнопка подтверждения на время запроса пишет `Отправляю…`** — как `BirthdaysScreen.tsx`. Погашенная кнопка без текста говорит «сломалось», погашенная с подписью — «идёт». Подпись основной кнопки при этом НЕ меняется: она считается от `settings.swapsLocked`, который обновится только после перечитывания;
 - **взведение сбрасывает и прошлую ошибку тоже**, не только прошлый результат: иначе рядом с новым подтверждением висит текст отказа от предыдущей попытки;
 - подпись «Закрыл Игорь Петров · 7 августа, 14:30» (форматировать `formatAuditMoment` из `@planer/shared` — та же функция, что рисует время в журнале, чтобы формат не разъехался); если `swapsLockUpdatedBy === null` — «Ни разу не меняли»;
 - после успеха — строка результата: `Обмены закрыты. Отменено заявок: 2. Уведомление дошло до 24 из 26.` Хвост про доставку строить через уже существующий `withNotifyNotice` из `admin/src/lib/notify-text.ts`;
