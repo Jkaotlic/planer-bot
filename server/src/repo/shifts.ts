@@ -30,11 +30,18 @@ export function listShiftsOverlapping(db: Db, from: string, to: string): Shift[]
     .all();
 }
 
+/**
+ * Записи работника, которые ещё не кончились на `fromDate`.
+ *
+ * Граница по концу записи, а не по началу: отпуск с 1 по 20 июля идёт прямо
+ * сейчас, если смотреть седьмого, и человек должен видеть его во «Ближайших
+ * сменах». Тот же `coalesce`, что и в `listShiftsOverlapping` двумя функциями выше.
+ */
 export function listUpcomingForEmployee(db: Db, employeeId: number, fromDate: string): Shift[] {
   return db
     .select()
     .from(shifts)
-    .where(and(eq(shifts.employeeId, employeeId), gte(shifts.date, fromDate)))
+    .where(and(eq(shifts.employeeId, employeeId), gte(sql`coalesce(${shifts.endDate}, ${shifts.date})`, fromDate)))
     .orderBy(shifts.date, shifts.start)
     .all();
 }
