@@ -688,6 +688,18 @@ describe("preferred name", () => {
     expect((await app.request("/api/me/settings", authedJson(token, {}, "PATCH"))).status).toBe(400);
   });
 
+  it("работник выключил напоминания — это видно в журнале", async () => {
+    const db = makeTestDb();
+    const mark = worker(db, "Марк Волков", 201);
+    const app = createApp({ db, config });
+
+    await app.request("/api/me/settings", authedJson(await tokenFor(app, 201), { remindersEnabled: false }, "PATCH"));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "settings_changed");
+    expect(event?.actorEmployeeId).toBe(mark.id);
+    expect((event?.payload as { remindersEnabled: boolean }).remindersEnabled).toBe(false);
+  });
+
   it("lets an admin set it for somebody who never will", async () => {
     // The case this exists for: workers linked before tgFirstName was stored have
     // nothing to fall back to but «Кузнецов Михаил».
