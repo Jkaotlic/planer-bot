@@ -47,7 +47,7 @@ const asked: { from: string; to: string }[] = [];
 
 beforeEach(() => {
   asked.length = 0;
-  vi.spyOn(apiClient, "getMyShifts").mockResolvedValue([MY_SHIFT]);
+  vi.spyOn(apiClient, "getMyShifts").mockResolvedValue({ shifts: [MY_SHIFT], today: daysFromNow(0) });
   vi.spyOn(apiClient, "getTeamSchedule").mockImplementation(async (from: string, to: string) => {
     asked.push({ from, to });
     return { employees: [], shifts: [] };
