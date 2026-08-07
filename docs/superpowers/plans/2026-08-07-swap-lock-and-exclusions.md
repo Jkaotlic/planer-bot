@@ -2157,6 +2157,18 @@ Run: `npx vitest run server/src/bot/notify.test.ts server/src/weekend/weekend.te
   }
 ```
 
+И в `interestedForSlot`, рядом с уже существующим отсевом архивных (`isOnStaff`):
+
+```ts
+    // Same reason the archived filter above exists: a name shown unmarked invites
+    // the admin to pick it. Somebody can have tapped «🙋 Хочу» BEFORE an admin
+    // excluded them, and that stale row would otherwise sit in the ranked list
+    // until «Назначить» refused it. His decision, 2026-08-07: drop them from the
+    // list rather than mark them — the flag means «не участвует в выходных».
+```
+
+Фильтр по `excludedFromAssignment` ставится в то же условие, что и `isOnStaff`.
+
 Расширить union причин в типе `AssignOutcome` значением `"excluded"` и дописать русский текст отказа там же, где переводятся остальные причины этого роута (`server/src/http/app.ts`, обработчик `/api/admin/weekend/slots/:id/assign`) — например «Этот человек выведен из назначений».
 
 В `server/src/http/app.ts:1279` ветка без бота считает `intended: listActive(db).length` — применить тот же фильтр, иначе без бота счётчик разойдётся с тем, что даёт `notifyVacantSlot`.
