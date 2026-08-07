@@ -35,6 +35,13 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
     rest.count > 0
       ? `Осталось на этой неделе — ${rest.count} ${pluralizeRu(rest.count, "смена", "смены", "смен")} · ${Math.round(rest.hours)} ч`
       : "На этой неделе смен больше нет";
+  // Считаем один раз на весь экран: причина одна и та же для каждой строки, и
+  // порядок совпадает с swapBlockReason на сервере — сначала общий лок.
+  const swapBlockedReason = me.swapsLocked
+    ? "Обмены сейчас закрыты"
+    : me.excludedFromSwaps
+      ? "Обмены тебе закрыты — спроси у админа"
+      : undefined;
 
   return (
     <ScreenScroll>
@@ -53,7 +60,14 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
             {weeks.map((week) => (
               <Section key={week.key} header={week.label}>
                 {week.shifts.map((shift) => (
-                  <ShiftRow key={shift.id} shift={shift} templates={templates} onSwap={onProposeSwap} isToday={shift.date === today} />
+                  <ShiftRow
+                    key={shift.id}
+                    shift={shift}
+                    templates={templates}
+                    onSwap={onProposeSwap}
+                    isToday={shift.date === today}
+                    swapBlockedReason={swapBlockedReason}
+                  />
                 ))}
               </Section>
             ))}

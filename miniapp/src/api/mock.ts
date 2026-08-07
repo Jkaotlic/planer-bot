@@ -57,7 +57,13 @@ export const MOCK_ME: Me = {
   preferredName: null,
   isAdmin: true,
   remindersEnabled: true,
+  swapsLocked: false,
+  excludedFromSwaps: false,
 };
+
+// Кого мок вывел из обменов — только Игорь Петров, чтобы DEV-экран показывал
+// живой случай погашенной кнопки, а не только текстовое описание.
+const SWAP_EXCLUDED_IDS = new Set<number>([2]);
 
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {
   await delay(200);
@@ -244,6 +250,7 @@ export async function mockGetTeamSchedule(from: string, to: string): Promise<Tea
         id: employee.id,
         displayName: employee.displayName,
         rosterOrder,
+        excludedFromSwaps: SWAP_EXCLUDED_IDS.has(employee.id),
       })),
     shifts: ALL_ENTRIES.filter((entry) => overlapsRange(entry, from, to)).sort(byDateThenStart),
   };

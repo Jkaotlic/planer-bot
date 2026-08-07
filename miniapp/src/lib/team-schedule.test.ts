@@ -24,9 +24,9 @@ const templates = [
 ] as const satisfies ReadonlyArray<Pick<Template, "id" | "name" | "accent" | "sortOrder">>;
 
 const employees = [
-  { id: 20, displayName: "Орлов Дмитрий", rosterOrder: 0 },
-  { id: 10, displayName: "Соколов Максим", rosterOrder: 1 },
-  { id: 30, displayName: "Без Смены", rosterOrder: 2 },
+  { id: 20, displayName: "Орлов Дмитрий", rosterOrder: 0, excludedFromSwaps: false },
+  { id: 10, displayName: "Соколов Максим", rosterOrder: 1, excludedFromSwaps: false },
+  { id: 30, displayName: "Без Смены", rosterOrder: 2, excludedFromSwaps: false },
 ];
 
 function shift(patch: Partial<Shift> & Pick<Shift, "id" | "date" | "employeeId">): Shift {
@@ -588,6 +588,7 @@ describe("buildWeekLegend", () => {
       id: id as number,
       displayName: `Человек ${index + 1}`,
       rosterOrder: index,
+      excludedFromSwaps: false,
     })),
     shifts,
   });

@@ -274,6 +274,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       preferredName: me.preferredName,
       isAdmin: c.get("auth").isAdmin,
       remindersEnabled: me.remindersEnabled,
+      /** The swap rule travels together with "who am I": the screen must grey
+       *  out the «Обменять» button, not show it live and get refused on tap. */
+      swapsLocked: isSwapsLocked(db),
+      excludedFromSwaps: me.excludedFromSwaps,
     });
   });
 

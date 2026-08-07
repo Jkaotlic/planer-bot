@@ -27,6 +27,9 @@ export function swapCandidates(
   dayShifts: readonly Shift[],
   meId: number,
   now: Date,
+  /** Кого админ вывел из обменов. Отдельным множеством, а не полем на смене:
+   *  запрет висит на человеке, а не на конкретной записи графика. */
+  excludedIds: ReadonlySet<number>,
 ): SwapCandidates {
   const candidates: Shift[] = [];
   let sameKindCount = 0;
@@ -37,6 +40,9 @@ export function swapCandidates(
     if (shift.category !== "shift") continue;
     if (shift.start == null || shift.end == null) continue;
     if (hasStarted(shift, now)) continue;
+    // Раньше проверки «такая же смена»: исключённого не прячут как одинакового,
+    // с ним нельзя меняться вообще, и в sameKindCount он попасть не должен.
+    if (excludedIds.has(shift.employeeId)) continue;
     if (isIdenticalShift(fromShift, shift)) {
       sameKindCount += 1;
       continue;

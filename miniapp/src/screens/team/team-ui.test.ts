@@ -91,6 +91,7 @@ function fallbackPaletteSchedule(): TeamSchedule {
       id: entry.employeeId,
       displayName: `Сотрудник ${index + 1}`,
       rosterOrder: index,
+      excludedFromSwaps: false,
     })),
     shifts: categories.map((entry) => ({
       ...entry,
@@ -308,8 +309,8 @@ describe("team schedule UI", () => {
     });
     const schedule: TeamSchedule = {
       employees: [
-        { id: 20, displayName: "Орлов Дмитрий Сергеевич", rosterOrder: 0 },
-        { id: 10, displayName: "Соколов Максим", rosterOrder: 1 },
+        { id: 20, displayName: "Орлов Дмитрий Сергеевич", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 10, displayName: "Соколов Максим", rosterOrder: 1, excludedFromSwaps: false },
       ],
       shifts: [
         timedShift(2, 10, "09:00", "18:00", 2),
@@ -428,9 +429,9 @@ describe("team schedule UI", () => {
   it("renders all seven dates, active rows, two-line names, exact palettes, and full cell labels", () => {
     const schedule: TeamSchedule = {
       employees: [
-        { id: 20, displayName: "Орлов Дмитрий", rosterOrder: 0 },
-        { id: 10, displayName: "Соколов Максим", rosterOrder: 1 },
-        { id: 30, displayName: "Без Смены", rosterOrder: 2 },
+        { id: 20, displayName: "Орлов Дмитрий", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 10, displayName: "Соколов Максим", rosterOrder: 1, excludedFromSwaps: false },
+        { id: 30, displayName: "Без Смены", rosterOrder: 2, excludedFromSwaps: false },
       ],
       shifts: [
         {
