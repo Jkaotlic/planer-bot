@@ -213,7 +213,13 @@ export function buildDistribution(
     };
   });
 
-  const workers = listActive(db).map((e) => seedWorkerLoad(db, e.id, from, to, nameById));
+  // Everyone the roster still counts — including people an admin took out of
+  // automatic assignment. Kept separate from `workers` below because the
+  // `empty_pool` / `nobody_free` split below is judged against this list.
+  const active = listActive(db);
+  const workers = active
+    .filter((employee) => !employee.excludedFromAssignment)
+    .map((e) => seedWorkerLoad(db, e.id, from, to, nameById));
 
   const chosen = distributeFairly(slots, workers);
   const assignments = chosen.map((a) => ({
@@ -234,7 +240,12 @@ export function buildDistribution(
       kind: slot.kind,
       // Told apart on eligibility alone — being busy or away is a fact about a day,
       // being outside every pool is a fact about the preset.
-      reason: workers.some((w) => allowedByPool(slot.pool, w.employeeId)) ? "nobody_free" : "empty_pool",
+      //
+      // Judged over ALL active people, not over `workers`: `empty_pool` means the
+      // preset lists nobody who is on the roster — a misconfiguration. A pool of
+      // people who are merely excluded from assignment is configured correctly and
+      // simply has nobody available, which is what `nobody_free` says.
+      reason: active.some((employee) => allowedByPool(slot.pool, employee.id)) ? "nobody_free" : "empty_pool",
     }));
 
   return { assignments, unfilled };

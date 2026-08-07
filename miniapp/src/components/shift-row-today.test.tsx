@@ -61,7 +61,8 @@ async function render(node: React.ReactElement) {
 }
 
 function findByText(el: HTMLElement, text: string): HTMLElement {
-  const found = [...el.querySelectorAll("span,div")].find((n) => (n.textContent ?? "").trim() === text);
+  // "Обменять" — теперь настоящая `<button>` (см. ShiftRow), не `span`.
+  const found = [...el.querySelectorAll("span,div,button")].find((n) => (n.textContent ?? "").trim() === text);
   if (!found) throw new Error(`не нашёл элемент с текстом «${text}»`);
   return found as HTMLElement;
 }

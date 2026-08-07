@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getByTelegramId } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getByTelegramId, setEmployeeRestrictions } from "../repo/employees";
 import { listShiftsInRange } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
@@ -336,6 +336,63 @@ describe("posting a vacant slot says how far the broadcast actually got", () => 
     // The admin (111) is on the roster too and did link, so they are counted.
     expect(body.intended).toBe(4);
     expect(body.delivered).toBe(3);
+  });
+});
+
+// Without a bot configured, the route computes `intended` itself instead of going
+// through notifyVacantSlot — a separate spot that has to apply the same exclusion
+// filter, or the count disagrees with itself depending on whether a bot exists.
+describe("posting a vacant slot with no bot configured still filters excluded people out of intended", () => {
+  it("intended matches the bot branch's filter — excluded people are not counted, and reappear once cleared", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config }); // no bot: exercises the app.ts fallback branch directly
+    const admin = await tokenFor(app, 111); // auto-registers as an active roster member too
+    await worker(db, app, "Аня Смирнова", 201);
+    const igor = await worker(db, app, "Игорь Петров", 202);
+    setEmployeeRestrictions(db, igor.w.id, { excludedFromAssignment: true });
+
+    const date = nextSaturday();
+    const excluded = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }),
+    );
+    expect(excluded.status).toBe(201);
+    const excludedBody = await excluded.json();
+    expect(excludedBody.delivered).toBe(0); // no bot — nothing can actually be sent
+    expect(excludedBody.intended).toBe(2); // admin + Аня, minus excluded Игорь
+
+    // Same fixture, flag cleared — a different slot (same date, different time) to
+    // dodge the duplicate-post guard, which the exact-match slot above would trigger.
+    setEmployeeRestrictions(db, igor.w.id, { excludedFromAssignment: false });
+    const cleared = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date, start: "11:00", end: "19:00", title: "Ярмарка" }),
+    );
+    expect(cleared.status).toBe(201);
+    expect((await cleared.json()).intended).toBe(3);
+  });
+});
+
+describe("the admin cannot assign an excluded worker", () => {
+  it("refuses the assign (400) with a Russian phrase, not the raw reason code", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const igor = await worker(db, app, "Игорь Петров", 201);
+
+    const date = nextSaturday();
+    const posted = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }),
+    );
+    const slotId = (await posted.json()).slot.id as number;
+    expect((await app.request(`/api/weekend/slots/${slotId}/interest`, authed(igor.token))).status).toBe(201);
+
+    setEmployeeRestrictions(db, igor.w.id, { excludedFromAssignment: true });
+
+    const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: igor.w.id }));
+    expect(assigned.status).toBe(400);
+    expect((await assigned.json()).error).toBe("Этот человек выведен из назначений");
   });
 });
 

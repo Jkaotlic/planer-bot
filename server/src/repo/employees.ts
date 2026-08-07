@@ -1,6 +1,7 @@
 import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, type Employee } from "../db/schema";
+import type { DbOrTx } from "./settings";
 
 export function createEmployee(
   db: Db,
@@ -131,6 +132,23 @@ export function setBirthDate(db: Db, id: number, birthDate: string | null): Empl
  */
 export function setPreferredName(db: Db, id: number, preferredName: string | null): Employee | undefined {
   return db.update(employees).set({ preferredName }).where(eq(employees.id, id)).returning().all()[0];
+}
+
+/**
+ * The two admin-set restriction flags. Both optional: they live on one card but
+ * are flipped by separate gestures, so either may arrive alone.
+ *
+ * Takes `DbOrTx`, not `Db`: `PATCH /api/admin/employees/:id` writes this flag
+ * and cancels the person's open swap requests as ONE fact — same reasoning as
+ * `setSwapLock` — so it has to be callable with the caller's own transaction
+ * handle.
+ */
+export function setEmployeeRestrictions(
+  db: DbOrTx,
+  id: number,
+  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
+): Employee | undefined {
+  return db.update(employees).set(patch).where(eq(employees.id, id)).returning().all()[0];
 }
 
 export function createAdminEmployee(

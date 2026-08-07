@@ -64,7 +64,8 @@ export function getAllTemplateRoles(db: Db): Map<number, TemplateRoles> {
 /**
  * Whose turn it is for a preset: everyone eligible, with the last day they held
  * it. Eligible means the pool, or the whole active roster when the pool is empty
- * — the same rule the distributor uses, so the hint and the assignment agree.
+ * — the same rule the distributor uses, so the hint and the assignment agree —
+ * minus anyone excluded from assignment, who this queue never offers.
  *
  * Reads history from the schedule itself rather than a separate counter, so it
  * stays right however entries got there — imported, distributed or typed in.
@@ -76,7 +77,12 @@ export function getAllTemplateRoles(db: Db): Map<number, TemplateRoles> {
  */
 export function rotationCandidatesFor(db: Db, templateId: number, asOf: string): RotationCandidate[] {
   const pool = new Set(getTemplateRoles(db, templateId).pool);
-  const eligible = listActive(db).filter((employee) => pool.size === 0 || pool.has(employee.id));
+  // Excluded people are out of every automatic hand-out, and this queue is the
+  // ★ hint on both consoles — showing them as «next up» would invite exactly the
+  // assignment the flag exists to prevent.
+  const eligible = listActive(db).filter(
+    (employee) => !employee.excludedFromAssignment && (pool.size === 0 || pool.has(employee.id)),
+  );
 
   const lastHeld = new Map<number, string>();
   for (const row of db

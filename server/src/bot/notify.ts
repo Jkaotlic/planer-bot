@@ -170,7 +170,10 @@ export async function notifyVacantSlot(
   text: string,
 ): Promise<{ delivered: number; intended: number }> {
   const kb = new InlineKeyboard().text("🙋 Хочу", `weekend:interest:${slotId}`);
-  const team = listActive(db);
+  // A call for weekend volunteers is an assignment offer, so people an admin took
+  // out of assignments are out of this too. Filtered before `intended` is measured,
+  // or «дошло до N из M» would count people we deliberately never wrote to.
+  const team = listActive(db).filter((employee) => !employee.excludedFromAssignment);
   let delivered = 0;
   for (const e of team) {
     if (e.telegramUserId == null) continue;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Me, type Shift, type SwapRequest, type Template, type WeekendSlotView, type WeekendOffer } from "./api/client";
+import { apiClient, type Me, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
@@ -54,7 +54,7 @@ export function App() {
   // Расписание за день отдаваемой смены. Грузится отдельно от недельного:
   // «Обменять» доступно и на смене через три недели, а недельная выборка про неё
   // ничего не знает — раньше в этом случае экран показывал пустой список.
-  const [dayShifts, setDayShifts] = useState<{ date: string; shifts: Shift[] } | null>(null);
+  const [dayShifts, setDayShifts] = useState<{ date: string; shifts: Shift[]; employees: TeamEmployee[] } | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
   const [dayError, setDayError] = useState<string | null>(null);
   // reloadData is a background refresh (tab switch, regained focus) the user
@@ -109,7 +109,7 @@ export function App() {
     apiClient
       .getTeamSchedule(date, date)
       .then((schedule) => {
-        if (!cancelled) setDayShifts({ date, shifts: schedule.shifts });
+        if (!cancelled) setDayShifts({ date, shifts: schedule.shifts, employees: schedule.employees });
       })
       .catch((err: unknown) => {
         console.error("Day schedule failed:", err);
@@ -252,7 +252,9 @@ export function App() {
     // Только свой день: пока грузится другой, показывать прежние строки нельзя —
     // это чужой день, и человек предложит обмен не туда.
     const day = dayShifts?.date === proposingFor.date ? dayShifts.shifts : [];
-    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, new Date());
+    const dayEmployees = dayShifts?.date === proposingFor.date ? dayShifts.employees : [];
+    const excludedIds = new Set(dayEmployees.filter((e) => e.excludedFromSwaps).map((e) => e.id));
+    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, new Date(), excludedIds);
     return (
       <ProposeSwapScreen
         fromShift={proposingFor}

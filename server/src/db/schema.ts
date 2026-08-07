@@ -21,6 +21,12 @@ export const employees = sqliteTable("employees", {
   isAdmin: integer({ mode: "boolean" }).notNull().default(false),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
   remindersEnabled: integer({ mode: "boolean" }).notNull().default(true),
+  /** An admin took this person out of AUTOMATIC placement: «Распределить честно»,
+   *  the ★ queue, the weekend call for volunteers, and weekend assignment. An admin
+   *  can still place them by hand — this is not archiving. */
+  excludedFromAssignment: integer({ mode: "boolean" }).notNull().default(false),
+  /** An admin took this person out of swaps, both ways: neither propose nor accept. */
+  excludedFromSwaps: integer({ mode: "boolean" }).notNull().default(false),
   prepBufferMin: integer().notNull().default(60),
   inviteToken: text().unique(),
   archivedAt: integer({ mode: "timestamp" }),
@@ -201,6 +207,21 @@ export const calendarDays = sqliteTable("calendar_days", {
   note: text(),
 });
 
+/**
+ * Team-wide toggles. Key-value rather than columns: today there is exactly one
+ * key (`swaps_locked`), and a single-column table for it — so that the next
+ * toggle needs a fresh migration — is a bad trade.
+ *
+ * An ABSENT row means the default. The migration seeds nothing, so a database
+ * that never saw this feature behaves exactly as it did before.
+ */
+export const appSettings = sqliteTable("app_settings", {
+  key: text().primaryKey(),
+  value: text().notNull(),
+  updatedByEmployeeId: integer().references(() => employees.id),
+  updatedAt: integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+});
+
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;
 export type ShiftTemplate = typeof shiftTemplates.$inferSelect;
@@ -266,3 +287,5 @@ export type BirthdayCampaign = typeof birthdayCampaigns.$inferSelect;
 export type NewBirthdayCampaign = typeof birthdayCampaigns.$inferInsert;
 export type CalendarDay = typeof calendarDays.$inferSelect;
 export type NewCalendarDay = typeof calendarDays.$inferInsert;
+export type AppSetting = typeof appSettings.$inferSelect;
+export type NewAppSetting = typeof appSettings.$inferInsert;

@@ -88,7 +88,7 @@ async function mount() {
 describe("загрузка дня под отдаваемую смену", () => {
   it("спрашивает расписание за дату смены, а не за текущую неделю", async () => {
     const el = await mount();
-    const swap = [...el.querySelectorAll("[role='button']")].find(
+    const swap = [...el.querySelectorAll("button")].find(
       (b) => (b.textContent ?? "").trim() === "Обменять",
     ) as HTMLElement | undefined;
     expect(swap).toBeDefined();

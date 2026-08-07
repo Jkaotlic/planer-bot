@@ -32,8 +32,12 @@ import {
   setInviteToken,
   setRemindersEnabled,
   setPreferredName,
+  setEmployeeRestrictions,
   rememberTelegramProfile,
 } from "../repo/employees";
+import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
+import { setSwapLock, pendingSwapsForEmployee, cancelSwapsForEmployeeTx } from "../swap/swap-lock";
+import { buildSwapLockNotices, buildExclusionNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { notifyEntryChange, notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -270,6 +274,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       preferredName: me.preferredName,
       isAdmin: c.get("auth").isAdmin,
       remindersEnabled: me.remindersEnabled,
+      /** The swap rule travels together with "who am I": the screen must grey
+       *  out the «Обменять» button, not show it live and get refused on tap. */
+      swapsLocked: isSwapsLocked(db),
+      excludedFromSwaps: me.excludedFromSwaps,
     });
   });
 
@@ -345,6 +353,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // `address` is computed, not stored: the admin card shows what the bot will
   // actually say, so it is obvious whose greeting still needs setting.
+  //
+  // `{ ...employee }` also carries `excludedFromAssignment`/`excludedFromSwaps`
+  // to the client for free — do not "tidy" that spread into a narrower shape,
+  // the workers screen reads both flags straight off this response.
   app.get("/api/admin/employees", requireAdmin(db, config.jwtSecret), (c) =>
     c.json({ employees: listForAdmin(db).map((employee) => ({ ...employee, address: addressOf(employee) })) }));
 
@@ -364,15 +376,32 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ employee, inviteToken, inviteLink }, 201);
   });
 
-  // Rename a worker, and/or set their birthday. Either field on its own is a
-  // valid edit; sending neither is not, so an empty body can't silently no-op.
+  // Rename a worker, set their birthday, and/or flip their two restriction flags.
+  // Any field on its own is a valid edit; sending none of them is not, so an
+  // empty body can't silently no-op.
+  //
+  // `employee_updated` (name/birthday/«обращение») and `employee_restrictions_changed`
+  // (the two flags) are two different journal rows on purpose: one PATCH touching
+  // both kinds writes both — that is the truth about what the admin did. Order
+  // matters below and is not stylistic: every DB write (the fields, the flags, the
+  // swap cancellations) happens synchronously first; the `await` messaging for the
+  // swaps flag runs afterwards, from what those writes returned. The `races` lens
+  // already caught a double broadcast in this codebase from a status guard written
+  // *after* a loop of awaits — see `setSwapLock`.
   app.patch("/api/admin/employees/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown; birthDate?: unknown; preferredName?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      displayName?: unknown; birthDate?: unknown; preferredName?: unknown;
+      excludedFromAssignment?: unknown; excludedFromSwaps?: unknown;
+    };
     const hasName = body.displayName !== undefined;
     const hasBirthday = body.birthDate !== undefined;
     const hasPreferred = body.preferredName !== undefined;
-    if (!hasName && !hasBirthday && !hasPreferred) return c.json({ error: "displayName is required" }, 400);
+    const hasExcludedAssignment = body.excludedFromAssignment !== undefined;
+    const hasExcludedSwaps = body.excludedFromSwaps !== undefined;
+    if (!hasName && !hasBirthday && !hasPreferred && !hasExcludedAssignment && !hasExcludedSwaps) {
+      return c.json({ error: "displayName is required" }, 400);
+    }
 
     if (hasName && (typeof body.displayName !== "string" || body.displayName.trim().length === 0)) {
       return c.json({ error: "displayName is required" }, 400);
@@ -385,12 +414,20 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (preferred && !preferred.ok) {
       return c.json({ error: `Обращение — не длиннее ${PREFERRED_NAME_MAX} символов` }, 400);
     }
+    if (hasExcludedAssignment && typeof body.excludedFromAssignment !== "boolean") {
+      return c.json({ error: "excludedFromAssignment должен быть true или false" }, 400);
+    }
+    if (hasExcludedSwaps && typeof body.excludedFromSwaps !== "boolean") {
+      return c.json({ error: "excludedFromSwaps должен быть true или false" }, 400);
+    }
 
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
-    // Снимок до правки: без него переименование не оставляет следа — в журнале
-    // оказывается новое имя, а старого нет нигде.
+    // Snapshot before the edit: without it a rename leaves no trace — the journal
+    // would carry only the new name, with the old one gone from everywhere. A
+    // separate snapshot for the two flags — they get their own journal row.
     const beforeEdit = { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName };
+    const beforeRestrictions = { excludedFromAssignment: employee.excludedFromAssignment, excludedFromSwaps: employee.excludedFromSwaps };
     if (hasName) {
       const clash = findActiveByDisplayName(db, body.displayName as string, id);
       if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
@@ -399,11 +436,70 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (hasBirthday) employee = setBirthDate(db, id, body.birthDate as string | null) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
-    recordAudit(db, "employee_updated", c.get("auth").employeeId, {
-      employeeId: id,
-      before: beforeEdit,
-      after: { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName },
-    });
+    if (hasName || hasBirthday || hasPreferred) {
+      recordAudit(db, "employee_updated", c.get("auth").employeeId, {
+        employeeId: id,
+        before: beforeEdit,
+        after: { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName },
+      });
+    }
+
+    if (hasExcludedAssignment || hasExcludedSwaps) {
+      const restrictionsPatch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean } = {};
+      if (hasExcludedAssignment) restrictionsPatch.excludedFromAssignment = body.excludedFromAssignment as boolean;
+      if (hasExcludedSwaps) restrictionsPatch.excludedFromSwaps = body.excludedFromSwaps as boolean;
+
+      // Whether this PATCH newly excludes the person from swaps is already
+      // knowable from the request body and the snapshot above. Read the
+      // payloads for it now, BEFORE the write — same reasoning as
+      // `setSwapLock`: `swapAuditPayload` resolves names and shift lines, and
+      // those have to describe the trade as it stood.
+      const willExcludeFromSwaps = hasExcludedSwaps && body.excludedFromSwaps === true && !beforeRestrictions.excludedFromSwaps;
+      const { pending, payloads: cancelledPayloads } = willExcludeFromSwaps
+        ? pendingSwapsForEmployee(db, id)
+        : { pending: [], payloads: [] };
+
+      // The flag and the cancellations are one fact — half of it landing is
+      // worse than neither (an admin would see the flag set while the
+      // buttons still worked). Same shape as `setSwapLock`.
+      db.transaction((tx) => {
+        employee = setEmployeeRestrictions(tx, id, restrictionsPatch) ?? employee;
+        if (willExcludeFromSwaps) cancelSwapsForEmployeeTx(tx, pending);
+      });
+
+      const afterRestrictions = { excludedFromAssignment: employee.excludedFromAssignment, excludedFromSwaps: employee.excludedFromSwaps };
+      const swapsChanged = beforeRestrictions.excludedFromSwaps !== afterRestrictions.excludedFromSwaps;
+      const restrictionsChanged = swapsChanged || beforeRestrictions.excludedFromAssignment !== afterRestrictions.excludedFromAssignment;
+
+      // Written only when a flag actually changed value — a rename-only PATCH,
+      // or one resending the flags' current values, must not add a row here.
+      if (restrictionsChanged) {
+        recordAudit(db, "employee_restrictions_changed", c.get("auth").employeeId, {
+          employeeId: id,
+          displayName: employee.displayName,
+          before: beforeRestrictions,
+          after: afterRestrictions,
+        });
+      }
+
+      // The assignment flag is deliberately silent — see `buildExclusionNotices`.
+      // Only a real change to `excludedFromSwaps` notifies.
+      if (swapsChanged) {
+        const others = listActive(db).filter((e) => e.id !== id);
+        const notices = buildExclusionNotices({
+          excluded: afterRestrictions.excludedFromSwaps,
+          person: { id, telegramUserId: employee.telegramUserId },
+          others,
+          cancelled: cancelledPayloads,
+        });
+        if (bot) {
+          for (const notice of notices) {
+            await notifyUser(bot, notice.telegramUserId, notice.text);
+          }
+        }
+      }
+    }
+
     return c.json({ employee: { ...employee, address: addressOf(employee) } });
   });
 
@@ -524,6 +620,45 @@ export function createApp(deps: AppDeps): Hono<Env> {
       payload: row.payload,
     }));
     return c.json({ events });
+  });
+
+  app.get("/api/admin/settings", requireAdmin(db, config.jwtSecret), (c) => {
+    const setting = swapsLockSetting(db);
+    const actor = setting?.updatedByEmployeeId == null ? undefined : getEmployeeById(db, setting.updatedByEmployeeId);
+    return c.json({
+      swapsLocked: isSwapsLocked(db),
+      swapsLockUpdatedAt: setting?.updatedAt?.toISOString() ?? null,
+      swapsLockUpdatedBy: actor?.displayName ?? null,
+    });
+  });
+
+  /**
+   * The team-wide swap switch.
+   *
+   * Order matters and is not stylistic: the database write and the cancellation
+   * happen first, synchronously, in one transaction; only then does the awaited
+   * broadcast run. The `races` lens already caught a double broadcast in this
+   * codebase that came from writing a status guard *after* a loop of awaits.
+   */
+  app.put("/api/admin/settings/swaps-lock", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { locked?: unknown };
+    if (typeof body.locked !== "boolean") return c.json({ error: "locked должен быть true или false" }, 400);
+
+    const actorId = c.get("auth").employeeId;
+    const cancelled = setSwapLock(db, body.locked, actorId);
+
+    const team = listActive(db);
+    const notices = buildSwapLockNotices({ locked: body.locked, team, cancelled });
+    let delivered = 0;
+    if (bot) {
+      for (const notice of notices) {
+        if (await notifyUser(bot, notice.telegramUserId, notice.text)) delivered += 1;
+      }
+    }
+    const reach = { delivered, intended: notices.length };
+
+    recordAudit(db, "swaps_lock_changed", actorId, { locked: body.locked, cancelled: cancelled.length, ...reach });
+    return c.json({ locked: body.locked, cancelled: cancelled.length, ...reach });
   });
 
   // --- Дни рождения ---------------------------------------------------------
@@ -1273,7 +1408,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // nobody, and the admin has no other way to find that out.
     const reach = bot
       ? await notifyVacantSlot(bot, db, slot.id, `Нужен человек на выходной:\n${slotLineOf(slot)}\n\nНажми «Хочу», если готов выйти.`)
-      : { delivered: 0, intended: listActive(db).length };
+      // No bot to actually send through, but the count must still agree with what
+      // notifyVacantSlot would have reported — same exclusion filter, or an admin
+      // running without a bot configured sees a different, dishonest number.
+      : { delivered: 0, intended: listActive(db).filter((employee) => !employee.excludedFromAssignment).length };
     recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, {
       slotId: slot.id,
       slot: slotLineOf(slot),
@@ -1298,7 +1436,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const body = (await c.req.json().catch(() => ({}))) as { employeeId?: unknown };
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
-    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (!res.ok) {
+      // "excluded" is the one reason here an admin can act on directly — the worker
+      // isn't broken, someone deliberately took them out of assignments — so it gets
+      // a human phrase. The other reason codes pass through as-is, unchanged.
+      const error = res.reason === "excluded" ? "Этот человек выведен из назначений" : res.reason;
+      return c.json({ error }, 400);
+    }
     const slot = getVacantSlot(db, res.assignment.slotId);
     recordAudit(db, "weekend_assigned", c.get("auth").employeeId, {
       slotId: res.assignment.slotId,

@@ -281,6 +281,39 @@ describe("describeAuditEvent — остальные события", () => {
     expect(rotationLineFor("week")).toContain("шаг: по неделям");
     expect(rotationLineFor("day")).toContain("шаг: по дням");
   });
+
+  it("описывает закрытие и открытие обменов", () => {
+    const closed = describeAuditEvent({
+      type: "swaps_lock_changed",
+      payload: { locked: true, cancelled: 3, delivered: 24, intended: 26 },
+    });
+    expect(closed.title).toBe("Обмены смен закрыты");
+    expect(closed.lines).toContain("отменено заявок: 3");
+    expect(closed.lines).toContain("дошло до 24 из 26");
+
+    const opened = describeAuditEvent({ type: "swaps_lock_changed", payload: { locked: false, cancelled: 0, delivered: 26, intended: 26 } });
+    expect(opened.title).toBe("Обмены смен открыты");
+    // Открытие ничего не гасит — строки про заявки быть не должно.
+    expect(opened.lines.some((line) => line.startsWith("отменено"))).toBe(false);
+  });
+});
+
+describe("describeAuditEvent — ограничения работника", () => {
+  it("описывает изменение ограничений работника", () => {
+    const view = describeAuditEvent({
+      type: "employee_restrictions_changed",
+      payload: {
+        employeeId: 4, displayName: "Аня Смирнова",
+        before: { excludedFromAssignment: false, excludedFromSwaps: false },
+        after: { excludedFromAssignment: true, excludedFromSwaps: false },
+      },
+    });
+    expect(view.title).toBe("Изменены ограничения работника");
+    expect(view.lines).toContain("Аня Смирнова");
+    expect(view.lines).toContain("назначения: участвует → не участвует");
+    // Обмены не менялись — строки про них быть не должно.
+    expect(view.lines.some((line) => line.startsWith("обмены"))).toBe(false);
+  });
 });
 
 describe("describeAuditEvent — полнота таблицы", () => {

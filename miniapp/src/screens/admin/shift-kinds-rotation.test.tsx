@@ -27,8 +27,8 @@ import { AdminShiftKinds } from "./AdminShiftKinds";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: false, isActive: true, telegramUserId: 10, birthDate: null, address: "Аня", preferredName: null },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, address: "Игорь", preferredName: null },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: false, isActive: true, telegramUserId: 10, birthDate: null, address: "Аня", preferredName: null, excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, address: "Игорь", preferredName: null, excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 let root: Root | null = null;

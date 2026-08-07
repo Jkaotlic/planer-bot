@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee } from "../repo/employees";
 import { createShift, getShift, updateShift } from "../repo/shifts";
 import { getSwapRequest, createSwapRequest } from "../repo/swaps";
+import { setSwapsLocked } from "../repo/settings";
+import { employees } from "../db/schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "./swap-service";
 
 const NOW = { date: "2026-07-01", time: "12:00" };
@@ -175,5 +178,80 @@ describe("swap service", () => {
     const res = acceptSwap(db, req.id, b.id, NOW);
     expect(res.ok).toBe(false);
     expect(getSwapRequest(db, req.id)?.status).toBe("expired");
+  });
+});
+
+describe("swap service under admin restrictions", () => {
+  it("createSwap refuses while swaps are locked, and allows once unlocked", () => {
+    const { db, a, b, sa, sb } = setup();
+    setSwapsLocked(db, true, b.id);
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "swaps-locked" });
+    setSwapsLocked(db, false, b.id);
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW).ok).toBe(true);
+  });
+
+  /**
+   * The one test this whole feature rests on.
+   *
+   * The bot's «Принять» button calls `acceptSwap` directly (`bot.ts:459`), never
+   * through an HTTP route — a guard placed in the route would leave that button
+   * working while the Mini App was locked. The request here is created BEFORE the
+   * lock, deliberately: `lockSwaps` (Task 3) cancels open requests, and a test
+   * relying on that would be proving the cancellation, not the guard.
+   */
+  it("acceptSwap refuses while swaps are locked", () => {
+    const { db, a, b, sa, sb } = setup();
+    const proposed = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) return;
+    setSwapsLocked(db, true, b.id);
+    expect(acceptSwap(db, proposed.request.id, b.id, NOW))
+      .toMatchObject({ ok: false, reason: "swaps-locked" });
+  });
+
+  /**
+   * The guard's own failure mode, not the lock's: `swaps-locked` is admin
+   * state, not a fact about the shifts, so refusing here must NOT do what
+   * `unavailable`/`identical-shift`/etc. do — write `expired` and hand back an
+   * `expired` request. That would tell the initiator their swap died because
+   * a shift moved, which is false; unlocking makes this very same request
+   * valid again. The existing "refuses while locked" test above only pins the
+   * `reason` (`toMatchObject` passes whether or not status changed) — this
+   * one pins the survival.
+   */
+  it("acceptSwap under lock leaves the request pending, not expired", () => {
+    const { db, a, b, sa, sb } = setup();
+    const proposed = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) return;
+    setSwapsLocked(db, true, b.id);
+    const res = acceptSwap(db, proposed.request.id, b.id, NOW);
+    expect(res).toEqual({ ok: false, reason: "swaps-locked" });
+    expect(getSwapRequest(db, proposed.request.id)?.status).toBe("pending");
+  });
+
+  it("decline and cancel stay open while swaps are locked", () => {
+    const { db, a, b, sa, sb } = setup();
+    const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
+    if (!first.ok) throw new Error("setup failed");
+    setSwapsLocked(db, true, b.id);
+    expect(declineSwap(db, first.request.id, b.id).ok).toBe(true);
+  });
+
+  it("createSwap refuses when the initiator is excluded, and allows once the flag is cleared", () => {
+    const { db, a, b, sa, sb } = setup();
+    db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, a.id)).run();
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "from-excluded" });
+    db.update(employees).set({ excludedFromSwaps: false }).where(eq(employees.id, a.id)).run();
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW).ok).toBe(true);
+  });
+
+  it("createSwap refuses when the counterparty is excluded", () => {
+    const { db, a, b, sa, sb } = setup();
+    db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, b.id)).run();
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "to-excluded" });
   });
 });

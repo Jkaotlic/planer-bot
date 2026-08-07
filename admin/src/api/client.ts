@@ -14,6 +14,7 @@ import {
   mockSetEmployeeAdmin,
   mockRenameEmployee,
   mockSetBirthDate,
+  mockSetEmployeeRestrictions,
   mockReorderEmployee,
   mockGetEmployeeInvite,
   mockGetWeekendSlots,
@@ -36,6 +37,8 @@ import {
   mockSaveTemplateRoles,
   mockPreviewRosterImport,
   mockApplyRosterImport,
+  mockGetSettings,
+  mockSetSwapsLock,
 } from "./mock";
 
 /** A worker row in the schedule grid / Работники screen. */
@@ -53,6 +56,11 @@ export interface Employee {
    *  Never derive this from `displayName`: the roster is «Фамилия Имя», so its
    *  first word is a surname. See `addressOf` in @planer/shared. */
   address: string;
+  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
+   *  выходные. Ручную постановку это не запрещает. */
+  excludedFromAssignment: boolean;
+  /** Админ вывел человека из обменов — в обе стороны. */
+  excludedFromSwaps: boolean;
 }
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -333,6 +341,22 @@ export interface NotifyReach {
   intended: number;
 }
 
+/** Состояние общего замка обменов сменами — экран «Настройки». */
+export interface AdminSettings {
+  swapsLocked: boolean;
+  /** ISO-строка или null, если тумблер ни разу не трогали. */
+  swapsLockUpdatedAt: string | null;
+  swapsLockUpdatedBy: string | null;
+}
+
+/** Итог переключения замка: что стало, и какой ценой (кому дошло уведомление). */
+export interface SwapLockResult {
+  locked: boolean;
+  cancelled: number;
+  delivered: number;
+  intended: number;
+}
+
 export interface ApiClient {
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
@@ -348,6 +372,10 @@ export interface ApiClient {
   renameEmployee(id: number, displayName: string): Promise<void>;
   /** `null` clears the birthday. */
   setBirthDate(id: number, birthDate: string | null): Promise<void>;
+  /** Sets one or both exclusion flags. Turning on `excludedFromSwaps` cancels
+   *  this person's open swap requests and notifies them — the caller doesn't
+   *  need to do anything else for that to happen. */
+  setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
@@ -375,6 +403,8 @@ export interface ApiClient {
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
+  getSettings(): Promise<AdminSettings>;
+  setSwapsLock(locked: boolean): Promise<SwapLockResult>;
 }
 
 interface EmployeesResponse {
@@ -693,6 +723,10 @@ export const realClient: ApiClient = {
     await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
   },
 
+  async setEmployeeRestrictions(id, patch) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
+  },
+
   getEmployeeInvite(id, regenerate = false) {
     return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
   },
@@ -818,6 +852,14 @@ export const realClient: ApiClient = {
     );
     return { ...summary, notified };
   },
+
+  getSettings() {
+    return authorizedGet<AdminSettings>("/api/admin/settings");
+  },
+
+  setSwapsLock(locked) {
+    return authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked });
+  },
 };
 
 const devClient: ApiClient = {
@@ -834,6 +876,7 @@ const devClient: ApiClient = {
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
   setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
+  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
   reorderEmployee: (id, position) => mockReorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
@@ -856,6 +899,8 @@ const devClient: ApiClient = {
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
+  getSettings: () => mockGetSettings(),
+  setSwapsLock: (locked) => mockSetSwapsLock(locked),
 };
 
 /**

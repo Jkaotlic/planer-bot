@@ -8,6 +8,8 @@ export interface EmployeesScreenProps {
   employees: readonly Employee[];
   /** Re-fetches the employee list from the API after a mutation. */
   onChanged: () => Promise<void>;
+  /** Patches a just-saved restriction flag into the parent's own state — see `setRestriction`. */
+  onRestrictionsSaved: (id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
 }
 
 /**
@@ -41,7 +43,7 @@ export function refusalText(message: string): string {
  * "Работники" screen: active/archived worker lists with archive/restore
  * actions, plus a dialog to add a new worker and hand them an invite link.
  */
-export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) {
+export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: EmployeesScreenProps) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -67,6 +69,28 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
       await onChanged();
     } catch (err) {
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось выполнить действие" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /**
+   * Deliberately does NOT go through `onChanged()`: a full re-fetch after a
+   * successful save is unnecessary work — the response already told us the
+   * new value took — and re-running it only reopens a stale-render window
+   * between the PATCH resolving and the GET's response landing, during which
+   * the checkbox could flash back to the pre-save value. Patching the
+   * confirmed value straight into the parent's state avoids that window
+   * entirely. Mirrors the Mini App's `AdminEmployeesScreen.setRestriction`.
+   */
+  async function setRestriction(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) {
+    setBusyId(id);
+    setRowError(null);
+    try {
+      await apiClient.setEmployeeRestrictions(id, patch);
+      onRestrictionsSaved(id, patch);
+    } catch (err) {
+      setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось сохранить ограничение" });
     } finally {
       setBusyId(null);
     }
@@ -106,6 +130,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         onReorder={(id, position) => withBusy(id, () => apiClient.reorderEmployee(id, position).then(() => {}))}
         onBirthDate={(id, birthDate) => withBusy(id, () => apiClient.setBirthDate(id, birthDate))}
         onShowInvite={(employee) => void showInvite(employee)}
+        onSetRestrictions={setRestriction}
       />
 
       <EmployeesSection
@@ -117,6 +142,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         rowError={rowError}
         onAction={(id) => withBusy(id, () => apiClient.restoreEmployee(id))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
+        onSetRestrictions={setRestriction}
       />
 
       {showAddDialog && (
@@ -156,9 +182,11 @@ interface EmployeesSectionProps {
   onReorder?: (id: number, position: number) => void;
   /** When provided, each row can set or clear the worker's birthday. */
   onBirthDate?: (id: number, birthDate: string | null) => void;
+  /** Every row gets the «Ограничения» checkboxes — active and archived alike. */
+  onSetRestrictions: (id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -180,6 +208,7 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, r
               onToggleAdmin={onToggleAdmin ? () => onToggleAdmin(employee.id, !employee.isAdmin) : undefined}
               onRename={onRename ? (name) => onRename(employee.id, name) : undefined}
               onShowInvite={onShowInvite ? () => onShowInvite(employee) : undefined}
+              onSetRestrictions={(patch) => onSetRestrictions(employee.id, patch)}
             />
           ))}
         </div>
@@ -200,6 +229,7 @@ function EmployeeRow({
   onShowInvite,
   onReorder,
   onBirthDate,
+  onSetRestrictions,
 }: {
   employee: Employee;
   actionLabel: string;
@@ -214,6 +244,7 @@ function EmployeeRow({
   onShowInvite?: () => void;
   onReorder?: (position: number) => void;
   onBirthDate?: (birthDate: string | null) => void;
+  onSetRestrictions: (patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -236,7 +267,7 @@ function EmployeeRow({
   }
 
   return (
-    <div className="employee-row-card">
+    <div className="employee-row-card" data-employee-id={employee.id}>
       {position !== undefined && onReorder && (
         <PositionField position={position} busy={busy} onCommit={onReorder} />
       )}
@@ -304,6 +335,35 @@ function EmployeeRow({
             {busy ? "…" : actionLabel}
           </button>
         </>
+      )}
+      {!editing && (
+        <div className="employee-restrictions">
+          <span className="employee-restrictions-title">Ограничения</span>
+          <label className="employee-restriction-checkbox">
+            <input
+              type="checkbox"
+              checked={employee.excludedFromAssignment}
+              disabled={busy}
+              onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
+            />
+            Не участвует в назначениях
+            <span className="employee-restriction-hint">
+              — бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно
+            </span>
+          </label>
+          <label className="employee-restriction-checkbox">
+            <input
+              type="checkbox"
+              checked={employee.excludedFromSwaps}
+              disabled={busy}
+              onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
+            />
+            Не участвует в обменах
+            <span className="employee-restriction-hint">
+              — ни предложить, ни принять обмен; открытые заявки будут отменены
+            </span>
+          </label>
+        </div>
       )}
       {/* The refusal belongs where the click was. `flex-basis: 100%` puts it on
           its own line inside the card — the card already wraps. */}

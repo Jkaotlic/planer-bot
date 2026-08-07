@@ -12,11 +12,14 @@ export interface ShiftRowProps {
   onSwap?: (shift: Shift) => void;
   /** Today's row is marked: an accent rail on the left and a «Сегодня» chip. */
   isToday?: boolean;
+  /** Почему обмен сейчас недоступен. Кнопка остаётся на месте, но гаснет и несёт
+   *  эту фразу: пропавшая кнопка читается как поломка, погашенная — как правило. */
+  swapBlockedReason?: string;
 }
 
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
-export function ShiftRow({ shift, templates, onSwap, isToday }: ShiftRowProps) {
+export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason }: ShiftRowProps) {
   const isSwappable = shift.category === "shift";
 
   return (
@@ -54,7 +57,7 @@ export function ShiftRow({ shift, templates, onSwap, isToday }: ShiftRowProps) {
         isToday || (isSwappable && onSwap) ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
             {isToday && <TodayChip />}
-            {isSwappable && onSwap && <SwapChip onClick={() => onSwap(shift)} />}
+            {isSwappable && onSwap && <SwapChip onClick={() => onSwap(shift)} blockedReason={swapBlockedReason} />}
           </div>
         ) : undefined
       }
@@ -86,23 +89,27 @@ function TodayChip() {
 
 interface SwapChipProps {
   onClick: () => void;
+  /** Причина, по которой обмен сейчас недоступен. Заданная — кнопка гаснет,
+   *  показывает эту фразу под собой и не зовёт `onClick`. */
+  blockedReason?: string;
 }
 
-/** The "Обменять" affordance: opens the propose-swap flow for this shift. */
-function SwapChip({ onClick }: SwapChipProps) {
-  return (
-    <span
-      role="button"
-      tabIndex={0}
+/** The "Обменять" affordance: opens the propose-swap flow for this shift, or —
+ *  with `blockedReason` set — stays on the row dimmed and names why, instead of
+ *  disappearing (a missing button reads as "the app is broken"). A real
+ *  `<button>`, not a `role="button"` span: its native `disabled` state is what
+ *  makes "не срабатывает" free — no extra guard can silently drift out of sync
+ *  with the dimmed styling next to it. */
+function SwapChip({ onClick, blockedReason }: SwapChipProps) {
+  const blocked = blockedReason != null;
+  const tint = blocked ? "var(--tgui--hint_color)" : "var(--tgui--link_color)";
+  const button = (
+    <button
+      type="button"
+      disabled={blocked}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
       }}
       style={{
         // `position: relative` is load-bearing, not cosmetic: `Cell`'s tap
@@ -117,15 +124,39 @@ function SwapChip({ onClick }: SwapChipProps) {
         display: "inline-block",
         fontSize: 13,
         fontWeight: 600,
-        color: "var(--tgui--link_color)",
-        boxShadow: "0 0 0 1.4px color-mix(in srgb, var(--tgui--link_color) 40%, transparent)",
+        fontFamily: "inherit",
+        color: tint,
+        background: "none",
+        border: "none",
+        boxShadow: `0 0 0 1.4px color-mix(in srgb, ${tint} 40%, transparent)`,
         borderRadius: 999,
         padding: "6px 12px",
         whiteSpace: "nowrap",
-        cursor: "pointer",
+        cursor: blocked ? "default" : "pointer",
       }}
     >
       Обменять
-    </span>
+    </button>
+  );
+  // No wrapper when there's nothing to caption: keeps the button the row's
+  // only "Обменять"-labelled element, so anything hunting for it by its exact
+  // text (as well as by tag) lands on the real control, not an ancestor `<div>`
+  // that happens to repeat the same text.
+  if (!blocked) return button;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+      {button}
+      <span
+        style={{
+          fontSize: 11,
+          color: "var(--tgui--hint_color)",
+          textAlign: "right",
+          maxWidth: 130,
+          lineHeight: 1.3,
+        }}
+      >
+        {blockedReason}
+      </span>
+    </div>
   );
 }

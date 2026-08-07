@@ -1,4 +1,5 @@
 import { List, Placeholder, Section } from "@telegram-apps/telegram-ui";
+import { swapBlockReason } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import { AddressField } from "../components/AddressField";
 import { GreetingHero } from "../components/GreetingHero";
@@ -7,6 +8,15 @@ import { ShiftRow } from "../components/ShiftRow";
 import { RemindersSwitch } from "../components/RemindersSwitch";
 import { groupUpcomingByWeek, remainingThisWeek } from "../lib/upcoming";
 import { pluralizeRu } from "../lib/shift";
+
+// Причина одна на весь экран, и её порядок берётся у той же функции, что решает
+// на сервере. `toExcluded: false` — здесь речь только про меня; исключённые
+// коллеги отсеиваются отдельно, в списке кандидатов.
+const BLOCK_PHRASES = {
+  "swaps-locked": "Обмены сейчас закрыты",
+  "from-excluded": "Обмены тебе закрыты — спроси у админа",
+  "to-excluded": "Обмены тебе закрыты — спроси у админа",
+} as const;
 
 export interface MyShiftsScreenProps {
   me: Me;
@@ -35,6 +45,15 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
     rest.count > 0
       ? `Осталось на этой неделе — ${rest.count} ${pluralizeRu(rest.count, "смена", "смены", "смен")} · ${Math.round(rest.hours)} ч`
       : "На этой неделе смен больше нет";
+  // Считаем один раз на весь экран и раздаём каждой строке. Порядок причин не
+  // переписан руками — он приходит от той же функции, что решает на сервере,
+  // чтобы кнопка не могла разъехаться с ним после следующей правки там.
+  const blocked = swapBlockReason({
+    swapsLocked: me.swapsLocked,
+    fromExcluded: me.excludedFromSwaps,
+    toExcluded: false,
+  });
+  const swapBlockedReason = blocked ? BLOCK_PHRASES[blocked] : undefined;
 
   return (
     <ScreenScroll>
@@ -53,7 +72,14 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
             {weeks.map((week) => (
               <Section key={week.key} header={week.label}>
                 {week.shifts.map((shift) => (
-                  <ShiftRow key={shift.id} shift={shift} templates={templates} onSwap={onProposeSwap} isToday={shift.date === today} />
+                  <ShiftRow
+                    key={shift.id}
+                    shift={shift}
+                    templates={templates}
+                    onSwap={onProposeSwap}
+                    isToday={shift.date === today}
+                    swapBlockedReason={swapBlockedReason}
+                  />
                 ))}
               </Section>
             ))}
