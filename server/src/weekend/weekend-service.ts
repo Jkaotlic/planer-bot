@@ -26,9 +26,13 @@ import { createShift, deleteShift, listShiftsOverlapping } from "../repo/shifts"
 import { getEmployeeById } from "../repo/employees";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
+/** Every refusal `assignSlot` actually returns — narrowed so a typo on either
+ *  side of the route's `res.reason === "excluded" ? … : res.reason` check
+ *  would be caught by `tsc` instead of shipping a raw code to the screen. */
+export type AssignReason = "not_found" | "not_open" | "slot_passed" | "not_weekend" | "not_active" | "excluded" | "not_interested";
 /** `changed` is false only for the true no-op branch below (already assigned, nothing
  *  written) — callers use it to skip re-notifying the worker on a repeat "Назначить". */
-export type AssignOutcome = { ok: true; assignment: WeekendAssignment; changed: boolean } | { ok: false; reason: string };
+export type AssignOutcome = { ok: true; assignment: WeekendAssignment; changed: boolean } | { ok: false; reason: AssignReason };
 /** `slotId` lets callers build a "<name> confirmed/declined <slot>" admin
  *  broadcast without a second lookup. */
 export type ConfirmOutcome = { ok: true; slotId: number } | { ok: false; reason: string };
@@ -74,7 +78,7 @@ function isOnStaff(db: Db, employeeId: number): boolean {
  * `createEntrySchema`, which is what enforces «только суббота или воскресенье» on
  * the other path. Two ways in, one rule each.
  */
-function slotUnusableReason(slot: VacantSlot, today: string): string | null {
+function slotUnusableReason(slot: VacantSlot, today: string): "slot_passed" | "not_weekend" | null {
   if (slot.date < today) return "slot_passed";
   if (!isWeekend(slot.date)) return "not_weekend";
   return null;
@@ -87,6 +91,11 @@ export function expressInterest(db: Db, slotId: number, employeeId: number, toda
   const unusable = slotUnusableReason(slot, today);
   if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
+  // The mini-app's «Выходные» tab is empty for an excluded worker (see
+  // `openSlotsForWorker`), so this door is normally never even reached — but
+  // the route takes `slotId` from the request body, so it has to refuse here
+  // too, not just leave the tab empty.
+  if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return { ok: false, reason: "excluded" };
   addInterest(db, slotId, employeeId);
   return { ok: true };
 }
@@ -147,9 +156,10 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   const unusable = slotUnusableReason(slot, today);
   if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
-  // Through the UI this can't be reached — an excluded person never got the call
-  // and never tapped «Хочу» — but the route takes an employeeId from the request
-  // body, so the door has to be shut here too.
+  // `expressInterest` above refuses an excluded worker outright, and the
+  // mini-app's «Выходные» tab is empty for them — but the route takes an
+  // employeeId from the request body, and an interest row recorded before the
+  // exclusion (or a direct API call) still has to hit a real refusal here.
   if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return { ok: false, reason: "excluded" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
 
@@ -313,6 +323,11 @@ export function openSlotsForWorker(
   employeeId: number,
   fromDate: string,
 ): { slot: VacantSlot; interested: boolean; assignees: { employeeId: number; name: string; status: string }[] }[] {
+  // Somebody excluded from assignment sees no open slots at all — his
+  // decision, 2026-08-07: the tab is empty, not "visible but disabled". A
+  // disabled «Хочу» would need explaining, and the flag is deliberately never
+  // explained to the person it's set on (see `assignSlot`'s silent refusal).
+  if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return [];
   const mine = new Set(listMyInterestSlotIds(db, employeeId));
   return listOpenSlots(db, fromDate).map((slot) => ({
     slot,
