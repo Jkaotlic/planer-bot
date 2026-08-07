@@ -289,9 +289,11 @@ describe("the weekend market and archived people", () => {
   });
 });
 
-// The UI cannot offer this — an excluded person never got the call and never
-// tapped «Хочу» — but the route takes an employeeId from the request body, so
-// the door has to be shut on the route itself.
+// `expressInterest` below refuses an excluded worker outright, and the mini-app
+// never shows them the slot at all (see the two tests further down) — but the
+// route takes an employeeId from the request body, and an interest row
+// recorded before the exclusion (or a direct API call) still has to hit a
+// real refusal here, not a database write.
 describe("assignSlot and excludedFromAssignment", () => {
   it("assignSlot refuses an excluded worker even when interest exists", () => {
     const db = makeTestDb();
@@ -334,6 +336,30 @@ describe("interestedForSlot and excludedFromAssignment", () => {
     // Same fixture, flag cleared: back on the list.
     setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
     expect(interestedForSlot(db, slot.id).map((i) => i.employeeId).sort()).toEqual([staying.id, igor.id].sort());
+  });
+});
+
+// Found by the final branch review: an excluded worker could still open the
+// «Выходные» tab, see every open slot and tap «🙋 Хочу» — `expressInterest`
+// took the interest, the bot answered «Записал 🙋», and `interestedForSlot`
+// had already filtered them out of the admin's list. His decision,
+// 2026-08-07: the tab is empty for them, not "visible but disabled" — the
+// latter would explain machinery («не участвует в назначениях») a worker was
+// never told about.
+describe("openSlotsForWorker/expressInterest and excludedFromAssignment", () => {
+  it("shows no open slots and refuses «Хочу» while excluded; both work again once cleared", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(openSlotsForWorker(db, igor.id, TEST_TODAY)).toEqual([]);
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY)).toEqual({ ok: false, reason: "excluded" });
+
+    // Same fixture, flag cleared: the slot is visible and «Хочу» works.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    expect(openSlotsForWorker(db, igor.id, TEST_TODAY).map((s) => s.slot.id)).toContain(slot.id);
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
   });
 });
 

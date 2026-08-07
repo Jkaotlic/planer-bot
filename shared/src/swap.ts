@@ -65,6 +65,23 @@ export function swapBlockReason(input: {
   return null;
 }
 
+/**
+ * Отличает три причины `swapBlockReason` от остальных `SWAP_REJECT_REASONS`.
+ *
+ * Нужна `acceptSwap`: те три причины — временное состояние, выставленное
+ * админом, а не факт про сами смены. Заявка, отказанная по ним, обязана
+ * остаться `pending` — «второй замок на той же двери» не должен навсегда
+ * гасить заявку и врать инициатору, что смена куда-то делась. Вынесена сюда
+ * единой функцией, а не тройным литералом на месте вызова, чтобы набор не
+ * разъехался с самим `swapBlockReason`, если в него когда-нибудь добавят
+ * четвёртую причину.
+ */
+export function isAdminBlockReason(
+  reason: SwapRejectReason,
+): reason is "swaps-locked" | "from-excluded" | "to-excluded" {
+  return reason === "swaps-locked" || reason === "from-excluded" || reason === "to-excluded";
+}
+
 export type SwapValidation = { ok: true } | { ok: false; reason: SwapRejectReason };
 
 /**

@@ -1,5 +1,5 @@
 import { and, eq, ne, or } from "drizzle-orm";
-import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, type Shift as DomainShift } from "@planer/shared";
+import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, isAdminBlockReason, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
@@ -115,6 +115,16 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
     ...restrictionsFor(db, req.fromEmployeeId, req.toEmployeeId),
   });
   if (!validation.ok) {
+    // The three admin-block reasons (`swaps-locked`, `from-excluded`,
+    // `to-excluded`) are temporary state, not a fact about the shifts — this
+    // guard is a second lock for when the first (which cancels every pending
+    // request synchronously) somehow fails to. Terminally expiring the
+    // request here would tell the initiator their swap died because a shift
+    // moved; it didn't, and unlocking makes this very same request valid
+    // again. Only the shift-facts reasons below actually kill the request.
+    if (isAdminBlockReason(validation.reason)) {
+      return { ok: false, reason: validation.reason };
+    }
     setSwapStatus(db, requestId, expired);
     return { ok: false, reason: validation.reason, expired: getSwapRequest(db, requestId) ?? { ...req, status: expired } };
   }

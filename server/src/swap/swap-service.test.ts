@@ -210,6 +210,27 @@ describe("swap service under admin restrictions", () => {
       .toMatchObject({ ok: false, reason: "swaps-locked" });
   });
 
+  /**
+   * The guard's own failure mode, not the lock's: `swaps-locked` is admin
+   * state, not a fact about the shifts, so refusing here must NOT do what
+   * `unavailable`/`identical-shift`/etc. do — write `expired` and hand back an
+   * `expired` request. That would tell the initiator their swap died because
+   * a shift moved, which is false; unlocking makes this very same request
+   * valid again. The existing "refuses while locked" test above only pins the
+   * `reason` (`toMatchObject` passes whether or not status changed) — this
+   * one pins the survival.
+   */
+  it("acceptSwap under lock leaves the request pending, not expired", () => {
+    const { db, a, b, sa, sb } = setup();
+    const proposed = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) return;
+    setSwapsLocked(db, true, b.id);
+    const res = acceptSwap(db, proposed.request.id, b.id, NOW);
+    expect(res).toEqual({ ok: false, reason: "swaps-locked" });
+    expect(getSwapRequest(db, proposed.request.id)?.status).toBe("pending");
+  });
+
   it("decline and cancel stay open while swaps are locked", () => {
     const { db, a, b, sa, sb } = setup();
     const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);
