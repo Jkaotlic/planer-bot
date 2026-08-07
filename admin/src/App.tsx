@@ -148,6 +148,18 @@ export function App() {
     setEmployees(await apiClient.getEmployees());
   }
 
+  /**
+   * Patches a saved restriction flag straight into local state instead of
+   * re-fetching. The server already confirmed the value by returning 200 —
+   * a `refreshEmployees()` here would be unnecessary work that reopens a
+   * stale-render window between the PATCH resolving and the GET's response
+   * landing, during which the checkbox could flash back to its old value.
+   * Mirrors the Mini App's `AdminEmployeesScreen.setRestriction`.
+   */
+  function patchEmployeeRestrictions(id: number, patch: Partial<Pick<Employee, "excludedFromAssignment" | "excludedFromSwaps">>) {
+    setEmployees((prev) => prev?.map((e) => (e.id === id ? { ...e, ...patch } : e)) ?? prev);
+  }
+
   useEffect(() => {
     let cancelled = false;
     void loadWeek(() => cancelled);
@@ -346,7 +358,7 @@ export function App() {
         ) : !employees || !templates ? (
           <div className="centered-fill">Загрузка…</div>
         ) : nav === "employees" ? (
-          <EmployeesScreen employees={employees} onChanged={refreshEmployees} />
+          <EmployeesScreen employees={employees} onChanged={refreshEmployees} onRestrictionsSaved={patchEmployeeRestrictions} />
         ) : nav === "kinds" ? (
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "weekend" ? (

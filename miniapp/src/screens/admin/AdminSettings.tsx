@@ -70,11 +70,9 @@ export function AdminSettings() {
   const actionLabel = locked ? "Открыть обмены" : "Закрыть обмены";
   const confirmLabel = locked ? "Да, открыть" : "Да, закрыть";
   const whoLabel =
-    settings.swapsLockUpdatedBy === null
+    settings.swapsLockUpdatedAt === null
       ? "Ни разу не меняли"
-      : `${locked ? "Закрыл" : "Открыл"} ${settings.swapsLockUpdatedBy}${
-          settings.swapsLockUpdatedAt ? ` · ${formatAuditMoment(settings.swapsLockUpdatedAt)}` : ""
-        }`;
+      : `${locked ? "Закрыл" : "Открыл"} ${settings.swapsLockUpdatedBy ?? "неизвестно кто"} · ${formatAuditMoment(settings.swapsLockUpdatedAt)}`;
 
   async function handleConfirm() {
     setSaving(true);

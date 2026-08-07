@@ -36,7 +36,7 @@ import {
   rememberTelegramProfile,
 } from "../repo/employees";
 import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
-import { setSwapLock, cancelSwapsForEmployee } from "../swap/swap-lock";
+import { setSwapLock, pendingSwapsForEmployee, cancelSwapsForEmployeeTx } from "../swap/swap-lock";
 import { buildSwapLockNotices, buildExclusionNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
@@ -448,7 +448,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const restrictionsPatch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean } = {};
       if (hasExcludedAssignment) restrictionsPatch.excludedFromAssignment = body.excludedFromAssignment as boolean;
       if (hasExcludedSwaps) restrictionsPatch.excludedFromSwaps = body.excludedFromSwaps as boolean;
-      employee = setEmployeeRestrictions(db, id, restrictionsPatch) ?? employee;
+
+      // Whether this PATCH newly excludes the person from swaps is already
+      // knowable from the request body and the snapshot above. Read the
+      // payloads for it now, BEFORE the write — same reasoning as
+      // `setSwapLock`: `swapAuditPayload` resolves names and shift lines, and
+      // those have to describe the trade as it stood.
+      const willExcludeFromSwaps = hasExcludedSwaps && body.excludedFromSwaps === true && !beforeRestrictions.excludedFromSwaps;
+      const { pending, payloads: cancelledPayloads } = willExcludeFromSwaps
+        ? pendingSwapsForEmployee(db, id)
+        : { pending: [], payloads: [] };
+
+      // The flag and the cancellations are one fact — half of it landing is
+      // worse than neither (an admin would see the flag set while the
+      // buttons still worked). Same shape as `setSwapLock`.
+      db.transaction((tx) => {
+        employee = setEmployeeRestrictions(tx, id, restrictionsPatch) ?? employee;
+        if (willExcludeFromSwaps) cancelSwapsForEmployeeTx(tx, pending);
+      });
 
       const afterRestrictions = { excludedFromAssignment: employee.excludedFromAssignment, excludedFromSwaps: employee.excludedFromSwaps };
       const swapsChanged = beforeRestrictions.excludedFromSwaps !== afterRestrictions.excludedFromSwaps;
@@ -466,15 +483,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
       }
 
       // The assignment flag is deliberately silent — see `buildExclusionNotices`.
-      // Only a real change to `excludedFromSwaps` cancels requests and notifies.
+      // Only a real change to `excludedFromSwaps` notifies.
       if (swapsChanged) {
-        const cancelled = afterRestrictions.excludedFromSwaps ? cancelSwapsForEmployee(db, id) : [];
         const others = listActive(db).filter((e) => e.id !== id);
         const notices = buildExclusionNotices({
           excluded: afterRestrictions.excludedFromSwaps,
           person: { id, telegramUserId: employee.telegramUserId },
           others,
-          cancelled,
+          cancelled: cancelledPayloads,
         });
         if (bot) {
           for (const notice of notices) {

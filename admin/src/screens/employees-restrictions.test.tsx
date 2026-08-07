@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient, type Employee } from "../api/client";
@@ -40,12 +40,28 @@ async function settle(times = 8) {
   }
 }
 
+/**
+ * Stands in for `App.tsx`: `EmployeesScreen` no longer keeps its own copy of
+ * the restriction flags, so a save has to reach a real state update to show
+ * up at all — this mirrors `App`'s `patchEmployeeRestrictions`, wired the
+ * same way (`onRestrictionsSaved` patches state; `onChanged` stays a no-op,
+ * as the real re-fetch would be for an unrelated action in these tests).
+ */
+function Harness({ initial }: { initial: Employee[] }) {
+  const [employees, setEmployees] = useState(initial);
+  return createElement(EmployeesScreen, {
+    employees,
+    onChanged: async () => {},
+    onRestrictionsSaved: (id, patch) => setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e))),
+  });
+}
+
 async function mount() {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(EmployeesScreen, { employees: EMPLOYEES, onChanged: async () => {} }));
+    root!.render(createElement(Harness, { initial: EMPLOYEES }));
   });
   await settle();
   return host;
