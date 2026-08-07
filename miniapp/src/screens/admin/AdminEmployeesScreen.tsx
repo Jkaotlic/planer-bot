@@ -108,12 +108,14 @@ export function AdminEmployeesScreen() {
 
   /**
    * Deliberately does NOT go through `withBusy`/`reload()`: a full re-fetch
-   * races the just-saved patch and can lose it (this is the exact bug the
-   * mirrored test guards — a checkbox that snaps back to its old value after
-   * a *successful* save because the screen redrew someone else's stale
-   * response instead of its own). Patching the confirmed value straight into
-   * local state is both simpler and correct here — nothing else about the
-   * row list changes from toggling a restriction.
+   * after a successful save is unnecessary work — the response already told
+   * us the new value took — and re-running it only reopens a stale-render
+   * window between the PATCH resolving and the GET's response landing,
+   * during which the checkbox could flash back to the pre-save value (this
+   * is the exact bug the mirrored test guards). Patching the confirmed value
+   * straight into local state avoids that window entirely and is simpler
+   * besides — nothing else about the row list changes from toggling a
+   * restriction.
    */
   async function setRestriction(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) {
     setBusyId(id);

@@ -1,6 +1,6 @@
 import { and, eq, or } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { swapRequests } from "../db/schema";
+import { swapRequests, type SwapRequest } from "../db/schema";
 import { setSwapsLocked, type DbOrTx } from "../repo/settings";
 import { swapAuditPayload, type SwapAuditPayload } from "../util/message-lines";
 
@@ -36,8 +36,10 @@ export function setSwapLock(db: Db, locked: boolean, actorEmployeeId: number): S
   return payloads;
 }
 
-/** Same, for one person being taken out of swaps: their open requests, both ways. */
-export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPayload[] {
+/** Who currently holds an open request touching this person, and what to tell
+ *  them — read step only, no write. Read BEFORE any cancellation so the
+ *  payload (names, shift lines) describes the trade as it stood. */
+function pendingForEmployee(db: Db, employeeId: number) {
   const pending = db
     .select()
     .from(swapRequests)
@@ -46,11 +48,31 @@ export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPay
       or(eq(swapRequests.fromEmployeeId, employeeId), eq(swapRequests.toEmployeeId, employeeId)),
     ))
     .all();
-  const payloads = pending.map((request) => swapAuditPayload(db, request));
+  return { pending, payloads: pending.map((request) => swapAuditPayload(db, request)) };
+}
 
+/** Same, for one person being taken out of swaps: their open requests, both ways. */
+export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPayload[] {
+  const { pending, payloads } = pendingForEmployee(db, employeeId);
   db.transaction((tx) => cancelAll(tx, pending));
-
   return payloads;
+}
+
+/**
+ * Read step for a caller that needs to fold this cancellation into its OWN
+ * transaction, alongside another write — `PATCH /api/admin/employees/:id`
+ * writing `excludedFromSwaps` and cancelling this person's open requests as
+ * one atomic fact, same reasoning as `setSwapLock` above (half landing is
+ * worse than neither). Call this BEFORE opening the transaction — it only
+ * reads — then pass `pending` to `cancelSwapsForEmployeeTx` inside it.
+ */
+export function pendingSwapsForEmployee(db: Db, employeeId: number): { pending: SwapRequest[]; payloads: SwapAuditPayload[] } {
+  return pendingForEmployee(db, employeeId);
+}
+
+/** The write step for `pendingSwapsForEmployee` above, run inside the caller's own transaction. */
+export function cancelSwapsForEmployeeTx(tx: DbOrTx, pending: readonly { id: number }[]): void {
+  cancelAll(tx, pending);
 }
 
 function listPending(db: Db) {

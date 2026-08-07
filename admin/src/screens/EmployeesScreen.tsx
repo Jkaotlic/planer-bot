@@ -8,6 +8,8 @@ export interface EmployeesScreenProps {
   employees: readonly Employee[];
   /** Re-fetches the employee list from the API after a mutation. */
   onChanged: () => Promise<void>;
+  /** Patches a just-saved restriction flag into the parent's own state — see `setRestriction`. */
+  onRestrictionsSaved: (id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
 }
 
 /**
@@ -41,7 +43,7 @@ export function refusalText(message: string): string {
  * "Работники" screen: active/archived worker lists with archive/restore
  * actions, plus a dialog to add a new worker and hand them an invite link.
  */
-export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) {
+export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: EmployeesScreenProps) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -55,43 +57,9 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
    * `rowError` in AdminEmployeesScreen.
    */
   const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
-  /**
-   * Confirmed restriction values this screen has saved itself, laid over
-   * `employees` when rendering. `onChanged` re-fetches from the server, but that
-   * fetch is async and its result may take a render or two to reach this screen's
-   * `employees` prop — a checkbox bound only to the prop would flash back to its
-   * old value right after a *successful* save. That exact bug has shipped twice
-   * in this project already (a rotation-unit select, a birthday form field), both
-   * from the same mistake: trusting the round trip instead of the response.
-   * Cleared per-employee once the prop actually catches up, so a real external
-   * change (someone else's edit, reloaded from a fresh page) is never masked.
-   */
-  const [restrictionOverride, setRestrictionOverride] = useState<
-    ReadonlyMap<number, Partial<Pick<Employee, "excludedFromAssignment" | "excludedFromSwaps">>>
-  >(new Map());
 
-  useEffect(() => {
-    setRestrictionOverride((prev) => {
-      if (prev.size === 0) return prev;
-      let changed = false;
-      const next = new Map(prev);
-      for (const [id, patch] of prev) {
-        const fresh = employees.find((e) => e.id === id);
-        if (fresh && Object.entries(patch).every(([key, value]) => fresh[key as keyof Employee] === value)) {
-          next.delete(id);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [employees]);
-
-  const withOverrides = employees.map((e) => {
-    const override = restrictionOverride.get(e.id);
-    return override ? { ...e, ...override } : e;
-  });
-  const active = withOverrides.filter((e) => e.isActive);
-  const archived = withOverrides.filter((e) => !e.isActive);
+  const active = employees.filter((e) => e.isActive);
+  const archived = employees.filter((e) => !e.isActive);
 
   async function withBusy(id: number, action: () => Promise<void>) {
     setBusyId(id);
@@ -106,17 +74,21 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
     }
   }
 
+  /**
+   * Deliberately does NOT go through `onChanged()`: a full re-fetch after a
+   * successful save is unnecessary work — the response already told us the
+   * new value took — and re-running it only reopens a stale-render window
+   * between the PATCH resolving and the GET's response landing, during which
+   * the checkbox could flash back to the pre-save value. Patching the
+   * confirmed value straight into the parent's state avoids that window
+   * entirely. Mirrors the Mini App's `AdminEmployeesScreen.setRestriction`.
+   */
   async function setRestriction(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) {
     setBusyId(id);
     setRowError(null);
     try {
       await apiClient.setEmployeeRestrictions(id, patch);
-      setRestrictionOverride((prev) => {
-        const next = new Map(prev);
-        next.set(id, { ...next.get(id), ...patch });
-        return next;
-      });
-      await onChanged();
+      onRestrictionsSaved(id, patch);
     } catch (err) {
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось сохранить ограничение" });
     } finally {

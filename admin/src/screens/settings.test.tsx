@@ -170,4 +170,17 @@ describe("SettingsScreen", () => {
     const el = await mount();
     expect(el.textContent ?? "").toContain("Ни разу не меняли");
   });
+
+  // «Ни разу не меняли» отвечает на другой вопрос, чем «кто менял»: сервер
+  // отдаёт `swapsLockUpdatedBy: null`, когда актор не резолвится (уволен,
+  // запись удалена), но время смены при этом настоящее. Если экран судит по
+  // имени, а не по времени, он врёт о том, что тумблер вообще не трогали.
+  it("время есть, а имя не резолвится — экран не говорит «ни разу не меняли»", async () => {
+    vi.spyOn(apiClient, "getSettings")
+      .mockResolvedValue({ swapsLocked: true, swapsLockUpdatedAt: "2026-08-07T11:30:00.000Z", swapsLockUpdatedBy: null });
+    const el = await mount();
+    const text = el.textContent ?? "";
+    expect(text).not.toContain("Ни разу не меняли");
+    expect(text).toContain("7 августа");
+  });
 });
