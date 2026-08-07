@@ -12,9 +12,19 @@ export function CardStack({ children }: { children: ReactNode }) {
   return <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 12px" }}>{children}</div>;
 }
 
-export function CardShell({ children }: { children: ReactNode }) {
+export function CardShell({
+  children,
+  "data-employee-id": dataEmployeeId,
+}: {
+  children: ReactNode;
+  /** Lets a card be found by the row it belongs to (e.g. a worker's card in
+   *  «Работники») instead of by its position in the list, which breaks on
+   *  any re-sort. Omitted, most cards have nothing to be looked up by. */
+  "data-employee-id"?: number;
+}) {
   return (
     <div
+      data-employee-id={dataEmployeeId}
       style={{
         background: "var(--tgui--section_bg_color, var(--tgui--bg_color))",
         borderRadius: 14,

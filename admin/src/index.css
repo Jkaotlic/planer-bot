@@ -587,6 +587,41 @@ button {
   white-space: nowrap;
 }
 
+/* Sits on its own line inside the row card (`flex-basis: 100%`, the card
+   already wraps) — two checkboxes an admin sets rarely enough that they
+   shouldn't compete for space with the row's everyday buttons. */
+.employee-restrictions {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--separator);
+  margin-top: 4px;
+}
+
+.employee-restrictions-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.employee-restriction-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.employee-restriction-hint {
+  color: var(--hint);
+  font-size: 12px;
+}
+
 .invite-link-row {
   display: flex;
   gap: 8px;

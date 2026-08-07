@@ -5,6 +5,7 @@ import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/c
 import { CategoryChip, useCategoryPalette } from "../../categories";
 import { CardShell, CardStack, MetaLine } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
+import { withError, withoutError } from "../../lib/error-map";
 import { initialsOf, personPalette } from "../../lib/people";
 
 /**
@@ -66,6 +67,12 @@ export function AdminEmployeesScreen() {
    * трём, и все три ответа уезжали за верхний край экрана.
    */
   const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
+  /**
+   * Ограничения-checkboxes' own refusals, one per row — the `withError`/
+   * `withoutError` pair `AdminShiftKinds`/`App` already use for the same shape
+   * of problem (several independently-actionable rows on one long scroll).
+   */
+  const [restrictionErrors, setRestrictionErrors] = useState<ReadonlyMap<number, string>>(new Map());
 
   async function reload() {
     setEmployees(await apiClient.getAdminEmployees());
@@ -94,6 +101,30 @@ export function AdminEmployeesScreen() {
       await reload();
     } catch (err) {
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось выполнить действие" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /**
+   * Deliberately does NOT go through `withBusy`/`reload()`: a full re-fetch
+   * races the just-saved patch and can lose it (this is the exact bug the
+   * mirrored test guards — a checkbox that snaps back to its old value after
+   * a *successful* save because the screen redrew someone else's stale
+   * response instead of its own). Patching the confirmed value straight into
+   * local state is both simpler and correct here — nothing else about the
+   * row list changes from toggling a restriction.
+   */
+  async function setRestriction(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) {
+    setBusyId(id);
+    setRestrictionErrors((prev) => withoutError(prev, id));
+    try {
+      await apiClient.setEmployeeRestrictions(id, patch);
+      setEmployees((prev) => prev?.map((e) => (e.id === id ? { ...e, ...patch } : e)) ?? prev);
+    } catch (err) {
+      setRestrictionErrors((prev) =>
+        withError(prev, id, err instanceof Error ? refusalText(err.message) : "Не удалось сохранить ограничение"),
+      );
     } finally {
       setBusyId(null);
     }
@@ -196,6 +227,8 @@ export function AdminEmployeesScreen() {
                 onShowInvite={() => void showRowInvite(e)}
                 invite={rowInvite?.employeeId === e.id ? rowInvite : null}
                 error={rowError?.employeeId === e.id ? rowError.message : null}
+                onSetRestrictions={(patch) => void setRestriction(e.id, patch)}
+                restrictionError={restrictionErrors.get(e.id) ?? null}
               />
             ))
           )}
@@ -217,6 +250,8 @@ export function AdminEmployeesScreen() {
                 onShowInvite={() => void showRowInvite(e)}
                 invite={rowInvite?.employeeId === e.id ? rowInvite : null}
                 error={rowError?.employeeId === e.id ? rowError.message : null}
+                onSetRestrictions={(patch) => void setRestriction(e.id, patch)}
+                restrictionError={restrictionErrors.get(e.id) ?? null}
               />
             ))
           )}
@@ -240,6 +275,8 @@ export function EmployeeRow({
   position,
   onReorder,
   onBirthDate,
+  onSetRestrictions,
+  restrictionError,
 }: {
   employee: Employee;
   /** The link this row asked for, shown right here — see the note on `rowInvite`. */
@@ -262,6 +299,10 @@ export function EmployeeRow({
   onPreferredName?: (preferredName: string | null) => void;
   /** When provided, an unlinked worker's invite link can be re-shown. */
   onShowInvite?: () => void;
+  /** Every row gets the «Ограничения» checkboxes — active and archived alike. */
+  onSetRestrictions: (patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
+  /** Why this row's last restriction save was refused, shown right here — see `restrictionErrors`. */
+  restrictionError?: string | null;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -334,7 +375,7 @@ export function EmployeeRow({
   // trailing slot squeeze the name down to "Nekh…". Name + status get the full
   // width on top; the actions wrap onto their own row underneath.
   return (
-    <CardShell>
+    <CardShell data-employee-id={employee.id}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {position !== undefined && onReorder && (
           <PositionField position={position} busy={busy} onCommit={onReorder} />
@@ -389,6 +430,48 @@ export function EmployeeRow({
           {actionLabel}
         </Button>
       </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--tgui--outline)" }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--tgui--hint_color)", textTransform: "uppercase", letterSpacing: 0.2 }}>
+          Ограничения
+        </span>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={employee.excludedFromAssignment}
+            disabled={busy}
+            style={{ marginTop: 2 }}
+            onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
+          />
+          <span>
+            Не участвует в назначениях
+            <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12 }}>
+              бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно
+            </span>
+          </span>
+        </label>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={employee.excludedFromSwaps}
+            disabled={busy}
+            style={{ marginTop: 2 }}
+            onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
+          />
+          <span>
+            Не участвует в обменах
+            <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12 }}>
+              ни предложить, ни принять обмен; открытые заявки будут отменены
+            </span>
+          </span>
+        </label>
+        {restrictionError && (
+          <div role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.4 }}>
+            {restrictionError}
+          </div>
+        )}
+      </div>
+
       {/* The refusal belongs where the finger was — a message at the top of a
           list of thirty is a message nobody sees. */}
       {error && (

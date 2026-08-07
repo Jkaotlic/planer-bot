@@ -25,6 +25,8 @@ const unlinked: Employee = {
   birthDate: null,
   address: "Никита",
   preferredName: null,
+  excludedFromAssignment: false,
+  excludedFromSwaps: false,
 };
 
 const INVITE = { inviteToken: "abc123", inviteLink: "https://t.me/planer_bot?start=abc123" };

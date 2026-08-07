@@ -1011,9 +1011,13 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
     <CardShell>
       <Select header="Работник" value={employeeId} onChange={(e) => setEmployeeId(Number(e.target.value))}>
         <option value={0}>— выберите —</option>
+        {/* Не фильтруем: «Заполнить неделю» — ручная постановка, админ называет
+            человека сам, и по решению заказчика это разрешено. Пометка нужна, чтобы
+            не выбрать по инерции того, кого бот сам никогда бы не поставил. */}
         {employees.map((e) => (
           <option key={e.id} value={e.id}>
             {e.displayName}
+            {e.excludedFromAssignment ? " · вне назначений" : ""}
           </option>
         ))}
       </Select>

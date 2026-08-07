@@ -55,9 +55,43 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
    * `rowError` in AdminEmployeesScreen.
    */
   const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
+  /**
+   * Confirmed restriction values this screen has saved itself, laid over
+   * `employees` when rendering. `onChanged` re-fetches from the server, but that
+   * fetch is async and its result may take a render or two to reach this screen's
+   * `employees` prop — a checkbox bound only to the prop would flash back to its
+   * old value right after a *successful* save. That exact bug has shipped twice
+   * in this project already (a rotation-unit select, a birthday form field), both
+   * from the same mistake: trusting the round trip instead of the response.
+   * Cleared per-employee once the prop actually catches up, so a real external
+   * change (someone else's edit, reloaded from a fresh page) is never masked.
+   */
+  const [restrictionOverride, setRestrictionOverride] = useState<
+    ReadonlyMap<number, Partial<Pick<Employee, "excludedFromAssignment" | "excludedFromSwaps">>>
+  >(new Map());
 
-  const active = employees.filter((e) => e.isActive);
-  const archived = employees.filter((e) => !e.isActive);
+  useEffect(() => {
+    setRestrictionOverride((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Map(prev);
+      for (const [id, patch] of prev) {
+        const fresh = employees.find((e) => e.id === id);
+        if (fresh && Object.entries(patch).every(([key, value]) => fresh[key as keyof Employee] === value)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [employees]);
+
+  const withOverrides = employees.map((e) => {
+    const override = restrictionOverride.get(e.id);
+    return override ? { ...e, ...override } : e;
+  });
+  const active = withOverrides.filter((e) => e.isActive);
+  const archived = withOverrides.filter((e) => !e.isActive);
 
   async function withBusy(id: number, action: () => Promise<void>) {
     setBusyId(id);
@@ -67,6 +101,24 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
       await onChanged();
     } catch (err) {
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось выполнить действие" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function setRestriction(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) {
+    setBusyId(id);
+    setRowError(null);
+    try {
+      await apiClient.setEmployeeRestrictions(id, patch);
+      setRestrictionOverride((prev) => {
+        const next = new Map(prev);
+        next.set(id, { ...next.get(id), ...patch });
+        return next;
+      });
+      await onChanged();
+    } catch (err) {
+      setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось сохранить ограничение" });
     } finally {
       setBusyId(null);
     }
@@ -106,6 +158,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         onReorder={(id, position) => withBusy(id, () => apiClient.reorderEmployee(id, position).then(() => {}))}
         onBirthDate={(id, birthDate) => withBusy(id, () => apiClient.setBirthDate(id, birthDate))}
         onShowInvite={(employee) => void showInvite(employee)}
+        onSetRestrictions={setRestriction}
       />
 
       <EmployeesSection
@@ -117,6 +170,7 @@ export function EmployeesScreen({ employees, onChanged }: EmployeesScreenProps) 
         rowError={rowError}
         onAction={(id) => withBusy(id, () => apiClient.restoreEmployee(id))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
+        onSetRestrictions={setRestriction}
       />
 
       {showAddDialog && (
@@ -156,9 +210,11 @@ interface EmployeesSectionProps {
   onReorder?: (id: number, position: number) => void;
   /** When provided, each row can set or clear the worker's birthday. */
   onBirthDate?: (id: number, birthDate: string | null) => void;
+  /** Every row gets the «Ограничения» checkboxes — active and archived alike. */
+  onSetRestrictions: (id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -180,6 +236,7 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, r
               onToggleAdmin={onToggleAdmin ? () => onToggleAdmin(employee.id, !employee.isAdmin) : undefined}
               onRename={onRename ? (name) => onRename(employee.id, name) : undefined}
               onShowInvite={onShowInvite ? () => onShowInvite(employee) : undefined}
+              onSetRestrictions={(patch) => onSetRestrictions(employee.id, patch)}
             />
           ))}
         </div>
@@ -200,6 +257,7 @@ function EmployeeRow({
   onShowInvite,
   onReorder,
   onBirthDate,
+  onSetRestrictions,
 }: {
   employee: Employee;
   actionLabel: string;
@@ -214,6 +272,7 @@ function EmployeeRow({
   onShowInvite?: () => void;
   onReorder?: (position: number) => void;
   onBirthDate?: (birthDate: string | null) => void;
+  onSetRestrictions: (patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -236,7 +295,7 @@ function EmployeeRow({
   }
 
   return (
-    <div className="employee-row-card">
+    <div className="employee-row-card" data-employee-id={employee.id}>
       {position !== undefined && onReorder && (
         <PositionField position={position} busy={busy} onCommit={onReorder} />
       )}
@@ -304,6 +363,35 @@ function EmployeeRow({
             {busy ? "…" : actionLabel}
           </button>
         </>
+      )}
+      {!editing && (
+        <div className="employee-restrictions">
+          <span className="employee-restrictions-title">Ограничения</span>
+          <label className="employee-restriction-checkbox">
+            <input
+              type="checkbox"
+              checked={employee.excludedFromAssignment}
+              disabled={busy}
+              onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
+            />
+            Не участвует в назначениях
+            <span className="employee-restriction-hint">
+              — бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно
+            </span>
+          </label>
+          <label className="employee-restriction-checkbox">
+            <input
+              type="checkbox"
+              checked={employee.excludedFromSwaps}
+              disabled={busy}
+              onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
+            />
+            Не участвует в обменах
+            <span className="employee-restriction-hint">
+              — ни предложить, ни принять обмен; открытые заявки будут отменены
+            </span>
+          </label>
+        </div>
       )}
       {/* The refusal belongs where the click was. `flex-basis: 100%` puts it on
           its own line inside the card — the card already wraps. */}
