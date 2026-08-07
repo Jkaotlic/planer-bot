@@ -119,11 +119,11 @@ Expected: FAIL — `Cannot find module './settings'`.
 В `server/src/db/schema.ts` в блок `employees` (после `remindersEnabled`) добавить:
 
 ```ts
-  /** Админ вывел человека из АВТОМАТИЧЕСКИХ назначений: «Распределить честно»,
-   *  ★-очередь, рассылка выходных, назначение на выходной. Руками админ его
-   *  по-прежнему ставит — это не архивирование. */
+  /** An admin took this person out of AUTOMATIC placement: «Распределить честно»,
+   *  the ★ queue, the weekend call for volunteers, and weekend assignment. An admin
+   *  can still place them by hand — this is not archiving. */
   excludedFromAssignment: integer({ mode: "boolean" }).notNull().default(false),
-  /** Админ вывел человека из обменов — в обе стороны: ни предложить, ни принять. */
+  /** An admin took this person out of swaps, both ways: neither propose nor accept. */
   excludedFromSwaps: integer({ mode: "boolean" }).notNull().default(false),
 ```
 
@@ -131,12 +131,12 @@ Expected: FAIL — `Cannot find module './settings'`.
 
 ```ts
 /**
- * Общекомандные переключатели. Ключ-значение, а не колонки: сегодня ключ ровно
- * один (`swaps_locked`), и заводить таблицу с одной колонкой ради него, чтобы
- * следующий тумблер потребовал новой миграции, — плохая сделка.
+ * Team-wide toggles. Key-value rather than columns: today there is exactly one
+ * key (`swaps_locked`), and a single-column table for it — so that the next
+ * toggle needs a fresh migration — is a bad trade.
  *
- * ОТСУТСТВИЕ строки = значение по умолчанию. Миграция ничего не вставляет, и
- * база, никогда не видевшая этой фичи, ведёт себя ровно как раньше.
+ * An ABSENT row means the default. The migration seeds nothing, so a database
+ * that never saw this feature behaves exactly as it did before.
  */
 export const appSettings = sqliteTable("app_settings", {
   key: text().primaryKey(),
