@@ -129,3 +129,57 @@ describe("PATCH /api/me/settings", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("swaps lock settings", () => {
+  it("PUT /api/admin/settings/swaps-lock closes swaps and reports what it cost", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111, "Игорь Петров");
+
+    const res = await app.request("/api/admin/settings/swaps-lock", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locked: true }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ locked: true, cancelled: 0 });
+
+    const state = await app.request("/api/admin/settings", { headers: { authorization: `Bearer ${token}` } });
+    expect(await state.json()).toMatchObject({ swapsLocked: true, swapsLockUpdatedBy: "Игорь Петров" });
+  });
+
+  it("PUT /api/admin/settings/swaps-lock rejects a non-boolean body", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111, "Игорь Петров");
+
+    const res = await app.request("/api/admin/settings/swaps-lock", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locked: "yes" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/admin/settings is admin-only", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const res = await app.request("/api/admin/settings");
+    expect(res.status).toBe(401);
+  });
+
+  it("locking writes one journal row naming what happened", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111, "Игорь Петров");
+
+    await app.request("/api/admin/settings/swaps-lock", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locked: true }),
+    });
+
+    const events = await (await app.request("/api/admin/journal", { headers: { authorization: `Bearer ${token}` } })).json();
+    expect(events.events[0]).toMatchObject({ type: "swaps_lock_changed" });
+  });
+});

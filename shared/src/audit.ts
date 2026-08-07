@@ -19,6 +19,7 @@ export const AUDIT_TYPES = [
   "entry_created", "entry_updated", "entry_deleted",
   "swap_proposed", "swap_accepted", "swap_declined",
   "swap_cancelled", "swap_expired", "swap_auto_cancelled",
+  "swaps_lock_changed",
   "distribution_applied", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
@@ -193,6 +194,15 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   swap_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён", lines: swapLines(p) }),
   swap_expired: (p) => ({ icon: "🔁", title: "Обмен стал неактуален", lines: swapLines(p) }),
   swap_auto_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён автоматически", lines: swapLines(p) }),
+
+  swaps_lock_changed: (p) => ({
+    icon: "🔒",
+    title: p.locked === true ? "Обмены смен закрыты" : "Обмены смен открыты",
+    lines: [
+      ...(p.locked === true ? [`отменено заявок: ${num(p.cancelled) ?? 0}`] : []),
+      `дошло до ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`,
+    ],
+  }),
 
   distribution_applied: (p) => ({
     icon: "⚖",
