@@ -103,54 +103,60 @@ interface SwapChipProps {
 function SwapChip({ onClick, blockedReason }: SwapChipProps) {
   const blocked = blockedReason != null;
   const tint = blocked ? "var(--tgui--hint_color)" : "var(--tgui--link_color)";
+  const button = (
+    <button
+      type="button"
+      disabled={blocked}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{
+        // `position: relative` is load-bearing, not cosmetic: `Cell`'s tap
+        // ripple is an absolutely-positioned overlay with `z-index: auto`,
+        // which paints *above* ordinary static-positioned content per CSS
+        // stacking rules — without this, the ripple silently swallows every
+        // click/tap on this chip (confirmed both in a real Chromium render
+        // and via Playwright's "element intercepts pointer events" check).
+        // telegram-ui's own interactive controls (e.g. `Selectable`) rely on
+        // this same trick internally, which is how they get away with it.
+        position: "relative",
+        display: "inline-block",
+        fontSize: 13,
+        fontWeight: 600,
+        fontFamily: "inherit",
+        color: tint,
+        background: "none",
+        border: "none",
+        boxShadow: `0 0 0 1.4px color-mix(in srgb, ${tint} 40%, transparent)`,
+        borderRadius: 999,
+        padding: "6px 12px",
+        whiteSpace: "nowrap",
+        cursor: blocked ? "default" : "pointer",
+      }}
+    >
+      Обменять
+    </button>
+  );
+  // No wrapper when there's nothing to caption: keeps the button the row's
+  // only "Обменять"-labelled element, so anything hunting for it by its exact
+  // text (as well as by tag) lands on the real control, not an ancestor `<div>`
+  // that happens to repeat the same text.
+  if (!blocked) return button;
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-      <button
-        type="button"
-        disabled={blocked}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick();
-        }}
+      {button}
+      <span
         style={{
-          // `position: relative` is load-bearing, not cosmetic: `Cell`'s tap
-          // ripple is an absolutely-positioned overlay with `z-index: auto`,
-          // which paints *above* ordinary static-positioned content per CSS
-          // stacking rules — without this, the ripple silently swallows every
-          // click/tap on this chip (confirmed both in a real Chromium render
-          // and via Playwright's "element intercepts pointer events" check).
-          // telegram-ui's own interactive controls (e.g. `Selectable`) rely on
-          // this same trick internally, which is how they get away with it.
-          position: "relative",
-          display: "inline-block",
-          fontSize: 13,
-          fontWeight: 600,
-          fontFamily: "inherit",
-          color: tint,
-          background: "none",
-          border: "none",
-          boxShadow: `0 0 0 1.4px color-mix(in srgb, ${tint} 40%, transparent)`,
-          borderRadius: 999,
-          padding: "6px 12px",
-          whiteSpace: "nowrap",
-          cursor: blocked ? "default" : "pointer",
+          fontSize: 11,
+          color: "var(--tgui--hint_color)",
+          textAlign: "right",
+          maxWidth: 130,
+          lineHeight: 1.3,
         }}
       >
-        Обменять
-      </button>
-      {blocked && (
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--tgui--hint_color)",
-            textAlign: "right",
-            maxWidth: 130,
-            lineHeight: 1.3,
-          }}
-        >
-          {blockedReason}
-        </span>
-      )}
+        {blockedReason}
+      </span>
     </div>
   );
 }
