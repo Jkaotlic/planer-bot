@@ -1,11 +1,16 @@
 import { and, count, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import type { AuditType } from "@planer/shared";
 import type { Db } from "../db/client";
 import { auditLog, employees, type AuditLog } from "../db/schema";
 
 /** Records one thing that happened, for the «кто когда что менял» feed. Never let a
  *  bookkeeping failure take down the action it describes — the write already
- *  succeeded by the time we get here. */
-export function recordAudit(db: Db, type: string, actorEmployeeId: number | null, payload: unknown): void {
+ *  succeeded by the time we get here.
+ *
+ *  `type` — не `string`: каждое событие обязано иметь человеческое описание в
+ *  `@planer/shared/audit`, и это единственное место, где такое требование можно
+ *  предъявить один раз на весь сервер. */
+export function recordAudit(db: Db, type: AuditType, actorEmployeeId: number | null, payload: unknown): void {
   try {
     db.insert(auditLog).values({ type, actorEmployeeId, payload }).run();
   } catch (err) {
@@ -46,7 +51,10 @@ export interface AuditPage {
  */
 export function queryAudit(db: Db, query: AuditQuery): AuditPage {
   const filters = [];
-  if (query.types && query.types.length > 0) filters.push(inArray(auditLog.type, [...query.types]));
+  // `types` пришёл из query-параметра — произвольные строки. Мимо `AuditType`
+  // это фильтр «сравни с типом в БД», а не запись: незнакомая строка просто
+  // ничему не совпадёт, поэтому кастуем, а не разрешаем в `AuditQuery` любую строку.
+  if (query.types && query.types.length > 0) filters.push(inArray(auditLog.type, query.types as AuditType[]));
   if (query.actorEmployeeId != null) filters.push(eq(auditLog.actorEmployeeId, query.actorEmployeeId));
   if (query.from) filters.push(gte(auditLog.createdAt, new Date(`${query.from}T00:00:00Z`)));
   if (query.to) filters.push(lte(auditLog.createdAt, new Date(`${query.to}T23:59:59Z`)));

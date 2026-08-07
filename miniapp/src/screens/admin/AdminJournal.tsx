@@ -1,58 +1,28 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Placeholder, SegmentedControl, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { describeAuditEvent, formatAuditMoment, auditMonthRange } from "@planer/shared";
 import { apiClient, type JournalPage, type ShiftCountsReport } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
 
-/** What each audit type is called in the log, in words rather than in code. */
-const TYPE_LABELS: Record<string, string> = {
-  entry_created: "Добавлена запись",
-  entry_updated: "Изменена запись",
-  entry_deleted: "Удалена запись",
-  distribution_applied: "Смены распределены честно",
-  employee_reordered: "Изменён порядок людей",
-  template_roles_changed: "Изменено «кто что может»",
-  template_rotation_changed: "Изменена очередь",
-  reminder_undeliverable: "Напоминание не дошло — бот заблокирован",
-  roster_import: "Загрузка графика из CSV",
-  swap_proposed: "Предложен обмен",
-  swap_accepted: "Обмен состоялся",
-  swap_declined: "Обмен отклонён",
-  swap_cancelled: "Обмен отменён",
-  swap_expired: "Обмен стал неактуален",
-  swap_auto_cancelled: "Обмен отменён автоматически",
-  employee_updated: "Изменены данные работника",
-  employee_archived: "Работник архивирован",
-  employee_restored: "Работник восстановлен",
-  employee_admin_changed: "Изменены права админа",
-  weekend_slot_created: "Открыта смена на выходной",
-  weekend_assigned: "Выходная смена назначена",
-  birthday_sent: "Разослан сбор на день рождения",
-  birthday_admin_notice: "Напоминание админам о дне рождения",
-  birthday_schedule_notice: "Напоминание админам о сборе",
-};
-
-export function typeLabel(type: string): string {
-  return TYPE_LABELS[type] ?? type;
-}
-
-/** "5 августа, 14:32" — a log is read by when, so the date leads. */
-export function formatMoment(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
-  }).format(date);
-}
-
-/** The month around `today`, as the [from, to] the report opens on. */
-export function monthRangeOf(today: string): { from: string; to: string } {
-  const year = Number(today.slice(0, 4));
-  const month = Number(today.slice(5, 7));
-  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(last)}` };
+/** Событие журнала карточкой. Текст — тот же, что в вебе: общий описатель. */
+export function JournalEventCard({ event }: { event: JournalPage["events"][number] }) {
+  const view = describeAuditEvent(event);
+  return (
+    <CardShell>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span aria-hidden style={{ flex: "none", fontSize: 15 }}>{view.icon}</span>
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14.5 }}>{view.title}</span>
+      </div>
+      <div style={{ marginTop: 4, color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+        {event.actorName ?? "система"} · {formatAuditMoment(event.createdAt)}
+      </div>
+      {view.lines.map((line, i) => (
+        <div key={i} style={{ marginTop: 3, fontSize: 13, lineHeight: 1.45 }}>{line}</div>
+      ))}
+    </CardShell>
+  );
 }
 
 type Tab = "report" | "history";
@@ -85,7 +55,7 @@ export function AdminJournal({ today }: { today: string }) {
 }
 
 function ShiftCounts({ today }: { today: string }) {
-  const initial = monthRangeOf(today);
+  const initial = auditMonthRange(today);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [report, setReport] = useState<ShiftCountsReport | null>(null);
@@ -240,7 +210,7 @@ function History() {
             <option value="">Все события</option>
             {page.availableTypes.map((available) => (
               <option value={available} key={available}>
-                {typeLabel(available)}
+                {describeAuditEvent({ type: available, payload: {} }).title}
               </option>
             ))}
           </select>
@@ -271,14 +241,7 @@ function History() {
         {page.events.length === 0 ? (
           <Placeholder description="Событий пока нет." />
         ) : (
-          page.events.map((event) => (
-            <CardShell key={event.id}>
-              <div style={{ fontWeight: 600, fontSize: 14.5 }}>{typeLabel(event.type)}</div>
-              <div style={{ marginTop: 4, color: "var(--tgui--hint_color)", fontSize: 13 }}>
-                {event.actorName ?? "система"} · {formatMoment(event.createdAt)}
-              </div>
-            </CardShell>
-          ))
+          page.events.map((event) => <JournalEventCard event={event} key={event.id} />)
         )}
 
         <CardShell>

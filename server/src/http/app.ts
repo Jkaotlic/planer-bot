@@ -9,7 +9,7 @@ import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
-import { listActiveTemplates } from "../repo/templates";
+import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { readTeamSchedule } from "../repo/team-schedule";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
@@ -296,6 +296,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
+    // Одно действие человека — одна строка журнала: маршрут принимает оба поля
+    // разом, и делить его на два события значило бы врать о том, что он сделал.
+    recordAudit(db, "settings_changed", id, {
+      employeeId: id,
+      displayName: employee.displayName,
+      ...(hasReminders ? { remindersEnabled: employee.remindersEnabled } : {}),
+      ...(preferred?.ok ? { preferredName: employee.preferredName } : {}),
+    });
+
     return c.json({
       remindersEnabled: employee.remindersEnabled,
       preferredName: employee.preferredName,
@@ -307,8 +316,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/templates", requireAuth(db, config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));
 
   app.get("/api/my/shifts", requireAuth(db, config.jwtSecret), (c) => {
-    const from = c.req.query("from") ?? new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
-    return c.json({ shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from) });
+    // Дата команды, а не телефона: мини-апп больше не присылает `from`, потому
+    // что граница дня не должна зависеть от того, где физически человек.
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
+    const from = c.req.query("from") ?? today;
+    return c.json({ shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from), today });
   });
 
   app.get("/api/team/schedule", requireAuth(db, config.jwtSecret), (c) => {
@@ -345,6 +357,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
     const inviteToken = randomBytes(16).toString("hex");
     const employee = createEmployee(db, { displayName: body.displayName, inviteToken });
+    recordAudit(db, "employee_created", c.get("auth").employeeId, {
+      employeeId: employee.id, displayName: employee.displayName,
+    });
     const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
     return c.json({ employee, inviteToken, inviteLink }, 201);
   });
@@ -373,6 +388,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    // Снимок до правки: без него переименование не оставляет следа — в журнале
+    // оказывается новое имя, а старого нет нигде.
+    const beforeEdit = { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName };
     if (hasName) {
       const clash = findActiveByDisplayName(db, body.displayName as string, id);
       if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
@@ -383,9 +401,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     recordAudit(db, "employee_updated", c.get("auth").employeeId, {
       employeeId: id,
-      displayName: employee.displayName,
-      ...(hasBirthday ? { birthDate: employee.birthDate } : {}),
-      ...(hasPreferred ? { preferredName: employee.preferredName } : {}),
+      before: beforeEdit,
+      after: { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName },
     });
     return c.json({ employee: { ...employee, address: addressOf(employee) } });
   });
@@ -490,6 +507,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
       setInviteToken(db, id, inviteToken);
     }
     const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
+    // Токен сюда не попадает намеренно: это действующий ключ к учётной записи, а
+    // журнал открыт всем админам. Важен факт выдачи и то, что прежняя ссылка умерла.
+    recordAudit(db, "employee_invite_issued", c.get("auth").employeeId, {
+      employeeId: id, displayName: emp.displayName, regenerated: body.regenerate === true,
+    });
     return c.json({ inviteToken, inviteLink });
   });
 
@@ -585,6 +607,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const campaign = updateCampaign(db, Number(c.req.param("id")), asOf, patch);
     if (!campaign) return c.json({ error: "not_found" }, 404);
+    // Пишем, ЧТО тронули, а не что написали: текст поздравления в журнал не копируется.
+    recordAudit(db, "birthday_campaign_updated", c.get("auth").employeeId, {
+      employeeId: Number(c.req.param("id")),
+      displayName: getEmployeeById(db, Number(c.req.param("id")))?.displayName ?? null,
+      ...(patch.collectUrl !== undefined ? { collectUrl: patch.collectUrl } : {}),
+      ...(patch.messageText !== undefined ? { messageText: patch.messageText ? "изменён" : null } : {}),
+      ...(patch.scheduledSendOn !== undefined ? { scheduledSendOn: patch.scheduledSendOn } : {}),
+    });
     return c.json({ campaign });
   });
 
@@ -694,9 +724,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   /** The fields worth keeping in the audit feed — enough to answer «что именно поменяли»
-   *  without copying the whole row into the log. */
+   *  without copying the whole row into the log. Имя, а не только `employeeId`:
+   *  журнал читают глазами, и «работник #24» не отвечает ни на один вопрос. */
   const auditShape = (s: Shift) => ({
-    entryId: s.id, employeeId: s.employeeId, date: s.date, endDate: s.endDate,
+    entryId: s.id, employeeId: s.employeeId,
+    employeeName: s.employeeId != null ? nameOf(s.employeeId) : null,
+    date: s.date, endDate: s.endDate,
     category: s.category, title: s.title, start: s.start, end: s.end,
   });
 
@@ -1029,7 +1062,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return c.json({ error: "rotationUnit must be «day» or «week»" }, 400);
     }
     setRotationUnit(db, templateId, body.rotationUnit);
-    recordAudit(db, "template_rotation_changed", c.get("auth").employeeId, { templateId, rotationUnit: body.rotationUnit });
+    recordAudit(db, "template_rotation_changed", c.get("auth").employeeId, {
+      templateId, templateName: getTemplate(db, templateId)?.name ?? null, rotationUnit: body.rotationUnit,
+    });
     return c.json({ templateId, rotationUnit: body.rotationUnit });
   });
 
@@ -1060,6 +1095,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const saved = setTemplateRoles(db, templateId, { pool: body.pool as number[], preference });
       recordAudit(db, "template_roles_changed", c.get("auth").employeeId, {
         templateId,
+        templateName: getTemplate(db, templateId)?.name ?? null,
         poolSize: saved.pool.length,
         preferred: Object.keys(saved.preference).length,
       });
@@ -1129,8 +1165,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: express interest in a slot (idempotent)
   app.post("/api/weekend/slots/:id/interest", requireAuth(db, config.jwtSecret), (c) => {
-    const res = expressInterest(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
+    const slotId = Number(c.req.param("id"));
+    const res = expressInterest(db, slotId, c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, slotId);
+    recordAudit(db, "weekend_interest", c.get("auth").employeeId, {
+      slotId,
+      slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId,
+      employeeName: nameOf(c.get("auth").employeeId) ?? null,
+    });
     return c.json({ ok: true }, 201);
   });
 
@@ -1143,9 +1187,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/weekend/offers/:id/confirm", requireAuth(db, config.jwtSecret), async (c) => {
     const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, res.slotId);
+    const name = nameOf(c.get("auth").employeeId) ?? "Работник";
+    recordAudit(db, "weekend_offer_confirmed", c.get("auth").employeeId, {
+      slotId: res.slotId, slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId, employeeName: name,
+    });
     if (bot) {
-      const slot = getVacantSlot(db, res.slotId);
-      const name = nameOf(c.get("auth").employeeId) ?? "Работник";
       await notifyAdmins(bot, db, weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
@@ -1155,9 +1203,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/weekend/offers/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
     const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, res.slotId);
+    const name = nameOf(c.get("auth").employeeId) ?? "Работник";
+    recordAudit(db, "weekend_offer_declined", c.get("auth").employeeId, {
+      slotId: res.slotId, slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId, employeeName: name,
+    });
     if (bot) {
-      const slot = getVacantSlot(db, res.slotId);
-      const name = nameOf(c.get("auth").employeeId) ?? "Работник";
       await notifyAdmins(bot, db, weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
@@ -1270,13 +1322,19 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/weekend/assignments/:id/unassign", requireAdmin(db, config.jwtSecret), async (c) => {
     const res = unassign(db, Number(c.req.param("id")));
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const removedSlot = getVacantSlot(db, res.slotId);
+    recordAudit(db, "weekend_unassigned", c.get("auth").employeeId, {
+      slotId: res.slotId,
+      slot: removedSlot ? slotLineOf(removedSlot) : null,
+      employeeId: res.employeeId,
+      employeeName: nameOf(res.employeeId) ?? null,
+    });
     // The reverse direction (worker declines) already notifies the admin —
     // close the loop here so the worker doesn't just find their shift gone.
     if (bot) {
       const tg = tgOf(res.employeeId);
       if (tg != null) {
-        const slot = getVacantSlot(db, res.slotId);
-        await notifyUser(bot, tg, weekendUnassignedText(slot ? slotLineOf(slot) : "выходную смену"));
+        await notifyUser(bot, tg, weekendUnassignedText(removedSlot ? slotLineOf(removedSlot) : "выходную смену"));
       }
     }
     return c.json({ ok: true });
