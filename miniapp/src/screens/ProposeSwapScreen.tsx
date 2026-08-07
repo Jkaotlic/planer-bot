@@ -24,13 +24,20 @@ export interface ProposeSwapScreenProps {
  *  turned into something a person can read. Anything not listed here (including a
  *  network/auth failure, whose message is a raw HTTP status string) falls back to
  *  the generic message below rather than leaking a code onto the screen. */
-const SWAP_ERROR_MESSAGES: Record<string, string> = {
+export const SWAP_ERROR_MESSAGES: Record<string, string> = {
   "identical-shift": "Это та же самая смена — обмен ничего не изменит.",
   duplicate: "Ты уже предложил обмен на эту смену — дождись ответа.",
   // Not the same as `duplicate`: the request exists, but it's theirs, so the
   // person is one tap from finishing this instead of proposing it again.
   mirror: "Коллега уже предложил тебе ровно этот обмен — ответь на его заявку в «Обменах».",
   not_your_shift: "Эта смена больше не твоя — обнови страницу.",
+  // `createSwap` сегодня никогда их не возвращает: владение отдающей сменой уже
+  // проверено выше (`not_your_shift`), а принимающая сторона берётся из самой
+  // toShift, так что расхождение структурно невозможно. Но сторож-тест ниже
+  // требует подписи на каждую причину без разбора — таблица не должна тайно
+  // полагаться на «сегодня недостижимо».
+  "from-shift-not-owned": "Эта смена больше не твоя — обнови страницу.",
+  "to-shift-not-owned": "Смена коллеги уже досталась другому — обнови страницу.",
   target_unassigned: "На эту смену сейчас никто не назначен.",
   same_person: "Нельзя предложить обмен самому себе.",
   not_swappable: "Такими сменами нельзя меняться.",
@@ -46,6 +53,12 @@ const SWAP_ERROR_MESSAGES: Record<string, string> = {
   // Экран предлагает только смены того же дня, так что это видно, лишь если
   // страница провисела открытой и день под ней успел смениться.
   "different-day": "Меняться можно только сменами в один и тот же день.",
+  // Три запрета, которые ставит админ. Список кандидатов их уже учитывает, так
+  // что сюда попадают те, у кого экран провисел открытым дольше, чем действовало
+  // разрешение.
+  "swaps-locked": "Обмены сейчас закрыты — админ их приостановил.",
+  "from-excluded": "Тебе закрыли обмены смен. Если это ошибка — напиши админу.",
+  "to-excluded": "Этому коллеге закрыли обмены смен.",
 };
 
 function describeSwapError(err: unknown): string {

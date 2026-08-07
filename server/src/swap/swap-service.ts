@@ -4,6 +4,8 @@ import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
 import { createSwapRequest, getSwapRequest, setSwapStatus, findPendingSwapForPair } from "../repo/swaps";
+import { isSwapsLocked } from "../repo/settings";
+import { getEmployeeById } from "../repo/employees";
 
 export type SwapNow = { date: string; time: string };
 export type SwapOutcome =
@@ -21,6 +23,17 @@ function timedOthers(db: Db, employeeId: number, excludeShiftId: number): Domain
   return listShiftsByEmployee(db, employeeId)
     .filter((s) => s.id !== excludeShiftId && s.start != null && s.end != null)
     .map(toDomain);
+}
+
+/** The three permission facts `validateSwap` needs, read from the database once
+ *  per call. Kept here rather than at each call site so the two entrances — the
+ *  Mini App route and the bot's «Принять» button — can never read them differently. */
+function restrictionsFor(db: Db, fromEmployeeId: number, toEmployeeId: number) {
+  return {
+    swapsLocked: isSwapsLocked(db),
+    fromExcluded: getEmployeeById(db, fromEmployeeId)?.excludedFromSwaps === true,
+    toExcluded: getEmployeeById(db, toEmployeeId)?.excludedFromSwaps === true,
+  };
 }
 
 export function createSwap(
@@ -53,6 +66,7 @@ export function createSwap(
     fromOtherShifts: timedOthers(db, input.fromEmployeeId, fromShift.id),
     toOtherShifts: timedOthers(db, toShift.employeeId, toShift.id),
     now,
+    ...restrictionsFor(db, input.fromEmployeeId, toShift.employeeId),
   });
   if (!validation.ok) return { ok: false, reason: validation.reason };
   // Same trade already open — either this person's own request («дождись ответа»)
@@ -98,6 +112,7 @@ export function acceptSwap(db: Db, requestId: number, actingEmployeeId: number, 
     fromOtherShifts: timedOthers(db, req.fromEmployeeId, fromShift.id),
     toOtherShifts: timedOthers(db, req.toEmployeeId, toShift.id),
     now,
+    ...restrictionsFor(db, req.fromEmployeeId, req.toEmployeeId),
   });
   if (!validation.ok) {
     setSwapStatus(db, requestId, expired);

@@ -12,6 +12,10 @@ const shift = (over: Partial<TestShift>): TestShift => ({
 
 const now = { date: "2026-07-01", time: "12:00" };
 
+/** Мир, в котором ничего не запрещено. Спредится в каждый вызов, чтобы тест
+ *  явно говорил, какие ограничения он проверяет, а какие снял. */
+const open = { swapsLocked: false, fromExcluded: false, toExcluded: false } as const;
+
 describe("validateSwap", () => {
   // Меняться можно только внутри одного дня, поэтому базовая пара — один день и
   // разное время: иначе сработал бы «identical-shift», и тесты проверяли бы не то.
@@ -21,7 +25,7 @@ describe("validateSwap", () => {
   it("accepts a clean swap", () => {
     const r = validateSwap({
       fromShift: from, toShift: to, fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: true });
   });
@@ -30,7 +34,7 @@ describe("validateSwap", () => {
     const r = validateSwap({
       fromShift: from, toShift: shift({ id: 2, date: "2026-07-11", employeeId: 200 }),
       fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "different-day" });
   });
@@ -39,7 +43,7 @@ describe("validateSwap", () => {
     const r = validateSwap({
       fromShift: from, toShift: shift({ id: 2, date: "2026-06-01", employeeId: 200 }),
       fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "different-day" });
   });
@@ -48,7 +52,7 @@ describe("validateSwap", () => {
     const r = validateSwap({
       fromShift: { ...from, employeeId: 999 }, toShift: to,
       fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "from-shift-not-owned" });
   });
@@ -57,7 +61,7 @@ describe("validateSwap", () => {
     const r = validateSwap({
       fromShift: { ...from, date: "2026-06-01" }, toShift: { ...to, date: "2026-06-01" },
       fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "from-shift-in-past" });
   });
@@ -67,7 +71,7 @@ describe("validateSwap", () => {
     const clash = shift({ id: 3, date: "2026-07-10", start: "20:00", end: "22:00", employeeId: 100 });
     const r = validateSwap({
       fromShift: from, toShift: to, fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [clash], toOtherShifts: [], now,
+      fromOtherShifts: [clash], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "double-booking-from" });
   });
@@ -76,7 +80,7 @@ describe("validateSwap", () => {
     const r = validateSwap({
       fromShift: from, toShift: { ...to, employeeId: 999 },
       fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "to-shift-not-owned" });
   });
@@ -89,7 +93,7 @@ describe("validateSwap", () => {
       fromShift: { ...from, ...today },
       toShift: { ...to, date: now.date, start: "09:00", end: "11:00" },
       fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [], now,
+      fromOtherShifts: [], toOtherShifts: [], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "to-shift-in-past" });
   });
@@ -99,7 +103,7 @@ describe("validateSwap", () => {
     const clash = shift({ id: 4, date: "2026-07-10", start: "10:00", end: "16:00", employeeId: 200 });
     const r = validateSwap({
       fromShift: from, toShift: to, fromEmployeeId: 100, toEmployeeId: 200,
-      fromOtherShifts: [], toOtherShifts: [clash], now,
+      fromOtherShifts: [], toOtherShifts: [clash], now, ...open,
     });
     expect(r).toEqual({ ok: false, reason: "double-booking-to" });
   });
@@ -111,7 +115,7 @@ describe("validateSwap", () => {
       const morningB = shift({ id: 2, date: "2026-08-05", employeeId: 200, templateId: 7, start: "08:00", end: "17:00" });
       const r = validateSwap({
         fromShift: morningA, toShift: morningB, fromEmployeeId: 100, toEmployeeId: 200,
-        fromOtherShifts: [], toOtherShifts: [], now,
+        fromOtherShifts: [], toOtherShifts: [], now, ...open,
       });
       expect(r).toEqual({ ok: false, reason: "identical-shift" });
     });
@@ -125,7 +129,7 @@ describe("validateSwap", () => {
       const augTwelve = shift({ id: 2, date: "2026-08-12", employeeId: 200, templateId: 7 });
       const r = validateSwap({
         fromShift: augFive, toShift: augTwelve, fromEmployeeId: 100, toEmployeeId: 200,
-        fromOtherShifts: [], toOtherShifts: [], now,
+        fromOtherShifts: [], toOtherShifts: [], now, ...open,
       });
       expect(r).toEqual({ ok: false, reason: "different-day" });
     });
@@ -136,7 +140,7 @@ describe("validateSwap", () => {
       const night = shift({ id: 2, date: "2026-08-05", employeeId: 200, templateId: 9, start: "20:00", end: "23:59" });
       const r = validateSwap({
         fromShift: morning, toShift: night, fromEmployeeId: 100, toEmployeeId: 200,
-        fromOtherShifts: [], toOtherShifts: [], now,
+        fromOtherShifts: [], toOtherShifts: [], now, ...open,
       });
       expect(r).toEqual({ ok: true });
     });
@@ -147,16 +151,76 @@ describe("validateSwap", () => {
       const sameKind = shift({ id: 2, date: "2026-08-05", employeeId: 200, templateId: null, category: "shift", start: "09:00", end: "18:00" });
       const rejected = validateSwap({
         fromShift: handMade, toShift: sameKind, fromEmployeeId: 100, toEmployeeId: 200,
-        fromOtherShifts: [], toOtherShifts: [], now,
+        fromOtherShifts: [], toOtherShifts: [], now, ...open,
       });
       expect(rejected).toEqual({ ok: false, reason: "identical-shift" });
 
       const differentTime = shift({ id: 3, date: "2026-08-05", employeeId: 200, templateId: null, category: "shift", start: "10:00", end: "19:00" });
       const allowed = validateSwap({
         fromShift: handMade, toShift: differentTime, fromEmployeeId: 100, toEmployeeId: 200,
-        fromOtherShifts: [], toOtherShifts: [], now,
+        fromOtherShifts: [], toOtherShifts: [], now, ...open,
       });
       expect(allowed).toEqual({ ok: true });
     });
+  });
+});
+
+import { swapBlockReason } from "./swap";
+
+describe("swapBlockReason", () => {
+  it("ничего не запрещено — null", () => {
+    expect(swapBlockReason({ swapsLocked: false, fromExcluded: false, toExcluded: false })).toBeNull();
+  });
+
+  // Порядок приоритета важен: человеку называют самую общую причину. «Обмены
+  // закрыты для всех» полезнее, чем «тебе закрыли обмены», когда верно и то и другое.
+  it("лок важнее личных исключений", () => {
+    expect(swapBlockReason({ swapsLocked: true, fromExcluded: true, toExcluded: true })).toBe("swaps-locked");
+  });
+
+  it("своё исключение важнее чужого", () => {
+    expect(swapBlockReason({ swapsLocked: false, fromExcluded: true, toExcluded: true })).toBe("from-excluded");
+  });
+
+  it("исключён только коллега", () => {
+    expect(swapBlockReason({ swapsLocked: false, fromExcluded: false, toExcluded: true })).toBe("to-excluded");
+  });
+});
+
+describe("validateSwap с ограничениями", () => {
+  const from = shift({ id: 1, date: "2026-07-10", start: "09:00", end: "18:00", employeeId: 100 });
+  const to = shift({ id: 2, date: "2026-07-10", start: "19:00", end: "23:00", employeeId: 200 });
+  const base = {
+    fromShift: from, toShift: to, fromEmployeeId: 100, toEmployeeId: 200,
+    fromOtherShifts: [], toOtherShifts: [], now,
+  };
+
+  it("под локом отказывает", () => {
+    expect(validateSwap({ ...base, ...open, swapsLocked: true }))
+      .toEqual({ ok: false, reason: "swaps-locked" });
+  });
+
+  // Парный тест: те же самые данные без лока проходят. Без него первый тест
+  // зеленел бы от любой другой причины отказа и не доказывал бы ничего.
+  it("те же данные без лока проходят", () => {
+    expect(validateSwap({ ...base, ...open })).toEqual({ ok: true });
+  });
+
+  // Ограничение стоит РАНЬШЕ проверок про сами смены: пара заведомо невалидна
+  // (разные дни), и всё равно называется лок — иначе человек услышал бы причину,
+  // которая исчезнет, если он выберет другую смену, а запрет останется.
+  it("лок называется раньше, чем «разные дни»", () => {
+    expect(validateSwap({ ...base, ...open, swapsLocked: true, toShift: shift({ id: 2, date: "2026-07-11", employeeId: 200 }) }))
+      .toEqual({ ok: false, reason: "swaps-locked" });
+  });
+
+  it("исключён инициатор", () => {
+    expect(validateSwap({ ...base, ...open, fromExcluded: true }))
+      .toEqual({ ok: false, reason: "from-excluded" });
+  });
+
+  it("исключена вторая сторона", () => {
+    expect(validateSwap({ ...base, ...open, toExcluded: true }))
+      .toEqual({ ok: false, reason: "to-excluded" });
   });
 });
