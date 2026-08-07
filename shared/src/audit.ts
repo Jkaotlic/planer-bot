@@ -5,24 +5,33 @@ import { parseISODate, weekdayShort } from "./week-dates";
  * Каждый тип события, который сервер умеет записывать в `audit_log`.
  *
  * Единственный список на весь проект: сервер типизирует им `recordAudit`, оба
- * консоля — таблицу описателей. Добавил тип сюда, но не добавил описание — `tsc`
- * красный. Раньше эту роль исполняли два зеркальных теста и два дубля
- * `TYPE_LABELS`, и консоли всё равно разъезжались.
+ * консоля — таблицу описателей и (Задачи 7–8) выпадающий фильтр по типу
+ * события. Добавил тип сюда, но не добавил описание — `tsc` красный. Раньше
+ * эту роль исполняли два зеркальных теста и два дубля `TYPE_LABELS`, и консоли
+ * всё равно разъезжались.
+ *
+ * Массив, а не просто объявление типа: `AuditType` выводится из него же
+ * (`(typeof AUDIT_TYPES)[number]`), так что тест на полноту таблицы
+ * описателей может реально перебрать все 33 значения в рантайме, а не
+ * сверять два списка, набранных руками в разных местах.
  */
-export type AuditType =
-  | "entry_created" | "entry_updated" | "entry_deleted"
-  | "swap_proposed" | "swap_accepted" | "swap_declined"
-  | "swap_cancelled" | "swap_expired" | "swap_auto_cancelled"
-  | "distribution_applied" | "roster_import"
-  | "employee_created" | "employee_updated" | "employee_reordered"
-  | "employee_archived" | "employee_restored" | "employee_admin_changed"
-  | "employee_invite_issued" | "settings_changed"
-  | "template_roles_changed" | "template_rotation_changed"
-  | "weekend_slot_created" | "weekend_assigned" | "weekend_unassigned"
-  | "weekend_interest" | "weekend_offer_confirmed" | "weekend_offer_declined"
-  | "birthday_sent" | "birthday_admin_notice" | "birthday_schedule_notice"
-  | "birthday_campaign_updated"
-  | "reminder_undeliverable" | "reminders_dispatched";
+export const AUDIT_TYPES = [
+  "entry_created", "entry_updated", "entry_deleted",
+  "swap_proposed", "swap_accepted", "swap_declined",
+  "swap_cancelled", "swap_expired", "swap_auto_cancelled",
+  "distribution_applied", "roster_import",
+  "employee_created", "employee_updated", "employee_reordered",
+  "employee_archived", "employee_restored", "employee_admin_changed",
+  "employee_invite_issued", "settings_changed",
+  "template_roles_changed", "template_rotation_changed",
+  "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
+  "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
+  "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
+  "birthday_campaign_updated",
+  "reminder_undeliverable", "reminders_dispatched",
+] as const;
+
+export type AuditType = (typeof AUDIT_TYPES)[number];
 
 export interface AuditView {
   /** Одиночный символ — опознавательный знак строки в ленте. */
@@ -144,6 +153,18 @@ function weekendView(p: Record<string, unknown>, icon: string, title: string) {
   return { icon, title, lines: [personLabel(p), str(p.slot) ?? `слот #${num(p.slotId) ?? "?"}`] };
 }
 
+/**
+ * `rotationUnit` в payload'е — сырой enum БД (`server/src/db/schema.ts`), а
+ * не текст для показа: `"day" | "week"`. Без перевода строка журнала съезжает
+ * на английский посреди русской фразы.
+ */
+function rotationLabel(v: unknown): string {
+  const s = str(v);
+  if (s === "week") return "по неделям";
+  if (s === "day") return "по дням";
+  return "—";
+}
+
 // ——— таблица описателей ———
 // `Partial` снят: с этого момента полноту стережёт компилятор, а не зеркальный
 // тест в каждом консоле.
@@ -254,7 +275,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   template_rotation_changed: (p) => ({
     icon: "🎚",
     title: "Изменена очередь",
-    lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, `шаг: ${str(p.rotationUnit) ?? "—"}`],
+    lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, `шаг: ${rotationLabel(p.rotationUnit)}`],
   }),
 
   weekend_slot_created: (p) => ({

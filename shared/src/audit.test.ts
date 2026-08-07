@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { auditMonthRange, describeAuditEvent, formatAuditMoment } from "./audit";
+import { AUDIT_TYPES, auditMonthRange, describeAuditEvent, formatAuditMoment } from "./audit";
 
 describe("describeAuditEvent — записи", () => {
   it("рассказывает, кому и на какой день поставили смену", () => {
@@ -272,12 +272,26 @@ describe("describeAuditEvent — остальные события", () => {
     expect(view.icon).toBe("⚖");
   });
 
-  it("описан каждый тип, который сервер умеет писать", () => {
-    const described = new Set(cases.map((c) => c.type));
-    // Типы из Task 4 проверены выше своими тестами.
-    for (const type of ["entry_created", "entry_updated", "entry_deleted", "swap_proposed", "swap_accepted",
-      "swap_declined", "swap_cancelled", "swap_expired", "swap_auto_cancelled"]) described.add(type);
-    expect(described.size).toBe(33);
+  it("переводит rotationUnit на русский, а не показывает английский enum как есть", () => {
+    const rotationLineFor = (rotationUnit: string) =>
+      describeAuditEvent({
+        type: "template_rotation_changed",
+        payload: { templateId: 3, templateName: "Ночь", rotationUnit },
+      }).lines.join(" · ");
+    expect(rotationLineFor("week")).toContain("шаг: по неделям");
+    expect(rotationLineFor("day")).toContain("шаг: по дням");
+  });
+});
+
+describe("describeAuditEvent — полнота таблицы", () => {
+  // Настоящая проверка полноты: не сравнение двух списков, набранных руками
+  // в этом файле, а прогон через саму `describeAuditEvent`. Тип без описателя
+  // проваливается в запасной вариант, где `title === type` — сырой строкой
+  // типа события. Ни у одного настоящего описателя заголовок не совпадает
+  // со своим типом (все заголовки — русские фразы, все типы — snake_case),
+  // так что это надёжный сигнал «описателя нет».
+  it.each(AUDIT_TYPES)("%s описан, а не проваливается в запасной вариант", (type) => {
+    expect(describeAuditEvent({ type, payload: {} }).title).not.toBe(type);
   });
 });
 
