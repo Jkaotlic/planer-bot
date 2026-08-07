@@ -1,11 +1,16 @@
 import { and, count, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import type { AuditType } from "@planer/shared";
 import type { Db } from "../db/client";
 import { auditLog, employees, type AuditLog } from "../db/schema";
 
 /** Records one thing that happened, for the «кто когда что менял» feed. Never let a
  *  bookkeeping failure take down the action it describes — the write already
- *  succeeded by the time we get here. */
-export function recordAudit(db: Db, type: string, actorEmployeeId: number | null, payload: unknown): void {
+ *  succeeded by the time we get here.
+ *
+ *  `type` — не `string`: каждое событие обязано иметь человеческое описание в
+ *  `@planer/shared/audit`, и это единственное место, где такое требование можно
+ *  предъявить один раз на весь сервер. */
+export function recordAudit(db: Db, type: AuditType, actorEmployeeId: number | null, payload: unknown): void {
   try {
     db.insert(auditLog).values({ type, actorEmployeeId, payload }).run();
   } catch (err) {
