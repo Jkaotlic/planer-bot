@@ -96,7 +96,7 @@ export function SettingsScreen() {
                 : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
             </span>
             <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void handleConfirm()}>
-              {saving ? "Отправляю…" : confirmLabel}
+              {confirmLabel}
             </button>
             <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setConfirming(false)}>
               Отмена
@@ -107,8 +107,10 @@ export function SettingsScreen() {
             <button
               type="button"
               className="btn btn-primary"
+              disabled={saving}
               onClick={() => {
                 setResult(null);
+                setError(null);
                 setConfirming(true);
               }}
             >

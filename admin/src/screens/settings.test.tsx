@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiClient } from "../api/client";
+import { apiClient, type SwapLockResult } from "../api/client";
 import { SettingsScreen } from "./SettingsScreen";
 
 /**
@@ -107,5 +107,53 @@ describe("SettingsScreen", () => {
     expect(el.textContent ?? "").toContain("сеть недоступна");
     // Тумблер обязан остаться на экране: иначе из этого состояния нет выхода без F5.
     expect(buttonWith(el, "Закрыть обмены")).toBeTruthy();
+  });
+
+  /**
+   * Пока запрос в полёте, нажать ещё раз нельзя.
+   *
+   * `confirming` сбрасывается сразу после ответа сервера, а `saving` — только
+   * после `reload()`. В это окно основная кнопка снова кликабельна, и второе
+   * подтверждение уходит вторым сообщением всей команде. Тест держит запрос
+   * незавершённым и проверяет, что кнопки погашены.
+   */
+  it("пока запрос идёт, кнопки погашены", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    let release!: (value: SwapLockResult) => void;
+    vi.spyOn(apiClient, "setSwapsLock").mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    await act(async () => buttonWith(el, "Да, закрыть").click());
+    await settle();
+
+    expect(buttonWith(el, "Да, закрыть").disabled).toBe(true);
+    await act(async () => release({ locked: true, cancelled: 0, delivered: 1, intended: 1 }));
+    await settle();
+  });
+
+  it("взведение убирает ошибку прошлой попытки", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(OPEN);
+    vi.spyOn(apiClient, "setSwapsLock").mockRejectedValue(new Error("сеть недоступна"));
+    const el = await mount();
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    await act(async () => buttonWith(el, "Да, закрыть").click());
+    await settle();
+    expect(el.textContent ?? "").toContain("сеть недоступна");
+
+    await act(async () => buttonWith(el, "Закрыть обмены").click());
+    await settle();
+    // Старый отказ рядом с новым подтверждением читается как отказ на него.
+    expect(el.textContent ?? "").not.toContain("сеть недоступна");
+  });
+
+  it("если тумблер ни разу не трогали, так и написано", async () => {
+    vi.spyOn(apiClient, "getSettings")
+      .mockResolvedValue({ swapsLocked: false, swapsLockUpdatedAt: null, swapsLockUpdatedBy: null });
+    const el = await mount();
+    expect(el.textContent ?? "").toContain("Ни разу не меняли");
   });
 });
