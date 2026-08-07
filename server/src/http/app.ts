@@ -307,8 +307,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/templates", requireAuth(db, config.jwtSecret), (c) => c.json({ templates: listActiveTemplates(db) }));
 
   app.get("/api/my/shifts", requireAuth(db, config.jwtSecret), (c) => {
-    const from = c.req.query("from") ?? new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
-    return c.json({ shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from) });
+    // Дата команды, а не телефона: мини-апп больше не присылает `from`, потому
+    // что граница дня не должна зависеть от того, где физически человек.
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
+    const from = c.req.query("from") ?? today;
+    return c.json({ shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from), today });
   });
 
   app.get("/api/team/schedule", requireAuth(db, config.jwtSecret), (c) => {
