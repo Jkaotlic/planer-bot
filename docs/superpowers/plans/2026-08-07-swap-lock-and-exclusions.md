@@ -1741,14 +1741,36 @@ git commit -m "feat(api): две галки ограничений на карт
 
 `miniapp/src/lib/swap-candidates.test.ts` — дописать:
 
+Тестов два, и они про разное. Первый закрепляет **порядок** проверок, второй — саму видимость. Порядок закрепляется только на коллеге с **такой же** сменой (`templateId` как у `mine`, то есть 4): на смене другого вида `isIdenticalShift` даст `false` при любом порядке, и `sameKindCount === 0` будет держаться, даже если проверку исключения переставить после проверки «та же смена». То есть тест на другой смене не доказывает ничего.
+
 ```ts
+  /**
+   * Исключённый коллега с ТАКОЙ ЖЕ сменой не попадает ни в кандидаты, ни в
+   * «столько же работают такую же».
+   *
+   * Смена нарочно совпадает по виду с моей: если переставить проверку исключения
+   * ПОСЛЕ `isIdenticalShift`, он утечёт в `sameKindCount`, и экран скажет «ещё 1
+   * работает такую же смену» про человека, с которым меняться нельзя. На коллеге
+   * с другой сменой этот тест был бы зелёным при любом порядке.
+   */
+  it("исключённый коллега с такой же сменой не считается и в «таких же»", () => {
+    const twin = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "15:00", end: "23:00", templateId: 4, title: "Вечер" });
+    const { candidates, sameKindCount } = swapCandidates(mine, [twin], 1, NOW, new Set([7]));
+    expect(candidates).toEqual([]);
+    expect(sameKindCount).toBe(0);
+  });
+
+  it("он же без исключения — считается как «такая же смена»", () => {
+    const twin = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "15:00", end: "23:00", templateId: 4, title: "Вечер" });
+    const { candidates, sameKindCount } = swapCandidates(mine, [twin], 1, NOW, new Set());
+    expect(candidates).toEqual([]);
+    expect(sameKindCount).toBe(1);
+  });
+
   it("исключённого из обменов коллегу в кандидатах нет", () => {
     const other = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "09:00", end: "18:00" });
-    const { candidates, sameKindCount } = swapCandidates(mine, [other], 1, NOW, new Set([7]));
+    const { candidates } = swapCandidates(mine, [other], 1, NOW, new Set([7]));
     expect(candidates).toEqual([]);
-    // И НЕ в «таких же»: он не спрятан как одинаковый, с ним нельзя меняться вообще.
-    // Иначе экран сказал бы «ещё 1 работает такую же смену» — и это была бы неправда.
-    expect(sameKindCount).toBe(0);
   });
 
   it("тот же коллега без исключения в кандидатах есть", () => {
@@ -1916,14 +1938,26 @@ export function swapCandidates(
   swapBlockedReason?: string;
 ```
 
-`MyShiftsScreen` — считать фразу один раз и раздать её строкам:
+`MyShiftsScreen` — считать фразу один раз и раздать её строкам. **Приоритет причин не переписывать руками**, а спросить у `swapBlockReason`: она для того и заведена, чтобы сервер, кнопка и список кандидатов называли причины в одном порядке. Тернарник, повторяющий её порядок, верен ровно до первой правки на сервере — и промолчит, когда разъедется.
 
 ```ts
-  const swapBlockedReason = me.swapsLocked
-    ? "Обмены сейчас закрыты"
-    : me.excludedFromSwaps
-      ? "Обмены тебе закрыты — спроси у админа"
-      : undefined;
+import { swapBlockReason } from "@planer/shared";
+
+// Причина одна на весь экран, и её порядок берётся у той же функции, что решает
+// на сервере. `toExcluded: false` — здесь речь только про меня; исключённые
+// коллеги отсеиваются отдельно, в списке кандидатов.
+const BLOCK_PHRASES = {
+  "swaps-locked": "Обмены сейчас закрыты",
+  "from-excluded": "Обмены тебе закрыты — спроси у админа",
+  "to-excluded": "Обмены тебе закрыты — спроси у админа",
+} as const;
+
+const blocked = swapBlockReason({
+  swapsLocked: me.swapsLocked,
+  fromExcluded: me.excludedFromSwaps,
+  toExcluded: false,
+});
+const swapBlockedReason = blocked ? BLOCK_PHRASES[blocked] : undefined;
 ```
 
 `miniapp/src/App.tsx` — в месте, где строится список кандидатов, собрать множество из `teamSchedule.employees` и передать пятым аргументом:
