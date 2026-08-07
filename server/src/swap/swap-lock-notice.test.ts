@@ -16,7 +16,8 @@ const trade = (over: Partial<SwapAuditPayload> = {}): SwapAuditPayload => ({
 describe("buildSwapLockNotices", () => {
   it("tells the whole reachable team that swaps are closed", () => {
     const notices = buildSwapLockNotices({ locked: true, team: [ANYA, IGOR, MARK], cancelled: [] });
-    expect(notices.map((n) => n.telegramUserId)).toEqual([1001, 1002]); // Марк без телеграма
+    // Марк has no Telegram account, so there is nowhere to send and nothing to count.
+    expect(notices.map((n) => n.telegramUserId)).toEqual([1001, 1002]);
     expect(notices[0]!.text).toContain("🔒 Обмены смен закрыты.");
   });
 
@@ -46,7 +47,8 @@ describe("buildSwapLockNotices", () => {
     const forAnya = notices.find((n) => n.telegramUserId === 1001)!;
     const forIgor = notices.find((n) => n.telegramUserId === 1002)!;
     expect(forAnya.text).toContain("Игорь Петров");
-    expect(forAnya.text).toContain("Чт 13 авг · 09:00–18:00"); // её собственная смена
+    // Her own shift, not his — the line is written from the reader's side.
+    expect(forAnya.text).toContain("Чт 13 авг · 09:00–18:00");
     expect(forIgor.text).toContain("Аня Смирнова");
     expect(forIgor.text).toContain("Чт 13 авг · 12:00–21:00");
   });
@@ -73,6 +75,19 @@ describe("buildExclusionNotices", () => {
   it("clearing the flag writes to that person only", () => {
     const notices = buildExclusionNotices({
       excluded: false, person: ANYA, others: [IGOR], cancelled: [],
+    });
+    expect(notices).toEqual([{ telegramUserId: 1001, text: "🔓 Тебе снова доступны обмены смен." }]);
+  });
+
+  /**
+   * Guards the asymmetry that the two builders had before `linesFor` existed:
+   * the lock builder suppressed cancellation lines when unlocking, this one did
+   * not. A stale «cancelled» threaded in by a caller would have made «снова
+   * доступны» sprout a list of requests that nothing had just cancelled.
+   */
+  it("«снова доступны» never grows cancellation lines, even if some are passed in", () => {
+    const notices = buildExclusionNotices({
+      excluded: false, person: ANYA, others: [], cancelled: [trade()],
     });
     expect(notices).toEqual([{ telegramUserId: 1001, text: "🔓 Тебе снова доступны обмены смен." }]);
   });
