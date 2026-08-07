@@ -305,6 +305,15 @@ describe("buildDistribution — excludedFromAssignment", () => {
     expect(result.unfilled).toEqual([
       { shiftId: slot.id, date: "2026-07-02", kind: "Утро", reason: "nobody_free" },
     ]);
+
+    // The same fixture, flag cleared: he is the pool's only member, so once he is
+    // no longer excluded there is nobody else it could go to.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    const cleared = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(cleared.assignments).toEqual([
+      { shiftId: slot.id, employeeId: igor.id, employeeName: "Игорь Петров" },
+    ]);
+    expect(cleared.unfilled).toEqual([]);
   });
 
   // The guard against the fix above accidentally erasing the real `empty_pool`
