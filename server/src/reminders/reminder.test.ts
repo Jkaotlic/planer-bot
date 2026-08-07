@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { employees } from "../db/schema";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
 import { createShift, updateShift, deleteShift } from "../repo/shifts";
 import { hasReminder } from "../repo/reminders";
 import { listRecentAudit } from "../repo/audit";
@@ -194,7 +194,7 @@ describe("runReminderTick", () => {
       expect(hasReminder(db, shift.id, "evening_before")).toBe(true); // won't be retried
 
       const event = listRecentAudit(db, 10).find((row) => row.type === "reminder_undeliverable");
-      expect(event?.payload).toEqual({ employeeId: anya.id, shiftId: shift.id, errorCode: 403 });
+      expect(event?.payload).toEqual({ employeeId: anya.id, displayName: "Аня", shiftId: shift.id, errorCode: 403 });
 
       // A later tick stays quiet instead of hammering a chat that will never open.
       const again = refusingBot(403, "Forbidden: bot was blocked by the user");
@@ -235,6 +235,49 @@ describe("runReminderTick", () => {
 
     expect(count).toBe(0);
     expect(sent).toHaveLength(0);
+  });
+
+  it("пишет одну строку на прогон, когда напоминания ушли", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const mark = linkedEmployee(db, "Марк", 112);
+    // Игорь тоже даёт заслуживающую напоминания смену — она войдёт в considered —
+    // но у него напоминания выключены, так что sent не дойдёт до 3. Без этого
+    // третьего человека sent и considered совпали бы (оба 2), и тест не отличил
+    // бы правильный `sent: count` от ошибочного `sent: shifts.length`.
+    const igor = linkedEmployee(db, "Игорь", 113);
+    setRemindersEnabled(db, igor.id, false);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id });
+
+    const { bot } = testBot();
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:05" })).toBe(2);
+
+    const rows = listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.payload).toMatchObject({ forDate: TOMORROW, sent: 2, considered: 3 });
+    expect(rows[0]!.actorEmployeeId).toBeNull();
+  });
+
+  it("молчит, когда отправлять было нечего", async () => {
+    const db = makeTestDb();
+    const { bot } = testBot();
+    await runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+    expect(listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched")).toEqual([]);
+  });
+
+  it("на повторном тике в тот же вечер второй строки не появляется", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+
+    const { bot } = testBot();
+    await runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+    // `hasReminder` дедуплицирует отправку, так что второй тик шлёт ноль — и молчит.
+    await runReminderTick(db, bot, { date: TODAY, time: "20:10" });
+
+    expect(listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched")).toHaveLength(1);
   });
 });
 

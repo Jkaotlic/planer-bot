@@ -16,6 +16,8 @@ import { swapCandidates } from "./lib/swap-candidates";
 interface AppData {
   me: Me;
   myShifts: Shift[];
+  /** Сегодня в часовом поясе команды — пришло вместе с «моими сменами». */
+  today: string;
   teamShifts: Shift[];
   /** Presets — the entry rows colour themselves by the one each entry came from. */
   templates: Template[];
@@ -72,7 +74,7 @@ export function App() {
       .then((me) =>
         Promise.all([
           Promise.resolve(me),
-          apiClient.getMyShifts(from),
+          apiClient.getMyShifts(),
           apiClient.getTeamSchedule(from, to).then((schedule) => schedule.shifts),
           apiClient.getTemplates(),
           apiClient.getSwaps(),
@@ -81,7 +83,9 @@ export function App() {
         ]),
       )
       .then(([me, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers]) => {
-        if (!cancelled) setData({ me, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers });
+        if (!cancelled) {
+          setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers });
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -164,7 +168,7 @@ export function App() {
     const to = toISODate(addDays(monday, 6));
     try {
       const [myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers] = await Promise.all([
-        apiClient.getMyShifts(from),
+        apiClient.getMyShifts(),
         apiClient.getTeamSchedule(from, to).then((schedule) => schedule.shifts),
         // Re-pulled with the rest so an admin's preset edits (a renamed or
         // recoloured Утро/День/…) reach the worker's rows too.
@@ -173,7 +177,11 @@ export function App() {
         apiClient.getWeekendSlots(),
         apiClient.getWeekendOffers(),
       ]);
-      setData((prev) => (prev ? { ...prev, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers } : prev));
+      setData((prev) =>
+        prev
+          ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
+          : prev,
+      );
       setRefreshError(null);
     } catch (err) {
       console.error("Refresh failed:", err);
@@ -263,6 +271,7 @@ export function App() {
       {tab === "mine" && (
         <MyShiftsScreen
           me={data.me}
+          today={data.today}
           shifts={data.myShifts}
           templates={data.templates}
           onProposeSwap={setProposingFor}

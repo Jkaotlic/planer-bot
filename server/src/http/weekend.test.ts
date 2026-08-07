@@ -151,6 +151,74 @@ describe("weekend-market endpoints", () => {
     expect(msg!.text).toContain("Ярмарка");
   });
 
+  it("снятие назначения попадает в журнал с именем и слотом", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = await worker(db, app, "Марк Волков", 201);
+
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(mark.token));
+    const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: mark.w.id }))).json()).assignment.id as number;
+
+    expect((await app.request(`/api/admin/weekend/assignments/${assignmentId}/unassign`, authed(admin))).status).toBe(200);
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "weekend_unassigned");
+    const payload = event?.payload as { employeeName: string; slot: string };
+    expect(payload.employeeName).toBe("Марк Волков");
+    expect(payload.slot).toContain("Ярмарка");
+  });
+
+  // declineOffer отказывает после confirm (статус уже не "offered", см.
+  // weekend-service.ts) — единый сценарий «отклик → назначение → подтверждение →
+  // отказ» из брифа падает на последнем шаге не из-за бага, а потому что
+  // подтверждённое назначение отклонить уже нельзя. Поэтому здесь два теста:
+  // один доводит до подтверждения, второй отказывается сразу после назначения,
+  // не подтверждая. Вместе они покрывают все три типа события работника.
+  it("отклик и подтверждение выходной смены видны в журнале, а не только её назначение", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = await worker(db, app, "Марк Волков", 201);
+
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }))).json()).slot.id as number;
+
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(mark.token));
+    const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: mark.w.id }))).json()).assignment.id as number;
+    await app.request(`/api/weekend/offers/${assignmentId}/confirm`, authed(mark.token));
+
+    const journal = listRecentAudit(db, 20);
+    for (const type of ["weekend_interest", "weekend_offer_confirmed"]) {
+      const event = journal.find((row) => row.type === type);
+      expect(event, type).toBeDefined();
+      expect((event!.payload as { employeeName: string }).employeeName).toBe("Марк Волков");
+      expect((event!.payload as { slot: string }).slot).toContain("Ярмарка");
+      expect(event!.actorEmployeeId).toBe(mark.w.id);
+    }
+  });
+
+  it("отказ от выходной смены без подтверждения тоже виден в журнале", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = await worker(db, app, "Марк Волков", 201);
+
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }))).json()).slot.id as number;
+
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(mark.token));
+    const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: mark.w.id }))).json()).assignment.id as number;
+    await app.request(`/api/weekend/offers/${assignmentId}/decline`, authed(mark.token));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "weekend_offer_declined");
+    expect(event).toBeDefined();
+    expect((event!.payload as { employeeName: string }).employeeName).toBe("Марк Волков");
+    expect((event!.payload as { slot: string }).slot).toContain("Ярмарка");
+    expect(event!.actorEmployeeId).toBe(mark.w.id);
+  });
+
   it("a repeat assign of an already-assigned worker sends no second Telegram nudge", async () => {
     const db = makeTestDb();
     const { bot, sent } = testBot();

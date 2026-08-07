@@ -1659,9 +1659,9 @@ input[type="time"] {
 
 .journal-row {
   display: grid;
-  grid-template-columns: minmax(180px, auto) minmax(120px, auto) minmax(150px, auto) 1fr;
-  gap: 12px;
-  align-items: baseline;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: start;
   padding: 10px 14px;
   border: 1px solid var(--separator);
   border-radius: 10px;
@@ -1669,22 +1669,34 @@ input[type="time"] {
   font-size: 13.5px;
 }
 
+.journal-icon {
+  font-size: 16px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.journal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
 .journal-type {
   font-weight: 600;
 }
 
-.journal-actor,
-.journal-when {
+.journal-meta {
+  margin-left: auto;
   color: var(--hint);
+  font-size: 12.5px;
 }
 
-.journal-payload {
+/* Подробности — то, ради чего строка и нужна: они не обрезаются и переносятся. */
+.journal-line {
+  margin-top: 2px;
   color: var(--hint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
 }
 
 /* День рождения в строке работника — компактно, чтобы не спорить с кнопками. */

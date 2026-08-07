@@ -10,3 +10,7 @@ export function listActiveTemplates(db: Db): ShiftTemplate[] {
     .orderBy(shiftTemplates.sortOrder)
     .all();
 }
+
+export function getTemplate(db: Db, id: number): ShiftTemplate | undefined {
+  return db.select().from(shiftTemplates).where(eq(shiftTemplates.id, id)).get();
+}

@@ -73,6 +73,21 @@ describe("PUT /api/admin/birthdays/:id", () => {
     expect((await res.json()).campaign).toMatchObject({ collectUrl: "https://sber.ru/x", status: "ready" });
   });
 
+  it("правка сбора попадает в журнал фактом, а не текстом поздравления", async () => {
+    const db = makeTestDb();
+    const igor = person(db, "Игорь Петров", 201, "08-05");
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request(`/api/admin/birthdays/${igor}?${ASOF}`, send(admin, { messageText: "Скидываемся Игорю" }, "PUT"));
+    expect(res.status).toBe(200);
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "birthday_campaign_updated");
+    expect((event?.payload as { displayName: string }).displayName).toBe("Игорь Петров");
+    // Текст поздравления в журнал не копируется — только факт правки.
+    expect(JSON.stringify(event?.payload)).not.toContain("Скидываемся");
+  });
+
   it("refuses a link that isn't http(s) — it travels to the whole team", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

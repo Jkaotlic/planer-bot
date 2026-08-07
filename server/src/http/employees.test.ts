@@ -101,6 +101,17 @@ describe("POST /api/admin/employees", () => {
     const missing = await app.request("/api/admin/employees", authedJson(admin, {}));
     expect(missing.status).toBe(400);
   });
+
+  it("создание работника попадает в журнал", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/employees", authedJson(admin, { displayName: "Света Орлова" }));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "employee_created");
+    expect((event?.payload as { displayName: string }).displayName).toBe("Света Орлова");
+  });
 });
 
 // The roster CSV is keyed by ФИО and nothing else: two active namesakes make the
@@ -184,6 +195,21 @@ describe("invite links", () => {
     const after = await app.request(`/api/admin/employees/${w.id}/invite`, authedJson(admin, {}));
     expect(after.status).toBe(400);
     expect((await after.json()).error).toBe("archived");
+  });
+
+  it("выдача приглашения попадает в журнал, но без самого токена", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config: configWithBotUsername });
+    const admin = await tokenFor(app, 111);
+    const created = await (await app.request("/api/admin/employees", authedJson(admin, { displayName: "Света Орлова" }))).json();
+
+    const res = await app.request(`/api/admin/employees/${created.employee.id}/invite`, authedJson(admin, { regenerate: true }));
+    const { inviteToken } = await res.json();
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "employee_invite_issued");
+    expect((event?.payload as { regenerated: boolean }).regenerated).toBe(true);
+    // Ключ к учётной записи в журнал не попадает — его видят все админы.
+    expect(JSON.stringify(event?.payload)).not.toContain(inviteToken);
   });
 });
 
@@ -475,6 +501,20 @@ describe("PATCH /api/admin/employees/:id (rename)", () => {
     const forbidden = await app.request(`/api/admin/employees/${w.id}`, authedJson(await tokenFor(app, 333), { displayName: "X" }, "PATCH"));
     expect(forbidden.status).toBe(403);
   });
+
+  it("переименование сохраняет в журнале и старое имя, и новое", async () => {
+    const db = makeTestDb();
+    const sveta = worker(db, "Света Орлов", 201);
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request(`/api/admin/employees/${sveta.id}`, authedJson(admin, { displayName: "Света Орлова" }, "PATCH"));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "employee_updated");
+    const payload = event?.payload as { before: { displayName: string }; after: { displayName: string } };
+    expect(payload.before.displayName).toBe("Света Орлов");
+    expect(payload.after.displayName).toBe("Света Орлова");
+  });
 });
 
 describe("worker order", () => {
@@ -646,6 +686,18 @@ describe("preferred name", () => {
     const app = createApp({ db, config });
     const token = await tokenFor(app, 904);
     expect((await app.request("/api/me/settings", authedJson(token, {}, "PATCH"))).status).toBe(400);
+  });
+
+  it("работник выключил напоминания — это видно в журнале", async () => {
+    const db = makeTestDb();
+    const mark = worker(db, "Марк Волков", 201);
+    const app = createApp({ db, config });
+
+    await app.request("/api/me/settings", authedJson(await tokenFor(app, 201), { remindersEnabled: false }, "PATCH"));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "settings_changed");
+    expect(event?.actorEmployeeId).toBe(mark.id);
+    expect((event?.payload as { remindersEnabled: boolean }).remindersEnabled).toBe(false);
   });
 
   it("lets an admin set it for somebody who never will", async () => {

@@ -51,6 +51,37 @@ describe("read endpoints", () => {
     expect((await res.json()).shifts.map((s: { date: string }) => s.date)).toEqual(["2026-07-06"]);
   });
 
+  it("без from отдаёт смены от сегодняшнего дня команды и называет эту дату", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
+    const yesterday = new Date(`${today}T00:00:00Z`);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const yesterdayIso = yesterday.toISOString().slice(0, 10);
+
+    createShift(db, { date: today, start: "09:00", end: "18:00", employeeId: w.id });
+    createShift(db, { date: yesterdayIso, start: "09:00", end: "18:00", employeeId: w.id });
+
+    const app = createApp({ db, config });
+    const res = await app.request("/api/my/shifts", bearer(await tokenFor(app, 333)));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.today).toBe(today);
+    expect(body.shifts.map((s: { date: string }) => s.date)).toEqual([today]);
+  });
+
+  it("не теряет многодневную запись, начавшуюся раньше окна", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    // Отпуск с 1 по 20 июля; смотрим с 7-го — он идёт прямо сейчас.
+    createShift(db, { date: "2026-07-01", endDate: "2026-07-20", category: "vacation", employeeId: w.id });
+
+    const app = createApp({ db, config });
+    const res = await app.request("/api/my/shifts?from=2026-07-07", bearer(await tokenFor(app, 333)));
+    const body = await res.json();
+    expect(body.shifts.map((s: { date: string }) => s.date)).toEqual(["2026-07-01"]);
+  });
+
   it("returns the full active roster in roster order and every overlapping shift", async () => {
     const db = makeTestDb();
     const late = worker(db, "Без порядка", 333);

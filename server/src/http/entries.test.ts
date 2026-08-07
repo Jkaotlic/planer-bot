@@ -97,6 +97,20 @@ describe("schedule edits are auditable", () => {
     expect(missing.status).toBe(404);
     expect(listRecentAudit(db, 10)).toHaveLength(0);
   });
+
+  it("в журнале записи есть имя работника, а не только его номер", async () => {
+    const db = makeTestDb();
+    const mark = createEmployee(db, { displayName: "Марк Волков" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries", authedJson(admin, {
+      date: FRIDAY, start: "09:00", end: "18:00", employeeId: mark.id, category: "shift", title: "День",
+    }));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "entry_created");
+    expect((event?.payload as { employeeName: string }).employeeName).toBe("Марк Волков");
+  });
 });
 
 describe("admin ranged reports validate their span", () => {
