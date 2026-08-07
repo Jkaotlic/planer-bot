@@ -23,6 +23,7 @@ export const AUDIT_TYPES = [
   "distribution_applied", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
+  "employee_restrictions_changed",
   "employee_invite_issued", "settings_changed",
   "template_roles_changed", "template_rotation_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
@@ -262,6 +263,19 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     if (lines.length === 0) lines.push(personLabel(p, "displayName"));
     else lines.unshift(str(after.displayName) ?? personLabel(p, "displayName"));
     return { icon: "👤", title: "Изменены данные работника", lines };
+  },
+  employee_restrictions_changed: (p) => {
+    const before = obj(p.before);
+    const after = obj(p.after);
+    const word = (value: unknown) => (value === true ? "не участвует" : "участвует");
+    const lines = [personLabel(p, "displayName")];
+    if (before.excludedFromAssignment !== after.excludedFromAssignment) {
+      lines.push(`назначения: ${word(before.excludedFromAssignment)} → ${word(after.excludedFromAssignment)}`);
+    }
+    if (before.excludedFromSwaps !== after.excludedFromSwaps) {
+      lines.push(`обмены: ${word(before.excludedFromSwaps)} → ${word(after.excludedFromSwaps)}`);
+    }
+    return { icon: "🚦", title: "Изменены ограничения работника", lines };
   },
   settings_changed: (p) => {
     const lines = [personLabel(p, "displayName")];

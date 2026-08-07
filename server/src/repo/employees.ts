@@ -133,6 +133,16 @@ export function setPreferredName(db: Db, id: number, preferredName: string | nul
   return db.update(employees).set({ preferredName }).where(eq(employees.id, id)).returning().all()[0];
 }
 
+/** The two admin-set restriction flags. Both optional: they live on one card but
+ *  are flipped by separate gestures, so either may arrive alone. */
+export function setEmployeeRestrictions(
+  db: Db,
+  id: number,
+  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
+): Employee | undefined {
+  return db.update(employees).set(patch).where(eq(employees.id, id)).returning().all()[0];
+}
+
 export function createAdminEmployee(
   db: Db,
   data: { telegramUserId: number; tgUsername?: string; tgFirstName?: string; displayName: string },
