@@ -236,6 +236,42 @@ describe("runReminderTick", () => {
     expect(count).toBe(0);
     expect(sent).toHaveLength(0);
   });
+
+  it("пишет одну строку на прогон, когда напоминания ушли", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const mark = linkedEmployee(db, "Марк", 112);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id });
+
+    const { bot } = testBot();
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:05" })).toBe(2);
+
+    const rows = listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.payload).toMatchObject({ forDate: TOMORROW, sent: 2 });
+    expect(rows[0]!.actorEmployeeId).toBeNull();
+  });
+
+  it("молчит, когда отправлять было нечего", async () => {
+    const db = makeTestDb();
+    const { bot } = testBot();
+    await runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+    expect(listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched")).toEqual([]);
+  });
+
+  it("на повторном тике в тот же вечер второй строки не появляется", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+
+    const { bot } = testBot();
+    await runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+    // `hasReminder` дедуплицирует отправку, так что второй тик шлёт ноль — и молчит.
+    await runReminderTick(db, bot, { date: TODAY, time: "20:10" });
+
+    expect(listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched")).toHaveLength(1);
+  });
 });
 
 describe("who a reminder is addressed to", () => {

@@ -35,6 +35,14 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
       console.error(`runReminderTick: shift ${shift.id} skipped:`, safeErrorMessage(err));
     }
   }
+
+  // Одна строка на прогон, а не на человека: тик крутится каждые пять минут весь
+  // вечер, и поштучные записи утопили бы всё остальное в журнале. Молчим, когда
+  // ушло ноль — «ничего не произошло» не событие, а `hasReminder` дедуплицирует
+  // отправку, так что второй тик за вечер сюда уже не дойдёт.
+  if (count > 0) {
+    recordAudit(db, "reminders_dispatched", null, { forDate: tomorrow, sent: count, considered: shifts.length });
+  }
   return count;
 }
 
