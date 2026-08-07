@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus, EntryCategory, TemplateAccent } from "@planer/shared";
+import type { SwapStatus, EntryCategory, TemplateAccent, AuditType } from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -125,7 +125,7 @@ export const reminderLog = sqliteTable(
 
 export const auditLog = sqliteTable("audit_log", {
   id: integer().primaryKey({ autoIncrement: true }),
-  type: text().notNull(),
+  type: text().$type<AuditType>().notNull(),
   actorEmployeeId: integer().references(() => employees.id),
   payload: text({ mode: "json" }).notNull(),
   createdAt: createdAt(),
