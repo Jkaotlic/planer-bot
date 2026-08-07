@@ -151,6 +151,25 @@ describe("weekend-market endpoints", () => {
     expect(msg!.text).toContain("Ярмарка");
   });
 
+  it("снятие назначения попадает в журнал с именем и слотом", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = await worker(db, app, "Марк Волков", 201);
+
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(mark.token));
+    const assignmentId = (await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: mark.w.id }))).json()).assignment.id as number;
+
+    expect((await app.request(`/api/admin/weekend/assignments/${assignmentId}/unassign`, authed(admin))).status).toBe(200);
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "weekend_unassigned");
+    const payload = event?.payload as { employeeName: string; slot: string };
+    expect(payload.employeeName).toBe("Марк Волков");
+    expect(payload.slot).toContain("Ярмарка");
+  });
+
   it("a repeat assign of an already-assigned worker sends no second Telegram nudge", async () => {
     const db = makeTestDb();
     const { bot, sent } = testBot();

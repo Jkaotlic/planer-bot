@@ -348,6 +348,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
     const inviteToken = randomBytes(16).toString("hex");
     const employee = createEmployee(db, { displayName: body.displayName, inviteToken });
+    recordAudit(db, "employee_created", c.get("auth").employeeId, {
+      employeeId: employee.id, displayName: employee.displayName,
+    });
     const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
     return c.json({ employee, inviteToken, inviteLink }, 201);
   });
@@ -495,6 +498,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
       setInviteToken(db, id, inviteToken);
     }
     const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
+    // Токен сюда не попадает намеренно: это действующий ключ к учётной записи, а
+    // журнал открыт всем админам. Важен факт выдачи и то, что прежняя ссылка умерла.
+    recordAudit(db, "employee_invite_issued", c.get("auth").employeeId, {
+      employeeId: id, displayName: emp.displayName, regenerated: body.regenerate === true,
+    });
     return c.json({ inviteToken, inviteLink });
   });
 
@@ -590,6 +598,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const campaign = updateCampaign(db, Number(c.req.param("id")), asOf, patch);
     if (!campaign) return c.json({ error: "not_found" }, 404);
+    // Пишем, ЧТО тронули, а не что написали: текст поздравления в журнал не копируется.
+    recordAudit(db, "birthday_campaign_updated", c.get("auth").employeeId, {
+      employeeId: Number(c.req.param("id")),
+      displayName: getEmployeeById(db, Number(c.req.param("id")))?.displayName ?? null,
+      ...(patch.collectUrl !== undefined ? { collectUrl: patch.collectUrl } : {}),
+      ...(patch.messageText !== undefined ? { messageText: patch.messageText ? "изменён" : null } : {}),
+      ...(patch.scheduledSendOn !== undefined ? { scheduledSendOn: patch.scheduledSendOn } : {}),
+    });
     return c.json({ campaign });
   });
 
@@ -1281,13 +1297,19 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/weekend/assignments/:id/unassign", requireAdmin(db, config.jwtSecret), async (c) => {
     const res = unassign(db, Number(c.req.param("id")));
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const removedSlot = getVacantSlot(db, res.slotId);
+    recordAudit(db, "weekend_unassigned", c.get("auth").employeeId, {
+      slotId: res.slotId,
+      slot: removedSlot ? slotLineOf(removedSlot) : null,
+      employeeId: res.employeeId,
+      employeeName: nameOf(res.employeeId) ?? null,
+    });
     // The reverse direction (worker declines) already notifies the admin —
     // close the loop here so the worker doesn't just find their shift gone.
     if (bot) {
       const tg = tgOf(res.employeeId);
       if (tg != null) {
-        const slot = getVacantSlot(db, res.slotId);
-        await notifyUser(bot, tg, weekendUnassignedText(slot ? slotLineOf(slot) : "выходную смену"));
+        await notifyUser(bot, tg, weekendUnassignedText(removedSlot ? slotLineOf(removedSlot) : "выходную смену"));
       }
     }
     return c.json({ ok: true });
