@@ -296,6 +296,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
+    // Одно действие человека — одна строка журнала: маршрут принимает оба поля
+    // разом, и делить его на два события значило бы врать о том, что он сделал.
+    recordAudit(db, "settings_changed", id, {
+      employeeId: id,
+      displayName: employee.displayName,
+      ...(hasReminders ? { remindersEnabled: employee.remindersEnabled } : {}),
+      ...(preferred?.ok ? { preferredName: employee.preferredName } : {}),
+    });
+
     return c.json({
       remindersEnabled: employee.remindersEnabled,
       preferredName: employee.preferredName,
@@ -1156,8 +1165,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: express interest in a slot (idempotent)
   app.post("/api/weekend/slots/:id/interest", requireAuth(db, config.jwtSecret), (c) => {
-    const res = expressInterest(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
+    const slotId = Number(c.req.param("id"));
+    const res = expressInterest(db, slotId, c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, slotId);
+    recordAudit(db, "weekend_interest", c.get("auth").employeeId, {
+      slotId,
+      slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId,
+      employeeName: nameOf(c.get("auth").employeeId) ?? null,
+    });
     return c.json({ ok: true }, 201);
   });
 
@@ -1170,9 +1187,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/weekend/offers/:id/confirm", requireAuth(db, config.jwtSecret), async (c) => {
     const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, res.slotId);
+    const name = nameOf(c.get("auth").employeeId) ?? "Работник";
+    recordAudit(db, "weekend_offer_confirmed", c.get("auth").employeeId, {
+      slotId: res.slotId, slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId, employeeName: name,
+    });
     if (bot) {
-      const slot = getVacantSlot(db, res.slotId);
-      const name = nameOf(c.get("auth").employeeId) ?? "Работник";
       await notifyAdmins(bot, db, weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
@@ -1182,9 +1203,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/weekend/offers/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
     const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    const slot = getVacantSlot(db, res.slotId);
+    const name = nameOf(c.get("auth").employeeId) ?? "Работник";
+    recordAudit(db, "weekend_offer_declined", c.get("auth").employeeId, {
+      slotId: res.slotId, slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId, employeeName: name,
+    });
     if (bot) {
-      const slot = getVacantSlot(db, res.slotId);
-      const name = nameOf(c.get("auth").employeeId) ?? "Работник";
       await notifyAdmins(bot, db, weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
