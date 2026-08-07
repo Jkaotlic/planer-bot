@@ -142,6 +142,10 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   const unusable = slotUnusableReason(slot, today);
   if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
+  // Through the UI this can't be reached — an excluded person never got the call
+  // and never tapped «Хочу» — but the route takes an employeeId from the request
+  // body, so the door has to be shut here too.
+  if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return { ok: false, reason: "excluded" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
 
   // slotId+employeeId is unique, so a second assign for the same pair always lands here.
