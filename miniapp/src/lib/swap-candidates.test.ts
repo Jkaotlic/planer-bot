@@ -36,13 +36,13 @@ describe("swapCandidates", () => {
   it("берёт только чужие смены того же дня", () => {
     const other = shift({ id: 2 });
     const otherDay = shift({ id: 3, date: "2026-09-11" });
-    const { candidates } = swapCandidates(mine, [mine, other, otherDay], 1, NOW);
+    const { candidates } = swapCandidates(mine, [mine, other, otherDay], 1, NOW, new Set());
     expect(candidates.map((s) => s.id)).toEqual([2]);
   });
 
   it("не предлагает вакантную запись — меняться не с кем", () => {
     const vacant = shift({ id: 2, employeeId: null, employeeName: undefined });
-    const { candidates } = swapCandidates(mine, [vacant], 1, NOW);
+    const { candidates } = swapCandidates(mine, [vacant], 1, NOW, new Set());
     expect(candidates).toEqual([]);
   });
 
@@ -50,13 +50,13 @@ describe("swapCandidates", () => {
     const duty = shift({ id: 2, category: "duty", title: "Дежурство" });
     const vacation = shift({ id: 3, category: "vacation", start: null, end: null, employeeId: 3 });
     const unreadable = shift({ id: 4, start: null, end: null, templateId: null, employeeId: 4 });
-    const { candidates } = swapCandidates(mine, [duty, vacation, unreadable], 1, NOW);
+    const { candidates } = swapCandidates(mine, [duty, vacation, unreadable], 1, NOW, new Set());
     expect(candidates).toEqual([]);
   });
 
   it("не предлагает начавшуюся смену", () => {
     const started = shift({ id: 2 });
-    const { candidates } = swapCandidates(mine, [started], 1, new Date("2026-09-10T12:00:00"));
+    const { candidates } = swapCandidates(mine, [started], 1, new Date("2026-09-10T12:00:00"), new Set());
     expect(candidates).toEqual([]);
   });
 
@@ -64,7 +64,7 @@ describe("swapCandidates", () => {
     const same = shift({ id: 2, templateId: 4, start: "15:00", end: "23:00", title: "Вечер" });
     const same2 = shift({ id: 3, employeeId: 3, templateId: 4, start: "15:00", end: "23:00", title: "Вечер" });
     const different = shift({ id: 4, employeeId: 4 });
-    const { candidates, sameKindCount } = swapCandidates(mine, [same, same2, different], 1, NOW);
+    const { candidates, sameKindCount } = swapCandidates(mine, [same, same2, different], 1, NOW, new Set());
     expect(candidates.map((s) => s.id)).toEqual([4]);
     expect(sameKindCount).toBe(2);
   });
@@ -72,7 +72,22 @@ describe("swapCandidates", () => {
   it("сортирует по имени — человека ищут глазами, а не по времени", () => {
     const late = shift({ id: 2, employeeId: 2, employeeName: "Яшин Пётр" });
     const early = shift({ id: 3, employeeId: 3, employeeName: "Волков Илья" });
-    const { candidates } = swapCandidates(mine, [late, early], 1, NOW);
+    const { candidates } = swapCandidates(mine, [late, early], 1, NOW, new Set());
     expect(candidates.map((s) => s.employeeName)).toEqual(["Волков Илья", "Яшин Пётр"]);
+  });
+
+  it("исключённого из обменов коллегу в кандидатах нет", () => {
+    const other = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "09:00", end: "18:00" });
+    const { candidates, sameKindCount } = swapCandidates(mine, [other], 1, NOW, new Set([7]));
+    expect(candidates).toEqual([]);
+    // И НЕ в «таких же»: он не спрятан как одинаковый, с ним нельзя меняться вообще.
+    // Иначе экран сказал бы «ещё 1 работает такую же смену» — и это была бы неправда.
+    expect(sameKindCount).toBe(0);
+  });
+
+  it("тот же коллега без исключения в кандидатах есть", () => {
+    const other = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "09:00", end: "18:00" });
+    const { candidates } = swapCandidates(mine, [other], 1, NOW, new Set());
+    expect(candidates.map((s) => s.id)).toEqual([9]);
   });
 });

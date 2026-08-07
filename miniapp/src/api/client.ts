@@ -89,6 +89,9 @@ export interface TeamEmployee {
   id: number;
   displayName: string;
   rosterOrder: number | null;
+  /** Admin took them out of swaps — the propose-swap candidate list must not
+   *  offer them, and the "Обменять" screen shouldn't count them as a duplicate. */
+  excludedFromSwaps: boolean;
 }
 
 export interface TeamSchedule {
@@ -109,6 +112,11 @@ export interface Me {
   isAdmin: boolean;
   /** Their own shift-reminder switch. */
   remindersEnabled: boolean;
+  /** Admin's global «Обменять» switch — the screen must grey the button out
+   *  rather than show it live and get refused on tap. */
+  swapsLocked: boolean;
+  /** Admin took this person specifically out of swaps. */
+  excludedFromSwaps: boolean;
 }
 
 export type SwapStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
