@@ -9,7 +9,7 @@ import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
-import { listActiveTemplates } from "../repo/templates";
+import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { readTeamSchedule } from "../repo/team-schedule";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
@@ -376,6 +376,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    // Снимок до правки: без него переименование не оставляет следа — в журнале
+    // оказывается новое имя, а старого нет нигде.
+    const beforeEdit = { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName };
     if (hasName) {
       const clash = findActiveByDisplayName(db, body.displayName as string, id);
       if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
@@ -386,9 +389,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     recordAudit(db, "employee_updated", c.get("auth").employeeId, {
       employeeId: id,
-      displayName: employee.displayName,
-      ...(hasBirthday ? { birthDate: employee.birthDate } : {}),
-      ...(hasPreferred ? { preferredName: employee.preferredName } : {}),
+      before: beforeEdit,
+      after: { displayName: employee.displayName, birthDate: employee.birthDate, preferredName: employee.preferredName },
     });
     return c.json({ employee: { ...employee, address: addressOf(employee) } });
   });
@@ -697,9 +699,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   /** The fields worth keeping in the audit feed — enough to answer «что именно поменяли»
-   *  without copying the whole row into the log. */
+   *  without copying the whole row into the log. Имя, а не только `employeeId`:
+   *  журнал читают глазами, и «работник #24» не отвечает ни на один вопрос. */
   const auditShape = (s: Shift) => ({
-    entryId: s.id, employeeId: s.employeeId, date: s.date, endDate: s.endDate,
+    entryId: s.id, employeeId: s.employeeId,
+    employeeName: s.employeeId != null ? nameOf(s.employeeId) : null,
+    date: s.date, endDate: s.endDate,
     category: s.category, title: s.title, start: s.start, end: s.end,
   });
 
@@ -1032,7 +1037,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return c.json({ error: "rotationUnit must be «day» or «week»" }, 400);
     }
     setRotationUnit(db, templateId, body.rotationUnit);
-    recordAudit(db, "template_rotation_changed", c.get("auth").employeeId, { templateId, rotationUnit: body.rotationUnit });
+    recordAudit(db, "template_rotation_changed", c.get("auth").employeeId, {
+      templateId, templateName: getTemplate(db, templateId)?.name ?? null, rotationUnit: body.rotationUnit,
+    });
     return c.json({ templateId, rotationUnit: body.rotationUnit });
   });
 
@@ -1063,6 +1070,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const saved = setTemplateRoles(db, templateId, { pool: body.pool as number[], preference });
       recordAudit(db, "template_roles_changed", c.get("auth").employeeId, {
         templateId,
+        templateName: getTemplate(db, templateId)?.name ?? null,
         poolSize: saved.pool.length,
         preferred: Object.keys(saved.preference).length,
       });

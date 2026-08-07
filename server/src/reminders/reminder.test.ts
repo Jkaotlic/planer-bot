@@ -194,7 +194,7 @@ describe("runReminderTick", () => {
       expect(hasReminder(db, shift.id, "evening_before")).toBe(true); // won't be retried
 
       const event = listRecentAudit(db, 10).find((row) => row.type === "reminder_undeliverable");
-      expect(event?.payload).toEqual({ employeeId: anya.id, shiftId: shift.id, errorCode: 403 });
+      expect(event?.payload).toEqual({ employeeId: anya.id, displayName: "Аня", shiftId: shift.id, errorCode: 403 });
 
       // A later tick stays quiet instead of hammering a chat that will never open.
       const again = refusingBot(403, "Forbidden: bot was blocked by the user");
