@@ -5,7 +5,7 @@ import { durationHours } from "./shift";
 export interface UpcomingWeek {
   /** Понедельник недели, "YYYY-MM-DD" — стабильный React-ключ. */
   key: string;
-  /** «Эта неделя · 5–9 авг.» / «Следующая неделя · 10–16 авг.» / «17–23 авг.» */
+  /** «Эта неделя · 5–9 августа» / «Следующая неделя · 10–16 августа» / «24–30 августа» */
   label: string;
   shifts: Shift[];
 }
