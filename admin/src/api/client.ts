@@ -14,6 +14,7 @@ import {
   mockSetEmployeeAdmin,
   mockRenameEmployee,
   mockSetBirthDate,
+  mockSetEmployeeRestrictions,
   mockReorderEmployee,
   mockGetEmployeeInvite,
   mockGetWeekendSlots,
@@ -55,6 +56,11 @@ export interface Employee {
    *  Never derive this from `displayName`: the roster is «Фамилия Имя», so its
    *  first word is a surname. See `addressOf` in @planer/shared. */
   address: string;
+  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
+   *  выходные. Ручную постановку это не запрещает. */
+  excludedFromAssignment: boolean;
+  /** Админ вывел человека из обменов — в обе стороны. */
+  excludedFromSwaps: boolean;
 }
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -366,6 +372,10 @@ export interface ApiClient {
   renameEmployee(id: number, displayName: string): Promise<void>;
   /** `null` clears the birthday. */
   setBirthDate(id: number, birthDate: string | null): Promise<void>;
+  /** Sets one or both exclusion flags. Turning on `excludedFromSwaps` cancels
+   *  this person's open swap requests and notifies them — the caller doesn't
+   *  need to do anything else for that to happen. */
+  setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
@@ -713,6 +723,10 @@ export const realClient: ApiClient = {
     await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
   },
 
+  async setEmployeeRestrictions(id, patch) {
+    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
+  },
+
   getEmployeeInvite(id, regenerate = false) {
     return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
   },
@@ -862,6 +876,7 @@ const devClient: ApiClient = {
   setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
   setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
+  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
   reorderEmployee: (id, position) => mockReorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),

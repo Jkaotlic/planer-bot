@@ -61,10 +61,6 @@ export const MOCK_ME: Me = {
   excludedFromSwaps: false,
 };
 
-// Кого мок вывел из обменов — только Игорь Петров, чтобы DEV-экран показывал
-// живой случай погашенной кнопки, а не только текстовое описание.
-const SWAP_EXCLUDED_IDS = new Set<number>([2]);
-
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {
   await delay(200);
   MOCK_ME.remindersEnabled = enabled;
@@ -96,13 +92,15 @@ export async function mockSetEmployeePreferredName(id: number, preferredName: st
  * employee-without-shifts state.
  */
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова" },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров" },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков" },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова" },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов" },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова" },
-  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29", preferredName: null, address: "Нина Белова" },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
+  // Живой пример погашенной кнопки в «Обмены» (см. `mockGetTeamSchedule` ниже,
+  // которая теперь читает это же поле, а не отдельный список).
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: true },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29", preferredName: null, address: "Нина Белова", excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 function personName(employeeId: number): string {
@@ -250,7 +248,9 @@ export async function mockGetTeamSchedule(from: string, to: string): Promise<Tea
         id: employee.id,
         displayName: employee.displayName,
         rosterOrder,
-        excludedFromSwaps: SWAP_EXCLUDED_IDS.has(employee.id),
+        // Live from `EMPLOYEES`, not a fixed set — so toggling «Не участвует в
+        // обменах» on «Работники» shows up here too, not just in the admin tab.
+        excludedFromSwaps: employee.excludedFromSwaps,
       })),
     shifts: ALL_ENTRIES.filter((entry) => overlapsRange(entry, from, to)).sort(byDateThenStart),
   };
@@ -466,7 +466,7 @@ export async function mockGetAdminEmployees(): Promise<Employee[]> {
 export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
   await delay(250);
   const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: name };
+  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: name, excludedFromAssignment: false, excludedFromSwaps: false };
   EMPLOYEES.push(employee);
   const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
   return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
@@ -519,6 +519,17 @@ export async function mockSetBirthDate(id: number, birthDate: string | null): Pr
   await delay(150);
   const employee = EMPLOYEES.find((item) => item.id === id);
   if (employee) employee.birthDate = birthDate;
+}
+
+export async function mockSetEmployeeRestrictions(
+  id: number,
+  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
+): Promise<void> {
+  await delay(150);
+  const employee = EMPLOYEES.find((item) => item.id === id);
+  if (!employee) return;
+  if (patch.excludedFromAssignment !== undefined) employee.excludedFromAssignment = patch.excludedFromAssignment;
+  if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
 }
 
 export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
@@ -1190,6 +1201,8 @@ export async function mockApplyRosterImport(
         birthDate: null,
         preferredName: null,
         address: resolution.csvName,
+        excludedFromAssignment: false,
+        excludedFromSwaps: false,
       });
     }
   }

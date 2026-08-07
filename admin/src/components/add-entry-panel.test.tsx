@@ -8,6 +8,7 @@ const WEEK = ["2026-06-08", "2026-06-09", "2026-06-10", "2026-06-11", "2026-06-1
 const employee: Employee = {
   id: 1, displayName: "Иванов Иван", isAdmin: false, isActive: true,
   telegramUserId: null, birthDate: null, address: "Иван",
+  excludedFromAssignment: false, excludedFromSwaps: false,
 };
 
 /** Отпуск, заведённый импортом: начинается в показанной неделе, кончается через две. */
