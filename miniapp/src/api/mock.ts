@@ -1,5 +1,6 @@
 import type { Category } from "../categories";
 import type {
+  AdminSettings,
   AdminSlotView,
   CreateEmployeeResult,
   DistributeResult,
@@ -23,6 +24,7 @@ import type {
   ShiftCountsReport,
   Shift,
   SwapDirection,
+  SwapLockResult,
   SwapRequest,
   SwapShiftSummary,
   SwapStatus,
@@ -1196,4 +1198,25 @@ export async function mockApplyRosterImport(
     // кому реально досталось что-то новое — молчаливый {0,0} честнее выдумки.
     notified: { delivered: 0, intended: 0 },
   };
+}
+
+// --- Настройки: замок обменов ------------------------------------------------
+
+/** Живёт между вызовами, чтобы DEV-тумблер вёл себя как настоящий: нажал —
+ *  и следующий getSettings отдаёт новое состояние. */
+let mockSwapsLocked = false;
+
+export async function mockGetSettings(): Promise<AdminSettings> {
+  await delay(150);
+  return {
+    swapsLocked: mockSwapsLocked,
+    swapsLockUpdatedAt: mockSwapsLocked ? new Date().toISOString() : null,
+    swapsLockUpdatedBy: mockSwapsLocked ? "Игорь Петров" : null,
+  };
+}
+
+export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult> {
+  await delay(250);
+  mockSwapsLocked = locked;
+  return { locked, cancelled: locked ? 2 : 0, delivered: 5, intended: 6 };
 }

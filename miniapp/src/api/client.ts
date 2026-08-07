@@ -52,6 +52,8 @@ import {
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
+  mockGetSettings,
+  mockSetSwapsLock,
 } from "./mock";
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
@@ -239,6 +241,22 @@ export interface NewEntryInput {
 
 /** До скольких из скольких дошло письмо о правке графика. */
 export interface NotifyReach {
+  delivered: number;
+  intended: number;
+}
+
+/** Состояние общего замка обменов сменами — экран «Настройки». */
+export interface AdminSettings {
+  swapsLocked: boolean;
+  /** ISO-строка или null, если тумблер ни разу не трогали. */
+  swapsLockUpdatedAt: string | null;
+  swapsLockUpdatedBy: string | null;
+}
+
+/** Итог переключения замка: что стало, и какой ценой (кому дошло уведомление). */
+export interface SwapLockResult {
+  locked: boolean;
+  cancelled: number;
   delivered: number;
   intended: number;
 }
@@ -497,6 +515,8 @@ export interface ApiClient {
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
+  getSettings(): Promise<AdminSettings>;
+  setSwapsLock(locked: boolean): Promise<SwapLockResult>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -962,6 +982,9 @@ export const realClient: ApiClient = {
     );
     return { ...summary, notified };
   },
+
+  getSettings: () => authorizedGet<AdminSettings>("/api/admin/settings"),
+  setSwapsLock: (locked) => authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked }),
 };
 
 const devClient: ApiClient = {
@@ -1017,6 +1040,8 @@ const devClient: ApiClient = {
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
+  getSettings: () => mockGetSettings(),
+  setSwapsLock: (locked) => mockSetSwapsLock(locked),
 };
 
 /**
