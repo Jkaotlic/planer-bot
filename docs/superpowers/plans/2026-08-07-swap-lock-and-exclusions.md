@@ -832,7 +832,8 @@ const trade = (over: Partial<SwapAuditPayload> = {}): SwapAuditPayload => ({
 describe("buildSwapLockNotices", () => {
   it("tells the whole reachable team that swaps are closed", () => {
     const notices = buildSwapLockNotices({ locked: true, team: [ANYA, IGOR, MARK], cancelled: [] });
-    expect(notices.map((n) => n.telegramUserId)).toEqual([1001, 1002]); // Марк без телеграма
+    // Марк has no Telegram account, so there is nowhere to send and nothing to count.
+    expect(notices.map((n) => n.telegramUserId)).toEqual([1001, 1002]);
     expect(notices[0]!.text).toContain("🔒 Обмены смен закрыты.");
   });
 
@@ -862,7 +863,8 @@ describe("buildSwapLockNotices", () => {
     const forAnya = notices.find((n) => n.telegramUserId === 1001)!;
     const forIgor = notices.find((n) => n.telegramUserId === 1002)!;
     expect(forAnya.text).toContain("Игорь Петров");
-    expect(forAnya.text).toContain("Чт 13 авг · 09:00–18:00"); // её собственная смена
+    // Her own shift, not his — the line is written from the reader's side.
+    expect(forAnya.text).toContain("Чт 13 авг · 09:00–18:00");
     expect(forIgor.text).toContain("Аня Смирнова");
     expect(forIgor.text).toContain("Чт 13 авг · 12:00–21:00");
   });
@@ -889,6 +891,19 @@ describe("buildExclusionNotices", () => {
   it("clearing the flag writes to that person only", () => {
     const notices = buildExclusionNotices({
       excluded: false, person: ANYA, others: [IGOR], cancelled: [],
+    });
+    expect(notices).toEqual([{ telegramUserId: 1001, text: "🔓 Тебе снова доступны обмены смен." }]);
+  });
+
+  /**
+   * Guards the asymmetry that the two builders had before `linesFor` existed:
+   * the lock builder suppressed cancellation lines when unlocking, this one did
+   * not. A stale `cancelled` threaded in by a caller would have made «снова
+   * доступны» sprout a list of requests that nothing had just cancelled.
+   */
+  it("«снова доступны» never grows cancellation lines, even if some are passed in", () => {
+    const notices = buildExclusionNotices({
+      excluded: false, person: ANYA, others: [], cancelled: [trade()],
     });
     expect(notices).toEqual([{ telegramUserId: 1001, text: "🔓 Тебе снова доступны обмены смен." }]);
   });
@@ -943,12 +958,30 @@ const LOCKED_HEADER = [
 
 const UNLOCKED_HEADER = "🔓 Обмены смен снова открыты.";
 
-/** «Заявка на обмен — Игорь Петров, Чт 13 авг · 12:00–21:00 — отменена.» */
+/**
+ * One cancelled trade, from the reader's side: the OTHER person's name and the
+ * reader's OWN shift — «Заявка на обмен — Игорь Петров, Чт 13 авг · 12:00–21:00 —
+ * отменена.» On the other phone the same trade reads the other way round.
+ */
 function cancelledLine(readerId: number, trade: SwapAuditPayload): string {
   const isInitiator = readerId === trade.fromEmployeeId;
   const otherName = isInitiator ? trade.toName : trade.fromName;
   const ownShift = isInitiator ? trade.fromShift : trade.toShift;
   return `Заявка на обмен — ${otherName}, ${ownShift} — отменена.`;
+}
+
+/**
+ * Every cancelled trade this person was part of, already worded for them.
+ *
+ * All three recipient paths below need exactly this, and three copies of
+ * «filter by id, map through cancelledLine» is three chances for them to drift
+ * on who counts as involved — which is how one path ended up appending lines
+ * regardless of whether anything had actually been cancelled.
+ */
+function linesFor(personId: number, cancelled: readonly SwapAuditPayload[]): string[] {
+  return cancelled
+    .filter((trade) => trade.fromEmployeeId === personId || trade.toEmployeeId === personId)
+    .map((trade) => cancelledLine(personId, trade));
 }
 
 export function buildSwapLockNotices(input: {
@@ -959,12 +992,9 @@ export function buildSwapLockNotices(input: {
   return input.team.flatMap((person) => {
     if (person.telegramUserId == null) return [];
     const lines = [input.locked ? LOCKED_HEADER : UNLOCKED_HEADER];
-    if (input.locked) {
-      const mine = input.cancelled.filter(
-        (trade) => trade.fromEmployeeId === person.id || trade.toEmployeeId === person.id,
-      );
-      if (mine.length > 0) lines.push("", ...mine.map((trade) => cancelledLine(person.id, trade)));
-    }
+    // Unlocking cancels nothing, so there is never anything to append to it.
+    const mine = input.locked ? linesFor(person.id, input.cancelled) : [];
+    if (mine.length > 0) lines.push("", ...mine);
     return [{ telegramUserId: person.telegramUserId, text: lines.join("\n") }];
   });
 }
@@ -983,10 +1013,10 @@ export function buildExclusionNotices(input: {
         ? "🔒 Тебе закрыли обмены смен. Если это ошибка — напиши админу."
         : "🔓 Тебе снова доступны обмены смен.",
     ];
-    const mine = input.cancelled.filter(
-      (trade) => trade.fromEmployeeId === input.person.id || trade.toEmployeeId === input.person.id,
-    );
-    if (mine.length > 0) lines.push("", ...mine.map((trade) => cancelledLine(input.person.id, trade)));
+    // Same guard as the lock builder: clearing the flag cancels nothing, so
+    // «снова доступны» must never grow a list of cancelled requests under it.
+    const mine = input.excluded ? linesFor(input.person.id, input.cancelled) : [];
+    if (mine.length > 0) lines.push("", ...mine);
     notices.push({ telegramUserId: input.person.telegramUserId, text: lines.join("\n") });
   }
 
@@ -994,14 +1024,9 @@ export function buildExclusionNotices(input: {
   // person is not something the rest of the team is told.
   for (const other of input.others) {
     if (other.telegramUserId == null) continue;
-    const mine = input.cancelled.filter(
-      (trade) => trade.fromEmployeeId === other.id || trade.toEmployeeId === other.id,
-    );
+    const mine = linesFor(other.id, input.cancelled);
     if (mine.length === 0) continue;
-    notices.push({
-      telegramUserId: other.telegramUserId,
-      text: mine.map((trade) => cancelledLine(other.id, trade)).join("\n"),
-    });
+    notices.push({ telegramUserId: other.telegramUserId, text: mine.join("\n") });
   }
 
   return notices;
