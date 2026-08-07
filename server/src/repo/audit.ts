@@ -51,7 +51,10 @@ export interface AuditPage {
  */
 export function queryAudit(db: Db, query: AuditQuery): AuditPage {
   const filters = [];
-  if (query.types && query.types.length > 0) filters.push(inArray(auditLog.type, [...query.types]));
+  // `types` пришёл из query-параметра — произвольные строки. Мимо `AuditType`
+  // это фильтр «сравни с типом в БД», а не запись: незнакомая строка просто
+  // ничему не совпадёт, поэтому кастуем, а не разрешаем в `AuditQuery` любую строку.
+  if (query.types && query.types.length > 0) filters.push(inArray(auditLog.type, query.types as AuditType[]));
   if (query.actorEmployeeId != null) filters.push(eq(auditLog.actorEmployeeId, query.actorEmployeeId));
   if (query.from) filters.push(gte(auditLog.createdAt, new Date(`${query.from}T00:00:00Z`)));
   if (query.to) filters.push(lte(auditLog.createdAt, new Date(`${query.to}T23:59:59Z`)));
