@@ -72,6 +72,7 @@ async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
       addReminder(db, shift.id, REMINDER_KIND);
       recordAudit(db, "reminder_undeliverable", null, {
         employeeId: owner.id,
+        displayName: owner.displayName,
         shiftId: shift.id,
         errorCode: outcome.errorCode,
       });

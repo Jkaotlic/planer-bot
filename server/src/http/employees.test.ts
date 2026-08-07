@@ -475,6 +475,20 @@ describe("PATCH /api/admin/employees/:id (rename)", () => {
     const forbidden = await app.request(`/api/admin/employees/${w.id}`, authedJson(await tokenFor(app, 333), { displayName: "X" }, "PATCH"));
     expect(forbidden.status).toBe(403);
   });
+
+  it("переименование сохраняет в журнале и старое имя, и новое", async () => {
+    const db = makeTestDb();
+    const sveta = worker(db, "Света Орлов", 201);
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request(`/api/admin/employees/${sveta.id}`, authedJson(admin, { displayName: "Света Орлова" }, "PATCH"));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "employee_updated");
+    const payload = event?.payload as { before: { displayName: string }; after: { displayName: string } };
+    expect(payload.before.displayName).toBe("Света Орлов");
+    expect(payload.after.displayName).toBe("Света Орлова");
+  });
 });
 
 describe("worker order", () => {
