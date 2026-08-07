@@ -1,9 +1,25 @@
 import { describe, it, expect } from "vitest";
+import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, archiveEmployee } from "../repo/employees";
+import { createEmployee, archiveEmployee, listActive, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { setTemplateRoles } from "../repo/template-roles";
+import { readTeamSchedule } from "../repo/team-schedule";
+import { runReminderTick } from "../reminders/reminder-service";
 import { buildDistribution, applyDistribution } from "./distribute-service";
+
+/** Bot with botInfo set (skips getMe) and a transformer capturing outgoing sendMessage — see reminder.test.ts. */
+function testBot() {
+  const bot = new Bot("12345:tok");
+  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
+    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+  const sent: { chat_id: number | string; text: string }[] = [];
+  bot.api.config.use((_prev, method, payload) => {
+    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
+    return { ok: true, result: {} } as any;
+  });
+  return { bot, sent };
+}
 
 // A slot nobody can take used to vanish from the result with no trace: the admin
 // pressed «Распределить честно», saw a smaller number than there were empty cells,
@@ -241,6 +257,103 @@ describe("buildDistribution", () => {
     // only one worker exists, so only one of the two overlapping slots can be filled
     expect(result.assignments.length).toBe(1);
     expect([s1.id, s2.id]).toContain(result.assignments[0]!.shiftId);
+  });
+});
+
+describe("buildDistribution — excludedFromAssignment", () => {
+  it("never assigns an excluded worker, and assigns them again once the flag is cleared", () => {
+    const db = makeTestDb();
+    // Created first, so a tied tiebreak (lower id wins) is what hands Игорь the
+    // slot once his flag is cleared below — proving the second run really picked
+    // him, not that he happened to win on some unrelated tiebreak.
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    const anya = createEmployee(db, { displayName: "Аня Смирнова" });
+
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00" });
+
+    const excluded = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(excluded.assignments).toEqual([
+      { shiftId: slot.id, employeeId: anya.id, employeeName: "Аня Смирнова" },
+    ]);
+
+    // Neither run is applied, so the slot is still open — the same fixture, just
+    // with the flag cleared, must now hand it to Игорь.
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: false });
+    const cleared = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(cleared.assignments).toEqual([
+      { shiftId: slot.id, employeeId: igor.id, employeeName: "Игорь Петров" },
+    ]);
+  });
+
+  /**
+   * `empty_pool` means «this preset lists nobody who is on the roster» — a broken
+   * configuration the admin has to fix. A pool of people who are merely excluded
+   * from assignment is not broken, so the reason must stay `nobody_free`.
+   * That is why the reason is computed over ALL active workers, not the filtered set.
+   */
+  it("a pool of excluded-only people reports nobody_free, not empty_pool", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    setTemplateRoles(db, 1, { pool: [igor.id], preference: {} });
+
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", templateId: 1 });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(result.assignments).toEqual([]);
+    expect(result.unfilled).toEqual([
+      { shiftId: slot.id, date: "2026-07-02", kind: "Утро", reason: "nobody_free" },
+    ]);
+  });
+
+  // The guard against the fix above accidentally erasing the real `empty_pool`
+  // case: a pool that lists only somebody archived is a misconfiguration, not
+  // ordinary unavailability, and must keep reporting so.
+  it("a pool of archived-only people still reports empty_pool", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров" });
+    setTemplateRoles(db, 1, { pool: [igor.id], preference: {} });
+    archiveEmployee(db, igor.id, "2026-07-01");
+    createEmployee(db, { displayName: "Аня Смирнова" }); // active, but outside the pool
+
+    const slot = createShift(db, { date: "2026-07-02", start: "08:00", end: "17:00", templateId: 1 });
+
+    const result = buildDistribution(db, "2026-07-01", "2026-07-10");
+    expect(result.assignments).toEqual([]);
+    expect(result.unfilled).toEqual([
+      { shiftId: slot.id, date: "2026-07-02", kind: "Утро", reason: "empty_pool" },
+    ]);
+  });
+
+  /**
+   * The flag must not creep into archiving.
+   *
+   * `listActive` is read by nearly everything — the team grid, reminders, birthday
+   * collections, reports, the CSV export. This flag touches exactly five call
+   * sites and none of those. The cheap way to «implement» it would have been to
+   * filter `listActive` itself, which would silently delete the person from half
+   * the product; this test is what makes that mistake loud.
+   */
+  it("an excluded worker is still on the team, still reminded, still exported", async () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь Петров", inviteToken: "i-igor" });
+    linkTelegramAccount(db, "i-igor", 111);
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    createShift(db, { date: "2026-07-15", start: "08:00", end: "17:00", employeeId: igor.id });
+
+    // still on the team
+    expect(listActive(db).some((e) => e.id === igor.id)).toBe(true);
+    expect(
+      readTeamSchedule(db, "2026-07-13", "2026-07-19").employees.some((e) => e.id === igor.id),
+    ).toBe(true);
+
+    // still reminded for tomorrow's shift
+    const { bot, sent } = testBot();
+    const count = await runReminderTick(db, bot, { date: "2026-07-14", time: "20:30" });
+    expect(count).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.chat_id).toBe(111);
   });
 });
 

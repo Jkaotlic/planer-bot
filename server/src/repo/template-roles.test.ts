@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, archiveEmployee } from "./employees";
+import { createEmployee, archiveEmployee, setEmployeeRestrictions } from "./employees";
 import { listActiveTemplates } from "./templates";
 import { createShift } from "./shifts";
 import {
@@ -105,6 +105,25 @@ describe("rotationCandidatesFor", () => {
 
     const candidates = rotationCandidatesFor(db, night, "2026-08-03");
     expect(candidates.find((c) => c.employeeId === a)?.lastHeld).toBe("2026-07-01");
+  });
+
+  // Excluded people are out of every automatic hand-out, and this queue is the
+  // ★ hint on both consoles — showing them as «next up» would invite exactly the
+  // assignment the flag exists to prevent.
+  it("skips an excluded worker and keeps the rest", () => {
+    const db = makeTestDb();
+    const night = presetId(db, "Ночь");
+    const igor = createEmployee(db, { displayName: "Игорь Петров" }).id;
+    const anya = createEmployee(db, { displayName: "Аня Смирнова" }).id;
+    setEmployeeRestrictions(db, igor, { excludedFromAssignment: true });
+
+    const excluded = rotationCandidatesFor(db, night, "2026-08-03");
+    expect(excluded.find((c) => c.employeeId === igor)).toBeUndefined();
+    expect(excluded.find((c) => c.employeeId === anya)).toBeDefined();
+
+    setEmployeeRestrictions(db, igor, { excludedFromAssignment: false });
+    const cleared = rotationCandidatesFor(db, night, "2026-08-03");
+    expect(cleared.find((c) => c.employeeId === igor)).toBeDefined();
   });
 });
 
