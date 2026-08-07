@@ -34,6 +34,9 @@ import {
   setPreferredName,
   rememberTelegramProfile,
 } from "../repo/employees";
+import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
+import { setSwapLock } from "../swap/swap-lock";
+import { buildSwapLockNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { notifyEntryChange, notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -524,6 +527,45 @@ export function createApp(deps: AppDeps): Hono<Env> {
       payload: row.payload,
     }));
     return c.json({ events });
+  });
+
+  app.get("/api/admin/settings", requireAdmin(db, config.jwtSecret), (c) => {
+    const setting = swapsLockSetting(db);
+    const actor = setting?.updatedByEmployeeId == null ? undefined : getEmployeeById(db, setting.updatedByEmployeeId);
+    return c.json({
+      swapsLocked: isSwapsLocked(db),
+      swapsLockUpdatedAt: setting?.updatedAt?.toISOString() ?? null,
+      swapsLockUpdatedBy: actor?.displayName ?? null,
+    });
+  });
+
+  /**
+   * The team-wide swap switch.
+   *
+   * Order matters and is not stylistic: the database write and the cancellation
+   * happen first, synchronously, in one transaction; only then does the awaited
+   * broadcast run. The `races` lens already caught a double broadcast in this
+   * codebase that came from writing a status guard *after* a loop of awaits.
+   */
+  app.put("/api/admin/settings/swaps-lock", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { locked?: unknown };
+    if (typeof body.locked !== "boolean") return c.json({ error: "locked должен быть true или false" }, 400);
+
+    const actorId = c.get("auth").employeeId;
+    const cancelled = setSwapLock(db, body.locked, actorId);
+
+    const team = listActive(db);
+    const notices = buildSwapLockNotices({ locked: body.locked, team, cancelled });
+    let delivered = 0;
+    if (bot) {
+      for (const notice of notices) {
+        if (await notifyUser(bot, notice.telegramUserId, notice.text)) delivered += 1;
+      }
+    }
+    const reach = { delivered, intended: notices.length };
+
+    recordAudit(db, "swaps_lock_changed", actorId, { locked: body.locked, cancelled: cancelled.length, ...reach });
+    return c.json({ locked: body.locked, cancelled: cancelled.length, ...reach });
   });
 
   // --- Дни рождения ---------------------------------------------------------
