@@ -2,8 +2,11 @@ import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
+import { createShift } from "../repo/shifts";
+import { createSwapRequest } from "../repo/swaps";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
+import type { Db } from "../db/client";
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -131,21 +134,66 @@ describe("PATCH /api/me/settings", () => {
 });
 
 describe("swaps lock settings", () => {
+  // Two reachable people and one open request between them. On an empty database
+  // `cancelled`/`delivered`/`intended` are all zero no matter what the route
+  // computes, so a happy-path test against an empty db would pass even if the
+  // wiring from DB state to the response body were completely broken. Named
+  // "Марк Волков" rather than "Игорь Петров" for the second swap party: the
+  // admin token below already claims that name, and two distinct active
+  // employees sharing a display name is a state the app treats as invalid
+  // everywhere else it's created through the HTTP layer.
+  function seedOpenSwap(db: Db) {
+    const anya = createEmployee(db, { displayName: "Аня Смирнова", inviteToken: "inv-anya" });
+    linkTelegramAccount(db, "inv-anya", 1001);
+    const mark = createEmployee(db, { displayName: "Марк Волков", inviteToken: "inv-mark" });
+    linkTelegramAccount(db, "inv-mark", 1002);
+    const anyaShift = createShift(db, { date: "2026-08-13", start: "09:00", end: "18:00", employeeId: anya.id });
+    const markShift = createShift(db, { date: "2026-08-13", start: "12:00", end: "21:00", employeeId: mark.id });
+    createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id,
+      toEmployeeId: mark.id, toShiftId: markShift.id,
+    });
+  }
+
+  const putLock = (app: ReturnType<typeof createApp>, token: string, locked: boolean) =>
+    app.request("/api/admin/settings/swaps-lock", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locked }),
+    });
+
   it("PUT /api/admin/settings/swaps-lock closes swaps and reports what it cost", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const token = await tokenFor(app, 111, "Игорь Петров");
+    seedOpenSwap(db);
 
-    const res = await app.request("/api/admin/settings/swaps-lock", {
-      method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ locked: true }),
-    });
+    const res = await putLock(app, token, true);
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ locked: true, cancelled: 0 });
+    const body = await res.json();
+    expect(body.locked).toBe(true);
+    expect(body.cancelled).toBe(1);
+    // `intended` counts everyone the notice was addressed to. The admin who
+    // pressed the button is an employee too, so this is the reachable headcount,
+    // not the number of people in the swap.
+    expect(body.intended).toBeGreaterThan(0);
+    expect(body.delivered).toBeLessThanOrEqual(body.intended);
 
     const state = await app.request("/api/admin/settings", { headers: { authorization: `Bearer ${token}` } });
     expect(await state.json()).toMatchObject({ swapsLocked: true, swapsLockUpdatedBy: "Игорь Петров" });
+  });
+
+  // The other half of the pair: unlocking must report an honest zero and must
+  // not reach into anybody's requests, even right after a lock that did cancel one.
+  it("PUT /api/admin/settings/swaps-lock reopening cancels nothing", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111, "Игорь Петров");
+    seedOpenSwap(db);
+
+    await putLock(app, token, true);
+    const res = await putLock(app, token, false);
+    expect(await res.json()).toMatchObject({ locked: false, cancelled: 0 });
   });
 
   it("PUT /api/admin/settings/swaps-lock rejects a non-boolean body", async () => {
@@ -159,27 +207,26 @@ describe("swaps lock settings", () => {
       body: JSON.stringify({ locked: "yes" }),
     });
     expect(res.status).toBe(400);
+    // Pin the wording too: a refusal a person reads must stay Russian.
+    expect((await res.json()).error).toBe("locked должен быть true или false");
   });
 
-  it("GET /api/admin/settings is admin-only", async () => {
-    const db = makeTestDb();
-    const app = createApp({ db, config });
-    const res = await app.request("/api/admin/settings");
-    expect(res.status).toBe(401);
-  });
+  // No standalone "GET /api/admin/settings is admin-only" test here: the whole
+  // /api/admin/* prefix is closed by blanket middleware already covered by
+  // server/src/http/admin-guard.test.ts. A per-route duplicate would pass even
+  // with the route entirely absent — `git stash push -- server/src/http/app.ts`
+  // would not turn it red — which makes it a test that cannot fail.
 
   it("locking writes one journal row naming what happened", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const token = await tokenFor(app, 111, "Игорь Петров");
+    seedOpenSwap(db);
 
-    await app.request("/api/admin/settings/swaps-lock", {
-      method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ locked: true }),
-    });
+    await putLock(app, token, true);
 
     const events = await (await app.request("/api/admin/journal", { headers: { authorization: `Bearer ${token}` } })).json();
     expect(events.events[0]).toMatchObject({ type: "swaps_lock_changed" });
+    expect(events.events[0].payload).toMatchObject({ locked: true, cancelled: 1 });
   });
 });
