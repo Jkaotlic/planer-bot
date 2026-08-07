@@ -696,6 +696,26 @@ describe("PATCH /api/admin/employees/:id (restriction flags)", () => {
 
     expect(sent.some((s) => s.chat_id === 201)).toBe(true);
   });
+
+  // The two journal rows are independent facts about one action: renaming
+  // somebody while also flipping a flag is a single admin gesture, but it is
+  // "changed the name" AND "changed a restriction" — both belong in the log.
+  it("a PATCH that renames AND flips a flag writes both journal rows", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = worker(db, "Кто-то", 203);
+
+    const res = await app.request(
+      `/api/admin/employees/${w.id}`,
+      authedJson(admin, { displayName: "Кто-то Другой", excludedFromSwaps: true }, "PATCH"),
+    );
+    expect(res.status).toBe(200);
+
+    const recent = listRecentAudit(db, 20);
+    expect(recent.some((row) => row.type === "employee_updated")).toBe(true);
+    expect(recent.some((row) => row.type === "employee_restrictions_changed")).toBe(true);
+  });
 });
 
 describe("worker order", () => {
