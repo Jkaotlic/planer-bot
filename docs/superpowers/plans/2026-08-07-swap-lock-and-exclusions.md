@@ -1062,19 +1062,52 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
 
 В `server/src/http/settings-route.test.ts` дописать (используя тот же способ поднятия приложения и выдачи админского токена, что уже применён в этом файле):
 
+**Тесты роутов обязаны стоять на непустых данных.** Прогон на базе без людей и без открытых заявок даст `cancelled: 0`, `delivered: 0`, `intended: 0` — и пройдёт при любой, в том числе сломанной, арифметике. Поэтому happy-path тест **сначала заводит двух работников с привязанным телеграмом и открытую заявку между ними**, и только потом дёргает лок.
+
 ```ts
   it("PUT /api/admin/settings/swaps-lock closes swaps and reports what it cost", async () => {
     // ... поднять app и админский токен ровно как в соседних тестах файла ...
+    // Two reachable people and one open request between them: on an empty
+    // database every count below is zero, and a zero proves nothing about the
+    // arithmetic that produced it.
+    const anya = createEmployee(db, { displayName: "Аня Смирнова", telegramUserId: 1001 });
+    const igor = createEmployee(db, { displayName: "Игорь Петров", telegramUserId: 1002 });
+    const anyaShift = createShift(db, { date: "2026-08-13", start: "09:00", end: "18:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: "2026-08-13", start: "12:00", end: "21:00", employeeId: igor.id });
+    createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id,
+      toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+
     const res = await app.request("/api/admin/settings/swaps-lock", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ locked: true }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ locked: true, cancelled: 0 });
+    const body = await res.json();
+    expect(body.locked).toBe(true);
+    expect(body.cancelled).toBe(1);
+    // `intended` counts everyone the notice was addressed to. The admin who
+    // pressed the button is an employee too, so this is the reachable headcount,
+    // not the number of people in the swap.
+    expect(body.intended).toBeGreaterThan(0);
+    expect(body.delivered).toBeLessThanOrEqual(body.intended);
 
     const state = await app.request("/api/admin/settings", { headers: { authorization: `Bearer ${token}` } });
     expect(await state.json()).toMatchObject({ swapsLocked: true, swapsLockUpdatedBy: "Игорь Петров" });
+  });
+
+  // The other half of the pair: unlocking must report an honest zero and must
+  // not reach into anybody's requests.
+  it("PUT /api/admin/settings/swaps-lock reopening cancels nothing", async () => {
+    // ... same seeding as above, then lock, then unlock ...
+    const res = await app.request("/api/admin/settings/swaps-lock", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ locked: false }),
+    });
+    expect(await res.json()).toMatchObject({ locked: false, cancelled: 0 });
   });
 
   it("PUT /api/admin/settings/swaps-lock rejects a non-boolean body", async () => {
@@ -1084,19 +1117,19 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
       body: JSON.stringify({ locked: "yes" }),
     });
     expect(res.status).toBe(400);
-  });
-
-  it("GET /api/admin/settings is admin-only", async () => {
-    const res = await app.request("/api/admin/settings");
-    expect(res.status).toBe(401);
+    // Pin the wording too: a refusal a person reads must stay Russian.
+    expect((await res.json()).error).toBe("locked должен быть true или false");
   });
 
   it("locking writes one journal row naming what happened", async () => {
-    // ... after the PUT above ...
+    // ... after the seeded PUT above ...
     const events = await (await app.request("/api/admin/journal", { headers: { authorization: `Bearer ${token}` } })).json();
     expect(events.events[0]).toMatchObject({ type: "swaps_lock_changed" });
+    expect(events.events[0].payload).toMatchObject({ locked: true, cancelled: 1 });
   });
 ```
+
+**Теста «GET /api/admin/settings is admin-only» здесь НЕТ, и это осознанно.** Весь префикс `/api/admin/*` закрыт общим middleware (`app.use("/api/admin/*", requireAdmin(...))`), у которого есть свой тест — `server/src/http/admin-guard.test.ts`. Такой тест на новом роуте зеленел бы и при полностью отсутствующем роуте: `git stash push -- server/src/http/app.ts` не сделал бы его красным. Это ровно «тест, который не может упасть», и добавлять его — театр, а не проверка.
 
 В `shared/src/audit.test.ts` дописать:
 
