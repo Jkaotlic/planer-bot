@@ -1,5 +1,6 @@
 import type { EntryCategory } from "@planer/shared";
 import type {
+  AdminSettings,
   AdminSlotView,
   CreateEmployeeResult,
   Employee,
@@ -19,6 +20,7 @@ import type {
   RosterImportSummary,
   RosterPersonResolution,
   Shift,
+  SwapLockResult,
   Template,
   VacantSlot,
 } from "./client";
@@ -784,5 +786,38 @@ export async function mockApplyRosterImport(
     // Мок не пишет по-дневные записи из файла в ENTRIES, поэтому не знает,
     // кому реально досталось что-то новое — молчаливый {0,0} честнее выдумки.
     notified: { delivered: 0, intended: 0 },
+  };
+}
+
+// --- Настройки: замок обменов ------------------------------------------------
+
+/** DEV-хранилище тумблера. Кто менял — id, а не имя: имя может смениться позже. */
+let swapsLock: { locked: boolean; updatedAt: string | null; updatedByEmployeeId: number | null } = {
+  locked: false,
+  updatedAt: null,
+  updatedByEmployeeId: null,
+};
+
+export async function mockGetSettings(): Promise<AdminSettings> {
+  await delay(150);
+  return {
+    swapsLocked: swapsLock.locked,
+    swapsLockUpdatedAt: swapsLock.updatedAt,
+    swapsLockUpdatedBy: swapsLock.updatedByEmployeeId != null ? nameOf(swapsLock.updatedByEmployeeId) : null,
+  };
+}
+
+export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult> {
+  await delay(250);
+  const actor = EMPLOYEES.find((e) => e.isAdmin && e.isActive);
+  swapsLock = { locked, updatedAt: new Date().toISOString(), updatedByEmployeeId: actor?.id ?? null };
+  // Мок не ведёт отдельный список заявок на обмен, поэтому cancelled всегда 0 —
+  // молчаливый ноль честнее выдуманного числа (тот же приём, что у applyRosterImport выше).
+  const team = EMPLOYEES.filter((e) => e.isActive);
+  return {
+    locked,
+    cancelled: 0,
+    delivered: team.filter((e) => e.telegramUserId != null).length,
+    intended: team.length,
   };
 }

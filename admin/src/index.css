@@ -1915,3 +1915,60 @@ input[type="time"] {
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* ---------- Настройки ---------- */
+
+.settings-intro {
+  margin: 0 0 20px;
+  max-width: 62ch;
+  color: var(--hint);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.settings-result {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  max-width: 620px;
+  border-radius: 10px;
+  background: var(--surface-section);
+  border: 1px solid var(--separator);
+  font-size: 13.5px;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 620px;
+  padding: 18px 20px;
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  background: var(--surface-section);
+}
+
+.settings-state {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-who {
+  color: var(--hint);
+  font-size: 13px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.settings-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--button);
+  font-size: 13px;
+}
