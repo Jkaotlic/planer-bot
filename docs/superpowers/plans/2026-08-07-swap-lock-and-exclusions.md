@@ -716,9 +716,9 @@ import { swapAuditPayload, type SwapAuditPayload } from "../util/message-lines";
  * Flipping the team-wide swap lock, and what it costs the people mid-trade.
  *
  * Locking cancels every still-open request: the counterparty is holding a chat
- * message with live-looking Принять/Отклонить buttons whose only possible answer
- * would now be an error. The same thing already happens when an accepted swap
- * knocks out its siblings, so this is the established shape, not a new idea.
+ * message with live-looking «Принять»/«Отклонить» buttons whose only possible
+ * answer would now be an error. The same thing already happens when an accepted
+ * swap knocks out its siblings, so this is the established shape, not a new idea.
  *
  * Everything here is synchronous and inside one transaction, and the caller does
  * the `await` messaging AFTERWARDS. That ordering is not stylistic: the `races`
@@ -738,12 +738,7 @@ export function setSwapLock(db: Db, locked: boolean, actorEmployeeId: number): S
     // and the cancellations are one fact, and half of it landing is worse than
     // neither — an admin would see «закрыто» while the buttons still worked.
     setSwapsLocked(tx, locked, actorEmployeeId);
-    for (const request of pending) {
-      tx.update(swapRequests)
-        .set({ status: "cancelled", resolvedAt: new Date() })
-        .where(eq(swapRequests.id, request.id))
-        .run();
-    }
+    cancelAll(tx, pending);
   });
 
   return payloads;
@@ -761,14 +756,7 @@ export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPay
     .all();
   const payloads = pending.map((request) => swapAuditPayload(db, request));
 
-  db.transaction((tx) => {
-    for (const request of pending) {
-      tx.update(swapRequests)
-        .set({ status: "cancelled", resolvedAt: new Date() })
-        .where(eq(swapRequests.id, request.id))
-        .run();
-    }
-  });
+  db.transaction((tx) => cancelAll(tx, pending));
 
   return payloads;
 }
@@ -776,7 +764,20 @@ export function cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPay
 function listPending(db: Db) {
   return db.select().from(swapRequests).where(eq(swapRequests.status, "pending")).all();
 }
+
+/** The one write both callers make. Extracted so the two paths cannot drift on
+ *  what «cancelled» means or on whether `resolvedAt` gets stamped. */
+function cancelAll(tx: DbOrTx, pending: readonly { id: number }[]): void {
+  for (const request of pending) {
+    tx.update(swapRequests)
+      .set({ status: "cancelled", resolvedAt: new Date() })
+      .where(eq(swapRequests.id, request.id))
+      .run();
+  }
+}
 ```
+
+`DbOrTx` is imported from `../repo/settings` alongside `setSwapsLocked`.
 
 - [ ] **Шаг 4: Прогнать — зелёно**
 
