@@ -47,7 +47,7 @@
 
 ---
 
-## Задача 1: Схема и репозиторий настроек
+## Task 1: Схема и репозиторий настроек
 
 **Files:**
 - Modify: `server/src/db/schema.ts`
@@ -235,7 +235,7 @@ git commit -m "feat(db): app_settings и две колонки исключен�
 
 ---
 
-## Задача 2: Правило `swapBlockReason` и его применение
+## Task 2: Правило `swapBlockReason` и его применение
 
 **Files:**
 - Modify: `shared/src/swap.ts`
@@ -246,7 +246,7 @@ git commit -m "feat(db): app_settings и две колонки исключен�
 - Test: `shared/src/swap-validate.test.ts`, `server/src/swap/swap-service.test.ts`
 
 **Interfaces:**
-- Consumes: `isSwapsLocked` (Задача 1), `employees.excludedFromSwaps` (Задача 1)
+- Consumes: `isSwapsLocked` (Task 1), `employees.excludedFromSwaps` (Task 1)
 - Produces: `swapBlockReason(input: { swapsLocked: boolean; fromExcluded: boolean; toExcluded: boolean }): "swaps-locked" | "from-excluded" | "to-excluded" | null`; `SwapContext` с тремя **обязательными** полями `swapsLocked`, `fromExcluded`, `toExcluded`; три новых значения `SwapRejectReason`
 
 **Замечание про обязательность полей.** Три поля делаются обязательными, а не опциональными с дефолтом `false`. Цена — правка ~15 существующих вызовов в `shared/src/swap-validate.test.ts`. Выгода — забытый вызов даёт красный `tsc`, а не тихое «разрешено», что ровно тот класс дефекта, ради которого фича и делается.
@@ -584,14 +584,14 @@ git commit -m "feat(swaps): правило swapBlockReason закрывает о
 
 ---
 
-## Задача 3: Смена лока и гашение открытых заявок
+## Task 3: Смена лока и гашение открытых заявок
 
 **Files:**
 - Create: `server/src/swap/swap-lock.ts`
 - Test: `server/src/swap/swap-lock.test.ts`
 
 **Interfaces:**
-- Consumes: `setSwapsLocked` (Задача 1), `swapAuditPayload` из `server/src/util/message-lines.ts`
+- Consumes: `setSwapsLocked` (Task 1), `swapAuditPayload` из `server/src/util/message-lines.ts`
 - Produces: `setSwapLock(db: Db, locked: boolean, actorEmployeeId: number): SwapAuditPayload[]`, `cancelSwapsForEmployee(db: Db, employeeId: number): SwapAuditPayload[]`
 
 - [ ] **Шаг 1: Написать падающий тест**
@@ -796,7 +796,7 @@ git commit -m "feat(swaps): включение лока гасит открыт�
 
 ---
 
-## Задача 4: Тексты уведомлений — одно письмо на человека
+## Task 4: Тексты уведомлений — одно письмо на человека
 
 **Files:**
 - Create: `server/src/swap/swap-lock-notice.ts`
@@ -1021,7 +1021,7 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
 
 ---
 
-## Задача 5: Роуты настроек, рассылка и журнал
+## Task 5: Роуты настроек, рассылка и журнал
 
 **Files:**
 - Modify: `shared/src/audit.ts` (`AUDIT_TYPES` + описатель)
@@ -1029,7 +1029,7 @@ git commit -m "feat(swaps): тексты уведомлений о локе — 
 - Test: `shared/src/audit.test.ts`, `server/src/http/settings-route.test.ts` (файл существует — дописать)
 
 **Interfaces:**
-- Consumes: `setSwapLock` (Задача 3), `buildSwapLockNotices` (Задача 4), `swapsLockSetting` (Задача 1)
+- Consumes: `setSwapLock` (Task 3), `buildSwapLockNotices` (Task 4), `swapsLockSetting` (Task 1)
 - Produces: `GET /api/admin/settings` → `{ swapsLocked: boolean; swapsLockUpdatedAt: string | null; swapsLockUpdatedBy: string | null }`; `PUT /api/admin/settings/swaps-lock` тело `{ locked: boolean }` → `{ locked: boolean; cancelled: number; delivered: number; intended: number }`; тип аудита `swaps_lock_changed`
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -1172,7 +1172,7 @@ git commit -m "feat(api): роуты лока обменов, рассылка �
 
 ---
 
-## Задача 6: Десктоп-консоль — раздел «Настройки»
+## Task 6: Десктоп-консоль — раздел «Настройки»
 
 **Files:**
 - Create: `admin/src/screens/SettingsScreen.tsx`
@@ -1182,7 +1182,7 @@ git commit -m "feat(api): роуты лока обменов, рассылка �
 - Modify: `admin/src/App.tsx` (ветка рендера)
 
 **Interfaces:**
-- Consumes: `GET /api/admin/settings`, `PUT /api/admin/settings/swaps-lock` (Задача 5)
+- Consumes: `GET /api/admin/settings`, `PUT /api/admin/settings/swaps-lock` (Task 5)
 - Produces: `AdminSettings { swapsLocked: boolean; swapsLockUpdatedAt: string | null; swapsLockUpdatedBy: string | null }`, `apiClient.getSettings()`, `apiClient.setSwapsLock(locked: boolean): Promise<{ locked: boolean; cancelled: number; delivered: number; intended: number }>`, `NavKey` расширен значением `"settings"`
 
 - [ ] **Шаг 1: Написать падающий DOM-тест**
@@ -1363,7 +1363,7 @@ git commit -m "feat(admin): раздел «Настройки» с тумбле�
 
 ---
 
-## Задача 7: Мини-апп — раздел «Настройки»
+## Task 7: Мини-апп — раздел «Настройки»
 
 **Files:**
 - Create: `miniapp/src/screens/admin/AdminSettings.tsx`
@@ -1373,12 +1373,12 @@ git commit -m "feat(admin): раздел «Настройки» с тумбле�
 - Modify: `miniapp/src/screens/AdminScreen.tsx` (`AdminSection` + чип + ветка)
 
 **Interfaces:**
-- Consumes: те же два роута (Задача 5)
+- Consumes: те же два роута (Task 5)
 - Produces: `AdminSettings`, `SwapLockResult`, `apiClient.getSettings()`, `apiClient.setSwapsLock(locked)`, `AdminSection` расширен значением `"settings"`
 
 - [ ] **Шаг 1: Написать падающий DOM-тест**
 
-`miniapp/src/screens/admin/admin-settings.test.tsx` — **тот же файл теста, что в Задаче 6**, с тремя отличиями мини-аппа:
+`miniapp/src/screens/admin/admin-settings.test.tsx` — **тот же файл теста, что в Task 6**, с тремя отличиями мини-аппа:
 
 1. импорт `apiClient` из `"../../api/client"`, компонента — из `"./AdminSettings"`;
 2. компонент оборачивается в провайдер telegram-ui, как в `shift-kinds-rotation.test.tsx`:
@@ -1443,7 +1443,7 @@ git commit -m "feat(miniapp): раздел «Настройки» с тумбл�
 
 ---
 
-## Задача 8: Две галки в `PATCH /api/admin/employees/:id`
+## Task 8: Две галки в `PATCH /api/admin/employees/:id`
 
 **Files:**
 - Modify: `shared/src/audit.ts` (`employee_restrictions_changed` + описатель)
@@ -1452,7 +1452,7 @@ git commit -m "feat(miniapp): раздел «Настройки» с тумбл�
 - Test: `server/src/http/employees.test.ts`, `shared/src/audit.test.ts`
 
 **Interfaces:**
-- Consumes: `cancelSwapsForEmployee` (Задача 3), `buildExclusionNotices` (Задача 4)
+- Consumes: `cancelSwapsForEmployee` (Task 3), `buildExclusionNotices` (Task 4)
 - Produces: `setEmployeeRestrictions(db: Db, id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Employee | undefined`; тип аудита `employee_restrictions_changed`; `PATCH /api/admin/employees/:id` принимает два новых булевых поля
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -1505,7 +1505,7 @@ git commit -m "feat(miniapp): раздел «Настройки» с тумбл�
   });
 ```
 
-Отдельно: `GET /api/admin/employees` (`server/src/http/app.ts:348`) отдаёт строку работника целиком через `{ ...employee }`, поэтому обе новые колонки попадают в ответ **сами**. Специально ничего добавлять не надо — но и «почистить» этот спред нельзя, экраны Задачи 12 читают галки именно оттуда. Написать это комментарием у роута.
+Отдельно: `GET /api/admin/employees` (`server/src/http/app.ts:348`) отдаёт строку работника целиком через `{ ...employee }`, поэтому обе новые колонки попадают в ответ **сами**. Специально ничего добавлять не надо — но и «почистить» этот спред нельзя, экраны Task 12 читают галки именно оттуда. Написать это комментарием у роута.
 
 В `shared/src/audit.test.ts`:
 
@@ -1576,7 +1576,7 @@ export function setEmployeeRestrictions(
 2. Валидация: если поле пришло и это не `boolean` → `400` с русским текстом.
 3. `beforeEdit` дополнить снимком обеих галок; `after` — тоже.
 4. После существующих мутаций — `setEmployeeRestrictions`, и **только если галки реально изменились** — `recordAudit(db, "employee_restrictions_changed", ...)` с `{ employeeId, displayName, before, after }`.
-5. Если `excludedFromSwaps` **стал** `true` — вызвать `cancelSwapsForEmployee(db, id)`; в обоих случаях (стал `true` или `false`) построить `buildExclusionNotices` и разослать **после** записи, тем же способом, что в Задаче 5. `others` — все активные, кроме самого человека.
+5. Если `excludedFromSwaps` **стал** `true` — вызвать `cancelSwapsForEmployee(db, id)`; в обоих случаях (стал `true` или `false`) построить `buildExclusionNotices` и разослать **после** записи, тем же способом, что в Task 5. `others` — все активные, кроме самого человека.
 
 Существующий `recordAudit(db, "employee_updated", ...)` **остаётся** и по-прежнему пишется только по своим трём полям: `employee_updated` про имя/ДР/обращение, `employee_restrictions_changed` — про галки. Один `PATCH` может дать обе строки, если админ поменял и то и другое — это правда о том, что он сделал.
 
@@ -1595,7 +1595,7 @@ git commit -m "feat(api): две галки ограничений на карт
 
 ---
 
-## Задача 9: Мини-апп — кнопка «Обменять» и список кандидатов
+## Task 9: Мини-апп — кнопка «Обменять» и список кандидатов
 
 **Files:**
 - Modify: `server/src/http/app.ts` (`/api/me`, ~строка 260)
@@ -1606,12 +1606,12 @@ git commit -m "feat(api): две галки ограничений на карт
 - Test: `server/src/http/read.test.ts`, `miniapp/src/lib/swap-candidates.test.ts`, `miniapp/src/components/shift-row-today.test.tsx` (или новый `shift-row-swap-lock.test.tsx`)
 
 **Interfaces:**
-- Consumes: `isSwapsLocked` (Задача 1), `employees.excludedFromSwaps` (Задача 1)
+- Consumes: `isSwapsLocked` (Task 1), `employees.excludedFromSwaps` (Task 1)
 - Produces: `Me` += `swapsLocked: boolean`, `excludedFromSwaps: boolean`; `TeamEmployee` += `excludedFromSwaps: boolean`; `swapCandidates(fromShift, dayShifts, meId, now, excludedIds: ReadonlySet<number>)`; `ShiftRowProps` += `swapBlockedReason?: string`
 
 - [ ] **Шаг 1: Написать падающие тесты**
 
-**Пятый аргумент `swapCandidates` делается обязательным**, не опциональным с дефолтом — по той же причине, что три поля в Задаче 2: забытый вызов должен валить `tsc`, а не тихо показывать в списке того, с кем меняться нельзя. Существующие вызовы в `miniapp/src/lib/swap-candidates.test.ts` дополняются `new Set()`; `tsc` покажет все.
+**Пятый аргумент `swapCandidates` делается обязательным**, не опциональным с дефолтом — по той же причине, что три поля в Task 2: забытый вызов должен валить `tsc`, а не тихо показывать в списке того, с кем меняться нельзя. Существующие вызовы в `miniapp/src/lib/swap-candidates.test.ts` дополняются `new Set()`; `tsc` покажет все.
 
 `miniapp/src/lib/swap-candidates.test.ts` — дописать:
 
@@ -1820,7 +1820,7 @@ git commit -m "feat(miniapp): кнопка «Обменять» знает пр�
 
 ---
 
-## Задача 10: Распределение и очередь
+## Task 10: Распределение и очередь
 
 **Files:**
 - Modify: `server/src/schedule/distribute-service.ts:191-241`
@@ -1828,7 +1828,7 @@ git commit -m "feat(miniapp): кнопка «Обменять» знает пр�
 - Test: `server/src/schedule/distribute.test.ts`, `server/src/repo/template-roles.test.ts`
 
 **Interfaces:**
-- Consumes: `employees.excludedFromAssignment` (Задача 1)
+- Consumes: `employees.excludedFromAssignment` (Task 1)
 - Produces: поведение — `buildDistribution` и `rotationCandidatesFor` не видят исключённых; причина `empty_pool` считается по **всем** активным
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -1935,7 +1935,7 @@ git commit -m "feat(schedule): исключённые вне распредел�
 
 ---
 
-## Задача 11: Выходные — рассылка и назначение
+## Task 11: Выходные — рассылка и назначение
 
 **Files:**
 - Modify: `server/src/bot/notify.ts:166-185` (`notifyVacantSlot`)
@@ -1944,7 +1944,7 @@ git commit -m "feat(schedule): исключённые вне распредел�
 - Test: `server/src/bot/notify.test.ts`, `server/src/weekend/weekend.test.ts`
 
 **Interfaces:**
-- Consumes: `employees.excludedFromAssignment` (Задача 1)
+- Consumes: `employees.excludedFromAssignment` (Task 1)
 - Produces: `assignSlot` умеет отказать причиной `"excluded"`; `notifyVacantSlot` не пишет исключённым и не считает их в `intended`
 
 - [ ] **Шаг 1: Написать падающие тесты**
@@ -2016,7 +2016,7 @@ git commit -m "feat(weekend): исключённых не зовут на вых
 
 ---
 
-## Задача 12: Галки на экране «Работники» в обеих консолях
+## Task 12: Галки на экране «Работники» в обеих консолях
 
 **Files:**
 - Modify: `admin/src/api/client.ts` (`Employee` += два поля, метод), `admin/src/screens/EmployeesScreen.tsx`
@@ -2025,7 +2025,7 @@ git commit -m "feat(weekend): исключённых не зовут на вых
 - Test: `admin/src/screens/employees-error.test.tsx` (дописать) или новый `admin/src/screens/employees-restrictions.test.tsx`; `miniapp/src/screens/admin/admin-employees-restrictions.test.tsx`
 
 **Interfaces:**
-- Consumes: `PATCH /api/admin/employees/:id` с двумя новыми полями (Задача 8)
+- Consumes: `PATCH /api/admin/employees/:id` с двумя новыми полями (Task 8)
 - Produces: `apiClient.setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>` в обоих клиентах
 
 - [ ] **Шаг 1: Написать падающие DOM-тесты**
