@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, reorderEmployee, archiveEmployee, setEmployeeAdmin } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
+import { createSwapRequest, getSwapRequest } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
@@ -29,6 +31,18 @@ function worker(db: Db, name: string, tgId: number) {
   const w = createEmployee(db, { displayName: name, inviteToken: `inv-${tgId}` });
   linkTelegramAccount(db, `inv-${tgId}`, tgId);
   return w;
+}
+
+/** A bot whose `sendMessage` calls land in `sent` instead of hitting the network —
+ *  same shape as `swaps.test.ts`'s helper, needed here to prove which restriction
+ *  flag talks to people and which stays silent. */
+function testBot() {
+  const bot = new Bot("12345:tok");
+  bot.botInfo = { id: 1, is_bot: true, first_name: "P", username: "p_bot",
+    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+  const sent: { chat_id: number | string; text: string }[] = [];
+  bot.api.config.use((_p, m, payload) => { if (m === "sendMessage") sent.push(payload as { chat_id: number | string; text: string }); return { ok: true, result: {} } as any; });
+  return { bot, sent };
 }
 // acceptSwap validates shift start against real wall-clock "now", so fixture dates must
 // always be in the future — compute them relative to today rather than a literal date.
@@ -514,6 +528,173 @@ describe("PATCH /api/admin/employees/:id (rename)", () => {
     const payload = event?.payload as { before: { displayName: string }; after: { displayName: string } };
     expect(payload.before.displayName).toBe("Света Орлов");
     expect(payload.after.displayName).toBe("Света Орлова");
+  });
+});
+
+describe("PATCH /api/admin/employees/:id (restriction flags)", () => {
+  it("PATCH accepts both restriction flags and reports them back", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь Петров", 202);
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request(
+      `/api/admin/employees/${w.id}`,
+      authedJson(admin, { excludedFromAssignment: true, excludedFromSwaps: true }, "PATCH"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.employee.excludedFromAssignment).toBe(true);
+    expect(body.employee.excludedFromSwaps).toBe(true);
+    expect(getEmployeeById(db, w.id)).toMatchObject({ excludedFromAssignment: true, excludedFromSwaps: true });
+  });
+
+  it("PATCH rejects a non-boolean restriction flag", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь Петров", 202);
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request(`/api/admin/employees/${w.id}`, authedJson(admin, { excludedFromSwaps: "yes" }, "PATCH"));
+    expect(res.status).toBe(400);
+    // Pin the wording: a body with only this field present must be refused for
+    // failing its own boolean check, not fall through to the unrelated
+    // "displayName is required" guard that fires when nothing valid is present.
+    expect((await res.json()).error).toBe("excludedFromSwaps должен быть true или false");
+    expect(getEmployeeById(db, w.id)!.excludedFromSwaps).toBe(false); // rejected, not half-applied
+  });
+
+  // Cancelling is the point: the counterparty is holding chat buttons whose only
+  // possible answer would now be an error.
+  it("closing a person's swaps cancels their open requests in both directions", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня Смирнова", 201); // the person being excluded
+    const igor = worker(db, "Игорь Петров", 202); // counterparty on Anya's outgoing request
+    const mark = worker(db, "Марк Волков", 203); // initiator of Anya's incoming request
+    const bystanderA = worker(db, "Первый Работник", 204); // unrelated pair — must survive
+    const bystanderB = worker(db, "Второй Работник", 205);
+
+    const anyaShift = createShift(db, { date: daysFromNow(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: daysFromNow(3), start: "09:00", end: "18:00", employeeId: igor.id });
+    const markShift = createShift(db, { date: daysFromNow(4), start: "10:00", end: "19:00", employeeId: mark.id });
+    const anyaShift2 = createShift(db, { date: daysFromNow(4), start: "11:00", end: "20:00", employeeId: anya.id });
+    const bystanderAShift = createShift(db, { date: daysFromNow(5), start: "08:00", end: "17:00", employeeId: bystanderA.id });
+    const bystanderBShift = createShift(db, { date: daysFromNow(5), start: "09:00", end: "18:00", employeeId: bystanderB.id });
+
+    // Anya's outgoing: she proposed trading her shift for Igor's.
+    const outgoing = createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+    // Anya's incoming: Mark proposed trading his shift for Anya's other one.
+    const incoming = createSwapRequest(db, {
+      fromEmployeeId: mark.id, fromShiftId: markShift.id, toEmployeeId: anya.id, toShiftId: anyaShift2.id,
+    });
+    // Nothing to do with Anya — must stay pending.
+    const unrelated = createSwapRequest(db, {
+      fromEmployeeId: bystanderA.id, fromShiftId: bystanderAShift.id, toEmployeeId: bystanderB.id, toShiftId: bystanderBShift.id,
+    });
+
+    const res = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { excludedFromSwaps: true }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(getSwapRequest(db, outgoing.id)?.status).toBe("cancelled");
+    expect(getSwapRequest(db, incoming.id)?.status).toBe("cancelled");
+    expect(getSwapRequest(db, unrelated.id)?.status).toBe("pending");
+  });
+
+  // Paired: the flag alone is what cancels, so clearing it must not.
+  it("clearing the flag cancels nothing", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня Смирнова", 201);
+    const igor = worker(db, "Игорь Петров", 202);
+    const bystanderA = worker(db, "Первый Работник", 204);
+    const bystanderB = worker(db, "Второй Работник", 205);
+
+    // Excluded first, with nothing pending yet — this PATCH itself cancels nothing.
+    const setup = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { excludedFromSwaps: true }, "PATCH"));
+    expect(setup.status).toBe(200);
+
+    const anyaShift = createShift(db, { date: daysFromNow(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: daysFromNow(3), start: "09:00", end: "18:00", employeeId: igor.id });
+    const bystanderAShift = createShift(db, { date: daysFromNow(4), start: "08:00", end: "17:00", employeeId: bystanderA.id });
+    const bystanderBShift = createShift(db, { date: daysFromNow(4), start: "09:00", end: "18:00", employeeId: bystanderB.id });
+    // Seeded directly (bypassing whatever Task 11 will do at creation time) so
+    // this test only exercises the PATCH route's own cancellation logic.
+    const anyaOwn = createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+    const unrelated = createSwapRequest(db, {
+      fromEmployeeId: bystanderA.id, fromShiftId: bystanderAShift.id, toEmployeeId: bystanderB.id, toShiftId: bystanderBShift.id,
+    });
+
+    const res = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { excludedFromSwaps: false }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(getSwapRequest(db, anyaOwn.id)?.status).toBe("pending");
+    expect(getSwapRequest(db, unrelated.id)?.status).toBe("pending");
+  });
+
+  it("a PATCH that does not touch the flags writes no restrictions journal row", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = worker(db, "Аня Смирнова", 201);
+
+    // Give the flags a real, non-default state first, so "unchanged by the rename"
+    // below is a fact about a genuine prior write, not just the schema default.
+    const seeded = await app.request(`/api/admin/employees/${w.id}`, authedJson(admin, { excludedFromAssignment: true }, "PATCH"));
+    expect(seeded.status).toBe(200);
+
+    const renamed = await app.request(`/api/admin/employees/${w.id}`, authedJson(admin, { displayName: "Аня Смирнова" }, "PATCH"));
+    expect(renamed.status).toBe(200);
+
+    // Exactly one restrictions row — from the seeding PATCH. The rename-only
+    // PATCH must not have added a second one.
+    const restrictionsRows = listRecentAudit(db, 20).filter((row) => row.type === "employee_restrictions_changed");
+    expect(restrictionsRows).toHaveLength(1);
+  });
+
+  /**
+   * The assignment flag is deliberately silent.
+   *
+   * A worker cannot see how the bot hands shifts out, so «тебя исключили из
+   * назначений» would tell them about machinery they never knew existed and start
+   * a conversation the admin did not ask for. The flag leaves a journal row and
+   * nothing else. Without this test the notification would arrive the first time
+   * somebody «tidied up» the route by treating both flags the same way.
+   */
+  it("the assignment flag notifies nobody", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const w = worker(db, "Игорь Петров", 202);
+
+    const res = await app.request(`/api/admin/employees/${w.id}`, authedJson(admin, { excludedFromAssignment: true }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(sent).toHaveLength(0);
+    const journaled = listRecentAudit(db, 20).find((row) => row.type === "employee_restrictions_changed");
+    expect(journaled).toBeDefined();
+    expect((journaled?.payload as { after: { excludedFromAssignment: boolean } }).after.excludedFromAssignment).toBe(true);
+  });
+
+  // Paired with the test above: the swaps flag is the one that talks.
+  it("the swaps flag does notify the person", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const w = worker(db, "Аня Смирнова", 201);
+
+    const res = await app.request(`/api/admin/employees/${w.id}`, authedJson(admin, { excludedFromSwaps: true }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(sent.some((s) => s.chat_id === 201)).toBe(true);
   });
 });
 

@@ -298,6 +298,24 @@ describe("describeAuditEvent — остальные события", () => {
   });
 });
 
+describe("describeAuditEvent — ограничения работника", () => {
+  it("описывает изменение ограничений работника", () => {
+    const view = describeAuditEvent({
+      type: "employee_restrictions_changed",
+      payload: {
+        employeeId: 4, displayName: "Аня Смирнова",
+        before: { excludedFromAssignment: false, excludedFromSwaps: false },
+        after: { excludedFromAssignment: true, excludedFromSwaps: false },
+      },
+    });
+    expect(view.title).toBe("Изменены ограничения работника");
+    expect(view.lines).toContain("Аня Смирнова");
+    expect(view.lines).toContain("назначения: участвует → не участвует");
+    // Обмены не менялись — строки про них быть не должно.
+    expect(view.lines.some((line) => line.startsWith("обмены"))).toBe(false);
+  });
+});
+
 describe("describeAuditEvent — полнота таблицы", () => {
   // Настоящая проверка полноты: не сравнение двух списков, набранных руками
   // в этом файле, а прогон через саму `describeAuditEvent`. Тип без описателя
