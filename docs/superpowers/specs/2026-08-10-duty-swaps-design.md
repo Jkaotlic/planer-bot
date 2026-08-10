@@ -171,12 +171,20 @@ title ?? имя пресета по templateId ?? categoryLabel(category)
 
 ```ts
 // server/src/swap/duty-notice.ts
-/**
- * «Берущий вне пула этого дежурства» — строка для сообщения, или null.
- * Пустой пул = можно всем (правило template_pool), значит уведомлять не о чем.
- */
-export function dutyNoticeOf(db: Db, input: { shiftId: number | null; receiverId: number }): string | null;
+/** Пустой пул = можно всем (правило template_pool), значит уведомлять не о чем. */
+export interface OutsidePoolFact { dutyName: string; receiverName: string }
+export function outsidePoolFact(db: Db, input: { shiftId: number | null; receiverId: number }): OutsidePoolFact | null;
+/** Обе стороны разом: инициатор получает toShift, вторая сторона — fromShift. */
+export function outsidePoolFacts(db: Db, request: SwapRequestPointers): OutsidePoolFact[];
+
+// server/src/bot/notify.ts — слова живут там же, где все остальные тексты
+export function dutyNoticeForReceiver(f: OutsidePoolFact): string; // «Ты не в списке…»
+export function dutyNoticeForAdmins(f: OutsidePoolFact): string;   // «Игорь не в списке…»
 ```
+
+Функция отдаёт **факт**, а не фразу: одна правда звучит по-разному тому, кто берёт
+дежурство, и админам, которые читают про третьего человека. Две фразы из одного факта —
+не два источника правды; две функции, каждая со своим запросом к базе, были бы им.
 
 Куда попадает:
 
@@ -241,8 +249,10 @@ export function dutyNoticeOf(db: Db, input: { shiftId: number | null; receiverId
 12. `swapProposalText` называет оба вида записи; с уведомлением из части 3 — несёт и его.
 13. `swapAcceptedAdminText` не содержит слова «сменами»; с непустым списком уведомлений
     несёт их хвостом, с пустым — не приписывает ничего.
-14. `dutyNoticeOf`: null при пустом пуле, null когда берущий в пуле, строка когда
-    дежурство с непустым пулом уходит человеку вне пула, null для обычной смены.
+14. `outsidePoolFact`: null при пустом пуле, null когда берущий в пуле, факт когда
+    дежурство с непустым пулом уходит человеку вне пула, null для обычной смены;
+    `outsidePoolFacts` отдаёт оба факта, когда вне пула обе стороны. Обе фразы
+    (`dutyNoticeForReceiver`, `dutyNoticeForAdmins`) — на «ты» и про третье лицо.
 15. `GET /api/swaps` отдаёт `category` в `yourShift` / `theirShift`.
 
 **мини-апп**
@@ -264,9 +274,10 @@ export function dutyNoticeOf(db: Db, input: { shiftId: number | null; receiverId
 | `shared/src/category.ts` | `isSwappable` → `{shift, duty}` |
 | `shared/src/category.test.ts` | правится: ожидание `["shift"]` |
 | `server/src/util/message-lines.ts` | `shiftLineOf` называет вид записи |
-| `server/src/bot/notify.ts` | `swapProposalText` (новый), правка админского текста |
-| `server/src/swap/duty-notice.ts` | новый: уведомление про пул |
+| `server/src/bot/notify.ts` | `swapProposalText` (новый), две фразы про пул, правка админского текста |
+| `server/src/swap/duty-notice.ts` | новый: факт «берущий вне пула дежурства» |
 | `server/src/http/app.ts` | текст предложения → билдер; `category` в `shiftSummaryOf` |
+| `server/src/bot/bot.ts` | тот же хвост админам на пути кнопки «Принять» |
 | `miniapp/src/api/client.ts` | `category` в `SwapShiftSummary` |
 | `miniapp/src/lib/swap-candidates.ts` | копия правила → `isSwappable` |
 | `miniapp/src/components/ShiftRow.tsx` | копия правила → `isSwappable` |
