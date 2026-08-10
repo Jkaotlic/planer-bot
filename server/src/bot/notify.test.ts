@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Bot } from "grammy";
-import { notifyUser, notifyAdmins, notifyVacantSlot } from "./notify";
+import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapAcceptedAdminText } from "./notify";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import type { Db } from "../db/client";
@@ -136,5 +136,50 @@ describe("notify", () => {
 
     expect(sent.map((s) => s.chat_id).sort()).toEqual([111, 222, 333]);
     expect(result).toEqual({ delivered: 3, intended: 3 });
+  });
+});
+
+/**
+ * Текст предложения жил литералом в `app.ts`, а не среди остальных билдеров.
+ * Это ровно тот класс дефекта, про который написана шапка `notify.ts`: два
+ * текста, которые «сегодня совпадают», расходятся на первой же правке. И
+ * именно в это сообщение встаёт уведомление про пул — потому что именно на нём
+ * висят кнопки, которыми обмен исполняется.
+ */
+const TRADE = {
+  requestId: 1,
+  fromEmployeeId: 1, fromName: "Аня", fromShift: "Ср 12 авг · 09:00–18:00 · Дежурство · Поклонка",
+  toEmployeeId: 2, toName: "Игорь", toShift: "Ср 12 авг · 10:00–19:00 · День",
+};
+
+describe("swapProposalText", () => {
+  it("называет обе записи", () => {
+    expect(swapProposalText(TRADE)).toBe(
+      "«Аня предлагает обмен: отдаёт Ср 12 авг · 09:00–18:00 · Дежурство · Поклонка, хочет твою Ср 12 авг · 10:00–19:00 · День»",
+    );
+  });
+
+  it("уведомления идут отдельным абзацем, чтобы их не проглядели над кнопками", () => {
+    const text = swapProposalText(TRADE, ["⚠️ Что-то важное."]);
+    expect(text.startsWith("«Аня предлагает обмен")).toBe(true);
+    expect(text).toContain("\n\n⚠️ Что-то важное.");
+  });
+
+  it("без уведомлений ничего не приписывает", () => {
+    expect(swapProposalText(TRADE, [])).toBe(swapProposalText(TRADE));
+  });
+});
+
+describe("swapAcceptedAdminText", () => {
+  // «Обмен сменами состоялся» рядом с дежурством в паре — просто неправда.
+  it("не называет обмен обменом смен", () => {
+    expect(swapAcceptedAdminText(TRADE)).not.toContain("сменами");
+    expect(swapAcceptedAdminText(TRADE)).toContain("Аня");
+    expect(swapAcceptedAdminText(TRADE)).toContain("Игорь");
+  });
+
+  it("уведомления приписывает хвостом, пустой список — нет", () => {
+    expect(swapAcceptedAdminText(TRADE, ["⚠️ Хвост."])).toContain("⚠️ Хвост.");
+    expect(swapAcceptedAdminText(TRADE, [])).toBe(swapAcceptedAdminText(TRADE));
   });
 });
