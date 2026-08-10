@@ -29,6 +29,7 @@
 - **Даты — строки `YYYY-MM-DD`**, сравниваются лексикографически. Никаких `Date` в правилах.
 - **`drizzle-kit migrate` и `push` из корня репозитория пишут В ЖИВУЮ БАЗУ.** `drizzle.config.ts` подставляет `./data/planer.db`, когда не задан `DATABASE_URL`, подтверждения не спрашивает и `--dry-run` не имеет. Живую базу мигрирует сервер сам при старте — руками её не трогает ни одна задача плана. Всё, что нужно прогнать на базе, гоняется на КОПИИ в скретчпаде и с явным `DATABASE_URL`. Найдено ревью Задачи 3.
 - **`as never` в фикстурах — только там, где значение никуда не читается.** У `never` нет ни одного свойства, поэтому `.map((c) => c.title)` после такого каста разваливается на `tsc --strict`, а его гоняет CI (`npm run typecheck`). Если фикстуру потом читают — кастовать в её настоящий тип. Поймано на Задаче 2.
+- **В SQL сравнивать с возможным NULL только через `is`, не через `=`.** `NULL = 5` — это не «false», а NULL, и `WHERE` выбрасывает такую строку так же, как ложную. На Задаче 7 из-за этого общий сбор (виновника нет, `employeeId` = JSON `null`) пропадал бы из журнала у всех подряд. Поймано только потому, что в фикстуре лежала строка, которую фильтр не должен трогать.
 - **Название теста — это обещание. Тест обязан проверять обе половины того, что обещал.** На Задаче 4 тест назывался «кастомный сбор можно дожать, а ДР нельзя» и не создавал ни одного ДР-сбора: ветка блокера у дней рождения не была покрыта вообще, а название уверяло, что покрыта. Если в названии есть «а вот так — нельзя», в теле обязана быть проверка этого «нельзя», и рядом — проверка, что до запрета было можно (иначе тест зелен и на сборе, заблокированном совсем по другой причине).
 - **Полную форму сообщения закреплять целиком (`toBe`), а не по кускам (`toContain`).** `toContain` не видит ни лишней пустой строки, ни пропавшей — ровно на этом спека однажды разошлась с кодом. Поймано на Задаче 2.
 
@@ -1879,10 +1880,16 @@ export interface AuditQuery {
   // The surprise rule, applied in SQL rather than after the fact: filtering the
   // page in JS would leave `total` counting rows the viewer never sees, and the
   // paging would claim there is more than there is.
+  //
+  // `is`, not `=`. A general collection has a JSON `null` honouree, and so does
+  // any row whose payload lacks the key; `NULL = 5` is neither true nor false but
+  // NULL, and SQLite's WHERE discards NULL exactly as it discards false. With `=`
+  // those rows vanish from the journal for EVERYBODY. `is` compares them as
+  // values and answers false, which is what the rule means.
   if (query.viewerEmployeeId != null) {
     filters.push(sql`not (
       ${auditLog.type} in ${HONOUREE_AUDIT_TYPES}
-      and json_extract(${auditLog.payload}, '$.employeeId') = ${query.viewerEmployeeId}
+      and json_extract(${auditLog.payload}, '$.employeeId') is ${query.viewerEmployeeId}
     )`);
   }
 ```
