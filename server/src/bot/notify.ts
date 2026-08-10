@@ -3,6 +3,7 @@ import type { Db } from "../db/client";
 import { listAdmins, listActive } from "../repo/employees";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
+import type { OutsidePoolFact } from "../swap/duty-notice";
 
 // --- Swap text builders ------------------------------------------------------
 //
@@ -28,10 +29,26 @@ export function swapDeclinedText(p: SwapAuditPayload): string {
   return `${p.toName} отклонил(а) твой обмен: ${p.fromShift} ↔ ${p.toShift}.`;
 }
 
+/**
+ * Само предложение обмена — сообщение, на котором висят «Принять/Отклонить».
+ *
+ * Жило литералом в `app.ts`; переехало сюда по причине из шапки этого файла.
+ * `notices` — то, что человек обязан прочитать ДО нажатия (см. `duty-notice.ts`):
+ * отдельным абзацем, а не в конце строки, потому что строка с двумя записями
+ * графика длинная, и приписанный к ней хвост читается как её продолжение.
+ */
+export function swapProposalText(p: SwapAuditPayload, notices: readonly string[] = []): string {
+  const head = `«${p.fromName} предлагает обмен: отдаёт ${p.fromShift}, хочет твою ${p.toShift}»`;
+  return notices.length === 0 ? head : `${head}\n\n${notices.join("\n")}`;
+}
+
 /** Admin broadcast once a swap actually goes through. Named and dated, so with
- *  30 people on the team an admin can tell which swap this was. */
-export function swapAcceptedAdminText(p: SwapAuditPayload): string {
-  return `Обмен сменами состоялся: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
+ *  30 people on the team an admin can tell which swap this was. Не «обмен
+ *  сменами»: с 2026-08-10 в паре может стоять дежурство, и старая формулировка
+ *  рядом с ним просто врала. */
+export function swapAcceptedAdminText(p: SwapAuditPayload, notices: readonly string[] = []): string {
+  const head = `Обмен состоялся: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
+  return notices.length === 0 ? head : `${head} ${notices.join(" ")}`;
 }
 
 /**
@@ -70,6 +87,22 @@ export function swapExpiredText(p: SwapAuditPayload, cause: SwapExpiryCause): st
     : cause === "roster_reimported" ? "график за этот период загрузили заново"
     : "смена изменилась, и обмен больше невозможен";
   return `Обмен неактуален: ${why}. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
+}
+
+/**
+ * Тому, кто вот-вот возьмёт чужое дежурство и не входит в его пул.
+ *
+ * Не запрет: пул — правило автораздачи, а не право (его решение от 2026-08-10).
+ * Но человек стоит в одном нажатии от Поклонки, и прочитать это он должен ДО
+ * нажатия, а не узнать потом из графика.
+ */
+export function dutyNoticeForReceiver(f: OutsidePoolFact): string {
+  return `⚠️ Ты берёшь дежурство: ${f.dutyName}. Ты не в списке тех, кто обычно на него выходит — если это ошибка, спроси у админа.`;
+}
+
+/** То же самое админам: они читают про третьего человека, поэтому по имени. */
+export function dutyNoticeForAdmins(f: OutsidePoolFact): string {
+  return `⚠️ ${f.receiverName} не в списке тех, кто обычно выходит на «${f.dutyName}».`;
 }
 
 // --- Weekend-offer text builders ---------------------------------------------

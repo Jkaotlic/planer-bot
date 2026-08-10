@@ -1,6 +1,7 @@
 import { categoryLabel, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { getShift } from "../repo/shifts";
+import { getTemplate } from "../repo/templates";
 import { getEmployeeById } from "../repo/employees";
 
 /** «Пт 7 авг» — день, как его пишут все остальные сообщения бота. */
@@ -39,23 +40,31 @@ export function entryLineOf(entry: {
 }
 
 /**
- * "Пн 13 июл · 08:00–17:00"-style short line describing a shift, for chat
- * notifications and the audit journal — a line that reads without a join
- * back to `shifts`.
+ * «Пт 10 июл · 09:00–18:00 · Дежурство · Поклонка» — строка про смену из базы,
+ * читаемая без джойна назад к `shifts`: для сообщений бота и журнала.
  *
- * Shared by the HTTP layer and the bot's own callback handlers so a swap
- * resolved either way produces the exact same wording.
+ * Строится тем же `entryLineOf`, что и письмо об изменении графика, а не своим
+ * форматированием даты: одна запись графика обязана называться одинаково во всех
+ * сообщениях. Раньше здесь не было ни категории, ни пресета, и сообщение с
+ * кнопками «Принять/Отклонить» не сообщало, что в обмене дежурство, — а с
+ * 2026-08-10 дежурством можно меняться.
+ *
+ * Общая для HTTP-слоя и кнопок бота, чтобы обмен, закрытый любым из двух путей,
+ * дал ровно один текст.
  */
 export function shiftLineOf(db: Db, shiftId: number | null): string {
   const shift = shiftId == null ? undefined : getShift(db, shiftId);
+  // Заявка живёт дольше смены, на которую показывала (см. `swap_requests.from_shift_id`),
+  // так что «записи больше нет» — нормальный случай, а не ошибка.
   if (!shift) return "смену";
-  const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
-    .formatToParts(new Date(`${shift.date}T00:00:00Z`));
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const weekday = get("weekday");
-  const dateLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${get("day")} ${get("month").replace(/\.$/, "")}`;
-  const time = shift.start != null && shift.end != null ? ` · ${shift.start}–${shift.end}` : "";
-  return `${dateLabel}${time}`;
+  return entryLineOf({ ...shift, title: shift.title ?? templateNameOf(db, shift.templateId) });
+}
+
+/** Имя пресета — для записей, которые своей подписи не несут. Та же
+ *  подстраховка, что уже стоит в `shiftKind` на сервере и в консоли: часть
+ *  старых строк писалась без `title`. */
+function templateNameOf(db: Db, templateId: number | null): string | null {
+  return templateId == null ? null : (getTemplate(db, templateId)?.name ?? null);
 }
 
 /** "Сб 19 июл · 10:00–18:00 · Ярмарка" — short line describing a vacant slot

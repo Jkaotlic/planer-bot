@@ -46,11 +46,26 @@ describe("swapCandidates", () => {
     expect(candidates).toEqual([]);
   });
 
-  it("не предлагает дежурство, отпуск и клетку без времени", () => {
-    const duty = shift({ id: 2, category: "duty", title: "Дежурство" });
+  // Дежурство здесь стояло рядом с отпуском до 2026-08-10: тогда «дежурством не
+  // меняются» было правилом. Теперь меняются, и дежурство переехало в тест ниже.
+  it("не предлагает отпуск и клетку без времени", () => {
     const vacation = shift({ id: 3, category: "vacation", start: null, end: null, employeeId: 3 });
     const unreadable = shift({ id: 4, start: null, end: null, templateId: null, employeeId: 4 });
-    const { candidates } = swapCandidates(mine, [duty, vacation, unreadable], 1, NOW, new Set());
+    const { candidates } = swapCandidates(mine, [vacation, unreadable], 1, NOW, new Set());
+    expect(candidates).toEqual([]);
+  });
+
+  it("дежурство коллеги предлагает — им тоже можно меняться", () => {
+    const duty = shift({ id: 2, category: "duty", title: "Дежурство · Поклонка", templateId: 7, start: "09:00", end: "18:00" });
+    const { candidates } = swapCandidates(mine, [duty], 1, NOW, new Set());
+    expect(candidates.map((s) => s.id)).toEqual([2]);
+  });
+
+  // Дежурство без часов — это нечитаемая клетка импорта: отдавать нечего, и
+  // сервер называет это `not_swappable`. Открытая категория этого не отменяет.
+  it("дежурство без времени не предлагает", () => {
+    const timeless = shift({ id: 2, category: "duty", start: null, end: null, templateId: null });
+    const { candidates } = swapCandidates(mine, [timeless], 1, NOW, new Set());
     expect(candidates).toEqual([]);
   });
 

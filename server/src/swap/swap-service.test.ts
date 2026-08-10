@@ -5,7 +5,7 @@ import { createEmployee } from "../repo/employees";
 import { createShift, getShift, updateShift } from "../repo/shifts";
 import { getSwapRequest, createSwapRequest } from "../repo/swaps";
 import { setSwapsLocked } from "../repo/settings";
-import { employees } from "../db/schema";
+import { employees, shiftTemplates } from "../db/schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "./swap-service";
 
 const NOW = { date: "2026-07-01", time: "12:00" };
@@ -252,6 +252,111 @@ describe("swap service under admin restrictions", () => {
     const { db, a, b, sa, sb } = setup();
     db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, b.id)).run();
     expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
+      .toEqual({ ok: false, reason: "to-excluded" });
+  });
+});
+
+/**
+ * Дежурство обменивается как смена — его решение от 2026-08-10.
+ *
+ * Пул дежурства при этом ничего не запрещает: он остаётся правилом автораздачи,
+ * а не правом. Поэтому здесь нет ни одного теста «отказал из-за пула» —
+ * отказывать нечем.
+ */
+describe("обмен дежурствами", () => {
+  function dutySetup() {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+    const pokl = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "09:00", end: "18:00", location: "Поклонка" })
+      .returning()
+      .all()[0]!;
+    const duty = createShift(db, {
+      date: "2026-07-10", start: "09:00", end: "18:00", category: "duty",
+      templateId: pokl.id, title: pokl.name, employeeId: anya.id,
+    });
+    const shift = createShift(db, { date: "2026-07-10", start: "11:00", end: "20:00", employeeId: igor.id });
+    return { db, anya, igor, pokl, duty, shift };
+  }
+
+  it("дежурство меняется на обычную смену того же дня и исполняется", () => {
+    const { db, anya, igor, duty, shift } = dutySetup();
+    const proposed = createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: shift.id }, NOW);
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) return;
+
+    const accepted = acceptSwap(db, proposed.request.id, igor.id, NOW);
+    expect(accepted.ok).toBe(true);
+    expect(getShift(db, duty.id)!.employeeId).toBe(igor.id);
+    expect(getShift(db, shift.id)!.employeeId).toBe(anya.id);
+  });
+
+  // Третий человек, а не Игорь из `dutySetup`: у того в этот день уже стоит смена
+  // 11:00–20:00, и Поклонка 09:00–18:00 оставила бы его с двойным букингом —
+  // правильный отказ, но не про то, что здесь проверяется.
+  it("два разных дежурства в один день — настоящий обмен", () => {
+    const { db, anya, duty } = dutySetup();
+    const mark = createEmployee(db, { displayName: "Марк" });
+    const v19 = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Вавилова 19", category: "duty", start: "10:00", end: "19:00", location: "Вавилова 19" })
+      .returning()
+      .all()[0]!;
+    const his = createShift(db, {
+      date: duty.date, start: "10:00", end: "19:00", category: "duty",
+      templateId: v19.id, title: v19.name, employeeId: mark.id,
+    });
+    expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: his.id }, NOW).ok).toBe(true);
+  });
+
+  it("одно и то же дежурство у обоих — обмен ничего не изменит", () => {
+    const { db, anya, igor, pokl, duty } = dutySetup();
+    const his = createShift(db, {
+      date: duty.date, start: "09:00", end: "18:00", category: "duty",
+      templateId: pokl.id, title: pokl.name, employeeId: igor.id,
+    });
+    expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: his.id }, NOW))
+      .toEqual({ ok: false, reason: "identical-shift" });
+  });
+
+  // Сторож: открыли ровно дежурство и ничего больше.
+  it.each(["offsite", "weekend_work", "vacation", "sick_leave", "business_trip"] as const)(
+    "%s обменять по-прежнему нельзя",
+    (category) => {
+      const { db, anya, igor, duty } = dutySetup();
+      const theirs = createShift(db, { date: duty.date, start: "11:00", end: "20:00", category, employeeId: igor.id });
+      expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: theirs.id }, NOW))
+        .toEqual({ ok: false, reason: "not_swappable" });
+    },
+  );
+
+  // Сторож: дежурство без часов — это нечитаемая клетка импорта, отдавать нечего.
+  it("дежурство без часов обменять нельзя", () => {
+    const { db, anya, shift } = dutySetup();
+    const timeless = createShift(db, { date: shift.date, category: "duty", employeeId: anya.id });
+    expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: timeless.id, toShiftId: shift.id }, NOW))
+      .toEqual({ ok: false, reason: "not_swappable" });
+  });
+
+  // Сторожа: общие запреты действуют на дежурство ровно так же, как на смену.
+  it("лок обменов закрывает и дежурства", () => {
+    const { db, anya, duty, shift } = dutySetup();
+    setSwapsLocked(db, true, anya.id);
+    expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: shift.id }, NOW))
+      .toEqual({ ok: false, reason: "swaps-locked" });
+  });
+
+  it("исключённый из обменов не отдаёт и не берёт дежурство", () => {
+    const { db, anya, igor, duty, shift } = dutySetup();
+    db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, anya.id)).run();
+    expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: shift.id }, NOW))
+      .toEqual({ ok: false, reason: "from-excluded" });
+
+    db.update(employees).set({ excludedFromSwaps: false }).where(eq(employees.id, anya.id)).run();
+    db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, igor.id)).run();
+    expect(createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: shift.id }, NOW))
       .toEqual({ ok: false, reason: "to-excluded" });
   });
 });
