@@ -3050,7 +3050,7 @@ git commit -m "feat(api-клиенты): сборы в обеих мордах �
   - `moneyLine(c: { amountPerPerson: number | null; totalGoal: number | null }): string | null`
   - `canCreate(title: string): boolean`
 
-- [ ] **Step 1: Написать падающий тест на хелперы**
+- [x] **Step 1: Написать падающий тест на хелперы**
 
 Создать `miniapp/src/screens/admin/collection-form.test.tsx`:
 
@@ -3106,12 +3106,12 @@ describe("statusOf", () => {
 `preview(patch)`), а не `as never`: у `never` нет свойств, и тест, который потом читает
 поле фикстуры, разваливается на `tsc --strict` — этот класс уже ловили на Задаче 2.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npx vitest run miniapp/src/screens/admin/collection-form.test.tsx`
 Expected: FAIL — модуля `./AdminCollections` нет.
 
-- [ ] **Step 3: Переименовать экран и дописать хелперы**
+- [x] **Step 3: Переименовать экран и дописать хелперы**
 
 ```bash
 git mv miniapp/src/screens/admin/AdminBirthdays.tsx miniapp/src/screens/admin/AdminCollections.tsx
@@ -3169,7 +3169,7 @@ export function roundStatus(campaign: Collection | null, today: string): { label
 }
 ```
 
-- [ ] **Step 4: Собрать экран**
+- [x] **Step 4: Собрать экран**
 
 Внутри `AdminCollections` — три секции в одном `List`:
 
@@ -3193,12 +3193,12 @@ export function roundStatus(campaign: Collection | null, today: string): { label
 
 и переименовать значение `AdminSection` `"birthdays"` → `"collections"` во всех местах файла.
 
-- [ ] **Step 5: Прогнать тесты мини-аппа**
+- [x] **Step 5: Прогнать тесты мини-аппа**
 
 Run: `npx vitest run miniapp/`
 Expected: PASS. Переименованные тесты поправить под новые имена — если какой-то из них после переименования проходит, не меняясь по сути, это нормально: он и раньше проверял поведение, которое не изменилось.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 npx vitest run server/src/db/no-real-names.test.ts
@@ -3221,7 +3221,7 @@ git commit -m "feat(мини-апп): раздел «Сборы» — форма
 
 **Что в консоли появляется впервые.** Сегодня в десктопной консоли нет списка прошлых сборов вообще — `admin/src/api/client.ts` не импортирует `mockGetBirthdayCampaigns`, и экран показывает только ближайшие дни рождения. Список сборов здесь строится с нуля.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `admin/src/collections-screen.test.tsx`:
 
@@ -3270,12 +3270,12 @@ describe("CollectionsScreen", () => {
 
 Если `@testing-library/react` в `admin` ещё не подключён — свериться с `admin/src/birthdays-reach.test.tsx` и повторить его способ рендера, а не заводить новую зависимость.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npx vitest run admin/src/collections-screen.test.tsx`
 Expected: FAIL — файла экрана нет.
 
-- [ ] **Step 3: Переименовать и собрать экран**
+- [x] **Step 3: Переименовать и собрать экран**
 
 ```bash
 git mv admin/src/screens/BirthdaysScreen.tsx admin/src/screens/CollectionsScreen.tsx
@@ -3286,7 +3286,7 @@ git mv admin/src/birthdays-reach.test.tsx admin/src/collections-reach.test.tsx
 
 В `admin/src/App.tsx` заменить импорт и ярлык раздела на «Сборы».
 
-- [ ] **Step 4: Прогнать тесты консоли и закоммитить**
+- [x] **Step 4: Прогнать тесты консоли и закоммитить**
 
 Run: `npx vitest run admin/`
 Expected: PASS.
@@ -3310,7 +3310,7 @@ git commit -m "feat(консоль): раздел «Сборы» вместо «
 - Consumes: `apiClient.getMyCollections()` (Задача 11); `formatMoney`, `formatDayMonth` из `@planer/shared`.
 - Produces: `TeamCollections` — секция, которая **рисует сама себя или ничего**.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `miniapp/src/screens/team/TeamCollections.test.tsx`:
 
@@ -3356,12 +3356,12 @@ describe("TeamCollections", () => {
 });
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npx vitest run miniapp/src/screens/team/TeamCollections.test.tsx`
 Expected: FAIL — компонента нет.
 
-- [ ] **Step 3: Написать компонент**
+- [x] **Step 3: Написать компонент**
 
 Создать `miniapp/src/screens/team/TeamCollections.tsx`:
 
@@ -3434,7 +3434,7 @@ export function TeamCollections() {
 
 В `miniapp/src/screens/TeamScreen.tsx` отрисовать `<TeamCollections />` первым элементом внутри `ScreenScroll`, выше переключателя вида.
 
-- [ ] **Step 4: Прогнать тесты и закоммитить**
+- [x] **Step 4: Прогнать тесты и закоммитить**
 
 Run: `npx vitest run miniapp/`
 Expected: PASS.
@@ -3451,7 +3451,7 @@ git commit -m "feat(мини-апп): секция «Идёт сбор» во в
 
 **Files:** ничего не создаётся — задача целиком про доказательства.
 
-- [ ] **Step 1: Полный прогон**
+- [x] **Step 1: Полный прогон**
 
 ```bash
 npm test
@@ -3460,7 +3460,7 @@ npm run typecheck
 
 Ожидается: оба зелёные. Записать число тестов и число файлов — с ними сверяется CI (было 1283 теста до этой работы).
 
-- [ ] **Step 2: Страж приватности на живой базе**
+- [x] **Step 2: Страж приватности на живой базе**
 
 ```bash
 npx vitest run server/src/db/no-real-names.test.ts
@@ -3468,7 +3468,7 @@ npx vitest run server/src/db/no-real-names.test.ts
 
 Ожидается: PASS. Если пропущен — значит нет `data/planer.db`, и это не доказательство: прогнать там, где база есть.
 
-- [ ] **Step 3: Проверить, что кириллических идентификаторов не завелось**
+- [x] **Step 3: Проверить, что кириллических идентификаторов не завелось**
 
 ```bash
 git grep -nE "(const|let|function) [а-яА-ЯёЁ]" -- '*.ts' '*.tsx'
@@ -3476,7 +3476,7 @@ git grep -nE "(const|let|function) [а-яА-ЯёЁ]" -- '*.ts' '*.tsx'
 
 Ожидается: пусто.
 
-- [ ] **Step 4: Проверить язык комментариев на сервере**
+- [x] **Step 4: Проверить язык комментариев на сервере**
 
 ```bash
 git grep -nE "^\s*(//|\*) .*[а-яА-ЯёЁ]" -- 'server/src/**/*.ts' | grep -v "«"
@@ -3484,7 +3484,7 @@ git grep -nE "^\s*(//|\*) .*[а-яА-ЯёЁ]" -- 'server/src/**/*.ts' | grep -v 
 
 Ожидается: пусто. Русские доменные термины на сервере допускаются только в «ёлочках» внутри английской фразы; всё, что нашлось помимо них, — перевести.
 
-- [ ] **Step 5: Пересобрать обе морды**
+- [x] **Step 5: Пересобрать обе морды**
 
 ```bash
 npm run build -w miniapp && npm run build -w admin
@@ -3492,11 +3492,11 @@ npm run build -w miniapp && npm run build -w admin
 
 Ожидается: обе сборки проходят. (Если скрипта `build` в воркспейсе нет — свериться с тем, как фронтенды собирались в предыдущих фичах, и повторить.)
 
-- [ ] **Step 6: Постусловие миграции ещё раз, на свежей копии живой базы**
+- [x] **Step 6: Постусловие миграции ещё раз, на свежей копии живой базы**
 
 Повторить Шаг 6 Задачи 3 на новой копии `data/planer.db` — между тем прогоном и этим успели пройти двенадцать задач, и проверять надо тот код, который поедет на сервер.
 
-- [ ] **Step 7: Отчитаться**
+- [x] **Step 7: Отчитаться**
 
 В отчёте назвать числами: сколько тестов, сколько файлов тестов, что показал прогон миграции на копии, и **что осталось непроверенным живьём** — реальная отправка в Telegram кастомного сбора никакими тестами не доказывается, транспорт в них застабан.
 
