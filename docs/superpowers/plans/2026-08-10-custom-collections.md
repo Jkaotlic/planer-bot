@@ -17,7 +17,8 @@
 - **Слой 1 — TDD обязателен.** Тест вперёд, прогон, красный, потом код. Красноту доказывать: `git stash push <файл-реализации>` → тест обязан упасть → `git stash pop`. «Написал тест и код вместе» — не TDD.
 - **Тест обязан уметь упасть.** Проверять не только «вернулось ожидаемое», но и что в фикстуре есть то, что не должно вернуться. Пустой ответ на фикстуре из одного элемента проходит и при полностью сломанной выборке.
 - **Идентификаторы только латиницей.** `git grep -nE "(const|let|function) [а-яА-ЯёЁ]"` обязан оставаться пустым, включая тестовые фикстуры.
-- **Комментарии в `server/src/**` — по-английски, и в коде, и в тестах.** Русские доменные термины — в «ёлочках» внутри английской фразы. В `shared/` и в мини-аппе комментарии по-русски — намеренная конвенция.
+- **Комментарии в `server/src/**` — по-английски, и в коде, и в тестах.** Русские доменные термины — в «ёлочках» внутри английской фразы (`two identical «ФИО»`). В `shared/` и в мини-аппе комментарии по-русски — намеренная конвенция.
+  **Два исключения, которые не надо «чинить»:** разделители секций в `app.ts` подписаны по-русски (`// --- Дни рождения ---`), и новый блок сборов повторяет этот же вид — иначе оглавление файла станет двуязычным; и в `app.ts` уже лежат старые русские комментарии, не относящиеся к этой работе, — переводить их не входит в задачи, трогать чужие строки ради языка нельзя.
 - **Репозиторий публичный.** Никаких настоящих имён, фамилий, хендлов, telegram id. Перед каждым коммитом: `npx vitest run server/src/db/no-real-names.test.ts`.
 - **`npm test` после правки мока или фикстуры.** Моки покрыты тестами, которые пинят точный состав данных; `npm run typecheck` этого не видит.
 - **Бот пишет команде только по тапу админа.** Ни одна задача не заводит автоматической рассылки работникам.
@@ -643,63 +644,63 @@ sqlite3 "$(echo $SCRATCH)/pre.db" \
 
 ```ts
 /**
- * Один сбор денег: на день рождения или заведённый админом руками.
+ * One collection of money: a birthday round, or one an admin made by hand.
  *
- * День рождения здесь — частный случай, а не отдельная сущность: у него есть
- * `employee_id` и `year` (пара «человек + год» — его ключ) и нет `title`. У
- * кастомного сбора наоборот — есть повод, а виновник необязателен: на
- * корпоратив скидываются все.
+ * A birthday is the special case here rather than a separate thing: it has an
+ * `employee_id` and a `year` (the pair is its key) and no `title`. A custom one
+ * is the other way round — it has a subject, and an honouree is optional:
+ * everybody chips in for the office coffee machine.
  *
- * Колонки `status` тут нет намеренно: он выводится из `collect_url` и
- * `send_count` (`collectionStatus` в `@planer/shared`). Хранимый статус был бы
- * вторым источником правды и с дожимами начал бы врать — у кастомного сбора со
- * статусом «разослано» кнопка «Разослать» жива.
+ * There is deliberately no `status` column: it follows from `collect_url` and
+ * `send_count` (`collectionStatus` in `@planer/shared`). A stored status would
+ * be a second source of truth, and with reminders it would start lying outright
+ * — a custom collection marked «sent» still has a live send button.
  *
- * Бот по-прежнему не пишет команде сам: он подталкивает админов, всё остальное
- * — нажатая ими кнопка.
+ * The bot still never mails the team on its own: it nudges admins, and every
+ * message after that is a button they pressed.
  */
 export const collections = sqliteTable(
   "collections",
   {
     id: integer().primaryKey({ autoIncrement: true }),
     kind: text().$type<CollectionKind>().notNull().default("custom"),
-    /** Виновник торжества. NULL у общего сбора — «кофемашина в офис». */
+    /** The «виновник торжества». NULL for a general collection. */
     employeeId: integer().references(() => employees.id),
-    /** Только у дня рождения: календарный год этого раунда. */
+    /** Birthday only: the calendar year this round belongs to. */
     year: integer(),
-    /** Только у дня рождения: когда празднуется, YYYY-MM-DD. */
+    /** Birthday only: when it is marked, YYYY-MM-DD. */
     celebratedOn: text(),
-    /** Повод кастомного сбора. У дня рождения NULL — заголовок строится из имени. */
+    /** What a custom collection is for. NULL on a birthday — its title is the name. */
     title: text(),
-    /** Когда событие: свадьба, проводы, корпоратив. */
+    /** When the event is: a wedding, a send-off, the office party. */
     eventDate: text(),
-    /** «Скиньтесь до» — край сбора, который главнее даты события. */
+    /** «Скиньтесь до» — the collection's edge, which outranks the event date. */
     deadline: text(),
-    /** Целые рубли. Копеек в сборе на подарок не бывает. */
+    /** Whole roubles. A whip-round is never counted in kopecks. */
     amountPerPerson: integer(),
     totalGoal: integer(),
     collectUrl: text(),
-    /** Что уйдёт команде. NULL — текст по умолчанию. */
+    /** What the team will be sent. Null means "use the default wording". */
     messageText: text(),
-    /** Когда админ нажал «Собрали, закрыть». NULL — сбор ещё идёт. */
+    /** When an admin pressed «Собрали, закрыть». NULL while it is still running. */
     closedAt: integer({ mode: "timestamp" }),
-    /** Когда админов подтолкнули за неделю, чтобы подтолкнуть один раз. */
+    /** When admins were nudged, so they are nudged once rather than every tick. */
     adminNotifiedAt: integer({ mode: "timestamp" }),
     scheduledSendOn: text(),
     scheduleNotifiedAt: integer({ mode: "timestamp" }),
-    /** Последняя рассылка. */
+    /** The LAST send. */
     sentAt: integer({ mode: "timestamp" }),
-    /** Скольким дошло в ПОСЛЕДНЮЮ рассылку. */
+    /** How many people the LAST send actually reached. */
     sentCount: integer().notNull().default(0),
-    /** Сколько раз рассылали вообще. Единственная правда о «разослано». */
+    /** How many rounds went out at all — the only truth about «разослано». */
     sendCount: integer().notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [
-    // Частичный: правило «один ДР-сбор на человека в год» касается только дней
-    // рождения. Без `WHERE` два кастомных сбора на одного человека и так не
-    // столкнулись бы (в SQLite `NULL ≠ NULL` внутри уникального индекса), но
-    // правило перестало бы читаться как правило.
+    // Partial: «one birthday round per person per year» is a rule about
+    // birthdays only. Without the `WHERE`, two custom collections for the same
+    // person would not clash anyway (in SQLite `NULL ≠ NULL` inside a unique
+    // index), but the rule would stop reading as a rule.
     uniqueIndex("collection_birthday_unique")
       .on(t.employeeId, t.year)
       .where(sql`${t.kind} = 'birthday'`),
@@ -2727,7 +2728,7 @@ export function collectionsForWorker(db: Db, today: string, employeeId: number):
 В `server/src/http/app.ts`, рядом с прочими роутами работника (`/api/weekend/*`):
 
 ```ts
-  /** Активные сборы, о которых человеку уже написали. Свой он не видит. */
+  /** Running collections this person has already been told about. Not their own. */
   app.get("/api/collections", requireAuth(config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
