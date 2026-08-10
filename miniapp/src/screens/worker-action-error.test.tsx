@@ -33,8 +33,8 @@ function swap(id: number): SwapRequest {
     message: null,
     createdAt: `2026-08-0${id}T10:00:00.000Z`,
     counterpartyName: `Коллега ${id}`,
-    yourShift: { date: "2026-08-10", start: "09:00", end: "18:00", title: "День" },
-    theirShift: { date: "2026-08-11", start: "08:00", end: "17:00", title: "Утро" },
+    yourShift: { date: "2026-08-10", start: "09:00", end: "18:00", title: "День", category: "shift" },
+    theirShift: { date: "2026-08-11", start: "08:00", end: "17:00", title: "Утро", category: "shift" },
   };
 }
 

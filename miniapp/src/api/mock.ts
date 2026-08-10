@@ -294,7 +294,7 @@ function shiftOf(employeeId: number, date: string): Shift {
 }
 
 function toSummary(shift: Shift): SwapShiftSummary {
-  return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
+  return { date: shift.date, start: shift.start, end: shift.end, title: shift.title, category: shift.category };
 }
 
 let nextSwapId = 1;

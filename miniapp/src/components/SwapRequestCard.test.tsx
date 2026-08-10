@@ -8,8 +8,8 @@ import { ArchivedSwapCard } from "./SwapRequestCard";
 
 // Distinct shift summaries so a mixed-up direction shows up as the wrong text
 // in the wrong line rather than passing by coincidence.
-const yourShift = { date: "2026-07-10", start: "08:00", end: "16:00", title: "Точка А" };
-const theirShift = { date: "2026-07-11", start: "09:00", end: "17:00", title: "Точка Б" };
+const yourShift = { date: "2026-07-10", start: "08:00", end: "16:00", title: "Точка А", category: "shift" as const };
+const theirShift = { date: "2026-07-11", start: "09:00", end: "17:00", title: "Точка Б", category: "shift" as const };
 const yourShiftText = `${formatDayLabel(yourShift.date)} · ${formatTimeRange(yourShift)} · ${yourShift.title}`;
 const theirShiftText = `${formatDayLabel(theirShift.date)} · ${formatTimeRange(theirShift)} · ${theirShift.title}`;
 
