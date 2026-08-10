@@ -4,7 +4,8 @@ import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, createAdminEmployee } from "../repo/employees";
 import { createShift, getShift, updateShift } from "../repo/shifts";
-import { auditLog } from "../db/schema";
+import { auditLog, shiftTemplates } from "../db/schema";
+import { setTemplateRoles } from "../repo/template-roles";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
@@ -363,4 +364,45 @@ describe("swap endpoints", () => {
     const cancelled = db.select().from(auditLog).all().find((r) => r.type === "swap_cancelled")!;
     expect(cancelled.actorEmployeeId).toBe(anya.w.id); // the initiator who withdrew it
   });
+
+  it("дежурство вне пула: предупреждение берущему до нажатия и админам после", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const anya = await worker(db, app, "Аня", 501);
+    const igor = await worker(db, app, "Игорь", 502);
+    // Админ существует только чтобы принять рассылку — своего токена ему не надо.
+    createAdminEmployee(db, { telegramUserId: 503, displayName: "Админ" });
+
+    const pokl = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "09:00", end: "18:00" })
+      .returning()
+      .all()[0]!;
+    // В пуле только Аня — Игорь на Поклонке не бывает.
+    setTemplateRoles(db, pokl.id, { pool: [anya.w.id], preference: {} });
+
+    const day = daysFromNow(3);
+    const duty = createShift(db, {
+      date: day, start: "09:00", end: "18:00", category: "duty",
+      templateId: pokl.id, title: pokl.name, employeeId: anya.w.id,
+    });
+    const his = createShift(db, { date: day, start: "11:00", end: "20:00", employeeId: igor.w.id });
+
+    const created = await app.request(
+      new Request("http://x/api/swaps", authed(anya.token, { fromShiftId: duty.id, toShiftId: his.id })),
+    );
+    expect(created.status).toBe(201);
+    const proposal = sent.find((m) => m.chat_id === 502);
+    expect(proposal?.text).toContain("Дежурство · Поклонка");
+    expect(proposal?.text).toContain("Ты не в списке");
+
+    const requestId = (await created.json()).request.id as number;
+    const accepted = await app.request(new Request(`http://x/api/swaps/${requestId}/accept`, authed(igor.token)));
+    expect(accepted.status).toBe(200);
+
+    const toAdmin = sent.filter((m) => m.chat_id === 503).map((m) => m.text).join("\n");
+    expect(toAdmin).toContain("Игорь не в списке");
+  });
+
 });

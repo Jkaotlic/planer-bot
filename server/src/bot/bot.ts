@@ -26,12 +26,14 @@ import {
   swapAcceptedText,
   swapDeclinedText,
   swapAcceptedAdminText,
+  dutyNoticeForAdmins,
   swapAutoCancelledText,
   swapExpiredText,
   weekendConfirmedAdminText,
   weekendDeclinedAdminText,
 } from "./notify";
 import { slotLineOf, swapAuditPayload } from "../util/message-lines";
+import { outsidePoolFacts } from "../swap/duty-notice";
 import { safeErrorMessage } from "../util/safe-error";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
@@ -493,7 +495,16 @@ export function createBot(deps: BotDeps): Bot {
       await notifyUser(bot, initiatorTg, action === "accept" ? swapAcceptedText(payload) : swapDeclinedText(payload));
     }
     if (action === "accept") {
-      await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(db, res.request)));
+      // Тот же хвост про пул, что и на маршруте мини-аппа: без него два входа
+      // расскажут админам разное про один и тот же обмен.
+      await notifyAdmins(
+        bot,
+        db,
+        swapAcceptedAdminText(
+          swapAuditPayload(db, res.request),
+          outsidePoolFacts(db, res.request).map(dutyNoticeForAdmins),
+        ),
+      );
       // Accepting can silently auto-cancel other pending swaps that touched the
       // same shift(s). Both sides hear about it — the counterparty whose buttons
       // just died, and the initiator who has been waiting and would otherwise

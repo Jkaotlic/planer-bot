@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Bot } from "grammy";
-import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapAcceptedAdminText } from "./notify";
+import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapAcceptedAdminText, dutyNoticeForReceiver, dutyNoticeForAdmins } from "./notify";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import type { Db } from "../db/client";
@@ -181,5 +181,24 @@ describe("swapAcceptedAdminText", () => {
   it("уведомления приписывает хвостом, пустой список — нет", () => {
     expect(swapAcceptedAdminText(TRADE, ["⚠️ Хвост."])).toContain("⚠️ Хвост.");
     expect(swapAcceptedAdminText(TRADE, [])).toBe(swapAcceptedAdminText(TRADE));
+  });
+});
+
+/** Один факт, две фразы: берущему — на «ты», админам — про третье лицо. */
+describe("уведомление про пул дежурства", () => {
+  const fact = { dutyName: "Дежурство · Поклонка", receiverName: "Игорь" };
+
+  it("берущему — на «ты», с названием дежурства", () => {
+    const text = dutyNoticeForReceiver(fact);
+    expect(text).toContain("Дежурство · Поклонка");
+    expect(text).toContain("Ты не в списке");
+    expect(text).not.toContain("Игорь");
+  });
+
+  it("админам — про третье лицо, по имени", () => {
+    const text = dutyNoticeForAdmins(fact);
+    expect(text).toContain("Игорь");
+    expect(text).toContain("Дежурство · Поклонка");
+    expect(text).not.toContain("Ты не");
   });
 });

@@ -9,7 +9,8 @@ import { createSwap } from "../swap/swap-service";
 import { teamNow } from "../util/team-time";
 import { expressInterest, assignSlot, payrollRows, interestedForSlot } from "../weekend/weekend-service";
 import { createVacantSlot, getAssignment } from "../repo/weekend";
-import { auditLog } from "../db/schema";
+import { auditLog, shiftTemplates } from "../db/schema";
+import { setTemplateRoles } from "../repo/template-roles";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 
@@ -419,6 +420,45 @@ describe("bot swap callback buttons", () => {
     expect(adminMsg).toBeDefined();
     expect(adminMsg!.text).toContain("Аня");
     expect(adminMsg!.text).toContain("Игорь");
+  });
+
+  /**
+   * Кнопка в чате и маршрут мини-аппа обязаны рассказать админам одно и то же.
+   *
+   * Кнопка зовёт `acceptSwap` напрямую, минуя HTTP: правка, поставленная только
+   * в роут, оставила бы этот путь молчать про пул — а он самый вероятный, потому
+   * что он проще. Ровно из-за этого тексты обмена и живут в `notify.ts`.
+   */
+  it("admin broadcast on accept says when a duty went to somebody outside its pool", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Босс", inviteToken: "boss", isAdmin: true });
+    linkTelegramAccount(db, "boss", 111);
+
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "a" });
+    linkTelegramAccount(db, "a", 201);
+    const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "i" });
+    linkTelegramAccount(db, "i", 202);
+    const pokl = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "09:00", end: "18:00" })
+      .returning()
+      .all()[0]!;
+    // В пуле только Аня.
+    setTemplateRoles(db, pokl.id, { pool: [anya.id], preference: {} });
+    const duty = createShift(db, {
+      date: daysFromNow(2), start: "09:00", end: "18:00", category: "duty",
+      templateId: pokl.id, title: pokl.name, employeeId: anya.id,
+    });
+    const his = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.id });
+    const created = createSwap(db, { fromEmployeeId: anya.id, fromShiftId: duty.id, toShiftId: his.id }, teamNow(config.teamTz));
+    if (!created.ok) throw new Error("setup failed to create swap");
+
+    const { bot, sent } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(202, `swap:accept:${created.request.id}`));
+
+    const adminMsg = sent.find((s) => s.chat_id === 111);
+    expect(adminMsg?.text).toContain("Дежурство · Поклонка");
+    expect(adminMsg?.text).toContain("Игорь не в списке");
   });
 
   it("notifies the sibling counterparty when their pending swap is auto-cancelled by an accept", async () => {
