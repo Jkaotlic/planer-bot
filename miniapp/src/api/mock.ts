@@ -17,9 +17,12 @@ import type {
   TemplateQueue,
   JournalEvent,
   JournalPage,
-  BirthdayCampaign,
-  BirthdayPreview,
-  CampaignListRow,
+  Collection,
+  CollectionRow,
+  CollectionPreview,
+  NewCollectionInput,
+  CollectionPatch,
+  WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
   Shift,
@@ -35,7 +38,17 @@ import type {
   WeekendOffer,
 } from "./client";
 import { addDays, mondayOf, toISODate } from "../lib/week";
-import { rotationQueue, describeTurn, daysUntilBirthday, formatBirthDate } from "@planer/shared";
+import {
+  rotationQueue,
+  describeTurn,
+  daysUntilBirthday,
+  formatBirthDate,
+  collectionMessage,
+  collectionTitle,
+  collectionStatus,
+  isCollectionActive,
+  compareCollections,
+} from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
 /**
@@ -905,45 +918,187 @@ export async function mockGetJournal(params: { types?: string[]; actor?: number;
   };
 }
 
-// --- Дни рождения -----------------------------------------------------------
-// Mirrors the server's rules rather than just returning data: the dev screen is
-// where the flow gets clicked through, so it has to refuse the same things —
-// no link, already sent, a link that isn't http(s).
+// --- Сборы (ДР и кастомные) --------------------------------------------------
+// Мок считает предпросмотр, заголовок, статус и активность теми же функциями
+// из @planer/shared, что и сервер (`collectionMessage`, `collectionTitle`,
+// `collectionStatus`, `isCollectionActive`, `compareCollections`) — иначе
+// DEV-режим начнёт показывать не тот текст, который реально уйдёт в бою.
 
-const CAMPAIGNS: BirthdayCampaign[] = [];
+/** Сборы DEV-режима: живут в памяти вкладки, как и весь остальной мок. */
+const COLLECTIONS: Collection[] = [];
+let nextCollectionId = 1;
 
-function campaignFor(employeeId: number, create: boolean): BirthdayCampaign | null {
-  const employee = EMPLOYEES.find((e) => e.id === employeeId);
-  if (!employee?.birthDate) return null;
-  const today = toISODate(new Date());
-  const days = daysUntilBirthday(employee.birthDate, today);
-  if (days === null) return null;
-  const celebratedOn = toISODate(addDays(new Date(`${today}T00:00:00Z`), days));
-  const year = Number(celebratedOn.slice(0, 4));
-
-  const existing = CAMPAIGNS.find((c) => c.employeeId === employeeId && c.year === year);
-  if (existing || !create) return existing ?? null;
-  const created: BirthdayCampaign = {
-    id: CAMPAIGNS.length + 1, employeeId, year, celebratedOn,
-    collectUrl: null, messageText: null, status: "pending",
-    adminNotifiedAt: null, sentAt: null, sentCount: 0,
-    scheduledSendOn: null, scheduleNotifiedAt: null,
+function blankCollection(patch: Partial<Collection>): Collection {
+  return {
+    id: nextCollectionId++, kind: "custom", employeeId: null, year: null, celebratedOn: null,
+    title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
+    collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
+    scheduleNotifiedAt: null, sentAt: null, sentCount: 0, sendCount: 0,
+    createdAt: new Date().toISOString(), ...patch,
   };
-  CAMPAIGNS.push(created);
-  return created;
 }
 
-function mockRecipients(employeeId: number): { employeeId: number; displayName: string }[] {
+function findCollection(id: number): Collection | undefined {
+  return COLLECTIONS.find((c) => c.id === id);
+}
+
+/** Имя виновника, или null — для общего сбора или удалённого работника. */
+function personNameOf(employeeId: number | null): string | null {
+  if (employeeId == null) return null;
+  return EMPLOYEES.find((e) => e.id === employeeId)?.displayName ?? null;
+}
+
+function mockRecipients(employeeId: number | null): { employeeId: number; displayName: string }[] {
   return EMPLOYEES.filter((e) => e.isActive && e.id !== employeeId && e.telegramUserId != null)
     .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
 }
 
-// Phrased so the name stays in the nominative — same rule, and same wording, as
-// the server's `defaultMessage`: «день рождения у Игорь Петров» is what it avoids.
-function mockDefaultMessage(name: string, label: string, collectUrl: string | null): string {
-  const lines = [`🎂 ${name} празднует день рождения ${label}.`];
-  if (collectUrl) lines.push("", `Сбор на подарок: ${collectUrl}`);
-  return lines.join("\n");
+/** То, что реально уйдёт команде, и кому — теми же правилами, что у сервера. */
+function previewOf(collection: Collection): CollectionPreview {
+  const personName = personNameOf(collection.employeeId);
+  const recipients = mockRecipients(collection.employeeId);
+  const honouree = collection.employeeId != null ? EMPLOYEES.find((e) => e.id === collection.employeeId) : null;
+
+  const message = collection.messageText?.trim() || collectionMessage(
+    {
+      kind: collection.kind,
+      title: collection.title,
+      personName,
+      birthDateLabel: honouree?.birthDate ?? null,
+      eventDate: collection.eventDate,
+      deadline: collection.deadline,
+      amountPerPerson: collection.amountPerPerson,
+      totalGoal: collection.totalGoal,
+      collectUrl: collection.collectUrl,
+    },
+    collection.sendCount > 0 ? "reminder" : "first",
+  );
+
+  let blocker: string | null = null;
+  if (collection.closedAt) blocker = "Сбор закрыт — рассылать нечего.";
+  else if (collection.kind === "birthday" && collection.sendCount > 0) {
+    blocker = "Уже разослано — повторная отправка отключена.";
+  } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
+  else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
+
+  return {
+    id: collection.id,
+    kind: collection.kind,
+    title: collectionTitle(collection, personName),
+    personName,
+    employeeId: collection.employeeId,
+    collectUrl: collection.collectUrl,
+    message,
+    recipients,
+    blocker,
+    sendCount: collection.sendCount,
+    lastSentAt: collection.sentAt,
+  };
+}
+
+function rowOf(collection: Collection, today: string): CollectionRow {
+  const personName = personNameOf(collection.employeeId);
+  return {
+    collection,
+    personName,
+    title: collectionTitle(collection, personName),
+    status: collectionStatus(collection),
+    active: isCollectionActive(collection, today),
+  };
+}
+
+/** Применяет правку: та же логика заморозки повода/виновника после первой
+ *  рассылки и то же окно дат напоминания, что у сервера. */
+function applyPatch(collection: Collection, patch: CollectionPatch, today: string): void {
+  const subjectTouched =
+    (patch.title !== undefined && patch.title !== collection.title) ||
+    (patch.employeeId !== undefined && patch.employeeId !== collection.employeeId);
+  if (collection.sendCount > 0 && subjectTouched) {
+    throw new Error("Сбор уже разослан — повод и виновника менять нельзя.");
+  }
+
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) throw new Error("Повод не может быть пустым");
+    collection.title = title;
+  }
+  if (patch.employeeId !== undefined) {
+    if (patch.employeeId != null && !EMPLOYEES.some((e) => e.id === patch.employeeId)) {
+      throw new Error("Такого работника нет");
+    }
+    collection.employeeId = patch.employeeId;
+  }
+  if (patch.collectUrl !== undefined) {
+    const url = patch.collectUrl?.trim() || null;
+    if (url && !/^https?:\/\/\S+$/i.test(url)) throw new Error("Ссылка должна начинаться с http:// или https://");
+    collection.collectUrl = url;
+  }
+  if (patch.messageText !== undefined) collection.messageText = patch.messageText?.trim() || null;
+  if (patch.eventDate !== undefined) collection.eventDate = patch.eventDate ?? null;
+  if (patch.deadline !== undefined) collection.deadline = patch.deadline ?? null;
+  if (patch.amountPerPerson !== undefined) collection.amountPerPerson = patch.amountPerPerson ?? null;
+  if (patch.totalGoal !== undefined) collection.totalGoal = patch.totalGoal ?? null;
+  if (patch.scheduledSendOn !== undefined) {
+    const value = patch.scheduledSendOn ?? null;
+    if (value !== null) {
+      // Как на сервере: от сегодня и не позже края сбора — кроме повторной
+      // отправки уже сохранённой даты, это не правка, а нажатие «сохранить».
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Дата должна быть в виде ГГГГ-ММ-ДД");
+      if (value !== collection.scheduledSendOn && value < today) throw new Error("Дата напоминания уже прошла");
+      const edge = collection.celebratedOn ?? collection.deadline ?? collection.eventDate;
+      if (edge && value > edge) throw new Error("Напоминать после самого события уже поздно");
+    }
+    if (value !== collection.scheduledSendOn) collection.scheduleNotifiedAt = null;
+    collection.scheduledSendOn = value;
+  }
+}
+
+// --- Дни рождения -------------------------------------------------------------
+// Раунд ДР живёт в той же таблице COLLECTIONS, что и кастомные сборы — сервер
+// устроен так же (см. `server/src/birthdays/birthday-service.ts`).
+
+function birthdayOccurrence(employee: Employee, today: string): { celebratedOn: string; year: number } | null {
+  if (!employee.birthDate) return null;
+  const days = daysUntilBirthday(employee.birthDate, today);
+  if (days === null) return null;
+  const celebratedOn = toISODate(addDays(new Date(`${today}T00:00:00Z`), days));
+  return { celebratedOn, year: Number(celebratedOn.slice(0, 4)) };
+}
+
+function findBirthdayRound(employeeId: number, year: number): Collection | undefined {
+  return COLLECTIONS.find((c) => c.kind === "birthday" && c.employeeId === employeeId && c.year === year);
+}
+
+/** GET не пишет: если раунда ещё нет, отдаёт черновик с `id: 0`, ничего не заводя.
+ *  Строится напрямую, а не через `blankCollection` — иначе каждый непрочитанный
+ *  предпросмотр съедал бы одно значение из общего счётчика `nextCollectionId`. */
+function birthdayRoundDraft(employeeId: number, today: string): Collection | null {
+  const employee = EMPLOYEES.find((e) => e.id === employeeId);
+  if (!employee) return null;
+  const occurrence = birthdayOccurrence(employee, today);
+  if (!occurrence) return null;
+  const existing = findBirthdayRound(employeeId, occurrence.year);
+  if (existing) return existing;
+  return {
+    id: 0, kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn,
+    title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
+    collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
+    scheduleNotifiedAt: null, sentAt: null, sentCount: 0, sendCount: 0,
+    createdAt: new Date(0).toISOString(),
+  };
+}
+
+/** Находит раунд этого года — или заводит его первым сохранением. */
+function ensureBirthdayRound(employeeId: number, today: string): Collection | null {
+  const employee = EMPLOYEES.find((e) => e.id === employeeId);
+  if (!employee) return null;
+  const occurrence = birthdayOccurrence(employee, today);
+  if (!occurrence) return null;
+  const existing = findBirthdayRound(employeeId, occurrence.year);
+  if (existing) return existing;
+  const created = blankCollection({ kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn });
+  COLLECTIONS.push(created);
+  return created;
 }
 
 export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
@@ -951,97 +1106,144 @@ export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
   const today = toISODate(new Date());
   return EMPLOYEES.filter((e) => e.isActive && e.birthDate)
     .flatMap((employee) => {
+      const occurrence = birthdayOccurrence(employee, today);
       const daysUntil = daysUntilBirthday(employee.birthDate!, today);
-      if (daysUntil === null) return [];
+      if (!occurrence || daysUntil === null) return [];
       return [{
         employeeId: employee.id,
         displayName: employee.displayName,
         birthDate: employee.birthDate!,
         birthDateLabel: formatBirthDate(employee.birthDate!),
-        celebratedOn: toISODate(addDays(new Date(`${today}T00:00:00Z`), daysUntil)),
+        celebratedOn: occurrence.celebratedOn,
         daysUntil,
-        campaign: campaignFor(employee.id, false),
+        campaign: findBirthdayRound(employee.id, occurrence.year) ?? null,
       }];
     })
     .sort((a, b) => a.daysUntil - b.daysUntil || a.displayName.localeCompare(b.displayName, "ru"));
 }
 
-export async function mockSaveBirthdayCampaign(
-  employeeId: number,
-  patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null },
-): Promise<BirthdayCampaign> {
+export async function mockGetBirthdayPreview(employeeId: number): Promise<CollectionPreview> {
   await delay(180);
-  const campaign = campaignFor(employeeId, true);
-  if (!campaign) throw new Error("У этого работника не указан день рождения");
-  if (patch.collectUrl !== undefined) {
-    const url = patch.collectUrl?.trim() || null;
-    if (url && !/^https?:\/\/\S+$/i.test(url)) throw new Error("Ссылка должна начинаться с http:// или https://");
-    campaign.collectUrl = url;
-  }
-  if (patch.messageText !== undefined) campaign.messageText = patch.messageText?.trim() || null;
-  if (patch.scheduledSendOn !== undefined) {
-    const value = patch.scheduledSendOn;
-    if (value !== null) {
-      // Mirrors the server: within [today, celebratedOn], except resubmitting
-      // the round's own already-stored date — that's not an edit, so it isn't
-      // held to the "not in the past" rule once today has moved past it.
-      const today = toISODate(new Date());
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Дата напоминания должна быть в виде ГГГГ-ММ-ДД");
-      if (value !== campaign.scheduledSendOn && value < today) throw new Error("Дата напоминания уже прошла");
-      if (value > campaign.celebratedOn) throw new Error("Напоминать после самого дня рождения уже поздно");
-    }
-    if (value !== campaign.scheduledSendOn) campaign.scheduleNotifiedAt = null;
-    campaign.scheduledSendOn = value;
-  }
-  if (campaign.status !== "sent") campaign.status = campaign.collectUrl ? "ready" : "pending";
-  return { ...campaign };
+  const today = toISODate(new Date());
+  const draft = birthdayRoundDraft(employeeId, today);
+  if (!draft) throw new Error("У этого работника не указан день рождения");
+  return previewOf(draft);
 }
 
-export async function mockGetBirthdayCampaigns(): Promise<CampaignListRow[]> {
+export async function mockSaveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection> {
+  await delay(180);
+  // У раунда ДР нет повода на правку — он назван по имени именинника.
+  if (patch.title !== undefined || patch.employeeId !== undefined) {
+    throw new Error("У сбора на день рождения повод и виновник заданы датой рождения.");
+  }
+  const today = toISODate(new Date());
+  const round = ensureBirthdayRound(employeeId, today);
+  if (!round) throw new Error("У этого работника не указан день рождения");
+  applyPatch(round, patch, today);
+  return { ...round };
+}
+
+// --- Сборы: общий список и CRUD ----------------------------------------------
+
+export async function mockGetCollections(): Promise<CollectionRow[]> {
   await delay(200);
-  return [...CAMPAIGNS]
-    .sort((a, b) => b.celebratedOn.localeCompare(a.celebratedOn))
-    .flatMap((campaign) => {
-      const employee = EMPLOYEES.find((e) => e.id === campaign.employeeId);
-      if (!employee?.birthDate) return [];
-      return [{ campaign: { ...campaign }, displayName: employee.displayName, birthDateLabel: formatBirthDate(employee.birthDate) }];
-    });
+  const today = toISODate(new Date());
+  return [...COLLECTIONS]
+    .map((c) => rowOf(c, today))
+    .sort((a, b) => compareCollections(a.collection, b.collection, today));
 }
 
-export async function mockGetBirthdayPreview(employeeId: number): Promise<BirthdayPreview> {
+export async function mockCreateCollection(input: NewCollectionInput): Promise<Collection> {
   await delay(180);
-  const employee = EMPLOYEES.find((e) => e.id === employeeId);
-  const campaign = campaignFor(employeeId, true);
-  if (!employee?.birthDate || !campaign) throw new Error("У этого работника не указан день рождения");
-
-  const recipients = mockRecipients(employeeId);
-  const label = formatBirthDate(employee.birthDate);
-  let blocker: string | null = null;
-  if (campaign.status === "sent") blocker = "Уже разослано — повторная отправка отключена.";
-  else if (!campaign.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
-  else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
-
-  return {
-    employeeId,
-    displayName: employee.displayName,
-    celebratedOn: campaign.celebratedOn,
-    collectUrl: campaign.collectUrl,
-    message: campaign.messageText?.trim() || mockDefaultMessage(employee.displayName, label, campaign.collectUrl),
-    recipients,
-    blocker,
-    alreadySentAt: campaign.sentAt,
-  };
+  const title = input.title?.trim();
+  if (!title) throw new Error("Повод обязателен");
+  if (input.employeeId != null && !EMPLOYEES.some((e) => e.id === input.employeeId)) {
+    throw new Error("Такого работника нет");
+  }
+  if (input.collectUrl) {
+    const url = input.collectUrl.trim();
+    if (url && !/^https?:\/\/\S+$/i.test(url)) throw new Error("Ссылка должна начинаться с http:// или https://");
+  }
+  const created = blankCollection({
+    kind: "custom",
+    title,
+    employeeId: input.employeeId ?? null,
+    eventDate: input.eventDate ?? null,
+    deadline: input.deadline ?? null,
+    amountPerPerson: input.amountPerPerson ?? null,
+    totalGoal: input.totalGoal ?? null,
+    collectUrl: input.collectUrl ?? null,
+    messageText: input.messageText ?? null,
+    scheduledSendOn: input.scheduledSendOn ?? null,
+  });
+  COLLECTIONS.push(created);
+  return { ...created };
 }
 
-export async function mockSendBirthday(employeeId: number): Promise<{ delivered: number; intended: number }> {
+export async function mockGetCollectionPreview(id: number): Promise<CollectionPreview> {
+  await delay(180);
+  const collection = findCollection(id);
+  if (!collection) throw new Error("not_found");
+  return previewOf(collection);
+}
+
+export async function mockSaveCollection(id: number, patch: CollectionPatch): Promise<Collection> {
+  await delay(180);
+  const collection = findCollection(id);
+  if (!collection) throw new Error("not_found");
+  applyPatch(collection, patch, toISODate(new Date()));
+  return { ...collection };
+}
+
+export async function mockSendCollection(id: number): Promise<{ delivered: number; intended: number; round: number }> {
   await delay(400);
-  const preview = await mockGetBirthdayPreview(employeeId);
+  const collection = findCollection(id);
+  if (!collection) throw new Error("not_found");
+  const preview = previewOf(collection);
   if (preview.blocker) throw new Error(preview.blocker);
-  const campaign = campaignFor(employeeId, true)!;
-  campaign.status = "sent";
-  campaign.sentAt = new Date().toISOString();
-  campaign.sentCount = preview.recipients.length;
-  return { delivered: preview.recipients.length, intended: preview.recipients.length };
+  const delivered = preview.recipients.length;
+  collection.sentAt = new Date().toISOString();
+  collection.sentCount = delivered;
+  collection.sendCount += 1;
+  return { delivered, intended: preview.recipients.length, round: collection.sendCount };
+}
+
+export async function mockSetCollectionClosed(id: number, closed: boolean): Promise<Collection> {
+  await delay(150);
+  const collection = findCollection(id);
+  if (!collection) throw new Error("not_found");
+  collection.closedAt = closed ? new Date().toISOString() : null;
+  return { ...collection };
+}
+
+export async function mockDeleteCollection(id: number): Promise<void> {
+  await delay(150);
+  const collection = findCollection(id);
+  if (!collection) throw new Error("not_found");
+  if (collection.kind === "birthday") throw new Error("Сбор на день рождения не удаляется.");
+  if (collection.sendCount > 0) throw new Error("Сбор уже разослан — удалить нельзя.");
+  COLLECTIONS.splice(COLLECTIONS.indexOf(collection), 1);
+}
+
+/** Что видит работник во вкладке «Команда»: чужие сборы, которые уже разосланы и ещё идут. */
+export async function mockGetMyCollections(): Promise<WorkerCollection[]> {
+  await delay(200);
+  const today = toISODate(new Date());
+  return COLLECTIONS
+    .filter((c) => c.employeeId !== MOCK_ME.id && c.sendCount > 0 && isCollectionActive(c, today))
+    .map((c) => {
+      const personName = personNameOf(c.employeeId);
+      return {
+        id: c.id,
+        title: collectionTitle(c, personName),
+        personName,
+        collectUrl: c.collectUrl,
+        amountPerPerson: c.amountPerPerson,
+        totalGoal: c.totalGoal,
+        deadline: c.deadline,
+        eventDate: c.eventDate,
+      };
+    });
 }
 
 export async function mockGetShiftCounts(from: string, to: string): Promise<ShiftCountsReport> {
