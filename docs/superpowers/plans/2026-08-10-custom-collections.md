@@ -3045,6 +3045,7 @@ git commit -m "feat(api-клиенты): сборы в обеих мордах �
 - Consumes: клиент из Задачи 11; `collectionStatus`, `formatMoney`, `formatDayMonth` из `@planer/shared`.
 - Produces: экспортируемые из `AdminCollections.tsx` чистые хелперы, на которых стоят тесты:
   - `statusOf(row: CollectionRow): { label: string; tone: StatusTone }`
+  - `roundStatus(campaign: Collection | null, today: string): { label: string; tone: StatusTone }` — тот же чип для списка ближайших ДР, где строки списка сборов нет: там лежит сама запись (или `null`, пока раунд не сохранён ни разу). Считает статус и активность через `collectionStatus`/`isCollectionActive` из `@planer/shared` и делегирует в `statusOf`, чтобы два списка на одном экране не разошлись в словах про один и тот же раунд.
   - `sendButtonLabel(preview: CollectionPreview): string`
   - `moneyLine(c: { amountPerPerson: number | null; totalGoal: number | null }): string | null`
   - `canCreate(title: string): boolean`
@@ -3090,12 +3091,20 @@ describe("sendButtonLabel", () => {
 
 describe("statusOf", () => {
   it("закрытый сбор читается закрытым, а не «готово»", () => {
-    const base = { collection: { collectUrl: "https://x", sendCount: 1, closedAt: null }, active: true };
-    expect(statusOf({ ...base, status: "sent" } as never).label).toBe("Разослано · 1");
+    // sentCount (до скольких дошло) и sendCount (сколько было рассылок) — РАЗНЫЕ
+    // числа, и в фикстуре они разные намеренно: чип показывает первое, как и
+    // сегодня на «Днях рождения». Совпадающие значения пропустили бы подмену
+    // одного другим, а `as never` не поймает её и на tsc.
+    const base = { collection: { collectUrl: "https://x", sentCount: 5, sendCount: 2, closedAt: null }, active: true };
+    expect(statusOf({ ...base, status: "sent" } as never).label).toBe("Разослано · 5");
     expect(statusOf({ ...base, status: "sent", active: false } as never).label).toBe("Закрыт");
   });
 });
 ```
+
+Фикстуры лучше строить типизированными фабриками (`collection(patch)`, `row(patch)`,
+`preview(patch)`), а не `as never`: у `never` нет свойств, и тест, который потом читает
+поле фикстуры, разваливается на `tsc --strict` — этот класс уже ловили на Задаче 2.
 
 - [ ] **Step 2: Прогнать и убедиться, что падает**
 
@@ -3139,12 +3148,24 @@ export function sendButtonLabel(preview: CollectionPreview): string {
   return `Напомнить ещё раз${when}`;
 }
 
-/** Где раунд, в одном слове. Закрытый читается закрытым, а не «готово». */
-export function statusOf(row: CollectionRow): { label: string; tone: StatusTone } {
+/** Где раунд, в одном слове. Закрытый читается закрытым, а не «готово».
+ *  Принимает `Pick<CollectionRow, …>`, а не всю строку: тогда `roundStatus`
+ *  ниже собирает вход сам, без каста. */
+export function statusOf(row: Pick<CollectionRow, "collection" | "status" | "active">): { label: string; tone: StatusTone } {
   if (!row.active) return { label: "Закрыт", tone: "pending" };
   if (row.status === "sent") return { label: `Разослано · ${row.collection.sentCount}`, tone: "sent" };
   if (row.status === "ready") return { label: "Готово", tone: "ready" };
   return { label: "Нет ссылки", tone: "pending" };
+}
+
+/** Тот же чип для раунда ДР: у списка ближайших нет строки, посчитанной сервером. */
+export function roundStatus(campaign: Collection | null, today: string): { label: string; tone: StatusTone } {
+  if (!campaign) return { label: "Нет ссылки", tone: "pending" };
+  return statusOf({
+    collection: campaign,
+    status: collectionStatus(campaign),
+    active: isCollectionActive(campaign, today),
+  });
 }
 ```
 
@@ -3155,6 +3176,7 @@ export function statusOf(row: CollectionRow): { label: string; tone: StatusTone 
 1. `Section header="Ближайшие дни рождения"` — существующие карточки, без изменений по смыслу; редактор карточки зовёт `saveBirthdayRound` и `getBirthdayPreview`, а отправку — общим `sendCollection(preview.id)`. Кнопка отправки погашена, пока `preview.id === 0`: раунд ещё не сохранён.
 2. `Section header="Новый сбор"` — сворачиваемая форма:
    - `Input header="Повод"` (обязателен), `Select` «Кому» со значениями «Общий сбор» + активные работники, `input type="date"` × 2 («Дата события», «Скинуться до»), `Input type="number" inputMode="numeric"` × 2 («По сколько с человека», «Нужно всего»), `Input header="Ссылка на сбор" type="url"`, `Textarea header="Свой текст"`;
+   - **из «Кому» вычитается сам смотрящий.** Сбор, где ты виновник, сервер тебе не отдаёт — созданный на себя пропал бы с экрана в тот же миг, и его нельзя было бы ни разослать, ни удалить, ни закрыть. Смотрящий берётся из `getMe()`, работники — из `getAdminEmployees()`, оба грузятся рядом со списками;
    - кнопка «Создать» — `disabled={!canCreate(title) || busy}`;
    - после успеха форма схлопывается, оба списка перечитываются (`reloadEverything`, он в файле уже есть).
 3. `Section header="Сборы"` — `rows.map` по `getCollections()`. Каждая карточка: заголовок (`row.title`), вторая строка `moneyLine` + дедлайн, статус справа, `CopyableLink` (компонент в файле уже есть), кнопка «Открыть» → разворачивает редактор по `row.collection.id`.
