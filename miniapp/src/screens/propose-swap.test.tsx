@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import type { Shift } from "../api/client";
+import type { Shift, Template } from "../api/client";
 import { ProposeSwapScreen, type ProposeSwapScreenProps } from "./ProposeSwapScreen";
 
 /**
@@ -84,6 +84,7 @@ async function mount(props: Partial<ProposeSwapScreenProps> = {}) {
         createElement(ProposeSwapScreen, {
           fromShift: MINE,
           candidates: CANDIDATES,
+          templates: [],
           sameKindCount: 0,
           loading: false,
           loadError: null,
@@ -158,5 +159,33 @@ describe("экран обмена", () => {
   it("пока грузится — не врёт, что меняться не с кем", async () => {
     const el = await mount({ candidates: [], sameKindCount: 0, loading: true });
     expect(el.textContent).not.toContain("меняться не с кем");
+  });
+});
+
+/**
+ * Экран обязан называть вид записи: с 2026-08-10 отдать можно и дежурство, и
+ * «10:00–19:00» без названия не говорит, Поклонка это или Вавилова.
+ *
+ * Ключевой кейс — запись БЕЗ своей подписи: подпись из `title` экран показывал
+ * и раньше, а имя пресета — нет, и на дежурстве из консоли это разница между
+ * «Дежурство · Вавилова 19» и молчанием.
+ */
+const V19: Template = {
+  id: 8, sortOrder: 3, name: "Дежурство · Вавилова 19", start: "10:00", end: "19:00",
+  fridayStart: "10:00", fridayEnd: "19:00", isLate: false, sendReminder: false,
+  category: "duty", location: "Вавилова 19", accent: "teal",
+};
+
+describe("экран предложения называет вид записи", () => {
+  it("и у отдаваемой, и у чужой", async () => {
+    const el = await mount({
+      fromShift: shift({ id: 1, employeeId: 1, employeeName: undefined, category: "duty", title: "Дежурство · Поклонка", templateId: 7 }),
+      candidates: [
+        shift({ id: 2, employeeId: 2, employeeName: "Игорь", category: "duty", title: null, templateId: V19.id, start: "10:00", end: "19:00" }),
+      ],
+      templates: [V19],
+    });
+    expect(el.textContent).toContain("Дежурство · Поклонка");
+    expect(el.textContent).toContain("Дежурство · Вавилова 19");
   });
 });

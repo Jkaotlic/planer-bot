@@ -1,16 +1,22 @@
 import type { ReactNode } from "react";
 import { Button } from "@telegram-apps/telegram-ui";
 import type { SwapRequest, SwapShiftSummary, SwapStatus } from "../api/client";
+import { categoryLabel } from "../categories";
 import { formatDayLabel } from "../lib/week";
 import { formatTimeRange } from "../lib/shift";
 import { useIsDark } from "../lib/theme";
 
 /** "Пн, 14 июля · 09:00–18:00 · День" — the preset name matters: without it a
- * Friday «Утро» (08:00–15:45) reads like a mis-timed «День». */
+ * Friday «Утро» (08:00–15:45) reads like a mis-timed «День».
+ *
+ * Своей подписи у записи может не быть, и тогда называем категорию: с
+ * 2026-08-10 в обмене бывает дежурство, а именно по этой карточке человек
+ * решает, что берёт. Безымянная строка молчала бы ровно там, где решение и
+ * принимается. */
 function formatSwapShift(shift: SwapShiftSummary | null): string {
   if (!shift || !shift.date) return "—";
-  const name = shift.title ? ` · ${shift.title}` : "";
-  return `${formatDayLabel(shift.date)} · ${formatTimeRange(shift)}${name}`;
+  const name = shift.title ?? categoryLabel(shift.category);
+  return `${formatDayLabel(shift.date)} · ${formatTimeRange(shift)} · ${name}`;
 }
 
 const STATUS_LABELS: Record<SwapStatus, string> = {
@@ -70,10 +76,34 @@ export function SwapStatusPill({ status }: SwapStatusPillProps) {
 
 function SwapDirectionLine({ label, shift }: { label: string; shift: SwapShiftSummary | null }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 14.5 }}>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 14.5, flexWrap: "wrap" }}>
       <span style={{ color: "var(--tgui--hint_color)", flex: "none" }}>{label}</span>
       <span style={{ fontWeight: 500 }}>{formatSwapShift(shift)}</span>
+      {shift?.category === "duty" && <DutyPill />}
     </div>
+  );
+}
+
+/** Дежурство — не «смена в другое время»: человек садится на телефон или едет на
+ *  точку. Отдельной пилюлей, а не только названием в строке: название легко
+ *  проскользить взглядом, когда рядом кнопка «Принять». Словом, не цветом —
+ *  то же правило, что на «Сегодня» в `ShiftRow`. */
+function DutyPill() {
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: 0.2,
+        borderRadius: 999,
+        padding: "2px 8px",
+        whiteSpace: "nowrap",
+        color: "var(--tgui--button_text_color)",
+        background: "var(--tgui--link_color)",
+      }}
+    >
+      Дежурство
+    </span>
   );
 }
 
