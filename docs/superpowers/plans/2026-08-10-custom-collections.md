@@ -1918,8 +1918,11 @@ git commit -m "feat(server): виновник не видит свой сбор 
 
 **Files:**
 - Modify: `server/src/birthdays/birthday-service.ts` (добавить `birthdayRoundDraft`)
+- **Create: `server/src/http/collection-body.ts` и `collection-body.test.ts` — ЦЕЛИКОМ, вместе с `parseCollectionBody`**
 - Modify: `server/src/http/app.ts:664-798` (весь блок «Дни рождения»)
 - Modify: `server/src/http/birthdays-route.test.ts`
+
+**Порядок, который я сначала перепутал:** `collection-body.ts` описан ниже, в Задаче 9, но роут `PUT /api/admin/birthdays/:id` из ЭТОЙ задачи уже зовёт `parseCollectionBody` — без него он не соберётся. Поэтому файл и его тест создаются здесь целиком (код и тесты — в Шагах 1 и 3 Задачи 9, читать их оттуда), а Задача 9 его только использует.
 
 **Interfaces:**
 - Consumes: `ensureBirthdayRound`, `upcomingBirthdays` (Задачи 5, 7); `previewCollection`, `updateCollection` (Задача 4).
@@ -2181,8 +2184,7 @@ git commit -m "feat(api): предпросмотр ДР ничего не соз
 ### Task 9: Роуты сборов
 
 **Files:**
-- Create: `server/src/http/collection-body.ts`
-- Create: `server/src/http/collection-body.test.ts`
+- `server/src/http/collection-body.ts` и `collection-body.test.ts` — **уже созданы Задачей 8** (её роут `PUT /api/admin/birthdays/:id` зависит от `parseCollectionBody`). Шаги 1–3 ниже держат их код; если файлы на месте и тесты зелёные — сверить и идти дальше, заново не писать.
 - Create: `server/src/http/collections-route.test.ts`
 - Modify: `server/src/http/app.ts` (новый блок роутов после блока дней рождения)
 
