@@ -7,6 +7,7 @@ import {
   mockSendCollection,
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
+  mockSetEmployeeAdmin,
 } from "./mock";
 
 describe("admin schedule mock", () => {
@@ -64,5 +65,23 @@ describe("мок сборов", () => {
     expect(rows.some((r) => r.collection.id === visible.id)).toBe(true);
 
     await expect(mockGetCollectionPreview(hidden.id)).rejects.toThrow("not_found");
+  });
+
+  it("без активного админа в фикстуре общий сбор всё равно виден", async () => {
+    // Общий сбор хранит employeeId: null — то же самое значение, которым
+    // viewerEmployeeId() метил «нет активного админа» до фикса. Если бы
+    // сравнение снова свелось к null === null, этот сбор исчез бы из списка
+    // и 404-ил бы по id, хотя виновника у него нет вообще.
+    // id 1 — «Аня Смирнова», единственный isAdmin в фикстуре.
+    await mockSetEmployeeAdmin(1, false);
+    try {
+      const visible = await mockCreateCollection({ title: "Без виновника" });
+      const rows = await mockGetCollections();
+      expect(rows.some((r) => r.collection.id === visible.id)).toBe(true);
+      const preview = await mockGetCollectionPreview(visible.id);
+      expect(preview.id).toBe(visible.id);
+    } finally {
+      await mockSetEmployeeAdmin(1, true);
+    }
   });
 });

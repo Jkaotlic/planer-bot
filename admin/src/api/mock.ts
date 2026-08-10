@@ -557,12 +557,15 @@ function findCollection(id: number): Collection | undefined {
 }
 
 /**
- * Кто смотрит DEV-консоль. У неё нет своего логина — тот же приём, что уже
+ * Кто «смотрит» в DEV-консоли. У неё нет своего логина — тот же приём, что уже
  * применяется у `setSwapsLock` в этом файле: «я» — первый активный админ
- * ростера.
+ * ростера. Возвращает id, которого нет ни у кого, если такого не нашлось:
+ * `null` тут нельзя — им помечен общий сбор, у которого виновника нет, и
+ * сравнение с ним спрятало бы все общие сборы разом, стоит демоутнуть или
+ * деактивировать последнего админа через `mockSetEmployeeAdmin`/архив.
  */
-function viewerEmployeeId(): number | null {
-  return EMPLOYEES.find((e) => e.isAdmin && e.isActive)?.id ?? null;
+function viewerEmployeeId(): number {
+  return EMPLOYEES.find((e) => e.isAdmin && e.isActive)?.id ?? -1;
 }
 
 /**
