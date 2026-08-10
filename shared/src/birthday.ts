@@ -11,7 +11,7 @@
 /** "MM-DD", 01-01 .. 12-31. */
 export type BirthDate = string;
 
-const MONTH_LENGTHS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+export const MONTH_LENGTHS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 export const MONTH_NAMES = [
   "января", "февраля", "марта", "апреля", "мая", "июня",

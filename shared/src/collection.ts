@@ -1,4 +1,4 @@
-import { MONTH_NAMES } from "./birthday";
+import { MONTH_NAMES, MONTH_LENGTHS } from "./birthday";
 
 /**
  * Сбор денег: на день рождения или заведённый админом руками.
@@ -88,6 +88,9 @@ export function formatDayMonth(iso: string): string {
   if (!match) return iso;
   const month = Number(match[2]);
   const day = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return iso;
+  // Границу дня спрашиваем у месяца, а не у числа 31: «30 февраля» — это не дата,
+  // и подписывать ею сбор нельзя. Таблица та же, что у `parseBirthDate`.
+  if (month < 1 || month > 12) return iso;
+  if (day < 1 || day > MONTH_LENGTHS[month - 1]!) return iso;
   return `${day} ${MONTH_NAMES[month - 1]}`;
 }
