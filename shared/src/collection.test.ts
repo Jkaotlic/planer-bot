@@ -171,6 +171,19 @@ describe("collectionMessage", () => {
     expect(text).toContain("Скидываемся по 1 000 ₽");
     expect(text).not.toContain("нужно");
     expect(text).not.toContain("Скиньтесь до");
+    // Форма письма закрепляется целиком: `toContain` не видит ни лишней пустой
+    // строки, ни пропавшей, а именно на этом спека разошлась с кодом.
+    expect(text).toBe(
+      [
+        "💰 Кофемашина в офис",
+        "",
+        "Скидываемся по 1 000 ₽",
+        "",
+        "Сбор: https://example.test/c/1",
+        "",
+        "Ссылка всегда есть в мини-приложении, вкладка «Команда».",
+      ].join("\n"),
+    );
   });
 
   it("дожим отличается только первой строкой", () => {
@@ -216,6 +229,19 @@ describe("collectionMessage", () => {
     );
     expect(text).toBe("🎂 Пётр Иванов празднует день рождения 5 августа.");
   });
+
+  it("день рождения без даты в карточке — без двойного пробела и пробела перед точкой", () => {
+    // Тип допускает null, и конструктор может собрать такой вход и с живыми
+    // данными — например, пока карточка работника ещё не заполнена целиком.
+    const text = collectionMessage(
+      {
+        kind: "birthday", title: null, personName: "Пётр Иванов", birthDateLabel: null,
+        eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null, collectUrl: null,
+      },
+      "first",
+    );
+    expect(text).toBe("🎂 Пётр Иванов празднует день рождения.");
+  });
 });
 
 describe("compareCollections", () => {
@@ -242,9 +268,11 @@ describe("compareCollections", () => {
       .toEqual(["Близкий", "Далёкий", "Бездатный"]);
   });
 
-  it("внутри закрытых — новые сверху", () => {
-    const older = row("Старый", { closedAt: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z" });
-    const newer = row("Новый", { closedAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z" });
+  it("внутри закрытых — новые сверху, по времени создания", () => {
+    // `closedAt` и `createdAt` намеренно разведены: сортировка идёт по времени
+    // СОЗДАНИЯ, и фикстура, где оба поля меняются вместе, этого не доказывает.
+    const older = row("Старый", { closedAt: "2026-08-09T00:00:00Z", createdAt: "2026-01-01T00:00:00Z" });
+    const newer = row("Новый", { closedAt: "2026-01-02T00:00:00Z", createdAt: "2026-08-01T00:00:00Z" });
     expect([older, newer].sort((a, b) => compareCollections(a, b, today)).map((c) => c.title))
       .toEqual(["Новый", "Старый"]);
   });
