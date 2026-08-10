@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
 import type { Db } from "../db/client";
+import { collections } from "../db/schema";
 import {
+  adminRecipients,
   createCustomCollection,
   deleteCollection,
   getCollection,
@@ -30,6 +32,18 @@ function blank(patch: Partial<Parameters<typeof createCustomCollection>[1]> = {}
   };
 }
 
+/** A birthday round, which `createCustomCollection` cannot produce by design. */
+function birthdayRound(db: Db, employeeId: number, patch: Record<string, unknown> = {}) {
+  return db
+    .insert(collections)
+    .values({
+      kind: "birthday", employeeId, year: 2026, celebratedOn: "2026-08-15",
+      collectUrl: "https://example.test/b/1", ...patch,
+    })
+    .returning()
+    .all()[0]!;
+}
+
 describe("recipientsOf", () => {
   it("«everyone but the honouree, and only those the bot can reach»", () => {
     const db = makeTestDb();
@@ -40,6 +54,21 @@ describe("recipientsOf", () => {
     expect(recipientsOf(db, honouree).map((e) => e.id)).toEqual([reachable]);
     // Without an honouree everybody reachable is in — a general collection.
     expect(recipientsOf(db, null).map((e) => e.id).sort()).toEqual([honouree, reachable].sort());
+  });
+});
+
+describe("adminRecipients", () => {
+  it("reachable admins, minus the honouree — even when the honouree is an admin", () => {
+    const db = makeTestDb();
+    const honouree = person(db, "HonoureeAdmin", 1);
+    const other = person(db, "OtherAdmin", 2);
+    person(db, "PlainWorker", 3);
+    setEmployeeAdmin(db, honouree, true);
+    setEmployeeAdmin(db, other, true);
+
+    // Three people, two of them admins: the plain worker proves admin-ness is
+    // filtered, and the honouree-admin proves the surprise rule outranks it.
+    expect(adminRecipients(db, honouree).map((e) => e.id)).toEqual([other]);
   });
 });
 
@@ -100,15 +129,27 @@ describe("previewCollection", () => {
 
   it("a custom collection can be sent again — a birthday one cannot", () => {
     const db = makeTestDb();
+    const honouree = person(db, "Honouree", 1);
     person(db, "Colleague", 2);
+
     const custom = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
     markCollectionSent(db, custom.id, 1, new Date("2026-08-12T09:00:00Z"));
-
     const again = previewCollection(db, getCollectionOrThrow(db, custom.id));
     expect(again.blocker).toBeNull();
     expect(again.sendCount).toBe(1);
     // The second round is worded as a reminder, not as the first announcement.
     expect(again.message.split("\n")[0]).toContain("Напоминаю про сбор");
+
+    // The same state on a birthday round is settled forever: a doubled greeting
+    // is worse than one nobody re-sent.
+    const birthday = birthdayRound(db, honouree);
+    markCollectionSent(db, birthday.id, 1, new Date("2026-08-12T09:00:00Z"));
+    expect(previewCollection(db, getCollectionOrThrow(db, birthday.id)).blocker)
+      .toContain("Уже разослано");
+    // Before it went out it was sendable — otherwise this assertion would hold
+    // against a birthday round that is blocked for some entirely other reason.
+    const fresh = birthdayRound(db, person(db, "Second", 3));
+    expect(previewCollection(db, fresh).blocker).toBeNull();
   });
 
   it("a closed collection is blocked whatever else is true", () => {
@@ -117,6 +158,19 @@ describe("previewCollection", () => {
     const collection = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
     setCollectionClosed(db, collection.id, true, new Date("2026-08-11T00:00:00Z"));
     expect(previewCollection(db, getCollectionOrThrow(db, collection.id)).blocker).toContain("закрыт");
+  });
+
+  it("closing is reversible", () => {
+    const db = makeTestDb();
+    person(db, "Colleague", 2);
+    const collection = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
+
+    setCollectionClosed(db, collection.id, true, new Date("2026-08-11T00:00:00Z"));
+    expect(previewCollection(db, getCollectionOrThrow(db, collection.id)).blocker).toContain("закрыт");
+
+    setCollectionClosed(db, collection.id, false, new Date("2026-08-12T00:00:00Z"));
+    expect(getCollectionOrThrow(db, collection.id).closedAt).toBeNull();
+    expect(previewCollection(db, getCollectionOrThrow(db, collection.id)).blocker).toBeNull();
   });
 });
 
@@ -134,6 +188,25 @@ describe("updateCollection", () => {
     const subject = updateCollection(db, collection.id, { title: "Проводы" });
     expect(subject).toEqual({ ok: false, error: expect.stringContaining("уже разослан") });
   });
+
+  it("resending an unchanged subject after a send is not an edit", () => {
+    const db = makeTestDb();
+    const honouree = person(db, "Honouree", 1);
+    person(db, "Colleague", 2);
+    const collection = createCustomCollection(db, blank({
+      title: "Свадьба", employeeId: honouree, collectUrl: "https://example.test/c/1",
+    }));
+    markCollectionSent(db, collection.id, 1, new Date("2026-08-12T09:00:00Z"));
+
+    // Both consoles resubmit every field on every save. Sending back the value
+    // that is already stored must not read as an attempt to change it.
+    const resend = updateCollection(db, collection.id, {
+      title: "Свадьба", employeeId: honouree, collectUrl: "https://example.test/c/2",
+    });
+    expect(resend.ok).toBe(true);
+    // …while an actual change to the same field still is refused.
+    expect(updateCollection(db, collection.id, { title: "Проводы" }).ok).toBe(false);
+  });
 });
 
 describe("deleteCollection", () => {
@@ -147,6 +220,16 @@ describe("deleteCollection", () => {
     expect(deleteCollection(db, fresh.id)).toEqual({ ok: true });
     expect(deleteCollection(db, sent.id).ok).toBe(false);
     expect(listCollections(db, TODAY, 999).map((r) => r.title)).toEqual(["Ушедший"]);
+  });
+
+  it("never deletes a birthday round — it would just be recreated", () => {
+    const db = makeTestDb();
+    const honouree = person(db, "Honouree", 1);
+    const birthday = birthdayRound(db, honouree, { collectUrl: null });
+    // Untouched by any send, so the refusal can only come from its kind.
+    expect(birthday.sendCount).toBe(0);
+    expect(deleteCollection(db, birthday.id).ok).toBe(false);
+    expect(getCollection(db, birthday.id)).not.toBeNull();
   });
 });
 

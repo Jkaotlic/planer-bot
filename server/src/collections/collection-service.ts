@@ -171,7 +171,10 @@ export function setCollectionClosed(db: Db, id: number, closed: boolean, when: D
  * Deletes a collection nobody has heard of yet.
  *
  * Once it has been sent there is nothing to delete: people already got the
- * message, and the journal row about it must keep making sense.
+ * message, and the journal row about it must keep making sense. A birthday
+ * round is refused outright, sent or not — it is derived from the roster's
+ * birth dates, not admin-authored, so deleting it would just have the next
+ * pass recreate the same row.
  */
 export function deleteCollection(db: Db, id: number): { ok: true } | { ok: false; error: string } {
   const current = getCollection(db, id);
