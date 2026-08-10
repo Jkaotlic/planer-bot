@@ -131,8 +131,10 @@ export function collectionMessage(input: CollectionMessageInput, mode: "first" |
   // его не трогает вообще, включая отсутствие хвоста про мини-приложение и
   // отсутствие сумм: в сборе на подарок их никогда и не было.
   if (input.kind === "birthday") {
-    const label = input.birthDateLabel ? formatBirthDate(input.birthDateLabel) : "";
-    const lines = [`🎂 ${input.personName ?? "Именинник"} празднует день рождения ${label}.`];
+    // Без метки даты — пустой лейбл, а не пробел перед точкой: конструктор
+    // способен собрать такой вход и не только на бумаге, поле в типе — null.
+    const label = input.birthDateLabel ? formatBirthDate(input.birthDateLabel) : null;
+    const lines = [`🎂 ${input.personName ?? "Именинник"} празднует день рождения${label ? ` ${label}` : ""}.`];
     if (input.collectUrl) lines.push("", `Сбор на подарок: ${input.collectUrl}`);
     return lines.join("\n");
   }

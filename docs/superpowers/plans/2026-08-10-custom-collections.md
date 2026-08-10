@@ -27,6 +27,8 @@
 - **Сбор, где ты виновник, не показывается тебе нигде** — ни в списках, ни в предпросмотре, ни в журнале.
 - **Кнопки гасятся на время запроса** (`disabled={busy}`), подтверждающая на время запроса пишет «Отправляю…». Подпись основной кнопки при этом не меняется.
 - **Даты — строки `YYYY-MM-DD`**, сравниваются лексикографически. Никаких `Date` в правилах.
+- **`as never` в фикстурах — только там, где значение никуда не читается.** У `never` нет ни одного свойства, поэтому `.map((c) => c.title)` после такого каста разваливается на `tsc --strict`, а его гоняет CI (`npm run typecheck`). Если фикстуру потом читают — кастовать в её настоящий тип. Поймано на Задаче 2.
+- **Полную форму сообщения закреплять целиком (`toBe`), а не по кускам (`toContain`).** `toContain` не видит ни лишней пустой строки, ни пропавшей — ровно на этом спека однажды разошлась с кодом. Поймано на Задаче 2.
 
 ## Структура файлов
 
@@ -456,8 +458,10 @@ describe("compareCollections", () => {
     kind: "custom" as const, employeeId: null, celebratedOn: null, eventDate: null,
     amountPerPerson: null, totalGoal: null, collectUrl: null, closedAt: null, sendCount: 0,
   };
+  // `as CollectionSortable`, а НЕ `as never`: у `never` нет ни одного свойства, и
+  // `.map((c) => c.title)` ниже разваливается на `tsc --strict`, который гоняет CI.
   const row = (title: string, patch: Record<string, unknown>) =>
-    ({ ...base, title, deadline: null, createdAt: "2026-08-01T00:00:00Z", ...patch }) as never;
+    ({ ...base, title, deadline: null, createdAt: "2026-08-01T00:00:00Z", ...patch }) as CollectionSortable;
 
   it("активные впереди закрытых, даже если закрытый ближе по дате", () => {
     const closed = row("Закрытый", { deadline: "2026-08-11", closedAt: "2026-08-09T00:00:00Z" });
@@ -605,7 +609,7 @@ function nearestDate(c: CollectionShape): string | null {
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `npx vitest run shared/src/collection.test.ts`
-Expected: PASS, 22 теста.
+Expected: PASS, 27 тестов (14 от Задачи 1 + 13 новых).
 
 - [ ] **Step 5: Поправить спеку под фактическую строку дожима**
 
