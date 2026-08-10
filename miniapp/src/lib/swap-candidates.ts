@@ -1,4 +1,4 @@
-import { isIdenticalShift } from "@planer/shared";
+import { isIdenticalShift, isSwappable } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { hasStarted } from "./swaps";
 
@@ -37,7 +37,9 @@ export function swapCandidates(
   for (const shift of dayShifts) {
     if (shift.date !== fromShift.date) continue;
     if (shift.employeeId == null || shift.employeeId === meId) continue;
-    if (shift.category !== "shift") continue;
+    // Правило живёт в shared: экран, который прячет кандидата там, где сервер
+    // обмен принимает, — наблюдаемый дефект. Своей копии здесь больше нет.
+    if (!isSwappable(shift.category)) continue;
     if (shift.start == null || shift.end == null) continue;
     if (hasStarted(shift, now)) continue;
     // Раньше проверки «такая же смена»: исключённого не прячут как одинакового,

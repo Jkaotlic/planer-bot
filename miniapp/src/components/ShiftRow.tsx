@@ -1,4 +1,5 @@
 import { Cell } from "@telegram-apps/telegram-ui";
+import { isSwappable } from "@planer/shared";
 import type { Shift, Template } from "../api/client";
 import { formatTimeRange } from "../lib/shift";
 import { DayBadge } from "./DayBadge";
@@ -20,7 +21,10 @@ export interface ShiftRowProps {
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
 export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason }: ShiftRowProps) {
-  const isSwappable = shift.category === "shift";
+  // По той же причине, что в `swap-candidates.ts`: одно правило, один источник.
+  // Локальной копии «category === shift» здесь больше нет — с 2026-08-10 ответ
+  // на этот вопрос знает только shared.
+  const swappable = isSwappable(shift.category);
 
   return (
     <Cell
@@ -54,10 +58,10 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason 
       // ширину и так задаёт «Обменять» (90px), поэтому этот столбик ничего у
       // строки не отнимает — ни на одной ширине.
       after={
-        isToday || (isSwappable && onSwap) ? (
+        isToday || (swappable && onSwap) ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
             {isToday && <TodayChip />}
-            {isSwappable && onSwap && <SwapChip onClick={() => onSwap(shift)} blockedReason={swapBlockedReason} />}
+            {swappable && onSwap && <SwapChip onClick={() => onSwap(shift)} blockedReason={swapBlockedReason} />}
           </div>
         ) : undefined
       }
