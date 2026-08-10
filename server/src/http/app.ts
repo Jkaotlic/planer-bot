@@ -47,6 +47,7 @@ import {
   notifyUser,
   notifyAdmins,
   notifySwapProposal,
+  swapProposalText,
   notifyVacantSlot,
   notifyWeekendOffer,
   swapAcceptedText,
@@ -1146,9 +1147,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (bot) {
       const tg = tgOf(res.counterpartyId);
       if (tg != null) {
-        const fromName = nameOf(res.request.fromEmployeeId) ?? "Коллега";
-        const text = `«${fromName} предлагает обмен: отдаёт ${shiftLineOf(res.request.fromShiftId)}, хочет твою ${shiftLineOf(res.request.toShiftId)}»`;
-        await notifySwapProposal(bot, tg, res.request.id, text);
+        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request)));
       }
     }
     return c.json({ request: res.request }, 201);
