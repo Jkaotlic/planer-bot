@@ -157,6 +157,29 @@ describe("the admin whose birthday it is", () => {
     // Two people have birthdays — an empty list would pass on a broken filter.
     expect(body.birthdays.map((b: { displayName: string }) => b.displayName)).toEqual(["Other"]);
   });
+
+  it("cannot open or save their own round through either route", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const self = person(db, "SelfAdmin", 111, "08-12");
+    setEmployeeAdmin(db, self, true);
+    const other = person(db, "Other", 2, "08-13");
+    const token = await tokenFor(app, 111);
+
+    // Their own round is invisible through both doors…
+    expect((await app.request(`/api/admin/birthdays/${self}/preview?${ASOF}`, auth(token))).status).toBe(404);
+    expect((await app.request(`/api/admin/birthdays/${self}?${ASOF}`,
+      send(token, { collectUrl: "https://example.test/c/1" }, "PUT"))).status).toBe(404);
+
+    // …while somebody else's works normally through the same two doors, so a
+    // route that 404s on everything would not pass this.
+    expect((await app.request(`/api/admin/birthdays/${other}/preview?${ASOF}`, auth(token))).status).toBe(200);
+    expect((await app.request(`/api/admin/birthdays/${other}?${ASOF}`,
+      send(token, { collectUrl: "https://example.test/c/1" }, "PUT"))).status).toBe(200);
+
+    // And the refusal really was a refusal: nothing was written for the admin.
+    expect(db.select().from(collections).all().filter((row) => row.employeeId === self)).toEqual([]);
+  });
 });
 
 describe("scheduled send date", () => {
