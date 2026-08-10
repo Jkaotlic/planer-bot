@@ -58,15 +58,15 @@ describe("canCreate", () => {
 describe("moneyLine", () => {
   it("склеивает то, что заполнено, и молчит, когда не заполнено ничего", () => {
     expect(moneyLine({ amountPerPerson: 1000, totalGoal: 25000 }))
-      .toBe("по 1 000 ₽ · нужно 25 000 ₽");
-    expect(moneyLine({ amountPerPerson: 1000, totalGoal: null })).toBe("по 1 000 ₽");
-    expect(moneyLine({ amountPerPerson: null, totalGoal: 25000 })).toBe("нужно 25 000 ₽");
+      .toBe("по 1\u00A0000\u00A0₽ · нужно 25\u00A0000\u00A0₽");
+    expect(moneyLine({ amountPerPerson: 1000, totalGoal: null })).toBe("по 1\u00A0000\u00A0₽");
+    expect(moneyLine({ amountPerPerson: null, totalGoal: 25000 })).toBe("нужно 25\u00A0000\u00A0₽");
     expect(moneyLine({ amountPerPerson: null, totalGoal: null })).toBeNull();
   });
 
   it("ноль — это заполненное поле, а не пустое", () => {
     // `if (c.amountPerPerson)` вместо `!= null` съел бы бесплатный сбор молча.
-    expect(moneyLine({ amountPerPerson: 0, totalGoal: null })).toBe("по 0 ₽");
+    expect(moneyLine({ amountPerPerson: 0, totalGoal: null })).toBe("по 0\u00A0₽");
   });
 });
 
