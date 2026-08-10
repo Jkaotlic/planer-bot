@@ -82,6 +82,7 @@ import {
   addressOf,
   normalizePreferredName,
   PREFERRED_NAME_MAX,
+  type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
@@ -1108,11 +1109,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
 
-  type ShiftSummary = { date: string; start: string | null; end: string | null; title: string | null };
+  // `category` — не украшение: с 2026-08-10 в обмене бывает дежурство, а карточка
+  // «Обменов» иначе отличала бы его от смены по часам, то есть никак. `title` у
+  // части записей пуст, и тогда назвать вид записи можно только по категории.
+  type ShiftSummary = { date: string; start: string | null; end: string | null; title: string | null; category: EntryCategory };
   const shiftSummaryOf = (shiftId: number | null): ShiftSummary | null => {
     const shift: Shift | undefined = shiftId == null ? undefined : getShift(db, shiftId);
     if (!shift) return null;
-    return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
+    return { date: shift.date, start: shift.start, end: shift.end, title: shift.title, category: shift.category };
   };
   // Formatting + payload helpers below are thin `db`-bound wrappers around
   // ../util/message-lines — shared verbatim with the bot's own callback
