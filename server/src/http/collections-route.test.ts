@@ -167,3 +167,45 @@ describe("DELETE /api/admin/collections/:id", () => {
       { method: "DELETE", ...auth(token) })).status).toBe(409);
   });
 });
+
+describe("the journal and the surprise rule", () => {
+  it("hides a collection's own events from its honouree, and shows everyone else's", async () => {
+    const db = makeTestDb();
+    const { bot } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const selfAdmin = person(db, "SelfAdmin", 111, null);
+    setEmployeeAdmin(db, selfAdmin, true);
+    const otherAdmin = person(db, "OtherAdmin", 7, null);
+    setEmployeeAdmin(db, otherAdmin, true);
+    person(db, "Colleague", 8, null);
+
+    // Prepared by the other admin, so the surprise is real: one collection for
+    // the self-admin, one for nobody in particular.
+    const otherToken = await tokenFor(app, 7);
+    for (const employeeId of [selfAdmin, null]) {
+      const { collection } = await (await app.request(`/api/admin/collections?${ASOF}`,
+        send(otherToken, { title: employeeId ? "Про меня" : "Общий", employeeId, collectUrl: "https://example.test/c/1" }, "POST"))).json();
+      await app.request(`/api/admin/collections/${collection.id}/send?${ASOF}`,
+        send(otherToken, { confirm: true }, "POST"));
+    }
+
+    const forSelf = await (await app.request(`/api/admin/journal?${ASOF}`, auth(await tokenFor(app, 111)))).json();
+    const titles = forSelf.events
+      .filter((e: { type: string }) => e.type.startsWith("collection_"))
+      .map((e: { payload: { title?: string } }) => e.payload.title);
+
+    // The general collection's rows survive — an empty answer would pass against
+    // a filter that hides everything, and against a payload with no employeeId
+    // at all (json_extract would then return null for every row).
+    expect(titles).toContain("Общий");
+    expect(titles).not.toContain("Про меня");
+
+    // The other admin, who is nobody's honouree here, sees both.
+    const forOther = await (await app.request(`/api/admin/journal?${ASOF}`, auth(otherToken))).json();
+    const otherTitles = forOther.events
+      .filter((e: { type: string }) => e.type.startsWith("collection_"))
+      .map((e: { payload: { title?: string } }) => e.payload.title);
+    expect(otherTitles).toContain("Общий");
+    expect(otherTitles).toContain("Про меня");
+  });
+});
