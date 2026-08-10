@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus, EntryCategory, TemplateAccent, AuditType } from "@planer/shared";
+import type { SwapStatus, EntryCategory, TemplateAccent, AuditType, CollectionKind } from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -235,42 +235,67 @@ export type NewReminderLog = typeof reminderLog.$inferInsert;
 export type AuditLog = typeof auditLog.$inferSelect;
 export type NewAuditLog = typeof auditLog.$inferInsert;
 /**
- * One birthday, one year, one round of collecting — the record of what the admin
- * decided to send and whether it went out.
+ * One collection of money: a birthday round, or one an admin made by hand.
  *
- * The bot never mails the team on its own: it only nudges admins a week ahead
- * (that is what `adminNotifiedAt` remembers, so it nudges once and not daily).
- * Everything after that is the admin's doing, which is why the link, the text and
- * `sentAt` all live here rather than being derived.
+ * A birthday is the special case here rather than a separate thing: it has an
+ * `employee_id` and a `year` (the pair is its key) and no `title`. A custom one
+ * is the other way round — it has a subject, and an honouree is optional:
+ * everybody chips in for the office coffee machine.
+ *
+ * There is deliberately no `status` column: it follows from `collect_url` and
+ * `send_count` (`collectionStatus` in `@planer/shared`). A stored status would
+ * be a second source of truth, and with reminders it would start lying outright
+ * — a custom collection marked «sent» still has a live send button.
+ *
+ * The bot still never mails the team on its own: it nudges admins, and every
+ * message after that is a button they pressed.
  */
-export const birthdayCampaigns = sqliteTable(
-  "birthday_campaigns",
+export const collections = sqliteTable(
+  "collections",
   {
     id: integer().primaryKey({ autoIncrement: true }),
-    employeeId: integer().notNull().references(() => employees.id),
-    /** The calendar year this round belongs to — one per person per year. */
-    year: integer().notNull(),
-    /** When it is marked, YYYY-MM-DD. 29 February rolls to 1 March in a common year. */
-    celebratedOn: text().notNull(),
-    /** The Сбербанк Онлайн link the admin generated; null until they paste it. */
+    kind: text().$type<CollectionKind>().notNull().default("custom"),
+    /** The «виновник торжества». NULL for a general collection. */
+    employeeId: integer().references(() => employees.id),
+    /** Birthday only: the calendar year this round belongs to. */
+    year: integer(),
+    /** Birthday only: when it is marked, YYYY-MM-DD. */
+    celebratedOn: text(),
+    /** What a custom collection is for. NULL on a birthday — its title is the name. */
+    title: text(),
+    /** When the event is: a wedding, a send-off, the office party. */
+    eventDate: text(),
+    /** «Скиньтесь до» — the collection's edge, which outranks the event date. */
+    deadline: text(),
+    /** Whole roubles. A whip-round is never counted in kopecks. */
+    amountPerPerson: integer(),
+    totalGoal: integer(),
     collectUrl: text(),
     /** What the team will be sent. Null means "use the default wording". */
     messageText: text(),
-    status: text().$type<"pending" | "ready" | "sent">().notNull().default("pending"),
+    /** When an admin pressed «Собрали, закрыть». NULL while it is still running. */
+    closedAt: integer({ mode: "timestamp" }),
     /** When admins were nudged, so they are nudged once rather than every tick. */
     adminNotifiedAt: integer({ mode: "timestamp" }),
-    /** The day the admin asked to be reminded to send the collection. YYYY-MM-DD,
-     *  null when they did not ask. Never triggers a send by itself — see
-     *  `runBirthdayNoticeTick`. */
     scheduledSendOn: text(),
-    /** When that reminder went out, so it goes out once rather than every tick. */
     scheduleNotifiedAt: integer({ mode: "timestamp" }),
+    /** The LAST send. */
     sentAt: integer({ mode: "timestamp" }),
-    /** How many people actually received it. */
+    /** How many people the LAST send actually reached. */
     sentCount: integer().notNull().default(0),
+    /** How many rounds went out at all — the only truth about «разослано». */
+    sendCount: integer().notNull().default(0),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("birthday_campaign_unique").on(t.employeeId, t.year)],
+  (t) => [
+    // Partial: «one birthday round per person per year» is a rule about
+    // birthdays only. Without the `WHERE`, two custom collections for the same
+    // person would not clash anyway (in SQLite `NULL ≠ NULL` inside a unique
+    // index), but the rule would stop reading as a rule.
+    uniqueIndex("collection_birthday_unique")
+      .on(t.employeeId, t.year)
+      .where(sql`${t.kind} = 'birthday'`),
+  ],
 );
 
 export type VacantSlot = typeof vacantSlots.$inferSelect;
@@ -283,8 +308,8 @@ export type TemplatePool = typeof templatePool.$inferSelect;
 export type NewTemplatePool = typeof templatePool.$inferInsert;
 export type TemplatePreference = typeof templatePreference.$inferSelect;
 export type NewTemplatePreference = typeof templatePreference.$inferInsert;
-export type BirthdayCampaign = typeof birthdayCampaigns.$inferSelect;
-export type NewBirthdayCampaign = typeof birthdayCampaigns.$inferInsert;
+export type Collection = typeof collections.$inferSelect;
+export type NewCollection = typeof collections.$inferInsert;
 export type CalendarDay = typeof calendarDays.$inferSelect;
 export type NewCalendarDay = typeof calendarDays.$inferInsert;
 export type AppSetting = typeof appSettings.$inferSelect;
