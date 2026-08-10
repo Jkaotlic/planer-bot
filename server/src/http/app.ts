@@ -99,7 +99,17 @@ import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type Pers
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
 import { upcomingBirthdays, ensureBirthdayRound, birthdayRoundDraft } from "../birthdays/birthday-service";
-import { previewCollection, updateCollection } from "../collections/collection-service";
+import {
+  getCollection,
+  listCollections,
+  createCustomCollection,
+  previewCollection,
+  updateCollection,
+  setCollectionClosed,
+  deleteCollection,
+  markCollectionSent,
+  recipientsOf,
+} from "../collections/collection-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 
 export interface AppDeps {
@@ -695,6 +705,162 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
     });
     return c.json({ collection: result.collection });
+  });
+
+  // --- Сборы ----------------------------------------------------------------
+  // One set of routes for both kinds: a birthday round and a hand-made
+  // collection differ in data, not in how they are previewed, sent or closed.
+  // `:id` here is the COLLECTION's id — unlike the birthday routes above, where
+  // it is the employee's.
+
+  /** Reads a collection the viewer is allowed to see, or explains why not. */
+  const readableCollection = (db: Db, id: number, viewerId: number) => {
+    const collection = getCollection(db, id);
+    // The surprise rule: «not found», not «forbidden». A 403 would confirm the
+    // collection exists, which is the one bit we are hiding.
+    if (!collection || collection.employeeId === viewerId) return null;
+    return collection;
+  };
+
+  // Claimed synchronously by /send below (see the comment on that route) so a
+  // double-tap on the same collection can never produce two broadcasts.
+  const collectionSending = new Set<number>();
+
+  app.get("/api/admin/collections", requireAdmin(db, config.jwtSecret), (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    return c.json({ asOf, collections: listCollections(db, asOf, c.get("auth").employeeId) });
+  });
+
+  app.post("/api/admin/collections", requireAdmin(db, config.jwtSecret), async (c) => {
+    const parsed = parseCollectionBody(await c.req.json().catch(() => ({})), { requireTitle: true });
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    if (parsed.value.employeeId != null && !getEmployeeById(db, parsed.value.employeeId)) {
+      return c.json({ error: "Такого работника нет" }, 400);
+    }
+
+    const collection = createCustomCollection(db, {
+      title: parsed.value.title!,
+      employeeId: parsed.value.employeeId ?? null,
+      eventDate: parsed.value.eventDate ?? null,
+      deadline: parsed.value.deadline ?? null,
+      amountPerPerson: parsed.value.amountPerPerson ?? null,
+      totalGoal: parsed.value.totalGoal ?? null,
+      collectUrl: parsed.value.collectUrl ?? null,
+      messageText: parsed.value.messageText ?? null,
+      scheduledSendOn: parsed.value.scheduledSendOn ?? null,
+    });
+    recordAudit(db, "collection_created", c.get("auth").employeeId, {
+      collectionId: collection.id,
+      employeeId: collection.employeeId,
+      title: collection.title,
+      personName: collection.employeeId != null ? (getEmployeeById(db, collection.employeeId)?.displayName ?? null) : null,
+    });
+    return c.json({ collection });
+  });
+
+  app.get("/api/admin/collections/:id/preview", requireAdmin(db, config.jwtSecret), (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    return c.json(previewCollection(db, collection));
+  });
+
+  app.put("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), async (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+
+    const parsed = parseCollectionBody(await c.req.json().catch(() => ({})), { requireTitle: false });
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    if (Object.keys(parsed.value).length === 0) return c.json({ error: "нечего сохранять" }, 400);
+    if (parsed.value.employeeId != null && !getEmployeeById(db, parsed.value.employeeId)) {
+      return c.json({ error: "Такого работника нет" }, 400);
+    }
+    const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, collection, asOf);
+    if (scheduleError) return c.json({ error: scheduleError }, 400);
+
+    const result = updateCollection(db, collection.id, parsed.value);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    recordAudit(db, "collection_updated", c.get("auth").employeeId, {
+      collectionId: collection.id,
+      employeeId: result.collection.employeeId,
+      title: result.collection.title,
+      ...(parsed.value.collectUrl !== undefined ? { collectUrl: parsed.value.collectUrl } : {}),
+      ...(parsed.value.deadline !== undefined ? { deadline: parsed.value.deadline } : {}),
+      ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
+      ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
+    });
+    return c.json({ collection: result.collection });
+  });
+
+  app.post("/api/admin/collections/:id/send", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
+    if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+
+    const preview = previewCollection(db, collection);
+    if (preview.blocker) return c.json({ error: preview.blocker }, 409);
+    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+
+    // The claim is synchronous: between this line and the first `await` below
+    // nothing else can run (single-threaded Node), so a second simultaneous
+    // «Разослать» always finds the collection already taken.
+    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
+    collectionSending.add(collection.id);
+    try {
+      let delivered = 0;
+      for (const recipient of recipientsOf(db, collection.employeeId)) {
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+      }
+      // Only count a round that reached somebody: zero delivered is not a round,
+      // it is Telegram having refused the lot. Counting it would tell the admin
+      // «рассылалось 2 раза» about one real message.
+      if (delivered > 0) markCollectionSent(db, collection.id, delivered, new Date());
+      recordAudit(db, "collection_sent", c.get("auth").employeeId, {
+        collectionId: collection.id,
+        employeeId: collection.employeeId,
+        title: preview.title,
+        round: collection.sendCount + (delivered > 0 ? 1 : 0),
+        delivered,
+        intended: preview.recipients.length,
+      });
+      return c.json({ delivered, intended: preview.recipients.length, round: collection.sendCount + (delivered > 0 ? 1 : 0) });
+    } finally {
+      collectionSending.delete(collection.id);
+    }
+  });
+
+  app.post("/api/admin/collections/:id/close", requireAdmin(db, config.jwtSecret), async (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { closed?: unknown };
+    if (typeof body.closed !== "boolean") return c.json({ error: "closed должен быть true или false" }, 400);
+
+    const updated = setCollectionClosed(db, collection.id, body.closed, new Date());
+    if (!updated) return c.json({ error: "not_found" }, 404);
+    recordAudit(db, "collection_closed", c.get("auth").employeeId, {
+      collectionId: collection.id,
+      employeeId: collection.employeeId,
+      title: previewCollection(db, updated).title,
+      closed: body.closed,
+    });
+    return c.json({ collection: updated });
+  });
+
+  app.delete("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    const title = previewCollection(db, collection).title;
+    const result = deleteCollection(db, collection.id);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    recordAudit(db, "collection_deleted", c.get("auth").employeeId, {
+      collectionId: collection.id,
+      employeeId: collection.employeeId,
+      title,
+    });
+    return c.json({ ok: true });
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */
