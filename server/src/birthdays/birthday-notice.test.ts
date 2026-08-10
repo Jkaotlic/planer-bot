@@ -4,7 +4,8 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
 import { runBirthdayNoticeTick } from "./birthday-notice";
-import { updateCampaign, ensureCampaign, markSent, markAdminNotified } from "./birthday-service";
+import { ensureBirthdayRound, markAdminNotified } from "./birthday-service";
+import { createCustomCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
 import type { Db } from "../db/client";
 
 const TODAY = "2026-08-01";
@@ -86,8 +87,9 @@ describe("runBirthdayNoticeTick", () => {
     const { bot, sent } = fakeBot();
     const id = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
-    updateCampaign(db, id, TODAY, { collectUrl: "https://sber.ru/x" });
-    markSent(db, ensureCampaign(db, id, TODAY)!.id, 1, new Date());
+    const round = ensureBirthdayRound(db, id, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x" });
+    markCollectionSent(db, round.id, 1, new Date());
 
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
     expect(sent).toEqual([]);
@@ -100,7 +102,7 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Админ", 2, null, true);
 
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
-    expect(ensureCampaign(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
+    expect(ensureBirthdayRound(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
   });
 
@@ -130,7 +132,8 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Админ", 2, null, true);
     // The admin pasted the link before the week-ahead pass ever ran for this
     // round — the case the new reminder-date feature made routine.
-    updateCampaign(db, id, TODAY, { collectUrl: "https://sber.ru/x" });
+    const round = ensureBirthdayRound(db, id, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x" });
 
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(1);
     expect(sent).toHaveLength(1);
@@ -138,7 +141,7 @@ describe("runBirthdayNoticeTick", () => {
     expect(sent[0]!.text).not.toContain("Создай сбор");
     expect(sent[0]!.text).not.toContain("Сбербанк Онлайн");
     // Still nudges exactly once — the flag semantics are unchanged.
-    expect(ensureCampaign(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
+    expect(ensureBirthdayRound(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
     expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
     expect(sent).toHaveLength(1);
   });
@@ -152,9 +155,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     person(db, "Админ", 2, null, true);
     // Prepare the round and mark the week-ahead nudge as already done, so this
     // test observes only the scheduled reminder.
-    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
-    const campaign = ensureCampaign(db, who, TODAY)!;
-    markAdminNotified(db, campaign.id, new Date());
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     expect(sent.map((m) => m.to)).toEqual([2]);
@@ -167,8 +170,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const { bot, sent } = fakeBot();
     const who = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
-    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
-    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     await runBirthdayNoticeTick(db, bot, TODAY);
@@ -180,8 +184,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const { bot, sent } = fakeBot();
     const who = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
-    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-04" });
-    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-04" });
+    markAdminNotified(db, round.id, new Date());
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     expect(sent).toHaveLength(0);
@@ -192,10 +197,10 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const { bot, sent } = fakeBot();
     const who = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
-    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
-    const campaign = ensureCampaign(db, who, TODAY)!;
-    markAdminNotified(db, campaign.id, new Date());
-    markSent(db, campaign.id, 4, new Date());
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
+    markCollectionSent(db, round.id, 4, new Date());
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     expect(sent).toHaveLength(0);
@@ -207,8 +212,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const who = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
     person(db, "Обычный коллега", 3, null);
-    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
-    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     expect(sent.map((m) => m.to)).toEqual([2]);
@@ -219,11 +225,29 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const { bot } = fakeBot();
     const who = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
-    updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
-    markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
 
     await runBirthdayNoticeTick(db, bot, TODAY);
     expect(listRecentAudit(db, 10).some((row) => row.type === "birthday_schedule_notice")).toBe(true);
+  });
+
+  it("reminds admins about a custom collection too", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const admin = person(db, "Admin", 9, null);
+    setEmployeeAdmin(db, admin, true);
+    createCustomCollection(db, {
+      title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
+      amountPerPerson: null, totalGoal: null, collectUrl: "https://example.test/c/1",
+      messageText: null, scheduledSendOn: "2026-08-10",
+    });
+
+    expect(await runBirthdayNoticeTick(db, bot, "2026-08-10")).toBe(1);
+    expect(sent[0]!.text).toContain("Кофемашина");
+    // Second tick must stay silent — `scheduleNotifiedAt` fires once.
+    expect(await runBirthdayNoticeTick(db, bot, "2026-08-10")).toBe(0);
   });
 
   describe("healing a missed reminder day (defect 1)", () => {
@@ -236,8 +260,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       // day since nothing ever called the tick with today === "2026-08-03". The
       // celebration itself ("2026-08-08") is still ahead, so the reminder is
       // still useful when it finally does fire.
-      updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
-      markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+      const round = ensureBirthdayRound(db, who, TODAY)!;
+      updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
+      markAdminNotified(db, round.id, new Date());
 
       await runBirthdayNoticeTick(db, bot, "2026-08-05");
       expect(sent.map((m) => m.to)).toEqual([2]);
@@ -251,8 +276,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       // then simulate the tick running months later, long after the party.
       const who = person(db, "Именинник", 1, "01-05");
       person(db, "Админ", 2, null, true);
-      updateCampaign(db, who, "2026-01-01", { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-01-03" });
-      markAdminNotified(db, ensureCampaign(db, who, "2026-01-01")!.id, new Date());
+      const round = ensureBirthdayRound(db, who, "2026-01-01")!;
+      updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-01-03" });
+      markAdminNotified(db, round.id, new Date());
 
       // "2026-06-01" is far enough out that the week-ahead pass sees only next
       // year's occurrence (2027-01-05), well outside its 7-day window — so any
@@ -266,8 +292,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       const { bot, sent } = fakeBot();
       const who = person(db, "Именинник", 1, "08-08");
       person(db, "Админ", 2, null, true);
-      updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
-      markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+      const round = ensureBirthdayRound(db, who, TODAY)!;
+      updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
+      markAdminNotified(db, round.id, new Date());
 
       await runBirthdayNoticeTick(db, bot, "2026-08-05");
       await runBirthdayNoticeTick(db, bot, "2026-08-05");
@@ -281,8 +308,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       const who = person(db, "Именинник", 1, "08-08");
       person(db, "Админ", 2, null, true);
       person(db, "Обычный коллега", 3, null);
-      updateCampaign(db, who, TODAY, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
-      markAdminNotified(db, ensureCampaign(db, who, TODAY)!.id, new Date());
+      const round = ensureBirthdayRound(db, who, TODAY)!;
+      updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
+      markAdminNotified(db, round.id, new Date());
 
       await runBirthdayNoticeTick(db, bot, "2026-08-05");
       expect(sent.map((m) => m.to)).toEqual([2]);
