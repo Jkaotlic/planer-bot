@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canCreate,
+  cardSubject,
   moneyLine,
   recipientsPhrase,
   recipientsSubject,
@@ -117,6 +118,14 @@ describe("moneyLine", () => {
     expect(moneyLine({ amountPerPerson: 1000, totalGoal: null })).toBe("по 1\u00A0000\u00A0₽");
     expect(moneyLine({ amountPerPerson: null, totalGoal: 25000 })).toBe("нужно 25\u00A0000\u00A0₽");
     expect(moneyLine({ amountPerPerson: null, totalGoal: null })).toBeNull();
+  });
+});
+
+describe("cardSubject", () => {
+  it("называет виновника через тире, а общий сбор оставляет как есть", () => {
+    // Та же форма, что в письме команде: «Свадьба — Пётр Иванов».
+    expect(cardSubject({ title: "Свадьба", personName: "Пётр Иванов" })).toBe("Свадьба — Пётр Иванов");
+    expect(cardSubject({ title: "Кофемашина", personName: null })).toBe("Кофемашина");
   });
 });
 

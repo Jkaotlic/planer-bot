@@ -110,6 +110,17 @@ export function canCreate(title: string): boolean {
 }
 
 /**
+ * Повод и виновник — одной фразой через тире, в именительном.
+ *
+ * Та же форма, что в письме команде (`collectionMessage`): «Свадьба — Пётр
+ * Иванов». Сервер отдаёт их порознь, и одно «Свадьба» в списке из трёх сборов
+ * не говорит, на кого он. Склонять нечем — в базе лежит только `display_name`.
+ */
+export function cardSubject(row: Pick<CollectionRow, "title" | "personName">): string {
+  return row.personName ? `${row.title} — ${row.personName}` : row.title;
+}
+
+/**
  * Подпись кнопки отправки.
  *
  * Дожим обязан говорить, что рассылка уже была, и когда: иначе второе нажатие
@@ -596,7 +607,7 @@ function CollectionCard({
   return (
     <div className={`birthday-card${open ? " open" : ""}`} data-testid="collection-card">
       <div className="birthday-card-head">
-        <span className="birthday-name">{row.title}</span>
+        <span className="birthday-name">{cardSubject(row)}</span>
         {subtitle && <span className="birthday-when">{subtitle}</span>}
         <span className={`birthday-status ${status.tone}`}>{status.label}</span>
         <button type="button" className="btn btn-secondary" onClick={onToggle}>

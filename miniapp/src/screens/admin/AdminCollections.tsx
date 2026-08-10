@@ -112,6 +112,17 @@ export function canCreate(title: string): boolean {
 }
 
 /**
+ * Повод и виновник — одной фразой через тире, в именительном.
+ *
+ * Та же форма, что в письме команде (`collectionMessage`): «Свадьба — Пётр
+ * Иванов». Сервер отдаёт их порознь, и одно «Свадьба» в списке из трёх сборов
+ * не говорит, на кого он. Склонять нечем — в базе лежит только `display_name`.
+ */
+export function cardSubject(row: Pick<CollectionRow, "title" | "personName">): string {
+  return row.personName ? `${row.title} — ${row.personName}` : row.title;
+}
+
+/**
  * Подпись кнопки отправки.
  *
  * Дожим обязан говорить, что рассылка уже была, и когда: иначе второй тап
@@ -653,7 +664,7 @@ function CollectionCard({
     <CardShell>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>{row.title}</div>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{cardSubject(row)}</div>
           {subtitle && <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>{subtitle}</div>}
         </div>
         <span style={{ flex: "none", fontSize: 12, fontWeight: 600, color: TONE_COLOR[status.tone], textAlign: "right" }}>

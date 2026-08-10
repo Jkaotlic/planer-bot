@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreate, moneyLine, roundStatus, sendButtonLabel, statusOf } from "./AdminCollections";
+import { canCreate, cardSubject, moneyLine, roundStatus, sendButtonLabel, statusOf } from "./AdminCollections";
 import type { Collection, CollectionPreview, CollectionRow } from "../../api/client";
 
 /**
@@ -52,6 +52,14 @@ describe("canCreate", () => {
     expect(canCreate("")).toBe(false);
     expect(canCreate("   ")).toBe(false);
     expect(canCreate("Кофемашина")).toBe(true);
+  });
+});
+
+describe("cardSubject", () => {
+  it("называет виновника через тире, а общий сбор оставляет как есть", () => {
+    // Та же форма, что в письме команде: «Свадьба — Пётр Иванов».
+    expect(cardSubject({ title: "Свадьба", personName: "Пётр Иванов" })).toBe("Свадьба — Пётр Иванов");
+    expect(cardSubject({ title: "Кофемашина", personName: null })).toBe("Кофемашина");
   });
 });
 
