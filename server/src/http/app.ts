@@ -40,6 +40,7 @@ import { setSwapLock, pendingSwapsForEmployee, cancelSwapsForEmployeeTx } from "
 import { buildSwapLockNotices, buildExclusionNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
+import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyEntryChange, notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
@@ -47,6 +48,9 @@ import {
   notifyUser,
   notifyAdmins,
   notifySwapProposal,
+  swapProposalText,
+  dutyNoticeForReceiver,
+  dutyNoticeForAdmins,
   notifyVacantSlot,
   notifyWeekendOffer,
   swapAcceptedText,
@@ -78,6 +82,7 @@ import {
   addressOf,
   normalizePreferredName,
   PREFERRED_NAME_MAX,
+  type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
@@ -1104,11 +1109,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
 
-  type ShiftSummary = { date: string; start: string | null; end: string | null; title: string | null };
+  // `category` — не украшение: с 2026-08-10 в обмене бывает дежурство, а карточка
+  // «Обменов» иначе отличала бы его от смены по часам, то есть никак. `title` у
+  // части записей пуст, и тогда назвать вид записи можно только по категории.
+  type ShiftSummary = { date: string; start: string | null; end: string | null; title: string | null; category: EntryCategory };
   const shiftSummaryOf = (shiftId: number | null): ShiftSummary | null => {
     const shift: Shift | undefined = shiftId == null ? undefined : getShift(db, shiftId);
     if (!shift) return null;
-    return { date: shift.date, start: shift.start, end: shift.end, title: shift.title };
+    return { date: shift.date, start: shift.start, end: shift.end, title: shift.title, category: shift.category };
   };
   // Formatting + payload helpers below are thin `db`-bound wrappers around
   // ../util/message-lines — shared verbatim with the bot's own callback
@@ -1146,9 +1154,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (bot) {
       const tg = tgOf(res.counterpartyId);
       if (tg != null) {
-        const fromName = nameOf(res.request.fromEmployeeId) ?? "Коллега";
-        const text = `«${fromName} предлагает обмен: отдаёт ${shiftLineOf(res.request.fromShiftId)}, хочет твою ${shiftLineOf(res.request.toShiftId)}»`;
-        await notifySwapProposal(bot, tg, res.request.id, text);
+        // Вторая сторона получает `fromShift`. Если это дежурство, а её нет в его
+        // пуле — она должна прочитать об этом ДО нажатия «Принять», а не потом.
+        const fact = outsidePoolFact(db, { shiftId: res.request.fromShiftId, receiverId: res.counterpartyId });
+        const notices = fact ? [dutyNoticeForReceiver(fact)] : [];
+        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices));
       }
     }
     return c.json({ request: res.request }, 201);
@@ -1174,7 +1184,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     if (bot) {
       const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapAcceptedText(swapAuditPayload(res.request)));
-      await notifyAdmins(bot, db, swapAcceptedAdminText(swapAuditPayload(res.request)));
+      await notifyAdmins(
+        bot,
+        db,
+        swapAcceptedAdminText(
+          swapAuditPayload(res.request),
+          outsidePoolFacts(db, res.request).map(dutyNoticeForAdmins),
+        ),
+      );
       // Accepting can silently auto-cancel other pending swaps that touched the
       // same shift(s). Both of their sides are told: the counterparty otherwise
       // only learns by tapping a now-stale button and getting a bare "not_pending",

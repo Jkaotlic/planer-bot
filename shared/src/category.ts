@@ -28,9 +28,24 @@ const BALANCE_COUNTED: ReadonlySet<EntryCategory> = new Set([
 export const templateAccents = ["gold", "blue", "violet", "indigo", "teal", "green", "rose", "amber", "emerald"] as const;
 export type TemplateAccent = (typeof templateAccents)[number];
 
-/** Only regular shifts can be swapped between workers. */
+/**
+ * Чем работники могут меняться между собой: обычные смены и дежурства
+ * (его решение от 2026-08-10).
+ *
+ * Множество — рантайм-значение, а не только объединение типов, по той же
+ * причине, что `SWAP_REJECT_REASONS` и `AUDIT_TYPES`: тест на полноту может
+ * перебрать все категории и проверить, что обменных ровно две, вместо сверки
+ * двух списков, набранных руками в разных файлах.
+ *
+ * ЕДИНСТВЕННОЕ место, где живёт это знание. Мини-апп зовёт эту же функцию — и в
+ * списке кандидатов, и на кнопке «Обменять»: экран, прячущий кнопку там, где
+ * сервер обмен разрешает, — наблюдаемый дефект, а не расхождение вкусов. Пул
+ * дежурства при этом ничего не запрещает, он остаётся правилом автораздачи.
+ */
+const SWAPPABLE: ReadonlySet<EntryCategory> = new Set(["shift", "duty"]);
+
 export function isSwappable(category: EntryCategory): boolean {
-  return category === "shift";
+  return SWAPPABLE.has(category);
 }
 
 /** Absences (vacation, sick leave, business trip) — the worker is away, no times. */

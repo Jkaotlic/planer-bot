@@ -17,8 +17,8 @@ describe("entry category", () => {
     expect(entryCategorySchema.safeParse("bogus").success).toBe(false);
   });
 
-  it("only regular shifts are swappable", () => {
-    expect(ALL.filter(isSwappable)).toEqual(["shift"]);
+  it("меняться можно сменами и дежурствами", () => {
+    expect(ALL.filter(isSwappable)).toEqual(["shift", "duty"]);
   });
 
   it("absences are vacation, sick leave and business_trip", () => {
