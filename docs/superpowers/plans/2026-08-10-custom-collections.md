@@ -59,7 +59,7 @@
 - Modify: `shared/src/index.ts`
 
 **Interfaces:**
-- Consumes: `MONTH_NAMES` из `shared/src/birthday.ts`.
+- Consumes: `MONTH_NAMES` и `MONTH_LENGTHS` из `shared/src/birthday.ts`. `MONTH_LENGTHS` там сейчас module-private — снять с неё замок словом `export`, больше в том файле не менять ничего.
 - Produces:
   - `type CollectionKind = "birthday" | "custom"`
   - `type CollectionStatus = "pending" | "ready" | "sent"`
@@ -149,6 +149,9 @@ describe("isCollectionActive", () => {
 });
 
 describe("formatMoney", () => {
+  // Разделитель разрядов ниже — литеральный U+00A0. В исходнике он неотличим от
+  // обычного пробела глазами, поэтому рядом стоит отдельный тест, проверяющий сам
+  // код-пойнт: без него тест и реализация могут быть неправы одинаково и зелены.
   it("разделяет разряды неразрывным пробелом", () => {
     expect(formatMoney(25000)).toBe("25 000 ₽");
     expect(formatMoney(1000)).toBe("1 000 ₽");
@@ -158,6 +161,11 @@ describe("formatMoney", () => {
 
   it("не показывает копеек", () => {
     expect(formatMoney(999.6)).toBe("1 000 ₽");
+  });
+  it("не пропускает обычный пробел вместо неразрывного", () => {
+    // Прямая проверка того самого дефекта: строка не должна содержать 0x20 вовсе.
+    expect(formatMoney(25000)).not.toContain(" ");
+    expect(formatMoney(25000).codePointAt(2)).toBe(0x00a0);
   });
 });
 
@@ -170,6 +178,15 @@ describe("formatDayMonth", () => {
   it("непонятную строку отдаёт как есть — врать не о чем", () => {
     expect(formatDayMonth("не дата")).toBe("не дата");
     expect(formatDayMonth("2026-13-01")).toBe("2026-13-01");
+  });
+
+  it("несуществующий день месяца — не дата", () => {
+    expect(formatDayMonth("2026-02-30")).toBe("2026-02-30");
+    expect(formatDayMonth("2026-04-31")).toBe("2026-04-31");
+    // А настоящие даты тех же месяцев по-прежнему читаются — иначе тест прошёл бы
+    // и на функции, которая отвергает вообще всё.
+    expect(formatDayMonth("2026-02-28")).toBe("28 февраля");
+    expect(formatDayMonth("2026-04-30")).toBe("30 апреля");
   });
 });
 ```
@@ -184,7 +201,7 @@ Expected: FAIL — `Failed to resolve import "./collection"`.
 Создать `shared/src/collection.ts`:
 
 ```ts
-import { MONTH_NAMES } from "./birthday";
+import { MONTH_LENGTHS, MONTH_NAMES } from "./birthday";
 
 /**
  * Сбор денег: на день рождения или заведённый админом руками.
@@ -274,7 +291,11 @@ export function formatDayMonth(iso: string): string {
   if (!match) return iso;
   const month = Number(match[2]);
   const day = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return iso;
+  // Границу дня спрашиваем у месяца, а не у числа 31: «30 февраля» — это не дата,
+  // и подписывать ею сбор нельзя. Таблица та же, что у `parseBirthDate`, вместе с
+  // её намеренными 29 днями февраля — почему так, написано там.
+  if (month < 1 || month > 12) return iso;
+  if (day < 1 || day > MONTH_LENGTHS[month - 1]!) return iso;
   return `${day} ${MONTH_NAMES[month - 1]}`;
 }
 ```
@@ -469,7 +490,7 @@ Expected: FAIL — `collectionTitle is not a function` и соседние.
 
 - [ ] **Step 3: Написать реализацию**
 
-Импорт в шапке `shared/src/collection.ts` расширить: `import { formatBirthDate, MONTH_NAMES } from "./birthday";` — ветка дня рождения зовёт `formatBirthDate`, чтобы «29 февраля» осталось «29 февраля» и в невисокосный год, а не превратилось в «1 марта».
+Импорт в шапке `shared/src/collection.ts` расширить: `import { formatBirthDate, MONTH_LENGTHS, MONTH_NAMES } from "./birthday";` — ветка дня рождения зовёт `formatBirthDate`, чтобы «29 февраля» осталось «29 февраля» и в невисокосный год, а не превратилось в «1 марта».
 
 Дописать в конец `shared/src/collection.ts`:
 
