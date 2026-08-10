@@ -98,15 +98,9 @@ import { listOpenSlots, getVacantSlot, findOpenSlotLike } from "../repo/weekend"
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
-import {
-  upcomingBirthdays,
-  previewCampaign,
-  updateCampaign,
-  ensureCampaign,
-  listAllCampaigns,
-  teamRecipients,
-  markSent,
-} from "../birthdays/birthday-service";
+import { upcomingBirthdays, ensureBirthdayRound, birthdayRoundDraft } from "../birthdays/birthday-service";
+import { previewCollection, updateCollection } from "../collections/collection-service";
+import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 
 export interface AppDeps {
   db: Db;
@@ -129,20 +123,6 @@ function nameTakenError(taken: string): string {
 export function createApp(deps: AppDeps): Hono<Env> {
   const { db, config, bot } = deps;
   const app = new Hono<Env>();
-
-  /**
-   * Кампании ДР, для которых прямо сейчас идёт рассылка.
-   *
-   * `previewCampaign`'s `blocker` смотрит на статус `sent`, а он ставится только
-   * ПОСЛЕ цикла `await notifyUser(...)` на каждого получателя — то есть между
-   * чтением блокера и записью статуса лежит настоящее окно на секунды. Два
-   * одновременных «Разослать» (двойной тап, два открытых админом устройства, повтор
-   * сети) оба проходят проверку и оба шлют всей команде — «задвоенное поздравление
-   * хуже недосланного», как и говорит комментарий у `markSent`, но раньше это не
-   * было ничем защищено. Клеймится синхронно, до первого `await`, поэтому окна для
-   * второго запроса нет — тот же принцип, что у `status !== "pending"` в обменах.
-   */
-  const birthdaySending = new Set<number>();
 
   // Registered first (= outermost) so it runs for every response this process
   // serves, including the static /app and /admin bundles mounted later in
@@ -664,7 +644,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // --- Дни рождения ---------------------------------------------------------
   // The bot never mails the team on its own. It nudges admins a week ahead; every
   // message after that is an admin pressing a button, having seen exactly what
-  // will go out and to whom.
+  // will go out and to whom. A round is created when an admin first SAVES it —
+  // looking at the card writes nothing.
 
   const birthdayAsOf = (c: { req: { query(name: string): string | undefined } }) =>
     c.req.query("asOf") ?? teamNow(config.teamTz).date;
@@ -672,129 +653,48 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/admin/birthdays", requireAdmin(db, config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
-    return c.json({ asOf, birthdays: upcomingBirthdays(db, asOf) });
+    return c.json({ asOf, birthdays: upcomingBirthdays(db, asOf, undefined, c.get("auth").employeeId) });
   });
-
-  /** Every round ever prepared — the ones already sent included. Separate from
-   *  `/birthdays` because that one looks forward and this one looks back. */
-  app.get("/api/admin/birthdays/campaigns", requireAdmin(db, config.jwtSecret), (c) =>
-    c.json({ campaigns: listAllCampaigns(db) }));
 
   app.get("/api/admin/birthdays/:id/preview", requireAdmin(db, config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
-    const preview = previewCampaign(db, Number(c.req.param("id")), asOf);
-    if (!preview) return c.json({ error: "not_found" }, 404);
-    return c.json(preview);
+    const employeeId = Number(c.req.param("id"));
+    // The surprise rule: not «forbidden», but «there is nothing here for you».
+    if (employeeId === c.get("auth").employeeId) return c.json({ error: "not_found" }, 404);
+    const draft = birthdayRoundDraft(db, employeeId, asOf);
+    if (!draft) return c.json({ error: "not_found" }, 404);
+    return c.json(previewCollection(db, draft));
   });
 
   app.put("/api/admin/birthdays/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { collectUrl?: unknown; messageText?: unknown; scheduledSendOn?: unknown };
-
-    const patch: { collectUrl?: string | null; messageText?: string | null; scheduledSendOn?: string | null } = {};
-    if (body.collectUrl !== undefined) {
-      if (body.collectUrl !== null && typeof body.collectUrl !== "string") {
-        return c.json({ error: "collectUrl должен быть ссылкой или null" }, 400);
-      }
-      const url = typeof body.collectUrl === "string" ? body.collectUrl.trim() : null;
-      // Only http(s) — the link is forwarded to the whole team, so a `javascript:`
-      // or a bare word must not be able to travel in a message from the bot.
-      if (url && !/^https?:\/\/\S+$/i.test(url)) {
-        return c.json({ error: "Ссылка должна начинаться с http:// или https://" }, 400);
-      }
-      patch.collectUrl = url || null;
-    }
-    if (body.messageText !== undefined) {
-      if (body.messageText !== null && typeof body.messageText !== "string") {
-        return c.json({ error: "messageText должен быть текстом или null" }, 400);
-      }
-      const text = typeof body.messageText === "string" ? body.messageText.trim() : null;
-      if (text && text.length > 3000) return c.json({ error: "Текст длиннее 3000 символов" }, 400);
-      patch.messageText = text || null;
-    }
-    if (body.scheduledSendOn !== undefined) {
-      if (body.scheduledSendOn === null) {
-        patch.scheduledSendOn = null;
-      } else if (typeof body.scheduledSendOn !== "string" || !dateStr.safeParse(body.scheduledSendOn).success) {
-        return c.json({ error: "Дата напоминания должна быть в виде ГГГГ-ММ-ДД" }, 400);
-      } else {
-        // Read the round before validating: a client that resends this field
-        // unchanged on every save (the miniapp does) must not get stuck the
-        // moment the reminder day is behind us but the birthday isn't —
-        // resubmitting the round's own stored value is not an edit.
-        const round = ensureCampaign(db, Number(c.req.param("id")), asOf);
-        if (!round) return c.json({ error: "not_found" }, 404);
-        // The window is «from today up to and including the birthday». Earlier is
-        // already gone; later is a reminder to send a collection for a party that
-        // has happened.
-        if (body.scheduledSendOn !== round.scheduledSendOn && body.scheduledSendOn < asOf) {
-          return c.json({ error: "Дата напоминания уже прошла" }, 400);
-        }
-        if (body.scheduledSendOn > round.celebratedOn) {
-          return c.json({ error: "Напоминать после самого дня рождения уже поздно" }, 400);
-        }
-        patch.scheduledSendOn = body.scheduledSendOn;
-      }
-    }
-    if (Object.keys(patch).length === 0) return c.json({ error: "нечего сохранять" }, 400);
-
-    const campaign = updateCampaign(db, Number(c.req.param("id")), asOf, patch);
-    if (!campaign) return c.json({ error: "not_found" }, 404);
-    // Пишем, ЧТО тронули, а не что написали: текст поздравления в журнал не копируется.
-    recordAudit(db, "birthday_campaign_updated", c.get("auth").employeeId, {
-      employeeId: Number(c.req.param("id")),
-      displayName: getEmployeeById(db, Number(c.req.param("id")))?.displayName ?? null,
-      ...(patch.collectUrl !== undefined ? { collectUrl: patch.collectUrl } : {}),
-      ...(patch.messageText !== undefined ? { messageText: patch.messageText ? "изменён" : null } : {}),
-      ...(patch.scheduledSendOn !== undefined ? { scheduledSendOn: patch.scheduledSendOn } : {}),
-    });
-    return c.json({ campaign });
-  });
-
-  /** Sends the collection to the team. Needs an explicit confirmation in the body:
-   *  this is the one call in the app that messages every colleague at once. */
-  app.post("/api/admin/birthdays/:id/send", requireAdmin(db, config.jwtSecret), async (c) => {
-    const asOf = birthdayAsOf(c);
-    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
-    if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
-
     const employeeId = Number(c.req.param("id"));
-    const preview = previewCampaign(db, employeeId, asOf);
-    if (!preview) return c.json({ error: "not_found" }, 404);
-    if (preview.blocker) return c.json({ error: preview.blocker }, 409);
-    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+    if (employeeId === c.get("auth").employeeId) return c.json({ error: "not_found" }, 404);
 
-    const campaign = ensureCampaign(db, employeeId, asOf)!;
-    // Клейм синхронный: между этой строкой и первым `await` ниже другому запросу
-    // некуда вклиниться (сингл-тредный Node), так что второй одновременный «Разослать»
-    // всегда видит кампанию уже занятой.
-    if (birthdaySending.has(campaign.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
-    birthdaySending.add(campaign.id);
-    try {
-      let delivered = 0;
-      for (const recipient of teamRecipients(db, employeeId)) {
-        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
-      }
-      // «Разослано» закрывает кнопку навсегда (`blocker`: «повторная отправка
-      // отключена»), поэтому ставится, только если сообщение дошло хоть до кого-то.
-      // Ноль доставленных — это не рассылка, а её отсутствие: Telegram ответил 429
-      // всей пачке или сеть отвалилась, и запирать единственную кнопку не за что.
-      // Никого не задваиваем — до людей ничего не дошло. Как только дошло хотя бы до
-      // одного, повтор снова закрыт: задвоенное поздравление хуже недосланного.
-      if (delivered > 0) markSent(db, campaign.id, delivered, new Date());
-      recordAudit(db, "birthday_sent", c.get("auth").employeeId, {
-        employeeId,
-        displayName: preview.displayName,
-        delivered,
-        intended: preview.recipients.length,
-      });
-      return c.json({ delivered, intended: preview.recipients.length });
-    } finally {
-      birthdaySending.delete(campaign.id);
+    const parsed = parseCollectionBody(await c.req.json().catch(() => ({})), { requireTitle: false });
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    // A birthday round has no subject to edit — it is named after the person.
+    if (parsed.value.title !== undefined || parsed.value.employeeId !== undefined) {
+      return c.json({ error: "У сбора на день рождения повод и виновник заданы датой рождения." }, 400);
     }
+
+    const round = ensureBirthdayRound(db, employeeId, asOf);
+    if (!round) return c.json({ error: "not_found" }, 404);
+    const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, round, asOf);
+    if (scheduleError) return c.json({ error: scheduleError }, 400);
+
+    const result = updateCollection(db, round.id, parsed.value);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    recordAudit(db, "birthday_campaign_updated", c.get("auth").employeeId, {
+      employeeId,
+      displayName: getEmployeeById(db, employeeId)?.displayName ?? null,
+      ...(parsed.value.collectUrl !== undefined ? { collectUrl: parsed.value.collectUrl } : {}),
+      ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
+      ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
+    });
+    return c.json({ collection: result.collection });
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */
@@ -821,7 +721,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       actorEmployeeId = Number(actorParam);
     }
 
-    const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId });
+    const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId, viewerEmployeeId: c.get("auth").employeeId });
     return c.json({
       total: page.total,
       limit,

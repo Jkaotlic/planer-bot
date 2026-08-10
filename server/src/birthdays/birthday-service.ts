@@ -106,6 +106,58 @@ export function ensureBirthdayRound(db: Db, employeeId: number, asOf: string): C
     .all()[0]!;
 }
 
+/**
+ * This year's round for that person — or an unsaved draft of it.
+ *
+ * A GET must not write, and until now looking at a birthday card created a row
+ * as a side effect. Preparing is what creates the round, and preparing means
+ * saving something: without a link the collection cannot be sent anyway, so a
+ * draft is never a state anybody can act on.
+ *
+ * `id: 0` marks the draft. Callers must not try to send it — `previewCollection`
+ * blocks it on the missing link regardless.
+ */
+export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Collection | null {
+  const employee = db.select().from(employees).where(eq(employees.id, employeeId)).get();
+  if (!employee?.birthDate) return null;
+  const occurrence = occurrenceOf(employee.birthDate, asOf);
+  if (!occurrence) return null;
+
+  const existing = db
+    .select()
+    .from(collections)
+    .where(and(
+      eq(collections.kind, "birthday"),
+      eq(collections.employeeId, employeeId),
+      eq(collections.year, occurrence.year),
+    ))
+    .get();
+  if (existing) return existing;
+
+  return {
+    id: 0,
+    kind: "birthday",
+    employeeId,
+    year: occurrence.year,
+    celebratedOn: occurrence.celebratedOn,
+    title: null,
+    eventDate: null,
+    deadline: null,
+    amountPerPerson: null,
+    totalGoal: null,
+    collectUrl: null,
+    messageText: null,
+    closedAt: null,
+    adminNotifiedAt: null,
+    scheduledSendOn: null,
+    scheduleNotifiedAt: null,
+    sentAt: null,
+    sentCount: 0,
+    sendCount: 0,
+    createdAt: new Date(0),
+  };
+}
+
 /** The nudge admins get a week ahead. Same nominative rule as everywhere else. */
 export function adminNoticeMessage(name: string, birthDateLabel: string, daysUntil: number): string {
   return [

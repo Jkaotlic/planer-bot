@@ -4,6 +4,7 @@ import { createEmployee, linkTelegramAccount, setBirthDate, archiveEmployee } fr
 import {
   upcomingBirthdays,
   ensureBirthdayRound,
+  birthdayRoundDraft,
   adminNoticeMessage,
   adminNoticeReadyMessage,
   roundsScheduledFor,
@@ -11,6 +12,7 @@ import {
   markScheduleNotified,
 } from "./birthday-service";
 import { createCustomCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
+import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
 const ASOF = "2026-08-01";
@@ -93,6 +95,35 @@ describe("ensureBirthdayRound", () => {
     const next = ensureBirthdayRound(db, employee, "2026-09-01")!;
     expect(next.id).not.toBe(first.id);
     expect(next.year).toBe(2027);
+  });
+});
+
+describe("birthdayRoundDraft", () => {
+  it("returns an unsaved draft — id 0 — and creates no row, when nothing has been prepared yet", () => {
+    const db = makeTestDb();
+    const employee = person(db, "Honouree", 1, "08-15");
+    const before = db.select().from(collections).all().length;
+
+    const draft = birthdayRoundDraft(db, employee, "2026-08-01")!;
+    expect(draft).toMatchObject({ id: 0, kind: "birthday", employeeId: employee, year: 2026, celebratedOn: "2026-08-15" });
+    // The point of the whole change: looking at a draft must not write a row.
+    expect(db.select().from(collections).all().length).toBe(before);
+  });
+
+  it("returns the real saved row once ensureBirthdayRound has made one", () => {
+    const db = makeTestDb();
+    const employee = person(db, "Honouree", 1, "08-15");
+    const saved = ensureBirthdayRound(db, employee, "2026-08-01")!;
+
+    const draft = birthdayRoundDraft(db, employee, "2026-08-01")!;
+    expect(draft.id).toBe(saved.id);
+    expect(draft.id).toBeGreaterThan(0);
+  });
+
+  it("returns null for someone with no birthday on file — there is nothing to draft", () => {
+    const db = makeTestDb();
+    const employee = person(db, "NoBirthday", 1, null);
+    expect(birthdayRoundDraft(db, employee, "2026-08-01")).toBeNull();
   });
 });
 
