@@ -5,6 +5,7 @@ import type { Db } from "../db/client";
 import { collections } from "../db/schema";
 import {
   adminRecipients,
+  collectionsForWorker,
   createCustomCollection,
   deleteCollection,
   getCollection,
@@ -230,6 +231,26 @@ describe("deleteCollection", () => {
     expect(birthday.sendCount).toBe(0);
     expect(deleteCollection(db, birthday.id).ok).toBe(false);
     expect(getCollection(db, birthday.id)).not.toBeNull();
+  });
+});
+
+describe("collectionsForWorker", () => {
+  it("shows what was actually sent, is still running, and is not about them", () => {
+    const db = makeTestDb();
+    const me = person(db, "Me", 1);
+    const other = person(db, "Other", 2);
+
+    const mine = createCustomCollection(db, blank({ title: "Про меня", employeeId: me, collectUrl: "https://example.test/1" }));
+    const theirs = createCustomCollection(db, blank({ title: "Про другого", employeeId: other, collectUrl: "https://example.test/2" }));
+    const draft = createCustomCollection(db, blank({ title: "Не разослан", collectUrl: "https://example.test/3" }));
+    const over = createCustomCollection(db, blank({ title: "Просроченный", deadline: "2026-08-01", collectUrl: "https://example.test/4" }));
+    for (const c of [mine, theirs, draft, over]) {
+      if (c.id !== draft.id) markCollectionSent(db, c.id, 2, new Date("2026-08-05T09:00:00Z"));
+    }
+
+    // Exactly one of four survives, and the other three fail for three different
+    // reasons — a filter that drops everything would not pass this.
+    expect(collectionsForWorker(db, TODAY, me).map((c) => c.title)).toEqual(["Про другого"]);
   });
 });
 

@@ -255,3 +255,42 @@ export function markCollectionSent(db: Db, id: number, delivered: number, when: 
     .where(eq(collections.id, id))
     .run();
 }
+
+/** A collection as a worker sees it: what it is for, how much, and the link. */
+export interface WorkerCollection {
+  id: number;
+  title: string;
+  personName: string | null;
+  collectUrl: string | null;
+  amountPerPerson: number | null;
+  totalGoal: number | null;
+  deadline: string | null;
+  eventDate: string | null;
+}
+
+/**
+ * What this person should see in the Mini App: a link to a collection that is
+ * running right now, because a link posted once in a private chat sinks out of
+ * view in a couple of days while the collection itself runs for a week.
+ *
+ * Three conditions, each of them load-bearing: it must have actually been sent
+ * (before that it is the admin's draft, and showing it would leak the surprise
+ * before anyone decided to reveal it), it must still be running (a finished
+ * collection is history, not a call to chip in), and it must not be about them
+ * (`listCollections` already enforces this — the one rule that governs the
+ * whole feature: the honouree never sees their own collection).
+ */
+export function collectionsForWorker(db: Db, today: string, employeeId: number): WorkerCollection[] {
+  return listCollections(db, today, employeeId)
+    .filter((row) => row.collection.sendCount > 0 && row.active)
+    .map((row) => ({
+      id: row.collection.id,
+      title: row.title,
+      personName: row.personName,
+      collectUrl: row.collection.collectUrl,
+      amountPerPerson: row.collection.amountPerPerson,
+      totalGoal: row.collection.totalGoal,
+      deadline: row.collection.deadline,
+      eventDate: row.collection.eventDate,
+    }));
+}
