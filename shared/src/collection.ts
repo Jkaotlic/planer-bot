@@ -79,7 +79,7 @@ export function formatMoney(amount: number): string {
   for (let end = digits.length; end > 0; end -= 3) {
     groups.unshift(digits.slice(Math.max(0, end - 3), end));
   }
-  return `${groups.join(" ")} ₽`;
+  return `${groups.join(" ")} ₽`;
 }
 
 /** «22 августа» из `2026-08-22`. Непонятную строку отдаёт как есть. */

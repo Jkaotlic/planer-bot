@@ -74,14 +74,14 @@ describe("isCollectionActive", () => {
 
 describe("formatMoney", () => {
   it("разделяет разряды неразрывным пробелом", () => {
-    expect(formatMoney(25000)).toBe("25 000 ₽");
-    expect(formatMoney(1000)).toBe("1 000 ₽");
-    expect(formatMoney(500)).toBe("500 ₽");
-    expect(formatMoney(1234567)).toBe("1 234 567 ₽");
+    expect(formatMoney(25000)).toBe("25 000 ₽");
+    expect(formatMoney(1000)).toBe("1 000 ₽");
+    expect(formatMoney(500)).toBe("500 ₽");
+    expect(formatMoney(1234567)).toBe("1 234 567 ₽");
   });
 
   it("не показывает копеек", () => {
-    expect(formatMoney(999.6)).toBe("1 000 ₽");
+    expect(formatMoney(999.6)).toBe("1 000 ₽");
   });
 });
 
