@@ -1,4 +1,4 @@
-export type NavKey = "schedule" | "employees" | "kinds" | "weekend" | "birthdays" | "log" | "settings";
+export type NavKey = "schedule" | "employees" | "kinds" | "weekend" | "collections" | "log" | "settings";
 
 export interface SidebarProps {
   active: NavKey;
@@ -12,7 +12,7 @@ const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }
   { key: "employees", label: "Работники", icon: <PeopleIcon /> },
   { key: "kinds", label: "Виды смен", icon: <KindsIcon /> },
   { key: "weekend", label: "Работа в выходные", icon: <MarketIcon /> },
-  { key: "birthdays", label: "Дни рождения", icon: <CakeIcon /> },
+  { key: "collections", label: "Сборы", icon: <CakeIcon /> },
   { key: "log", label: "Журнал", icon: <LogIcon /> },
   { key: "settings", label: "Настройки", icon: <GearIcon /> },
 ];
