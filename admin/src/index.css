@@ -1875,7 +1875,8 @@ input[type="time"] {
 }
 
 .birthday-label input,
-.birthday-label textarea {
+.birthday-label textarea,
+.birthday-label select {
   padding: 8px 10px;
   border: 1px solid var(--separator);
   border-radius: 8px;
@@ -1884,6 +1885,18 @@ input[type="time"] {
   font: inherit;
   font-size: 13.5px;
   resize: vertical;
+}
+
+/* Даты и суммы ходят парами и на десктопе умещаются в одну строку. На узком
+   окне переносятся, а не сжимаются в нечитаемое. */
+.collection-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.collection-form-row .birthday-label {
+  flex: 1 1 220px;
 }
 
 .birthday-preview-title {

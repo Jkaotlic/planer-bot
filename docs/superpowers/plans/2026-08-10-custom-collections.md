@@ -17,7 +17,8 @@
 - **Слой 1 — TDD обязателен.** Тест вперёд, прогон, красный, потом код. Красноту доказывать: `git stash push <файл-реализации>` → тест обязан упасть → `git stash pop`. «Написал тест и код вместе» — не TDD.
 - **Тест обязан уметь упасть.** Проверять не только «вернулось ожидаемое», но и что в фикстуре есть то, что не должно вернуться. Пустой ответ на фикстуре из одного элемента проходит и при полностью сломанной выборке.
 - **Идентификаторы только латиницей.** `git grep -nE "(const|let|function) [а-яА-ЯёЁ]"` обязан оставаться пустым, включая тестовые фикстуры.
-- **Комментарии в `server/src/**` — по-английски, и в коде, и в тестах.** Русские доменные термины — в «ёлочках» внутри английской фразы. В `shared/` и в мини-аппе комментарии по-русски — намеренная конвенция.
+- **Комментарии в `server/src/**` — по-английски, и в коде, и в тестах.** Русские доменные термины — в «ёлочках» внутри английской фразы (`two identical «ФИО»`). В `shared/` и в мини-аппе комментарии по-русски — намеренная конвенция.
+  **Два исключения, которые не надо «чинить»:** разделители секций в `app.ts` подписаны по-русски (`// --- Дни рождения ---`), и новый блок сборов повторяет этот же вид — иначе оглавление файла станет двуязычным; и в `app.ts` уже лежат старые русские комментарии, не относящиеся к этой работе, — переводить их не входит в задачи, трогать чужие строки ради языка нельзя.
 - **Репозиторий публичный.** Никаких настоящих имён, фамилий, хендлов, telegram id. Перед каждым коммитом: `npx vitest run server/src/db/no-real-names.test.ts`.
 - **`npm test` после правки мока или фикстуры.** Моки покрыты тестами, которые пинят точный состав данных; `npm run typecheck` этого не видит.
 - **Бот пишет команде только по тапу админа.** Ни одна задача не заводит автоматической рассылки работникам.
@@ -26,6 +27,11 @@
 - **Сбор, где ты виновник, не показывается тебе нигде** — ни в списках, ни в предпросмотре, ни в журнале.
 - **Кнопки гасятся на время запроса** (`disabled={busy}`), подтверждающая на время запроса пишет «Отправляю…». Подпись основной кнопки при этом не меняется.
 - **Даты — строки `YYYY-MM-DD`**, сравниваются лексикографически. Никаких `Date` в правилах.
+- **`drizzle-kit migrate` и `push` из корня репозитория пишут В ЖИВУЮ БАЗУ.** `drizzle.config.ts` подставляет `./data/planer.db`, когда не задан `DATABASE_URL`, подтверждения не спрашивает и `--dry-run` не имеет. Живую базу мигрирует сервер сам при старте — руками её не трогает ни одна задача плана. Всё, что нужно прогнать на базе, гоняется на КОПИИ в скретчпаде и с явным `DATABASE_URL`. Найдено ревью Задачи 3.
+- **`as never` в фикстурах — только там, где значение никуда не читается.** У `never` нет ни одного свойства, поэтому `.map((c) => c.title)` после такого каста разваливается на `tsc --strict`, а его гоняет CI (`npm run typecheck`). Если фикстуру потом читают — кастовать в её настоящий тип. Поймано на Задаче 2.
+- **В SQL сравнивать с возможным NULL только через `is`, не через `=`.** `NULL = 5` — это не «false», а NULL, и `WHERE` выбрасывает такую строку так же, как ложную. На Задаче 7 из-за этого общий сбор (виновника нет, `employeeId` = JSON `null`) пропадал бы из журнала у всех подряд. Поймано только потому, что в фикстуре лежала строка, которую фильтр не должен трогать.
+- **Название теста — это обещание. Тест обязан проверять обе половины того, что обещал.** На Задаче 4 тест назывался «кастомный сбор можно дожать, а ДР нельзя» и не создавал ни одного ДР-сбора: ветка блокера у дней рождения не была покрыта вообще, а название уверяло, что покрыта. Если в названии есть «а вот так — нельзя», в теле обязана быть проверка этого «нельзя», и рядом — проверка, что до запрета было можно (иначе тест зелен и на сборе, заблокированном совсем по другой причине).
+- **Полную форму сообщения закреплять целиком (`toBe`), а не по кускам (`toContain`).** `toContain` не видит ни лишней пустой строки, ни пропавшей — ровно на этом спека однажды разошлась с кодом. Поймано на Задаче 2.
 
 ## Структура файлов
 
@@ -58,7 +64,7 @@
 - Modify: `shared/src/index.ts`
 
 **Interfaces:**
-- Consumes: `MONTH_NAMES` из `shared/src/birthday.ts`.
+- Consumes: `MONTH_NAMES` и `MONTH_LENGTHS` из `shared/src/birthday.ts`. `MONTH_LENGTHS` там сейчас module-private — снять с неё замок словом `export`, больше в том файле не менять ничего.
 - Produces:
   - `type CollectionKind = "birthday" | "custom"`
   - `type CollectionStatus = "pending" | "ready" | "sent"`
@@ -148,6 +154,9 @@ describe("isCollectionActive", () => {
 });
 
 describe("formatMoney", () => {
+  // Разделитель разрядов ниже — литеральный U+00A0. В исходнике он неотличим от
+  // обычного пробела глазами, поэтому рядом стоит отдельный тест, проверяющий сам
+  // код-пойнт: без него тест и реализация могут быть неправы одинаково и зелены.
   it("разделяет разряды неразрывным пробелом", () => {
     expect(formatMoney(25000)).toBe("25 000 ₽");
     expect(formatMoney(1000)).toBe("1 000 ₽");
@@ -157,6 +166,11 @@ describe("formatMoney", () => {
 
   it("не показывает копеек", () => {
     expect(formatMoney(999.6)).toBe("1 000 ₽");
+  });
+  it("не пропускает обычный пробел вместо неразрывного", () => {
+    // Прямая проверка того самого дефекта: строка не должна содержать 0x20 вовсе.
+    expect(formatMoney(25000)).not.toContain(" ");
+    expect(formatMoney(25000).codePointAt(2)).toBe(0x00a0);
   });
 });
 
@@ -169,6 +183,15 @@ describe("formatDayMonth", () => {
   it("непонятную строку отдаёт как есть — врать не о чем", () => {
     expect(formatDayMonth("не дата")).toBe("не дата");
     expect(formatDayMonth("2026-13-01")).toBe("2026-13-01");
+  });
+
+  it("несуществующий день месяца — не дата", () => {
+    expect(formatDayMonth("2026-02-30")).toBe("2026-02-30");
+    expect(formatDayMonth("2026-04-31")).toBe("2026-04-31");
+    // А настоящие даты тех же месяцев по-прежнему читаются — иначе тест прошёл бы
+    // и на функции, которая отвергает вообще всё.
+    expect(formatDayMonth("2026-02-28")).toBe("28 февраля");
+    expect(formatDayMonth("2026-04-30")).toBe("30 апреля");
   });
 });
 ```
@@ -183,7 +206,7 @@ Expected: FAIL — `Failed to resolve import "./collection"`.
 Создать `shared/src/collection.ts`:
 
 ```ts
-import { MONTH_NAMES } from "./birthday";
+import { MONTH_LENGTHS, MONTH_NAMES } from "./birthday";
 
 /**
  * Сбор денег: на день рождения или заведённый админом руками.
@@ -273,7 +296,11 @@ export function formatDayMonth(iso: string): string {
   if (!match) return iso;
   const month = Number(match[2]);
   const day = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return iso;
+  // Границу дня спрашиваем у месяца, а не у числа 31: «30 февраля» — это не дата,
+  // и подписывать ею сбор нельзя. Таблица та же, что у `parseBirthDate`, вместе с
+  // её намеренными 29 днями февраля — почему так, написано там.
+  if (month < 1 || month > 12) return iso;
+  if (day < 1 || day > MONTH_LENGTHS[month - 1]!) return iso;
   return `${day} ${MONTH_NAMES[month - 1]}`;
 }
 ```
@@ -434,8 +461,10 @@ describe("compareCollections", () => {
     kind: "custom" as const, employeeId: null, celebratedOn: null, eventDate: null,
     amountPerPerson: null, totalGoal: null, collectUrl: null, closedAt: null, sendCount: 0,
   };
+  // `as CollectionSortable`, а НЕ `as never`: у `never` нет ни одного свойства, и
+  // `.map((c) => c.title)` ниже разваливается на `tsc --strict`, который гоняет CI.
   const row = (title: string, patch: Record<string, unknown>) =>
-    ({ ...base, title, deadline: null, createdAt: "2026-08-01T00:00:00Z", ...patch }) as never;
+    ({ ...base, title, deadline: null, createdAt: "2026-08-01T00:00:00Z", ...patch }) as CollectionSortable;
 
   it("активные впереди закрытых, даже если закрытый ближе по дате", () => {
     const closed = row("Закрытый", { deadline: "2026-08-11", closedAt: "2026-08-09T00:00:00Z" });
@@ -468,7 +497,7 @@ Expected: FAIL — `collectionTitle is not a function` и соседние.
 
 - [ ] **Step 3: Написать реализацию**
 
-Импорт в шапке `shared/src/collection.ts` расширить: `import { formatBirthDate, MONTH_NAMES } from "./birthday";` — ветка дня рождения зовёт `formatBirthDate`, чтобы «29 февраля» осталось «29 февраля» и в невисокосный год, а не превратилось в «1 марта».
+Импорт в шапке `shared/src/collection.ts` расширить: `import { formatBirthDate, MONTH_LENGTHS, MONTH_NAMES } from "./birthday";` — ветка дня рождения зовёт `formatBirthDate`, чтобы «29 февраля» осталось «29 февраля» и в невисокосный год, а не превратилось в «1 марта».
 
 Дописать в конец `shared/src/collection.ts`:
 
@@ -583,7 +612,7 @@ function nearestDate(c: CollectionShape): string | null {
 - [ ] **Step 4: Прогнать тесты**
 
 Run: `npx vitest run shared/src/collection.test.ts`
-Expected: PASS, 22 теста.
+Expected: PASS, 27 тестов (14 от Задачи 1 + 13 новых).
 
 - [ ] **Step 5: Поправить спеку под фактическую строку дожима**
 
@@ -643,63 +672,63 @@ sqlite3 "$(echo $SCRATCH)/pre.db" \
 
 ```ts
 /**
- * Один сбор денег: на день рождения или заведённый админом руками.
+ * One collection of money: a birthday round, or one an admin made by hand.
  *
- * День рождения здесь — частный случай, а не отдельная сущность: у него есть
- * `employee_id` и `year` (пара «человек + год» — его ключ) и нет `title`. У
- * кастомного сбора наоборот — есть повод, а виновник необязателен: на
- * корпоратив скидываются все.
+ * A birthday is the special case here rather than a separate thing: it has an
+ * `employee_id` and a `year` (the pair is its key) and no `title`. A custom one
+ * is the other way round — it has a subject, and an honouree is optional:
+ * everybody chips in for the office coffee machine.
  *
- * Колонки `status` тут нет намеренно: он выводится из `collect_url` и
- * `send_count` (`collectionStatus` в `@planer/shared`). Хранимый статус был бы
- * вторым источником правды и с дожимами начал бы врать — у кастомного сбора со
- * статусом «разослано» кнопка «Разослать» жива.
+ * There is deliberately no `status` column: it follows from `collect_url` and
+ * `send_count` (`collectionStatus` in `@planer/shared`). A stored status would
+ * be a second source of truth, and with reminders it would start lying outright
+ * — a custom collection marked «sent» still has a live send button.
  *
- * Бот по-прежнему не пишет команде сам: он подталкивает админов, всё остальное
- * — нажатая ими кнопка.
+ * The bot still never mails the team on its own: it nudges admins, and every
+ * message after that is a button they pressed.
  */
 export const collections = sqliteTable(
   "collections",
   {
     id: integer().primaryKey({ autoIncrement: true }),
     kind: text().$type<CollectionKind>().notNull().default("custom"),
-    /** Виновник торжества. NULL у общего сбора — «кофемашина в офис». */
+    /** The «виновник торжества». NULL for a general collection. */
     employeeId: integer().references(() => employees.id),
-    /** Только у дня рождения: календарный год этого раунда. */
+    /** Birthday only: the calendar year this round belongs to. */
     year: integer(),
-    /** Только у дня рождения: когда празднуется, YYYY-MM-DD. */
+    /** Birthday only: when it is marked, YYYY-MM-DD. */
     celebratedOn: text(),
-    /** Повод кастомного сбора. У дня рождения NULL — заголовок строится из имени. */
+    /** What a custom collection is for. NULL on a birthday — its title is the name. */
     title: text(),
-    /** Когда событие: свадьба, проводы, корпоратив. */
+    /** When the event is: a wedding, a send-off, the office party. */
     eventDate: text(),
-    /** «Скиньтесь до» — край сбора, который главнее даты события. */
+    /** «Скиньтесь до» — the collection's edge, which outranks the event date. */
     deadline: text(),
-    /** Целые рубли. Копеек в сборе на подарок не бывает. */
+    /** Whole roubles. A whip-round is never counted in kopecks. */
     amountPerPerson: integer(),
     totalGoal: integer(),
     collectUrl: text(),
-    /** Что уйдёт команде. NULL — текст по умолчанию. */
+    /** What the team will be sent. Null means "use the default wording". */
     messageText: text(),
-    /** Когда админ нажал «Собрали, закрыть». NULL — сбор ещё идёт. */
+    /** When an admin pressed «Собрали, закрыть». NULL while it is still running. */
     closedAt: integer({ mode: "timestamp" }),
-    /** Когда админов подтолкнули за неделю, чтобы подтолкнуть один раз. */
+    /** When admins were nudged, so they are nudged once rather than every tick. */
     adminNotifiedAt: integer({ mode: "timestamp" }),
     scheduledSendOn: text(),
     scheduleNotifiedAt: integer({ mode: "timestamp" }),
-    /** Последняя рассылка. */
+    /** The LAST send. */
     sentAt: integer({ mode: "timestamp" }),
-    /** Скольким дошло в ПОСЛЕДНЮЮ рассылку. */
+    /** How many people the LAST send actually reached. */
     sentCount: integer().notNull().default(0),
-    /** Сколько раз рассылали вообще. Единственная правда о «разослано». */
+    /** How many rounds went out at all — the only truth about «разослано». */
     sendCount: integer().notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [
-    // Частичный: правило «один ДР-сбор на человека в год» касается только дней
-    // рождения. Без `WHERE` два кастомных сбора на одного человека и так не
-    // столкнулись бы (в SQLite `NULL ≠ NULL` внутри уникального индекса), но
-    // правило перестало бы читаться как правило.
+    // Partial: «one birthday round per person per year» is a rule about
+    // birthdays only. Without the `WHERE`, two custom collections for the same
+    // person would not clash anyway (in SQLite `NULL ≠ NULL` inside a unique
+    // index), but the rule would stop reading as a rule.
     uniqueIndex("collection_birthday_unique")
       .on(t.employeeId, t.year)
       .where(sql`${t.kind} = 'birthday'`),
@@ -726,8 +755,12 @@ Expected: ошибки только в `server/src/birthdays/birthday-service.ts
 - [ ] **Step 4: Сгенерировать миграцию и переписать её руками**
 
 ```bash
-npm run db:generate -w @planer/server
+npx drizzle-kit generate
 ```
+
+**Именно так, из корня репозитория, а НЕ `npm run db:generate -w @planer/server`.** Скрипт объявлен в `server/package.json`, поэтому `-w` запускает его с `cwd=server/`, откуда корневой `drizzle.config.ts` не находится. Проверено на Задаче 3.
+
+Команда задаёт интерактивные вопросы «переименование или новая таблица» — без TTY на них не ответить. Отвечать можно как угодно: тело SQL всё равно переписывается целиком на Шаге 4, а `meta/0018_snapshot.json` описывает КОНЕЧНОЕ состояние схемы, а не путь к нему, и от ответов не зависит. Это проверено полем-за-полем на Задаче 3 — но проверить снимок после генерации всё равно надо: он молча портит не эту миграцию, а следующую.
 
 drizzle-kit создаст `server/drizzle/0018_*.sql` и допишет `meta/_journal.json`. Переименовать файл в `0018_collections.sql` (и поправить `tag` в `_journal.json` на `0018_collections`), затем привести содержимое к виду:
 
@@ -909,7 +942,9 @@ describe("listCollections", () => {
 
     const titles = listCollections(db, TODAY, viewer).map((row) => row.title);
     // Two rows must survive: an empty answer would pass on a broken query too.
-    expect(titles).toEqual(["Про другого", "Общий"]);
+    // Order is «Общий» first: both rows are dateless, so they tie on date and
+    // fall through to `localeCompare(title, "ru")`, where О precedes П.
+    expect(titles).toEqual(["Общий", "Про другого"]);
   });
 
   it("marks active and closed, and puts the active ones first", () => {
@@ -1845,10 +1880,16 @@ export interface AuditQuery {
   // The surprise rule, applied in SQL rather than after the fact: filtering the
   // page in JS would leave `total` counting rows the viewer never sees, and the
   // paging would claim there is more than there is.
+  //
+  // `is`, not `=`. A general collection has a JSON `null` honouree, and so does
+  // any row whose payload lacks the key; `NULL = 5` is neither true nor false but
+  // NULL, and SQLite's WHERE discards NULL exactly as it discards false. With `=`
+  // those rows vanish from the journal for EVERYBODY. `is` compares them as
+  // values and answers false, which is what the rule means.
   if (query.viewerEmployeeId != null) {
     filters.push(sql`not (
       ${auditLog.type} in ${HONOUREE_AUDIT_TYPES}
-      and json_extract(${auditLog.payload}, '$.employeeId') = ${query.viewerEmployeeId}
+      and json_extract(${auditLog.payload}, '$.employeeId') is ${query.viewerEmployeeId}
     )`);
   }
 ```
@@ -1877,8 +1918,11 @@ git commit -m "feat(server): виновник не видит свой сбор 
 
 **Files:**
 - Modify: `server/src/birthdays/birthday-service.ts` (добавить `birthdayRoundDraft`)
+- **Create: `server/src/http/collection-body.ts` и `collection-body.test.ts` — ЦЕЛИКОМ, вместе с `parseCollectionBody`**
 - Modify: `server/src/http/app.ts:664-798` (весь блок «Дни рождения»)
 - Modify: `server/src/http/birthdays-route.test.ts`
+
+**Порядок, который я сначала перепутал:** `collection-body.ts` описан ниже, в Задаче 9, но роут `PUT /api/admin/birthdays/:id` из ЭТОЙ задачи уже зовёт `parseCollectionBody` — без него он не соберётся. Поэтому файл и его тест создаются здесь целиком (код и тесты — в Шагах 1 и 3 Задачи 9, читать их оттуда), а Задача 9 его только использует.
 
 **Interfaces:**
 - Consumes: `ensureBirthdayRound`, `upcomingBirthdays` (Задачи 5, 7); `previewCollection`, `updateCollection` (Задача 4).
@@ -2140,8 +2184,7 @@ git commit -m "feat(api): предпросмотр ДР ничего не соз
 ### Task 9: Роуты сборов
 
 **Files:**
-- Create: `server/src/http/collection-body.ts`
-- Create: `server/src/http/collection-body.test.ts`
+- `server/src/http/collection-body.ts` и `collection-body.test.ts` — **уже созданы Задачей 8** (её роут `PUT /api/admin/birthdays/:id` зависит от `parseCollectionBody`). Шаги 1–3 ниже держат их код; если файлы на месте и тесты зелёные — сверить и идти дальше, заново не писать.
 - Create: `server/src/http/collections-route.test.ts`
 - Modify: `server/src/http/app.ts` (новый блок роутов после блока дней рождения)
 
@@ -2727,7 +2770,7 @@ export function collectionsForWorker(db: Db, today: string, employeeId: number):
 В `server/src/http/app.ts`, рядом с прочими роутами работника (`/api/weekend/*`):
 
 ```ts
-  /** Активные сборы, о которых человеку уже написали. Свой он не видит. */
+  /** Running collections this person has already been told about. Not their own. */
   app.get("/api/collections", requireAuth(config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
@@ -3002,11 +3045,12 @@ git commit -m "feat(api-клиенты): сборы в обеих мордах �
 - Consumes: клиент из Задачи 11; `collectionStatus`, `formatMoney`, `formatDayMonth` из `@planer/shared`.
 - Produces: экспортируемые из `AdminCollections.tsx` чистые хелперы, на которых стоят тесты:
   - `statusOf(row: CollectionRow): { label: string; tone: StatusTone }`
+  - `roundStatus(campaign: Collection | null, today: string): { label: string; tone: StatusTone }` — тот же чип для списка ближайших ДР, где строки списка сборов нет: там лежит сама запись (или `null`, пока раунд не сохранён ни разу). Считает статус и активность через `collectionStatus`/`isCollectionActive` из `@planer/shared` и делегирует в `statusOf`, чтобы два списка на одном экране не разошлись в словах про один и тот же раунд.
   - `sendButtonLabel(preview: CollectionPreview): string`
   - `moneyLine(c: { amountPerPerson: number | null; totalGoal: number | null }): string | null`
   - `canCreate(title: string): boolean`
 
-- [ ] **Step 1: Написать падающий тест на хелперы**
+- [x] **Step 1: Написать падающий тест на хелперы**
 
 Создать `miniapp/src/screens/admin/collection-form.test.tsx`:
 
@@ -3047,19 +3091,27 @@ describe("sendButtonLabel", () => {
 
 describe("statusOf", () => {
   it("закрытый сбор читается закрытым, а не «готово»", () => {
-    const base = { collection: { collectUrl: "https://x", sendCount: 1, closedAt: null }, active: true };
-    expect(statusOf({ ...base, status: "sent" } as never).label).toBe("Разослано · 1");
+    // sentCount (до скольких дошло) и sendCount (сколько было рассылок) — РАЗНЫЕ
+    // числа, и в фикстуре они разные намеренно: чип показывает первое, как и
+    // сегодня на «Днях рождения». Совпадающие значения пропустили бы подмену
+    // одного другим, а `as never` не поймает её и на tsc.
+    const base = { collection: { collectUrl: "https://x", sentCount: 5, sendCount: 2, closedAt: null }, active: true };
+    expect(statusOf({ ...base, status: "sent" } as never).label).toBe("Разослано · 5");
     expect(statusOf({ ...base, status: "sent", active: false } as never).label).toBe("Закрыт");
   });
 });
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+Фикстуры лучше строить типизированными фабриками (`collection(patch)`, `row(patch)`,
+`preview(patch)`), а не `as never`: у `never` нет свойств, и тест, который потом читает
+поле фикстуры, разваливается на `tsc --strict` — этот класс уже ловили на Задаче 2.
+
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npx vitest run miniapp/src/screens/admin/collection-form.test.tsx`
 Expected: FAIL — модуля `./AdminCollections` нет.
 
-- [ ] **Step 3: Переименовать экран и дописать хелперы**
+- [x] **Step 3: Переименовать экран и дописать хелперы**
 
 ```bash
 git mv miniapp/src/screens/admin/AdminBirthdays.tsx miniapp/src/screens/admin/AdminCollections.tsx
@@ -3096,22 +3148,35 @@ export function sendButtonLabel(preview: CollectionPreview): string {
   return `Напомнить ещё раз${when}`;
 }
 
-/** Где раунд, в одном слове. Закрытый читается закрытым, а не «готово». */
-export function statusOf(row: CollectionRow): { label: string; tone: StatusTone } {
+/** Где раунд, в одном слове. Закрытый читается закрытым, а не «готово».
+ *  Принимает `Pick<CollectionRow, …>`, а не всю строку: тогда `roundStatus`
+ *  ниже собирает вход сам, без каста. */
+export function statusOf(row: Pick<CollectionRow, "collection" | "status" | "active">): { label: string; tone: StatusTone } {
   if (!row.active) return { label: "Закрыт", tone: "pending" };
   if (row.status === "sent") return { label: `Разослано · ${row.collection.sentCount}`, tone: "sent" };
   if (row.status === "ready") return { label: "Готово", tone: "ready" };
   return { label: "Нет ссылки", tone: "pending" };
 }
+
+/** Тот же чип для раунда ДР: у списка ближайших нет строки, посчитанной сервером. */
+export function roundStatus(campaign: Collection | null, today: string): { label: string; tone: StatusTone } {
+  if (!campaign) return { label: "Нет ссылки", tone: "pending" };
+  return statusOf({
+    collection: campaign,
+    status: collectionStatus(campaign),
+    active: isCollectionActive(campaign, today),
+  });
+}
 ```
 
-- [ ] **Step 4: Собрать экран**
+- [x] **Step 4: Собрать экран**
 
 Внутри `AdminCollections` — три секции в одном `List`:
 
 1. `Section header="Ближайшие дни рождения"` — существующие карточки, без изменений по смыслу; редактор карточки зовёт `saveBirthdayRound` и `getBirthdayPreview`, а отправку — общим `sendCollection(preview.id)`. Кнопка отправки погашена, пока `preview.id === 0`: раунд ещё не сохранён.
 2. `Section header="Новый сбор"` — сворачиваемая форма:
    - `Input header="Повод"` (обязателен), `Select` «Кому» со значениями «Общий сбор» + активные работники, `input type="date"` × 2 («Дата события», «Скинуться до»), `Input type="number" inputMode="numeric"` × 2 («По сколько с человека», «Нужно всего»), `Input header="Ссылка на сбор" type="url"`, `Textarea header="Свой текст"`;
+   - **из «Кому» вычитается сам смотрящий.** Сбор, где ты виновник, сервер тебе не отдаёт — созданный на себя пропал бы с экрана в тот же миг, и его нельзя было бы ни разослать, ни удалить, ни закрыть. Смотрящий берётся из `getMe()`, работники — из `getAdminEmployees()`, оба грузятся рядом со списками;
    - кнопка «Создать» — `disabled={!canCreate(title) || busy}`;
    - после успеха форма схлопывается, оба списка перечитываются (`reloadEverything`, он в файле уже есть).
 3. `Section header="Сборы"` — `rows.map` по `getCollections()`. Каждая карточка: заголовок (`row.title`), вторая строка `moneyLine` + дедлайн, статус справа, `CopyableLink` (компонент в файле уже есть), кнопка «Открыть» → разворачивает редактор по `row.collection.id`.
@@ -3128,12 +3193,12 @@ export function statusOf(row: CollectionRow): { label: string; tone: StatusTone 
 
 и переименовать значение `AdminSection` `"birthdays"` → `"collections"` во всех местах файла.
 
-- [ ] **Step 5: Прогнать тесты мини-аппа**
+- [x] **Step 5: Прогнать тесты мини-аппа**
 
 Run: `npx vitest run miniapp/`
 Expected: PASS. Переименованные тесты поправить под новые имена — если какой-то из них после переименования проходит, не меняясь по сути, это нормально: он и раньше проверял поведение, которое не изменилось.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 npx vitest run server/src/db/no-real-names.test.ts
@@ -3156,7 +3221,7 @@ git commit -m "feat(мини-апп): раздел «Сборы» — форма
 
 **Что в консоли появляется впервые.** Сегодня в десктопной консоли нет списка прошлых сборов вообще — `admin/src/api/client.ts` не импортирует `mockGetBirthdayCampaigns`, и экран показывает только ближайшие дни рождения. Список сборов здесь строится с нуля.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `admin/src/collections-screen.test.tsx`:
 
@@ -3205,12 +3270,12 @@ describe("CollectionsScreen", () => {
 
 Если `@testing-library/react` в `admin` ещё не подключён — свериться с `admin/src/birthdays-reach.test.tsx` и повторить его способ рендера, а не заводить новую зависимость.
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npx vitest run admin/src/collections-screen.test.tsx`
 Expected: FAIL — файла экрана нет.
 
-- [ ] **Step 3: Переименовать и собрать экран**
+- [x] **Step 3: Переименовать и собрать экран**
 
 ```bash
 git mv admin/src/screens/BirthdaysScreen.tsx admin/src/screens/CollectionsScreen.tsx
@@ -3221,7 +3286,7 @@ git mv admin/src/birthdays-reach.test.tsx admin/src/collections-reach.test.tsx
 
 В `admin/src/App.tsx` заменить импорт и ярлык раздела на «Сборы».
 
-- [ ] **Step 4: Прогнать тесты консоли и закоммитить**
+- [x] **Step 4: Прогнать тесты консоли и закоммитить**
 
 Run: `npx vitest run admin/`
 Expected: PASS.
@@ -3245,7 +3310,7 @@ git commit -m "feat(консоль): раздел «Сборы» вместо «
 - Consumes: `apiClient.getMyCollections()` (Задача 11); `formatMoney`, `formatDayMonth` из `@planer/shared`.
 - Produces: `TeamCollections` — секция, которая **рисует сама себя или ничего**.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `miniapp/src/screens/team/TeamCollections.test.tsx`:
 
@@ -3291,12 +3356,12 @@ describe("TeamCollections", () => {
 });
 ```
 
-- [ ] **Step 2: Прогнать и убедиться, что падает**
+- [x] **Step 2: Прогнать и убедиться, что падает**
 
 Run: `npx vitest run miniapp/src/screens/team/TeamCollections.test.tsx`
 Expected: FAIL — компонента нет.
 
-- [ ] **Step 3: Написать компонент**
+- [x] **Step 3: Написать компонент**
 
 Создать `miniapp/src/screens/team/TeamCollections.tsx`:
 
@@ -3369,7 +3434,7 @@ export function TeamCollections() {
 
 В `miniapp/src/screens/TeamScreen.tsx` отрисовать `<TeamCollections />` первым элементом внутри `ScreenScroll`, выше переключателя вида.
 
-- [ ] **Step 4: Прогнать тесты и закоммитить**
+- [x] **Step 4: Прогнать тесты и закоммитить**
 
 Run: `npx vitest run miniapp/`
 Expected: PASS.
@@ -3386,7 +3451,7 @@ git commit -m "feat(мини-апп): секция «Идёт сбор» во в
 
 **Files:** ничего не создаётся — задача целиком про доказательства.
 
-- [ ] **Step 1: Полный прогон**
+- [x] **Step 1: Полный прогон**
 
 ```bash
 npm test
@@ -3395,7 +3460,7 @@ npm run typecheck
 
 Ожидается: оба зелёные. Записать число тестов и число файлов — с ними сверяется CI (было 1283 теста до этой работы).
 
-- [ ] **Step 2: Страж приватности на живой базе**
+- [x] **Step 2: Страж приватности на живой базе**
 
 ```bash
 npx vitest run server/src/db/no-real-names.test.ts
@@ -3403,7 +3468,7 @@ npx vitest run server/src/db/no-real-names.test.ts
 
 Ожидается: PASS. Если пропущен — значит нет `data/planer.db`, и это не доказательство: прогнать там, где база есть.
 
-- [ ] **Step 3: Проверить, что кириллических идентификаторов не завелось**
+- [x] **Step 3: Проверить, что кириллических идентификаторов не завелось**
 
 ```bash
 git grep -nE "(const|let|function) [а-яА-ЯёЁ]" -- '*.ts' '*.tsx'
@@ -3411,7 +3476,7 @@ git grep -nE "(const|let|function) [а-яА-ЯёЁ]" -- '*.ts' '*.tsx'
 
 Ожидается: пусто.
 
-- [ ] **Step 4: Проверить язык комментариев на сервере**
+- [x] **Step 4: Проверить язык комментариев на сервере**
 
 ```bash
 git grep -nE "^\s*(//|\*) .*[а-яА-ЯёЁ]" -- 'server/src/**/*.ts' | grep -v "«"
@@ -3419,7 +3484,7 @@ git grep -nE "^\s*(//|\*) .*[а-яА-ЯёЁ]" -- 'server/src/**/*.ts' | grep -v 
 
 Ожидается: пусто. Русские доменные термины на сервере допускаются только в «ёлочках» внутри английской фразы; всё, что нашлось помимо них, — перевести.
 
-- [ ] **Step 5: Пересобрать обе морды**
+- [x] **Step 5: Пересобрать обе морды**
 
 ```bash
 npm run build -w miniapp && npm run build -w admin
@@ -3427,11 +3492,11 @@ npm run build -w miniapp && npm run build -w admin
 
 Ожидается: обе сборки проходят. (Если скрипта `build` в воркспейсе нет — свериться с тем, как фронтенды собирались в предыдущих фичах, и повторить.)
 
-- [ ] **Step 6: Постусловие миграции ещё раз, на свежей копии живой базы**
+- [x] **Step 6: Постусловие миграции ещё раз, на свежей копии живой базы**
 
 Повторить Шаг 6 Задачи 3 на новой копии `data/planer.db` — между тем прогоном и этим успели пройти двенадцать задач, и проверять надо тот код, который поедет на сервер.
 
-- [ ] **Step 7: Отчитаться**
+- [x] **Step 7: Отчитаться**
 
 В отчёте назвать числами: сколько тестов, сколько файлов тестов, что показал прогон миграции на копии, и **что осталось непроверенным живьём** — реальная отправка в Telegram кастомного сбора никакими тестами не доказывается, транспорт в них застабан.
 

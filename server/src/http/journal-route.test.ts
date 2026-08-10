@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { createShift } from "../repo/shifts";
 import { recordAudit } from "../repo/audit";
@@ -20,6 +20,9 @@ const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(id) }),
   }))).json()).token as string;
 const auth = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+const send = (token: string, body: unknown, method: string) => ({
+  method, headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+});
 const presetId = (db: Db, name: string) => listActiveTemplates(db).find((t) => t.name === name)!.id;
 
 describe("GET /api/admin/journal", () => {
@@ -151,6 +154,38 @@ describe("GET /api/admin/journal", () => {
     const res = await (await app.request(`/api/admin/journal?actor=${anya}`, auth(token))).json();
     expect(res.total).toBe(1);
     expect(res.events.every((e: { actorName: string | null }) => e.actorName !== null)).toBe(true);
+  });
+
+  /**
+   * The surprise rule applies to the journal too: an event about a person's own
+   * birthday round must not tell them the amount, the wording, or who is
+   * chipping in — even when they are one of the admins who can otherwise read
+   * the whole feed. Two admins, so the honouree's own filtered-out view is
+   * distinguishable from a query that filters everything.
+   */
+  it("hides a birthday-round event from its own honouree, even though they are an admin", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const honouree = createEmployee(db, { displayName: "Honouree", inviteToken: "inv-honouree" }).id;
+    linkTelegramAccount(db, "inv-honouree", 111);
+    setBirthDate(db, honouree, "08-05");
+    setEmployeeAdmin(db, honouree, true);
+    const otherAdmin = createEmployee(db, { displayName: "OtherAdmin", inviteToken: "inv-other" }).id;
+    linkTelegramAccount(db, "inv-other", 222);
+    setEmployeeAdmin(db, otherAdmin, true);
+
+    const otherToken = await tokenFor(app, 222);
+    await app.request(`/api/admin/birthdays/${honouree}?asOf=2026-08-01`,
+      send(otherToken, { collectUrl: "https://example.test/c/1" }, "PUT"));
+
+    const honoureeToken = await tokenFor(app, 111);
+    const asHonouree = await (await app.request("/api/admin/journal", auth(honoureeToken))).json();
+    expect(asHonouree.events.map((e: { type: string }) => e.type)).not.toContain("birthday_campaign_updated");
+
+    // The other admin — who is not the honouree — must still see it: an empty
+    // feed for everyone would also pass the assertion above.
+    const asOther = await (await app.request("/api/admin/journal", auth(otherToken))).json();
+    expect(asOther.events.map((e: { type: string }) => e.type)).toContain("birthday_campaign_updated");
   });
 });
 

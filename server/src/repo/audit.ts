@@ -1,5 +1,5 @@
-import { and, count, desc, eq, gte, inArray, lte } from "drizzle-orm";
-import type { AuditType } from "@planer/shared";
+import { and, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { HONOUREE_AUDIT_TYPES, type AuditType } from "@planer/shared";
 import type { Db } from "../db/client";
 import { auditLog, employees, type AuditLog } from "../db/schema";
 
@@ -30,6 +30,9 @@ export interface AuditQuery {
   to?: string;
   limit: number;
   offset?: number;
+  /** Who is looking. Events about their own collection are withheld from them —
+   *  the surprise rule applies to the journal too, not only to the bot. */
+  viewerEmployeeId?: number;
 }
 
 export interface AuditPage {
@@ -58,6 +61,20 @@ export function queryAudit(db: Db, query: AuditQuery): AuditPage {
   if (query.actorEmployeeId != null) filters.push(eq(auditLog.actorEmployeeId, query.actorEmployeeId));
   if (query.from) filters.push(gte(auditLog.createdAt, new Date(`${query.from}T00:00:00Z`)));
   if (query.to) filters.push(lte(auditLog.createdAt, new Date(`${query.to}T23:59:59Z`)));
+  // The surprise rule, applied in SQL rather than after the fact: filtering the
+  // page in JS would leave `total` counting rows the viewer never sees, and the
+  // paging would then claim there is more left to show than there actually is.
+  // `is`, not `=`: a general collection stores `employeeId: null`, and SQL's
+  // three-valued logic makes `NULL = x` itself NULL rather than false — that
+  // would turn `not (...)` into NULL too, which SQLite's WHERE drops just like
+  // it drops false, silently hiding rows that were never about anyone in
+  // particular. `is` compares NULL to a non-null value as plain false instead.
+  if (query.viewerEmployeeId != null) {
+    filters.push(sql`not (
+      ${auditLog.type} in ${HONOUREE_AUDIT_TYPES}
+      and json_extract(${auditLog.payload}, '$.employeeId') is ${query.viewerEmployeeId}
+    )`);
+  }
   const where = filters.length > 0 ? and(...filters) : undefined;
 
   const rows = db
