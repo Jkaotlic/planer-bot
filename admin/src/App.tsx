@@ -19,7 +19,7 @@ import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
-import { BirthdaysScreen } from "./screens/BirthdaysScreen";
+import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
@@ -98,7 +98,7 @@ export function App() {
   // всей `main-column`. Загрузка людей и пресетов не удалась — показывать
   // действительно нечего, ни один раздел без них не работает. Не подгрузилась
   // неделя расписания — это беда одного раздела, и «Работники», «Журнал»,
-  // «Выходные», «Дни рождения» обязаны открываться как ни в чём не бывало.
+  // «Выходные», «Сборы» обязаны открываться как ни в чём не бывало.
   const [bootError, setBootError] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
@@ -363,8 +363,8 @@ export function App() {
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "weekend" ? (
           <WeekendAdminScreen />
-        ) : nav === "birthdays" ? (
-          <BirthdaysScreen />
+        ) : nav === "collections" ? (
+          <CollectionsScreen />
         ) : nav === "log" ? (
           <JournalScreen />
         ) : nav === "settings" ? (
