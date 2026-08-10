@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_TYPES, auditMonthRange, describeAuditEvent, formatAuditMoment } from "./audit";
+import { AUDIT_TYPES, HONOUREE_AUDIT_TYPES, auditMonthRange, describeAuditEvent, formatAuditMoment } from "./audit";
 
 describe("describeAuditEvent — записи", () => {
   it("рассказывает, кому и на какой день поставили смену", () => {
@@ -313,6 +313,45 @@ describe("describeAuditEvent — ограничения работника", () 
     expect(view.lines).toContain("назначения: участвует → не участвует");
     // Обмены не менялись — строки про них быть не должно.
     expect(view.lines.some((line) => line.startsWith("обмены"))).toBe(false);
+  });
+});
+
+describe("события сборов", () => {
+  it("«создан сбор» называет повод, а не идентификатор", () => {
+    const view = describeAuditEvent({
+      type: "collection_created",
+      payload: { collectionId: 4, title: "Кофемашина", personName: null },
+    });
+    expect(view.title).toBe("Заведён сбор");
+    expect(view.lines[0]).toBe("Кофемашина");
+  });
+
+  it("«разослан сбор» отличает первую рассылку от напоминания", () => {
+    const first = describeAuditEvent({
+      type: "collection_sent",
+      payload: { title: "Кофемашина", round: 1, delivered: 12, intended: 14 },
+    });
+    expect(first.title).toBe("Разослан сбор");
+    expect(first.lines).toContain("доставлено 12 из 14");
+
+    const again = describeAuditEvent({
+      type: "collection_sent",
+      payload: { title: "Кофемашина", round: 3, delivered: 9, intended: 14 },
+    });
+    expect(again.title).toBe("Напоминание о сборе");
+    expect(again.lines).toContain("рассылка №3");
+  });
+
+  it("«закрыт» и «открыт заново» — разные заголовки", () => {
+    expect(describeAuditEvent({ type: "collection_closed", payload: { title: "Кофемашина", closed: true } }).title)
+      .toBe("Сбор закрыт");
+    expect(describeAuditEvent({ type: "collection_closed", payload: { title: "Кофемашина", closed: false } }).title)
+      .toBe("Сбор открыт заново");
+  });
+
+  it("список типов виновника не пуст и состоит из существующих типов", () => {
+    expect(HONOUREE_AUDIT_TYPES.length).toBeGreaterThan(0);
+    for (const type of HONOUREE_AUDIT_TYPES) expect(AUDIT_TYPES).toContain(type);
   });
 });
 

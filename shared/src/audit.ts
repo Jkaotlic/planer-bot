@@ -30,10 +30,28 @@ export const AUDIT_TYPES = [
   "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
   "birthday_campaign_updated",
+  "collection_created", "collection_updated", "collection_sent",
+  "collection_closed", "collection_deleted",
   "reminder_undeliverable", "reminders_dispatched",
 ] as const;
 
 export type AuditType = (typeof AUDIT_TYPES)[number];
+
+/**
+ * События, у которых в payload лежит `employeeId` виновника торжества.
+ *
+ * На этот список опирается правило «сбор, где ты виновник, не показывается
+ * тебе нигде»: журнал вычитает из выдачи строки, где `employeeId` совпал со
+ * смотрящим. Список отдельный, а не «все, что начинается с birthday_»:
+ * префикс — это соглашение об именах, а не гарантия того, что в payload есть
+ * нужное поле.
+ */
+export const HONOUREE_AUDIT_TYPES: readonly AuditType[] = [
+  "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
+  "birthday_campaign_updated",
+  "collection_created", "collection_updated", "collection_sent",
+  "collection_closed", "collection_deleted",
+];
 
 export interface AuditView {
   /** Одиночный символ — опознавательный знак строки в ленте. */
@@ -336,6 +354,45 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     if (p.messageText !== undefined) lines.push(str(p.messageText) ? "текст изменён" : "текст сброшен на стандартный");
     return { icon: "🎂", title: "Изменён сбор на день рождения", lines };
   },
+
+  collection_created: (p) => ({
+    icon: "💰",
+    title: "Заведён сбор",
+    lines: [str(p.title) ?? "сбор", ...(str(p.personName) ? [`виновник: ${str(p.personName)}`] : [])],
+  }),
+  collection_updated: (p) => {
+    const lines = [str(p.title) ?? "сбор"];
+    if (p.collectUrl !== undefined) lines.push(str(p.collectUrl) ? "ссылка на сбор изменена" : "ссылка на сбор убрана");
+    if (p.deadline !== undefined) lines.push(`скинуться до: ${str(p.deadline) ? dayLabel(p.deadline) : "без срока"}`);
+    if (p.scheduledSendOn !== undefined) {
+      lines.push(`напомнить: ${str(p.scheduledSendOn) ? dayLabel(p.scheduledSendOn) : "не напоминать"}`);
+    }
+    // Сам текст письма в журнал не копируется — здесь только факт правки.
+    if (p.messageText !== undefined) lines.push(str(p.messageText) ? "текст изменён" : "текст сброшен на стандартный");
+    return { icon: "💰", title: "Изменён сбор", lines };
+  },
+  collection_sent: (p) => {
+    const round = num(p.round) ?? 1;
+    return {
+      icon: "💰",
+      title: round > 1 ? "Напоминание о сборе" : "Разослан сбор",
+      lines: [
+        str(p.title) ?? "сбор",
+        ...(round > 1 ? [`рассылка №${round}`] : []),
+        `доставлено ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`,
+      ],
+    };
+  },
+  collection_closed: (p) => ({
+    icon: "💰",
+    title: p.closed === false ? "Сбор открыт заново" : "Сбор закрыт",
+    lines: [str(p.title) ?? "сбор"],
+  }),
+  collection_deleted: (p) => ({
+    icon: "🗑",
+    title: "Удалён сбор",
+    lines: [str(p.title) ?? "сбор"],
+  }),
 
   reminder_undeliverable: (p) => ({
     icon: "🚫",
