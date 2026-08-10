@@ -47,11 +47,21 @@ function occurrenceOf(birthDate: string, asOf: string): { celebratedOn: string; 
  * time round if one exists. `withinDays` trims it to the near future; without
  * it the whole year comes back, which is what the «Дни рождения» list shows.
  */
-export function upcomingBirthdays(db: Db, asOf: string, withinDays?: number): UpcomingBirthday[] {
+export function upcomingBirthdays(
+  db: Db,
+  asOf: string,
+  withinDays?: number,
+  viewerEmployeeId?: number,
+): UpcomingBirthday[] {
   const rows = db.select().from(collections).where(eq(collections.kind, "birthday")).all();
   const roundFor = new Map(rows.map((row) => [`${row.employeeId}:${row.year}`, row] as const));
 
   return listActive(db)
+    // A collection is a surprise, and the one person who must never see it is
+    // the honouree — including when they are the admin looking at the screen.
+    // Left undefined by the notice tick on purpose: the bot messages everyone
+    // on this list, honouree included, or their colleagues never get reminded.
+    .filter((employee) => employee.id !== viewerEmployeeId)
     .filter((employee) => employee.birthDate && parseBirthDate(employee.birthDate))
     .flatMap((employee) => {
       const occurrence = occurrenceOf(employee.birthDate!, asOf);

@@ -66,6 +66,19 @@ describe("upcomingBirthdays", () => {
   });
 });
 
+describe("upcomingBirthdays and the viewer", () => {
+  it("drops the viewer from the list and keeps everybody else", () => {
+    const db = makeTestDb();
+    const viewer = person(db, "Viewer", 1, "08-12");
+    person(db, "Other", 2, "08-13");
+
+    const forViewer = upcomingBirthdays(db, "2026-08-10", 30, viewer);
+    // Two people have birthdays here — an empty list would pass on a broken filter.
+    expect(forViewer.map((b) => b.displayName)).toEqual(["Other"]);
+    expect(upcomingBirthdays(db, "2026-08-10", 30).map((b) => b.displayName)).toEqual(["Viewer", "Other"]);
+  });
+});
+
 describe("ensureBirthdayRound", () => {
   it("creates one round per person per year and finds it again", () => {
     const db = makeTestDb();
