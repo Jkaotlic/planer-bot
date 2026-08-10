@@ -18,6 +18,8 @@ import {
   mockGetCollections,
   mockGetCollectionPreview,
   mockSendCollection,
+  mockGetBirthdayPreview,
+  mockSaveBirthdayRound,
   MOCK_ME,
 } from "./mock";
 
@@ -320,5 +322,26 @@ describe("мок сборов", () => {
     await mockSendCollection(created.id);
     expect((await mockGetCollectionPreview(created.id)).blocker).toBeNull();
     expect((await mockGetCollectionPreview(created.id)).sendCount).toBe(1);
+
+    // Вторая половина названия теста: раунд ДР после рассылки — наоборот,
+    // дожать нельзя. id 2 — «Игорь Петров», у него есть дата рождения в
+    // фикстуре, и это не MOCK_ME (id 1), так что сюрприз-правило его не тронет.
+    const BIRTHDAY_EMPLOYEE_ID = 2;
+    const round = await mockSaveBirthdayRound(BIRTHDAY_EMPLOYEE_ID, { collectUrl: "https://example.test/dr" });
+    expect((await mockGetBirthdayPreview(BIRTHDAY_EMPLOYEE_ID)).blocker).toBeNull();
+
+    await mockSendCollection(round.id);
+    expect((await mockGetBirthdayPreview(BIRTHDAY_EMPLOYEE_ID)).blocker).toBe("Уже разослано — повторная отправка отключена.");
+  });
+
+  it("сюрприз-правило: свой сбор не виден в списке и не открывается по id — чужой виден", async () => {
+    const hidden = await mockCreateCollection({ title: "Секретный сбор", employeeId: MOCK_ME.id });
+    const visible = await mockCreateCollection({ title: "Открытый сбор" });
+
+    const rows = await mockGetCollections();
+    expect(rows.some((r) => r.collection.id === hidden.id)).toBe(false);
+    expect(rows.some((r) => r.collection.id === visible.id)).toBe(true);
+
+    await expect(mockGetCollectionPreview(hidden.id)).rejects.toThrow("not_found");
   });
 });
