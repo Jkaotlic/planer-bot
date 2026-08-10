@@ -1,21 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin, archiveEmployee } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setBirthDate, archiveEmployee } from "../repo/employees";
 import {
   upcomingBirthdays,
-  ensureCampaign,
-  updateCampaign,
-  previewCampaign,
-  teamRecipients,
-  adminRecipients,
-  defaultMessage,
+  ensureBirthdayRound,
   adminNoticeMessage,
   adminNoticeReadyMessage,
-  campaignsScheduledFor,
+  roundsScheduledFor,
   markAdminNotified,
   markScheduleNotified,
-  markSent,
 } from "./birthday-service";
+import { createCustomCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
 import type { Db } from "../db/client";
 
 const ASOF = "2026-08-01";
@@ -71,120 +66,31 @@ describe("upcomingBirthdays", () => {
   });
 });
 
-describe("who gets what", () => {
-  it("never sends the collection to the person it is for", () => {
+describe("ensureBirthdayRound", () => {
+  it("creates one round per person per year and finds it again", () => {
     const db = makeTestDb();
-    const birthday = person(db, "Именинник", 1, "08-05");
-    person(db, "Коллега", 2, null);
+    const employee = person(db, "Honouree", 1, "08-15");
 
-    expect(teamRecipients(db, birthday).map((e) => e.displayName)).toEqual(["Коллега"]);
-  });
-
-  it("leaves out anybody with no Telegram — there is nowhere to send it", () => {
-    const db = makeTestDb();
-    const birthday = person(db, "Именинник", 1, "08-05");
-    person(db, "Без телеграма", null, null);
-    expect(teamRecipients(db, birthday)).toEqual([]);
-  });
-
-  it("nudges admins, but not an admin whose own birthday it is", () => {
-    const db = makeTestDb();
-    const birthdayAdmin = person(db, "Админ-именинник", 1, "08-05");
-    const otherAdmin = person(db, "Другой админ", 2, null);
-    person(db, "Обычный", 3, null);
-    setEmployeeAdmin(db, birthdayAdmin, true);
-    setEmployeeAdmin(db, otherAdmin, true);
-
-    expect(adminRecipients(db, birthdayAdmin).map((e) => e.displayName)).toEqual(["Другой админ"]);
-  });
-});
-
-describe("campaign", () => {
-  it("creates one round per person per year, and reuses it", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    const first = ensureCampaign(db, id, ASOF)!;
-    const again = ensureCampaign(db, id, ASOF)!;
+    const first = ensureBirthdayRound(db, employee, "2026-08-01")!;
+    const again = ensureBirthdayRound(db, employee, "2026-08-02")!;
     expect(again.id).toBe(first.id);
-    expect(first).toMatchObject({ year: 2026, celebratedOn: "2026-08-05", status: "pending" });
-  });
+    expect(first).toMatchObject({ kind: "birthday", year: 2026, celebratedOn: "2026-08-15", sendCount: 0 });
 
-  it("becomes «ready» once the link is in, and «pending» again if it is cleared", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    expect(updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x" })!.status).toBe("ready");
-    expect(updateCampaign(db, id, ASOF, { collectUrl: null })!.status).toBe("pending");
-  });
-
-  it("keeps the admin's own wording over the default", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    person(db, "Коллега", 2, null);
-    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", messageText: "Скидываемся Мишину!" });
-    expect(previewCampaign(db, id, ASOF)!.message).toBe("Скидываемся Мишину!");
-  });
-});
-
-describe("previewCampaign — what the admin sees before anything leaves", () => {
-  it("shows the exact text and the exact recipients", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    person(db, "Первый", 2, null);
-    person(db, "Второй", 3, null);
-    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/abc" });
-
-    const preview = previewCampaign(db, id, ASOF)!;
-    expect(preview.recipients.map((r) => r.displayName)).toEqual(["Первый", "Второй"]);
-    expect(preview.message).toContain("5 августа");
-    expect(preview.message).toContain("https://sber/abc");
-    expect(preview.blocker).toBeNull();
-  });
-
-  it("blocks sending until there is a link", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    person(db, "Коллега", 2, null);
-    expect(previewCampaign(db, id, ASOF)!.blocker).toMatch(/ссылк/i);
-  });
-
-  it("blocks sending when nobody is reachable", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x" });
-    expect(previewCampaign(db, id, ASOF)!.blocker).toMatch(/некому/i);
-  });
-
-  it("blocks a second send, so nobody is congratulated twice", () => {
-    const db = makeTestDb();
-    const id = person(db, "Именинник", 1, "08-05");
-    person(db, "Коллега", 2, null);
-    const campaign = updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x" })!;
-    markSent(db, campaign.id, 1, new Date("2026-08-01T10:00:00Z"));
-
-    const preview = previewCampaign(db, id, ASOF)!;
-    expect(preview.blocker).toMatch(/уже разослано/i);
-    expect(preview.alreadySentAt).toBeInstanceOf(Date);
+    // Next year is a different round — the unique index is (employee, year).
+    const next = ensureBirthdayRound(db, employee, "2026-09-01")!;
+    expect(next.id).not.toBe(first.id);
+    expect(next.year).toBe(2027);
   });
 });
 
 describe("wording", () => {
-  it("names the person and the day, and carries the link when there is one", () => {
-    expect(defaultMessage("Мишин Илья", "5 августа", "https://sber/x"))
-      .toBe("🎂 Мишин Илья празднует день рождения 5 августа.\n\nСбор на подарок: https://sber/x");
-    expect(defaultMessage("Мишин Илья", "5 августа", null)).not.toContain("Сбор");
-  });
-
   it("leaves the name in the nominative — we cannot decline it", () => {
     // One display name is stored and nothing that would let us inflect it, so
     // every phrase has to be built around the name as given. «день рождения у
     // Мишин Илья» is the failure this guards, and it would land in 25 chats.
-    for (const text of [
-      defaultMessage("Мишин Илья", "5 августа", "https://sber/x"),
-      adminNoticeMessage("Мишин Илья", "5 августа", 7),
-    ]) {
-      expect(text).toContain("Мишин Илья");
-      expect(text).not.toMatch(/у Мишин Илья/);
-    }
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7);
+    expect(notice).toContain("Мишин Илья");
+    expect(notice).not.toMatch(/у Мишин Илья/);
   });
 
   it("tells admins what to do next, not just that a birthday exists", () => {
@@ -204,54 +110,106 @@ describe("wording", () => {
   });
 });
 
-describe("campaignsScheduledFor — the reminder query defect 1 fixes", () => {
+describe("roundsScheduledFor", () => {
+  it("skips a birthday round that has gone out, keeps one that hasn't", () => {
+    const db = makeTestDb();
+    const sentTo = person(db, "Sent", 1, "08-20");
+    const waiting = person(db, "Waiting", 2, "08-21");
+    const sentRound = ensureBirthdayRound(db, sentTo, "2026-08-01")!;
+    const waitingRound = ensureBirthdayRound(db, waiting, "2026-08-01")!;
+    updateCollection(db, sentRound.id, { scheduledSendOn: "2026-08-10" });
+    updateCollection(db, waitingRound.id, { scheduledSendOn: "2026-08-10" });
+    markCollectionSent(db, sentRound.id, 3, new Date("2026-08-09T09:00:00Z"));
+
+    expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([waitingRound.id]);
+  });
+
+  it("keeps a custom collection that has already gone out — the reminder is «пора дожать»", () => {
+    const db = makeTestDb();
+    person(db, "Colleague", 3, null);
+    const collection = createCustomCollection(db, {
+      title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
+      amountPerPerson: null, totalGoal: null, collectUrl: "https://example.test/c/1",
+      messageText: null, scheduledSendOn: "2026-08-10",
+    });
+    markCollectionSent(db, collection.id, 2, new Date("2026-08-05T09:00:00Z"));
+
+    expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([collection.id]);
+  });
+
+  it("drops a custom collection whose deadline is behind us", () => {
+    const db = makeTestDb();
+    const gone = createCustomCollection(db, {
+      title: "Просроченный", employeeId: null, eventDate: null, deadline: "2026-08-05",
+      amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null,
+      scheduledSendOn: "2026-08-04",
+    });
+    const alive = createCustomCollection(db, {
+      title: "Идущий", employeeId: null, eventDate: null, deadline: "2026-08-20",
+      amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null,
+      scheduledSendOn: "2026-08-04",
+    });
+    // Both reminder days are in the past — the difference is only the deadline,
+    // so a filter that dropped everything would not pass this.
+    expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([alive.id]);
+    expect(gone.id).not.toBe(alive.id);
+  });
+
+  // The scenarios below carried the old `campaignsScheduledFor` behaviour and
+  // still apply unchanged: only the table and the API to set them up moved.
   it("matches a reminder day that has already passed and was never notified", () => {
     const db = makeTestDb();
     const id = person(db, "Именинник", 1, "08-08");
-    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" });
+    const round = ensureBirthdayRound(db, id, ASOF)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" });
 
     // ASOF ("2026-08-01") is after the picked day ("2026-07-30") but still
     // before the birthday itself ("2026-08-08") — the missed day heals.
-    const rows = campaignsScheduledFor(db, ASOF);
-    expect(rows.map((c) => c.employeeId)).toEqual([id]);
+    const rows = roundsScheduledFor(db, ASOF);
+    expect(rows.map((r) => r.employeeId)).toEqual([id]);
   });
 
   it("does not match once the celebration itself is behind the given date", () => {
     const db = makeTestDb();
     const id = person(db, "Именинник", 1, "01-05");
-    updateCampaign(db, id, "2026-01-01", { collectUrl: "https://sber/x", scheduledSendOn: "2026-01-03" });
+    const round = ensureBirthdayRound(db, id, "2026-01-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: "2026-01-03" });
 
-    expect(campaignsScheduledFor(db, "2026-06-01")).toEqual([]);
+    expect(roundsScheduledFor(db, "2026-06-01")).toEqual([]);
   });
 
   it("matches exactly on the picked day, same as before", () => {
     const db = makeTestDb();
     const id = person(db, "Именинник", 1, "08-08");
-    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: ASOF });
+    const round = ensureBirthdayRound(db, id, ASOF)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: ASOF });
 
-    expect(campaignsScheduledFor(db, ASOF).map((c) => c.employeeId)).toEqual([id]);
+    expect(roundsScheduledFor(db, ASOF).map((r) => r.employeeId)).toEqual([id]);
   });
 
   it("stays quiet on a day before the picked one", () => {
     const db = makeTestDb();
     const id = person(db, "Именинник", 1, "08-08");
-    updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-08-04" });
-    expect(campaignsScheduledFor(db, ASOF)).toEqual([]);
+    const round = ensureBirthdayRound(db, id, ASOF)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: "2026-08-04" });
+    expect(roundsScheduledFor(db, ASOF)).toEqual([]);
   });
 
   it("excludes a round already marked notified, even a healed one", () => {
     const db = makeTestDb();
     const id = person(db, "Именинник", 1, "08-08");
-    const campaign = updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" })!;
-    markScheduleNotified(db, campaign.id, new Date());
-    expect(campaignsScheduledFor(db, ASOF)).toEqual([]);
+    const round = ensureBirthdayRound(db, id, ASOF)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" });
+    markScheduleNotified(db, round.id, new Date());
+    expect(roundsScheduledFor(db, ASOF)).toEqual([]);
   });
 
   it("is unaffected by the unrelated week-ahead flag", () => {
     const db = makeTestDb();
     const id = person(db, "Именинник", 1, "08-08");
-    const campaign = updateCampaign(db, id, ASOF, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" })!;
-    markAdminNotified(db, campaign.id, new Date());
-    expect(campaignsScheduledFor(db, ASOF).map((c) => c.employeeId)).toEqual([id]);
+    const round = ensureBirthdayRound(db, id, ASOF)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" });
+    markAdminNotified(db, round.id, new Date());
+    expect(roundsScheduledFor(db, ASOF).map((r) => r.employeeId)).toEqual([id]);
   });
 });
