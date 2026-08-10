@@ -942,6 +942,19 @@ function findCollection(id: number): Collection | undefined {
   return COLLECTIONS.find((c) => c.id === id);
 }
 
+/**
+ * Как `readableCollection` на сервере: сбор, у которого виновник — сам смотрящий,
+ * не читается вообще, ни по id, ни в списке. «Сюрприз»-правило: единственный
+ * человек, который не должен видеть свой сбор — именно он, включая случай, когда
+ * он же и админ. Отдаём «not_found», а не отказ отдельным кодом — 403 подтвердил
+ * бы, что сбор существует, а прятать нужно именно этот факт.
+ */
+function readableCollection(id: number): Collection | undefined {
+  const collection = findCollection(id);
+  if (!collection || collection.employeeId === MOCK_ME.id) return undefined;
+  return collection;
+}
+
 /** Имя виновника, или null — для общего сбора или удалённого работника. */
 function personNameOf(employeeId: number | null): string | null {
   if (employeeId == null) return null;
@@ -1104,7 +1117,9 @@ function ensureBirthdayRound(employeeId: number, today: string): Collection | nu
 export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
   await delay(200);
   const today = toISODate(new Date());
-  return EMPLOYEES.filter((e) => e.isActive && e.birthDate)
+  // Сюрприз-правило: тикающий раз в неделю пуш видят все админы, кроме
+  // именинника — даже когда именинник сам админ и смотрит список.
+  return EMPLOYEES.filter((e) => e.isActive && e.birthDate && e.id !== MOCK_ME.id)
     .flatMap((employee) => {
       const occurrence = birthdayOccurrence(employee, today);
       const daysUntil = daysUntilBirthday(employee.birthDate!, today);
@@ -1124,6 +1139,9 @@ export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
 
 export async function mockGetBirthdayPreview(employeeId: number): Promise<CollectionPreview> {
   await delay(180);
+  // Сюрприз-правило: «not_found», не отказ — 403 подтвердил бы, что для него
+  // готовится раунд, а прятать нужно именно этот факт.
+  if (employeeId === MOCK_ME.id) throw new Error("not_found");
   const today = toISODate(new Date());
   const draft = birthdayRoundDraft(employeeId, today);
   if (!draft) throw new Error("У этого работника не указан день рождения");
@@ -1132,6 +1150,7 @@ export async function mockGetBirthdayPreview(employeeId: number): Promise<Collec
 
 export async function mockSaveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection> {
   await delay(180);
+  if (employeeId === MOCK_ME.id) throw new Error("not_found");
   // У раунда ДР нет повода на правку — он назван по имени именинника.
   if (patch.title !== undefined || patch.employeeId !== undefined) {
     throw new Error("У сбора на день рождения повод и виновник заданы датой рождения.");
@@ -1148,7 +1167,10 @@ export async function mockSaveBirthdayRound(employeeId: number, patch: Collectio
 export async function mockGetCollections(): Promise<CollectionRow[]> {
   await delay(200);
   const today = toISODate(new Date());
-  return [...COLLECTIONS]
+  // Сюрприз-правило: как `listCollections` на сервере — свой собственный сбор
+  // не виден вообще, даже в списке.
+  return COLLECTIONS
+    .filter((c) => c.employeeId !== MOCK_ME.id)
     .map((c) => rowOf(c, today))
     .sort((a, b) => compareCollections(a.collection, b.collection, today));
 }
@@ -1182,14 +1204,14 @@ export async function mockCreateCollection(input: NewCollectionInput): Promise<C
 
 export async function mockGetCollectionPreview(id: number): Promise<CollectionPreview> {
   await delay(180);
-  const collection = findCollection(id);
+  const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
   return previewOf(collection);
 }
 
 export async function mockSaveCollection(id: number, patch: CollectionPatch): Promise<Collection> {
   await delay(180);
-  const collection = findCollection(id);
+  const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
   applyPatch(collection, patch, toISODate(new Date()));
   return { ...collection };
@@ -1197,7 +1219,7 @@ export async function mockSaveCollection(id: number, patch: CollectionPatch): Pr
 
 export async function mockSendCollection(id: number): Promise<{ delivered: number; intended: number; round: number }> {
   await delay(400);
-  const collection = findCollection(id);
+  const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
   const preview = previewOf(collection);
   if (preview.blocker) throw new Error(preview.blocker);
@@ -1210,7 +1232,7 @@ export async function mockSendCollection(id: number): Promise<{ delivered: numbe
 
 export async function mockSetCollectionClosed(id: number, closed: boolean): Promise<Collection> {
   await delay(150);
-  const collection = findCollection(id);
+  const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
   collection.closedAt = closed ? new Date().toISOString() : null;
   return { ...collection };
@@ -1218,7 +1240,7 @@ export async function mockSetCollectionClosed(id: number, closed: boolean): Prom
 
 export async function mockDeleteCollection(id: number): Promise<void> {
   await delay(150);
-  const collection = findCollection(id);
+  const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
   if (collection.kind === "birthday") throw new Error("Сбор на день рождения не удаляется.");
   if (collection.sendCount > 0) throw new Error("Сбор уже разослан — удалить нельзя.");
