@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Avatar, Button, Cell, IconButton, Input, List, Placeholder, Section, Selectable, Spinner, Textarea, Title } from "@telegram-apps/telegram-ui";
-import type { Shift } from "../api/client";
+import type { Shift, Template } from "../api/client";
 import { DayBadge } from "../components/DayBadge";
+import { EntryChip } from "../components/EntryChip";
 import { ScreenScroll } from "../components/ScreenScroll";
-import { categoryLabel } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
 import { formatTimeRange, pluralizeRu } from "../lib/shift";
 
@@ -12,6 +12,10 @@ export interface ProposeSwapScreenProps {
   fromShift: Shift;
   /** Colleagues working the SAME day, already filtered to those a swap can succeed with. */
   candidates: Shift[];
+  /** Пресеты — чтобы записи назывались и раскрашивались здесь ровно так же, как в
+   *  «Моих сменах»: с 2026-08-10 отдать можно и дежурство, и «10:00–19:00» без
+   *  названия не говорит, Поклонка это или Вавилова. */
+  templates: readonly Template[];
   /** How many people work exactly this shift that day — hidden from the list, but named. */
   sameKindCount: number;
   loading: boolean;
@@ -72,6 +76,7 @@ function describeSwapError(err: unknown): string {
 export function ProposeSwapScreen({
   fromShift,
   candidates,
+  templates,
   sameKindCount,
   loading,
   loadError,
@@ -124,7 +129,11 @@ export function ProposeSwapScreen({
         <Section header="Отдаёшь свою смену">
           <Cell
             before={<DayBadge date={fromShift.date} endDate={fromShift.endDate} />}
-            subtitle={fromShift.title ?? categoryLabel(fromShift.category)}
+            // Тем же чипом, что рисует строку в «Моих сменах»: одна запись — одна
+            // подпись и один цвет на всех экранах. Текстовая подпись здесь брала
+            // только `title` и на записи из консоли без него говорила «Дежурство»
+            // вместо «Дежурство · Поклонка».
+            description={<EntryChip entry={fromShift} templates={templates} />}
           >
             {formatTimeRange(fromShift)}
           </Cell>
@@ -167,13 +176,23 @@ export function ProposeSwapScreen({
                   key={shift.id}
                   data-testid="swap-candidate"
                   before={<Avatar acronym={initialsOf(name)} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-                  subtitle={`${formatTimeRange(shift)} · ${shift.title ?? categoryLabel(shift.category)}`}
-                  // Отдельной строкой, а не приклеено к subtitle: subtitle обрезается
-                  // многоточием («Cell» режет его как единую строку), и «· Выбрано»
-                  // на узком экране становилось «· Выбр…» — тот же класс дефекта,
-                  // что уже не раз чинили в этом мини-аппе. Чекмарк справа тоже
-                  // сигнализирует выбор, но раз пишем словами — пусть будет видно целиком.
-                  description={selectedHere ? "Выбрано" : undefined}
+                  subtitle={formatTimeRange(shift)}
+                  // Название записи — чипом, а не текстом в subtitle: subtitle
+                  // обрезается многоточием («Cell» режет его как единую строку), и
+                  // «10:00–19:00 · Дежурство · Вавилова 19» на узком экране
+                  // превращалось в «10:00–19:00 · Дежурс…» — то есть ровно там, где
+                  // человек берёт дежурство, он видел бы обрезок. Чип к тому же
+                  // несёт цвет пресета, как и в «Моих сменах».
+                  //
+                  // «Выбрано» стоит здесь же отдельным словом, а не приклеено к
+                  // subtitle, по той же причине обрезки. Чекмарк справа тоже
+                  // сигнализирует выбор, но раз пишем словами — пусть видно целиком.
+                  description={
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <EntryChip entry={shift} templates={templates} />
+                      {selectedHere && <span>Выбрано</span>}
+                    </span>
+                  }
                   after={
                     <Selectable
                       type="radio"

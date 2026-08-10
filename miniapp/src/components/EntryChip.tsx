@@ -27,6 +27,13 @@ interface ChipStyle extends CSSProperties {
  */
 export function EntryChip({ entry, templates, style }: EntryChipProps) {
   const palette = useEntryPalette(entry, templates);
+  // `title ?? имя пресета ?? категория` — та же цепочка, что на сервере
+  // (`shiftLineOf`) и в `shiftKind` на обоих консолях. Средняя ступень нужна для
+  // записей, которые своей подписи не несут: без неё дежурство из консоли
+  // подписывалось «Дежурство» вместо «Дежурство · Поклонка», и человек, берущий
+  // его в обмен, не видел, ЧТО именно берёт. `templates` тут уже есть — их
+  // читает палитра.
+  const label = entry.title ?? templates.find((t) => t.id === entry.templateId)?.name ?? categoryLabel(entry.category);
   const chipStyle: ChipStyle = {
     background: palette.bg,
     "--tgui--plain_foreground": palette.fg,
@@ -35,7 +42,7 @@ export function EntryChip({ entry, templates, style }: EntryChipProps) {
   };
   return (
     <Chip mode="mono" style={chipStyle}>
-      {entry.title ?? categoryLabel(entry.category)}
+      {label}
     </Chip>
   );
 }

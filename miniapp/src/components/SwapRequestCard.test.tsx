@@ -1,10 +1,11 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { AppRoot } from "@telegram-apps/telegram-ui";
 import { describe, expect, it } from "vitest";
 import type { SwapRequest } from "../api/client";
 import { formatDayLabel } from "../lib/week";
 import { formatTimeRange } from "../lib/shift";
-import { ArchivedSwapCard } from "./SwapRequestCard";
+import { ArchivedSwapCard, IncomingSwapCard } from "./SwapRequestCard";
 
 // Distinct shift summaries so a mixed-up direction shows up as the wrong text
 // in the wrong line rather than passing by coincidence.
@@ -67,5 +68,54 @@ describe("ArchivedSwapCard", () => {
     const markup = renderToStaticMarkup(createElement(ArchivedSwapCard, { request: archivedRequest("outgoing") }));
     expect(markup).toContain("Коллега Имя");
     expect(markup).toContain("Принято");
+  });
+});
+
+/**
+ * Карточка обязана называть дежурство словом.
+ *
+ * До 2026-08-10 в обмене могла быть только смена, и подпись сводки была
+ * необязательной роскошью. Теперь по этой карточке человек решает, что он
+ * отдаёт и что берёт. Проверяем входящую: именно на ней стоит «Принять».
+ */
+describe("карточка обмена и дежурство", () => {
+  const incoming = (theirs: SwapRequest["theirShift"]): SwapRequest => ({
+    id: 2,
+    direction: "incoming",
+    status: "pending",
+    message: null,
+    createdAt: "2026-08-11T10:00:00.000Z",
+    counterpartyName: "Коллега Имя",
+    yourShift: { date: "2026-08-12", start: "11:00", end: "20:00", title: "День", category: "shift" },
+    theirShift: theirs,
+  });
+
+  // `AppRoot` нужен ровно из-за кнопок «Принять/Отклонить»: telegram-ui читает
+  // из него свой контекст. Архивной карточке (тесты выше) он не требуется.
+  const render = (theirs: SwapRequest["theirShift"]) =>
+    renderToStaticMarkup(
+      createElement(
+        AppRoot,
+        null,
+        createElement(IncomingSwapCard, { request: incoming(theirs), onAccept: () => {}, onDecline: () => {} }),
+      ),
+    );
+
+  it("дежурство названо и помечено", () => {
+    const markup = render({
+      date: "2026-08-12", start: "09:00", end: "18:00", title: "Дежурство · Поклонка", category: "duty",
+    });
+    expect(markup).toContain("Дежурство · Поклонка");
+  });
+
+  it("дежурство без своей подписи всё равно названо, а не «—»", () => {
+    const markup = render({ date: "2026-08-12", start: "09:00", end: "18:00", title: null, category: "duty" });
+    expect(markup).toContain("Дежурство");
+  });
+
+  it("обычная смена метки дежурства не несёт", () => {
+    const markup = render({ date: "2026-08-12", start: "09:00", end: "18:00", title: "Утро", category: "shift" });
+    expect(markup).toContain("Утро");
+    expect(markup).not.toContain("Дежурство");
   });
 });

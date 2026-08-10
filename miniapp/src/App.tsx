@@ -259,6 +259,7 @@ export function App() {
       <ProposeSwapScreen
         fromShift={proposingFor}
         candidates={candidates}
+        templates={data.templates}
         sameKindCount={sameKindCount}
         loading={dayLoading}
         loadError={dayError}
