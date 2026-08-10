@@ -28,9 +28,15 @@ import {
   mockGetShiftCountsCsv,
   mockGetJournal,
   mockGetBirthdays,
-  mockSaveBirthdayCampaign,
   mockGetBirthdayPreview,
-  mockSendBirthday,
+  mockSaveBirthdayRound,
+  mockGetCollections,
+  mockCreateCollection,
+  mockGetCollectionPreview,
+  mockSaveCollection,
+  mockSendCollection,
+  mockSetCollectionClosed,
+  mockDeleteCollection,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -296,19 +302,70 @@ export interface JournalPage {
   events: JournalEvent[];
 }
 
-/** One round of collecting for one person's birthday, in one year. */
-export interface BirthdayCampaign {
+/** Сбор денег: раунд ДР — заводится системой из даты рождения — или сбор,
+ *  заведённый админом руками по любому поводу. */
+export interface Collection {
   id: number;
-  employeeId: number;
-  year: number;
-  celebratedOn: string;
+  kind: "birthday" | "custom";
+  employeeId: number | null;
+  year: number | null;
+  celebratedOn: string | null;
+  title: string | null;
+  eventDate: string | null;
+  deadline: string | null;
+  amountPerPerson: number | null;
+  totalGoal: number | null;
   collectUrl: string | null;
   messageText: string | null;
-  status: "pending" | "ready" | "sent";
-  adminNotifiedAt: string | null;
+  closedAt: string | null;
+  scheduledSendOn: string | null;
+  scheduleNotifiedAt: string | null;
   sentAt: string | null;
   sentCount: number;
+  sendCount: number;
+  createdAt: string;
 }
+
+/** Строка списка сборов: сама запись плюс всё, что сервер уже посчитал. */
+export interface CollectionRow {
+  collection: Collection;
+  personName: string | null;
+  title: string;
+  status: "pending" | "ready" | "sent";
+  active: boolean;
+}
+
+/** Ровно то, что уйдёт команде, и кому именно — до того, как что-то ушло. */
+export interface CollectionPreview {
+  id: number;
+  kind: "birthday" | "custom";
+  title: string;
+  personName: string | null;
+  employeeId: number | null;
+  collectUrl: string | null;
+  message: string;
+  recipients: { employeeId: number; displayName: string }[];
+  /** Почему рассылка сейчас невозможна, или null, если возможна. */
+  blocker: string | null;
+  sendCount: number;
+  lastSentAt: string | null;
+}
+
+/** Всё, что может задать админ при заведении кастомного сбора. */
+export interface NewCollectionInput {
+  title: string;
+  employeeId?: number | null;
+  eventDate?: string | null;
+  deadline?: string | null;
+  amountPerPerson?: number | null;
+  totalGoal?: number | null;
+  collectUrl?: string | null;
+  messageText?: string | null;
+  scheduledSendOn?: string | null;
+}
+
+/** Правка сбора: отсутствующий ключ значит «оставить как есть». */
+export type CollectionPatch = Partial<NewCollectionInput>;
 
 export interface UpcomingBirthday {
   employeeId: number;
@@ -319,20 +376,7 @@ export interface UpcomingBirthday {
   birthDateLabel: string;
   celebratedOn: string;
   daysUntil: number;
-  campaign: BirthdayCampaign | null;
-}
-
-/** Exactly what would be sent, and to exactly whom — before anything leaves. */
-export interface BirthdayPreview {
-  employeeId: number;
-  displayName: string;
-  celebratedOn: string;
-  collectUrl: string | null;
-  message: string;
-  recipients: { employeeId: number; displayName: string }[];
-  /** Why sending is impossible right now, or null when it isn't. */
-  blocker: string | null;
-  alreadySentAt: string | null;
+  campaign: Collection | null;
 }
 
 /** До скольких из скольких дошло письмо о правке графика. */
@@ -393,10 +437,17 @@ export interface ApiClient {
   getShiftCountsCsv(from: string, to: string): Promise<string>;
   getJournal(params: { types?: string[]; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
   getBirthdays(): Promise<UpcomingBirthday[]>;
-  saveBirthdayCampaign(employeeId: number, patch: { collectUrl?: string | null; messageText?: string | null }): Promise<BirthdayCampaign>;
-  getBirthdayPreview(employeeId: number): Promise<BirthdayPreview>;
-  /** Sends the collection to the whole team but the birthday person. Confirmed by the caller. */
-  sendBirthday(employeeId: number): Promise<{ delivered: number; intended: number }>;
+  getBirthdayPreview(employeeId: number): Promise<CollectionPreview>;
+  /** Сохраняет раунд ДР; на первом сохранении он и заводится. */
+  saveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection>;
+  getCollections(): Promise<CollectionRow[]>;
+  createCollection(input: NewCollectionInput): Promise<Collection>;
+  getCollectionPreview(id: number): Promise<CollectionPreview>;
+  saveCollection(id: number, patch: CollectionPatch): Promise<Collection>;
+  /** Рассылает команде. Подтверждение — на вызывающем. */
+  sendCollection(id: number): Promise<{ delivered: number; intended: number; round: number }>;
+  setCollectionClosed(id: number, closed: boolean): Promise<Collection>;
+  deleteCollection(id: number): Promise<void>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -802,19 +853,49 @@ export const realClient: ApiClient = {
     return birthdays;
   },
 
-  async saveBirthdayCampaign(employeeId, patch) {
-    const { campaign } = await authorizedPutJson<{ campaign: BirthdayCampaign }>(`/api/admin/birthdays/${employeeId}`, patch);
-    return campaign;
-  },
-
   getBirthdayPreview(employeeId) {
-    return authorizedGet<BirthdayPreview>(`/api/admin/birthdays/${employeeId}/preview`);
+    return authorizedGet<CollectionPreview>(`/api/admin/birthdays/${employeeId}/preview`);
   },
 
-  sendBirthday(employeeId) {
-    // `confirm` is sent here so no caller can forget it — but the server refuses
-    // without it either way, and the screen still asks the admin out loud first.
-    return authorizedPostJson<{ delivered: number; intended: number }>(`/api/admin/birthdays/${employeeId}/send`, { confirm: true });
+  async saveBirthdayRound(employeeId, patch) {
+    const { collection } = await authorizedPutJson<{ collection: Collection }>(`/api/admin/birthdays/${employeeId}`, patch);
+    return collection;
+  },
+
+  async getCollections() {
+    const { collections } = await authorizedGet<{ collections: CollectionRow[] }>("/api/admin/collections");
+    return collections;
+  },
+
+  async createCollection(input) {
+    const { collection } = await authorizedPostJson<{ collection: Collection }>("/api/admin/collections", input);
+    return collection;
+  },
+
+  getCollectionPreview(id) {
+    return authorizedGet<CollectionPreview>(`/api/admin/collections/${id}/preview`);
+  },
+
+  async saveCollection(id, patch) {
+    const { collection } = await authorizedPutJson<{ collection: Collection }>(`/api/admin/collections/${id}`, patch);
+    return collection;
+  },
+
+  sendCollection(id) {
+    // `confirm: true` — сервер не примет рассылку без него, и это осознанно:
+    // это единственный вызов, который пишет сразу всем коллегам.
+    return authorizedPostJson<{ delivered: number; intended: number; round: number }>(
+      `/api/admin/collections/${id}/send`, { confirm: true });
+  },
+
+  async setCollectionClosed(id, closed) {
+    const { collection } = await authorizedPostJson<{ collection: Collection }>(
+      `/api/admin/collections/${id}/close`, { closed });
+    return collection;
+  },
+
+  async deleteCollection(id) {
+    await authorizedDelete(`/api/admin/collections/${id}`);
   },
 
   getTemplateQueue(templateId) {
@@ -890,9 +971,15 @@ const devClient: ApiClient = {
   getShiftCountsCsv: (from, to) => mockGetShiftCountsCsv(from, to),
   getJournal: (params) => mockGetJournal(params),
   getBirthdays: () => mockGetBirthdays(),
-  saveBirthdayCampaign: (employeeId, patch) => mockSaveBirthdayCampaign(employeeId, patch),
   getBirthdayPreview: (employeeId) => mockGetBirthdayPreview(employeeId),
-  sendBirthday: (employeeId) => mockSendBirthday(employeeId),
+  saveBirthdayRound: (employeeId, patch) => mockSaveBirthdayRound(employeeId, patch),
+  getCollections: () => mockGetCollections(),
+  createCollection: (input) => mockCreateCollection(input),
+  getCollectionPreview: (id) => mockGetCollectionPreview(id),
+  saveCollection: (id, patch) => mockSaveCollection(id, patch),
+  sendCollection: (id) => mockSendCollection(id),
+  setCollectionClosed: (id, closed) => mockSetCollectionClosed(id, closed),
+  deleteCollection: (id) => mockDeleteCollection(id),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),

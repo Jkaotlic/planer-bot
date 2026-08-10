@@ -14,6 +14,10 @@ import {
   mockRenameEmployee,
   mockSetPreferredName,
   mockSetEmployeePreferredName,
+  mockCreateCollection,
+  mockGetCollections,
+  mockGetCollectionPreview,
+  mockSendCollection,
   MOCK_ME,
 } from "./mock";
 
@@ -297,5 +301,24 @@ describe("mockSetEmployeePreferredName", () => {
     const employee = await employeeById(EMPLOYEE_ID);
     expect(employee.preferredName).toBeNull();
     expect(employee.address).toBe(displayName);
+  });
+});
+
+describe("мок сборов", () => {
+  it("отдаёт заведённый сбор в списке и в предпросмотре", async () => {
+    const created = await mockCreateCollection({ title: "Кофемашина", amountPerPerson: 1000 });
+    const rows = await mockGetCollections();
+    expect(rows.map((r) => r.title)).toContain("Кофемашина");
+
+    const preview = await mockGetCollectionPreview(created.id);
+    expect(preview.message).toContain("Скидываемся по 1 000 ₽");
+    expect(preview.blocker).toContain("Нет ссылки");
+  });
+
+  it("после рассылки кастомный сбор можно дожать, а ДР нельзя", async () => {
+    const created = await mockCreateCollection({ title: "Кофемашина", collectUrl: "https://example.test/c/1" });
+    await mockSendCollection(created.id);
+    expect((await mockGetCollectionPreview(created.id)).blocker).toBeNull();
+    expect((await mockGetCollectionPreview(created.id)).sendCount).toBe(1);
   });
 });
