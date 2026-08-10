@@ -109,6 +109,7 @@ import {
   deleteCollection,
   markCollectionSent,
   recipientsOf,
+  collectionsForWorker,
 } from "../collections/collection-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 
@@ -1414,6 +1415,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       await notifyAdmins(bot, db, weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
+  });
+
+  /** Running collections this person has already been told about. Not their own. */
+  app.get("/api/collections", requireAuth(db, config.jwtSecret), (c) => {
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+    return c.json({ collections: collectionsForWorker(db, asOf, c.get("auth").employeeId) });
   });
 
   // Admin: post a new vacant slot

@@ -168,6 +168,28 @@ describe("DELETE /api/admin/collections/:id", () => {
   });
 });
 
+describe("GET /api/collections", () => {
+  it("is open to a plain worker and hides their own collection", async () => {
+    const db = makeTestDb();
+    const { bot } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const worker = person(db, "Worker", 222, null);
+    person(db, "Colleague", 6, null);
+    const adminToken = await tokenFor(app, 111);
+
+    for (const [title, employeeId] of [["Про работника", worker], ["Общий", null]] as const) {
+      const { collection } = await (await app.request(`/api/admin/collections?${ASOF}`,
+        send(adminToken, { title, employeeId, collectUrl: "https://example.test/c/1" }, "POST"))).json();
+      await app.request(`/api/admin/collections/${collection.id}/send?${ASOF}`, send(adminToken, { confirm: true }, "POST"));
+    }
+
+    const res = await app.request(`/api/collections?${ASOF}`, auth(await tokenFor(app, 222)));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.collections.map((c: { title: string }) => c.title)).toEqual(["Общий"]);
+  });
+});
+
 describe("the journal and the surprise rule", () => {
   it("hides a collection's own events from its honouree, and shows everyone else's", async () => {
     const db = makeTestDb();
