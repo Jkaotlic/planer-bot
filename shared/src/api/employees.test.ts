@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { adminEmployeesResponseSchema, employeeBriefSchema } from "./employees";
+import {
+  adminEmployeeResponseSchema,
+  adminEmployeesResponseSchema,
+  createEmployeeResponseSchema,
+  employeeBriefSchema,
+  employeeInviteResponseSchema,
+} from "./employees";
 
 const adminRow = {
   id: 1,
@@ -43,5 +49,43 @@ describe("схемы домена employees", () => {
   it("отвергает работника без обязательного displayName", () => {
     const { displayName, ...withoutName } = adminRow;
     expect(adminEmployeesResponseSchema.safeParse({ employees: [withoutName] }).success).toBe(false);
+  });
+});
+
+describe("формы ответов, которые домен отдаёт мимо списков", () => {
+  it("создание отдаёт работника, токен и ссылку", () => {
+    const parsed = createEmployeeResponseSchema.safeParse({
+      employee: adminRow,
+      inviteToken: "a1b2c3d4e5f6",
+      inviteLink: "https://t.me/planer_bot?start=a1b2c3d4e5f6",
+    });
+    expect(parsed.error?.issues ?? []).toEqual([]);
+  });
+
+  it("ссылки может не быть — имя бота серверу не обязано быть известно", () => {
+    const parsed = createEmployeeResponseSchema.safeParse({
+      employee: adminRow, inviteToken: "a1b2c3d4e5f6", inviteLink: null,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("создание не отдаёт работника с колонками ряда", () => {
+    // Ровно это и уезжало: `c.json({ employee })` с целым рядом внутри.
+    const parsed = createEmployeeResponseSchema.safeParse({
+      employee: { ...adminRow, inviteToken: "inv-555", rosterOrder: 0 },
+      inviteToken: "a1b2c3d4e5f6", inviteLink: null,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("приглашение — это токен и ссылка, и больше ничего", () => {
+    expect(employeeInviteResponseSchema.safeParse({ inviteToken: "t", inviteLink: null }).success).toBe(true);
+    // Работник рядом с токеном означал бы, что ключ уехал вторым путём.
+    expect(employeeInviteResponseSchema.safeParse({ inviteToken: "t", inviteLink: null, employee: adminRow }).success).toBe(false);
+  });
+
+  it("ответ с одним работником отвергает лишнее поле", () => {
+    expect(adminEmployeeResponseSchema.safeParse({ employee: adminRow }).success).toBe(true);
+    expect(adminEmployeeResponseSchema.safeParse({ employee: { ...adminRow, inviteToken: "x" } }).success).toBe(false);
   });
 });
