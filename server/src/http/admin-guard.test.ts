@@ -25,7 +25,7 @@ const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>
 describe("blanket /api/admin/* guard", () => {
   it("blocks a made-up admin path for a non-admin, even with no inline guard", async () => {
     const db = makeTestDb();
-    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-333" });
+    createEmployee(db, { displayName: "Игорь", inviteToken: "inv-333" });
     linkTelegramAccount(db, "inv-333", 333);
     const app = createApp({ db, config });
     // A path under /api/admin/ that has no handler: the guard must still 403 (not 404) for a worker.

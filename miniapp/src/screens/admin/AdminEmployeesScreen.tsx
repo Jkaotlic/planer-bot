@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
-import { Avatar, Button, Cell, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Avatar, Button, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
 import { CardShell, CardStack, MetaLine } from "../../components/Card";

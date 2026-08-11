@@ -7,6 +7,19 @@ import { apiClient, type WorkerCollection } from "../../api/client";
 import { TeamCollections } from "./TeamCollections";
 
 /**
+ * Ловушка необработанных отказов — это Node API, а мини-апп живёт в браузере,
+ * поэтому типы Node сюда намеренно не подключены: иначе и прод-код смог бы
+ * звать `process`, не получив ни слова от компилятора. (До vitest 4 так и было —
+ * он подтягивал их глобально, и граница держалась случайно.) Объявляем ровно то,
+ * чем пользуемся, и ровно в том файле, где это нужно.
+ */
+declare const process: {
+  on(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+  off(event: "unhandledRejection", listener: (reason: unknown) => void): void;
+};
+const nodeProcess = process;
+
+/**
  * Секция «Идёт сбор» во вкладке «Команда».
  *
  * Главное, что здесь проверяется, — секция умеет НЕ рисоваться. Пустой
@@ -122,14 +135,14 @@ describe("TeamCollections", () => {
     // пределы секции, и это и есть «уронить вкладку».
     const escaped: unknown[] = [];
     const onUnhandled = (reason: unknown) => escaped.push(reason);
-    process.on("unhandledRejection", onUnhandled);
+    nodeProcess.on("unhandledRejection", onUnhandled);
     try {
       const el = await mount();
       expect(load).toHaveBeenCalled();
       // Сбор — не главное на этом экране: график должен остаться на месте.
       expect(el.textContent).toBe("");
     } finally {
-      process.off("unhandledRejection", onUnhandled);
+      nodeProcess.off("unhandledRejection", onUnhandled);
     }
     expect(escaped).toEqual([]);
   });

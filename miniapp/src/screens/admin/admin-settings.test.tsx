@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { apiClient, type AdminSettings as AdminSettingsData, type SwapLockResult } from "../../api/client";
+import { apiClient, type AdminSettings as AdminSettingsData, } from "../../api/client";
 import { AdminSettings } from "./AdminSettings";
 
 /**
