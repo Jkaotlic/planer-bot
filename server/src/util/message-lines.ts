@@ -5,7 +5,7 @@ import { getTemplate } from "../repo/templates";
 import { getEmployeeById } from "../repo/employees";
 
 /** «Пт 7 авг» — день, как его пишут все остальные сообщения бота. */
-function dayLabel(iso: string): string {
+export function dayLabel(iso: string): string {
   const parts = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
     .formatToParts(new Date(`${iso}T00:00:00Z`));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
