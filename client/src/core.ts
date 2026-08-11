@@ -35,13 +35,25 @@ export interface Transport {
 }
 
 export function createTransport(opts: TransportOptions): Transport {
-  const { baseUrl, tokenSource, fetchImpl = fetch } = opts;
+  const { baseUrl, tokenSource, fetchImpl } = opts;
+
+  /**
+   * Глобальный `fetch` берётся на каждый запрос, а не защёлкивается здесь.
+   *
+   * Разница видна ровно в одном месте, зато настоящем: транспорт создаётся при
+   * загрузке модуля клиента, а подмена `fetch` в тестах случается позже — и
+   * захваченная ссылка мимо подмены уводила запрос в настоящую сеть. Тест
+   * консоли на текст ошибки сервера так и упал; соседний с ним, наоборот,
+   * зеленел по неверной причине (в jsdom настоящий запрос падает сам, и
+   * «нет связи» получалось без всякой подмены).
+   */
+  const doFetch = (input: string, init: RequestInit) => (fetchImpl ?? globalThis.fetch)(input, init);
 
   async function send(path: string, init: RequestInit): Promise<unknown> {
     const token = await tokenSource.get();
     let res: Response;
     try {
-      res = await fetchImpl(`${baseUrl}${path}`, {
+      res = await doFetch(`${baseUrl}${path}`, {
         ...init,
         headers: { ...init.headers, Authorization: `Bearer ${token}` },
       });

@@ -35,3 +35,21 @@ describe("транспорт", () => {
     expect(fetchImpl.mock.calls[0]![1].headers.Authorization).toBe("Bearer abc");
   });
 });
+
+it("берёт глобальный fetch на каждый запрос, а не защёлкивает при создании", async () => {
+  // Транспорт создаётся при загрузке модуля клиента, а подмена `fetch` в тестах
+  // случается позже. Пока ссылка защёлкивалась, запрос уходил мимо подмены — в
+  // настоящую сеть, где он падал, и «нет связи» получалось по неверной причине.
+  const t = createTransport({ baseUrl: "", tokenSource: source() });
+  const later = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ error: "Такого работника нет" }), { status: 400 }),
+  );
+  const original = globalThis.fetch;
+  globalThis.fetch = later as unknown as typeof fetch;
+  try {
+    await expect(t.get("/api/x")).rejects.toThrow("Такого работника нет");
+    expect(later).toHaveBeenCalledOnce();
+  } finally {
+    globalThis.fetch = original;
+  }
+});
