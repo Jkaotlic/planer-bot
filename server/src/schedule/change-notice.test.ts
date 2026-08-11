@@ -16,24 +16,73 @@ import {
   withScheduleDiff,
 } from "./change-notice";
 
+const eveningShift = {
+  date: "2026-08-07", endDate: null, start: "15:00", end: "23:00",
+  category: "shift" as const, title: "Вечер",
+};
+const morningShift = {
+  date: "2026-08-05", endDate: null, start: "08:00", end: "17:00",
+  category: "shift" as const, title: "Утро",
+};
+const dayShift = {
+  date: "2026-08-12", endDate: null, start: "09:00", end: "18:00",
+  category: "shift" as const, title: "День",
+};
+const vacation = {
+  date: "2026-08-10", endDate: "2026-08-14", start: null, end: null,
+  category: "vacation" as const, title: null,
+};
+const duty = {
+  date: "2026-08-12", endDate: null, start: "09:00", end: "18:00",
+  category: "duty" as const, title: "Дежурство · Поклонка",
+};
+
 describe("тексты одиночной правки", () => {
   it("поставили", () => {
-    expect(entryAddedText("Аня", "Пт 7 авг · 15:00–23:00 · Вечер")).toBe(
+    expect(entryAddedText("Аня", eveningShift)).toBe(
       "Аня поставил(а) тебе смену: Пт 7 авг · 15:00–23:00 · Вечер.",
     );
   });
 
   it("сняли", () => {
-    expect(entryRemovedText("Аня", "Ср 5 авг · 08:00–17:00 · Утро")).toBe(
+    expect(entryRemovedText("Аня", morningShift)).toBe(
       "Аня снял(а) с тебя смену: Ср 5 авг · 08:00–17:00 · Утро.",
     );
   });
 
   it("изменили — называет и было, и стало", () => {
-    expect(
-      entryChangedText("Аня", "Ср 5 авг · 08:00–17:00 · Утро", "Пт 7 авг · 15:00–23:00 · Вечер"),
-    ).toBe(
+    expect(entryChangedText("Аня", morningShift, eveningShift)).toBe(
       "Аня изменил(а) твою смену: было Ср 5 авг · 08:00–17:00 · Утро → стало Пт 7 авг · 15:00–23:00 · Вечер.",
+    );
+  });
+});
+
+describe("письмо называет вид записи", () => {
+  it("отпуск — отпуском, а не «сменой»", () => {
+    expect(entryRemovedText("Аня", vacation)).toBe(
+      "Аня снял(а) с тебя отпуск: Пн 10 авг – Пт 14 авг · весь день · Отпуск.",
+    );
+  });
+
+  it("дежурство — дежурством", () => {
+    expect(entryAddedText("Аня", duty)).toBe(
+      "Аня поставил(а) тебе дежурство: Ср 12 авг · 09:00–18:00 · Дежурство · Поклонка.",
+    );
+  });
+
+  it("правка внутри одной категории говорит «изменил твою смену»", () => {
+    const moved = { ...dayShift, start: "11:00", end: "20:00", title: "Вечер" };
+    expect(entryChangedText("Аня", dayShift, moved)).toBe(
+      "Аня изменил(а) твою смену: было Ср 12 авг · 09:00–18:00 · День → стало Ср 12 авг · 11:00–20:00 · Вечер.",
+    );
+  });
+
+  it("смена категории говорится прямо: заменил отпуск на смену", () => {
+    // Ровно тот случай, с которого началась работа: человек прочитал
+    // «изменил твою смену» про свой отпуск и не понял, отменён ли отпуск.
+    const replaced = { ...dayShift, date: "2026-08-10" };
+    expect(entryChangedText("Аня", vacation, replaced)).toBe(
+      "Аня заменил(а) твой отпуск на смену: было Пн 10 авг – Пт 14 авг · весь день · Отпуск → стало Пн 10 авг · 09:00–18:00 · День.",
     );
   });
 });
@@ -222,7 +271,7 @@ describe("сводное письмо", () => {
 
   it("одна запись — не сводка, а обычный одиночный текст", () => {
     const one = { added: [a1], removed: [], changed: [] };
-    expect(scheduleSummaryText("Аня", "fill_week", one)).toBe(entryAddedText("Аня", entryLineOf(a1)));
+    expect(scheduleSummaryText("Аня", "fill_week", one)).toBe(entryAddedText("Аня", a1));
   });
 });
 
