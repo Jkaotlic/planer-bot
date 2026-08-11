@@ -36,6 +36,7 @@ function shift(patch: Partial<Shift> & Pick<Shift, "id" | "date" | "employeeId">
     endDate: null,
     category: "shift",
     title: "День",
+    unrecognisedCode: null,
     templateId: 2,
     location: null,
     ...patch,

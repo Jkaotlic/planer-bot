@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildTodayModel, buildWeekModel } from "../lib/team-schedule";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 import {
+  employeesMock,
   mockCreateEntry,
   mockDeleteEntry,
   mockGetTeamSchedule,
@@ -10,10 +11,7 @@ import {
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
-  mockGetAdminEmployees,
-  mockRenameEmployee,
   mockSetPreferredName,
-  mockSetEmployeePreferredName,
   mockCreateCollection,
   mockGetCollections,
   mockGetCollectionPreview,
@@ -199,27 +197,27 @@ describe("roster CSV development mock", () => {
   });
 });
 
-describe("mockRenameEmployee", () => {
+describe("employeesMock.renameEmployee", () => {
   const EMPLOYEE_ID = 3; // «Марк Волков» — preferredName: null in the fixture.
 
   afterEach(async () => {
     // Put both fields back to the fixture's baseline for later tests.
-    await mockRenameEmployee(EMPLOYEE_ID, "Марк Волков");
-    await mockSetEmployeePreferredName(EMPLOYEE_ID, null);
+    await employeesMock.renameEmployee(EMPLOYEE_ID, "Марк Волков");
+    await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, null);
   });
 
   it("keeps the address in step with a rename when no preferredName overrides it", async () => {
-    await mockRenameEmployee(EMPLOYEE_ID, "Марк Волков-Новый");
-    const employees = await mockGetAdminEmployees();
+    await employeesMock.renameEmployee(EMPLOYEE_ID, "Марк Волков-Новый");
+    const employees = await employeesMock.getAdminEmployees();
     const employee = employees.find((e) => e.id === EMPLOYEE_ID)!;
     expect(employee.displayName).toBe("Марк Волков-Новый");
     expect(employee.address).toBe("Марк Волков-Новый");
   });
 
   it("leaves a chosen preferredName in place across a rename", async () => {
-    await mockSetEmployeePreferredName(EMPLOYEE_ID, "Марик");
-    await mockRenameEmployee(EMPLOYEE_ID, "Марк Волков-Новый");
-    const employees = await mockGetAdminEmployees();
+    await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, "Марик");
+    await employeesMock.renameEmployee(EMPLOYEE_ID, "Марк Волков-Новый");
+    const employees = await employeesMock.getAdminEmployees();
     const employee = employees.find((e) => e.id === EMPLOYEE_ID)!;
     expect(employee.displayName).toBe("Марк Волков-Новый");
     expect(employee.address).toBe("Марик");
@@ -260,11 +258,11 @@ describe("mockSetPreferredName", () => {
   });
 });
 
-describe("mockSetEmployeePreferredName", () => {
+describe("employeesMock.setEmployeePreferredName", () => {
   const EMPLOYEE_ID = 2; // «Игорь Петров» — starts with preferredName: null in the fixture.
 
   async function employeeById(id: number) {
-    const employees = await mockGetAdminEmployees();
+    const employees = await employeesMock.getAdminEmployees();
     const employee = employees.find((e) => e.id === id);
     if (!employee) throw new Error(`fixture employee ${id} not found`);
     return employee;
@@ -273,12 +271,12 @@ describe("mockSetEmployeePreferredName", () => {
   afterEach(async () => {
     // EMPLOYEES is a module-level singleton other tests in this file (and
     // other screens) also read — put this row back as the fixture found it.
-    await mockSetEmployeePreferredName(EMPLOYEE_ID, null);
+    await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, null);
   });
 
   it("saves a trimmed name and the address follows it", async () => {
     const before = await employeeById(EMPLOYEE_ID);
-    await mockSetEmployeePreferredName(EMPLOYEE_ID, "  Гоша  ");
+    await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, "  Гоша  ");
     const after = await employeeById(EMPLOYEE_ID);
     expect(after.preferredName).toBe("Гоша");
     expect(after.address).toBe("Гоша");
@@ -288,8 +286,8 @@ describe("mockSetEmployeePreferredName", () => {
   it("clears on an empty or blank string, falling back to displayName", async () => {
     const { displayName } = await employeeById(EMPLOYEE_ID);
     for (const blank of ["", "   "]) {
-      await mockSetEmployeePreferredName(EMPLOYEE_ID, "Гоша");
-      await mockSetEmployeePreferredName(EMPLOYEE_ID, blank);
+      await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, "Гоша");
+      await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, blank);
       const employee = await employeeById(EMPLOYEE_ID);
       expect(employee.preferredName).toBeNull();
       expect(employee.address).toBe(displayName);
@@ -298,8 +296,8 @@ describe("mockSetEmployeePreferredName", () => {
 
   it("treats null the same as an empty string", async () => {
     const { displayName } = await employeeById(EMPLOYEE_ID);
-    await mockSetEmployeePreferredName(EMPLOYEE_ID, "Гоша");
-    await mockSetEmployeePreferredName(EMPLOYEE_ID, null);
+    await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, "Гоша");
+    await employeesMock.setEmployeePreferredName(EMPLOYEE_ID, null);
     const employee = await employeeById(EMPLOYEE_ID);
     expect(employee.preferredName).toBeNull();
     expect(employee.address).toBe(displayName);

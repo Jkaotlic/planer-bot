@@ -1,8 +1,9 @@
+import { createEmployeesMock, createReadMock } from "@planer/client";
+import type { TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
   AdminSlotView,
-  CreateEmployeeResult,
   DistributeResult,
   UnfilledSlot,
   Employee,
@@ -31,7 +32,6 @@ import type {
   SwapRequest,
   SwapShiftSummary,
   SwapStatus,
-  TeamSchedule,
   Template,
   VacantSlot,
   WeekendSlotView,
@@ -89,14 +89,6 @@ export async function mockSetPreferredName(preferredName: string | null): Promis
   return { preferredName: value, address: MOCK_ME.address };
 }
 
-export async function mockSetEmployeePreferredName(id: number, preferredName: string | null): Promise<void> {
-  await delay(200);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (!employee) return;
-  employee.preferredName = preferredName?.trim() || null;
-  employee.address = employee.preferredName ?? employee.displayName;
-}
-
 /**
  * In-memory roster shared by the worker screens (name lookups) and the admin
  * "Работники" screen (full rows). Mutated live by create/archive/restore so
@@ -147,6 +139,7 @@ function entry(draft: EntryDraft): Shift {
     ...draft,
     templateId: draft.templateId ?? null,
     location: draft.location ?? null,
+    unrecognisedCode: draft.unrecognisedCode ?? null,
   };
 }
 
@@ -234,39 +227,59 @@ function overlapsRange(s: Shift, from: string, to: string): boolean {
   return s.date <= to && endOf(s) >= from;
 }
 
-function byDateThenStart(a: Shift, b: Shift): number {
-  return a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? "");
-}
-
 export async function mockGetMe(): Promise<Me> {
   await delay(150);
   return MOCK_ME;
 }
 
-export async function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
-  await delay(300);
-  const today = new Date().toISOString().slice(0, 10);
-  return {
-    shifts: ALL_ENTRIES.filter((s) => s.employeeId === MOCK_ME.id && endOf(s) >= today).sort(byDateThenStart),
-    today,
-  };
+/**
+ * Мок домена read живёт в `@planer/client`, а состояние остаётся здесь.
+ *
+ * Так потому, что в `ALL_ENTRIES` и `EMPLOYEES` пишут ещё не переехавшие
+ * домены — создание и правка записи, распределение, импорт ростера, — и экран
+ * администратора рассчитывает, что правка сразу видна в графике. Массивы
+ * передаются по ссылке, поэтому мутации остаются видимыми моку.
+ *
+ * Задержка ненулевая намеренно: в `npm run dev` она делает экраны честными.
+ */
+/**
+ * Мок домена employees — над тем же массивом `EMPLOYEES`.
+ *
+ * Массив передаётся по ссылке, поэтому правки из «Работников» сразу видны и
+ * моку `read` (график, «Команда»), и ещё не переехавшим доменам — отчётам,
+ * выходным, сборам, дням рождения. Тот же довод, что и у `read`: пакет владеет
+ * формой ответа, фронт — состоянием.
+ *
+ * `inviteLinkFor` приходит отсюда, потому что имя бота живёт в переменных
+ * сборки мини-аппа, а не в пакете.
+ */
+const employeesMock = createEmployeesMock({ delayMs: 200, state: { employees: EMPLOYEES }, inviteLinkFor });
+export { employeesMock };
+
+const readMock = createReadMock({
+  delayMs: 250,
+  state: {
+    get templates() {
+      return TEMPLATES;
+    },
+    get entries() {
+      return ALL_ENTRIES;
+    },
+    get employees() {
+      return EMPLOYEES;
+    },
+    get meId() {
+      return MOCK_ME.id;
+    },
+  },
+});
+
+export function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
+  return readMock.getMyShifts();
 }
 
-export async function mockGetTeamSchedule(from: string, to: string): Promise<TeamSchedule> {
-  await delay(350);
-  return {
-    employees: EMPLOYEES
-      .filter((employee) => employee.isActive)
-      .map((employee, rosterOrder) => ({
-        id: employee.id,
-        displayName: employee.displayName,
-        rosterOrder,
-        // Live from `EMPLOYEES`, not a fixed set — so toggling «Не участвует в
-        // обменах» on «Работники» shows up here too, not just in the admin tab.
-        excludedFromSwaps: employee.excludedFromSwaps,
-      })),
-    shifts: ALL_ENTRIES.filter((entry) => overlapsRange(entry, from, to)).sort(byDateThenStart),
-  };
+export function mockGetTeamSchedule(from: string, to: string): Promise<TeamScheduleResponse> {
+  return readMock.getTeamSchedule(from, to);
 }
 
 /**
@@ -471,86 +484,6 @@ export async function mockDeclineOffer(id: number): Promise<void> {
 
 // --- Работники --------------------------------------------------------------
 
-export async function mockGetAdminEmployees(): Promise<Employee[]> {
-  await delay(150);
-  return EMPLOYEES.map((e) => ({ ...e }));
-}
-
-export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
-  await delay(250);
-  const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: name, excludedFromAssignment: false, excludedFromSwaps: false };
-  EMPLOYEES.push(employee);
-  const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-  return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
-}
-
-export async function mockArchiveEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = false;
-}
-
-export async function mockRestoreEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = true;
-}
-
-export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isAdmin = isAdmin;
-}
-
-export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (!employee) return;
-  employee.displayName = displayName;
-  // Mirrors `mockSetEmployeePreferredName`: address follows displayName unless
-  // a preferredName overrides it — renaming must not leave a stale address.
-  employee.address = employee.preferredName ?? displayName;
-}
-
-/** Mirrors the server: move one worker, then renumber everyone contiguously. */
-export async function mockReorderEmployee(id: number, position: number): Promise<Employee[]> {
-  await delay(150);
-  const active = EMPLOYEES.filter((e) => e.isActive);
-  const from = active.findIndex((e) => e.id === id);
-  if (from === -1) throw new Error("Работник не найден");
-  const target = Math.min(Math.max(Math.trunc(position), 1), active.length) - 1;
-  const [moved] = active.splice(from, 1);
-  active.splice(target, 0, moved!);
-  const archived = EMPLOYEES.filter((e) => !e.isActive);
-  EMPLOYEES.length = 0;
-  EMPLOYEES.push(...active, ...archived);
-  return [...active];
-}
-
-export async function mockSetBirthDate(id: number, birthDate: string | null): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (employee) employee.birthDate = birthDate;
-}
-
-export async function mockSetEmployeeRestrictions(
-  id: number,
-  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
-): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (!employee) return;
-  if (patch.excludedFromAssignment !== undefined) employee.excludedFromAssignment = patch.excludedFromAssignment;
-  if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
-}
-
-export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
-  await delay(150);
-  const inviteToken = `${id}-${regenerate ? "regen" : "keep"}`.padEnd(12, "0").slice(0, 12);
-  return { inviteToken, inviteLink: inviteLinkFor(inviteToken) };
-}
-
 // --- Расписание -------------------------------------------------------------
 
 const TEMPLATES: readonly Template[] = [
@@ -564,9 +497,8 @@ const TEMPLATES: readonly Template[] = [
   { id: 8, sortOrder: 7, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
 ];
 
-export async function mockGetTemplates(): Promise<Template[]> {
-  await delay(120);
-  return [...TEMPLATES];
+export function mockGetTemplates(): Promise<Template[]> {
+  return readMock.getTemplates() as Promise<Template[]>;
 }
 
 /** Реального `notifyEntryChange` в DEV-моке нет, поэтому «дошло до N из M» —
@@ -590,6 +522,7 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
     location: input.location ?? null,
     templateId: input.templateId ?? null,
     employeeId: input.employeeId ?? null,
+    unrecognisedCode: null,
     employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
   };
   ALL_ENTRIES.push(created);
@@ -614,6 +547,7 @@ export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ crea
       location: input.location ?? null,
       templateId: input.templateId ?? null,
       employeeId: input.employeeId ?? null,
+      unrecognisedCode: null,
       employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
     };
     ALL_ENTRIES.push(created);
