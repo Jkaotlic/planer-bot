@@ -3,7 +3,7 @@ import type { Bot } from "grammy";
 import type { Db } from "../db/client";
 import type { Shift } from "../db/schema";
 import { getEmployeeById } from "../repo/employees";
-import { type NotifyReach, notifyScheduleChange } from "./change-notice";
+import { type NotifyReach, filterFutureDiff, notifyScheduleChange } from "./change-notice";
 import { type EmployeeDiff, diffSchedules } from "./schedule-diff";
 
 /**
@@ -76,10 +76,15 @@ export function createNoticeBuffer(deps: NoticeBufferDeps): NoticeBuffer {
     let intended = 0;
     let delivered = 0;
 
-    for (const [employeeId, incoming] of perEmployee) {
+    for (const [employeeId, raw] of perEmployee) {
       // Skipped before counting: an admin editing their own shift must not be
       // told «уйдёт 0 из 1» about a letter that is never written.
       if (employeeId === opts.actorEmployeeId) continue;
+
+      // The same «the past stays quiet» filter the sender applies. Predicting
+      // without it would promise a letter about a day nobody will be told about.
+      const incoming = filterFutureDiff(raw, opts.now.date);
+      if (incoming.added.length + incoming.removed.length + incoming.changed.length === 0) continue;
 
       // The prediction the route answers with. What it cannot know yet is
       // whether Telegram will accept the message — only whether there is an

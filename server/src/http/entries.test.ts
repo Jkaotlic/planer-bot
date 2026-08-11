@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
@@ -6,6 +6,7 @@ import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/em
 import { getShift, createShift, listShiftsInRange } from "../repo/shifts";
 import { buildRosterCsv } from "../roster/roster-service";
 import { listRecentAudit } from "../repo/audit";
+import { NOTICE_WINDOW_MS } from "../schedule/notice-buffer";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 
@@ -518,6 +519,13 @@ describe("своё время снимает пресет", () => {
 });
 
 describe("уведомление о правке записи", () => {
+  // Письмо о ручной правке ждёт окно буфера, поэтому здесь время двигается
+  // вручную. Таймеры включаются ПОСЛЕ `stage()`: выдача токена идёт через
+  // настоящий JWT и настоящие часы.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   /** Админ (allowlisted, id 111) и привязанный работник. Возвращает всё, что нужно роутам. */
   async function stage() {
     const db = makeTestDb();
@@ -534,9 +542,14 @@ describe("уведомление о правке записи", () => {
 
   it("создание записи пишет её владельцу", async () => {
     const { app, token, sent, workerId } = await stage();
+    vi.useFakeTimers();
     const res = await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"));
     expect(res.status).toBe(201);
+    // Ответ несёт предсказание, а не отчёт: письма в этот момент ещё нет.
     expect(await res.json()).toMatchObject({ notified: { delivered: 1, intended: 1 } });
+    expect(sent).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(555);
     expect(sent[0]!.text).toContain("поставил(а) тебе смену");
@@ -544,9 +557,13 @@ describe("уведомление о правке записи", () => {
 
   it("перенос даты пишет «было → стало»", async () => {
     const { app, token, sent, workerId } = await stage();
+    vi.useFakeTimers();
     const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    // Спускаем письмо о создании, чтобы дальше проверять ровно письмо о правке.
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     sent.length = 0;
     await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, { date: "2099-09-12" }, "PATCH"));
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("было");
     expect(sent[0]!.text).toContain("стало");
@@ -554,9 +571,13 @@ describe("уведомление о правке записи", () => {
 
   it("удаление пишет «снял(а) с тебя смену»", async () => {
     const { app, token, sent, workerId } = await stage();
+    vi.useFakeTimers();
     const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    // Спускаем письмо о создании, чтобы дальше проверять ровно письмо о правке.
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     sent.length = 0;
     await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, {}, "DELETE"));
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("снял(а) с тебя смену");
   });

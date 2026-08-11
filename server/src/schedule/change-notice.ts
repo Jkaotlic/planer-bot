@@ -52,55 +52,6 @@ export interface NotifyReach {
   intended: number;
 }
 
-interface EntryChangeOpts {
-  actorEmployeeId: number;
-  before: Shift | null;
-  after: Shift | null;
-  now: { date: string; time: string };
-}
-
-/**
- * Пишет человеку, что с его записью сделали.
- *
- * Зовётся ПОСЛЕ коммита: упавший Telegram не должен откатывать правку графика,
- * поэтому функция ничего не бросает и отвечает только тем, до скольких дошло.
- * Тумблер `remindersEnabled` здесь намеренно не спрашивается — это отдельный
- * канал (решение Антона, см. спеку): выключив шум напоминаний, человек не
- * отказывался узнавать, что его смену перенесли.
- */
-export async function notifyEntryChange(
-  db: Db,
-  bot: Bot | undefined,
-  opts: EntryChangeOpts,
-): Promise<NotifyReach> {
-  if (!bot) return { delivered: 0, intended: 0 };
-
-  const diff = diffSchedules(opts.before ? [opts.before] : [], opts.after ? [opts.after] : []);
-  const actor = getEmployeeById(db, opts.actorEmployeeId);
-  const actorName = actor ? addressOf(actor) : "Админ";
-  let delivered = 0;
-  let intended = 0;
-
-  for (const [employeeId, d] of diff) {
-    if (employeeId === opts.actorEmployeeId) continue; // себе не пишем
-    const future = filterFutureDiff(d, opts.now.date);
-    const texts: string[] = [
-      ...future.added.map((s) => entryAddedText(actorName, s)),
-      ...future.removed.map((s) => entryRemovedText(actorName, s)),
-      ...future.changed.map((c) => entryChangedText(actorName, c.before, c.after)),
-    ];
-    if (texts.length === 0) continue;
-
-    intended += 1;
-    const target = getEmployeeById(db, employeeId);
-    if (target?.telegramUserId == null) continue;
-    let ok = true;
-    for (const text of texts) ok = (await notifyUser(bot, target.telegramUserId, text)) && ok;
-    if (ok) delivered += 1;
-  }
-  return { delivered, intended };
-}
-
 /** Запись целиком в прошлом: даже её последний день раньше сегодняшнего. */
 function isPast(s: Shift, today: string): boolean {
   return (s.endDate ?? s.date) < today;
@@ -111,10 +62,10 @@ function isPast(s: Shift, today: string): boolean {
  *
  * Перенос ИЗ прошлого в будущее остаётся — это про будущее, о нём сказать надо;
  * молчит только правка, целиком лежащая в прошлом. Общая функция для
- * `notifyEntryChange` и `notifyScheduleChange`: правило одно, и ему не дано
- * разойтись между одиночным письмом и сводкой.
+ * `notifyScheduleChange` и предсказания в `notice-buffer`: правило одно, и ему
+ * не дано разойтись между тем, что уходит, и тем, что обещано в ответе роута.
  */
-function filterFutureDiff(diff: EmployeeDiff, today: string): EmployeeDiff {
+export function filterFutureDiff(diff: EmployeeDiff, today: string): EmployeeDiff {
   return {
     added: diff.added.filter((s) => !isPast(s, today)),
     removed: diff.removed.filter((s) => !isPast(s, today)),
