@@ -86,3 +86,43 @@ const CATEGORY_LABELS: Record<EntryCategory, string> = {
 export function categoryLabel(category: EntryCategory): string {
   return CATEGORY_LABELS[category];
 }
+
+/**
+ * Категория в винительном падеже: «поставил(а) тебе смену», «снял(а) с тебя отпуск».
+ *
+ * Отдельной таблицей, а не падежом от `CATEGORY_LABELS`: «Работа в выходной» →
+ * «работу в выходной» никаким правилом не выводится, а семь строк дешевле любого
+ * правила и читаются глазами.
+ *
+ * Повод завести это: до 2026-08-11 все три письма о правке графика говорили
+ * «смену» независимо от того, что правили, и человек прочитал «изменил твою
+ * смену» про свой отпуск — понять из этого, отменён ли отпуск, было нельзя.
+ */
+const CATEGORY_ACCUSATIVE: Record<EntryCategory, string> = {
+  shift: "смену",
+  vacation: "отпуск",
+  sick_leave: "больничный",
+  duty: "дежурство",
+  offsite: "выездное мероприятие",
+  business_trip: "командировку",
+  weekend_work: "работу в выходной",
+};
+
+/** Та же форма с «твой/твоя/твоё»: род у категорий разный, и склеить его правилом нельзя. */
+const CATEGORY_POSSESSIVE: Record<EntryCategory, string> = {
+  shift: "твою смену",
+  vacation: "твой отпуск",
+  sick_leave: "твой больничный",
+  duty: "твоё дежурство",
+  offsite: "твоё выездное мероприятие",
+  business_trip: "твою командировку",
+  weekend_work: "твою работу в выходной",
+};
+
+export function categoryAccusative(category: EntryCategory): string {
+  return CATEGORY_ACCUSATIVE[category];
+}
+
+export function categoryPossessive(category: EntryCategory): string {
+  return CATEGORY_POSSESSIVE[category];
+}
