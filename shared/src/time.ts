@@ -1,4 +1,3 @@
-import type { ShiftTemplate } from "./types";
 
 const MINUTES_PER_DAY = 24 * 60;
 
@@ -31,7 +30,18 @@ export function dayOfWeek(date: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-export function resolveShiftTimes(tpl: ShiftTemplate, date: string): { start: string; end: string } {
+/**
+ * Часы пресета на конкретную дату: в пятницу — пятничные, если они заданы.
+ *
+ * Параметр описан структурно, а не типом `ShiftTemplate`, потому что тем же
+ * правилом пользуются экраны, у которых на руках DTO из контракта, а не ряд
+ * таблицы. Два экрана мини-аппа успели завести свои копии этого расчёта — и обе
+ * забыли, что пятничные часы допускают `null`.
+ */
+export function resolveShiftTimes(
+  tpl: { start: string; end: string; fridayStart: string | null; fridayEnd: string | null },
+  date: string,
+): { start: string; end: string } {
   const isFriday = dayOfWeek(date) === 5;
   if (isFriday && tpl.fridayStart && tpl.fridayEnd) {
     return { start: tpl.fridayStart, end: tpl.fridayEnd };

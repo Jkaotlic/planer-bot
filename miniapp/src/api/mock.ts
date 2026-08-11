@@ -1,3 +1,5 @@
+import { createReadMock } from "@planer/client";
+import type { TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
@@ -31,7 +33,6 @@ import type {
   SwapRequest,
   SwapShiftSummary,
   SwapStatus,
-  TeamSchedule,
   Template,
   VacantSlot,
   WeekendSlotView,
@@ -147,6 +148,7 @@ function entry(draft: EntryDraft): Shift {
     ...draft,
     templateId: draft.templateId ?? null,
     location: draft.location ?? null,
+    unrecognisedCode: draft.unrecognisedCode ?? null,
   };
 }
 
@@ -234,39 +236,45 @@ function overlapsRange(s: Shift, from: string, to: string): boolean {
   return s.date <= to && endOf(s) >= from;
 }
 
-function byDateThenStart(a: Shift, b: Shift): number {
-  return a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? "");
-}
-
 export async function mockGetMe(): Promise<Me> {
   await delay(150);
   return MOCK_ME;
 }
 
-export async function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
-  await delay(300);
-  const today = new Date().toISOString().slice(0, 10);
-  return {
-    shifts: ALL_ENTRIES.filter((s) => s.employeeId === MOCK_ME.id && endOf(s) >= today).sort(byDateThenStart),
-    today,
-  };
+/**
+ * Мок домена read живёт в `@planer/client`, а состояние остаётся здесь.
+ *
+ * Так потому, что в `ALL_ENTRIES` и `EMPLOYEES` пишут ещё не переехавшие
+ * домены — создание и правка записи, распределение, импорт ростера, — и экран
+ * администратора рассчитывает, что правка сразу видна в графике. Массивы
+ * передаются по ссылке, поэтому мутации остаются видимыми моку.
+ *
+ * Задержка ненулевая намеренно: в `npm run dev` она делает экраны честными.
+ */
+const readMock = createReadMock({
+  delayMs: 250,
+  state: {
+    get templates() {
+      return TEMPLATES;
+    },
+    get entries() {
+      return ALL_ENTRIES;
+    },
+    get employees() {
+      return EMPLOYEES;
+    },
+    get meId() {
+      return MOCK_ME.id;
+    },
+  },
+});
+
+export function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
+  return readMock.getMyShifts();
 }
 
-export async function mockGetTeamSchedule(from: string, to: string): Promise<TeamSchedule> {
-  await delay(350);
-  return {
-    employees: EMPLOYEES
-      .filter((employee) => employee.isActive)
-      .map((employee, rosterOrder) => ({
-        id: employee.id,
-        displayName: employee.displayName,
-        rosterOrder,
-        // Live from `EMPLOYEES`, not a fixed set — so toggling «Не участвует в
-        // обменах» on «Работники» shows up here too, not just in the admin tab.
-        excludedFromSwaps: employee.excludedFromSwaps,
-      })),
-    shifts: ALL_ENTRIES.filter((entry) => overlapsRange(entry, from, to)).sort(byDateThenStart),
-  };
+export function mockGetTeamSchedule(from: string, to: string): Promise<TeamScheduleResponse> {
+  return readMock.getTeamSchedule(from, to);
 }
 
 /**
@@ -564,9 +572,8 @@ const TEMPLATES: readonly Template[] = [
   { id: 8, sortOrder: 7, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
 ];
 
-export async function mockGetTemplates(): Promise<Template[]> {
-  await delay(120);
-  return [...TEMPLATES];
+export function mockGetTemplates(): Promise<Template[]> {
+  return readMock.getTemplates() as Promise<Template[]>;
 }
 
 /** Реального `notifyEntryChange` в DEV-моке нет, поэтому «дошло до N из M» —
@@ -590,6 +597,7 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
     location: input.location ?? null,
     templateId: input.templateId ?? null,
     employeeId: input.employeeId ?? null,
+    unrecognisedCode: null,
     employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
   };
   ALL_ENTRIES.push(created);
@@ -614,6 +622,7 @@ export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ crea
       location: input.location ?? null,
       templateId: input.templateId ?? null,
       employeeId: input.employeeId ?? null,
+      unrecognisedCode: null,
       employeeName: input.employeeId != null ? personName(input.employeeId) : undefined,
     };
     ALL_ENTRIES.push(created);
