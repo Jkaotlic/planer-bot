@@ -1,10 +1,9 @@
-import { createReadMock } from "@planer/client";
+import { createEmployeesMock, createReadMock } from "@planer/client";
 import type { TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
   AdminSlotView,
-  CreateEmployeeResult,
   DistributeResult,
   UnfilledSlot,
   Employee,
@@ -88,14 +87,6 @@ export async function mockSetPreferredName(preferredName: string | null): Promis
   // Mirrors `addressOf`: chosen name, then Telegram's, then the roster's.
   MOCK_ME.address = value ?? "Аня";
   return { preferredName: value, address: MOCK_ME.address };
-}
-
-export async function mockSetEmployeePreferredName(id: number, preferredName: string | null): Promise<void> {
-  await delay(200);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (!employee) return;
-  employee.preferredName = preferredName?.trim() || null;
-  employee.address = employee.preferredName ?? employee.displayName;
 }
 
 /**
@@ -251,6 +242,20 @@ export async function mockGetMe(): Promise<Me> {
  *
  * Задержка ненулевая намеренно: в `npm run dev` она делает экраны честными.
  */
+/**
+ * Мок домена employees — над тем же массивом `EMPLOYEES`.
+ *
+ * Массив передаётся по ссылке, поэтому правки из «Работников» сразу видны и
+ * моку `read` (график, «Команда»), и ещё не переехавшим доменам — отчётам,
+ * выходным, сборам, дням рождения. Тот же довод, что и у `read`: пакет владеет
+ * формой ответа, фронт — состоянием.
+ *
+ * `inviteLinkFor` приходит отсюда, потому что имя бота живёт в переменных
+ * сборки мини-аппа, а не в пакете.
+ */
+const employeesMock = createEmployeesMock({ delayMs: 200, state: { employees: EMPLOYEES }, inviteLinkFor });
+export { employeesMock };
+
 const readMock = createReadMock({
   delayMs: 250,
   state: {
@@ -478,86 +483,6 @@ export async function mockDeclineOffer(id: number): Promise<void> {
  * =========================================================================== */
 
 // --- Работники --------------------------------------------------------------
-
-export async function mockGetAdminEmployees(): Promise<Employee[]> {
-  await delay(150);
-  return EMPLOYEES.map((e) => ({ ...e }));
-}
-
-export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
-  await delay(250);
-  const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: name, excludedFromAssignment: false, excludedFromSwaps: false };
-  EMPLOYEES.push(employee);
-  const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-  return { employee, inviteToken, inviteLink: inviteLinkFor(inviteToken) };
-}
-
-export async function mockArchiveEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = false;
-}
-
-export async function mockRestoreEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = true;
-}
-
-export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isAdmin = isAdmin;
-}
-
-export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (!employee) return;
-  employee.displayName = displayName;
-  // Mirrors `mockSetEmployeePreferredName`: address follows displayName unless
-  // a preferredName overrides it — renaming must not leave a stale address.
-  employee.address = employee.preferredName ?? displayName;
-}
-
-/** Mirrors the server: move one worker, then renumber everyone contiguously. */
-export async function mockReorderEmployee(id: number, position: number): Promise<Employee[]> {
-  await delay(150);
-  const active = EMPLOYEES.filter((e) => e.isActive);
-  const from = active.findIndex((e) => e.id === id);
-  if (from === -1) throw new Error("Работник не найден");
-  const target = Math.min(Math.max(Math.trunc(position), 1), active.length) - 1;
-  const [moved] = active.splice(from, 1);
-  active.splice(target, 0, moved!);
-  const archived = EMPLOYEES.filter((e) => !e.isActive);
-  EMPLOYEES.length = 0;
-  EMPLOYEES.push(...active, ...archived);
-  return [...active];
-}
-
-export async function mockSetBirthDate(id: number, birthDate: string | null): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (employee) employee.birthDate = birthDate;
-}
-
-export async function mockSetEmployeeRestrictions(
-  id: number,
-  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
-): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (!employee) return;
-  if (patch.excludedFromAssignment !== undefined) employee.excludedFromAssignment = patch.excludedFromAssignment;
-  if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
-}
-
-export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
-  await delay(150);
-  const inviteToken = `${id}-${regenerate ? "regen" : "keep"}`.padEnd(12, "0").slice(0, 12);
-  return { inviteToken, inviteLink: inviteLinkFor(inviteToken) };
-}
 
 // --- Расписание -------------------------------------------------------------
 

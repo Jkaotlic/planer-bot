@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  employeesMock,
   TEMPLATES,
   mockCreateCollection,
   mockGetCollections,
@@ -7,7 +8,6 @@ import {
   mockSendCollection,
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
-  mockSetEmployeeAdmin,
 } from "./mock";
 
 describe("admin schedule mock", () => {
@@ -73,7 +73,7 @@ describe("мок сборов", () => {
     // сравнение снова свелось к null === null, этот сбор исчез бы из списка
     // и 404-ил бы по id, хотя виновника у него нет вообще.
     // id 1 — «Аня Смирнова», единственный isAdmin в фикстуре.
-    await mockSetEmployeeAdmin(1, false);
+    await employeesMock.setEmployeeAdmin(1, false);
     try {
       const visible = await mockCreateCollection({ title: "Без виновника" });
       const rows = await mockGetCollections();
@@ -81,7 +81,7 @@ describe("мок сборов", () => {
       const preview = await mockGetCollectionPreview(visible.id);
       expect(preview.id).toBe(visible.id);
     } finally {
-      await mockSetEmployeeAdmin(1, true);
+      await employeesMock.setEmployeeAdmin(1, true);
     }
   });
 });

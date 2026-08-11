@@ -1,23 +1,21 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
-import { AuthRequiredError, OFFLINE_MESSAGE, createReadApi, createTransport } from "@planer/client";
-import type { EntryCategory, ScheduleEntryDto, TemplateAccent, TemplateDto } from "@planer/shared";
+import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
+import type {
+  AdminEmployeeDto,
+  CreateEmployeeResponse,
+  EntryCategory,
+  ScheduleEntryDto,
+  TemplateAccent,
+  TemplateDto,
+} from "@planer/shared";
 import {
-  mockArchiveEmployee,
-  mockCreateEmployee,
+  employeesMock,
   mockCreateEntry,
   mockUpdateEntry,
   mockDeleteEntry,
-  mockGetEmployees,
   mockGetEvents,
   mockGetTeamSchedule,
   mockGetTemplates,
-  mockRestoreEmployee,
-  mockSetEmployeeAdmin,
-  mockRenameEmployee,
-  mockSetBirthDate,
-  mockSetEmployeeRestrictions,
-  mockReorderEmployee,
-  mockGetEmployeeInvite,
   mockGetWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -48,27 +46,15 @@ import {
   mockSetSwapsLock,
 } from "./mock";
 
-/** A worker row in the schedule grid / Работники screen. */
-export interface Employee {
-  id: number;
-  displayName: string;
-  isAdmin: boolean;
-  /** false once archived (see `archiveEmployee`). */
-  isActive: boolean;
-  /** null until the worker opens the invite link and links their Telegram account. */
-  telegramUserId: number | null;
-  /** «MM-DD» — day and month of their birthday, or null if not given. */
-  birthDate: string | null;
-  /** What the bot will actually call them — computed server-side by `addressOf`.
-   *  Never derive this from `displayName`: the roster is «Фамилия Имя», so its
-   *  first word is a surname. See `addressOf` in @planer/shared. */
-  address: string;
-  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
-   *  выходные. Ручную постановку это не запрещает. */
-  excludedFromAssignment: boolean;
-  /** Админ вывел человека из обменов — в обе стороны. */
-  excludedFromSwaps: boolean;
-}
+/**
+ * Работник — DTO из контракта.
+ *
+ * Форма была объявлена здесь своими словами и не знала `preferredName`, хотя
+ * сервер его отдаёт: консоль поле не читает — «обращение» человек задаёт себе
+ * сам в мини-аппе. Теперь оно просто есть и остаётся непрочитанным, а тип один
+ * на сервер и на оба фронта.
+ */
+export type Employee = AdminEmployeeDto;
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
 /**
@@ -105,13 +91,8 @@ export interface FeedEvent {
   timeLabel: string;
 }
 
-export interface CreateEmployeeResult {
-  employee: Employee;
-  /** Single-use token embedded in the invite deep-link. */
-  inviteToken: string;
-  /** Ready-made `https://t.me/<bot>?start=<token>` deep-link, or `null` if the server has no bot username configured. */
-  inviteLink: string | null;
-}
+/** Ответ создания работника: он сам, токен приглашения и готовая ссылка. */
+export type CreateEmployeeResult = CreateEmployeeResponse;
 
 export interface NewEntryInput {
   date: string;
@@ -446,10 +427,6 @@ export interface ApiClient {
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
 }
 
-interface EmployeesResponse {
-  employees: Employee[];
-}
-
 /** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
  * formatted for the "События" feed (see `toFeedEvent` below). */
 interface RawAdminEvent {
@@ -612,6 +589,7 @@ const tokenSource = { get: authToken, clear: clearAuth };
 
 const transport = createTransport({ baseUrl: API_BASE, tokenSource });
 const readApi = createReadApi(transport);
+const employeesApi = createEmployeesApi(transport);
 
 /** Reads `{error}` off a non-2xx JSON response, falling back to a generic message. */
 async function errorMessage(path: string, res: Response): Promise<string> {
@@ -692,10 +670,7 @@ async function authorizedDelete<T>(path: string): Promise<T> {
 
 /** Экспортируется ради теста про сетевой сбой — в приложение уходит `apiClient` ниже. */
 export const realClient: ApiClient = {
-  async getEmployees() {
-    const { employees } = await authorizedGet<EmployeesResponse>("/api/admin/employees");
-    return employees;
-  },
+  getEmployees: () => employeesApi.getAdminEmployees(),
 
   // Консоли из ответа нужны только записи: ростер она рисует из собственного
   // `getEmployees`, а не из этой ручки.
@@ -711,7 +686,7 @@ export const realClient: ApiClient = {
   async getEvents() {
     const [{ events }, { employees }] = await Promise.all([
       authorizedGet<EventsResponse>("/api/admin/events"),
-      authorizedGet<EmployeesResponse>("/api/admin/employees"),
+      employeesApi.getAdminEmployees().then((employees) => ({ employees })),
     ]);
     const namesById = new Map(employees.map((e) => [e.id, e.displayName]));
     return events.map((raw) => toFeedEvent(raw, namesById));
@@ -724,45 +699,18 @@ export const realClient: ApiClient = {
 
   deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
-  async createEmployee(name) {
-    return authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name });
-  },
-
-  async archiveEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/archive`, {});
-  },
-
-  async restoreEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
-  },
-
-  async setEmployeeAdmin(id, isAdmin) {
-    await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
-  },
-
-  async reorderEmployee(id, position) {
-    const { employees } = await authorizedPostJson<{ employees: Employee[] }>(
-      `/api/admin/employees/${id}/order`,
-      { position },
-    );
-    return employees;
-  },
-
-  async setBirthDate(id, birthDate) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { birthDate });
-  },
-
-  async renameEmployee(id, displayName) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
-  },
-
-  async setEmployeeRestrictions(id, patch) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
-  },
-
-  getEmployeeInvite(id, regenerate = false) {
-    return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
-  },
+  // Методы перечислены, а не спреднуты: у консоли этот домен уже своего имени
+  // ручке (`getEmployees` вместо `getAdminEmployees`), и «обращение» она не
+  // трогает вовсе. Общий слой несёт объединение, консоль берёт своё.
+  createEmployee: (name) => employeesApi.createEmployee(name),
+  archiveEmployee: (id) => employeesApi.archiveEmployee(id),
+  restoreEmployee: (id) => employeesApi.restoreEmployee(id),
+  setEmployeeAdmin: (id, isAdmin) => employeesApi.setEmployeeAdmin(id, isAdmin),
+  reorderEmployee: (id, position) => employeesApi.reorderEmployee(id, position),
+  setBirthDate: (id, birthDate) => employeesApi.setBirthDate(id, birthDate),
+  renameEmployee: (id, displayName) => employeesApi.renameEmployee(id, displayName),
+  setEmployeeRestrictions: (id, patch) => employeesApi.setEmployeeRestrictions(id, patch),
+  getEmployeeInvite: (id, regenerate) => employeesApi.getEmployeeInvite(id, regenerate),
 
   async getWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
@@ -926,22 +874,22 @@ export const realClient: ApiClient = {
 };
 
 const devClient: ApiClient = {
-  getEmployees: () => mockGetEmployees(),
+  getEmployees: () => employeesMock.getAdminEmployees(),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getTemplates: () => mockGetTemplates(),
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
-  createEmployee: (name) => mockCreateEmployee(name),
-  archiveEmployee: (id) => mockArchiveEmployee(id),
-  restoreEmployee: (id) => mockRestoreEmployee(id),
-  setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
-  renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
-  setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
-  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
-  reorderEmployee: (id, position) => mockReorderEmployee(id, position),
-  getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
+  createEmployee: (name) => employeesMock.createEmployee(name),
+  archiveEmployee: (id) => employeesMock.archiveEmployee(id),
+  restoreEmployee: (id) => employeesMock.restoreEmployee(id),
+  setEmployeeAdmin: (id, isAdmin) => employeesMock.setEmployeeAdmin(id, isAdmin),
+  renameEmployee: (id, displayName) => employeesMock.renameEmployee(id, displayName),
+  setBirthDate: (id, birthDate) => employeesMock.setBirthDate(id, birthDate),
+  setEmployeeRestrictions: (id, patch) => employeesMock.setEmployeeRestrictions(id, patch),
+  reorderEmployee: (id, position) => employeesMock.reorderEmployee(id, position),
+  getEmployeeInvite: (id, regenerate) => employeesMock.getEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
