@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
@@ -6,6 +6,7 @@ import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/em
 import { getShift, createShift, listShiftsInRange } from "../repo/shifts";
 import { buildRosterCsv } from "../roster/roster-service";
 import { listRecentAudit } from "../repo/audit";
+import { NOTICE_WINDOW_MS } from "../schedule/notice-buffer";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 
@@ -518,6 +519,13 @@ describe("своё время снимает пресет", () => {
 });
 
 describe("уведомление о правке записи", () => {
+  // Письмо о ручной правке ждёт окно буфера, поэтому здесь время двигается
+  // вручную. Таймеры включаются ПОСЛЕ `stage()`: выдача токена идёт через
+  // настоящий JWT и настоящие часы.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   /** Админ (allowlisted, id 111) и привязанный работник. Возвращает всё, что нужно роутам. */
   async function stage() {
     const db = makeTestDb();
@@ -534,9 +542,14 @@ describe("уведомление о правке записи", () => {
 
   it("создание записи пишет её владельцу", async () => {
     const { app, token, sent, workerId } = await stage();
+    vi.useFakeTimers();
     const res = await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"));
     expect(res.status).toBe(201);
+    // Ответ несёт предсказание, а не отчёт: письма в этот момент ещё нет.
     expect(await res.json()).toMatchObject({ notified: { delivered: 1, intended: 1 } });
+    expect(sent).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(555);
     expect(sent[0]!.text).toContain("поставил(а) тебе смену");
@@ -544,9 +557,13 @@ describe("уведомление о правке записи", () => {
 
   it("перенос даты пишет «было → стало»", async () => {
     const { app, token, sent, workerId } = await stage();
+    vi.useFakeTimers();
     const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    // Спускаем письмо о создании, чтобы дальше проверять ровно письмо о правке.
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     sent.length = 0;
     await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, { date: "2099-09-12" }, "PATCH"));
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("было");
     expect(sent[0]!.text).toContain("стало");
@@ -554,9 +571,13 @@ describe("уведомление о правке записи", () => {
 
   it("удаление пишет «снял(а) с тебя смену»", async () => {
     const { app, token, sent, workerId } = await stage();
+    vi.useFakeTimers();
     const created = await (await app.request("/api/admin/entries", authedJson(token, entryBody({ employeeId: workerId }), "POST"))).json();
+    // Спускаем письмо о создании, чтобы дальше проверять ровно письмо о правке.
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     sent.length = 0;
     await app.request(`/api/admin/entries/${created.entry.id}`, authedJson(token, {}, "DELETE"));
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("снял(а) с тебя смену");
   });
@@ -624,5 +645,78 @@ describe("POST /api/admin/entries/bulk", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(555);
     expect(sent[0]!.text).toContain("заполнение недели");
+  });
+});
+
+describe("правка целой недели одним письмом", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function stage() {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const worker = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-w" });
+    linkTelegramAccount(db, "inv-w", 555);
+    return { db, app, token, sent, workerId: worker.id };
+  }
+
+  it("отмена отпуска и три смены подряд дают одно письмо, называющее отпуск отпуском", async () => {
+    // Сценарий из живого журнала 7 августа: правка записи отпуска в смену, затем
+    // новые дни — всё внутри одного окна буфера. До этой работы человек получал
+    // письмо на каждую правку, и первое звало его отпуск «сменой».
+    const { db, app, token, sent, workerId } = await stage();
+    const vacation = createShift(db, {
+      date: "2099-09-10", endDate: "2099-09-14", start: null, end: null,
+      category: "vacation", title: null, employeeId: workerId,
+    });
+
+    vi.useFakeTimers();
+    await app.request(`/api/admin/entries/${vacation.id}`, authedJson(token, {
+      date: "2099-09-10", endDate: null, category: "shift", title: "День",
+      start: "09:00", end: "18:00",
+    }, "PATCH"));
+    for (const date of ["2099-09-11", "2099-09-12", "2099-09-13"]) {
+      await app.request("/api/admin/entries", authedJson(token, {
+        employeeId: workerId, date, start: "09:00", end: "18:00", category: "shift", title: "День",
+      }, "POST"));
+    }
+
+    expect(sent, "ещё копится — в этом весь смысл буфера").toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
+
+    expect(sent).toHaveLength(1);
+    const text = sent[0]!.text;
+    // Человек видит, во что превратился его отпуск, — прямо в строке перехода.
+    expect(text).toContain("весь день · Отпуск →");
+    // Раньше первое из пяти писем звало отпуск «твоей сменой» — ровно то, из-за
+    // чего человек и написал. Никакая правка отпуска не смеет зваться сменой.
+    expect(text).not.toContain("твою смену");
+  });
+
+  it("вторая смена рядом с уже стоявшей называет обе в одном письме", async () => {
+    // Сценарий 8 августа: на дне уже стоит «День 09:00–18:00», админ ставит рядом
+    // «Вечер 11:00–20:00» и снимает первую только вечером. Письмо обязано сказать,
+    // что смен на этот день стало две, — иначе человек узнает об этом через 12 часов.
+    const { db, app, token, sent, workerId } = await stage();
+    createShift(db, {
+      date: "2099-09-12", endDate: null, start: "09:00", end: "18:00",
+      category: "shift", title: "День", employeeId: workerId,
+    });
+
+    vi.useFakeTimers();
+    await app.request("/api/admin/entries", authedJson(token, {
+      employeeId: workerId, date: "2099-09-12", start: "11:00", end: "20:00",
+      category: "shift", title: "Вечер",
+    }, "POST"));
+    await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 1);
+
+    expect(sent).toHaveLength(1);
+    const text = sent[0]!.text;
+    expect(text).toContain("Теперь на Сб 12 сент у тебя:");
+    expect(text).toContain("09:00–18:00 · День");
+    expect(text).toContain("11:00–20:00 · Вечер");
   });
 });

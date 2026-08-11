@@ -51,6 +51,23 @@ export function notifyNotice(reach: { delivered: number; intended: number }): st
   return `Уведомление дошло до ${reach.delivered} из ${reach.intended}: остальные не подключили телеграм.`;
 }
 
+/**
+ * То же самое, но про письмо, которое ещё НЕ ушло.
+ *
+ * Одиночная правка копится в буфере сервера до двадцати секунд, поэтому в
+ * момент ответа факта доставки нет — есть только знание, у кого из адресатов
+ * привязан телеграм. Врать словом «дошло» об этом нельзя, а молчать не надо:
+ * фраза произносится ровно в том же случае, что и раньше, — часть команды не
+ * подключила телеграм, и об этом админ должен узнать сразу.
+ *
+ * `notifyNotice` рядом остаётся: импорт файла, «Распределить честно» и
+ * «Заполнить неделю» отправляют внутри запроса и отчитываются о факте.
+ */
+export function notifyPendingNotice(reach: { delivered: number; intended: number }): string | null {
+  if (reach.intended === 0 || reach.delivered >= reach.intended) return null;
+  return `Уведомление уйдёт ${reach.delivered} из ${reach.intended}: остальные не подключили телеграм.`;
+}
+
 /** Приписывает `notifyNotice` к базовому сообщению, если есть что сказать. */
 export function withNotifyNotice(base: string, reach: { delivered: number; intended: number }): string {
   const extra = notifyNotice(reach);

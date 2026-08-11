@@ -4,6 +4,8 @@ import {
   isSwappable,
   isAbsence,
   categoryLabel,
+  categoryAccusative,
+  categoryPossessive,
   countsForBalance,
   templateAccents,
   type EntryCategory,
@@ -53,5 +55,36 @@ describe("categoryLabel", () => {
     expect(categoryLabel("offsite")).toBe("Выездное мероприятие");
     expect(categoryLabel("business_trip")).toBe("Командировка");
     expect(categoryLabel("weekend_work")).toBe("Работа в выходной");
+  });
+});
+
+describe("склонения категорий для писем", () => {
+  it("винительный падеж — то, что подставляется после «поставил(а) тебе»", () => {
+    expect(categoryAccusative("shift")).toBe("смену");
+    expect(categoryAccusative("duty")).toBe("дежурство");
+    expect(categoryAccusative("vacation")).toBe("отпуск");
+    expect(categoryAccusative("sick_leave")).toBe("больничный");
+    expect(categoryAccusative("offsite")).toBe("выездное мероприятие");
+    expect(categoryAccusative("business_trip")).toBe("командировку");
+    expect(categoryAccusative("weekend_work")).toBe("работу в выходной");
+  });
+
+  it("винительный с «твой» — род у категорий разный, одной формой не обойтись", () => {
+    expect(categoryPossessive("shift")).toBe("твою смену");
+    expect(categoryPossessive("duty")).toBe("твоё дежурство");
+    expect(categoryPossessive("vacation")).toBe("твой отпуск");
+    expect(categoryPossessive("sick_leave")).toBe("твой больничный");
+    expect(categoryPossessive("offsite")).toBe("твоё выездное мероприятие");
+    expect(categoryPossessive("business_trip")).toBe("твою командировку");
+    expect(categoryPossessive("weekend_work")).toBe("твою работу в выходной");
+  });
+
+  // Таблица, забытая при добавлении категории, — это письмо со словом `undefined`
+  // в чате у человека. Перебор по схеме ловит это на наборе категорий, а не в проде.
+  it("обе таблицы покрывают все категории, какие есть", () => {
+    for (const category of entryCategorySchema.options) {
+      expect(categoryAccusative(category)).toMatch(/\S/);
+      expect(categoryPossessive(category)).toMatch(/\S/);
+    }
   });
 });

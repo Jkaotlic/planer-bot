@@ -15,7 +15,7 @@ import { CardShell, CardStack } from "../../components/Card";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
 import { ScreenScroll } from "../../components/ScreenScroll";
-import { formatTimeRange, notifyNotice, withNotifyNotice } from "../../lib/shift";
+import { formatTimeRange, notifyPendingNotice, withNotifyNotice } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import { createLatestRequestGate } from "../../lib/request-gate";
@@ -309,7 +309,7 @@ export function AdminScheduleScreen() {
     await loadWeek(from, to);
     // Своего сообщения об успехе у сохранения записи нет — «дошло не до всех»
     // говорим, только когда есть что сказать, иначе экран молчит, как раньше.
-    setNotice(notifyNotice(notified));
+    setNotice(notifyPendingNotice(notified));
   }
 
   async function handleFilled(count: number, notified: { delivered: number; intended: number }) {
