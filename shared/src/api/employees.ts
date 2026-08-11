@@ -55,3 +55,33 @@ export const adminEmployeesResponseSchema = z
   .object({ employees: z.array(adminEmployeeSchema) })
   .strict();
 export type AdminEmployeesResponse = z.infer<typeof adminEmployeesResponseSchema>;
+
+/** Ответ правки и смены прав: тот же работник, что и в списке. */
+export const adminEmployeeResponseSchema = z.object({ employee: adminEmployeeSchema }).strict();
+export type AdminEmployeeResponse = z.infer<typeof adminEmployeeResponseSchema>;
+
+/**
+ * Ответ создания работника.
+ *
+ * Токен приглашения здесь намеренно и отдельным полем: админ только что завёл
+ * человека, и ссылка нужна ему сразу. Внутри `employee` его быть не должно —
+ * там он ехал вторым, незамеченным путём вместе с восемью прочими колонками
+ * ряда, и `.strict()` на `adminEmployeeSchema` это теперь запрещает.
+ *
+ * `inviteLink` необязателен не по забывчивости: без `botUsername` в конфиге
+ * сервер собрать её не из чего, и это нормальное состояние.
+ */
+export const createEmployeeResponseSchema = z
+  .object({
+    employee: adminEmployeeSchema,
+    inviteToken: z.string(),
+    inviteLink: z.string().nullable(),
+  })
+  .strict();
+export type CreateEmployeeResponse = z.infer<typeof createEmployeeResponseSchema>;
+
+/** Ответ выдачи приглашения: только ключ и ссылка, без работника рядом. */
+export const employeeInviteResponseSchema = z
+  .object({ inviteToken: z.string(), inviteLink: z.string().nullable() })
+  .strict();
+export type EmployeeInviteResponse = z.infer<typeof employeeInviteResponseSchema>;
