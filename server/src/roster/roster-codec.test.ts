@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { parseRosterCsv, decodeRoster, CODE_TO_PRESET_NAME, PRESET_NAME_TO_CODE } from "./roster-codec";
 import { makeTestDb } from "../db/testdb";
 import { listActiveTemplates } from "../repo/templates";
-import type { DecodeResult } from "./roster-codec";
 
 // Fake names, engineered byte-for-byte like the real export: UTF-8 BOM, CRLF, ';'
 // delimiter, no trailing newline. See task-10-brief.md Fix 4 for what it must cover.

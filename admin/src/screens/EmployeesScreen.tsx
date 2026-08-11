@@ -45,16 +45,17 @@ export function refusalText(message: string): string {
  */
 export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: EmployeesScreenProps) {
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
   /**
-   * A refusal earned by a row's own button, kept with that row. `error` above is
-   * the whole screen's and is drawn under the title — right for a failed load,
-   * wrong for a row: with 28 active workers plus the archive the list is far
-   * taller than the window, so «Архивировать» на нижней строке отвечало за
-   * пределами видимой области. Same fix, and same reasoning, as the Mini App's
-   * `rowError` in AdminEmployeesScreen.
+   * A refusal earned by a row's own button, kept with that row — and the only
+   * error state this screen has. A whole-screen error drawn under the title is
+   * right for a failed load, but this screen never loads anything itself (the
+   * list arrives as a prop), and for a row it is wrong outright: with 28 active
+   * workers plus the archive the list is far taller than the window, so
+   * «Архивировать» на нижней строке отвечало за пределами видимой области.
+   * Same fix, and same reasoning, as the Mini App's `rowError` in
+   * AdminEmployeesScreen.
    */
   const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
 
@@ -114,8 +115,6 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: E
           ＋ Добавить работника
         </button>
       </div>
-
-      {error && <div className="error-text">{error}</div>}
 
       <EmployeesSection
         title="Активные"

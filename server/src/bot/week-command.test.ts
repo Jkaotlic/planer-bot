@@ -110,7 +110,7 @@ function groupCallbackUpdate(tgId: number, data: string) {
 
 /** Creates a linked worker with a Telegram account and one shift this week. */
 function linkedWorker(db: Db, tgId: number) {
-  const employee = createEmployee(db, { displayName: "Иванов Иван", inviteToken: `tok-${tgId}` });
+  createEmployee(db, { displayName: "Иванов Иван", inviteToken: `tok-${tgId}` });
   linkTelegramAccount(db, `tok-${tgId}`, tgId, "ivanov", "Иван");
   const linked = getByTelegramId(db, tgId)!;
   createShift(db, { employeeId: linked.id, date: "2026-08-05", start: "08:00", end: "20:00", category: "shift" });

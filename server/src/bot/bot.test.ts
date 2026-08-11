@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { decodeJwt } from "jose";
-import type { Bot } from "grammy";
 import { createBot, reasonToRu } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getByTelegramId, getEmployeeById, archiveEmployee } from "../repo/employees";
