@@ -12,7 +12,7 @@ import { rateLimiter } from "./rate-limit";
 import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping } from "../repo/shifts";
-import type { Shift, SwapRequest } from "../db/schema";
+import type { Employee as EmployeeRow, Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
   getEmployeeById,
@@ -81,6 +81,9 @@ import {
   addressOf,
   normalizePreferredName,
   PREFERRED_NAME_MAX,
+  type AdminEmployeeDto,
+  type AdminEmployeesResponse,
+  type EmployeesResponse,
   type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
@@ -133,6 +136,30 @@ function displayNameOf(u: TelegramUser): string {
 function nameTakenError(taken: string): string {
   return `«${taken}» уже есть в списке. График файлом сверяется по ФИО, поэтому двух одинаковых быть не может — ` +
     `добавьте отчество или инициал, чтобы их было видно врозь.`;
+}
+
+/**
+ * Работник в том виде, в каком его отдаёт контракт.
+ *
+ * Одна функция на все ручки домена намеренно: до неё список полей существовал в
+ * виде `{ ...employee }` в двух местах, и вместе с нужными десятью полями
+ * уезжали ещё девять колонок ряда — включая `inviteToken`, ключ привязки чужого
+ * телеграма. Добавить поле в ответ теперь можно только здесь, и `satisfies` на
+ * вызывающей стороне сверит его со схемой.
+ */
+function toAdminEmployee(employee: EmployeeRow): AdminEmployeeDto {
+  return {
+    id: employee.id,
+    displayName: employee.displayName,
+    preferredName: employee.preferredName,
+    address: addressOf(employee),
+    isAdmin: employee.isAdmin,
+    isActive: employee.isActive,
+    telegramUserId: employee.telegramUserId,
+    birthDate: employee.birthDate,
+    excludedFromAssignment: employee.excludedFromAssignment,
+    excludedFromSwaps: employee.excludedFromSwaps,
+  };
 }
 
 export function createApp(deps: AppDeps): Hono<Env> {
@@ -319,17 +346,23 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.route("/", createReadRoutes({ db, config }));
 
   app.get("/api/employees", requireAuth(db, config.jwtSecret), (c) =>
-    c.json({ employees: listActive(db).map((e) => ({ id: e.id, displayName: e.displayName })) }),
+    c.json({
+      employees: listActive(db).map((e) => ({ id: e.id, displayName: e.displayName })),
+    } satisfies EmployeesResponse),
   );
 
   // `address` is computed, not stored: the admin card shows what the bot will
   // actually say, so it is obvious whose greeting still needs setting.
   //
-  // `{ ...employee }` also carries `excludedFromAssignment`/`excludedFromSwaps`
-  // to the client for free — do not "tidy" that spread into a narrower shape,
-  // the workers screen reads both flags straight off this response.
+  // Поля перечислены, а не спреднуты. Раньше здесь стоял `{ ...employee }` с
+  // предупреждением «не сужать: экран работников читает оба флага исключений» —
+  // флаги на месте, а вместе с ними уезжали ещё девять колонок ряда, включая
+  // `inviteToken`: ключ, которым чужой телеграм привязывается к работнику.
+  // Ни одну из девяти не объявляет тип `Employee` ни одного из фронтов.
+  // Что отдаётся, теперь решает `adminEmployeeSchema`, а не форма таблицы.
   app.get("/api/admin/employees", requireAdmin(db, config.jwtSecret), (c) =>
-    c.json({ employees: listForAdmin(db).map((employee) => ({ ...employee, address: addressOf(employee) })) }));
+    c.json({ employees: listForAdmin(db).map(toAdminEmployee) } satisfies AdminEmployeesResponse),
+  );
 
   app.post("/api/admin/employees", requireAdmin(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
@@ -471,7 +504,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       }
     }
 
-    return c.json({ employee: { ...employee, address: addressOf(employee) } });
+    return c.json({ employee: toAdminEmployee(employee) });
   });
 
   // Move a worker to a position in the list. The number is what the admin sees

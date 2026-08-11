@@ -1178,6 +1178,28 @@ export type AdminEmployeesResponse = z.infer<typeof adminEmployeesResponseSchema
 под старым именем `Employee` в задаче 10, а `adminEmployeesResponseSchema` зовётся из
 тестов мока в задаче 9. Переименуешь здесь — сломаешь там.
 
+**Факт исполнения 2026-08-11 — три поправки к этой задаче.**
+
+1. **`employeeSchema` переименована в `employeeBriefSchema`** (тип —
+   `EmployeeBriefDto`). Имя `employeeSchema` уже занято в `shared/src/types.ts`, где
+   оно описывает ряд таблицы. Два `export *` из одного `shared/src/index.ts` погасили
+   бы оба имени молча — это не ошибка компиляции, а переставший резолвиться импорт.
+   Остальные имена (`adminEmployeeSchema`, `adminEmployeesResponseSchema`,
+   `AdminEmployeeDto`) свободны и оставлены как в плане.
+2. **Инвентаризация расхождений двух фронтов дала ровно одно, как и ожидалось** —
+   `preferredName` есть у мини-аппа и нет у консоли. Разбор прежний: типовое, чиню сам.
+3. **Ручек в домене оказалось три, а не две.** Кроме списков, ряд спредил ещё и
+   `PATCH /api/admin/employees/:id` (`{ ...employee, address }`). Один список полей
+   поправили бы, а второй забыли, поэтому оба свелись к общему `toAdminEmployee`, и на
+   PATCH заведён отдельный контрактный тест. Найдено тем самым `grep`, который эта же
+   задача записала в ledger, — стоит гонять его и на остальных семи доменах.
+
+Лишние поля, которые вскрыл `.strict()` (девять на каждой из двух ручек):
+`tgUsername`, `tgFirstName`, `phone`, `remindersEnabled`, `prepBufferMin`,
+`inviteToken`, `archivedAt`, `rosterOrder`, `createdAt`. Ни одно не объявлено типом
+`Employee` ни одного фронта. `inviteToken` ушёл в ledger как находка про утечку —
+уже устранённая, потому что поведения её устранение не меняет.
+
 Точный состав полей второй схемы — **сверить с фактическим ответом**, а не с типами
 клиентов: `listForAdmin` спредится целиком (`server/src/http/app.ts:356`), и в нём могут
 оказаться поля сверх этого списка (`rosterOrder`, `inviteToken`, `createdAt`). Каждое
