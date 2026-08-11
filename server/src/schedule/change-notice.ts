@@ -122,12 +122,15 @@ function filterFutureDiff(diff: EmployeeDiff, today: string): EmployeeDiff {
   };
 }
 
-export type ChangeCause = "file" | "distribute" | "fill_week";
+export type ChangeCause = "file" | "distribute" | "fill_week" | "manual";
 
-const CAUSE_LABEL: Record<ChangeCause, string> = {
+const CAUSE_LABEL: Record<ChangeCause, string | null> = {
   file: "загрузка файла",
   distribute: "распределение смен",
   fill_week: "заполнение недели",
+  // A hand edit needs no explanation — «обновил(а) твой график (ручная правка)»
+  // states the obvious. The other three name a machine that did the work.
+  manual: null,
 };
 
 const MAX_LINES = 10;
@@ -160,7 +163,8 @@ export function scheduleSummaryText(actorName: string, cause: ChangeCause, diff:
   ];
   const shown = lines.slice(0, MAX_LINES).map((l) => `\n• ${l}`).join("");
   const rest = lines.length > MAX_LINES ? `\n…и ещё ${lines.length - MAX_LINES}` : "";
-  return `${actorName} обновил(а) твой график (${CAUSE_LABEL[cause]}): ${counts.join(", ")}.${shown}${rest}`;
+  const why = CAUSE_LABEL[cause] ? ` (${CAUSE_LABEL[cause]})` : "";
+  return `${actorName} обновил(а) твой график${why}: ${counts.join(", ")}.${shown}${rest}`;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {
