@@ -105,7 +105,10 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       employeeId: employee.id, displayName: employee.displayName,
     });
     const inviteLink = config.botUsername ? `https://t.me/${config.botUsername}?start=${inviteToken}` : null;
-    return c.json({ employee, inviteToken, inviteLink }, 201);
+    // Токен приглашения отдаётся здесь намеренно и отдельным полем — админ только
+    // что завёл человека и должен получить ссылку. А вот внутри `employee` он
+    // ехал вторым, незамеченным путём, вместе с восемью прочими колонками ряда.
+    return c.json({ employee: toAdminEmployee(employee), inviteToken, inviteLink }, 201);
   });
 
   // Rename a worker, set their birthday, and/or flip their two restriction flags.
@@ -253,7 +256,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       from: before?.rosterOrder ?? null,
       to: after.rosterOrder,
     });
-    return c.json({ employees });
+    return c.json({ employees: employees.map(toAdminEmployee) } satisfies AdminEmployeesResponse);
   });
 
   // Guarded exactly like the /role demote below: archiving an admin reaches the same
@@ -314,7 +317,10 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       displayName: employee?.displayName ?? target.displayName,
       isAdmin: body.isAdmin,
     });
-    return c.json({ employee });
+    // `undefined` сохраняется как было: ряд под этим id только что читался выше,
+    // поэтому ветка недостижима, но сузить её в `null` значило бы поменять тело
+    // ответа заодно с формой — а тут переносится форма.
+    return c.json({ employee: employee && toAdminEmployee(employee) });
   });
 
   // (Re)issue an invite link for a worker who hasn't linked their Telegram yet —
