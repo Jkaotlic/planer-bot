@@ -23,9 +23,9 @@ const REFUSAL_CODE = "last_admin";
 const REFUSAL = refusalText(REFUSAL_CODE);
 
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, address: "Аня", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, address: "Игорь", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: "Марк", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, preferredName: null, address: "Аня", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, preferredName: null, address: "Игорь", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк", excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 let root: Root | null = null;

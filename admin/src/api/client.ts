@@ -1,22 +1,21 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
-import type { EntryCategory, TemplateAccent } from "@planer/shared";
+import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
+import type {
+  AdminEmployeeDto,
+  CreateEmployeeResponse,
+  EntryCategory,
+  ScheduleEntryDto,
+  TemplateAccent,
+  TemplateDto,
+} from "@planer/shared";
 import {
-  mockArchiveEmployee,
-  mockCreateEmployee,
+  employeesMock,
   mockCreateEntry,
   mockUpdateEntry,
   mockDeleteEntry,
-  mockGetEmployees,
   mockGetEvents,
   mockGetTeamSchedule,
   mockGetTemplates,
-  mockRestoreEmployee,
-  mockSetEmployeeAdmin,
-  mockRenameEmployee,
-  mockSetBirthDate,
-  mockSetEmployeeRestrictions,
-  mockReorderEmployee,
-  mockGetEmployeeInvite,
   mockGetWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -47,63 +46,38 @@ import {
   mockSetSwapsLock,
 } from "./mock";
 
-/** A worker row in the schedule grid / Работники screen. */
-export interface Employee {
-  id: number;
-  displayName: string;
-  isAdmin: boolean;
-  /** false once archived (see `archiveEmployee`). */
-  isActive: boolean;
-  /** null until the worker opens the invite link and links their Telegram account. */
-  telegramUserId: number | null;
-  /** «MM-DD» — day and month of their birthday, or null if not given. */
-  birthDate: string | null;
-  /** What the bot will actually call them — computed server-side by `addressOf`.
-   *  Never derive this from `displayName`: the roster is «Фамилия Имя», so its
-   *  first word is a surname. See `addressOf` in @planer/shared. */
-  address: string;
-  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
-   *  выходные. Ручную постановку это не запрещает. */
-  excludedFromAssignment: boolean;
-  /** Админ вывел человека из обменов — в обе стороны. */
-  excludedFromSwaps: boolean;
-}
+/**
+ * Работник — DTO из контракта.
+ *
+ * Форма была объявлена здесь своими словами и не знала `preferredName`, хотя
+ * сервер его отдаёт: консоль поле не читает — «обращение» человек задаёт себе
+ * сам в мини-аппе. Теперь оно просто есть и остаётся непрочитанным, а тип один
+ * на сервер и на оба фронта.
+ */
+export type Employee = AdminEmployeeDto;
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
-export interface Shift {
-  id: number;
-  /** "YYYY-MM-DD"; for absences, the first day of the span. */
-  date: string;
-  /** "HH:MM", or null for absences (vacation / business trip) which have no clock times. */
-  start: string | null;
-  end: string | null;
-  /** Last day of the span for multi-day absences; null for single-day entries. */
-  endDate: string | null;
-  category: EntryCategory;
-  title: string | null;
-  /** Set only when a roster import could not read this cell: the original text,
-   *  e.g. «Ко». Such an entry has no preset and no times, and draws as «?». */
-  unrecognisedCode?: string | null;
-  /** The preset this entry came from, if any — drives its colour in the grid. */
-  templateId: number | null;
-  employeeId: number | null;
-}
+/**
+ * Запись графика — DTO из контракта.
+ *
+ * Форма была объявлена здесь своими словами и успела разойтись с сервером:
+ * `unrecognisedCode` значился необязательным, хотя сервер отдаёт его всегда,
+ * пусть и `null`. `location` тут не было вовсе — см. находку в ledger.
+ */
+export type Shift = ScheduleEntryDto;
 
 /** A saved preset the add-panel can offer, with Friday-shortened times. */
-export interface Template {
-  id: number;
-  name: string;
-  start: string;
-  end: string;
-  fridayStart: string;
-  fridayEnd: string;
-  isLate: boolean;
-  sendReminder: boolean;
-  /** Which kind of entry this preset creates — default "shift"; e.g. the Поклонка preset is a "duty". */
-  category: EntryCategory;
-  /** Default place for duty/offsite presets, null for plain shifts. */
-  location: string | null;
-  /** Colour slot so each preset reads apart in the schedule. */
+/**
+ * Пресет смены — форма из контракта, с одним сужением.
+ *
+ * `sortOrder` в контракте есть, а здесь его раньше не было: консоль поле не
+ * читает, порядок ей приходит уже отсортированным (`repo/templates.ts` — 
+ * `orderBy(sortOrder)`). Теперь оно просто есть и остаётся непрочитанным.
+ *
+ * `accent` наоборот сужен против контракта: сервер отдаёт строку намеренно
+ * (новый цвет в базе не должен ронять контракт), а палитре нужен перечислимый тип.
+ */
+export interface Template extends Omit<TemplateDto, "accent"> {
   accent: TemplateAccent;
 }
 
@@ -117,13 +91,8 @@ export interface FeedEvent {
   timeLabel: string;
 }
 
-export interface CreateEmployeeResult {
-  employee: Employee;
-  /** Single-use token embedded in the invite deep-link. */
-  inviteToken: string;
-  /** Ready-made `https://t.me/<bot>?start=<token>` deep-link, or `null` if the server has no bot username configured. */
-  inviteLink: string | null;
-}
+/** Ответ создания работника: он сам, токен приглашения и готовая ссылка. */
+export type CreateEmployeeResult = CreateEmployeeResponse;
 
 export interface NewEntryInput {
   date: string;
@@ -458,18 +427,6 @@ export interface ApiClient {
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
 }
 
-interface EmployeesResponse {
-  employees: Employee[];
-}
-
-interface ShiftsResponse {
-  shifts: Shift[];
-}
-
-interface TemplatesResponse {
-  templates: Template[];
-}
-
 /** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
  * formatted for the "События" feed (see `toFeedEvent` below). */
 interface RawAdminEvent {
@@ -534,7 +491,9 @@ function toFeedEvent(raw: RawAdminEvent, namesById: ReadonlyMap<number, string>)
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 /** Thrown when the console has no valid session — the UI shows a login prompt. */
-export class AuthRequiredError extends Error {}
+// `AuthRequiredError` и `OFFLINE_MESSAGE` переехали в пакет; реэкспорт — чтобы
+// у экранов, которые их ловят и показывают, не поменялись импорты.
+export { AuthRequiredError, OFFLINE_MESSAGE };
 
 const ADMIN_TOKEN_KEY = "adminToken";
 
@@ -579,18 +538,6 @@ function clearAuth(): void {
 let tokenPromise: Promise<string> | null = null;
 
 
-/**
- * Сетевой сбой — это не ответ сервера, а его отсутствие: `fetch` бросает
- * `TypeError: Failed to fetch` (в Chrome) или «NetworkError…» (в Firefox), и
- * именно эта английская строка доезжала до человека — она кладётся в
- * `Error.message`, а экраны показывают его как есть. Повод дёрнуть эту ветку
- * будничный: рестарт сервера при выкладке или лифт с плохим интернетом.
- *
- * То же правило, что у `refusalText`: то, что читает человек, пишется
- * по-русски. Ответ сервера с кодом мы не трогаем — у него свои переводы.
- */
-export const OFFLINE_MESSAGE = "Нет связи с сервером — проверь интернет и попробуй ещё раз.";
-
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
@@ -630,6 +577,19 @@ function authToken(): Promise<string> {
   tokenPromise ??= requestToken();
   return tokenPromise;
 }
+
+/**
+ * Тот же вход, но в виде, который понимает общий транспорт из `@planer/client`.
+ *
+ * Ничего не переписано: оба способа входа — `#token=` из ссылки бота и
+ * Telegram initData — остались в `requestToken`/`storedToken` выше, а `clear`
+ * это прежний `clearAuth`, который чистит и `tokenPromise`, и localStorage.
+ */
+const tokenSource = { get: authToken, clear: clearAuth };
+
+const transport = createTransport({ baseUrl: API_BASE, tokenSource });
+const readApi = createReadApi(transport);
+const employeesApi = createEmployeesApi(transport);
 
 /** Reads `{error}` off a non-2xx JSON response, falling back to a generic message. */
 async function errorMessage(path: string, res: Response): Promise<string> {
@@ -710,26 +670,23 @@ async function authorizedDelete<T>(path: string): Promise<T> {
 
 /** Экспортируется ради теста про сетевой сбой — в приложение уходит `apiClient` ниже. */
 export const realClient: ApiClient = {
-  async getEmployees() {
-    const { employees } = await authorizedGet<EmployeesResponse>("/api/admin/employees");
-    return employees;
-  },
+  getEmployees: () => employeesApi.getAdminEmployees(),
 
+  // Консоли из ответа нужны только записи: ростер она рисует из собственного
+  // `getEmployees`, а не из этой ручки.
   async getTeamSchedule(from, to) {
-    const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const { shifts } = await authorizedGet<ShiftsResponse>(`/api/team/schedule?${query}`);
+    const { shifts } = await readApi.getTeamSchedule(from, to);
     return shifts;
   },
 
-  async getTemplates() {
-    const { templates } = await authorizedGet<TemplatesResponse>("/api/templates");
-    return templates;
-  },
+  // `accent` сужается здесь: сервер типизирует его строкой намеренно, а палитре
+  // консоли нужен перечислимый тип.
+  getTemplates: () => readApi.getTemplates() as Promise<Template[]>,
 
   async getEvents() {
     const [{ events }, { employees }] = await Promise.all([
       authorizedGet<EventsResponse>("/api/admin/events"),
-      authorizedGet<EmployeesResponse>("/api/admin/employees"),
+      employeesApi.getAdminEmployees().then((employees) => ({ employees })),
     ]);
     const namesById = new Map(employees.map((e) => [e.id, e.displayName]));
     return events.map((raw) => toFeedEvent(raw, namesById));
@@ -742,45 +699,18 @@ export const realClient: ApiClient = {
 
   deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
-  async createEmployee(name) {
-    return authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name });
-  },
-
-  async archiveEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/archive`, {});
-  },
-
-  async restoreEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
-  },
-
-  async setEmployeeAdmin(id, isAdmin) {
-    await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
-  },
-
-  async reorderEmployee(id, position) {
-    const { employees } = await authorizedPostJson<{ employees: Employee[] }>(
-      `/api/admin/employees/${id}/order`,
-      { position },
-    );
-    return employees;
-  },
-
-  async setBirthDate(id, birthDate) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { birthDate });
-  },
-
-  async renameEmployee(id, displayName) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
-  },
-
-  async setEmployeeRestrictions(id, patch) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
-  },
-
-  getEmployeeInvite(id, regenerate = false) {
-    return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
-  },
+  // Методы перечислены, а не спреднуты: у консоли этот домен уже своего имени
+  // ручке (`getEmployees` вместо `getAdminEmployees`), и «обращение» она не
+  // трогает вовсе. Общий слой несёт объединение, консоль берёт своё.
+  createEmployee: (name) => employeesApi.createEmployee(name),
+  archiveEmployee: (id) => employeesApi.archiveEmployee(id),
+  restoreEmployee: (id) => employeesApi.restoreEmployee(id),
+  setEmployeeAdmin: (id, isAdmin) => employeesApi.setEmployeeAdmin(id, isAdmin),
+  reorderEmployee: (id, position) => employeesApi.reorderEmployee(id, position),
+  setBirthDate: (id, birthDate) => employeesApi.setBirthDate(id, birthDate),
+  renameEmployee: (id, displayName) => employeesApi.renameEmployee(id, displayName),
+  setEmployeeRestrictions: (id, patch) => employeesApi.setEmployeeRestrictions(id, patch),
+  getEmployeeInvite: (id, regenerate) => employeesApi.getEmployeeInvite(id, regenerate),
 
   async getWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
@@ -944,22 +874,22 @@ export const realClient: ApiClient = {
 };
 
 const devClient: ApiClient = {
-  getEmployees: () => mockGetEmployees(),
+  getEmployees: () => employeesMock.getAdminEmployees(),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getTemplates: () => mockGetTemplates(),
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
-  createEmployee: (name) => mockCreateEmployee(name),
-  archiveEmployee: (id) => mockArchiveEmployee(id),
-  restoreEmployee: (id) => mockRestoreEmployee(id),
-  setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
-  renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
-  setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
-  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
-  reorderEmployee: (id, position) => mockReorderEmployee(id, position),
-  getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
+  createEmployee: (name) => employeesMock.createEmployee(name),
+  archiveEmployee: (id) => employeesMock.archiveEmployee(id),
+  restoreEmployee: (id) => employeesMock.restoreEmployee(id),
+  setEmployeeAdmin: (id, isAdmin) => employeesMock.setEmployeeAdmin(id, isAdmin),
+  renameEmployee: (id, displayName) => employeesMock.renameEmployee(id, displayName),
+  setBirthDate: (id, birthDate) => employeesMock.setBirthDate(id, birthDate),
+  setEmployeeRestrictions: (id, patch) => employeesMock.setEmployeeRestrictions(id, patch),
+  reorderEmployee: (id, position) => employeesMock.reorderEmployee(id, position),
+  getEmployeeInvite: (id, regenerate) => employeesMock.getEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),

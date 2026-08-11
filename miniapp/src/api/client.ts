@@ -1,4 +1,12 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
+import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
+import type {
+  AdminEmployeeDto,
+  CreateEmployeeResponse,
+  ScheduleEntryDto,
+  TeamScheduleResponse,
+  TemplateDto,
+} from "@planer/shared";
 import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
@@ -16,17 +24,6 @@ import {
   mockGetWeekendOffers,
   mockConfirmOffer,
   mockDeclineOffer,
-  mockGetAdminEmployees,
-  mockCreateEmployee,
-  mockArchiveEmployee,
-  mockRestoreEmployee,
-  mockSetEmployeeAdmin,
-  mockRenameEmployee,
-  mockSetEmployeePreferredName,
-  mockSetBirthDate,
-  mockSetEmployeeRestrictions,
-  mockReorderEmployee,
-  mockGetEmployeeInvite,
   mockGetTemplates,
   mockCreateEntry,
   mockCreateEntries,
@@ -61,36 +58,25 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  employeesMock,
 } from "./mock";
 
-/** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
-export interface Shift {
-  id: number;
-  /** "YYYY-MM-DD"; for absences, the first day of the span. */
-  date: string;
-  /** "HH:MM", or null for absences (vacation / business trip) which have no clock times. */
-  start: string | null;
-  end: string | null;
-  /** Last day of the span for multi-day absences; null for single-day entries. */
-  endDate: string | null;
-  category: Category;
-  title: string | null;
-  /** Optional place for duties, offsite work, and other location-specific entries. */
-  location: string | null;
-  /** Set only when a roster import could not read this cell: the original text,
-   *  e.g. «Ко». Such an entry has no preset and no times, and draws as «?». */
-  unrecognisedCode?: string | null;
-  /** The preset this entry came from, if any — drives its colour in the schedule. */
-  templateId: number | null;
-  employeeId: number | null;
+/**
+ * Запись графика: смена, дежурство или (возможно многодневное) отсутствие.
+ *
+ * Это DTO из контракта плюс одно поле сверху. Раньше форма была объявлена здесь
+ * своими словами и успела разойтись с сервером: `unrecognisedCode` значился
+ * необязательным, хотя сервер отдаёт его всегда, пусть и `null`.
+ */
+export type Shift = ScheduleEntryDto & {
   /**
-   * Not part of the raw shift row — the real client joins it from the roster
-   * returned by `/api/team/schedule` (id -> displayName).
-   * Only `getTeamSchedule` populates this; `getMyShifts` leaves it
-   * `undefined` (every row already belongs to the caller).
+   * Не поле сервера: мини-апп приклеивает имя сам, соединяя записи с ростером
+   * из того же ответа `/api/team/schedule` (id -> displayName).
+   * Заполняет только `getTeamSchedule`; у `getMyShifts` остаётся `undefined`,
+   * потому что там каждая запись и так принадлежит спрашивающему.
    */
   employeeName?: string;
-}
+};
 
 export interface TeamEmployee {
   id: number;
@@ -201,54 +187,33 @@ export interface WeekendOffer {
 // Ported verbatim from the desktop console's client (`admin/src/api/client.ts`)
 // so the mini-app admin surface speaks the exact same shapes as the web one.
 
-/** A worker row in the "Работники" screen and the add-entry employee picker. */
-export interface Employee {
-  id: number;
-  displayName: string;
-  isAdmin: boolean;
-  /** false once archived (see `archiveEmployee`). */
-  isActive: boolean;
-  /** null until the worker opens the invite link and links their Telegram account. */
-  telegramUserId: number | null;
-  /** «MM-DD» — day and month of their birthday, or null if not given. */
-  birthDate: string | null;
-  /** Set by the worker or by an admin; null falls back through Telegram to the roster. */
-  preferredName: string | null;
-  /** What the bot will actually call them — computed server-side by `addressOf`. */
-  address: string;
-  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
-   *  выходные. Ручную постановку это не запрещает. */
-  excludedFromAssignment: boolean;
-  /** Админ вывел человека из обменов — в обе стороны. */
-  excludedFromSwaps: boolean;
-}
+/**
+ * Работник — DTO из контракта.
+ *
+ * Форма была объявлена здесь своими словами; на переезде выяснилось, что три
+ * ручки домена её не выполняли — отдавали ряд таблицы и не отдавали `address`,
+ * который тут объявлен `string`. Теперь тип один на сервер и на оба фронта.
+ */
+export type Employee = AdminEmployeeDto;
 
 /** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
-export interface Template {
-  id: number;
-  sortOrder: number;
-  name: string;
-  start: string;
-  end: string;
-  fridayStart: string;
-  fridayEnd: string;
-  isLate: boolean;
-  sendReminder: boolean;
-  /** Which kind of entry this preset creates — default "shift"; e.g. the Поклонка preset is a "duty". */
-  category: Category;
-  /** Default place for duty/offsite presets (prefills the entry form's "Место"), null for plain shifts. */
-  location: string | null;
-  /** Colour slot so each preset reads apart in the schedule. */
+/**
+ * Пресет смены — форма из контракта, с одним сужением.
+ *
+ * Поля брались отсюда же до переезда на `@planer/client`, но два из них врали:
+ * `fridayStart`/`fridayEnd` объявлялись `string`, а колонка в базе допускает
+ * `null` — то есть первый же пресет без пятничных часов уронил бы экран.
+ *
+ * `accent` наоборот сужен против контракта: сервер отдаёт строку намеренно
+ * (новый цвет в базе не должен ронять контракт), а экраны индексируют по нему
+ * палитру, и им нужен именно перечислимый тип.
+ */
+export interface Template extends Omit<TemplateDto, "accent"> {
   accent: TemplateAccent;
 }
 
-export interface CreateEmployeeResult {
-  employee: Employee;
-  /** Single-use token embedded in the invite deep-link. */
-  inviteToken: string;
-  /** Ready-made `https://t.me/<bot>?start=<token>` deep-link, or `null` if the server has no bot username configured. */
-  inviteLink: string | null;
-}
+/** Ответ создания работника: он сам, токен приглашения и готовая ссылка. */
+export type CreateEmployeeResult = CreateEmployeeResponse;
 
 /** Body for creating (or patching) a schedule entry — mirrors the server's `createEntrySchema`. */
 export interface NewEntryInput {
@@ -634,17 +599,6 @@ export interface RosterImportSummary {
   unknowns: RosterUnknownCell[];
 }
 
-interface ShiftsResponse {
-  shifts: Shift[];
-  /** Сегодняшняя дата в часовом поясе команды — её считает сервер. */
-  today: string;
-}
-
-/** `GET /api/admin/employees` — the richer admin roster (active + archived). */
-interface AdminEmployeesResponse {
-  employees: Employee[];
-}
-
 /** Exact shape of a `GET /api/swaps` row (server-enriched). `counterpartyName`
  * can be `null` if the counterparty employee row is gone; the client falls
  * back to a generic label so the UI's non-nullable `counterpartyName` holds. */
@@ -730,6 +684,44 @@ async function requestToken(): Promise<string> {
 function authToken(): Promise<string> {
   tokenPromise ??= requestToken();
   return tokenPromise;
+}
+
+/**
+ * Тот же токен, но в виде, который понимает общий транспорт из `@planer/client`.
+ *
+ * Логика входа не переписана: `restoreInitData` + `initDataRaw` остались в
+ * `requestToken` выше. Новое здесь только `clear` — до переезда мини-апп не
+ * сбрасывал протухший токен вообще, и после 401 продолжал ходить с ним же.
+ */
+const tokenSource = {
+  get: authToken,
+  clear: () => {
+    tokenPromise = null;
+  },
+};
+
+const transport = createTransport({ baseUrl: API_BASE, tokenSource });
+const readApi = createReadApi(transport);
+const employeesApi = createEmployeesApi(transport);
+
+/**
+ * Приклеивает имя работника к записи, соединяя её с ростером из того же ответа.
+ *
+ * Живёт здесь, а не в моке и не на сервере, по двум причинам. Сервер имени не
+ * отдаёт — записи и ростер приезжают одним ответом, и join дешевле повторения
+ * имени в каждой строке. А мок раньше запекал имя в фикстуру, из-за чего
+ * dev-путь и живой путь расходились ровно тем полем, которого в контракте нет.
+ * Теперь оба зовут это.
+ */
+function withEmployeeNames(schedule: TeamScheduleResponse): TeamSchedule {
+  const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
+  return {
+    employees: schedule.employees,
+    shifts: schedule.shifts.map((shift) => ({
+      ...shift,
+      employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,
+    })),
+  };
 }
 
 async function authorizedGet<T>(path: string): Promise<T> {
@@ -832,20 +824,9 @@ export const realClient: ApiClient = {
     authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
 
   // `from` не передаётся намеренно: сервер сам возьмёт сегодняшний день команды.
-  getMyShifts: () => authorizedGet<ShiftsResponse>("/api/my/shifts"),
+  getMyShifts: () => readApi.getMyShifts(),
 
-  async getTeamSchedule(from, to) {
-    const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const schedule = await authorizedGet<TeamSchedule>(`/api/team/schedule?${query}`);
-    const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
-    return {
-      employees: schedule.employees,
-      shifts: schedule.shifts.map((shift) => ({
-        ...shift,
-        employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,
-      })),
-    };
-  },
+  getTeamSchedule: async (from, to) => withEmployeeNames(await readApi.getTeamSchedule(from, to)),
 
   getSwaps: () => fetchSwaps(),
 
@@ -878,49 +859,11 @@ export const realClient: ApiClient = {
   declineOffer: (id) => authorizedPostAction(`/api/weekend/offers/${id}/decline`),
 
   // --- Admin-only ------------------------------------------------------------
-  async getAdminEmployees() {
-    const { employees } = await authorizedGet<AdminEmployeesResponse>("/api/admin/employees");
-    return employees;
-  },
-  createEmployee: (name) => authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name }),
-  async archiveEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/archive`, {});
-  },
-  async restoreEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
-  },
-  async setEmployeeAdmin(id, isAdmin) {
-    await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
-  },
-  async reorderEmployee(id, position) {
-    const { employees } = await authorizedPostJson<{ employees: Employee[] }>(
-      `/api/admin/employees/${id}/order`,
-      { position },
-    );
-    return employees;
-  },
+  ...employeesApi,
 
-  async setBirthDate(id, birthDate) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { birthDate });
-  },
-
-  async renameEmployee(id, displayName) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
-  },
-  async setEmployeePreferredName(id, preferredName) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { preferredName });
-  },
-  async setEmployeeRestrictions(id, patch) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
-  },
-  getEmployeeInvite(id, regenerate = false) {
-    return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
-  },
-
-  async getTemplates() {
-    const { templates } = await authorizedGet<{ templates: Template[] }>("/api/templates");
-    return templates;
-  },
+  // `accent` сужается здесь: сервер типизирует его строкой, палитра экранов —
+  // перечислением. Незнакомый цвет рисуется запасным, см. `categories.ts`.
+  getTemplates: () => readApi.getTemplates() as Promise<Template[]>,
 
   createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
   createEntries: (inputs) =>
@@ -1097,7 +1040,7 @@ const devClient: ApiClient = {
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getMyShifts: () => mockGetMyShifts(),
-  getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
+  getTeamSchedule: async (from, to) => withEmployeeNames(await mockGetTeamSchedule(from, to)),
   getSwaps: () => mockGetSwaps(),
   proposeSwap: (fromShiftId, toShiftId, message) => mockProposeSwap(fromShiftId, toShiftId, message),
   acceptSwap: (id) => mockAcceptSwap(id),
@@ -1109,17 +1052,7 @@ const devClient: ApiClient = {
   confirmOffer: (id) => mockConfirmOffer(id),
   declineOffer: (id) => mockDeclineOffer(id),
 
-  getAdminEmployees: () => mockGetAdminEmployees(),
-  createEmployee: (name) => mockCreateEmployee(name),
-  archiveEmployee: (id) => mockArchiveEmployee(id),
-  restoreEmployee: (id) => mockRestoreEmployee(id),
-  setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
-  renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
-  setEmployeePreferredName: (id, preferredName) => mockSetEmployeePreferredName(id, preferredName),
-  setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
-  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
-  reorderEmployee: (id, position) => mockReorderEmployee(id, position),
-  getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
+  ...employeesMock,
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
   createEntries: (inputs) => mockCreateEntries(inputs),

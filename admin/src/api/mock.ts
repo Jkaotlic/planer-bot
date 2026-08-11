@@ -1,8 +1,8 @@
+import { createEmployeesMock, createReadMock } from "@planer/client";
 import type { EntryCategory } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
-  CreateEmployeeResult,
   Employee,
   FeedEvent,
   NewEntryInput,
@@ -51,13 +51,15 @@ import { inviteLinkFor } from "../lib/bot";
 // `address` mirrors the roster's displayName here: none of the sample workers
 // have a `preferredName` set, so the server's `addressOf` would fall back to
 // `displayName` for all of them too. See the `Employee.address` doc comment.
+// `preferredName` объявлен явно, а не опущен: контракт держит его обязательным
+// и nullable — «не задано» это `null`, а не отсутствие поля.
 const SEED_EMPLOYEES: readonly Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 /** In-memory employee store — mutated live by create/archive/restore so the Работники screen (and the schedule, which only shows active workers) update without a reload. */
@@ -77,12 +79,22 @@ interface EntryDraft {
   endDate: string | null;
   category: EntryCategory;
   title: string | null;
+  location?: string | null;
+  unrecognisedCode?: string | null;
   employeeId: number | null;
 }
 
 let nextId = 1;
 function entry(draft: EntryDraft): Shift {
-  return { id: nextId++, templateId: draft.templateId ?? null, ...draft };
+  return {
+    id: nextId++,
+    templateId: draft.templateId ?? null,
+    // Оба поля сервер отдаёт всегда, пусть и `null`. `location` в типе консоли
+    // не было вовсе — место дежурства до неё не доезжало (находка в ledger).
+    location: draft.location ?? null,
+    unrecognisedCode: draft.unrecognisedCode ?? null,
+    ...draft,
+  };
 }
 
 // A full week across the 5-person team (Пн=0 .. Вс=6), touching every
@@ -122,14 +134,14 @@ const SEED_ENTRIES: Shift[] = [
 const ENTRIES: Shift[] = [...SEED_ENTRIES];
 
 export const TEMPLATES: readonly Template[] = [
-  { id: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
-  { id: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
-  { id: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
-  { id: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
-  { id: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
-  { id: 6, name: "Дежурство с 07:00", accent: "amber", start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true, category: "duty", location: null },
-  { id: 7, name: "Дежурство · Телефон", accent: "rose", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: null },
-  { id: 8, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
+  { sortOrder: 1, id: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
+  { sortOrder: 2, id: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
+  { sortOrder: 3, id: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
+  { sortOrder: 4, id: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
+  { sortOrder: 5, id: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
+  { sortOrder: 6, id: 6, name: "Дежурство с 07:00", accent: "amber", start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true, category: "duty", location: null },
+  { sortOrder: 7, id: 7, name: "Дежурство · Телефон", accent: "rose", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: null },
+  { sortOrder: 8, id: 8, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
 ];
 
 function delay(ms: number): Promise<void> {
@@ -144,23 +156,54 @@ function overlapsRange(s: Shift, from: string, to: string): boolean {
   return s.date <= to && endOf(s) >= from;
 }
 
-function byDateThenStart(a: Shift, b: Shift): number {
-  return a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? "");
-}
+/**
+ * Мок домена read живёт в `@planer/client`, а состояние остаётся здесь.
+ *
+ * Так потому, что в `ENTRIES` пишут ещё не переехавшие домены — создание и
+ * правка записи, распределение, импорт ростера, — и экран графика рассчитывает,
+ * что правка сразу видна без перезагрузки. Массивы передаются по ссылке,
+ * поэтому мутации остаются видимыми моку.
+ *
+ * Задержка ненулевая намеренно: в `npm run dev` она делает экраны честными.
+ */
+/**
+ * Мок домена employees — над тем же массивом `EMPLOYEES`.
+ *
+ * Массив передаётся по ссылке: правки из «Работников» обязаны быть сразу видны
+ * и в графике, и в отчётах, и в сборах — доменах, которые ещё не переехали.
+ * Форма ответа принадлежит пакету, состояние — консоли.
+ *
+ * До переезда мок консоли не знал `preferredName` и на переименовании ставил
+ * `address = displayName` безусловно; общий мок повторяет `addressOf` — сервер
+ * ведёт себя так же.
+ */
+const employeesMock = createEmployeesMock({ delayMs: 200, state: { employees: EMPLOYEES }, inviteLinkFor });
+export { employeesMock };
 
-export async function mockGetEmployees(): Promise<Employee[]> {
-  await delay(150);
-  return [...EMPLOYEES];
-}
+const readMock = createReadMock({
+  delayMs: 250,
+  state: {
+    get templates() {
+      return TEMPLATES;
+    },
+    get entries() {
+      return ENTRIES;
+    },
+    get employees() {
+      return EMPLOYEES;
+    },
+    // Консоль не показывает «свои смены» — поле есть только ради формы состояния.
+    meId: 0,
+  },
+});
 
 export async function mockGetTeamSchedule(from: string, to: string): Promise<Shift[]> {
-  await delay(300);
-  return ENTRIES.filter((s) => overlapsRange(s, from, to)).sort(byDateThenStart);
+  const { shifts } = await readMock.getTeamSchedule(from, to);
+  return shifts;
 }
 
-export async function mockGetTemplates(): Promise<Template[]> {
-  await delay(120);
-  return [...TEMPLATES];
+export function mockGetTemplates(): Promise<Template[]> {
+  return readMock.getTemplates() as Promise<Template[]>;
 }
 
 /** Реального `notifyEntryChange` в DEV-моке нет, поэтому «дошло до N из M» —
@@ -223,84 +266,6 @@ const EVENTS: readonly FeedEvent[] = [
 export async function mockGetEvents(): Promise<FeedEvent[]> {
   await delay(180);
   return [...EVENTS];
-}
-
-export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
-  await delay(250);
-  const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: name, excludedFromAssignment: false, excludedFromSwaps: false };
-  EMPLOYEES.push(employee);
-  const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-  return { employee, inviteToken, inviteLink: null };
-}
-
-export async function mockArchiveEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = false;
-}
-
-export async function mockRestoreEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = true;
-}
-
-export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isAdmin = isAdmin;
-}
-
-export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  // No `preferredName` modeled here, so address follows the roster name — mirrors
-  // the server, which would fall back to the new `displayName` the same way.
-  if (employee) {
-    employee.displayName = displayName;
-    employee.address = displayName;
-  }
-}
-
-/** Mirrors the server: move one worker, then renumber everyone contiguously. */
-export async function mockReorderEmployee(id: number, position: number): Promise<Employee[]> {
-  await delay(150);
-  const active = EMPLOYEES.filter((e) => e.isActive);
-  const from = active.findIndex((e) => e.id === id);
-  if (from === -1) throw new Error("Работник не найден");
-  const target = Math.min(Math.max(Math.trunc(position), 1), active.length) - 1;
-  const [moved] = active.splice(from, 1);
-  active.splice(target, 0, moved!);
-  // Rewrite EMPLOYEES so every screen reading it sees the new order.
-  const archived = EMPLOYEES.filter((e) => !e.isActive);
-  EMPLOYEES.length = 0;
-  EMPLOYEES.push(...active, ...archived);
-  return [...active];
-}
-
-export async function mockSetBirthDate(id: number, birthDate: string | null): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (employee) employee.birthDate = birthDate;
-}
-
-export async function mockSetEmployeeRestrictions(
-  id: number,
-  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
-): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (!employee) return;
-  if (patch.excludedFromAssignment !== undefined) employee.excludedFromAssignment = patch.excludedFromAssignment;
-  if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
-}
-
-export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
-  await delay(150);
-  const seed = `${id}-${regenerate ? "regen" : "keep"}`;
-  const inviteToken = seed.padEnd(12, "0").slice(0, 12);
-  return { inviteToken, inviteLink: inviteLinkFor(inviteToken) };
 }
 
 /**
@@ -1019,6 +984,7 @@ export async function mockApplyRosterImport(
       EMPLOYEES.push({
         id,
         displayName: resolution.csvName,
+        preferredName: null,
         isAdmin: false,
         isActive: true,
         telegramUserId: null,

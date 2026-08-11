@@ -9,6 +9,11 @@ import type { Db } from "../db/client";
 import { employees } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { setSwapsLocked } from "../repo/settings";
+import {
+  myShiftsResponseSchema,
+  teamScheduleResponseSchema,
+  templatesResponseSchema,
+} from "@planer/shared";
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -283,5 +288,39 @@ describe("read endpoints", () => {
     const body = await res.json();
     expect(body.employees.find((e: { id: number }) => e.id === other.id)).toMatchObject({ excludedFromSwaps: true });
     expect(body.employees.find((e: { id: number }) => e.id === me.id)).toMatchObject({ excludedFromSwaps: false });
+  });
+});
+
+describe("контракт домена read", () => {
+  it("/api/templates отдаёт ровно обещанное, без лишних полей", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request("/api/templates", bearer(await tokenFor(app, 333)));
+    const parsed = templatesResponseSchema.safeParse(await res.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("/api/my/shifts отдаёт ровно обещанное", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    createShift(db, { date: "2026-07-06", start: "11:00", end: "20:00", employeeId: w.id });
+    const app = createApp({ db, config });
+    const res = await app.request("/api/my/shifts?from=2026-07-01", bearer(await tokenFor(app, 333)));
+    const parsed = myShiftsResponseSchema.safeParse(await res.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("/api/team/schedule отдаёт ровно обещанное", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    createShift(db, { date: "2026-07-06", start: "11:00", end: "20:00", employeeId: w.id });
+    const app = createApp({ db, config });
+    const res = await app.request("/api/team/schedule?from=2026-07-01&to=2026-07-10", bearer(await tokenFor(app, 333)));
+    const parsed = teamScheduleResponseSchema.safeParse(await res.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
   });
 });
