@@ -1,4 +1,6 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
+import { createReadApi, createTransport } from "@planer/client";
+import type { ScheduleEntryDto, TeamScheduleResponse, TemplateDto } from "@planer/shared";
 import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
@@ -63,34 +65,22 @@ import {
   mockSetSwapsLock,
 } from "./mock";
 
-/** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
-export interface Shift {
-  id: number;
-  /** "YYYY-MM-DD"; for absences, the first day of the span. */
-  date: string;
-  /** "HH:MM", or null for absences (vacation / business trip) which have no clock times. */
-  start: string | null;
-  end: string | null;
-  /** Last day of the span for multi-day absences; null for single-day entries. */
-  endDate: string | null;
-  category: Category;
-  title: string | null;
-  /** Optional place for duties, offsite work, and other location-specific entries. */
-  location: string | null;
-  /** Set only when a roster import could not read this cell: the original text,
-   *  e.g. «Ко». Such an entry has no preset and no times, and draws as «?». */
-  unrecognisedCode?: string | null;
-  /** The preset this entry came from, if any — drives its colour in the schedule. */
-  templateId: number | null;
-  employeeId: number | null;
+/**
+ * Запись графика: смена, дежурство или (возможно многодневное) отсутствие.
+ *
+ * Это DTO из контракта плюс одно поле сверху. Раньше форма была объявлена здесь
+ * своими словами и успела разойтись с сервером: `unrecognisedCode` значился
+ * необязательным, хотя сервер отдаёт его всегда, пусть и `null`.
+ */
+export type Shift = ScheduleEntryDto & {
   /**
-   * Not part of the raw shift row — the real client joins it from the roster
-   * returned by `/api/team/schedule` (id -> displayName).
-   * Only `getTeamSchedule` populates this; `getMyShifts` leaves it
-   * `undefined` (every row already belongs to the caller).
+   * Не поле сервера: мини-апп приклеивает имя сам, соединяя записи с ростером
+   * из того же ответа `/api/team/schedule` (id -> displayName).
+   * Заполняет только `getTeamSchedule`; у `getMyShifts` остаётся `undefined`,
+   * потому что там каждая запись и так принадлежит спрашивающему.
    */
   employeeName?: string;
-}
+};
 
 export interface TeamEmployee {
   id: number;
@@ -224,21 +214,18 @@ export interface Employee {
 }
 
 /** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
-export interface Template {
-  id: number;
-  sortOrder: number;
-  name: string;
-  start: string;
-  end: string;
-  fridayStart: string;
-  fridayEnd: string;
-  isLate: boolean;
-  sendReminder: boolean;
-  /** Which kind of entry this preset creates — default "shift"; e.g. the Поклонка preset is a "duty". */
-  category: Category;
-  /** Default place for duty/offsite presets (prefills the entry form's "Место"), null for plain shifts. */
-  location: string | null;
-  /** Colour slot so each preset reads apart in the schedule. */
+/**
+ * Пресет смены — форма из контракта, с одним сужением.
+ *
+ * Поля брались отсюда же до переезда на `@planer/client`, но два из них врали:
+ * `fridayStart`/`fridayEnd` объявлялись `string`, а колонка в базе допускает
+ * `null` — то есть первый же пресет без пятничных часов уронил бы экран.
+ *
+ * `accent` наоборот сужен против контракта: сервер отдаёт строку намеренно
+ * (новый цвет в базе не должен ронять контракт), а экраны индексируют по нему
+ * палитру, и им нужен именно перечислимый тип.
+ */
+export interface Template extends Omit<TemplateDto, "accent"> {
   accent: TemplateAccent;
 }
 
@@ -634,12 +621,6 @@ export interface RosterImportSummary {
   unknowns: RosterUnknownCell[];
 }
 
-interface ShiftsResponse {
-  shifts: Shift[];
-  /** Сегодняшняя дата в часовом поясе команды — её считает сервер. */
-  today: string;
-}
-
 /** `GET /api/admin/employees` — the richer admin roster (active + archived). */
 interface AdminEmployeesResponse {
   employees: Employee[];
@@ -730,6 +711,43 @@ async function requestToken(): Promise<string> {
 function authToken(): Promise<string> {
   tokenPromise ??= requestToken();
   return tokenPromise;
+}
+
+/**
+ * Тот же токен, но в виде, который понимает общий транспорт из `@planer/client`.
+ *
+ * Логика входа не переписана: `restoreInitData` + `initDataRaw` остались в
+ * `requestToken` выше. Новое здесь только `clear` — до переезда мини-апп не
+ * сбрасывал протухший токен вообще, и после 401 продолжал ходить с ним же.
+ */
+const tokenSource = {
+  get: authToken,
+  clear: () => {
+    tokenPromise = null;
+  },
+};
+
+const transport = createTransport({ baseUrl: API_BASE, tokenSource });
+const readApi = createReadApi(transport);
+
+/**
+ * Приклеивает имя работника к записи, соединяя её с ростером из того же ответа.
+ *
+ * Живёт здесь, а не в моке и не на сервере, по двум причинам. Сервер имени не
+ * отдаёт — записи и ростер приезжают одним ответом, и join дешевле повторения
+ * имени в каждой строке. А мок раньше запекал имя в фикстуру, из-за чего
+ * dev-путь и живой путь расходились ровно тем полем, которого в контракте нет.
+ * Теперь оба зовут это.
+ */
+function withEmployeeNames(schedule: TeamScheduleResponse): TeamSchedule {
+  const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
+  return {
+    employees: schedule.employees,
+    shifts: schedule.shifts.map((shift) => ({
+      ...shift,
+      employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,
+    })),
+  };
 }
 
 async function authorizedGet<T>(path: string): Promise<T> {
@@ -832,20 +850,9 @@ export const realClient: ApiClient = {
     authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
 
   // `from` не передаётся намеренно: сервер сам возьмёт сегодняшний день команды.
-  getMyShifts: () => authorizedGet<ShiftsResponse>("/api/my/shifts"),
+  getMyShifts: () => readApi.getMyShifts(),
 
-  async getTeamSchedule(from, to) {
-    const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const schedule = await authorizedGet<TeamSchedule>(`/api/team/schedule?${query}`);
-    const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
-    return {
-      employees: schedule.employees,
-      shifts: schedule.shifts.map((shift) => ({
-        ...shift,
-        employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,
-      })),
-    };
-  },
+  getTeamSchedule: async (from, to) => withEmployeeNames(await readApi.getTeamSchedule(from, to)),
 
   getSwaps: () => fetchSwaps(),
 
@@ -917,10 +924,9 @@ export const realClient: ApiClient = {
     return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
   },
 
-  async getTemplates() {
-    const { templates } = await authorizedGet<{ templates: Template[] }>("/api/templates");
-    return templates;
-  },
+  // `accent` сужается здесь: сервер типизирует его строкой, палитра экранов —
+  // перечислением. Незнакомый цвет рисуется запасным, см. `categories.ts`.
+  getTemplates: () => readApi.getTemplates() as Promise<Template[]>,
 
   createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
   createEntries: (inputs) =>
@@ -1097,7 +1103,7 @@ const devClient: ApiClient = {
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getMyShifts: () => mockGetMyShifts(),
-  getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
+  getTeamSchedule: async (from, to) => withEmployeeNames(await mockGetTeamSchedule(from, to)),
   getSwaps: () => mockGetSwaps(),
   proposeSwap: (fromShiftId, toShiftId, message) => mockProposeSwap(fromShiftId, toShiftId, message),
   acceptSwap: (id) => mockAcceptSwap(id),

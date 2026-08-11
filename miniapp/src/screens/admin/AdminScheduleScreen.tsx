@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
-import { allowedByPool, countsForBalance } from "@planer/shared";
+import { allowedByPool, countsForBalance, resolveShiftTimes } from "@planer/shared";
 import {
   apiClient,
   type Employee,
@@ -599,8 +599,10 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
 
   const isFriday = weekdayIndex(date) === FRIDAY_INDEX;
 
+  // Правило «в пятницу — пятничные часы» живёт в @planer/shared: пятничные часы
+  // допускают null, и локальная копия этого не учитывала.
   function templateTimes(template: Template): { start: string; end: string } {
-    return isFriday ? { start: template.fridayStart, end: template.fridayEnd } : { start: template.start, end: template.end };
+    return resolveShiftTimes(template, date);
   }
 
   /** Presets the picker offers for a category — e.g. shift → Утро/День/Вечер/Ночь, duty → Поклонка. */
@@ -936,9 +938,7 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
   );
 
   function templateTimesFor(template: Template, iso: string): { start: string; end: string } {
-    return weekdayIndex(iso) === FRIDAY_INDEX
-      ? { start: template.fridayStart, end: template.fridayEnd }
-      : { start: template.start, end: template.end };
+    return resolveShiftTimes(template, iso);
   }
 
   function setDay(iso: string, value: string) {
