@@ -39,6 +39,14 @@ jobs:
       - name: Typecheck workspaces
         run: npm run typecheck
 
+      # Линтер ловит то, чего не видит tsc: осиротевшие импорты и переменные,
+      # которые остаются после рефакторинга и притворяются живым кодом. На первом
+      # же прогоне (2026-08-11) он нашёл 16 таких мест — включая обёртку в app.ts,
+      # над которой стоял комментарий «keep the short local names so the many call
+      # sites below don't change», хотя вызовов не осталось ни одного.
+      - name: Lint
+        run: npm run lint
+
       - name: Build Mini App
         run: npm run build --workspace @planer/miniapp
 

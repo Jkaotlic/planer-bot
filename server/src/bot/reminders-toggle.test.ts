@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from "vitest";
-import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createBot, remindersKeyboard, remindersStateText } from "./bot";
 import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";

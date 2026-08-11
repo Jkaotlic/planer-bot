@@ -214,7 +214,7 @@ describe("admin entry endpoints", () => {
 
   it("rejects a worker (403) and validates the body (400)", async () => {
     const db = makeTestDb();
-    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "tok" });
+    createEmployee(db, { displayName: "Игорь", inviteToken: "tok" });
     linkTelegramAccount(db, "tok", 333);
     const app = createApp({ db, config });
 

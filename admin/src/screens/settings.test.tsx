@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiClient, type AdminSettings, type SwapLockResult } from "../api/client";
+import { apiClient, type AdminSettings, } from "../api/client";
 import { SettingsScreen } from "./SettingsScreen";
 
 /**

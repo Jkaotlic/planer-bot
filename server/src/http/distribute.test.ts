@@ -66,7 +66,7 @@ describe("POST /api/admin/distribute", () => {
 
   it("rejects a worker (403) and validates from/to (400)", async () => {
     const db = makeTestDb();
-    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "tok" });
+    createEmployee(db, { displayName: "Игорь", inviteToken: "tok" });
     linkTelegramAccount(db, "tok", 333);
     const app = createApp({ db, config });
 

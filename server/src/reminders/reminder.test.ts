@@ -49,7 +49,7 @@ function refusingBot(errorCode: number, description: string) {
 }
 
 function linkedEmployee(db: Db, name: string, tgId: number) {
-  const emp = createEmployee(db, { displayName: name, inviteToken: `i-${tgId}` });
+  createEmployee(db, { displayName: name, inviteToken: `i-${tgId}` });
   return linkTelegramAccount(db, `i-${tgId}`, tgId)!;
 }
 

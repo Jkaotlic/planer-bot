@@ -1,7 +1,7 @@
 # Planer Bot
 
 [![CI](https://github.com/Jkaotlic/planer-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Jkaotlic/planer-bot/actions/workflows/ci.yml)
-[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -67,7 +67,9 @@ Browser admin (React + Vite) ────┼── Hono API ── Drizzle ORM �
 
 ## Требования
 
-- Node.js 20 или новее;
+- Node.js 22.22.2 или новее (ровно то, что требует `engines` в `package.json`:
+  на двадцатке `jsdom@30` падает на импорте, и все экранные тесты молча не
+  выполняются — см. комментарий в `.github/workflows/ci.yml`);
 - npm 10 или новее;
 - Telegram-бот, созданный через BotFather;
 - публичный HTTPS URL для Telegram Mini App.
@@ -147,7 +149,7 @@ npm run dev --workspace @planer/admin
 ```
 
 GitHub Actions выполняет установку из lock-файла, полный набор тестов, typecheck
-и обе production-сборки на Node.js 20.
+и обе production-сборки на Node.js 22.
 
 ### Импорт и экспорт CSV
 
