@@ -12,7 +12,7 @@ import { rateLimiter } from "./rate-limit";
 import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { readTeamSchedule } from "../repo/team-schedule";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
-import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsInRange, listShiftsOverlapping } from "../repo/shifts";
+import { createShift, updateShift, deleteShift, getShift, listUpcomingForEmployee, listShiftsOverlapping } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -63,7 +63,6 @@ import {
   weekendUnassignedText,
 } from "../bot/notify";
 import {
-  shiftLineOf as shiftLineOfDb,
   slotLineOf,
   nameOf as nameOfDb,
   swapAuditPayload as swapAuditPayloadDb,
@@ -1124,7 +1123,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // produces byte-identical journal rows and chat text. Keep the short local
   // names so the many call sites below don't change.
   const nameOf = (employeeId: number): string | null => nameOfDb(db, employeeId);
-  const shiftLineOf = (shiftId: number | null): string => shiftLineOfDb(db, shiftId);
   const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number | null; toShiftId: number | null }) =>
     swapAuditPayloadDb(db, request);
 

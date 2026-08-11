@@ -1,0 +1,41 @@
+# Обновления зависимостей приезжают роботом, а не аудитом раз в полгода.
+#
+# Повод завести: на 2026-08-11 в дереве лежало 17 уязвимостей, включая critical
+# в vitest и четыре CVE в hono. Ни одна из них не была свежей — все успели
+# накопиться просто потому, что смотреть было некому.
+#
+# Группировка не косметическая: без неё Dependabot заводит по PR на пакет, и
+# полтора десятка PR в неделю читать никто не станет — а непрочитанный PR ничем
+# не лучше необновлённой зависимости.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Moscow
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # Патчи и миноры — одним PR: их читают на предмет «гейт зелёный?», а не
+      # построчно.
+      safe-updates:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Мажоры приходят отдельными PR — каждый требует чтения changelog'а,
+      # и складывать их в общую кучу значит не прочитать ни один.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope

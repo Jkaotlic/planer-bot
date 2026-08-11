@@ -240,7 +240,7 @@ describe("swap service under admin restrictions", () => {
   });
 
   it("createSwap refuses when the initiator is excluded, and allows once the flag is cleared", () => {
-    const { db, a, b, sa, sb } = setup();
+    const { db, a, sa, sb } = setup();
     db.update(employees).set({ excludedFromSwaps: true }).where(eq(employees.id, a.id)).run();
     expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW))
       .toEqual({ ok: false, reason: "from-excluded" });

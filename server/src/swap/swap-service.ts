@@ -1,5 +1,5 @@
 import { and, eq, ne, or } from "drizzle-orm";
-import { isSwappable, isIdenticalShift, validateSwap, nextSwapStatus, isAdminBlockReason, type Shift as DomainShift } from "@planer/shared";
+import { isSwappable, validateSwap, nextSwapStatus, isAdminBlockReason, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
