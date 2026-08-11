@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { resolveShiftTimes } from "@planer/shared";
 import type { EntryCategory } from "@planer/shared";
 import type { Employee, NewEntryInput, Shift, Template } from "../api/client";
 import { ALL_CATEGORIES, categoryLabel } from "../categories";
@@ -68,10 +69,10 @@ export function AddEntryPanel({
   /** Preset mode applies to timed categories that actually have presets. */
   const presetMode = needsTime(category) && categoryPresets.length > 0 && !customTime;
 
+  // Правило «в пятницу — пятничные часы» живёт в @planer/shared: пятничные часы
+  // допускают null, и локальная копия этого не учитывала.
   function templateTimes(template: Template): { start: string; end: string } {
-    return isFriday
-      ? { start: template.fridayStart, end: template.fridayEnd }
-      : { start: template.start, end: template.end };
+    return resolveShiftTimes(template, date);
   }
 
   /** Selecting a preset also prefills the place from its default location. */

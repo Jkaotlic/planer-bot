@@ -14,7 +14,8 @@ const employee: Employee = {
 /** Отпуск, заведённый импортом: начинается в показанной неделе, кончается через две. */
 const longVacation: Shift = {
   id: 10, date: "2026-06-08", start: null, end: null, endDate: "2026-06-22",
-  category: "vacation", title: null, templateId: null, employeeId: 1,
+  category: "vacation", title: null, location: null, unrecognisedCode: null,
+  templateId: null, employeeId: 1,
 };
 
 const render = (existing: Shift) =>

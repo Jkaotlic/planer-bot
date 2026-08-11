@@ -1,3 +1,4 @@
+import { createReadMock } from "@planer/client";
 import type { EntryCategory } from "@planer/shared";
 import type {
   AdminSettings,
@@ -77,12 +78,22 @@ interface EntryDraft {
   endDate: string | null;
   category: EntryCategory;
   title: string | null;
+  location?: string | null;
+  unrecognisedCode?: string | null;
   employeeId: number | null;
 }
 
 let nextId = 1;
 function entry(draft: EntryDraft): Shift {
-  return { id: nextId++, templateId: draft.templateId ?? null, ...draft };
+  return {
+    id: nextId++,
+    templateId: draft.templateId ?? null,
+    // Оба поля сервер отдаёт всегда, пусть и `null`. `location` в типе консоли
+    // не было вовсе — место дежурства до неё не доезжало (находка в ledger).
+    location: draft.location ?? null,
+    unrecognisedCode: draft.unrecognisedCode ?? null,
+    ...draft,
+  };
 }
 
 // A full week across the 5-person team (Пн=0 .. Вс=6), touching every
@@ -122,14 +133,14 @@ const SEED_ENTRIES: Shift[] = [
 const ENTRIES: Shift[] = [...SEED_ENTRIES];
 
 export const TEMPLATES: readonly Template[] = [
-  { id: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
-  { id: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
-  { id: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
-  { id: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
-  { id: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
-  { id: 6, name: "Дежурство с 07:00", accent: "amber", start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true, category: "duty", location: null },
-  { id: 7, name: "Дежурство · Телефон", accent: "rose", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: null },
-  { id: 8, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
+  { sortOrder: 1, id: 1, name: "Утро", accent: "gold", start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true, category: "shift", location: null },
+  { sortOrder: 2, id: 2, name: "День", accent: "blue", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false, category: "shift", location: null },
+  { sortOrder: 3, id: 3, name: "Вечер", accent: "violet", start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false, category: "shift", location: null },
+  { sortOrder: 4, id: 4, name: "Ночь", accent: "indigo", start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true, category: "shift", location: null },
+  { sortOrder: 5, id: 5, name: "Дежурство · Поклонка", accent: "teal", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Поклонка" },
+  { sortOrder: 6, id: 6, name: "Дежурство с 07:00", accent: "amber", start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true, category: "duty", location: null },
+  { sortOrder: 7, id: 7, name: "Дежурство · Телефон", accent: "rose", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: null },
+  { sortOrder: 8, id: 8, name: "Дежурство · Вавилова 19", accent: "green", start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true, category: "duty", location: "Вавилова 19" },
 ];
 
 function delay(ms: number): Promise<void> {
@@ -144,23 +155,45 @@ function overlapsRange(s: Shift, from: string, to: string): boolean {
   return s.date <= to && endOf(s) >= from;
 }
 
-function byDateThenStart(a: Shift, b: Shift): number {
-  return a.date.localeCompare(b.date) || (a.start ?? "").localeCompare(b.start ?? "");
-}
-
 export async function mockGetEmployees(): Promise<Employee[]> {
   await delay(150);
   return [...EMPLOYEES];
 }
 
+/**
+ * Мок домена read живёт в `@planer/client`, а состояние остаётся здесь.
+ *
+ * Так потому, что в `ENTRIES` пишут ещё не переехавшие домены — создание и
+ * правка записи, распределение, импорт ростера, — и экран графика рассчитывает,
+ * что правка сразу видна без перезагрузки. Массивы передаются по ссылке,
+ * поэтому мутации остаются видимыми моку.
+ *
+ * Задержка ненулевая намеренно: в `npm run dev` она делает экраны честными.
+ */
+const readMock = createReadMock({
+  delayMs: 250,
+  state: {
+    get templates() {
+      return TEMPLATES;
+    },
+    get entries() {
+      return ENTRIES;
+    },
+    get employees() {
+      return EMPLOYEES;
+    },
+    // Консоль не показывает «свои смены» — поле есть только ради формы состояния.
+    meId: 0,
+  },
+});
+
 export async function mockGetTeamSchedule(from: string, to: string): Promise<Shift[]> {
-  await delay(300);
-  return ENTRIES.filter((s) => overlapsRange(s, from, to)).sort(byDateThenStart);
+  const { shifts } = await readMock.getTeamSchedule(from, to);
+  return shifts;
 }
 
-export async function mockGetTemplates(): Promise<Template[]> {
-  await delay(120);
-  return [...TEMPLATES];
+export function mockGetTemplates(): Promise<Template[]> {
+  return readMock.getTemplates() as Promise<Template[]>;
 }
 
 /** Реального `notifyEntryChange` в DEV-моке нет, поэтому «дошло до N из M» —
