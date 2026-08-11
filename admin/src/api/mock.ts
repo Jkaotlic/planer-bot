@@ -1,9 +1,8 @@
-import { createReadMock } from "@planer/client";
+import { createEmployeesMock, createReadMock } from "@planer/client";
 import type { EntryCategory } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
-  CreateEmployeeResult,
   Employee,
   FeedEvent,
   NewEntryInput,
@@ -52,13 +51,15 @@ import { inviteLinkFor } from "../lib/bot";
 // `address` mirrors the roster's displayName here: none of the sample workers
 // have a `preferredName` set, so the server's `addressOf` would fall back to
 // `displayName` for all of them too. See the `Employee.address` doc comment.
+// `preferredName` объявлен явно, а не опущен: контракт держит его обязательным
+// и nullable — «не задано» это `null`, а не отсутствие поля.
 const SEED_EMPLOYEES: readonly Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
 ];
 
 /** In-memory employee store — mutated live by create/archive/restore so the Работники screen (and the schedule, which only shows active workers) update without a reload. */
@@ -155,11 +156,6 @@ function overlapsRange(s: Shift, from: string, to: string): boolean {
   return s.date <= to && endOf(s) >= from;
 }
 
-export async function mockGetEmployees(): Promise<Employee[]> {
-  await delay(150);
-  return [...EMPLOYEES];
-}
-
 /**
  * Мок домена read живёт в `@planer/client`, а состояние остаётся здесь.
  *
@@ -170,6 +166,20 @@ export async function mockGetEmployees(): Promise<Employee[]> {
  *
  * Задержка ненулевая намеренно: в `npm run dev` она делает экраны честными.
  */
+/**
+ * Мок домена employees — над тем же массивом `EMPLOYEES`.
+ *
+ * Массив передаётся по ссылке: правки из «Работников» обязаны быть сразу видны
+ * и в графике, и в отчётах, и в сборах — доменах, которые ещё не переехали.
+ * Форма ответа принадлежит пакету, состояние — консоли.
+ *
+ * До переезда мок консоли не знал `preferredName` и на переименовании ставил
+ * `address = displayName` безусловно; общий мок повторяет `addressOf` — сервер
+ * ведёт себя так же.
+ */
+const employeesMock = createEmployeesMock({ delayMs: 200, state: { employees: EMPLOYEES }, inviteLinkFor });
+export { employeesMock };
+
 const readMock = createReadMock({
   delayMs: 250,
   state: {
@@ -256,84 +266,6 @@ const EVENTS: readonly FeedEvent[] = [
 export async function mockGetEvents(): Promise<FeedEvent[]> {
   await delay(180);
   return [...EVENTS];
-}
-
-export async function mockCreateEmployee(name: string): Promise<CreateEmployeeResult> {
-  await delay(250);
-  const id = Math.max(0, ...EMPLOYEES.map((e) => e.id)) + 1;
-  const employee: Employee = { id, displayName: name, isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, address: name, excludedFromAssignment: false, excludedFromSwaps: false };
-  EMPLOYEES.push(employee);
-  const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-  return { employee, inviteToken, inviteLink: null };
-}
-
-export async function mockArchiveEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = false;
-}
-
-export async function mockRestoreEmployee(id: number): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isActive = true;
-}
-
-export async function mockSetEmployeeAdmin(id: number, isAdmin: boolean): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  if (employee) employee.isAdmin = isAdmin;
-}
-
-export async function mockRenameEmployee(id: number, displayName: string): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((e) => e.id === id);
-  // No `preferredName` modeled here, so address follows the roster name — mirrors
-  // the server, which would fall back to the new `displayName` the same way.
-  if (employee) {
-    employee.displayName = displayName;
-    employee.address = displayName;
-  }
-}
-
-/** Mirrors the server: move one worker, then renumber everyone contiguously. */
-export async function mockReorderEmployee(id: number, position: number): Promise<Employee[]> {
-  await delay(150);
-  const active = EMPLOYEES.filter((e) => e.isActive);
-  const from = active.findIndex((e) => e.id === id);
-  if (from === -1) throw new Error("Работник не найден");
-  const target = Math.min(Math.max(Math.trunc(position), 1), active.length) - 1;
-  const [moved] = active.splice(from, 1);
-  active.splice(target, 0, moved!);
-  // Rewrite EMPLOYEES so every screen reading it sees the new order.
-  const archived = EMPLOYEES.filter((e) => !e.isActive);
-  EMPLOYEES.length = 0;
-  EMPLOYEES.push(...active, ...archived);
-  return [...active];
-}
-
-export async function mockSetBirthDate(id: number, birthDate: string | null): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (employee) employee.birthDate = birthDate;
-}
-
-export async function mockSetEmployeeRestrictions(
-  id: number,
-  patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean },
-): Promise<void> {
-  await delay(150);
-  const employee = EMPLOYEES.find((item) => item.id === id);
-  if (!employee) return;
-  if (patch.excludedFromAssignment !== undefined) employee.excludedFromAssignment = patch.excludedFromAssignment;
-  if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
-}
-
-export async function mockGetEmployeeInvite(id: number, regenerate = false): Promise<{ inviteToken: string; inviteLink: string | null }> {
-  await delay(150);
-  const seed = `${id}-${regenerate ? "regen" : "keep"}`;
-  const inviteToken = seed.padEnd(12, "0").slice(0, 12);
-  return { inviteToken, inviteLink: inviteLinkFor(inviteToken) };
 }
 
 /**
@@ -1052,6 +984,7 @@ export async function mockApplyRosterImport(
       EMPLOYEES.push({
         id,
         displayName: resolution.csvName,
+        preferredName: null,
         isAdmin: false,
         isActive: true,
         telegramUserId: null,

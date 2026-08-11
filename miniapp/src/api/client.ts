@@ -1,6 +1,12 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
-import { createReadApi, createTransport } from "@planer/client";
-import type { ScheduleEntryDto, TeamScheduleResponse, TemplateDto } from "@planer/shared";
+import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
+import type {
+  AdminEmployeeDto,
+  CreateEmployeeResponse,
+  ScheduleEntryDto,
+  TeamScheduleResponse,
+  TemplateDto,
+} from "@planer/shared";
 import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
@@ -18,17 +24,6 @@ import {
   mockGetWeekendOffers,
   mockConfirmOffer,
   mockDeclineOffer,
-  mockGetAdminEmployees,
-  mockCreateEmployee,
-  mockArchiveEmployee,
-  mockRestoreEmployee,
-  mockSetEmployeeAdmin,
-  mockRenameEmployee,
-  mockSetEmployeePreferredName,
-  mockSetBirthDate,
-  mockSetEmployeeRestrictions,
-  mockReorderEmployee,
-  mockGetEmployeeInvite,
   mockGetTemplates,
   mockCreateEntry,
   mockCreateEntries,
@@ -63,6 +58,7 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  employeesMock,
 } from "./mock";
 
 /**
@@ -191,27 +187,14 @@ export interface WeekendOffer {
 // Ported verbatim from the desktop console's client (`admin/src/api/client.ts`)
 // so the mini-app admin surface speaks the exact same shapes as the web one.
 
-/** A worker row in the "Работники" screen and the add-entry employee picker. */
-export interface Employee {
-  id: number;
-  displayName: string;
-  isAdmin: boolean;
-  /** false once archived (see `archiveEmployee`). */
-  isActive: boolean;
-  /** null until the worker opens the invite link and links their Telegram account. */
-  telegramUserId: number | null;
-  /** «MM-DD» — day and month of their birthday, or null if not given. */
-  birthDate: string | null;
-  /** Set by the worker or by an admin; null falls back through Telegram to the roster. */
-  preferredName: string | null;
-  /** What the bot will actually call them — computed server-side by `addressOf`. */
-  address: string;
-  /** Админ вывел человека из автоматических назначений: распределение, ★-очередь,
-   *  выходные. Ручную постановку это не запрещает. */
-  excludedFromAssignment: boolean;
-  /** Админ вывел человека из обменов — в обе стороны. */
-  excludedFromSwaps: boolean;
-}
+/**
+ * Работник — DTO из контракта.
+ *
+ * Форма была объявлена здесь своими словами; на переезде выяснилось, что три
+ * ручки домена её не выполняли — отдавали ряд таблицы и не отдавали `address`,
+ * который тут объявлен `string`. Теперь тип один на сервер и на оба фронта.
+ */
+export type Employee = AdminEmployeeDto;
 
 /** A saved shift preset the add-entry form can offer, with Friday-shortened times. */
 /**
@@ -229,13 +212,8 @@ export interface Template extends Omit<TemplateDto, "accent"> {
   accent: TemplateAccent;
 }
 
-export interface CreateEmployeeResult {
-  employee: Employee;
-  /** Single-use token embedded in the invite deep-link. */
-  inviteToken: string;
-  /** Ready-made `https://t.me/<bot>?start=<token>` deep-link, or `null` if the server has no bot username configured. */
-  inviteLink: string | null;
-}
+/** Ответ создания работника: он сам, токен приглашения и готовая ссылка. */
+export type CreateEmployeeResult = CreateEmployeeResponse;
 
 /** Body for creating (or patching) a schedule entry — mirrors the server's `createEntrySchema`. */
 export interface NewEntryInput {
@@ -621,11 +599,6 @@ export interface RosterImportSummary {
   unknowns: RosterUnknownCell[];
 }
 
-/** `GET /api/admin/employees` — the richer admin roster (active + archived). */
-interface AdminEmployeesResponse {
-  employees: Employee[];
-}
-
 /** Exact shape of a `GET /api/swaps` row (server-enriched). `counterpartyName`
  * can be `null` if the counterparty employee row is gone; the client falls
  * back to a generic label so the UI's non-nullable `counterpartyName` holds. */
@@ -729,6 +702,7 @@ const tokenSource = {
 
 const transport = createTransport({ baseUrl: API_BASE, tokenSource });
 const readApi = createReadApi(transport);
+const employeesApi = createEmployeesApi(transport);
 
 /**
  * Приклеивает имя работника к записи, соединяя её с ростером из того же ответа.
@@ -885,44 +859,7 @@ export const realClient: ApiClient = {
   declineOffer: (id) => authorizedPostAction(`/api/weekend/offers/${id}/decline`),
 
   // --- Admin-only ------------------------------------------------------------
-  async getAdminEmployees() {
-    const { employees } = await authorizedGet<AdminEmployeesResponse>("/api/admin/employees");
-    return employees;
-  },
-  createEmployee: (name) => authorizedPostJson<CreateEmployeeResult>("/api/admin/employees", { displayName: name }),
-  async archiveEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/archive`, {});
-  },
-  async restoreEmployee(id) {
-    await authorizedPostJson(`/api/admin/employees/${id}/restore`, {});
-  },
-  async setEmployeeAdmin(id, isAdmin) {
-    await authorizedPostJson(`/api/admin/employees/${id}/role`, { isAdmin });
-  },
-  async reorderEmployee(id, position) {
-    const { employees } = await authorizedPostJson<{ employees: Employee[] }>(
-      `/api/admin/employees/${id}/order`,
-      { position },
-    );
-    return employees;
-  },
-
-  async setBirthDate(id, birthDate) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { birthDate });
-  },
-
-  async renameEmployee(id, displayName) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { displayName });
-  },
-  async setEmployeePreferredName(id, preferredName) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, { preferredName });
-  },
-  async setEmployeeRestrictions(id, patch) {
-    await authorizedPatchJson(`/api/admin/employees/${id}`, patch);
-  },
-  getEmployeeInvite(id, regenerate = false) {
-    return authorizedPostJson<{ inviteToken: string; inviteLink: string | null }>(`/api/admin/employees/${id}/invite`, { regenerate });
-  },
+  ...employeesApi,
 
   // `accent` сужается здесь: сервер типизирует его строкой, палитра экранов —
   // перечислением. Незнакомый цвет рисуется запасным, см. `categories.ts`.
@@ -1115,17 +1052,7 @@ const devClient: ApiClient = {
   confirmOffer: (id) => mockConfirmOffer(id),
   declineOffer: (id) => mockDeclineOffer(id),
 
-  getAdminEmployees: () => mockGetAdminEmployees(),
-  createEmployee: (name) => mockCreateEmployee(name),
-  archiveEmployee: (id) => mockArchiveEmployee(id),
-  restoreEmployee: (id) => mockRestoreEmployee(id),
-  setEmployeeAdmin: (id, isAdmin) => mockSetEmployeeAdmin(id, isAdmin),
-  renameEmployee: (id, displayName) => mockRenameEmployee(id, displayName),
-  setEmployeePreferredName: (id, preferredName) => mockSetEmployeePreferredName(id, preferredName),
-  setBirthDate: (id, birthDate) => mockSetBirthDate(id, birthDate),
-  setEmployeeRestrictions: (id, patch) => mockSetEmployeeRestrictions(id, patch),
-  reorderEmployee: (id, position) => mockReorderEmployee(id, position),
-  getEmployeeInvite: (id, regenerate) => mockGetEmployeeInvite(id, regenerate),
+  ...employeesMock,
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
   createEntries: (inputs) => mockCreateEntries(inputs),
