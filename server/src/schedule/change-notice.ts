@@ -1,4 +1,4 @@
-import { addressOf } from "@planer/shared";
+import { addressOf, categoryAccusative, categoryPossessive } from "@planer/shared";
 import type { Bot } from "grammy";
 
 import { notifyUser } from "../bot/notify";
@@ -9,23 +9,40 @@ import { listShiftsOverlapping } from "../repo/shifts";
 import { entryLineOf } from "../util/message-lines";
 import { diffSchedules, type EmployeeDiff } from "./schedule-diff";
 
+/** Just enough of an entry to write a line about it. */
+type EntryLike = Parameters<typeof entryLineOf>[0];
+
 /**
  * Род автора правки неизвестен: у работника есть имя, но не пол, и заводить
  * ради писем колонку «пол» — цена выше пользы. Форма `поставил(а)` уже принята
  * в этом боте (`отдал(а)`, `отказался(лась)` в `bot/notify.ts`), поэтому письма
  * про график говорят так же, а не «Антон поставила тебе смену».
+ *
+ * The word for the entry itself comes from its category. Until 2026-08-11 all
+ * three texts said «смену» regardless of what was edited.
  */
-export function entryAddedText(actorName: string, line: string): string {
-  return `${actorName} поставил(а) тебе смену: ${line}.`;
+export function entryAddedText(actorName: string, entry: EntryLike): string {
+  return `${actorName} поставил(а) тебе ${categoryAccusative(entry.category)}: ${entryLineOf(entry)}.`;
 }
 
-export function entryRemovedText(actorName: string, line: string): string {
-  return `${actorName} снял(а) с тебя смену: ${line}.`;
+export function entryRemovedText(actorName: string, entry: EntryLike): string {
+  return `${actorName} снял(а) с тебя ${categoryAccusative(entry.category)}: ${entryLineOf(entry)}.`;
 }
 
-/** Называет и «было», и «стало»: человеку важно, что именно у него поменялось. */
-export function entryChangedText(actorName: string, before: string, after: string): string {
-  return `${actorName} изменил(а) твою смену: было ${before} → стало ${after}.`;
+/**
+ * Называет и «было», и «стало»: человеку важно, что именно у него поменялось.
+ *
+ * A changed category is said outright — «заменил(а) твой отпуск на смену» —
+ * because «изменил(а) твой отпуск … стало День» stays unreadable even with the
+ * right noun. That exact sentence is what a worker read about his own cancelled
+ * holiday on 2026-08-07, and what made him ask what was going on.
+ */
+export function entryChangedText(actorName: string, before: EntryLike, after: EntryLike): string {
+  const verb =
+    before.category === after.category
+      ? `изменил(а) ${categoryPossessive(before.category)}`
+      : `заменил(а) ${categoryPossessive(before.category)} на ${categoryAccusative(after.category)}`;
+  return `${actorName} ${verb}: было ${entryLineOf(before)} → стало ${entryLineOf(after)}.`;
 }
 
 /** До скольких из скольких дошло: `intended` считает и тех, у кого нет телеграма. */
@@ -67,9 +84,9 @@ export async function notifyEntryChange(
     if (employeeId === opts.actorEmployeeId) continue; // себе не пишем
     const future = filterFutureDiff(d, opts.now.date);
     const texts: string[] = [
-      ...future.added.map((s) => entryAddedText(actorName, entryLineOf(s))),
-      ...future.removed.map((s) => entryRemovedText(actorName, entryLineOf(s))),
-      ...future.changed.map((c) => entryChangedText(actorName, entryLineOf(c.before), entryLineOf(c.after))),
+      ...future.added.map((s) => entryAddedText(actorName, s)),
+      ...future.removed.map((s) => entryRemovedText(actorName, s)),
+      ...future.changed.map((c) => entryChangedText(actorName, c.before, c.after)),
     ];
     if (texts.length === 0) continue;
 
@@ -124,10 +141,10 @@ const MAX_LINES = 10;
 export function scheduleSummaryText(actorName: string, cause: ChangeCause, diff: EmployeeDiff): string {
   const total = diff.added.length + diff.removed.length + diff.changed.length;
   if (total === 1) {
-    if (diff.added[0]) return entryAddedText(actorName, entryLineOf(diff.added[0]));
-    if (diff.removed[0]) return entryRemovedText(actorName, entryLineOf(diff.removed[0]));
+    if (diff.added[0]) return entryAddedText(actorName, diff.added[0]);
+    if (diff.removed[0]) return entryRemovedText(actorName, diff.removed[0]);
     const c = diff.changed[0]!;
-    return entryChangedText(actorName, entryLineOf(c.before), entryLineOf(c.after));
+    return entryChangedText(actorName, c.before, c.after);
   }
 
   const counts: string[] = [];
