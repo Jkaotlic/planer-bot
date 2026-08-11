@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, reorderEmployee, archiveEmployee, setEmployeeAdmin } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, listForAdmin, reorderEmployee, archiveEmployee, setEmployeeAdmin } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { createSwapRequest, getSwapRequest } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
@@ -735,7 +735,10 @@ describe("worker order", () => {
     const named = (list: { displayName: string }[]) =>
       list.map((e) => e.displayName).filter((n) => n !== "T");
     expect(named(employees)).toEqual(["Третий", "Первый", "Второй"]);
-    expect(employees.map((e: { rosterOrder: number }) => e.rosterOrder)).toEqual([0, 1, 2, 3]);
+    // Сплошная нумерация — свойство колонки, а не ответа: `rosterOrder` в контракт
+    // не входит (ни один экран его отсюда не читает, оба фронта возвращённый
+    // список вовсе отбрасывают), поэтому проверяется там, где живёт.
+    expect(listForAdmin(db).map((e) => e.rosterOrder)).toEqual([0, 1, 2, 3]);
 
     // The listing every screen reads must agree with what the move returned.
     const listed = await (await app.request("/api/admin/employees", { headers: { Authorization: `Bearer ${admin}` } })).json();
@@ -958,6 +961,53 @@ describe("контракт домена employees", () => {
     worker(db, "Игорь", 333);
     const app = createApp({ db, config });
     const res = await app.request("/api/admin/employees", bearer(await tokenFor(app, 111)));
+    const parsed = adminEmployeesResponseSchema.safeParse(await res.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  // Три ручки ниже отдавали ряд не спредом, а самим объектом (`c.json({ employee })`),
+  // поэтому grep по `...employee`, которым ловили первые две, их не видел. Форма у
+  // них была та же самая: десять нужных полей плюс девять колонок ряда, включая
+  // `inviteToken`.
+  it("POST /api/admin/employees отдаёт созданного работника той же формы", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 111);
+    const app = createApp({ db, config });
+    const res = await app.request(
+      "/api/admin/employees",
+      authedJson(await tokenFor(app, 111), { displayName: "Марк" }),
+    );
+    const body = (await res.json()) as { employee: unknown };
+    const parsed = adminEmployeeSchema.safeParse(body.employee);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("POST /api/admin/employees/:id/role отдаёт работника той же формы", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 111);
+    const target = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request(
+      `/api/admin/employees/${target.id}/role`,
+      authedJson(await tokenFor(app, 111), { isAdmin: true }),
+    );
+    const body = (await res.json()) as { employee: unknown };
+    const parsed = adminEmployeeSchema.safeParse(body.employee);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("POST /api/admin/employees/:id/order отдаёт список той же формы", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 111);
+    const target = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request(
+      `/api/admin/employees/${target.id}/order`,
+      authedJson(await tokenFor(app, 111), { position: 1 }),
+    );
     const parsed = adminEmployeesResponseSchema.safeParse(await res.json());
     expect(parsed.error?.issues ?? []).toEqual([]);
     expect(parsed.success).toBe(true);
