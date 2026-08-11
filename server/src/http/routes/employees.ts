@@ -3,7 +3,10 @@ import type { Bot } from "grammy";
 import { Hono } from "hono";
 import {
   type AdminEmployeeDto,
+  type AdminEmployeeResponse,
   type AdminEmployeesResponse,
+  type CreateEmployeeResponse,
+  type EmployeeInviteResponse,
   type EmployeesResponse,
   PREFERRED_NAME_MAX,
   addressOf,
@@ -108,7 +111,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     // Токен приглашения отдаётся здесь намеренно и отдельным полем — админ только
     // что завёл человека и должен получить ссылку. А вот внутри `employee` он
     // ехал вторым, незамеченным путём, вместе с восемью прочими колонками ряда.
-    return c.json({ employee: toAdminEmployee(employee), inviteToken, inviteLink }, 201);
+    return c.json({ employee: toAdminEmployee(employee), inviteToken, inviteLink } satisfies CreateEmployeeResponse, 201);
   });
 
   // Rename a worker, set their birthday, and/or flip their two restriction flags.
@@ -235,7 +238,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       }
     }
 
-    return c.json({ employee: toAdminEmployee(employee) });
+    return c.json({ employee: toAdminEmployee(employee) } satisfies AdminEmployeeResponse);
   });
 
   // Move a worker to a position in the list. The number is what the admin sees
@@ -317,9 +320,11 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       displayName: employee?.displayName ?? target.displayName,
       isAdmin: body.isAdmin,
     });
-    // `undefined` сохраняется как было: ряд под этим id только что читался выше,
-    // поэтому ветка недостижима, но сузить её в `null` значило бы поменять тело
-    // ответа заодно с формой — а тут переносится форма.
+    // Единственная ручка домена без `satisfies`: `setEmployeeAdmin` объявлен
+    // возвращающим `Employee | undefined`, и `undefined` сохраняется как было —
+    // ряд под этим id читался двумя операторами выше, better-sqlite3 синхронный,
+    // так что ветка недостижима, но менять тело ответа заодно с формой незачем.
+    // Форму держит тип `toAdminEmployee` и контрактный тест этой ручки.
     return c.json({ employee: employee && toAdminEmployee(employee) });
   });
 
@@ -346,7 +351,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     recordAudit(db, "employee_invite_issued", c.get("auth").employeeId, {
       employeeId: id, displayName: emp.displayName, regenerated: body.regenerate === true,
     });
-    return c.json({ inviteToken, inviteLink });
+    return c.json({ inviteToken, inviteLink } satisfies EmployeeInviteResponse);
   });
 
   return routes;
