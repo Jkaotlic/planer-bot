@@ -9,6 +9,7 @@ import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
+import { adminEmployeeSchema, adminEmployeesResponseSchema, employeesResponseSchema } from "@planer/shared";
 
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
@@ -918,5 +919,47 @@ describe("preferred name", () => {
     const { employees } = await (await app.request("/api/admin/employees", bearer(admin))).json();
     expect(employees.find((e: { id: number }) => e.id === mike.id).address).toBe("Михаил");
     expect(listRecentAudit(db, 10).some((row) => row.type === "employee_updated")).toBe(true);
+  });
+});
+
+describe("контракт домена employees", () => {
+  it("/api/employees отдаёт коллегу только по имени", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    worker(db, "Марк", 444);
+    const app = createApp({ db, config });
+    const res = await app.request("/api/employees", bearer(await tokenFor(app, 333)));
+    const parsed = employeesResponseSchema.safeParse(await res.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("PATCH /api/admin/employees/:id отдаёт работника той же формы", async () => {
+    // Отдельный случай, потому что до контракта эта ручка спредила ряд вторым
+    // местом — и один список полей поправили бы, а второй забыли.
+    const db = makeTestDb();
+    worker(db, "Аня", 111);
+    const target = worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const res = await app.request(
+      `/api/admin/employees/${target.id}`,
+      authedJson(token, { displayName: "Игорь Н." }, "PATCH"),
+    );
+    const body = (await res.json()) as { employee: unknown };
+    const parsed = adminEmployeeSchema.safeParse(body.employee);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("/api/admin/employees отдаёт ровно обещанное, без токена приглашения", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 111);
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const res = await app.request("/api/admin/employees", bearer(await tokenFor(app, 111)));
+    const parsed = adminEmployeesResponseSchema.safeParse(await res.json());
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
   });
 });
