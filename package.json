@@ -2,8 +2,15 @@
   "name": "planer-bot",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.22.2" },
-  "workspaces": ["shared", "server", "miniapp", "admin"],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "miniapp",
+    "admin"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -12,6 +19,6 @@
   "devDependencies": {
     "jsdom": "^30.0.1",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.10"
   }
 }
