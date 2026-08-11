@@ -1,5 +1,6 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
-import type { EntryCategory, TemplateAccent } from "@planer/shared";
+import { AuthRequiredError, OFFLINE_MESSAGE, createReadApi, createTransport } from "@planer/client";
+import type { EntryCategory, ScheduleEntryDto, TemplateAccent, TemplateDto } from "@planer/shared";
 import {
   mockArchiveEmployee,
   mockCreateEmployee,
@@ -70,40 +71,27 @@ export interface Employee {
 }
 
 /** A single scheduled entry: a work shift, duty, or a (possibly multi-day) absence. */
-export interface Shift {
-  id: number;
-  /** "YYYY-MM-DD"; for absences, the first day of the span. */
-  date: string;
-  /** "HH:MM", or null for absences (vacation / business trip) which have no clock times. */
-  start: string | null;
-  end: string | null;
-  /** Last day of the span for multi-day absences; null for single-day entries. */
-  endDate: string | null;
-  category: EntryCategory;
-  title: string | null;
-  /** Set only when a roster import could not read this cell: the original text,
-   *  e.g. «Ко». Such an entry has no preset and no times, and draws as «?». */
-  unrecognisedCode?: string | null;
-  /** The preset this entry came from, if any — drives its colour in the grid. */
-  templateId: number | null;
-  employeeId: number | null;
-}
+/**
+ * Запись графика — DTO из контракта.
+ *
+ * Форма была объявлена здесь своими словами и успела разойтись с сервером:
+ * `unrecognisedCode` значился необязательным, хотя сервер отдаёт его всегда,
+ * пусть и `null`. `location` тут не было вовсе — см. находку в ledger.
+ */
+export type Shift = ScheduleEntryDto;
 
 /** A saved preset the add-panel can offer, with Friday-shortened times. */
-export interface Template {
-  id: number;
-  name: string;
-  start: string;
-  end: string;
-  fridayStart: string;
-  fridayEnd: string;
-  isLate: boolean;
-  sendReminder: boolean;
-  /** Which kind of entry this preset creates — default "shift"; e.g. the Поклонка preset is a "duty". */
-  category: EntryCategory;
-  /** Default place for duty/offsite presets, null for plain shifts. */
-  location: string | null;
-  /** Colour slot so each preset reads apart in the schedule. */
+/**
+ * Пресет смены — форма из контракта, с одним сужением.
+ *
+ * `sortOrder` в контракте есть, а здесь его раньше не было: консоль поле не
+ * читает, порядок ей приходит уже отсортированным (`repo/templates.ts` — 
+ * `orderBy(sortOrder)`). Теперь оно просто есть и остаётся непрочитанным.
+ *
+ * `accent` наоборот сужен против контракта: сервер отдаёт строку намеренно
+ * (новый цвет в базе не должен ронять контракт), а палитре нужен перечислимый тип.
+ */
+export interface Template extends Omit<TemplateDto, "accent"> {
   accent: TemplateAccent;
 }
 
@@ -462,14 +450,6 @@ interface EmployeesResponse {
   employees: Employee[];
 }
 
-interface ShiftsResponse {
-  shifts: Shift[];
-}
-
-interface TemplatesResponse {
-  templates: Template[];
-}
-
 /** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
  * formatted for the "События" feed (see `toFeedEvent` below). */
 interface RawAdminEvent {
@@ -534,7 +514,9 @@ function toFeedEvent(raw: RawAdminEvent, namesById: ReadonlyMap<number, string>)
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 /** Thrown when the console has no valid session — the UI shows a login prompt. */
-export class AuthRequiredError extends Error {}
+// `AuthRequiredError` и `OFFLINE_MESSAGE` переехали в пакет; реэкспорт — чтобы
+// у экранов, которые их ловят и показывают, не поменялись импорты.
+export { AuthRequiredError, OFFLINE_MESSAGE };
 
 const ADMIN_TOKEN_KEY = "adminToken";
 
@@ -579,18 +561,6 @@ function clearAuth(): void {
 let tokenPromise: Promise<string> | null = null;
 
 
-/**
- * Сетевой сбой — это не ответ сервера, а его отсутствие: `fetch` бросает
- * `TypeError: Failed to fetch` (в Chrome) или «NetworkError…» (в Firefox), и
- * именно эта английская строка доезжала до человека — она кладётся в
- * `Error.message`, а экраны показывают его как есть. Повод дёрнуть эту ветку
- * будничный: рестарт сервера при выкладке или лифт с плохим интернетом.
- *
- * То же правило, что у `refusalText`: то, что читает человек, пишется
- * по-русски. Ответ сервера с кодом мы не трогаем — у него свои переводы.
- */
-export const OFFLINE_MESSAGE = "Нет связи с сервером — проверь интернет и попробуй ещё раз.";
-
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
@@ -630,6 +600,18 @@ function authToken(): Promise<string> {
   tokenPromise ??= requestToken();
   return tokenPromise;
 }
+
+/**
+ * Тот же вход, но в виде, который понимает общий транспорт из `@planer/client`.
+ *
+ * Ничего не переписано: оба способа входа — `#token=` из ссылки бота и
+ * Telegram initData — остались в `requestToken`/`storedToken` выше, а `clear`
+ * это прежний `clearAuth`, который чистит и `tokenPromise`, и localStorage.
+ */
+const tokenSource = { get: authToken, clear: clearAuth };
+
+const transport = createTransport({ baseUrl: API_BASE, tokenSource });
+const readApi = createReadApi(transport);
 
 /** Reads `{error}` off a non-2xx JSON response, falling back to a generic message. */
 async function errorMessage(path: string, res: Response): Promise<string> {
@@ -715,16 +697,16 @@ export const realClient: ApiClient = {
     return employees;
   },
 
+  // Консоли из ответа нужны только записи: ростер она рисует из собственного
+  // `getEmployees`, а не из этой ручки.
   async getTeamSchedule(from, to) {
-    const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const { shifts } = await authorizedGet<ShiftsResponse>(`/api/team/schedule?${query}`);
+    const { shifts } = await readApi.getTeamSchedule(from, to);
     return shifts;
   },
 
-  async getTemplates() {
-    const { templates } = await authorizedGet<TemplatesResponse>("/api/templates");
-    return templates;
-  },
+  // `accent` сужается здесь: сервер типизирует его строкой намеренно, а палитре
+  // консоли нужен перечислимый тип.
+  getTemplates: () => readApi.getTemplates() as Promise<Template[]>,
 
   async getEvents() {
     const [{ events }, { employees }] = await Promise.all([
