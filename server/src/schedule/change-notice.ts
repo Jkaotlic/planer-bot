@@ -7,6 +7,7 @@ import type { Shift } from "../db/schema";
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { entryLineOf } from "../util/message-lines";
+import { dayAfterLine } from "./day-summary";
 import { diffSchedules, type EmployeeDiff } from "./schedule-diff";
 
 /** Just enough of an entry to write a line about it. */
@@ -171,6 +172,32 @@ function plural(n: number, one: string, few: string, many: string): string {
   return many;
 }
 
+/**
+ * Appends «what you have on that day now» when it says something new.
+ *
+ * Only for the one-entry letter: a summary of several changes already lists
+ * them, and the same line under it would repeat itself. A multi-day entry is
+ * summarised by its first day — the same day `entryLineOf` leads with.
+ *
+ * Lives on `notifyScheduleChange` rather than on the per-entry path because the
+ * hand edits go through the notice buffer, and the buffer sends from here.
+ */
+function withDayAfter(db: Db, diff: EmployeeDiff, text: string): string {
+  const total = diff.added.length + diff.removed.length + diff.changed.length;
+  const only = diff.added[0] ?? diff.removed[0] ?? diff.changed[0]?.after;
+  if (total !== 1 || !only || only.employeeId == null) return text;
+
+  const line = dayAfterLine(db, {
+    employeeId: only.employeeId,
+    date: only.date,
+    // For a deleted entry this id is already gone from the table, so the
+    // "only the named one" branch cannot fire and the worker gets the honest
+    // remainder of the day.
+    keepSilentForEntryId: only.id,
+  });
+  return line ? `${text}\n${line}` : text;
+}
+
 interface ScheduleChangeOpts {
   actorEmployeeId: number;
   diffs: Map<number, EmployeeDiff>;
@@ -205,7 +232,7 @@ export async function notifyScheduleChange(
     intended += 1;
     const target = getEmployeeById(db, employeeId);
     if (target?.telegramUserId == null) continue;
-    const text = scheduleSummaryText(actorName, opts.cause, future);
+    const text = withDayAfter(db, future, scheduleSummaryText(actorName, opts.cause, future));
     if (await notifyUser(bot, target.telegramUserId, text)) delivered += 1;
   }
   return { delivered, intended };
