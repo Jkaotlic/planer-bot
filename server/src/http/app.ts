@@ -29,7 +29,8 @@ import { buildSwapLockNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
-import { notifyEntryChange, notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
+import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
+import { createNoticeBuffer } from "../schedule/notice-buffer";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
 import {
@@ -126,6 +127,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // index.ts — Hono composes "*" middleware around whatever else is
   // registered on the same app instance, regardless of registration order
   // relative to those routes.
+  // One buffer per app instance, not per request: it is the thing holding the
+  // timers. A hand edit waits in it for a few seconds so a series of edits
+  // reaches the worker as one letter instead of one message per entry.
+  const noticeBuffer = createNoticeBuffer({ db, bot });
+
   app.use("*", securityHeaders());
 
   // Coarse flood protection for the whole app — see rate-limit.ts for keying
@@ -660,7 +666,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (archived) return c.json({ error: archived }, 400);
     const entry = createShift(db, parsed.data);
     recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
-    const notified = await notifyEntryChange(db, bot, {
+    const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now: teamNow(config.teamTz),
     });
     return c.json({ entry, notified }, 201);
@@ -742,7 +748,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: auditShape(existing), after: auditShape(entry) });
-    const notified = await notifyEntryChange(db, bot, {
+    const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
     });
     return c.json({ entry, notified });
@@ -795,7 +801,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       }
     }
     const notified = existing
-      ? await notifyEntryChange(db, bot, {
+      ? noticeBuffer.register({
           actorEmployeeId: c.get("auth").employeeId, before: existing, after: null, now: teamNow(config.teamTz),
         })
       : { delivered: 0, intended: 0 };

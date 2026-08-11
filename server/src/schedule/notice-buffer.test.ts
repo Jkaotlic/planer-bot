@@ -181,4 +181,65 @@ describe("буфер писем о правке графика", () => {
     await vi.advanceTimersByTimeAsync(WINDOW_MS + 1);
     expect(sent).toHaveLength(1);
   });
+
+  // Правила ниже переехали сюда из тестов `notifyEntryChange`, когда буфер стал
+  // единственным входом для ручной правки. Они про поведение, а не про буфер, —
+  // и без них исчезли бы вместе с той функцией.
+  it("молчит про день, который уже прошёл", async () => {
+    const db = makeTestDb();
+    const admin = worker(db, "Аня", 111);
+    const target = worker(db, "Игорь", 333);
+    const { bot, sent } = testBot();
+    const buffer = createNoticeBuffer({ db, bot, windowMs: WINDOW_MS });
+
+    const past = shiftOn(db, target.id, "2026-07-20", "День", "09:00", "18:00");
+    const reach = buffer.register({ actorEmployeeId: admin.id, before: null, after: past, now: NOW });
+
+    expect(reach).toEqual({ delivered: 0, intended: 0 });
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 1);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("правка внутри прошлого молчит, а перенос из прошлого в будущее — нет", async () => {
+    const db = makeTestDb();
+    const admin = worker(db, "Аня", 111);
+    const target = worker(db, "Игорь", 333);
+    const { bot, sent } = testBot();
+    const buffer = createNoticeBuffer({ db, bot, windowMs: WINDOW_MS });
+
+    const past = shiftOn(db, target.id, "2026-07-20", "День", "09:00", "18:00");
+    buffer.register({
+      actorEmployeeId: admin.id, before: past,
+      after: { ...past, date: "2026-07-21" }, now: NOW,
+    });
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 1);
+    expect(sent).toHaveLength(0);
+
+    buffer.register({
+      actorEmployeeId: admin.id, before: past,
+      after: { ...past, date: "2026-08-20" }, now: NOW,
+    });
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("смена владельца — снято прежнему, поставлено новому", async () => {
+    const db = makeTestDb();
+    const admin = worker(db, "Аня", 111);
+    const igor = worker(db, "Игорь", 333);
+    const mark = worker(db, "Марк", 444);
+    const { bot, sent } = testBot();
+    const buffer = createNoticeBuffer({ db, bot, windowMs: WINDOW_MS });
+
+    const entry = shiftOn(db, igor.id, "2026-08-11", "День", "09:00", "18:00");
+    buffer.register({
+      actorEmployeeId: admin.id, before: entry,
+      after: { ...entry, employeeId: mark.id }, now: NOW,
+    });
+
+    await vi.advanceTimersByTimeAsync(WINDOW_MS + 1);
+    expect(sent).toHaveLength(2);
+    expect(sent.find((m) => m.chat_id === 333)!.text).toContain("снял(а) с тебя смену");
+    expect(sent.find((m) => m.chat_id === 444)!.text).toContain("поставил(а) тебе смену");
+  });
 });
