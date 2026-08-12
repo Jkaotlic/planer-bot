@@ -67,3 +67,21 @@ export function formatWeekRangeLabel(monday: Date, sunday: Date): string {
 export function formatWeekRangeLabelIso(mondayIso: string, sundayIso: string): string {
   return formatWeekRangeLabel(parseISODate(mondayIso), parseISODate(sundayIso));
 }
+
+/**
+ * Каждый день диапазона включительно: `["2026-08-12", "2026-08-13", "2026-08-14"]`.
+ *
+ * Понадобилось письму админам о многодневном больничном: оно обязано пройти по
+ * каждому дню и сказать, что на нём стоит. Считать через `addDaysIso`, а не
+ * прибавлять к числу: у августа 31 день, а у сентября 30, и «date + 1» через
+ * границу месяца врёт.
+ *
+ * Перевёрнутый диапазон отдаёт пустой список, а не крутится вечно: такой вход
+ * приходит из тела запроса, и цикл `while (day <= to)` на нём просто не
+ * начнётся — но полагаться на это молча нельзя, поэтому здесь есть тест.
+ */
+export function eachDayIso(from: string, to: string): string[] {
+  const days: string[] = [];
+  for (let day = from; day <= to; day = addDaysIso(day, 1)) days.push(day);
+  return days;
+}
