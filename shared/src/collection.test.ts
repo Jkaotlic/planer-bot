@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   collectionMessage,
+  outgoingCollectionMessage,
   collectionStatus,
   collectionTitle,
   compareCollections,
@@ -275,5 +276,53 @@ describe("compareCollections", () => {
     const newer = row("Новый", { closedAt: "2026-01-02T00:00:00Z", createdAt: "2026-08-01T00:00:00Z" });
     expect([older, newer].sort((a, b) => compareCollections(a, b, today)).map((c) => c.title))
       .toEqual(["Новый", "Старый"]);
+  });
+});
+
+describe("outgoingCollectionMessage — что реально уйдёт команде", () => {
+  /** Вход сборщика письма: кастомный сбор со ссылкой и суммой. */
+  const input = {
+    kind: "custom" as const,
+    title: "Кофемашина",
+    personName: null,
+    birthDateLabel: null,
+    eventDate: null,
+    deadline: null,
+    amountPerPerson: 500,
+    totalGoal: null,
+    collectUrl: "https://bank.example/sl/abc",
+  };
+
+  it("без своего текста отдаёт собранное письмо — со ссылкой, как и раньше", () => {
+    expect(outgoingCollectionMessage(input, "first", null)).toBe(collectionMessage(input, "first"));
+  });
+
+  it("пробельный свой текст не считается своим текстом", () => {
+    expect(outgoingCollectionMessage(input, "first", "   \n  ")).toBe(collectionMessage(input, "first"));
+  });
+
+  /**
+   * Живой случай 12 августа 2026: сбор ушёл 27 людям без ссылки. Поле ссылки было
+   * заполнено, блокер поэтому молчал, а свой текст заменял письмо целиком — вместе
+   * со строкой «Сбор: …», которую собирает `collectionMessage`.
+   */
+  it("свой текст без ссылки получает её отдельной строкой", () => {
+    const out = outgoingCollectionMessage(input, "first", "Скидываемся Ирине на лечение, кто сколько может");
+    expect(out).toBe("Скидываемся Ирине на лечение, кто сколько может\n\nСбор: https://bank.example/sl/abc");
+  });
+
+  it("свой текст со ссылкой внутри не получает второй копии", () => {
+    const custom = "Скидываемся: https://bank.example/sl/abc — спасибо!";
+    expect(outgoingCollectionMessage(input, "first", custom)).toBe(custom);
+  });
+
+  it("дожим своим текстом тоже несёт ссылку", () => {
+    const out = outgoingCollectionMessage(input, "reminder", "Напоминаю про сбор");
+    expect(out).toContain("https://bank.example/sl/abc");
+  });
+
+  it("без ссылки в карточке свой текст уходит как есть", () => {
+    const out = outgoingCollectionMessage({ ...input, collectUrl: null }, "first", "Скидываемся налом у Ани");
+    expect(out).toBe("Скидываемся налом у Ани");
   });
 });

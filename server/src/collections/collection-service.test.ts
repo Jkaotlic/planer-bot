@@ -128,6 +128,28 @@ describe("previewCollection", () => {
     expect(previewCollection(db, saved.ok ? saved.collection : collection).blocker).toBeNull();
   });
 
+  /**
+   * The live incident of 2026-08-12: a collection went out to 27 people with no
+   * link in it. The link WAS filled in — so the blocker stayed silent — but the
+   * admin's own wording replaced the composed message wholesale, and the
+   * «Сбор: …» line went with it. This asserts the wiring, not the rule: the rule
+   * has its own tests in `shared/src/collection.test.ts`.
+   */
+  it("keeps the link when the admin wrote their own wording", () => {
+    const db = makeTestDb();
+    person(db, "Colleague", 2);
+    const collection = createCustomCollection(db, blank({
+      title: "Кофемашина",
+      collectUrl: "https://example.test/c/1",
+      messageText: "Скидываемся на кофемашину, кто сколько может",
+    }));
+
+    const preview = previewCollection(db, collection);
+    expect(preview.message).toContain("Скидываемся на кофемашину");
+    expect(preview.message).toContain("https://example.test/c/1");
+    expect(preview.blocker).toBeNull();
+  });
+
   it("a custom collection can be sent again — a birthday one cannot", () => {
     const db = makeTestDb();
     const honouree = person(db, "Honouree", 1);
