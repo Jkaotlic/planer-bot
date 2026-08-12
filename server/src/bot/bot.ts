@@ -20,7 +20,7 @@ import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
-import { mainKeyboard } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import {
   notifyUser,
   notifyAdmins,
@@ -426,6 +426,32 @@ export function createBot(deps: BotDeps): Bot {
   }
 
   bot.command("week", (ctx) => sendWeek(ctx));
+
+  /**
+   * Нажатая кнопка постоянной клавиатуры. Telegram присылает её обычным
+   * текстовым сообщением, поэтому единственный ключ — точное совпадение метки.
+   * Кнопка «Мои смены» сюда не попадает: она `web_app`, её нажатие открывает
+   * мини-апп и боту не шлёт ничего.
+   *
+   * Регистрируется после всех `bot.command(...)` намеренно: grammy передаёт
+   * управление дальше по цепочке только если предыдущий обработчик об этом
+   * попросил, а команды не просят — значит `/week` сюда не долетит и обработан
+   * дважды не будет.
+   *
+   * Приватные чаты только. Не для симметрии: без этой проверки кнопка «График»
+   * стала бы обходом защиты `sendWeek`, которая существует ровно для того,
+   * чтобы роспись всей команды не публиковалась в группу.
+   *
+   * На всё остальное бот молчит, как молчал до этой клавиатуры. Отвечать на
+   * произвольный текст его никто не просил.
+   */
+  bot.on("message:text", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+    const text = ctx.msg.text;
+    if (text === BTN_WEEK) await sendWeek(ctx);
+    else if (text === BTN_REMINDERS) await sendReminders(ctx);
+    else if (text === BTN_ADMIN) await sendAdminLink(ctx);
+  });
 
   /**
    * Paging through weeks. Unlike the cosmetic edits elsewhere in this file,
