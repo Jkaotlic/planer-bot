@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { KeyboardButton } from "grammy/types";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_SICK, BTN_EVENT, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 
 const PUBLIC_URL = "https://x.keenetic.pro";
 
@@ -28,12 +28,25 @@ describe("mainKeyboard", () => {
     expect(labels(mainKeyboard({ isAdmin: false, publicUrl: PUBLIC_URL }))).not.toContain(BTN_ADMIN);
   });
 
-  it("работник получает график, мини-апп и напоминания — и ничего сверх того", () => {
+  it("работник получает график, мини-апп, самозапись и напоминания — и ничего сверх того", () => {
     expect(labels(mainKeyboard({ isAdmin: false, publicUrl: PUBLIC_URL }))).toEqual([
       BTN_WEEK,
       BTN_MY_SHIFTS,
+      BTN_SICK,
+      BTN_EVENT,
       BTN_REMINDERS,
     ]);
+  });
+
+  it("даёт вход в больничный и в мероприятие, и каждый ведёт в свою форму", () => {
+    const kb = mainKeyboard({ isAdmin: false, publicUrl: "https://x.test" });
+    const buttons = kb.keyboard.flat();
+    expect(buttons.find((b) => labelOf(b) === BTN_SICK)).toMatchObject({
+      web_app: { url: "https://x.test/app/?screen=sick" },
+    });
+    expect(buttons.find((b) => labelOf(b) === BTN_EVENT)).toMatchObject({
+      web_app: { url: "https://x.test/app/?screen=event" },
+    });
   });
 
   it("кнопка мини-аппа открывает его по адресу из конфига, а не по зашитому", () => {
