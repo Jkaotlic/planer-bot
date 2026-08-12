@@ -164,3 +164,96 @@ describe("постоянная клавиатура — доставка", () =>
     expect(keyboardLabels(reply.payload)).toContain(BTN_ADMIN);
   });
 });
+
+/** Нажатая кнопка приходит обычным текстом — без entity `bot_command`. */
+function textUpdate(tgId: number, text: string) {
+  return {
+    update_id: 3,
+    message: {
+      message_id: 7, date: 1_712_803_046,
+      chat: { id: tgId, first_name: "T", type: "private" as const },
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      text,
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
+/** Тот же текст, но из группы. */
+function groupTextUpdate(tgId: number, text: string) {
+  return {
+    update_id: 3,
+    message: {
+      message_id: 7, date: 1_712_803_046,
+      chat: { id: -1_001_234_567, title: "Смены", type: "supergroup" as const },
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      text,
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
+describe("постоянная клавиатура — нажатия", () => {
+  it("«График» отвечает тем же, чем /week", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1001);
+
+    const viaCommand = testBot(db);
+    await viaCommand.bot.handleUpdate(commandUpdate(1001, "/week"));
+    const fromCommand = viaCommand.calls.find((c) => c.method === "sendPhoto");
+
+    const viaButton = testBot(db);
+    await viaButton.bot.handleUpdate(textUpdate(1001, BTN_WEEK));
+    const fromButton = viaButton.calls.find((c) => c.method === "sendPhoto");
+
+    expect(fromCommand?.payload.caption).toBeDefined();
+    expect(fromButton?.payload.caption).toBe(fromCommand?.payload.caption);
+    expect(JSON.stringify(fromButton?.payload.reply_markup)).toBe(
+      JSON.stringify(fromCommand?.payload.reply_markup),
+    );
+  });
+
+  it("«Напоминания» отвечают тем же, чем /notifications", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1002);
+
+    const viaCommand = testBot(db);
+    await viaCommand.bot.handleUpdate(commandUpdate(1002, "/notifications"));
+    const fromCommand = viaCommand.calls.find((c) => c.method === "sendMessage");
+
+    const viaButton = testBot(db);
+    await viaButton.bot.handleUpdate(textUpdate(1002, BTN_REMINDERS));
+    const fromButton = viaButton.calls.find((c) => c.method === "sendMessage");
+
+    expect(fromCommand?.payload.text).toContain("Напоминания о сменах");
+    expect(fromButton?.payload.text).toBe(fromCommand?.payload.text);
+    expect(JSON.stringify(fromButton?.payload.reply_markup)).toBe(
+      JSON.stringify(fromCommand?.payload.reply_markup),
+    );
+  });
+
+  it("«Админка» от не-админа отказывает так же, как команда", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1003);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(textUpdate(1003, BTN_ADMIN));
+
+    expect(calls.find((c) => c.method === "sendMessage")?.payload.text).toContain("только администраторам");
+  });
+
+  it("«График» из группы не отвечает ничем — иначе кнопка обходила бы защиту /week", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1004);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(groupTextUpdate(1004, BTN_WEEK));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("на произвольный текст бот молчит, как молчал", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1005);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(textUpdate(1005, "привет"));
+
+    expect(calls).toEqual([]);
+  });
+});
