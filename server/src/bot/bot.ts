@@ -283,10 +283,16 @@ export function createBot(deps: BotDeps): Bot {
     await replyWithMenu(ctx, "Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");
   });
 
-  // /admin — hands an admin a browser login link for the desktop console.
-  // The link carries a long-lived admin JWT the /admin SPA reads from the URL
-  // hash; opening the console from inside Telegram still works via initData.
-  bot.command("admin", async (ctx) => {
+  /**
+   * Hands an admin a browser login link for the desktop console. The link
+   * carries a long-lived admin JWT the /admin SPA reads from the URL hash;
+   * opening the console from inside Telegram still works via initData.
+   *
+   * Вынесено из обработчика, чтобы команда и кнопка клавиатуры звали одно и то
+   * же: два входа, отвечающие по-разному на один вопрос, — наблюдаемый дефект,
+   * а не мелочь.
+   */
+  async function sendAdminLink(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
     const isAllowlisted = config.adminTelegramIds.includes(from.id);
@@ -347,11 +353,19 @@ export function createBot(deps: BotDeps): Bot {
       `Вход в админку (ссылка личная, не пересылай — действует 12 часов, потом попроси новую через /admin):\n${url}`,
       { link_preview_options: { is_disabled: true } },
     );
-  });
+  }
 
-  // /notifications — the setting, reachable at any time rather than only while a
-  // reminder happens to be on screen.
-  bot.command("notifications", async (ctx) => {
+  bot.command("admin", (ctx) => sendAdminLink(ctx));
+
+  /**
+   * The reminders setting, reachable at any time rather than only while a
+   * reminder happens to be on screen.
+   *
+   * Отвечает через `ctx.reply`, а не `replyWithMenu`, и это не недосмотр: у
+   * успешного ответа поле `reply_markup` уже занято переключателем напоминаний,
+   * а отказ адресован тому, кому `menuFor` всё равно вернул бы `undefined`.
+   */
+  async function sendReminders(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
     const who = acting(from.id);
@@ -361,7 +375,9 @@ export function createBot(deps: BotDeps): Bot {
     }
     const me = who.me;
     await ctx.reply(remindersStateText(me.remindersEnabled), { reply_markup: remindersKeyboard(me.remindersEnabled) });
-  });
+  }
+
+  bot.command("notifications", (ctx) => sendReminders(ctx));
 
   /** Monday of the week `offset` weeks from the current one, in team time. */
   function mondayForOffset(offset: number): { monday: string; today: string } {
@@ -369,18 +385,20 @@ export function createBot(deps: BotDeps): Bot {
     return { monday: addDaysIso(mondayOfIso(today), offset * 7), today };
   }
 
-  // /week — the team's schedule as a picture. Visible to everyone in the menu:
-  // it's the same data /api/team/schedule already gives any authorized worker,
-  // just on a different medium — no need to open the mini app, it's already
-  // in the chat.
-  bot.command("week", async (ctx) => {
+  /**
+   * The team's schedule as a picture. Visible to everyone in the menu: it's the
+   * same data /api/team/schedule already gives any authorized worker, just on a
+   * different medium — no need to open the mini app, it's already in the chat.
+   *
+   * Private chats only. Every other answer this bot gives concerns whoever
+   * asked; this one is the whole team's roster, and it would go wherever the
+   * update came from. Should the bot ever land in a group, one command would
+   * publish the roster there. The guarantee belongs in the code, not in a
+   * BotFather checkbox somebody can untick.
+   */
+  async function sendWeek(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
-    // Private chats only. Every other answer this bot gives concerns whoever
-    // asked; this one is the whole team's roster, and it would go wherever the
-    // update came from. Should the bot ever land in a group, one command would
-    // publish the roster there. The guarantee belongs in the code, not in a
-    // BotFather checkbox somebody can untick.
     if (ctx.chat?.type !== "private") return;
     const who = acting(from.id);
     if (!who.ok) {
@@ -405,7 +423,9 @@ export function createBot(deps: BotDeps): Bot {
       console.error("week: send failed:", safeErrorMessage(err));
       await ctx.reply("Не смог нарисовать график, открой мини-апп.");
     }
-  });
+  }
+
+  bot.command("week", (ctx) => sendWeek(ctx));
 
   /**
    * Paging through weeks. Unlike the cosmetic edits elsewhere in this file,
