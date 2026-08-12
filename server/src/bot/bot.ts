@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, InputFile } from "grammy";
+import { Bot, InlineKeyboard, InputFile, Keyboard, type Context } from "grammy";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import type { Employee } from "../db/schema";
@@ -20,6 +20,7 @@ import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
+import { mainKeyboard, BTN_WEEK, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import {
   notifyUser,
   notifyAdmins,
@@ -171,6 +172,51 @@ export function createBot(deps: BotDeps): Bot {
     return { ok: true, me };
   }
 
+  /** Что можно доложить к текстовому ответу: у `/admin` это отключённое превью ссылки. */
+  type MenuExtra = { link_preview_options?: { is_disabled: boolean } };
+
+  /**
+   * Клавиатура для этого человека — или ничего, если слать её некому.
+   *
+   * Три отказа. Групповой чат: клавиатуру увидели бы все участники, а бот и так
+   * не рассказывает там про график (`/week` молчит по той же причине). Человек
+   * не в системе и архивный: нажимать им нечего, а «Мои смены» привели бы их в
+   * мини-апп, который отвечает им 403.
+   *
+   * Аллоулистнутый (`ADMIN_TELEGRAM_IDS`) — то же документированное исключение,
+   * что и везде в этом файле: `/api/auth` восстанавливает его при входе, поэтому
+   * архивным он здесь не считается и админскую кнопку получает сразу — `/admin`
+   * ему отвечает, а до первого обращения его строка ещё говорит `isAdmin: false`.
+   */
+  function menuFor(tgId: number, chatType: string | undefined): Keyboard | undefined {
+    if (chatType !== "private") return undefined;
+    const me = getByTelegramId(db, tgId);
+    if (!me) return undefined;
+    const allowlisted = config.adminTelegramIds.includes(tgId);
+    if (!me.isActive && !allowlisted) return undefined;
+    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted, publicUrl: config.publicUrl });
+  }
+
+  /**
+   * Текстовый ответ с постоянной клавиатурой.
+   *
+   * Только текстовый: у сообщения ровно одно поле `reply_markup`, и у `/week`
+   * с `/notifications` оно уже занято листалкой недель и переключателем
+   * напоминаний. Прицепить к ним ещё и клавиатуру нельзя физически — она едет
+   * с теми ответами, где это поле свободно.
+   *
+   * Кому она достанется, решает `menuFor`, а не место вызова: половина ответов
+   * ниже адресована людям, которым клавиатура не положена, и разбирать это на
+   * каждой строчке значило бы завести восемь копий одного правила.
+   */
+  async function replyWithMenu(ctx: Context, text: string, extra?: MenuExtra): Promise<void> {
+    const tgId = ctx.from?.id;
+    await ctx.reply(text, {
+      ...extra,
+      reply_markup: tgId == null ? undefined : menuFor(tgId, ctx.chat?.type),
+    });
+  }
+
   bot.command("start", async (ctx) => {
     const from = ctx.from;
     if (!from) return;
@@ -185,10 +231,10 @@ export function createBot(deps: BotDeps): Bot {
         // was both untrue — they are not in the system in any usable sense — and a
         // dead end. The way out is the admin's «Восстановить», so say that.
         if (!already.isActive && !config.adminTelegramIds.includes(from.id)) {
-          await ctx.reply("Ты в архиве — новая ссылка не поможет. Попроси админа восстановить твою запись, история и смены сохранятся.");
+          await replyWithMenu(ctx, "Ты в архиве — новая ссылка не поможет. Попроси админа восстановить твою запись, история и смены сохранятся.");
           return;
         }
-        await ctx.reply(`Ты уже привязан, ${addressOf(already)} 👋`);
+        await replyWithMenu(ctx, `Ты уже привязан, ${addressOf(already)} 👋`);
         return;
       }
       const linked = linkTelegramAccount(db, token, from.id, from.username, from.first_name);
@@ -198,10 +244,10 @@ export function createBot(deps: BotDeps): Bot {
         // catchable here. Skipped when the two names are the same word anyway.
         const address = addressOf(linked);
         const roster = address === linked.displayName ? "" : ` В расписании ты — ${linked.displayName}.`;
-        await ctx.reply(`Готово, ${address}! Ты в системе ✅${roster} Открой мини-апп, чтобы посмотреть смены.`);
+        await replyWithMenu(ctx, `Готово, ${address}! Ты в системе ✅${roster} Открой мини-апп, чтобы посмотреть смены.`);
         return;
       }
-      await ctx.reply("Ссылка недействительна или уже использована. Попроси у админа новую.");
+      await replyWithMenu(ctx, "Ссылка недействительна или уже использована. Попроси у админа новую.");
       return;
     }
 
@@ -214,12 +260,12 @@ export function createBot(deps: BotDeps): Bot {
       // restores them on sight (see its comment), so the normal greeting
       // below is still true for them and they must not be told they're locked out.
       if (!existing.isActive && !config.adminTelegramIds.includes(from.id)) {
-        await ctx.reply("Ты в архиве — доступ в мини-апп закрыт. Если это ошибка, напиши админу.");
+        await replyWithMenu(ctx, "Ты в архиве — доступ в мини-апп закрыт. Если это ошибка, напиши админу.");
         return;
       }
       // Keep the greeting name current — people rename themselves in Telegram.
       rememberTelegramProfile(db, existing.id, { tgUsername: from.username, tgFirstName: from.first_name });
-      await ctx.reply(`Привет, ${addressOf({ ...existing, tgFirstName: from.first_name })}! 👋 Открой мини-апп, чтобы посмотреть смены.`);
+      await replyWithMenu(ctx, `Привет, ${addressOf({ ...existing, tgFirstName: from.first_name })}! 👋 Открой мини-апп, чтобы посмотреть смены.`);
       return;
     }
     // Allowlisted admins self-register on first /start — no invite link needed.
@@ -231,16 +277,22 @@ export function createBot(deps: BotDeps): Bot {
         tgFirstName: from.first_name,
         displayName,
       });
-      await ctx.reply(`Привет, ${addressOf(admin)}! Ты вошёл как админ ✅ Открой мини-апп для управления сменами.`);
+      await replyWithMenu(ctx, `Привет, ${addressOf(admin)}! Ты вошёл как админ ✅ Открой мини-апп для управления сменами.`);
       return;
     }
-    await ctx.reply("Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");
+    await replyWithMenu(ctx, "Ты пока не зарегистрирован. Попроси у админа ссылку-приглашение.");
   });
 
-  // /admin — hands an admin a browser login link for the desktop console.
-  // The link carries a long-lived admin JWT the /admin SPA reads from the URL
-  // hash; opening the console from inside Telegram still works via initData.
-  bot.command("admin", async (ctx) => {
+  /**
+   * Hands an admin a browser login link for the desktop console. The link
+   * carries a long-lived admin JWT the /admin SPA reads from the URL hash;
+   * opening the console from inside Telegram still works via initData.
+   *
+   * Вынесено из обработчика, чтобы команда и кнопка клавиатуры звали одно и то
+   * же: два входа, отвечающие по-разному на один вопрос, — наблюдаемый дефект,
+   * а не мелочь.
+   */
+  async function sendAdminLink(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
     const isAllowlisted = config.adminTelegramIds.includes(from.id);
@@ -252,7 +304,7 @@ export function createBot(deps: BotDeps): Bot {
     // `requireAdmin`. Catch that here rather than handing out a dead link.
     if (admin && !admin.isActive) {
       if (!isAllowlisted) {
-        await ctx.reply("Ты в архиве — админка недоступна. Если это ошибка, напиши другому админу.");
+        await replyWithMenu(ctx, "Ты в архиве — админка недоступна. Если это ошибка, напиши другому админу.");
         return;
       }
       // Same restore-on-reauth as POST /api/auth (see its comment): a Telegram
@@ -265,7 +317,7 @@ export function createBot(deps: BotDeps): Bot {
     }
 
     if ((!admin || !admin.isAdmin) && !isAllowlisted) {
-      await ctx.reply("Админка доступна только администраторам.");
+      await replyWithMenu(ctx, "Админка доступна только администраторам.");
       return;
     }
     if (!admin && isAllowlisted) {
@@ -278,7 +330,7 @@ export function createBot(deps: BotDeps): Bot {
       });
     }
     if (!admin) {
-      await ctx.reply("Сначала отправь /start.");
+      await replyWithMenu(ctx, "Сначала отправь /start.");
       return;
     }
     // The link below claims `isAdmin: true`, and `requireAdmin` believes the row,
@@ -296,15 +348,24 @@ export function createBot(deps: BotDeps): Bot {
     }
     const token = await issueToken({ employeeId: admin.id, isAdmin: true }, config.jwtSecret, ADMIN_LINK_TTL_SEC);
     const url = `${config.publicUrl}/admin/#token=${token}`;
-    await ctx.reply(
+    await replyWithMenu(
+      ctx,
       `Вход в админку (ссылка личная, не пересылай — действует 12 часов, потом попроси новую через /admin):\n${url}`,
       { link_preview_options: { is_disabled: true } },
     );
-  });
+  }
 
-  // /notifications — the setting, reachable at any time rather than only while a
-  // reminder happens to be on screen.
-  bot.command("notifications", async (ctx) => {
+  bot.command("admin", (ctx) => sendAdminLink(ctx));
+
+  /**
+   * The reminders setting, reachable at any time rather than only while a
+   * reminder happens to be on screen.
+   *
+   * Отвечает через `ctx.reply`, а не `replyWithMenu`, и это не недосмотр: у
+   * успешного ответа поле `reply_markup` уже занято переключателем напоминаний,
+   * а отказ адресован тому, кому `menuFor` всё равно вернул бы `undefined`.
+   */
+  async function sendReminders(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
     const who = acting(from.id);
@@ -314,7 +375,9 @@ export function createBot(deps: BotDeps): Bot {
     }
     const me = who.me;
     await ctx.reply(remindersStateText(me.remindersEnabled), { reply_markup: remindersKeyboard(me.remindersEnabled) });
-  });
+  }
+
+  bot.command("notifications", (ctx) => sendReminders(ctx));
 
   /** Monday of the week `offset` weeks from the current one, in team time. */
   function mondayForOffset(offset: number): { monday: string; today: string } {
@@ -322,18 +385,20 @@ export function createBot(deps: BotDeps): Bot {
     return { monday: addDaysIso(mondayOfIso(today), offset * 7), today };
   }
 
-  // /week — the team's schedule as a picture. Visible to everyone in the menu:
-  // it's the same data /api/team/schedule already gives any authorized worker,
-  // just on a different medium — no need to open the mini app, it's already
-  // in the chat.
-  bot.command("week", async (ctx) => {
+  /**
+   * The team's schedule as a picture. Visible to everyone in the menu: it's the
+   * same data /api/team/schedule already gives any authorized worker, just on a
+   * different medium — no need to open the mini app, it's already in the chat.
+   *
+   * Private chats only. Every other answer this bot gives concerns whoever
+   * asked; this one is the whole team's roster, and it would go wherever the
+   * update came from. Should the bot ever land in a group, one command would
+   * publish the roster there. The guarantee belongs in the code, not in a
+   * BotFather checkbox somebody can untick.
+   */
+  async function sendWeek(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
-    // Private chats only. Every other answer this bot gives concerns whoever
-    // asked; this one is the whole team's roster, and it would go wherever the
-    // update came from. Should the bot ever land in a group, one command would
-    // publish the roster there. The guarantee belongs in the code, not in a
-    // BotFather checkbox somebody can untick.
     if (ctx.chat?.type !== "private") return;
     const who = acting(from.id);
     if (!who.ok) {
@@ -358,6 +423,34 @@ export function createBot(deps: BotDeps): Bot {
       console.error("week: send failed:", safeErrorMessage(err));
       await ctx.reply("Не смог нарисовать график, открой мини-апп.");
     }
+  }
+
+  bot.command("week", (ctx) => sendWeek(ctx));
+
+  /**
+   * Нажатая кнопка постоянной клавиатуры. Telegram присылает её обычным
+   * текстовым сообщением, поэтому единственный ключ — точное совпадение метки.
+   * Кнопка «Мои смены» сюда не попадает: она `web_app`, её нажатие открывает
+   * мини-апп и боту не шлёт ничего.
+   *
+   * Регистрируется после всех `bot.command(...)` намеренно: grammy передаёт
+   * управление дальше по цепочке только если предыдущий обработчик об этом
+   * попросил, а команды не просят — значит `/week` сюда не долетит и обработан
+   * дважды не будет.
+   *
+   * Приватные чаты только. Не для симметрии: без этой проверки кнопка «График»
+   * стала бы обходом защиты `sendWeek`, которая существует ровно для того,
+   * чтобы роспись всей команды не публиковалась в группу.
+   *
+   * На всё остальное бот молчит, как молчал до этой клавиатуры. Отвечать на
+   * произвольный текст его никто не просил.
+   */
+  bot.on("message:text", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+    const text = ctx.msg.text;
+    if (text === BTN_WEEK) await sendWeek(ctx);
+    else if (text === BTN_REMINDERS) await sendReminders(ctx);
+    else if (text === BTN_ADMIN) await sendAdminLink(ctx);
   });
 
   /**
