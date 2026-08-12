@@ -14,6 +14,7 @@ import { adminEmployeeSchema, adminEmployeesResponseSchema, employeesResponseSch
 const config: Config = {
   botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
   databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
+  handoverFanHours: 3, handoverEscalateHours: 12,
 };
 const configWithBotUsername: Config = { ...config, botUsername: "planer_bot" };
 

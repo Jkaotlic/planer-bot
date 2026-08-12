@@ -11,6 +11,8 @@ import { createBot, publishBotCommands } from "./bot/bot";
 import { shutdownSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
+import { runHandoverTick } from "./handover/handover-tick";
+import { createHandoverMessenger } from "./handover/handover-messenger";
 import { teamNow } from "./util/team-time";
 import { safeErrorMessage } from "./util/safe-error";
 import { runTicksIndependently } from "./util/ticks";
@@ -45,6 +47,12 @@ setInterval(() => {
   runTicksIndependently([
     { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz)) },
     { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz).date) },
+    // Третьим в тот же массив, а не своим setInterval: `runTicksIndependently`
+    // и написан затем, чтобы падение одного тика не гасило соседей.
+    {
+      name: "handover",
+      run: () => runHandoverTick({ db, config, messenger: createHandoverMessenger(bot, db) }, Date.now()),
+    },
   ]).finally(() => {
     ticking = false;
   });

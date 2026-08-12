@@ -1,6 +1,6 @@
 import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
-import { listAdmins, listActive } from "../repo/employees";
+import { listAdmins, listActive, getEmployeeById } from "../repo/employees";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
 import type { OutsidePoolFact } from "../swap/duty-notice";
@@ -228,6 +228,56 @@ export async function notifyWeekendOffer(bot: Bot, telegramUserId: number, assig
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
   } catch (err) {
     console.error(`notifyWeekendOffer: failed for ${telegramUserId}:`, safeErrorMessage(err));
+  }
+}
+
+/**
+ * A shift offered to one colleague, with «Беру» / «Не могу» routed to
+ * `handover:take:<id>` / `handover:decline:<id>`.
+ */
+export async function notifyHandoverOffer(
+  bot: Bot,
+  telegramUserId: number,
+  handoverId: number,
+  text: string,
+): Promise<void> {
+  const kb = new InlineKeyboard()
+    .text("✅ Беру", `handover:take:${handoverId}`)
+    .text("✖ Не могу", `handover:decline:${handoverId}`);
+  try {
+    await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
+  } catch (err) {
+    console.error(`notifyHandoverOffer: failed for ${telegramUserId}:`, safeErrorMessage(err));
+  }
+}
+
+/**
+ * The fan-out: the same shift to everybody still free, one «Беру» each.
+ *
+ * No «Не могу» here on purpose. In a broadcast a refusal answers nothing — the
+ * offer is not addressed to anyone in particular, and a row of «не могу» from
+ * people who were never asked personally would only bury the one tap that
+ * matters. Refusals are recorded from the personal offer, which is where they
+ * change what happens next.
+ */
+export async function notifyHandoverFan(
+  bot: Bot,
+  db: Db,
+  handoverId: number,
+  employeeIds: readonly number[],
+  text: string,
+): Promise<void> {
+  const kb = new InlineKeyboard().text("✅ Беру", `handover:take:${handoverId}`);
+  for (const employeeId of employeeIds) {
+    const telegramUserId = getEmployeeById(db, employeeId)?.telegramUserId;
+    if (telegramUserId == null) continue;
+    try {
+      await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
+    } catch (err) {
+      // One unreachable chat must not cut the broadcast short: the people after
+      // this one in the list are exactly those who might still take the shift.
+      console.error(`notifyHandoverFan: failed for ${telegramUserId}:`, safeErrorMessage(err));
+    }
   }
 }
 

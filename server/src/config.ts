@@ -24,6 +24,16 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   PUBLIC_URL: z.string().url(),
   BOT_USERNAME: z.string().optional(),
+  /**
+   * Пороги лестницы передачи смены: сколько ждём ответа адресата, прежде чем
+   * звать всех, и за сколько часов до смены зовём админов.
+   *
+   * Со значениями по умолчанию намеренно: иначе выкладка потребовала бы править
+   * `server/.env` на живой машине ради двух чисел, которые почти не меняются, —
+   * а каждая правка боевого .env это шанс уронить сервис на старте.
+   */
+  HANDOVER_FAN_HOURS: z.coerce.number().positive().default(3),
+  HANDOVER_ESCALATE_HOURS: z.coerce.number().positive().default(12),
 });
 
 export interface Config {
@@ -34,6 +44,8 @@ export interface Config {
   jwtSecret: string;
   publicUrl: string;
   botUsername?: string;
+  handoverFanHours: number;
+  handoverEscalateHours: number;
 }
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
@@ -51,5 +63,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     jwtSecret: e.JWT_SECRET,
     publicUrl: e.PUBLIC_URL,
     botUsername: e.BOT_USERNAME,
+    handoverFanHours: e.HANDOVER_FAN_HOURS,
+    handoverEscalateHours: e.HANDOVER_ESCALATE_HOURS,
   };
 }
