@@ -12,6 +12,17 @@ interface DayAfterOpts {
    * day, this line would just repeat the sentence above it.
    */
   keepSilentForEntryId: number;
+  /**
+   * Who the line is addressed to. The default «worker» is the letter this
+   * function was written for, and it must not change.
+   *
+   * «admins» differs in two ways, both for one reason — the admin has just read
+   * WHAT was recorded and needs to know what is now UNCOVERED. So the named
+   * entry is dropped from the list rather than repeated, and a day holding
+   * nothing else produces no line at all: a fortnight of sick leave would
+   * otherwise spell out fourteen lines of «ничего».
+   */
+  voice?: "worker" | "admins";
 }
 
 /**
@@ -30,14 +41,22 @@ interface DayAfterOpts {
  * every entry would read as noise.
  */
 export function dayAfterLine(db: Db, opts: DayAfterOpts): string | null {
-  const mine = listShiftsOverlapping(db, opts.date, opts.date).filter(
+  const all = listShiftsOverlapping(db, opts.date, opts.date).filter(
     (entry) => entry.employeeId === opts.employeeId,
   );
+  const forAdmins = opts.voice === "admins";
+  // One read of the day for both voices. Two reads would drift, and two letters
+  // about one day would start saying different things — the very defect fixed
+  // in d9f16bc.
+  const mine = forAdmins ? all.filter((entry) => entry.id !== opts.keepSilentForEntryId) : all;
 
-  const onlyTheNamedOne = mine.length === 1 && mine[0]!.id === opts.keepSilentForEntryId;
-  if (onlyTheNamedOne) return null;
-
-  if (mine.length === 0) return `Теперь на ${dayLabel(opts.date)} у тебя ничего.`;
+  if (forAdmins) {
+    if (mine.length === 0) return null;
+  } else {
+    const onlyTheNamedOne = mine.length === 1 && mine[0]!.id === opts.keepSilentForEntryId;
+    if (onlyTheNamedOne) return null;
+    if (mine.length === 0) return `Теперь на ${dayLabel(opts.date)} у тебя ничего.`;
+  }
 
   const parts = mine
     .map((entry) => {
@@ -46,5 +65,6 @@ export function dayAfterLine(db: Db, opts: DayAfterOpts): string | null {
       return `${time} · ${entry.title ?? categoryLabel(entry.category)}`;
     })
     .join(", ");
-  return `Теперь на ${dayLabel(opts.date)} у тебя: ${parts}.`;
+  const lead = forAdmins ? `На ${dayLabel(opts.date)} стоят: ` : `Теперь на ${dayLabel(opts.date)} у тебя: `;
+  return `${lead}${parts}.`;
 }

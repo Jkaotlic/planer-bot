@@ -17,6 +17,10 @@ import { parseISODate, weekdayShort } from "./week-dates";
  */
 export const AUDIT_TYPES = [
   "entry_created", "entry_updated", "entry_deleted",
+  // Отдельно от админских `entry_*` намеренно: админ, читающий журнал, должен
+  // различать «я это поставил» и «человек поставил себе сам», иначе строка не
+  // отвечает на первый же вопрос, который к ней возникает.
+  "self_entry_created", "self_entry_updated", "self_entry_deleted",
   "swap_proposed", "swap_accepted", "swap_declined",
   "swap_cancelled", "swap_expired", "swap_auto_cancelled",
   "swaps_lock_changed",
@@ -161,6 +165,29 @@ function entryView(entry: Record<string, unknown>): string[] {
   return [`${personLabel(entry)} · ${spanLabel(entry)}`, entryLabel(entry)];
 }
 
+/**
+ * Строки правки записи: кто, когда, и что именно поменялось.
+ *
+ * Вынесено из таблицы описателей, когда у правки появился второй тип
+ * (`self_entry_updated`): оставить логику внутри `entry_updated` значило бы
+ * завести её вторую копию строчкой ниже.
+ */
+function entryUpdatedLines(p: Record<string, unknown>): string[] {
+  const before = obj(p.before);
+  const after = obj(p.after);
+  const lines = [`${personLabel(after)} · ${spanLabel(after)}`];
+  if (num(before.employeeId) !== num(after.employeeId)) {
+    lines.push(`работник: ${personLabel(before)} → ${personLabel(after)}`);
+  }
+  if (spanLabel(before) !== spanLabel(after)) {
+    lines.push(`день: ${spanLabel(before)} → ${spanLabel(after)}`);
+  }
+  if (entryLabel(before) !== entryLabel(after)) {
+    lines.push(`было: ${entryLabel(before)}`, `стало: ${entryLabel(after)}`);
+  }
+  return lines;
+}
+
 function swapLines(p: Record<string, unknown>): string[] {
   return [
     `${personLabel(p, "fromName", "fromEmployeeId")} отдаёт: ${str(p.fromShift) ?? "—"}`,
@@ -191,21 +218,13 @@ function rotationLabel(v: unknown): string {
 const DESCRIBERS: Record<AuditType, Describer> = {
   entry_created: (p) => ({ icon: "＋", title: entryTitle("created", p), lines: entryView(p) }),
   entry_deleted: (p) => ({ icon: "🗑", title: entryTitle("deleted", p), lines: entryView(p) }),
-  entry_updated: (p) => {
-    const before = obj(p.before);
-    const after = obj(p.after);
-    const lines = [`${personLabel(after)} · ${spanLabel(after)}`];
-    if (num(before.employeeId) !== num(after.employeeId)) {
-      lines.push(`работник: ${personLabel(before)} → ${personLabel(after)}`);
-    }
-    if (spanLabel(before) !== spanLabel(after)) {
-      lines.push(`день: ${spanLabel(before)} → ${spanLabel(after)}`);
-    }
-    if (entryLabel(before) !== entryLabel(after)) {
-      lines.push(`было: ${entryLabel(before)}`, `стало: ${entryLabel(after)}`);
-    }
-    return { icon: "✎", title: entryTitle("updated", after), lines };
-  },
+  entry_updated: (p) => ({ icon: "✎", title: entryTitle("updated", obj(p.after)), lines: entryUpdatedLines(p) }),
+
+  // Иконка одна на все три: 🙋 — «это сделал сам работник», и именно это
+  // отличает их от админских строк выше.
+  self_entry_created: (p) => ({ icon: "🙋", title: "Записал(а) себе сам(а)", lines: entryView(p) }),
+  self_entry_updated: (p) => ({ icon: "🙋", title: "Поправил(а) свою запись сам(а)", lines: entryUpdatedLines(p) }),
+  self_entry_deleted: (p) => ({ icon: "🙋", title: "Снял(а) свою запись сам(а)", lines: entryView(p) }),
 
   swap_proposed: (p) => ({ icon: "🔁", title: "Предложен обмен", lines: swapLines(p) }),
   swap_accepted: (p) => ({ icon: "🔁", title: "Обмен состоялся", lines: swapLines(p) }),

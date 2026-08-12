@@ -78,7 +78,10 @@ const CATEGORY_LABELS: Record<EntryCategory, string> = {
   vacation: "Отпуск",
   sick_leave: "Больничный",
   duty: "Дежурство",
-  offsite: "Выездное мероприятие",
+  // «Мероприятие», а не «Выездное мероприятие»: выездное отличается заполненным
+  // `location`, и это поле, а не категория. Категория, отличающаяся от соседней
+  // только наличием строчки текста, — это поле.
+  offsite: "Мероприятие",
   business_trip: "Командировка",
   weekend_work: "Работа в выходной",
 };
@@ -103,7 +106,7 @@ const CATEGORY_ACCUSATIVE: Record<EntryCategory, string> = {
   vacation: "отпуск",
   sick_leave: "больничный",
   duty: "дежурство",
-  offsite: "выездное мероприятие",
+  offsite: "мероприятие",
   business_trip: "командировку",
   weekend_work: "работу в выходной",
 };
@@ -114,7 +117,7 @@ const CATEGORY_POSSESSIVE: Record<EntryCategory, string> = {
   vacation: "твой отпуск",
   sick_leave: "твой больничный",
   duty: "твоё дежурство",
-  offsite: "твоё выездное мероприятие",
+  offsite: "твоё мероприятие",
   business_trip: "твою командировку",
   weekend_work: "твою работу в выходной",
 };

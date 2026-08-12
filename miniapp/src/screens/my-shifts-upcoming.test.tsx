@@ -39,7 +39,7 @@ async function renderScreen(shifts: Shift[]) {
   root = createRoot(host);
   const screen = createElement(MyShiftsScreen, {
     me, today: WEDNESDAY, shifts, templates: [],
-    onProposeSwap: () => {}, onRemindersChanged: () => {}, onAddressChanged: () => {},
+    onProposeSwap: () => {}, onSelfEntry: () => {}, onRemindersChanged: () => {}, onAddressChanged: () => {},
   });
   await act(async () => root!.render(createElement(AppRoot, null, screen)));
   return host.textContent ?? "";

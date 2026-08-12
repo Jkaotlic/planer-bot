@@ -1,6 +1,7 @@
 import { categoryLabel, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { getShift } from "../repo/shifts";
+import type { Shift } from "../db/schema";
 import { getTemplate } from "../repo/templates";
 import { getEmployeeById } from "../repo/employees";
 
@@ -82,6 +83,30 @@ export function slotLineOf(s: { date: string; start: string; end: string; title?
 /** An employee's display name for chat text, or null if the id doesn't resolve. */
 export function nameOf(db: Db, employeeId: number): string | null {
   return getEmployeeById(db, employeeId)?.displayName ?? null;
+}
+
+/**
+ * The fields worth keeping in the audit feed — enough to answer «что именно
+ * поменяли» without copying the whole row into the log. The name, not just
+ * `employeeId`: the journal is read by eye, and «работник #24» answers nothing.
+ *
+ * Lives here rather than inside `createApp` because a SECOND entrance now writes
+ * to the same feed — `/api/my/entries`, where a worker records their own sick
+ * leave. Two entrances shaping one journal differently is a defect this
+ * repository has already paid for once, on swaps.
+ */
+export function entryAuditPayload(db: Db, s: Shift) {
+  return {
+    entryId: s.id,
+    employeeId: s.employeeId,
+    employeeName: s.employeeId != null ? nameOf(db, s.employeeId) : null,
+    date: s.date,
+    endDate: s.endDate,
+    category: s.category,
+    title: s.title,
+    start: s.start,
+    end: s.end,
+  };
 }
 
 /**
