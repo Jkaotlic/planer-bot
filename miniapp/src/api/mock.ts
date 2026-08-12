@@ -26,6 +26,7 @@ import type {
   WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
+  SelfEntryInput,
   Shift,
   SwapDirection,
   SwapLockResult,
@@ -48,6 +49,8 @@ import {
   collectionStatus,
   isCollectionActive,
   compareCollections,
+  selfEntryRefusal,
+  selfEntryEditRefusal,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -580,6 +583,76 @@ export async function mockDeleteEntry(id: number): Promise<{ notified: { deliver
   if (index === -1) return { notified: { delivered: 0, intended: 0 } };
   const [removed] = ALL_ENTRIES.splice(index, 1);
   return { notified: mockReach(removed?.employeeId != null ? [removed.employeeId] : []) };
+}
+
+/**
+ * Самозапись работника в DEV-моке.
+ *
+ * Отказы считает та же `selfEntryRefusal` из `@planer/shared`, что и сервер, а
+ * не список условий, набранный здесь заново: мок, который разрешает больше
+ * настоящей ручки, врёт ровно про то, ради чего его открывают — про поведение
+ * формы на отказе.
+ *
+ * Письма админам тут нет и быть не может: телеграма в DEV нет вовсе.
+ */
+export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<Shift> {
+  await delay(250);
+  const today = toISODate(new Date());
+  const refusal = selfEntryRefusal(
+    { category: input.category, date: input.date, endDate: input.category === "sick_leave" ? input.endDate : null },
+    today,
+  );
+  if (refusal) throw new Error(refusal);
+  const created: Shift = {
+    id: nextId++,
+    date: input.date,
+    start: input.category === "offsite" ? input.start : null,
+    end: input.category === "offsite" ? input.end : null,
+    endDate: input.category === "sick_leave" ? (input.endDate ?? null) : null,
+    category: input.category,
+    title: input.category === "offsite" ? input.title : null,
+    location: input.category === "offsite" ? (input.location ?? null) : null,
+    templateId: null,
+    employeeId: MOCK_ME.id,
+    unrecognisedCode: null,
+    employeeName: personName(MOCK_ME.id),
+  };
+  ALL_ENTRIES.push(created);
+  return created;
+}
+
+export async function mockUpdateSelfEntry(id: number, input: SelfEntryInput): Promise<Shift> {
+  await delay(250);
+  const today = toISODate(new Date());
+  const shift = ALL_ENTRIES.find((s) => s.id === id && s.employeeId === MOCK_ME.id);
+  // Чужая и несуществующая — один ответ, как на сервере: подтверждать, что
+  // чужая запись существует, здесь тоже нечем.
+  if (!shift) throw new Error("not_found");
+  const editRefusal = selfEntryEditRefusal(shift, today);
+  if (editRefusal) throw new Error(editRefusal);
+  const moveRefusal = selfEntryRefusal(
+    { category: input.category, date: input.date, endDate: input.category === "sick_leave" ? input.endDate : null },
+    today,
+  );
+  if (moveRefusal) throw new Error(moveRefusal);
+  if (shift.category !== input.category) throw new Error("Вид записи менять нельзя");
+
+  shift.date = input.date;
+  shift.endDate = input.category === "sick_leave" ? (input.endDate ?? null) : null;
+  shift.start = input.category === "offsite" ? input.start : null;
+  shift.end = input.category === "offsite" ? input.end : null;
+  shift.title = input.category === "offsite" ? input.title : null;
+  shift.location = input.category === "offsite" ? (input.location ?? null) : null;
+  return shift;
+}
+
+export async function mockDeleteSelfEntry(id: number): Promise<void> {
+  await delay(150);
+  const index = ALL_ENTRIES.findIndex((s) => s.id === id && s.employeeId === MOCK_ME.id);
+  if (index === -1) throw new Error("not_found");
+  const refusal = selfEntryEditRefusal(ALL_ENTRIES[index]!, toISODate(new Date()));
+  if (refusal) throw new Error(refusal);
+  ALL_ENTRIES.splice(index, 1);
 }
 
 /**

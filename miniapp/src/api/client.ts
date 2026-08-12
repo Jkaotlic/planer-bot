@@ -29,6 +29,9 @@ import {
   mockCreateEntries,
   mockUpdateEntry,
   mockDeleteEntry,
+  mockCreateSelfEntry,
+  mockUpdateSelfEntry,
+  mockDeleteSelfEntry,
   mockDistribute,
   mockGetAdminWeekendSlots,
   mockPostSlot,
@@ -228,6 +231,18 @@ export interface NewEntryInput {
   /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
   title?: string | null;
 }
+
+/**
+ * Тело самозаписи работника — зеркало `selfEntryBody` из `my-entries.ts`.
+ *
+ * `employeeId` здесь нет, и это не упущение: сервер берёт его из токена, а
+ * поля, которого нет в схеме, не подставишь. Объединение по категории, а не
+ * `NewEntryInput`: та принимает `templateId`, `employeeId` и все семь категорий,
+ * и любое её будущее расширение молча расширило бы права работника.
+ */
+export type SelfEntryInput =
+  | { category: "sick_leave"; date: string; endDate?: string | null }
+  | { category: "offsite"; date: string; start: string; end: string; title: string; location?: string | null };
 
 /** До скольких из скольких дошло письмо о правке графика. */
 export interface NotifyReach {
@@ -486,6 +501,10 @@ export interface ApiClient {
   acceptSwap(id: number): Promise<void>;
   declineSwap(id: number): Promise<void>;
   cancelSwap(id: number): Promise<void>;
+  /** Больничный или мероприятие себе. Отказ приезжает `Error`'ом с русской фразой правила. */
+  createSelfEntry(input: SelfEntryInput): Promise<Shift>;
+  updateSelfEntry(id: number, input: SelfEntryInput): Promise<Shift>;
+  deleteSelfEntry(id: number): Promise<void>;
   getWeekendSlots(): Promise<WeekendSlotView[]>;
   expressInterest(slotId: number): Promise<void>;
   getWeekendOffers(): Promise<WeekendOffer[]>;
@@ -846,6 +865,18 @@ export const realClient: ApiClient = {
   declineSwap: (id) => authorizedPostAction(`/api/swaps/${id}/decline`),
   cancelSwap: (id) => authorizedPostAction(`/api/swaps/${id}/cancel`),
 
+  async createSelfEntry(input) {
+    const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/my/entries", input);
+    return entry;
+  },
+  async updateSelfEntry(id, input) {
+    const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/my/entries/${id}`, input);
+    return entry;
+  },
+  async deleteSelfEntry(id) {
+    await authorizedDelete<{ ok: true }>(`/api/my/entries/${id}`);
+  },
+
   async getWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: WeekendSlotView[] }>("/api/weekend/slots");
     return slots;
@@ -1046,6 +1077,9 @@ const devClient: ApiClient = {
   acceptSwap: (id) => mockAcceptSwap(id),
   declineSwap: (id) => mockDeclineSwap(id),
   cancelSwap: (id) => mockCancelSwap(id),
+  createSelfEntry: (input) => mockCreateSelfEntry(input),
+  updateSelfEntry: (id, input) => mockUpdateSelfEntry(id, input),
+  deleteSelfEntry: (id) => mockDeleteSelfEntry(id),
   getWeekendSlots: () => mockGetWeekendSlots(),
   expressInterest: (slotId) => mockExpressInterest(slotId),
   getWeekendOffers: () => mockGetWeekendOffers(),
