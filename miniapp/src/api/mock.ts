@@ -43,7 +43,7 @@ import {
   describeTurn,
   daysUntilBirthday,
   formatBirthDate,
-  collectionMessage,
+  outgoingCollectionMessage,
   collectionTitle,
   collectionStatus,
   isCollectionActive,
@@ -854,7 +854,7 @@ export async function mockGetJournal(params: { types?: string[]; actor?: number;
 
 // --- Сборы (ДР и кастомные) --------------------------------------------------
 // Мок считает предпросмотр, заголовок, статус и активность теми же функциями
-// из @planer/shared, что и сервер (`collectionMessage`, `collectionTitle`,
+// из @planer/shared, что и сервер (`outgoingCollectionMessage`, `collectionTitle`,
 // `collectionStatus`, `isCollectionActive`, `compareCollections`) — иначе
 // DEV-режим начнёт показывать не тот текст, который реально уйдёт в бою.
 
@@ -906,7 +906,7 @@ function previewOf(collection: Collection): CollectionPreview {
   const recipients = mockRecipients(collection.employeeId);
   const honouree = collection.employeeId != null ? EMPLOYEES.find((e) => e.id === collection.employeeId) : null;
 
-  const message = collection.messageText?.trim() || collectionMessage(
+  const message = outgoingCollectionMessage(
     {
       kind: collection.kind,
       title: collection.title,
@@ -919,6 +919,7 @@ function previewOf(collection: Collection): CollectionPreview {
       collectUrl: collection.collectUrl,
     },
     collection.sendCount > 0 ? "reminder" : "first",
+    collection.messageText,
   );
 
   let blocker: string | null = null;
