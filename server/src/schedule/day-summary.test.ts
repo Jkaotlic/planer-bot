@@ -76,3 +76,46 @@ describe("что осталось у человека на этот день", (
     );
   });
 });
+
+describe("the same day, addressed to the admins", () => {
+  it("names what is left uncovered, without addressing anyone", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Аня" });
+    shiftOn(db, worker.id, "День", "09:00", "18:00");
+    const sick = createShift(db, {
+      date: DAY, start: null, end: null, endDate: "2026-08-14", category: "sick_leave", title: null, employeeId: worker.id,
+    });
+
+    const line = dayAfterLine(db, { employeeId: worker.id, date: DAY, keepSilentForEntryId: sick.id, voice: "admins" });
+    expect(line).toBe("На Ср 12 авг стоят: 09:00–18:00 · День.");
+  });
+
+  it("says nothing when the day holds only the entry the letter just named", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Аня" });
+    const sick = createShift(db, {
+      date: DAY, start: null, end: null, endDate: DAY, category: "sick_leave", title: null, employeeId: worker.id,
+    });
+
+    expect(dayAfterLine(db, { employeeId: worker.id, date: DAY, keepSilentForEntryId: sick.id, voice: "admins" })).toBeNull();
+  });
+
+  it("says nothing about an empty day either — «ничего» ×14 is what a fortnight of sick leave would read like", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Аня" });
+
+    expect(dayAfterLine(db, { employeeId: worker.id, date: DAY, keepSilentForEntryId: 9999, voice: "admins" })).toBeNull();
+  });
+
+  /** Сторож от разъезда двух голосов: письмо работнику обязано остаться прежним. */
+  it("still addresses the worker when no voice is given, and still lists the named entry", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    shiftOn(db, worker.id, "День", "09:00", "18:00");
+    const evening = shiftOn(db, worker.id, "Вечер", "11:00", "20:00");
+
+    expect(dayAfterLine(db, { employeeId: worker.id, date: DAY, keepSilentForEntryId: evening.id })).toBe(
+      "Теперь на Ср 12 авг у тебя: 09:00–18:00 · День, 11:00–20:00 · Вечер.",
+    );
+  });
+});
