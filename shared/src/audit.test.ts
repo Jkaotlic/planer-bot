@@ -433,3 +433,44 @@ describe("auditMonthRange", () => {
     expect(auditMonthRange("2026-02-10")).toEqual({ from: "2026-02-01", to: "2026-02-28" });
   });
 });
+
+describe("самозапись работника в журнале", () => {
+  const payload = {
+    entryId: 7,
+    employeeId: 3,
+    employeeName: "Аня",
+    date: "2026-08-12",
+    endDate: "2026-08-14",
+    category: "sick_leave",
+    title: null,
+    start: null,
+    end: null,
+  };
+
+  it("читается как отдельное событие, а не как админская правка", () => {
+    const self = describeAuditEvent({ type: "self_entry_created", payload });
+    const byAdmin = describeAuditEvent({ type: "entry_created", payload });
+    expect(self.title).not.toBe(byAdmin.title);
+    expect(self.title.toLowerCase()).toContain("сам");
+  });
+
+  it("называет человека и срок", () => {
+    const view = describeAuditEvent({ type: "self_entry_created", payload });
+    expect(view.lines.join(" ")).toContain("Аня");
+    expect(view.lines.join(" ")).toContain("12 авг");
+  });
+
+  it("правка показывает, что стало", () => {
+    const view = describeAuditEvent({
+      type: "self_entry_updated",
+      payload: { before: payload, after: { ...payload, endDate: "2026-08-16" } },
+    });
+    expect(view.lines.join(" ")).toContain("16 авг");
+  });
+
+  it("снятие описано, а не падает в сырой JSON", () => {
+    const view = describeAuditEvent({ type: "self_entry_deleted", payload });
+    expect(view.title).not.toBe("self_entry_deleted");
+    expect(view.lines.join(" ")).toContain("Аня");
+  });
+});
