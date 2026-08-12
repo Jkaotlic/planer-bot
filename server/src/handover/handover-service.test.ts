@@ -129,6 +129,44 @@ describe("offering to one colleague", () => {
   });
 });
 
+describe("going straight to the fan-out", () => {
+  it("asks everybody free at once — this is what «Потом» does", async () => {
+    // Пропуск выбора не должен означать «смена тихо осталась на больном».
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    sent = [];
+
+    await fanOut(deps(db), handover!.id);
+
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+    expect(getHandover(db, handover!.id)?.offeredToEmployeeId).toBeNull();
+    expect(sent.map((m) => m.to).sort()).toEqual([`employee:${igor}`, `employee:${mark}`].sort());
+    expect(auditTypes(db)).toContain("handover_fanned");
+  });
+
+  it("skips those who already said no", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    await declineHandover(deps(db), handover!.id, igor);
+    sent = [];
+
+    await fanOut(deps(db), handover!.id);
+
+    expect(sent.map((m) => m.to)).toEqual([`employee:${mark}`]);
+  });
+});
+
 describe("declining", () => {
   it("records the refusal and fans out immediately", async () => {
     const db = makeTestDb();
