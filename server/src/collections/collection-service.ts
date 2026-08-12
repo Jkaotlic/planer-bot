@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import {
-  collectionMessage,
+  outgoingCollectionMessage,
   collectionStatus,
   collectionTitle,
   compareCollections,
@@ -209,22 +209,21 @@ export function previewCollection(db: Db, collection: Collection): CollectionPre
   const recipients = recipientsOf(db, collection.employeeId);
   const honouree = collection.employeeId != null ? getEmployeeById(db, collection.employeeId) : null;
 
-  const message =
-    collection.messageText?.trim() ||
-    collectionMessage(
-      {
-        kind: collection.kind,
-        title: collection.title,
-        personName,
-        birthDateLabel: honouree?.birthDate ?? null,
-        eventDate: collection.eventDate,
-        deadline: collection.deadline,
-        amountPerPerson: collection.amountPerPerson,
-        totalGoal: collection.totalGoal,
-        collectUrl: collection.collectUrl,
-      },
-      collection.sendCount > 0 ? "reminder" : "first",
-    );
+  const message = outgoingCollectionMessage(
+    {
+      kind: collection.kind,
+      title: collection.title,
+      personName,
+      birthDateLabel: honouree?.birthDate ?? null,
+      eventDate: collection.eventDate,
+      deadline: collection.deadline,
+      amountPerPerson: collection.amountPerPerson,
+      totalGoal: collection.totalGoal,
+      collectUrl: collection.collectUrl,
+    },
+    collection.sendCount > 0 ? "reminder" : "first",
+    collection.messageText,
+  );
 
   let blocker: string | null = null;
   if (collection.closedAt) blocker = "Сбор закрыт — рассылать нечего.";
