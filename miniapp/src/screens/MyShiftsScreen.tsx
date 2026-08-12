@@ -1,4 +1,4 @@
-import { List, Placeholder, Section } from "@telegram-apps/telegram-ui";
+import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
 import { swapBlockReason } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import { AddressField } from "../components/AddressField";
@@ -30,6 +30,9 @@ export interface MyShiftsScreenProps {
   templates: readonly Template[];
   /** Opens the "Предложить обмен" flow for the tapped shift. */
   onProposeSwap: (shift: Shift) => void;
+  /** Открывает форму больничного или мероприятия — тот же оверлей, в который
+   *  ведут кнопки бота. */
+  onSelfEntry: (mode: "sick" | "event") => void;
   /** Keeps `me` in step when the reminders switch is flipped. */
   onRemindersChanged: (enabled: boolean) => void;
   /** Keeps `me` in step when the greeting name is saved. */
@@ -38,7 +41,7 @@ export interface MyShiftsScreenProps {
 
 /** «Мои смены»: приветствие с остатком недели, ближайшие записи секциями по
  *  неделям, и переключатель напоминаний. Прошедших дней здесь нет. */
-export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, onRemindersChanged, onAddressChanged }: MyShiftsScreenProps) {
+export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, onSelfEntry, onRemindersChanged, onAddressChanged }: MyShiftsScreenProps) {
   const weeks = groupUpcomingByWeek(shifts, today);
   const rest = remainingThisWeek(shifts, today);
   const summary =
@@ -63,6 +66,22 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
             roster is written «Фамилия Имя». See `addressOf` in @planer/shared. */}
         <GreetingHero name={me.address} summary={summary} />
       </div>
+
+      {/* Вход в самозапись стоит НАД списком смен: список не имеет нижней
+          границы, и кнопка под ним у человека с плотным графиком оказалась бы
+          за десятком экранов прокрутки. Те же две формы открывают кнопки бота. */}
+      <List>
+        <Section header="Записать себе">
+          <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
+            <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("sick")}>
+              🤒 Больничный
+            </Button>
+            <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("event")}>
+              📌 Мероприятие
+            </Button>
+          </div>
+        </Section>
+      </List>
 
       {weeks.length === 0 ? (
         <Placeholder header="Пока нет смен" description="Здесь появятся ваши ближайшие смены и отпуска." />

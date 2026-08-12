@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Me, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
+import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
+import { SelfEntryScreen, screenFromSearch, type SelfEntryMode } from "./screens/SelfEntryScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
@@ -33,6 +34,12 @@ interface AppData {
 export function App() {
   const [tab, setTab] = useState<TabKey>("mine");
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
+  // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
+  // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
+  // «📌 Мероприятие» в боте открывают мини-апп сразу на нужной форме.
+  const [selfEntryMode, setSelfEntryMode] = useState<SelfEntryMode | null>(() =>
+    screenFromSearch(window.location.search),
+  );
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Sets, not single ids: several rows (two pending swaps, two open weekend
@@ -154,6 +161,30 @@ export function App() {
     }
   }
 
+  /** Свои записи после самозаписи — чтобы список в форме и «Мои смены» сразу
+   *  показывали то, что человек только что сделал. */
+  async function refreshMyShifts() {
+    const myShifts = await apiClient.getMyShifts();
+    setData((prev) => (prev ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today } : prev));
+  }
+
+  /** Ошибку показывает сама форма — она её и ловит, поэтому здесь ничего не
+   *  перехватываем: проглоченный отказ был бы молчаливым «сохранил». */
+  async function handleCreateSelfEntry(input: SelfEntryInput) {
+    await apiClient.createSelfEntry(input);
+    await refreshMyShifts();
+  }
+
+  async function handleUpdateSelfEntry(id: number, input: SelfEntryInput) {
+    await apiClient.updateSelfEntry(id, input);
+    await refreshMyShifts();
+  }
+
+  async function handleDeleteSelfEntry(id: number) {
+    await apiClient.deleteSelfEntry(id);
+    await refreshMyShifts();
+  }
+
   async function refreshWeekend() {
     const [weekendSlots, weekendOffers] = await Promise.all([apiClient.getWeekendSlots(), apiClient.getWeekendOffers()]);
     setData((prev) => (prev ? { ...prev, weekendSlots, weekendOffers } : prev));
@@ -248,6 +279,21 @@ export function App() {
     );
   }
 
+  if (selfEntryMode) {
+    return (
+      <SelfEntryScreen
+        mode={selfEntryMode}
+        today={data.today}
+        shifts={data.myShifts}
+        templates={data.templates}
+        onCancel={() => setSelfEntryMode(null)}
+        onCreate={handleCreateSelfEntry}
+        onUpdate={handleUpdateSelfEntry}
+        onDelete={handleDeleteSelfEntry}
+      />
+    );
+  }
+
   if (proposingFor) {
     // Только свой день: пока грузится другой, показывать прежние строки нельзя —
     // это чужой день, и человек предложит обмен не туда.
@@ -278,6 +324,7 @@ export function App() {
           shifts={data.myShifts}
           templates={data.templates}
           onProposeSwap={setProposingFor}
+          onSelfEntry={setSelfEntryMode}
           onRemindersChanged={(remindersEnabled) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
           }
