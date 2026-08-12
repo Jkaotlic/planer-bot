@@ -55,6 +55,7 @@ import {
   slotLineOf,
   nameOf as nameOfDb,
   swapAuditPayload as swapAuditPayloadDb,
+  entryAuditPayload,
 } from "../util/message-lines";
 import { teamNow } from "../util/team-time";
 import { createEmployeesRoutes } from "./routes/employees";
@@ -631,16 +632,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.body("﻿" + csv);
   });
 
-  /** The fields worth keeping in the audit feed — enough to answer «что именно поменяли»
-   *  without copying the whole row into the log. Имя, а не только `employeeId`:
-   *  журнал читают глазами, и «работник #24» не отвечает ни на один вопрос. */
-  const auditShape = (s: Shift) => ({
-    entryId: s.id, employeeId: s.employeeId,
-    employeeName: s.employeeId != null ? nameOf(s.employeeId) : null,
-    date: s.date, endDate: s.endDate,
-    category: s.category, title: s.title, start: s.start, end: s.end,
-  });
-
   /**
    * The target of a schedule edit, when there is one, has to still be on staff.
    *
@@ -665,7 +656,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
     const entry = createShift(db, parsed.data);
-    recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
+    recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now: teamNow(config.teamTz),
     });
@@ -747,7 +738,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const clearsUnread = existing.unrecognisedCode != null && namesTheEntry.some((field) => patch[field] !== undefined);
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
-    recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: auditShape(existing), after: auditShape(entry) });
+    recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
     });
@@ -772,7 +763,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const { result: entries, diffs } = withScheduleDiff(db, { from: dates[0]!, to: dates.at(-1)! }, () =>
       db.transaction(() => parsed.data.entries.map((input) => createShift(db, input))),
     );
-    for (const entry of entries) recordAudit(db, "entry_created", c.get("auth").employeeId, auditShape(entry));
+    for (const entry of entries) recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = await notifyScheduleChange(db, bot, {
       actorEmployeeId: c.get("auth").employeeId, diffs, cause: "fill_week", now: teamNow(config.teamTz),
     });
@@ -788,7 +779,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const linesBefore = new Map(listPendingSwapsForShift(db, id).map((r) => [r.id, swapAuditPayload(r)]));
     const { deleted, expiredSwaps } = deleteShift(db, id);
     if (!deleted) return c.json({ error: "not_found" }, 404);
-    if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, auditShape(existing));
+    if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, entryAuditPayload(db, existing));
     for (const request of expiredSwaps) {
       const payload = linesBefore.get(request.id) ?? swapAuditPayload(request);
       // The admin who deleted the entry is the actor — nobody involved in the swap
