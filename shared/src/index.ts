@@ -13,5 +13,6 @@ export * from "./rotation";
 export * from "./birthday";
 export * from "./collection";
 export * from "./self-entry";
+export * from "./handover";
 export * from "./address";
 export * from "./api";
