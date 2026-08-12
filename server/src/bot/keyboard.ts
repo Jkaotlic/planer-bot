@@ -11,6 +11,8 @@ import { Keyboard } from "grammy";
  */
 export const BTN_WEEK = "📅 График";
 export const BTN_MY_SHIFTS = "📋 Мои смены";
+export const BTN_SICK = "🤒 Больничный";
+export const BTN_EVENT = "📌 Мероприятие";
 export const BTN_REMINDERS = "🔔 Напоминания";
 export const BTN_ADMIN = "⚙️ Админка";
 
@@ -33,6 +35,14 @@ export function mainKeyboard(opts: { isAdmin: boolean; publicUrl: string }): Key
     // «открой мини-апп», но открыть его из бота было нечем — ссылки в коде нет,
     // вход живёт в настройках BotFather.
     .webApp(BTN_MY_SHIFTS, `${opts.publicUrl}/app/`)
+    .row()
+    // Строкой запроса, а не фрагментом: фрагмент у мини-аппа занят самим
+    // Telegram — initData приезжает именно в нём.
+    //
+    // Второй строкой, а не первой: график и свои смены жмут каждый день, а
+    // больничный ставят несколько раз в год.
+    .webApp(BTN_SICK, `${opts.publicUrl}/app/?screen=sick`)
+    .webApp(BTN_EVENT, `${opts.publicUrl}/app/?screen=event`)
     .row()
     .text(BTN_REMINDERS);
   if (opts.isAdmin) kb.row().text(BTN_ADMIN);
