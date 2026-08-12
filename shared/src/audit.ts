@@ -24,6 +24,11 @@ export const AUDIT_TYPES = [
   "swap_proposed", "swap_accepted", "swap_declined",
   "swap_cancelled", "swap_expired", "swap_auto_cancelled",
   "swaps_lock_changed",
+  // Отдельно от `swap_*`: обмен — это сделка двух людей, а передача — смена,
+  // оставшаяся без человека. Один тип на оба случая не отвечал бы на первый
+  // вопрос, который к строке возникает.
+  "handover_offered", "handover_declined", "handover_fanned",
+  "handover_taken", "handover_escalated", "handover_cancelled",
   "distribution_applied", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
@@ -161,6 +166,19 @@ function entryTitle(verb: keyof typeof VERB, entry: Record<string, unknown>): st
   return `${VERB[verb][gender]} ${categoryWord(entry)}`;
 }
 
+/**
+ * Строки передачи смены: чья смена, какая — и кому, если адресат есть.
+ *
+ * У веера адресата нет, и строки про него не пишется вовсе: пустое «кому: —»
+ * читалось бы как потерянные данные, а не как «предложено всем».
+ */
+function handoverView(p: Record<string, unknown>): string[] {
+  const lines = [`${personLabel(p, "fromName", "fromEmployeeId")} · ${str(p.shiftLine) ?? "—"}`];
+  const to = str(p.toName);
+  if (to) lines.push(`кому: ${to}`);
+  return lines;
+}
+
 function entryView(entry: Record<string, unknown>): string[] {
   return [`${personLabel(entry)} · ${spanLabel(entry)}`, entryLabel(entry)];
 }
@@ -232,6 +250,13 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   swap_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён", lines: swapLines(p) }),
   swap_expired: (p) => ({ icon: "🔁", title: "Обмен стал неактуален", lines: swapLines(p) }),
   swap_auto_cancelled: (p) => ({ icon: "🔁", title: "Обмен отменён автоматически", lines: swapLines(p) }),
+
+  handover_offered: (p) => ({ icon: "🤝", title: "Смена предложена коллеге", lines: handoverView(p) }),
+  handover_declined: (p) => ({ icon: "✖", title: "Коллега не может выйти", lines: handoverView(p) }),
+  handover_fanned: (p) => ({ icon: "📣", title: "Смена предложена всем свободным", lines: handoverView(p) }),
+  handover_taken: (p) => ({ icon: "✅", title: "Смену забрали", lines: handoverView(p) }),
+  handover_escalated: (p) => ({ icon: "⚠️", title: "Смена без человека — нужно решение", lines: handoverView(p) }),
+  handover_cancelled: (p) => ({ icon: "↩", title: "Передача больше не нужна", lines: handoverView(p) }),
 
   swaps_lock_changed: (p) => ({
     icon: "🔒",
