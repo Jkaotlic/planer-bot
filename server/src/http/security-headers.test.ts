@@ -10,6 +10,7 @@ const config: Config = {
   databaseUrl: ":memory:",
   jwtSecret: "test-secret-16chars-min",
   publicUrl: "https://x.keenetic.pro",
+  handoverFanHours: 3, handoverEscalateHours: 12,
 };
 
 const app = () => createApp({ db: makeTestDb(), config });

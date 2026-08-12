@@ -14,6 +14,7 @@ const config: Config = {
   databaseUrl: ":memory:",
   jwtSecret: "test-secret-16chars-min",
   publicUrl: "https://x.keenetic.pro",
+  handoverFanHours: 3, handoverEscalateHours: 12,
 };
 
 const initDataFor = (id: number) =>
