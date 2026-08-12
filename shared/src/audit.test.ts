@@ -37,7 +37,7 @@ describe("describeAuditEvent — записи", () => {
     expect(titleFor("vacation")).toBe("Добавлен отпуск");
     expect(titleFor("duty")).toBe("Добавлено дежурство");
     expect(titleFor("weekend_work")).toBe("Добавлена работа в выходной");
-    expect(titleFor("offsite")).toBe("Добавлено выездное мероприятие");
+    expect(titleFor("offsite")).toBe("Добавлено мероприятие");
   });
 
   it("на правке показывает только то, что действительно изменилось", () => {

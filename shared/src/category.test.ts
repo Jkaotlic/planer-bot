@@ -52,7 +52,7 @@ describe("categoryLabel", () => {
     expect(categoryLabel("vacation")).toBe("Отпуск");
     expect(categoryLabel("sick_leave")).toBe("Больничный");
     expect(categoryLabel("duty")).toBe("Дежурство");
-    expect(categoryLabel("offsite")).toBe("Выездное мероприятие");
+    expect(categoryLabel("offsite")).toBe("Мероприятие");
     expect(categoryLabel("business_trip")).toBe("Командировка");
     expect(categoryLabel("weekend_work")).toBe("Работа в выходной");
   });
@@ -64,7 +64,7 @@ describe("склонения категорий для писем", () => {
     expect(categoryAccusative("duty")).toBe("дежурство");
     expect(categoryAccusative("vacation")).toBe("отпуск");
     expect(categoryAccusative("sick_leave")).toBe("больничный");
-    expect(categoryAccusative("offsite")).toBe("выездное мероприятие");
+    expect(categoryAccusative("offsite")).toBe("мероприятие");
     expect(categoryAccusative("business_trip")).toBe("командировку");
     expect(categoryAccusative("weekend_work")).toBe("работу в выходной");
   });
@@ -74,7 +74,7 @@ describe("склонения категорий для писем", () => {
     expect(categoryPossessive("duty")).toBe("твоё дежурство");
     expect(categoryPossessive("vacation")).toBe("твой отпуск");
     expect(categoryPossessive("sick_leave")).toBe("твой больничный");
-    expect(categoryPossessive("offsite")).toBe("твоё выездное мероприятие");
+    expect(categoryPossessive("offsite")).toBe("твоё мероприятие");
     expect(categoryPossessive("business_trip")).toBe("твою командировку");
     expect(categoryPossessive("weekend_work")).toBe("твою работу в выходной");
   });
