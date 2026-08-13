@@ -32,6 +32,8 @@ import {
   mockCreateSelfEntry,
   mockUpdateSelfEntry,
   mockDeleteSelfEntry,
+  mockOfferHandover,
+  mockSkipHandover,
   mockDistribute,
   mockGetAdminWeekendSlots,
   mockPostSlot,
@@ -243,6 +245,19 @@ export interface NewEntryInput {
 export type SelfEntryInput =
   | { category: "sick_leave"; date: string; endDate?: string | null }
   | { category: "offsite"; date: string; start: string; end: string; title: string; location?: string | null };
+
+/**
+ * Смена, оставшаяся без человека из-за больничного, и кому её можно предложить.
+ *
+ * Кандидатов считает сервер: экран, предлагающий коллегу, которому сервер
+ * откажет, — дефект, который человек встречает уже после нажатия.
+ */
+export interface HandoverDraft {
+  id: number;
+  /** «Ср 12 авг · 09:00–18:00 · День» — той же функцией, что и во всех письмах. */
+  shiftLine: string;
+  candidates: { id: number; displayName: string }[];
+}
 
 /** До скольких из скольких дошло письмо о правке графика. */
 export interface NotifyReach {
@@ -501,10 +516,18 @@ export interface ApiClient {
   acceptSwap(id: number): Promise<void>;
   declineSwap(id: number): Promise<void>;
   cancelSwap(id: number): Promise<void>;
-  /** Больничный или мероприятие себе. Отказ приезжает `Error`'ом с русской фразой правила. */
-  createSelfEntry(input: SelfEntryInput): Promise<Shift>;
+  /**
+   * Больничный или мероприятие себе. Отказ приезжает `Error`'ом с русской фразой
+   * правила. Вместе с записью возвращаются смены, оставшиеся без человека, —
+   * форма спрашивает про них вторым шагом.
+   */
+  createSelfEntry(input: SelfEntryInput): Promise<{ entry: Shift; handovers: HandoverDraft[] }>;
   updateSelfEntry(id: number, input: SelfEntryInput): Promise<Shift>;
   deleteSelfEntry(id: number): Promise<void>;
+  /** «Предложить Игорю» — адресно одному коллеге. */
+  offerHandover(handoverId: number, toEmployeeId: number): Promise<void>;
+  /** «Потом» — сразу всем свободным, чтобы смена не осталась молча на больном. */
+  skipHandover(handoverId: number): Promise<void>;
   getWeekendSlots(): Promise<WeekendSlotView[]>;
   expressInterest(slotId: number): Promise<void>;
   getWeekendOffers(): Promise<WeekendOffer[]>;
@@ -866,8 +889,14 @@ export const realClient: ApiClient = {
   cancelSwap: (id) => authorizedPostAction(`/api/swaps/${id}/cancel`),
 
   async createSelfEntry(input) {
-    const { entry } = await authorizedPostJson<{ entry: Shift }>("/api/my/entries", input);
-    return entry;
+    const res = await authorizedPostJson<{ entry: Shift; handovers?: HandoverDraft[] }>("/api/my/entries", input);
+    return { entry: res.entry, handovers: res.handovers ?? [] };
+  },
+  async offerHandover(handoverId, toEmployeeId) {
+    await authorizedPostJson(`/api/my/handovers/${handoverId}/offer`, { toEmployeeId });
+  },
+  async skipHandover(handoverId) {
+    await authorizedPostJson(`/api/my/handovers/${handoverId}/skip`, {});
   },
   async updateSelfEntry(id, input) {
     const { entry } = await authorizedPatchJson<{ entry: Shift }>(`/api/my/entries/${id}`, input);
@@ -1080,6 +1109,8 @@ const devClient: ApiClient = {
   createSelfEntry: (input) => mockCreateSelfEntry(input),
   updateSelfEntry: (id, input) => mockUpdateSelfEntry(id, input),
   deleteSelfEntry: (id) => mockDeleteSelfEntry(id),
+  offerHandover: (handoverId, toEmployeeId) => mockOfferHandover(handoverId, toEmployeeId),
+  skipHandover: (handoverId) => mockSkipHandover(handoverId),
   getWeekendSlots: () => mockGetWeekendSlots(),
   expressInterest: (slotId) => mockExpressInterest(slotId),
   getWeekendOffers: () => mockGetWeekendOffers(),
