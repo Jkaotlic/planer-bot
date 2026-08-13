@@ -474,3 +474,48 @@ describe("самозапись работника в журнале", () => {
     expect(view.lines.join(" ")).toContain("Аня");
   });
 });
+
+describe("передача смены в журнале", () => {
+  const payload = {
+    handoverId: 3,
+    shiftId: 7,
+    shiftLine: "Ср 12 авг · 09:00–18:00 · День",
+    fromEmployeeId: 1,
+    fromName: "Аня",
+    toEmployeeId: 2,
+    toName: "Игорь",
+  };
+
+  it("называет обе стороны и смену", () => {
+    const view = describeAuditEvent({ type: "handover_offered", payload });
+    expect(view.lines.join(" ")).toContain("Аня");
+    expect(view.lines.join(" ")).toContain("Игорь");
+    expect(view.lines.join(" ")).toContain("09:00–18:00");
+  });
+
+  it("веер адресата не называет — его нет", () => {
+    const view = describeAuditEvent({ type: "handover_fanned", payload: { ...payload, toEmployeeId: null, toName: null } });
+    expect(view.lines.join(" ")).toContain("Аня");
+    expect(view.lines.join(" ")).not.toContain("Игорь");
+  });
+
+  it("взятие и эскалация читаются по-разному", () => {
+    expect(describeAuditEvent({ type: "handover_taken", payload }).title).not.toBe(
+      describeAuditEvent({ type: "handover_escalated", payload }).title,
+    );
+  });
+
+  it("все шесть типов описаны, а не падают на неизвестном", () => {
+    const types = [
+      "handover_offered",
+      "handover_declined",
+      "handover_fanned",
+      "handover_taken",
+      "handover_escalated",
+      "handover_cancelled",
+    ] as const;
+    for (const type of types) {
+      expect(describeAuditEvent({ type, payload }).lines.length, type).toBeGreaterThan(0);
+    }
+  });
+});

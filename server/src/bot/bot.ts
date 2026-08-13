@@ -14,6 +14,8 @@ import {
 } from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
+import { declineHandover, takeHandover } from "../handover/handover-service";
+import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
@@ -679,6 +681,46 @@ export function createBot(deps: BotDeps): Bot {
 
     // Only the buttons go stale — the offer text (which slot, which hours) is
     // still what the person needs, so leave it and just drop Беру/Не смогу.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  /**
+   * «Беру» / «Не могу» on a shift somebody could not work.
+   *
+   * The whole decision lives in `handover-service`, which the mini app has no
+   * route into: this button is the ONLY entrance to taking a handover. That is
+   * deliberate — the answer belongs in the chat where the question was asked,
+   * and a second entrance would be a second place for the rules to drift.
+   *
+   * `acting` first, like every other button here: these are a second entrance to
+   * the data, and the one time they were not guarded (cf33022) an archived person
+   * could still record themselves onto the schedule.
+   */
+  bot.callbackQuery(/^handover:(take|decline):(\d+)$/, async (ctx) => {
+    const action = ctx.match[1] as "take" | "decline";
+    const handoverId = Number(ctx.match[2]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    const deps = { db, config, messenger: createHandoverMessenger(bot, db) };
+    const res =
+      action === "take"
+        ? await takeHandover(deps, handoverId, who.me.id)
+        : await declineHandover(deps, handoverId, who.me.id);
+    if (!res.ok) {
+      // The service writes its refusals in Russian a person can read — «Уже
+      // забрали», «У тебя в это время уже стоит своя смена» — so they go straight
+      // through. There is no reason code to translate here, unlike swaps.
+      await ctx.answerCallbackQuery({ text: res.reason });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: action === "take" ? "Готово ✅" : "Понял, спрошу других" });
+
+    // Only the buttons go stale — which shift it was is still worth reading, so
+    // the text stays. Through `safeEdit`, like every cosmetic edit in this file:
+    // a failure here must not reach `bot.catch` as an unexplained handler error.
     await safeEdit(() => ctx.editMessageReplyMarkup());
   });
 

@@ -24,6 +24,14 @@ import {
   selfEntryUpdatedText,
   selfEntryDeletedText,
 } from "../../schedule/self-entry-notice";
+import {
+  cancelHandoversForEntry,
+  detachHandoversFromEntry,
+  startHandovers,
+  type HandoverDeps,
+} from "../../handover/handover-service";
+import { createHandoverMessenger } from "../../handover/handover-messenger";
+import { handoverDraftViews } from "./my-handovers";
 import { type Env, requireAuth } from "../middleware";
 
 /**
@@ -89,6 +97,9 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
   const { db, config, bot } = deps;
   const routes = new Hono<Env>();
 
+  /** Собирается на каждый вызов: мессенджер читает базу, а она живёт дольше. */
+  const handoverDeps = (): HandoverDeps => ({ db, config, messenger: createHandoverMessenger(bot ?? null, db) });
+
   /** Every day the entry covers that still holds something ELSE. */
   function riskLines(employeeId: number, entry: { id: number; date: string; endDate: string | null }): string[] {
     return eachDayIso(entry.date, entry.endDate ?? entry.date)
@@ -123,7 +134,12 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
         selfEntryCreatedText(nameOf(db, employeeId) ?? "Работник", entry, riskLines(employeeId, entry)),
       );
     }
-    return c.json({ entry }, 201);
+    // Только больничный: мероприятие 14:00–16:00 смену 09:00–18:00 не
+    // освобождает, и предлагать её кому-то значило бы снять с человека работу,
+    // которую он и не собирался пропускать.
+    const handovers =
+      entry.category === "sick_leave" ? await startHandovers(handoverDeps(), { sickEntry: entry, employeeId }) : [];
+    return c.json({ entry, handovers: handoverDraftViews(db, handovers) }, 201);
   });
 
   routes.patch("/api/my/entries/:id", requireAuth(db, config.jwtSecret), async (c) => {
@@ -158,6 +174,15 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     if (!updated) return c.json({ error: "not_found" }, 404);
 
     recordAudit(db, "self_entry_updated", employeeId, { before, after: entryAuditPayload(db, updated) });
+    if (updated.category === "sick_leave") {
+      // Порядок важен: сперва гасим дни, которые больничный больше не покрывает,
+      // потом открываем те, до которых он теперь дотянулся. Продление — это
+      // правка той же записи, и смена нового дня остаётся без человека точно так
+      // же, как в первый день.
+      const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
+      await cancelHandoversForEntry(handoverDeps(), updated.id, covered);
+      await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
+    }
     if (bot) {
       await notifyAdmins(
         bot,
@@ -182,6 +207,16 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // pending swap makes it reachable, and the admin delete route handles it.
     // Two delete paths treating one swap differently is the same class of defect
     // as two journals.
+    // Гасим ДО удаления записи: `cancelHandoversForEntry` читает смены, чтобы
+    // назвать их в письме «выходить не нужно», а после `deleteShift` называть
+    // будет нечего.
+    if (existing.category === "sick_leave") {
+      await cancelHandoversForEntry(handoverDeps(), existing.id, []);
+      // Затем отвязать: `sickEntryId` — внешний ключ, и `deleteShift` без этого
+      // отвечает `invalid_reference`. Строки передач остаются как история.
+      detachHandoversFromEntry(db, existing.id);
+    }
+
     const linesBefore = new Map(listPendingSwapsForShift(db, existing.id).map((r) => [r.id, swapAuditPayload(db, r)]));
     const { deleted, expiredSwaps } = deleteShift(db, existing.id);
     if (!deleted) return c.json({ error: "not_found" }, 404);
