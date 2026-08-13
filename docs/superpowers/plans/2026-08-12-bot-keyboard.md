@@ -1,5 +1,17 @@
 # Постоянная клавиатура в боте — план реализации
 
+> **Правка от 2026-08-13: раздел про `web_app`-кнопку в этом плане неверен.**
+> `mainKeyboard` заводила вход в мини-апп кнопкой `web_app` обычной клавиатуры
+> (`.webApp(BTN_MY_SHIFTS, …)`, задача 2 ниже). Так делать нельзя: Telegram не
+> передаёт мини-аппу `initData`, если запуск пришёл из кнопки клавиатуры, и
+> `POST /api/auth` отвечает 401 всем без исключения — кнопка рисовалась и не
+> работала ни у кого. Тест плана (`toMatchObject({ web_app: { url } })`) этого
+> поймать не мог: он проверял форму объекта, а не то, что вход работает.
+> Вход перенесён в inline-клавиатуру (`miniAppKeyboard` в `bot.ts`), клавиатура
+> держит обычную текстовую «📋 Мои смены». Подробности и сторож — в
+> `docs/audit/ledger.md`, запись от 2026-08-13. Читать задачу 2 ниже как
+> историю, а не как образец.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Команды бота `/week`, `/notifications`, `/admin` и вход в мини-апп становятся кнопками постоянной клавиатуры под полем ввода, при этом сами команды продолжают работать.

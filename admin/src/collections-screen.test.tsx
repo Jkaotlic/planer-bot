@@ -109,9 +109,17 @@ describe("CollectionsScreen", () => {
     ]);
 
     const el = await mount();
+    // Закрытый убран под свёрнутую секцию: на экране сначала только живой.
+    const visible = [...el.querySelectorAll<HTMLElement>('[data-testid="collection-card"]')];
+    expect(visible.map((card) => card.textContent)).toEqual([expect.stringContaining("Идёт")]);
+    expect(el.textContent).toContain("Закрытые · 1");
+
+    act(() => el.querySelector<HTMLButtonElement>(".archive-toggle")!.click());
+
     const cards = [...el.querySelectorAll<HTMLElement>('[data-testid="collection-card"]')];
     expect(cards).toHaveLength(2);
-    // Порядок задан сервером — экран его не пересортировывает.
+    // Порядок задан сервером — экран его не пересортировывает, и разбивка на
+    // две секции этого не меняет: живой выше закрытого, как и пришло.
     expect(cards.map((card) => card.textContent)).toEqual([
       expect.stringContaining("Идёт"),
       expect.stringContaining("Закрытый"),

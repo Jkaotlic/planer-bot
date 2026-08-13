@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
+import { CollapsibleArchive } from "../components/CollapsibleArchive";
 import { initialsOf, personPalette } from "../lib/people";
 
 export interface EmployeesScreenProps {
@@ -132,17 +133,24 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: E
         onSetRestrictions={setRestriction}
       />
 
-      <EmployeesSection
-        title="Архив"
-        employees={archived}
-        emptyLabel="Архив пуст"
-        actionLabel="Восстановить"
-        busyId={busyId}
-        rowError={rowError}
-        onAction={(id) => withBusy(id, () => apiClient.restoreEmployee(id))}
-        onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
-        onSetRestrictions={setRestriction}
-      />
+      <CollapsibleArchive title="Архив" items={archived}>
+        {(rows) => (
+          <div className="employees-list">
+            {rows.map((employee) => (
+              <EmployeeRow
+                key={employee.id}
+                employee={employee}
+                actionLabel="Восстановить"
+                busy={busyId === employee.id}
+                error={rowError?.employeeId === employee.id ? rowError.message : null}
+                onAction={() => withBusy(employee.id, () => apiClient.restoreEmployee(employee.id))}
+                onRename={(name) => withBusy(employee.id, () => apiClient.renameEmployee(employee.id, name))}
+                onSetRestrictions={(patch) => setRestriction(employee.id, patch)}
+              />
+            ))}
+          </div>
+        )}
+      </CollapsibleArchive>
 
       {showAddDialog && (
         <AddEmployeeDialog

@@ -17,6 +17,7 @@ import {
   type UpcomingBirthday,
 } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
+import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
 import { toISODate } from "../../lib/week";
@@ -218,6 +219,30 @@ export function AdminCollections() {
     );
   }
 
+  // Живые и закрытые — двумя списками. Порядок внутри каждого остаётся серверным
+  // (`compareCollections`), который и так держит закрытые в конце: фильтр по
+  // `active` только разносит их по секциям, ничего не пересортировывая.
+  const openRows = rows === null ? null : rows.filter((row) => row.active);
+  const closedRows = rows === null ? [] : rows.filter((row) => !row.active);
+
+  // Обработчики одни на оба списка: закрытый сбор открывают заново той же
+  // карточкой, и две копии этих замыканий разъехались бы на первой же правке.
+  const toggleCollection = (id: number) => {
+    setNotice(null);
+    setOpenCollection(openCollection === id ? null : id);
+  };
+  const handleSent = (row: CollectionRow, delivered: number, intended: number) => {
+    setOpenCollection(null);
+    const aside = row.personName ? ` ${row.personName} — не в списке.` : "";
+    setNotice(withNotifyNotice(`Разослано ${recipientsPhrase(delivered)}.${aside}`, { delivered, intended }));
+    void reloadEverything();
+  };
+  const handleDeleted = () => {
+    setOpenCollection(null);
+    setNotice("Сбор удалён.");
+    void reloadEverything();
+  };
+
   return (
     <ScreenScroll>
       <List>
@@ -288,30 +313,42 @@ export function AdminCollections() {
         <Section header="Сборы">
           <CardStack>
             <CollectionsList
-              rows={rows}
+              rows={openRows}
               error={rowsError}
+              // Не «сборов пока не было», когда они были и все закрыты: список
+              // ниже прямо противоречил бы этой фразе.
+              emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
               employees={employees}
               viewerId={viewerId}
               openId={openCollection}
-              onToggle={(id) => {
-                setNotice(null);
-                setOpenCollection(openCollection === id ? null : id);
-              }}
+              onToggle={toggleCollection}
               onChanged={reloadEverything}
-              onSent={(row, delivered, intended) => {
-                setOpenCollection(null);
-                const aside = row.personName ? ` ${row.personName} — не в списке.` : "";
-                setNotice(withNotifyNotice(`Разослано ${recipientsPhrase(delivered)}.${aside}`, { delivered, intended }));
-                void reloadEverything();
-              }}
-              onDeleted={() => {
-                setOpenCollection(null);
-                setNotice("Сбор удалён.");
-                void reloadEverything();
-              }}
+              onSent={handleSent}
+              onDeleted={handleDeleted}
             />
           </CardStack>
         </Section>
+
+        {/* Закрытые не мешают живым, но и не пропадают: их ещё открывают заново. */}
+        <CollapsibleArchive title="Закрытые" items={closedRows}>
+          {(closed) => (
+            <CardStack>
+              <CollectionsList
+                rows={closed as CollectionRow[]}
+                // Ошибка загрузки уже показана в секции выше — второй раз тем же текстом незачем.
+                error={null}
+                emptyLabel="Сборов пока не было."
+                employees={employees}
+                viewerId={viewerId}
+                openId={openCollection}
+                onToggle={toggleCollection}
+                onChanged={reloadEverything}
+                onSent={handleSent}
+                onDeleted={handleDeleted}
+              />
+            </CardStack>
+          )}
+        </CollapsibleArchive>
       </List>
     </ScreenScroll>
   );
@@ -589,6 +626,7 @@ function CollectionFields({
 function CollectionsList({
   rows,
   error,
+  emptyLabel,
   employees,
   viewerId,
   openId,
@@ -599,6 +637,8 @@ function CollectionsList({
 }: {
   rows: CollectionRow[] | null;
   error: string | null;
+  /** Что сказать на пустом списке. Приходит извне: «сборов не было» и «открытых нет» — разные правды. */
+  emptyLabel: string;
   employees: Employee[];
   viewerId: number | null;
   openId: number | null;
@@ -609,7 +649,7 @@ function CollectionsList({
 }) {
   if (error) return <CardShell><div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div></CardShell>;
   if (!rows) return <CardShell><Spinner size="s" /></CardShell>;
-  if (rows.length === 0) return <CardShell><div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Сборов пока не было.</div></CardShell>;
+  if (rows.length === 0) return <CardShell><div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>{emptyLabel}</div></CardShell>;
 
   return (
     <>

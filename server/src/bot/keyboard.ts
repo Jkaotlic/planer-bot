@@ -8,11 +8,13 @@ import { Keyboard } from "grammy";
  * только по точному совпадению строки. Вторая копия метки, набранная руками в
  * обработчике, однажды разъедется с этой — и кнопка станет рисоваться, ничего
  * при этом не делая.
+ *
+ * Метки входов в сам мини-апп («Больничный», «Мероприятие») живут не здесь, а в
+ * `bot.ts`: они на inline-кнопках, а те маршрутизируются адресом, а не текстом,
+ * и ключом ничему не служат.
  */
 export const BTN_WEEK = "📅 График";
 export const BTN_MY_SHIFTS = "📋 Мои смены";
-export const BTN_SICK = "🤒 Больничный";
-export const BTN_EVENT = "📌 Мероприятие";
 export const BTN_REMINDERS = "🔔 Напоминания";
 export const BTN_ADMIN = "⚙️ Админка";
 
@@ -27,25 +29,24 @@ export const BTN_ADMIN = "⚙️ Админка";
  * первом обращении, а до него его строка говорит `isAdmin: false`. Кнопка,
  * спрятанная от того, кому команда уже отвечает, — такая же ложь, как кнопка,
  * показанная тому, кому она откажет.
+ *
+ * Здесь нет ни одной `web_app`-кнопки, и это не упущение. Telegram не передаёт
+ * мини-аппу `initData`, если запуск пришёл из кнопки обычной клавиатуры — поле
+ * документированно пустое «if the Mini App was launched from a keyboard button
+ * or from inline mode». Подписи нет, `POST /api/auth` отвечает 401, и человек
+ * видит «Не удалось загрузить». Так три кнопки здесь и стояли: рисовались у
+ * всех, не работали ни у кого. Вход в мини-апп теперь один — `BTN_MY_SHIFTS`,
+ * обычная текстовая кнопка, на которую бот отвечает сообщением с
+ * inline-кнопками (`miniAppKeyboard` в `bot.ts`); там `initData` приходит
+ * подписанным. Лишний тап — цена работающего входа, а не небрежность.
+ *
+ * Две строки, а не четыре: «Напоминания» и «Админка» занимали по строке на
+ * одну кнопку, и клавиатура забирала пол-экрана. Строки теперь про разное —
+ * сверху то, что жмут каждый день, снизу служебное.
  */
-export function mainKeyboard(opts: { isAdmin: boolean; publicUrl: string }): Keyboard {
-  const kb = new Keyboard()
-    .text(BTN_WEEK)
-    // Мини-апп открывается прямо из клавиатуры: до этой кнопки бот трижды писал
-    // «открой мини-апп», но открыть его из бота было нечем — ссылки в коде нет,
-    // вход живёт в настройках BotFather.
-    .webApp(BTN_MY_SHIFTS, `${opts.publicUrl}/app/`)
-    .row()
-    // Строкой запроса, а не фрагментом: фрагмент у мини-аппа занят самим
-    // Telegram — initData приезжает именно в нём.
-    //
-    // Второй строкой, а не первой: график и свои смены жмут каждый день, а
-    // больничный ставят несколько раз в год.
-    .webApp(BTN_SICK, `${opts.publicUrl}/app/?screen=sick`)
-    .webApp(BTN_EVENT, `${opts.publicUrl}/app/?screen=event`)
-    .row()
-    .text(BTN_REMINDERS);
-  if (opts.isAdmin) kb.row().text(BTN_ADMIN);
+export function mainKeyboard(opts: { isAdmin: boolean }): Keyboard {
+  const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS).row().text(BTN_REMINDERS);
+  if (opts.isAdmin) kb.text(BTN_ADMIN);
   // resized — иначе клавиатура занимает пол-экрана. persistent — иначе Telegram
   // сворачивает её после первого нажатия, и человек решает, что она пропала.
   return kb.resized().persistent();
