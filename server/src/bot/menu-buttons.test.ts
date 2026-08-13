@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
-import { BTN_WEEK, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
+import { BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import {
   createEmployee,
@@ -254,6 +254,68 @@ describe("постоянная клавиатура — нажатия", () => {
     linkedWorker(db, 1005);
     const { bot, calls } = testBot(db);
     await bot.handleUpdate(textUpdate(1005, "привет"));
+
+    expect(calls).toEqual([]);
+  });
+});
+
+/** Адреса inline-кнопок с `web_app` из перехваченного payload — по порядку строк. */
+function webAppUrls(payload: any): string[] {
+  const rows = payload?.reply_markup?.inline_keyboard ?? [];
+  return rows.flat().map((btn: { web_app?: { url: string } }) => btn.web_app?.url).filter(Boolean);
+}
+
+/**
+ * Вход в мини-апп.
+ *
+ * Почему через сообщение с inline-кнопками, а не кнопкой клавиатуры: Telegram не
+ * передаёт `initData` мини-аппу, запущенному из кнопки обычной клавиатуры, и тот
+ * падает с 401 у всех без исключения (сторож — в `keyboard.test.ts`). Из
+ * inline-кнопки подпись приходит, поэтому лишнее сообщение здесь — не украшение,
+ * а единственный работающий вход.
+ */
+describe("вход в мини-апп", () => {
+  it("«Мои смены» присылает три inline-кнопки, и каждая ведёт в свою форму", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1101);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(textUpdate(1101, BTN_MY_SHIFTS));
+
+    const reply = calls.find((c) => c.method === "sendMessage")!;
+    expect(webAppUrls(reply.payload)).toEqual([
+      "https://x.keenetic.pro/app/",
+      "https://x.keenetic.pro/app/?screen=sick",
+      "https://x.keenetic.pro/app/?screen=event",
+    ]);
+  });
+
+  it("незнакомцу отвечает так же, как остальные кнопки, и никуда не пускает", async () => {
+    const db = makeTestDb();
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(textUpdate(1102, BTN_MY_SHIFTS));
+
+    const reply = calls.find((c) => c.method === "sendMessage")!;
+    expect(reply.payload.text).toContain("/start");
+    expect(webAppUrls(reply.payload)).toEqual([]);
+  });
+
+  it("архивному кнопок не даёт — мини-апп ответил бы ему 403", async () => {
+    const db = makeTestDb();
+    const worker = linkedWorker(db, 1103);
+    archiveEmployee(db, worker.id, "2026-08-06");
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(textUpdate(1103, BTN_MY_SHIFTS));
+
+    const reply = calls.find((c) => c.method === "sendMessage")!;
+    expect(reply.payload.text).toContain("архиве");
+    expect(webAppUrls(reply.payload)).toEqual([]);
+  });
+
+  it("из группы молчит — вход личный, а сообщение увидели бы все", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 1104);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(groupTextUpdate(1104, BTN_MY_SHIFTS));
 
     expect(calls).toEqual([]);
   });

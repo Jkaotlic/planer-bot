@@ -529,6 +529,39 @@ button {
   letter-spacing: 0.03em;
 }
 
+/* Заголовок свёрнутой секции с прошедшим (`CollapsibleArchive`). Выглядит как
+   `employees-section-title`, но это кнопка: раскрывает нажатие на всю строку, а
+   не на маленькую иконку сбоку. */
+.archive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 6px 2px;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  text-align: left;
+}
+
+.archive-toggle:hover {
+  color: var(--text);
+}
+
+.archive-caret {
+  font-size: 11px;
+  /* Не сдвигать текст заголовка при раскрытии: «▸» и «▾» разной ширины. */
+  width: 10px;
+  flex: none;
+}
+
 .employees-empty {
   color: var(--hint);
   font-size: 13.5px;

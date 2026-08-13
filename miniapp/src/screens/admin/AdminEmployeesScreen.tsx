@@ -4,6 +4,7 @@ import { Avatar, Button, Input, List, Placeholder, Section, Spinner } from "@tel
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
 import { CardShell, CardStack, MetaLine } from "../../components/Card";
+import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { withError, withoutError } from "../../lib/error-map";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -236,11 +237,9 @@ export function AdminEmployeesScreen() {
           )}
         </Section>
 
-        <Section header={`Архив · ${archived.length}`}>
-          {archived.length === 0 ? (
-            <Placeholder description="Архив пуст" />
-          ) : (
-            archived.map((e) => (
+        <CollapsibleArchive title="Архив" items={archived}>
+          {(rows) =>
+            rows.map((e) => (
               <EmployeeRow
                 key={e.id}
                 employee={e}
@@ -256,8 +255,8 @@ export function AdminEmployeesScreen() {
                 restrictionError={restrictionErrors.get(e.id) ?? null}
               />
             ))
-          )}
-        </Section>
+          }
+        </CollapsibleArchive>
       </List>
     </ScreenScroll>
   );

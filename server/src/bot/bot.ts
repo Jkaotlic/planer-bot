@@ -22,7 +22,7 @@ import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
-import { mainKeyboard, BTN_WEEK, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import {
   notifyUser,
   notifyAdmins,
@@ -147,6 +147,30 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
     : new InlineKeyboard().text("🔔 Включить напоминания", "reminders:on");
 }
 
+/**
+ * Три входа в мини-апп: сам список смен и две формы самозаписи.
+ *
+ * Именно inline-кнопками, и это единственный способ, а не выбор оформления.
+ * Мини-апп, запущенный из кнопки *обычной* клавиатуры, не получает `initData` —
+ * Telegram оставляет поле пустым «if the Mini App was launched from a keyboard
+ * button or from inline mode», — поэтому `POST /api/auth` отвечает такому входу
+ * 401 у всех без исключения. Из inline-кнопки подпись приходит. Сторож, чтобы
+ * кнопки не переехали обратно на клавиатуру, — в `keyboard.test.ts`.
+ *
+ * Адрес формы — строкой запроса, а не фрагментом: фрагмент у мини-аппа занят
+ * самим Telegram, `initData` приезжает именно в нём.
+ *
+ * Формы во второй строке, а не в первой: смены смотрят каждый день, а
+ * больничный ставят несколько раз в год.
+ */
+export function miniAppKeyboard(publicUrl: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .webApp("📋 Открыть смены", `${publicUrl}/app/`)
+    .row()
+    .webApp("🤒 Больничный", `${publicUrl}/app/?screen=sick`)
+    .webApp("📌 Мероприятие", `${publicUrl}/app/?screen=event`);
+}
+
 export function createBot(deps: BotDeps): Bot {
   const { db, config } = deps;
   const bot = new Bot(config.botToken);
@@ -196,7 +220,7 @@ export function createBot(deps: BotDeps): Bot {
     if (!me) return undefined;
     const allowlisted = config.adminTelegramIds.includes(tgId);
     if (!me.isActive && !allowlisted) return undefined;
-    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted, publicUrl: config.publicUrl });
+    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted });
   }
 
   /**
@@ -381,6 +405,27 @@ export function createBot(deps: BotDeps): Bot {
 
   bot.command("notifications", (ctx) => sendReminders(ctx));
 
+  /**
+   * Вход в мини-апп по кнопке «Мои смены».
+   *
+   * Отказы те же и теми же словами, что у `sendReminders`: человек не в системе
+   * или в архиве — мини-апп ответил бы ему 403, так что кнопок он не получает
+   * вовсе, а не получает их и натыкается на отказ уже внутри.
+   *
+   * Через `ctx.reply`, а не `replyWithMenu`, по той же причине, что и
+   * напоминания: `reply_markup` здесь занят inline-кнопками.
+   */
+  async function sendMiniApp(ctx: Context): Promise<void> {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    await ctx.reply("Что открыть:", { reply_markup: miniAppKeyboard(config.publicUrl) });
+  }
+
   /** Monday of the week `offset` weeks from the current one, in team time. */
   function mondayForOffset(offset: number): { monday: string; today: string } {
     const today = teamNow(config.teamTz).date;
@@ -451,6 +496,7 @@ export function createBot(deps: BotDeps): Bot {
     if (ctx.chat.type !== "private") return;
     const text = ctx.msg.text;
     if (text === BTN_WEEK) await sendWeek(ctx);
+    else if (text === BTN_MY_SHIFTS) await sendMiniApp(ctx);
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
   });

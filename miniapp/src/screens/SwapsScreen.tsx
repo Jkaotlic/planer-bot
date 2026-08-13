@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
-import { Button, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
+import { type ReactNode } from "react";
+import { List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
 import type { SwapRequest } from "../api/client";
 import { ArchivedSwapCard, IncomingSwapCard, OutgoingSwapCard } from "../components/SwapRequestCard";
+import { CollapsibleArchive } from "../components/CollapsibleArchive";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { splitSwaps } from "../lib/swaps";
 
@@ -25,9 +26,6 @@ export interface SwapsScreenProps {
 /** "Обмены": what still needs an answer, split from what is already settled. */
 export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, actionErrors }: SwapsScreenProps) {
   const { incoming, outgoing, archived } = splitSwaps(swaps);
-  // Collapsed by default — the whole point is that finished swaps stop competing
-  // for attention with the ones that still need something.
-  const [archiveOpen, setArchiveOpen] = useState(false);
 
   return (
     <ScreenScroll>
@@ -75,18 +73,18 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, act
           )}
         </Section>
 
-        {/* An empty archive draws nothing at all — an empty section would be one
-            more thing to read past. */}
-        {archived.length > 0 && (
-          <Section header={`Архив · ${archived.length}`}>
+        {/* Тумблер, счётчик и «пустое не рисуем» переехали в `CollapsibleArchive`:
+            те же три решения понадобились архиву работников и закрытым сборам, а
+            три набранные вручную копии одного поведения разъезжаются. */}
+        <CollapsibleArchive title="Архив" items={archived}>
+          {(rows) => (
             <CardStack>
-              <Button size="s" mode="gray" stretched onClick={() => setArchiveOpen(!archiveOpen)}>
-                {archiveOpen ? "Свернуть" : "Показать завершённые"}
-              </Button>
-              {archiveOpen && archived.map((request) => <ArchivedSwapCard key={request.id} request={request} />)}
+              {rows.map((request) => (
+                <ArchivedSwapCard key={request.id} request={request} />
+              ))}
             </CardStack>
-          </Section>
-        )}
+          )}
+        </CollapsibleArchive>
       </List>
     </ScreenScroll>
   );

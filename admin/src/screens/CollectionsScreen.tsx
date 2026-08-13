@@ -16,6 +16,7 @@ import {
   type Employee,
   type UpcomingBirthday,
 } from "../api/client";
+import { CollapsibleArchive } from "../components/CollapsibleArchive";
 import { initialsOf, personPalette } from "../lib/people";
 import { withNotifyNotice } from "../lib/notify-text";
 
@@ -210,6 +211,30 @@ export function CollectionsScreen() {
   const soon = birthdays.filter((b) => b.daysUntil <= SOON_DAYS);
   const later = birthdays.filter((b) => b.daysUntil > SOON_DAYS);
 
+  // Живые и закрытые — двумя списками. Порядок внутри каждого остаётся серверным
+  // (`compareCollections`), который и так держит закрытые в конце: фильтр по
+  // `active` только разносит их по секциям, ничего не пересортировывая.
+  const openRows = rows === null ? null : rows.filter((row) => row.active);
+  const closedRows = rows === null ? [] : rows.filter((row) => !row.active);
+
+  // Обработчики одни на оба списка: закрытый сбор открывают заново той же
+  // карточкой, и две копии этих замыканий разъехались бы на первой же правке.
+  const toggleCollection = (id: number) => {
+    setNotice(null);
+    setOpenCollection(openCollection === id ? null : id);
+  };
+  const handleSent = (row: CollectionRow, delivered: number, intended: number) => {
+    setOpenCollection(null);
+    const aside = row.personName ? ` ${row.personName} — не в списке.` : "";
+    setNotice(withNotifyNotice(`Разослано ${recipientsPhrase(delivered)}.${aside}`, { delivered, intended }));
+    void reloadEverything();
+  };
+  const handleDeleted = () => {
+    setOpenCollection(null);
+    setNotice("Сбор удалён.");
+    void reloadEverything();
+  };
+
   function renderRow(birthday: UpcomingBirthday) {
     return (
       <BirthdayRow
@@ -294,27 +319,36 @@ export function CollectionsScreen() {
 
       <h3 className="birthday-group">Сборы</h3>
       <CollectionsList
-        rows={rows}
+        rows={openRows}
         error={rowsError}
+        // Не «сборов пока не было», когда они были и все закрыты: список ниже
+        // прямо противоречил бы этой фразе.
+        emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
         employees={employees}
         openId={openCollection}
-        onToggle={(id) => {
-          setNotice(null);
-          setOpenCollection(openCollection === id ? null : id);
-        }}
+        onToggle={toggleCollection}
         onChanged={reloadEverything}
-        onSent={(row, delivered, intended) => {
-          setOpenCollection(null);
-          const aside = row.personName ? ` ${row.personName} — не в списке.` : "";
-          setNotice(withNotifyNotice(`Разослано ${recipientsPhrase(delivered)}.${aside}`, { delivered, intended }));
-          void reloadEverything();
-        }}
-        onDeleted={() => {
-          setOpenCollection(null);
-          setNotice("Сбор удалён.");
-          void reloadEverything();
-        }}
+        onSent={handleSent}
+        onDeleted={handleDeleted}
       />
+
+      {/* Закрытые не мешают живым, но и не пропадают: их ещё открывают заново. */}
+      <CollapsibleArchive title="Закрытые" items={closedRows}>
+        {(closed) => (
+          <CollectionsList
+            rows={closed as CollectionRow[]}
+            // Ошибка загрузки уже показана выше — второй раз тем же текстом незачем.
+            error={null}
+            emptyLabel="Сборов пока не было."
+            employees={employees}
+            openId={openCollection}
+            onToggle={toggleCollection}
+            onChanged={reloadEverything}
+            onSent={handleSent}
+            onDeleted={handleDeleted}
+          />
+        )}
+      </CollapsibleArchive>
     </div>
   );
 }
@@ -537,15 +571,17 @@ function CollectionFields({
 }
 
 /**
- * Все сборы — и закрытые тоже.
+ * Один список сборов — живых или закрытых, смотря что передали.
  *
  * Порядок задан сервером (`compareCollections` из `@planer/shared`), тем же,
  * что и в мини-аппе: два независимых `sort` — это два разных списка через
- * полгода.
+ * полгода. Разбивка на «живые» и «Закрытые» сделана фильтром на вызывающей
+ * стороне и серверный порядок внутри каждой половины сохраняет.
  */
 function CollectionsList({
   rows,
   error,
+  emptyLabel,
   employees,
   openId,
   onToggle,
@@ -555,6 +591,8 @@ function CollectionsList({
 }: {
   rows: CollectionRow[] | null;
   error: string | null;
+  /** Что сказать на пустом списке. Приходит извне: «сборов не было» и «открытых нет» — разные правды. */
+  emptyLabel: string;
   employees: Employee[];
   openId: number | null;
   onToggle: (id: number) => void;
@@ -564,7 +602,7 @@ function CollectionsList({
 }) {
   if (error) return <div className="employees-error">{error}</div>;
   if (!rows) return <div className="employees-empty">Загрузка…</div>;
-  if (rows.length === 0) return <div className="employees-empty">Сборов пока не было.</div>;
+  if (rows.length === 0) return <div className="employees-empty">{emptyLabel}</div>;
 
   return (
     <div className="employees-list">
