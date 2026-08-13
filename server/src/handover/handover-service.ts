@@ -118,8 +118,17 @@ export async function startHandovers(
       entry.category !== "offsite",
   );
 
+  // Extending a sick leave runs this again over days that already have offers.
+  // Without this, «поболею ещё день» would re-ask the whole team about Wednesday.
+  const alreadyOffered = new Set(
+    listHandoversForEntry(db, input.sickEntry.id)
+      .filter((handover) => handover.status !== "cancelled")
+      .map((handover) => handover.shiftId),
+  );
+
   const made: Handover[] = [];
   for (const shift of mine) {
+    if (alreadyOffered.has(shift.id)) continue;
     const handover = createHandover(db, {
       shiftId: shift.id,
       fromEmployeeId: input.employeeId,
@@ -302,6 +311,24 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
 /** The shift started and nobody took it. Silent by design — the admins already know. */
 export function expireHandover(deps: HandoverDeps, handoverId: number): void {
   updateHandover(deps.db, handoverId, { status: "expired", resolvedAt: new Date() });
+}
+
+/**
+ * Cut the handovers loose from a sick leave that is about to be deleted.
+ *
+ * `sickEntryId` is a foreign key, so the entry row cannot go while handovers
+ * point at it — the delete fails with `invalid_reference`, which is how this was
+ * found. Nulling the pointer rather than deleting the handovers is the same
+ * choice already made for `shiftId`: the row must outlive what it pointed at,
+ * because «Аня отдавала эту смену, и её никто не взял» stays true after the sick
+ * leave is gone.
+ *
+ * Call AFTER cancelling, never instead of it: this only unlinks, it tells nobody.
+ */
+export function detachHandoversFromEntry(db: Db, sickEntryId: number): void {
+  for (const handover of listHandoversForEntry(db, sickEntryId)) {
+    updateHandover(db, handover.id, { sickEntryId: null });
+  }
 }
 
 /**

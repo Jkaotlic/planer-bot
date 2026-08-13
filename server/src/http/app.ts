@@ -61,6 +61,7 @@ import { teamNow } from "../util/team-time";
 import { createEmployeesRoutes } from "./routes/employees";
 import { createReadRoutes } from "./routes/read";
 import { createMyEntryRoutes } from "./routes/my-entries";
+import { createMyHandoverRoutes } from "./routes/my-handovers";
 import {
   isWeekend,
   isAbsence,
@@ -309,6 +310,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.route("/", createReadRoutes({ db, config }));
 
   app.route("/", createMyEntryRoutes({ db, config, bot }));
+  app.route("/", createMyHandoverRoutes({ db, config, bot }));
 
   app.route("/", createEmployeesRoutes({ db, config, bot }));
 
