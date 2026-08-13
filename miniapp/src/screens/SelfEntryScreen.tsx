@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, Cell, IconButton, Input, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
 import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
-import type { SelfEntryInput, Shift, Template } from "../api/client";
+import type { HandoverDraft, SelfEntryInput, Shift, Template } from "../api/client";
 import type { Category } from "../categories";
 import { DayBadge } from "../components/DayBadge";
 import { EntryChip } from "../components/EntryChip";
@@ -93,9 +93,12 @@ export interface SelfEntryScreenProps {
   shifts: readonly Shift[];
   templates: readonly Template[];
   onCancel: () => void;
-  onCreate: (input: SelfEntryInput) => Promise<void>;
+  /** Возвращает смены, оставшиеся без человека, — про них форма спросит вторым шагом. */
+  onCreate: (input: SelfEntryInput) => Promise<HandoverDraft[]>;
   onUpdate: (id: number, input: SelfEntryInput) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
+  onOfferHandover: (handoverId: number, toEmployeeId: number) => Promise<void>;
+  onSkipHandover: (handoverId: number) => Promise<void>;
 }
 
 /**
@@ -106,7 +109,22 @@ export interface SelfEntryScreenProps {
  * своих записей, правка, удаление и разбор ответа сервера. Развести их в два
  * экрана значило бы держать две копии этого всего.
  */
-export function SelfEntryScreen({ mode, today, shifts, templates, onCancel, onCreate, onUpdate, onDelete }: SelfEntryScreenProps) {
+export function SelfEntryScreen({
+  mode,
+  today,
+  shifts,
+  templates,
+  onCancel,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onOfferHandover,
+  onSkipHandover,
+}: SelfEntryScreenProps) {
+  // Смены, оставшиеся без человека. Пока список не пуст, форма не закрывается:
+  // это единственный момент, когда человек ещё помнит, кого можно попросить.
+  const [drafts, setDrafts] = useState<HandoverDraft[]>([]);
+  const [handoverBusy, setHandoverBusy] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   // Категория формы: у правки — та, что у самой записи, иначе та, ради которой
   // экран открыли. Иначе, начав править мероприятие из формы больничного,
@@ -170,14 +188,39 @@ export function SelfEntryScreen({ mode, today, shifts, templates, onCancel, onCr
     setSubmitting(true);
     setError(null);
     try {
-      if (editingId != null) await onUpdate(editingId, draft());
-      else await onCreate(draft());
+      if (editingId != null) {
+        await onUpdate(editingId, draft());
+      } else {
+        const uncovered = await onCreate(draft());
+        setDrafts(uncovered);
+      }
       resetForm();
     } catch (err) {
       console.error("Self entry save failed:", err);
       setError(describeError(err));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /**
+   * Смена ушла — либо конкретному человеку, либо в веер.
+   *
+   * Строка убирается со экрана только после успеха: иначе человек, у которого
+   * запрос не прошёл, увидел бы пустой экран и решил, что смену кто-то принял.
+   */
+  async function resolveDraft(handoverId: number, action: () => Promise<void>) {
+    if (handoverBusy) return;
+    setHandoverBusy(true);
+    setError(null);
+    try {
+      await action();
+      setDrafts((prev) => prev.filter((draft) => draft.id !== handoverId));
+    } catch (err) {
+      console.error("Handover action failed:", err);
+      setError(describeError(err));
+    } finally {
+      setHandoverBusy(false);
     }
   }
 
@@ -288,6 +331,48 @@ export function SelfEntryScreen({ mode, today, shifts, templates, onCancel, onCr
           </div>
         )}
       </div>
+
+      {drafts.length > 0 && (
+        <List>
+          {drafts.map((draft) => (
+            <Section
+              key={draft.id}
+              header="Кому предложить смену"
+              footer="Не ответит за три часа — спросим всех свободных. Если никто не выйдет, за 12 часов до смены напишем админам."
+            >
+              <Cell multiline>{draft.shiftLine}</Cell>
+              {draft.candidates.length === 0 ? (
+                <Placeholder description="Свободных нет — админы уже знают, что смена без человека." />
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "4px 12px 10px" }}>
+                  {draft.candidates.map((candidate) => (
+                    <Button
+                      key={candidate.id}
+                      size="s"
+                      mode="bezeled"
+                      disabled={handoverBusy}
+                      onClick={() => void resolveDraft(draft.id, () => onOfferHandover(draft.id, candidate.id))}
+                    >
+                      {candidate.displayName}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <div style={{ padding: "0 12px 12px" }}>
+                <Button
+                  size="m"
+                  stretched
+                  mode="plain"
+                  disabled={handoverBusy}
+                  onClick={() => void resolveDraft(draft.id, () => onSkipHandover(draft.id))}
+                >
+                  Потом
+                </Button>
+              </div>
+            </Section>
+          ))}
+        </List>
+      )}
 
       <List>
         <Section header="Что ты уже записал себе" footer="Здесь только то, что ещё не кончилось: прошедшее правит админ.">

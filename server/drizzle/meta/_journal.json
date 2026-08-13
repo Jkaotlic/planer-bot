@@ -134,6 +134,13 @@
       "when": 1786351605856,
       "tag": "0018_collections",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786564409247,
+      "tag": "0019_light_slapstick",
+      "breakpoints": true
     }
   ]
 }

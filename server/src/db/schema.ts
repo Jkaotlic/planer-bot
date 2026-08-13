@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus, EntryCategory, TemplateAccent, AuditType, CollectionKind } from "@planer/shared";
+import type { SwapStatus, EntryCategory, TemplateAccent, AuditType, CollectionKind, HandoverStatus } from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -117,6 +117,66 @@ export const swapRequests = sqliteTable("swap_requests", {
   createdAt: createdAt(),
   resolvedAt: integer({ mode: "timestamp" }),
 });
+
+/**
+ * A shift its owner cannot work, on its way to somebody who can.
+ *
+ * Born from a worker recording their own «больничный», never from an admin's
+ * edit: an admin is already looking at the schedule and reassigns faster than
+ * any ladder. The ladder exists for «человека у экрана нет».
+ */
+export const handovers = sqliteTable("handovers", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  /**
+   * Nullable for the same reason as `swap_requests.fromShiftId`: the row must
+   * outlive the entry it points at. A handover whose shift was deleted is still
+   * a thing that happened, and the journal row written beside it carries the
+   * date and the time.
+   */
+  shiftId: integer().references(() => shifts.id),
+  fromEmployeeId: integer().notNull().references(() => employees.id),
+  /**
+   * The «больничный» that spawned this. Nullable — the sick leave can be removed
+   * while the handover stays as history; live rows are found by it when the sick
+   * leave is cancelled or shortened.
+   */
+  sickEntryId: integer().references(() => shifts.id),
+  status: text().$type<HandoverStatus>().notNull().default("offered"),
+  /** Null means «веер» — the offer is open to everyone who is free. */
+  offeredToEmployeeId: integer().references(() => employees.id),
+  offeredAt: createdAt(),
+  /**
+   * When the admins were told. NOT a status: escalation does not replace the
+   * stage, it is added to it — the fan-out stays open, and somebody can still
+   * take the shift an hour before it starts. Without this mark the tick would
+   * write to the admins every five minutes.
+   */
+  escalatedAt: integer({ mode: "timestamp" }),
+  takenByEmployeeId: integer().references(() => employees.id),
+  resolvedAt: integer({ mode: "timestamp" }),
+});
+
+export const handoverDeclines = sqliteTable(
+  "handover_declines",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    handoverId: integer().notNull().references(() => handovers.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    declinedAt: createdAt(),
+  },
+  // A separate table rather than a field on `handovers`, because the refusals do
+  // two jobs: the fan-out must not write to those people again, and the
+  // escalation letter names them one by one. A comma-joined text column would
+  // have to be parsed back, and the first test about «кому не писать» would read
+  // a string instead of rows.
+  //
+  // Uniqueness is on the pair, not on the person: a sick leave covering two days
+  // makes two handovers, and one colleague may be unable to take either.
+  (t) => [uniqueIndex("handover_decline_unique").on(t.handoverId, t.employeeId)],
+);
+
+export type Handover = typeof handovers.$inferSelect;
+export type NewHandover = typeof handovers.$inferInsert;
 
 export const reminderLog = sqliteTable(
   "reminder_log",

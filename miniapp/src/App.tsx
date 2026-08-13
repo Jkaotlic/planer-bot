@@ -171,8 +171,18 @@ export function App() {
   /** Ошибку показывает сама форма — она её и ловит, поэтому здесь ничего не
    *  перехватываем: проглоченный отказ был бы молчаливым «сохранил». */
   async function handleCreateSelfEntry(input: SelfEntryInput) {
-    await apiClient.createSelfEntry(input);
+    const { handovers } = await apiClient.createSelfEntry(input);
     await refreshMyShifts();
+    // Смены, оставшиеся без человека, — форма спросит про них вторым шагом.
+    return handovers;
+  }
+
+  async function handleOfferHandover(handoverId: number, toEmployeeId: number) {
+    await apiClient.offerHandover(handoverId, toEmployeeId);
+  }
+
+  async function handleSkipHandover(handoverId: number) {
+    await apiClient.skipHandover(handoverId);
   }
 
   async function handleUpdateSelfEntry(id: number, input: SelfEntryInput) {
@@ -290,6 +300,8 @@ export function App() {
         onCreate={handleCreateSelfEntry}
         onUpdate={handleUpdateSelfEntry}
         onDelete={handleDeleteSelfEntry}
+        onOfferHandover={handleOfferHandover}
+        onSkipHandover={handleSkipHandover}
       />
     );
   }

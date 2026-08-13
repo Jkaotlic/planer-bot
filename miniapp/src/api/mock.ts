@@ -26,6 +26,7 @@ import type {
   WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
+  HandoverDraft,
   SelfEntryInput,
   Shift,
   SwapDirection,
@@ -595,7 +596,38 @@ export async function mockDeleteEntry(id: number): Promise<{ notified: { deliver
  *
  * Письма админам тут нет и быть не может: телеграма в DEV нет вовсе.
  */
-export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<Shift> {
+/**
+ * Смены, которые больничный оставляет без человека, — как их считает сервер.
+ *
+ * Кандидаты — активные, у кого в этот день ничего не стоит: то же правило, что
+ * в `handoverCandidates`. Мок, показывающий занятого коллегу, врал бы ровно про
+ * то, ради чего второй шаг формы и существует.
+ */
+function mockHandoverDrafts(input: SelfEntryInput, sickId: number): HandoverDraft[] {
+  if (input.category !== "sick_leave") return [];
+  const from = input.date;
+  const to = input.endDate ?? input.date;
+  return ALL_ENTRIES.filter(
+    (entry) =>
+      entry.employeeId === MOCK_ME.id &&
+      entry.id !== sickId &&
+      entry.category === "shift" &&
+      entry.date >= from &&
+      entry.date <= to,
+  ).map((shift) => ({
+    id: nextId++,
+    shiftLine: `${shift.date} · ${shift.start ?? "весь день"}${shift.end ? `–${shift.end}` : ""} · ${shift.title ?? "Смена"}`,
+    candidates: EMPLOYEES.filter(
+      (employee) =>
+        employee.isActive &&
+        employee.id !== MOCK_ME.id &&
+        !employee.excludedFromSwaps &&
+        !ALL_ENTRIES.some((entry) => entry.employeeId === employee.id && entry.date === shift.date),
+    ).map((employee) => ({ id: employee.id, displayName: employee.displayName })),
+  }));
+}
+
+export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<{ entry: Shift; handovers: HandoverDraft[] }> {
   await delay(250);
   const today = toISODate(new Date());
   const refusal = selfEntryRefusal(
@@ -618,7 +650,16 @@ export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<Shift>
     employeeName: personName(MOCK_ME.id),
   };
   ALL_ENTRIES.push(created);
-  return created;
+  return { entry: created, handovers: mockHandoverDrafts(input, created.id) };
+}
+
+/** DEV-мок писем не шлёт — телеграма здесь нет вовсе; форма проверяется по факту вызова. */
+export async function mockOfferHandover(_handoverId: number, _toEmployeeId: number): Promise<void> {
+  await delay(200);
+}
+
+export async function mockSkipHandover(_handoverId: number): Promise<void> {
+  await delay(200);
 }
 
 export async function mockUpdateSelfEntry(id: number, input: SelfEntryInput): Promise<Shift> {
