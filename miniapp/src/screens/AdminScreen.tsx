@@ -4,12 +4,13 @@ import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
 import { AdminCollections } from "./admin/AdminCollections";
 import { AdminAnnounce } from "./admin/AdminAnnounce";
+import { AdminBugs } from "./admin/AdminBugs";
 import { AdminJournal } from "./admin/AdminJournal";
 import { AdminSettings } from "./admin/AdminSettings";
 import { SectionChips, SectionPanel } from "../components/SectionChips";
 import { toISODate } from "../lib/week";
 
-export type AdminSection = "schedule" | "weekend" | "employees" | "collections" | "announce" | "journal" | "settings";
+export type AdminSection = "schedule" | "weekend" | "employees" | "collections" | "announce" | "bugs" | "journal" | "settings";
 
 const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "schedule", label: "Расписание" },
@@ -17,6 +18,7 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "employees", label: "Работники" },
   { key: "collections", label: "Сборы" },
   { key: "announce", label: "Анонсы" },
+  { key: "bugs", label: "Баги" },
   { key: "journal", label: "Журнал" },
   { key: "settings", label: "Настройки" },
 ];
@@ -51,6 +53,7 @@ export function AdminScreen({ initialSection }: { initialSection?: AdminSection 
         {section === "employees" && <AdminEmployeesScreen />}
         {section === "collections" && <AdminCollections />}
         {section === "announce" && <AdminAnnounce />}
+        {section === "bugs" && <AdminBugs />}
         {section === "journal" && <AdminJournal today={toISODate(new Date())} />}
         {section === "settings" && <AdminSettings />}
       </SectionPanel>

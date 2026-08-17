@@ -66,6 +66,8 @@ import {
   mockGetNoticePrefs,
   mockSetNoticePref,
   mockSendAnnouncement,
+  mockGetBugReports,
+  mockResolveBugReport,
   employeesMock,
 } from "./mock";
 
@@ -310,6 +312,17 @@ export interface AnnouncementResult {
   delivered: number;
   intended: number;
   unreachable: string[];
+}
+
+/** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
+ *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */
+export interface BugReportRow {
+  id: number;
+  authorName: string;
+  text: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
@@ -632,6 +645,9 @@ export interface ApiClient {
   /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
    *  не даёт, текст анонса и так ровно тот, что напечатал админ. */
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
+  getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
+  /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
+  resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -1134,6 +1150,12 @@ export const realClient: ApiClient = {
     authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
   sendAnnouncement: (text, audience) =>
     authorizedPostJson<AnnouncementResult>("/api/admin/announcements", { text, audience }),
+  async getBugReports(status) {
+    const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
+    return reports;
+  },
+  resolveBugReport: (id, resolved) =>
+    authorizedPostJson<{ id: number; resolvedAt: string | null }>(`/api/admin/bug-reports/${id}/resolve`, { resolved }),
 };
 
 const devClient: ApiClient = {
@@ -1196,6 +1218,8 @@ const devClient: ApiClient = {
   getNoticePrefs: () => mockGetNoticePrefs(),
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
+  getBugReports: (status) => mockGetBugReports(status),
+  resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };
 
 /**

@@ -26,6 +26,7 @@ import type {
   NoticePrefs,
   AnnouncementAudience,
   AnnouncementResult,
+  BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
@@ -1566,4 +1567,63 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
   const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
 
   return { delivered: reachable.length, intended: reachable.length, unreachable };
+}
+
+// --- Багрепорты ---------------------------------------------------------
+
+/** Живёт между вызовами по той же причине, что `mockSwapsLocked` выше: отметил
+ *  «Разобрал» — и следующий `getBugReports` должен помнить об этом. */
+interface MockBugReport {
+  id: number;
+  authorId: number;
+  text: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedById: number | null;
+}
+
+const MOCK_BUG_REPORTS: MockBugReport[] = [
+  {
+    id: 1,
+    authorId: 3,
+    text: "Кнопка «Обмен» не открывается на Андроиде — тап проваливается сквозь карточку",
+    createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    resolvedAt: null,
+    resolvedById: null,
+  },
+  {
+    id: 2,
+    authorId: 5,
+    text: "В расписании на выходные не видно моей смены, хотя в боте пришло напоминание",
+    createdAt: new Date(Date.now() - 26 * 3600_000).toISOString(),
+    resolvedAt: new Date(Date.now() - 20 * 3600_000).toISOString(),
+    resolvedById: 1,
+  },
+];
+
+function bugReportView(report: MockBugReport): BugReportRow {
+  return {
+    id: report.id,
+    authorName: personName(report.authorId),
+    text: report.text,
+    createdAt: report.createdAt,
+    resolvedAt: report.resolvedAt,
+    resolvedByName: report.resolvedById != null ? personName(report.resolvedById) : null,
+  };
+}
+
+export async function mockGetBugReports(status: "open" | "all"): Promise<BugReportRow[]> {
+  await delay(200);
+  const rows = status === "open" ? MOCK_BUG_REPORTS.filter((r) => r.resolvedAt == null) : MOCK_BUG_REPORTS;
+  // Свежие сверху — тем же порядком, что и `listBugReports` на сервере.
+  return [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id).map(bugReportView);
+}
+
+export async function mockResolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }> {
+  await delay(200);
+  const report = MOCK_BUG_REPORTS.find((r) => r.id === id);
+  if (!report) throw new Error("Багрепорт не найден");
+  report.resolvedAt = resolved ? new Date().toISOString() : null;
+  report.resolvedById = resolved ? MOCK_ME.id : null;
+  return { id: report.id, resolvedAt: report.resolvedAt };
 }
