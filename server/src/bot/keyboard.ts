@@ -17,6 +17,7 @@ export const BTN_WEEK = "📅 График";
 export const BTN_MY_SHIFTS = "📋 Мои смены";
 export const BTN_REMINDERS = "🔔 Напоминания";
 export const BTN_ADMIN = "⚙️ Админка";
+export const BTN_BUG = "🐞 Проблема";
 
 /**
  * Раскладка под полем ввода.
@@ -42,10 +43,12 @@ export const BTN_ADMIN = "⚙️ Админка";
  *
  * Две строки, а не четыре: «Напоминания» и «Админка» занимали по строке на
  * одну кнопку, и клавиатура забирала пол-экрана. Строки теперь про разное —
- * сверху то, что жмут каждый день, снизу служебное.
+ * сверху то, что жмут каждый день, снизу служебное. «Проблема» — тоже
+ * служебная, поэтому едет во вторую строку рядом с «Напоминаниями», а не
+ * заводит третью.
  */
 export function mainKeyboard(opts: { isAdmin: boolean }): Keyboard {
-  const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS).row().text(BTN_REMINDERS);
+  const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS).row().text(BTN_REMINDERS).text(BTN_BUG);
   if (opts.isAdmin) kb.text(BTN_ADMIN);
   // resized — иначе клавиатура занимает пол-экрана. persistent — иначе Telegram
   // сворачивает её после первого нажатия, и человек решает, что она пропала.
