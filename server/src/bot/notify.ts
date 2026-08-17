@@ -292,6 +292,11 @@ export async function notifyHandoverFan(
  * уведомление, не решив, к какому виду оно относится.
  */
 export async function notifyAdmins(bot: Bot, db: Db, kind: AdminNoticeKind, text: string): Promise<void> {
+  // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
+  // `notifyReminder`: за настройкой, о существовании которой не знаешь, не ходят.
+  // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
+  // него на экране.
+  const kb = new InlineKeyboard().text("🔕 Не писать мне про это", `notice:mute:${kind}`);
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
     // Единственное место на весь проект, где эта проверка делается. Если она
@@ -299,7 +304,7 @@ export async function notifyAdmins(bot: Bot, db: Db, kind: AdminNoticeKind, text
     // надо это, а не копировать условие.
     if (isNoticeMuted(db, admin.id, kind)) continue;
     try {
-      await bot.api.sendMessage(admin.telegramUserId, text);
+      await bot.api.sendMessage(admin.telegramUserId, text, { reply_markup: kb });
     } catch (err) {
       console.error(`notifyAdmins(${kind}): failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }

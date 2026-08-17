@@ -17,10 +17,11 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
+import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import {
@@ -590,6 +591,38 @@ export function createBot(deps: BotDeps): Bot {
     // Only the buttons are rewritten: the reminder itself is still the useful part
     // of the message, and replacing it would delete tomorrow's shift time.
     await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: remindersKeyboard(enabled) }));
+  });
+
+  /**
+   * «Не писать мне про это» под админским уведомлением.
+   *
+   * Как и у напоминаний, вид берётся из callback-данных, а человек — из того,
+   * кто нажал: чужие уведомления выключить нечем. Проверка на админа нужна
+   * отдельно — кнопка живёт в чате вечно, а админа могли разжаловать.
+   */
+  bot.callbackQuery(/^notice:mute:([a-z_]+)$/, async (ctx) => {
+    const kind = ADMIN_NOTICE_KINDS.find((k) => k === ctx.match[1]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    if (!kind) {
+      await ctx.answerCallbackQuery({ text: "Такого вида уведомлений больше нет" });
+      return;
+    }
+    if (!who.me.isAdmin && !config.adminTelegramIds.includes(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это настройка администратора" });
+      return;
+    }
+    setNoticeMuted(db, who.me.id, kind, true);
+    await ctx.answerCallbackQuery({ text: "Больше не буду 🔕" });
+    // Существенное — до косметики: человек должен знать, где вернуть обратно.
+    await ctx.reply(
+      `«${ADMIN_NOTICE_LABELS[kind].title}» больше не пишу. Вернуть — в мини-аппе, «Админ» → «Настройки».`,
+    );
+    // Снимается только кнопка: текст уведомления по-прежнему нужен человеку.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {
