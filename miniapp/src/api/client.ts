@@ -63,6 +63,8 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  mockGetNoticePrefs,
+  mockSetNoticePref,
   employeesMock,
 } from "./mock";
 
@@ -279,6 +281,18 @@ export interface SwapLockResult {
   cancelled: number;
   delivered: number;
   intended: number;
+}
+
+/** Один вид админского письма и его тумблер — экран «Настройки» → «Что мне писать». */
+export interface NoticePref {
+  kind: string;
+  title: string;
+  hint: string;
+  enabled: boolean;
+}
+
+export interface NoticePrefs {
+  kinds: NoticePref[];
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
@@ -596,6 +610,8 @@ export interface ApiClient {
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
+  getNoticePrefs(): Promise<NoticePrefs>;
+  setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -1093,6 +1109,9 @@ export const realClient: ApiClient = {
 
   getSettings: () => authorizedGet<AdminSettings>("/api/admin/settings"),
   setSwapsLock: (locked) => authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked }),
+  getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
+  setNoticePref: (kind, enabled) =>
+    authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
 };
 
 const devClient: ApiClient = {
@@ -1152,6 +1171,8 @@ const devClient: ApiClient = {
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
+  getNoticePrefs: () => mockGetNoticePrefs(),
+  setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
 };
 
 /**

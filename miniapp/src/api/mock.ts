@@ -23,6 +23,7 @@ import type {
   CollectionPreview,
   NewCollectionInput,
   CollectionPatch,
+  NoticePrefs,
   WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
@@ -52,6 +53,8 @@ import {
   compareCollections,
   selfEntryRefusal,
   selfEntryEditRefusal,
+  ADMIN_NOTICE_KINDS,
+  ADMIN_NOTICE_LABELS,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1512,4 +1515,29 @@ export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult>
   await delay(250);
   mockSwapsLocked = locked;
   return { locked, cancelled: locked ? 2 : 0, delivered: 5, intended: 6 };
+}
+
+// --- Настройки: что писать админу --------------------------------------------
+
+/** Живёт между вызовами по той же причине, что и `mockSwapsLocked` выше: нажал
+ *  тумблер — и следующий getNoticePrefs должен помнить об этом, без перезагрузки. */
+const mockMutedKinds = new Set<string>();
+
+export async function mockGetNoticePrefs(): Promise<NoticePrefs> {
+  await delay(150);
+  return {
+    kinds: ADMIN_NOTICE_KINDS.map((kind) => ({
+      kind,
+      title: ADMIN_NOTICE_LABELS[kind].title,
+      hint: ADMIN_NOTICE_LABELS[kind].hint,
+      enabled: !mockMutedKinds.has(kind),
+    })),
+  };
+}
+
+export async function mockSetNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }> {
+  await delay(200);
+  if (enabled) mockMutedKinds.delete(kind);
+  else mockMutedKinds.add(kind);
+  return { kind, enabled };
 }
