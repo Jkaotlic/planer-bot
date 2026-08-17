@@ -1,6 +1,14 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus, EntryCategory, TemplateAccent, AuditType, CollectionKind, HandoverStatus } from "@planer/shared";
+import type {
+  SwapStatus,
+  EntryCategory,
+  TemplateAccent,
+  AuditType,
+  CollectionKind,
+  HandoverStatus,
+  AdminNoticeKind,
+} from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -281,6 +289,30 @@ export const appSettings = sqliteTable("app_settings", {
   updatedByEmployeeId: integer().references(() => employees.id),
   updatedAt: integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
 });
+
+/**
+ * Какие виды писем админ себе выключил.
+ *
+ * СТРОКА ЕСТЬ — ВЫКЛЮЧЕНО, СТРОКИ НЕТ — ВКЛЮЧЕНО. Тот же приём, что в
+ * `app_settings`: миграция ничего не засеивает, и база, не знавшая этой фичи,
+ * ведёт себя ровно как вчера. Обратная запись («включено») означала бы, что до
+ * первого захода в настройки админу не приходит ничего.
+ *
+ * Отдельная таблица, а не колонки в `employees`: шестой вид потребовал бы
+ * миграции таблицы, вокруг которой крутится вся система.
+ */
+export const notificationMutes = sqliteTable(
+  "notification_mutes",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    employeeId: integer().notNull().references(() => employees.id),
+    kind: text().$type<AdminNoticeKind>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("notification_mute_unique").on(t.employeeId, t.kind)],
+);
+
+export type NotificationMute = typeof notificationMutes.$inferSelect;
 
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;

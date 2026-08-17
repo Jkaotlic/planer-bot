@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
 import { getShift } from "../repo/shifts";
 import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry } from "./handover-service";
+import { createHandoverMessenger } from "./handover-messenger";
+import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { setNoticeMuted } from "../repo/notice-prefs";
 import type { Db } from "../db/client";
 
 const CONFIG = { teamTz: "Europe/Moscow" } as const;
@@ -57,6 +61,29 @@ function sickLeave(db: TestDb, employeeId: number, date: string, endDate: string
 
 function auditTypes(db: TestDb): string[] {
   return db.select().from(auditLog).all().map((row) => row.type);
+}
+
+/** Настоящий бот-заглушка: нужен там, где тест проверяет не «кому из
+ *  доменных ролей ушло», а «дошло ли до конкретного chat_id» — то есть когда
+ *  между отправителем и `sendMessage` стоит `notifyAdmins`, а не фейковый
+ *  `messenger` из `deps()` выше. */
+function testBot() {
+  const bot = new Bot("12345:tok");
+  bot.botInfo = {
+    id: 42,
+    is_bot: true,
+    first_name: "P",
+    username: "p_bot",
+    can_join_groups: false,
+    can_read_all_group_messages: false,
+    supports_inline_queries: false,
+  } as unknown as typeof bot.botInfo;
+  const wire: { chat_id: number | string; text: string }[] = [];
+  bot.api.config.use((_prev, method, payload) => {
+    if (method === "sendMessage") wire.push(payload as { chat_id: number | string; text: string });
+    return { ok: true, result: {} } as any;
+  });
+  return { bot, wire };
 }
 
 beforeEach(() => {
@@ -348,5 +375,52 @@ describe("cancelling", () => {
 
     expect(getHandover(db, handover!.id)?.status).toBe("taken");
     expect(getShift(db, work.id)?.employeeId).toBe(igor);
+  });
+});
+
+// Замечание с ревью Задачи 1: пока `admins` и `adminsAlways` вели себя
+// одинаково, тестовый `deps()` выше складывал оба в один список с одним тегом
+// «admins» — и разницу между ними никто не видел. Она реальна только через
+// настоящий `createHandoverMessenger` поверх настоящего `notifyAdmins` /
+// `notifyAdminsAlways`, поэтому здесь — живой grammy-бот, а не фейковый
+// messenger.
+describe("выключенный вид фильтрует «забрали», но не эскалацию", () => {
+  it("админ без «передач смен» не видит взятую смену, но видит эскалацию", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i-anya", isAdmin: true });
+    linkTelegramAccount(db, "i-anya", 111);
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    setNoticeMuted(db, anya.id, "handovers", true);
+
+    const { bot, wire } = testBot();
+    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db) };
+
+    // Обычное «смену забрали»: Марк свободен 12-го, поэтому передача не
+    // эскалирует при рождении — эскалация ушла бы через adminsAlways и
+    // смазала бы проверку.
+    const sick = sickLeave(db, igor, "2026-08-12", "2026-08-12");
+    shift(db, igor, "2026-08-12");
+    const [handover] = await startHandovers(realDeps, { sickEntry: sick, employeeId: igor });
+    expect(handover!.status).toBe("offered");
+    await takeHandover(realDeps, handover!.id, mark);
+
+    expect(wire.some((m) => m.chat_id === 111)).toBe(false);
+
+    wire.length = 0;
+
+    // Эскалация: 13-го заняты все, кроме самого Игоря, — свободных нет,
+    // `startHandovers` эскалирует при рождении через `adminsAlways`, и её мут
+    // не касается. Аня — тоже кандидат по умолчанию (админ, но не выключена
+    // из обменов), поэтому и её нужно занять, иначе передача снова уйдёт
+    // одному свободному человеку, а не эскалирует.
+    const sick2 = sickLeave(db, igor, "2026-08-13", "2026-08-13");
+    shift(db, igor, "2026-08-13");
+    shift(db, mark, "2026-08-13");
+    shift(db, anya.id, "2026-08-13");
+    const [handover2] = await startHandovers(realDeps, { sickEntry: sick2, employeeId: igor });
+
+    expect(handover2!.status).toBe("fanned");
+    expect(wire.some((m) => m.chat_id === 111)).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins, listActive, getEmployeeById } from "../repo/employees";
+import { isNoticeMuted } from "../repo/notice-prefs";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
 import type { OutsidePoolFact } from "../swap/duty-notice";
@@ -293,6 +294,10 @@ export async function notifyHandoverFan(
 export async function notifyAdmins(bot: Bot, db: Db, kind: AdminNoticeKind, text: string): Promise<void> {
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
+    // Единственное место на весь проект, где эта проверка делается. Если она
+    // понадобится где-то ещё — значит, письмо шлют мимо `notifyAdmins`, и чинить
+    // надо это, а не копировать условие.
+    if (isNoticeMuted(db, admin.id, kind)) continue;
     try {
       await bot.api.sendMessage(admin.telegramUserId, text);
     } catch (err) {
