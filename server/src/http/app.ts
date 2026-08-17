@@ -8,6 +8,7 @@ import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
+import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
@@ -181,7 +182,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (/FOREIGN KEY/i.test(msg)) return c.json({ error: "invalid_reference" }, 400);
-    console.error("unhandled error:", err);
+    // Через редактор, как весь остальной сервер: сюда попадает ЛЮБАЯ ошибка
+    // роута, и если однажды кто-то дёрнет `bot.api.*` прямо из обработчика (а не
+    // через `notify.ts`), в лог уедет полный URL запроса к Telegram вместе с
+    // токеном. Стек печатается тоже редактированным — он и нужен, чтобы понять,
+    // где упало.
+    console.error("unhandled error:", redactSecrets(err instanceof Error ? (err.stack ?? msg) : msg));
     return c.json({ error: "internal" }, 500);
   });
 
