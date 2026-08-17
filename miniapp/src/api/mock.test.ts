@@ -21,6 +21,8 @@ import {
   mockGetNoticePrefs,
   mockSetNoticePref,
   mockSendAnnouncement,
+  mockGetBugReports,
+  mockResolveBugReport,
   MOCK_ME,
 } from "./mock";
 
@@ -418,5 +420,43 @@ describe("mockSendAnnouncement", () => {
 
   it("пустой текст отклоняется — так же, как это делает сервер", async () => {
     await expect(mockSendAnnouncement("   ", "all")).rejects.toThrow("Текст объявления пустой");
+  });
+});
+
+describe("mockGetBugReports / mockResolveBugReport", () => {
+  afterEach(async () => {
+    // Фикстура живёт в модульном массиве — вернуть её в стартовое состояние,
+    // иначе тест, что дёрнул resolve, протечёт в соседний (id 1 открыт, id 2 разобран).
+    await mockResolveBugReport(1, false);
+    await mockResolveBugReport(2, true);
+  });
+
+  it("status=open прячет разобранные", async () => {
+    const rows = await mockGetBugReports("open");
+    expect(rows.map((r) => r.id)).toEqual([1]);
+  });
+
+  it("status=all отдаёт всё, свежие сверху — тем же порядком, что и сервис", async () => {
+    const rows = await mockGetBugReports("all");
+    expect(rows.map((r) => r.id)).toEqual([1, 2]);
+  });
+
+  it("resolve проставляет автора и время и обратим", async () => {
+    const resolved = await mockResolveBugReport(1, true);
+    expect(resolved.id).toBe(1);
+    expect(resolved.resolvedAt).not.toBeNull();
+
+    const afterResolve = await mockGetBugReports("all");
+    const row = afterResolve.find((r) => r.id === 1)!;
+    expect(row.resolvedByName).toBe(MOCK_ME.displayName);
+    expect((await mockGetBugReports("open")).map((r) => r.id)).not.toContain(1);
+
+    const reopened = await mockResolveBugReport(1, false);
+    expect(reopened.resolvedAt).toBeNull();
+    expect((await mockGetBugReports("open")).map((r) => r.id)).toContain(1);
+  });
+
+  it("несуществующий id — отказ, а не тихий успех", async () => {
+    await expect(mockResolveBugReport(999, true)).rejects.toThrow();
   });
 });

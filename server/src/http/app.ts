@@ -34,6 +34,7 @@ import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notic
 import { createNoticeBuffer } from "../schedule/notice-buffer";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
+import { listBugReports, resolveBugReport } from "../bugs/bug-service";
 import {
   notifyUser,
   notifyAdmins,
@@ -708,6 +709,49 @@ export function createApp(deps: AppDeps): Hono<Env> {
         payload: row.payload,
       })),
     });
+  });
+
+  /**
+   * Багрепорты списком — ради этого и заводилась таблица: в чате сообщение
+   * тонет за сутки, здесь оно остаётся, пока кто-то не отметит «Разобрал».
+   *
+   * `requireAdmin`, а не `requireAuth`: это свободный текст живого человека,
+   * и видеть чужие жалобы работнику незачем.
+   */
+  app.get("/api/admin/bug-reports", requireAdmin(db, config.jwtSecret), (c) => {
+    const status = c.req.query("status") ?? "open";
+    if (status !== "open" && status !== "all") {
+      return c.json({ error: "status должен быть open или all" }, 400);
+    }
+    const reports = listBugReports(db, status);
+    return c.json({
+      reports: reports.map(({ report, authorName, resolvedByName }) => ({
+        id: report.id,
+        authorName,
+        text: report.text,
+        createdAt: report.createdAt,
+        resolvedAt: report.resolvedAt,
+        resolvedByName,
+      })),
+    });
+  });
+
+  /**
+   * «Разобрал» / «вернуть в работу» — переключатель, тем же узором, что
+   * «Собрали, закрыть» у сборов: неотменяемое нажатие не стоит ничего, а
+   * промах отправляет баг обратно в список, а не теряет его.
+   *
+   * `resolveBugReport` сам пишет строку в журнал — второй `recordAudit` здесь
+   * задвоил бы событие.
+   */
+  app.post("/api/admin/bug-reports/:id/resolve", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { resolved?: unknown };
+    if (typeof body.resolved !== "boolean") {
+      return c.json({ error: "resolved должен быть true или false" }, 400);
+    }
+    const updated = resolveBugReport(db, Number(c.req.param("id")), c.get("auth").employeeId, body.resolved, new Date());
+    if (!updated) return c.json({ error: "not_found" }, 404);
+    return c.json({ id: updated.id, resolvedAt: updated.resolvedAt });
   });
 
   /** «Кто сколько отдежурил» — people × kinds over a period. */
