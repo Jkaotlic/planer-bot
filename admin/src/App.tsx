@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { pluralRecords, rosterImportSummaryLine } from "@planer/shared";
 import {
   apiClient,
   AuthRequiredError,
@@ -74,15 +75,6 @@ export function rosterImportBlocker(state: Pick<RosterImportState, "preview" | "
   return validateRosterResolutions(state.resolutions);
 }
 
-/** "1 запись" / "2 записи" / "5 записей" — the feedback line reads as Russian, not as a log. */
-export function pluralRecords(count: number): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return `${count} записей`;
-  if (mod10 === 1) return `${count} запись`;
-  if (mod10 >= 2 && mod10 <= 4) return `${count} записи`;
-  return `${count} записей`;
-}
 
 /** App shell: sidebar nav + top bar + the schedule grid (this task's scope). */
 export function App() {
@@ -284,17 +276,14 @@ export function App() {
     // то есть в никуда. `scheduleError` — то же место, где уже показывают отказ
     // загрузки расписания, поэтому отказ здесь не теряется молча, как раньше.
     setRosterImport(null);
-    const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
-    if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
-    if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
-    if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
-    // Mirror of `summaryLine` in miniapp/src/screens/admin/AdminRosterCsv.tsx.
-    const expired = summary.swapsExpired;
-    const tail = expired > 0
-      ? `. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
-      : "";
-    const base = `CSV загружен: ${parts.join(", ")}${tail}`;
-    setRosterNotice({ kind: "success", text: withNotifyNotice(base, summary.notified) });
+    // Одна сводка на обе консоли (`@planer/shared`). Здесь была своя сборка с
+    // комментарием «Mirror of `summaryLine`», и зеркалом она не была: хвоста про
+    // нераспознанные клетки в ней не хватало, то есть после файла со знаками «?»
+    // консоль говорила только «CSV загружен».
+    setRosterNotice({
+      kind: "success",
+      text: withNotifyNotice(rosterImportSummaryLine(summary), summary.notified),
+    });
     try {
       await Promise.all([
         refreshEmployees(),
