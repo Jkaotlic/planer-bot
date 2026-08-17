@@ -15,8 +15,13 @@ import { runHandoverTick } from "./handover/handover-tick";
 import { createHandoverMessenger } from "./handover/handover-messenger";
 import { teamNow } from "./util/team-time";
 import { safeErrorMessage } from "./util/safe-error";
+import { installFatalHandlers } from "./util/fatal-log";
 import { runTicksIndependently } from "./util/ticks";
 import type { Env } from "./http/middleware";
+
+// Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
+// печатает Node сам и несёт в логе токен бота открытым текстом.
+installFatalHandlers();
 
 const config = loadConfig(process.env);
 const { db, sqlite } = openDb(config.databaseUrl);
