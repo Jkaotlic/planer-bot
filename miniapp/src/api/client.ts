@@ -65,6 +65,7 @@ import {
   mockSetSwapsLock,
   mockGetNoticePrefs,
   mockSetNoticePref,
+  mockSendAnnouncement,
   employeesMock,
 } from "./mock";
 
@@ -293,6 +294,22 @@ export interface NoticePref {
 
 export interface NoticePrefs {
   kinds: NoticePref[];
+}
+
+/** Зеркалит `ANNOUNCEMENT_TEXT_MAX` из `server/src/announcements/announcement-service.ts`.
+ *  Не импортируется оттуда: тот модуль тянет `grammy`, серверную зависимость,
+ *  которой не место в бандле мини-аппа. Разойдись значения — счётчик соврёт на
+ *  пару символов, но 400 всё равно решает сервер; здесь только подсказка. */
+export const ANNOUNCEMENT_TEXT_MAX = 2000;
+
+/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/admin/announcements`. */
+export type AnnouncementAudience = "all" | number[];
+
+/** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
+export interface AnnouncementResult {
+  delivered: number;
+  intended: number;
+  unreachable: string[];
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
@@ -612,6 +629,9 @@ export interface ApiClient {
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
+  /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
+   *  не даёт, текст анонса и так ровно тот, что напечатал админ. */
+  sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -1112,6 +1132,8 @@ export const realClient: ApiClient = {
   getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
   setNoticePref: (kind, enabled) =>
     authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
+  sendAnnouncement: (text, audience) =>
+    authorizedPostJson<AnnouncementResult>("/api/admin/announcements", { text, audience }),
 };
 
 const devClient: ApiClient = {
@@ -1173,6 +1195,7 @@ const devClient: ApiClient = {
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
   getNoticePrefs: () => mockGetNoticePrefs(),
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
+  sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
 };
 
 /**

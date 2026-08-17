@@ -20,6 +20,7 @@ import {
   mockSaveBirthdayRound,
   mockGetNoticePrefs,
   mockSetNoticePref,
+  mockSendAnnouncement,
   MOCK_ME,
 } from "./mock";
 
@@ -371,5 +372,51 @@ describe("уведомления администратора: mockGetNoticePref
     await mockSetNoticePref("swaps", true);
     const afterUnmute = await mockGetNoticePrefs();
     expect(afterUnmute.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(true);
+  });
+});
+
+describe("mockSendAnnouncement", () => {
+  it("считает адресатов по тому же списку, что отдаёт getAdminEmployees, а не по своему", async () => {
+    // Не сверяем с числами из фикстуры напрямую: если фикстуру когда-нибудь
+    // подвинут, тест должен остаться верным описанию — «мок использует тот же
+    // источник», а не «в фикстуре сейчас пять активных».
+    // «Всем» набирает пул из активных — так же, как `listActive` на сервере
+    // (`announcementRecipients`): архивный в этот пул не попадает вовсе, и
+    // недостижимым его «Всем» не назовёт — назвать его может только явный выбор.
+    const roster = await employeesMock.getAdminEmployees();
+    const pool = roster.filter((e) => e.isActive && e.id !== MOCK_ME.id);
+    const expectedReachable = pool.filter((e) => e.telegramUserId != null);
+    const expectedUnreachableNames = pool
+      .filter((e) => e.telegramUserId == null)
+      .map((e) => e.displayName)
+      .sort();
+
+    const result = await mockSendAnnouncement("Текст анонса", "all");
+
+    expect(result.delivered).toBe(expectedReachable.length);
+    expect(result.intended).toBe(expectedReachable.length);
+    expect([...result.unreachable].sort()).toEqual(expectedUnreachableNames);
+  });
+
+  it("«Всем» не зовёт отправителя — он ни в счёте, ни в списке недостижимых", async () => {
+    const result = await mockSendAnnouncement("Текст анонса", "all");
+    expect(result.unreachable).not.toContain(MOCK_ME.displayName);
+  });
+
+  it("явно выбранный архивный или без телеграма попадает в отчёт поимённо, а не пропадает", async () => {
+    // id 3 — «Марк Волков», активен, но без телеграма; id 6 — «Света Орлова», в архиве.
+    const result = await mockSendAnnouncement("Текст анонса", [3, 6, 4]);
+    expect(result.delivered).toBe(1); // только id 4 достижим
+    expect(result.unreachable.sort()).toEqual(["Марк Волков", "Света Орлова"]);
+  });
+
+  it("повтор id в списке не удваивает адресата", async () => {
+    const result = await mockSendAnnouncement("Текст анонса", [4, 4]);
+    expect(result.delivered).toBe(1);
+    expect(result.intended).toBe(1);
+  });
+
+  it("пустой текст отклоняется — так же, как это делает сервер", async () => {
+    await expect(mockSendAnnouncement("   ", "all")).rejects.toThrow("Текст объявления пустой");
   });
 });

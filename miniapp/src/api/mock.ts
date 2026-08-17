@@ -24,6 +24,8 @@ import type {
   NewCollectionInput,
   CollectionPatch,
   NoticePrefs,
+  AnnouncementAudience,
+  AnnouncementResult,
   WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
@@ -1540,4 +1542,28 @@ export async function mockSetNoticePref(kind: string, enabled: boolean): Promise
   if (enabled) mockMutedKinds.delete(kind);
   else mockMutedKinds.add(kind);
   return { kind, enabled };
+}
+
+/**
+ * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
+ * — иначе экран в dev показал бы одних людей, а мок отчитывался бы про других.
+ * Правила ровно те, что у сервера (`announcementRecipients`): архивный или без
+ * телеграма, даже выбранный явно, попадает в пул и в `unreachable` поимённо, а
+ * не пропадает молча; отправитель исключается всегда.
+ */
+export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
+  await delay(300);
+  if (!text.trim()) throw new Error("Текст объявления пустой");
+
+  const pool =
+    audience === "all"
+      ? EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id)
+      : [...new Set(audience)]
+          .map((id) => EMPLOYEES.find((e) => e.id === id))
+          .filter((e): e is Employee => e != null && e.id !== MOCK_ME.id);
+
+  const reachable = pool.filter((e) => e.isActive && e.telegramUserId != null);
+  const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
+
+  return { delivered: reachable.length, intended: reachable.length, unreachable };
 }
