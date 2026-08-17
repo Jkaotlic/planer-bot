@@ -454,6 +454,13 @@ describe("mockGetBugReports / mockResolveBugReport", () => {
     const reopened = await mockResolveBugReport(1, false);
     expect(reopened.resolvedAt).toBeNull();
     expect((await mockGetBugReports("open")).map((r) => r.id)).toContain(1);
+    // Вторая половина обратимости, и проверяется она отдельно от `resolvedAt`
+    // намеренно: мок, обнуляющий время, но забывающий автора, оставил бы запись
+    // «снова открытой» с чужим именем разобравшего — и dev-экран разошёлся бы с
+    // сервером ровно тем полем, которого на нём не видно. Сервер этот случай
+    // стережёт (`bug-service.test.ts`), мок до сих пор — нет.
+    const rowAfterReopen = (await mockGetBugReports("all")).find((r) => r.id === 1)!;
+    expect(rowAfterReopen.resolvedByName).toBeNull();
   });
 
   it("несуществующий id — отказ, а не тихий успех", async () => {
