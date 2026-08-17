@@ -131,6 +131,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       await notifyAdmins(
         bot,
         db,
+        "self_entries",
         selfEntryCreatedText(nameOf(db, employeeId) ?? "Работник", entry, riskLines(employeeId, entry)),
       );
     }
@@ -187,6 +188,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       await notifyAdmins(
         bot,
         db,
+        "self_entries",
         selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", existing, updated, riskLines(employeeId, updated)),
       );
     }
@@ -233,7 +235,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     }
 
     if (bot) {
-      await notifyAdmins(bot, db, selfEntryDeletedText(nameOf(db, employeeId) ?? "Работник", existing));
+      await notifyAdmins(bot, db, "self_entries", selfEntryDeletedText(nameOf(db, employeeId) ?? "Работник", existing));
     }
     return c.json({ ok: true });
   });

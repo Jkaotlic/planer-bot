@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import type { Db } from "../db/client";
 import { getEmployeeById } from "../repo/employees";
-import { notifyAdmins, notifyHandoverFan, notifyHandoverOffer, notifyUser } from "../bot/notify";
+import { notifyAdmins, notifyAdminsAlways, notifyHandoverFan, notifyHandoverOffer, notifyUser } from "../bot/notify";
 import type { HandoverMessenger } from "./handover-service";
 
 /**
@@ -31,7 +31,10 @@ export function createHandoverMessenger(bot: Bot | null, db: Db): HandoverMessen
       if (bot && chat != null) await notifyUser(bot, chat, text);
     },
     async admins(text) {
-      if (bot) await notifyAdmins(bot, db, text);
+      if (bot) await notifyAdmins(bot, db, "handovers", text);
+    },
+    async adminsAlways(text) {
+      if (bot) await notifyAdminsAlways(bot, db, text);
     },
   };
 }

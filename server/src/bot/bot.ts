@@ -641,6 +641,7 @@ export function createBot(deps: BotDeps): Bot {
       await notifyAdmins(
         bot,
         db,
+        "swaps",
         swapAcceptedAdminText(
           swapAuditPayload(db, res.request),
           outsidePoolFacts(db, res.request).map(dutyNoticeForAdmins),
@@ -722,6 +723,7 @@ export function createBot(deps: BotDeps): Bot {
     await notifyAdmins(
       bot,
       db,
+      "weekend",
       action === "confirm" ? weekendConfirmedAdminText(me.displayName, slotLine) : weekendDeclinedAdminText(me.displayName, slotLine),
     );
 

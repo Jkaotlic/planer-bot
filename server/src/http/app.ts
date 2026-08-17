@@ -883,6 +883,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       await notifyAdmins(
         bot,
         db,
+        "swaps",
         swapAcceptedAdminText(
           swapAuditPayload(res.request),
           outsidePoolFacts(db, res.request).map(dutyNoticeForAdmins),
@@ -1109,7 +1110,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       employeeId: c.get("auth").employeeId, employeeName: name,
     });
     if (bot) {
-      await notifyAdmins(bot, db, weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
+      await notifyAdmins(bot, db, "weekend", weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
   });
@@ -1125,7 +1126,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       employeeId: c.get("auth").employeeId, employeeName: name,
     });
     if (bot) {
-      await notifyAdmins(bot, db, weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
+      await notifyAdmins(bot, db, "weekend", weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
   });
