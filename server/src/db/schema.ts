@@ -1,6 +1,14 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { SwapStatus, EntryCategory, TemplateAccent, AuditType, CollectionKind, HandoverStatus } from "@planer/shared";
+import type {
+  SwapStatus,
+  EntryCategory,
+  TemplateAccent,
+  AuditType,
+  CollectionKind,
+  HandoverStatus,
+  AdminNoticeKind,
+} from "@planer/shared";
 
 const createdAt = () =>
   integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`);
@@ -281,6 +289,61 @@ export const appSettings = sqliteTable("app_settings", {
   updatedByEmployeeId: integer().references(() => employees.id),
   updatedAt: integer({ mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
 });
+
+/**
+ * Какие виды писем админ себе выключил.
+ *
+ * СТРОКА ЕСТЬ — ВЫКЛЮЧЕНО, СТРОКИ НЕТ — ВКЛЮЧЕНО. Тот же приём, что в
+ * `app_settings`: миграция ничего не засеивает, и база, не знавшая этой фичи,
+ * ведёт себя ровно как вчера. Обратная запись («включено») означала бы, что до
+ * первого захода в настройки админу не приходит ничего.
+ *
+ * Отдельная таблица, а не колонки в `employees`: шестой вид потребовал бы
+ * миграции таблицы, вокруг которой крутится вся система.
+ */
+export const notificationMutes = sqliteTable(
+  "notification_mutes",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    employeeId: integer().notNull().references(() => employees.id),
+    kind: text().$type<AdminNoticeKind>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("notification_mute_unique").on(t.employeeId, t.kind)],
+);
+
+export type NotificationMute = typeof notificationMutes.$inferSelect;
+
+/**
+ * Кому бот задал вопрос «что не так» и ждёт ответа.
+ *
+ * `employeeId` первичным ключом: окно одно на человека, второе нажатие заменяет
+ * первое. Две строки с разными `promptMessageId` означали бы, что непонятно,
+ * на какое приглашение смотреть.
+ *
+ * В базе, а не в памяти процесса: рестарт сервиса здесь и есть деплой, случается
+ * регулярно, и молча съеденный багрепорт — худшее, что эта кнопка может сделать.
+ * Человек уверен, что сообщил; админ ничего не получил; узнать неоткуда.
+ */
+export const bugReportPending = sqliteTable("bug_report_pending", {
+  employeeId: integer().primaryKey().references(() => employees.id),
+  /** На что смотреть, если человек ответит реплаем, а не просто следующим сообщением. */
+  promptMessageId: integer().notNull(),
+  createdAt: createdAt(),
+});
+
+/** Жалоба на бота от живого человека. Своя таблица, а не строка в журнале:
+ *  у неё есть жизнь после доставки — «новый» и «разобран». */
+export const bugReports = sqliteTable("bug_reports", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  employeeId: integer().notNull().references(() => employees.id),
+  text: text().notNull(),
+  createdAt: createdAt(),
+  resolvedAt: integer({ mode: "timestamp" }),
+  resolvedByEmployeeId: integer().references(() => employees.id),
+});
+
+export type BugReport = typeof bugReports.$inferSelect;
 
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;

@@ -23,6 +23,10 @@ import type {
   CollectionPreview,
   NewCollectionInput,
   CollectionPatch,
+  NoticePrefs,
+  AnnouncementAudience,
+  AnnouncementResult,
+  BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
   ShiftCountsReport,
@@ -52,6 +56,8 @@ import {
   compareCollections,
   selfEntryRefusal,
   selfEntryEditRefusal,
+  ADMIN_NOTICE_KINDS,
+  ADMIN_NOTICE_LABELS,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1512,4 +1518,112 @@ export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult>
   await delay(250);
   mockSwapsLocked = locked;
   return { locked, cancelled: locked ? 2 : 0, delivered: 5, intended: 6 };
+}
+
+// --- Настройки: что писать админу --------------------------------------------
+
+/** Живёт между вызовами по той же причине, что и `mockSwapsLocked` выше: нажал
+ *  тумблер — и следующий getNoticePrefs должен помнить об этом, без перезагрузки. */
+const mockMutedKinds = new Set<string>();
+
+export async function mockGetNoticePrefs(): Promise<NoticePrefs> {
+  await delay(150);
+  return {
+    kinds: ADMIN_NOTICE_KINDS.map((kind) => ({
+      kind,
+      title: ADMIN_NOTICE_LABELS[kind].title,
+      hint: ADMIN_NOTICE_LABELS[kind].hint,
+      enabled: !mockMutedKinds.has(kind),
+    })),
+  };
+}
+
+export async function mockSetNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }> {
+  await delay(200);
+  if (enabled) mockMutedKinds.delete(kind);
+  else mockMutedKinds.add(kind);
+  return { kind, enabled };
+}
+
+/**
+ * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
+ * — иначе экран в dev показал бы одних людей, а мок отчитывался бы про других.
+ * Правила ровно те, что у сервера (`announcementRecipients`): архивный или без
+ * телеграма, даже выбранный явно, попадает в пул и в `unreachable` поимённо, а
+ * не пропадает молча; отправитель исключается всегда.
+ */
+export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
+  await delay(300);
+  if (!text.trim()) throw new Error("Текст объявления пустой");
+
+  const pool =
+    audience === "all"
+      ? EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id)
+      : [...new Set(audience)]
+          .map((id) => EMPLOYEES.find((e) => e.id === id))
+          .filter((e): e is Employee => e != null && e.id !== MOCK_ME.id);
+
+  const reachable = pool.filter((e) => e.isActive && e.telegramUserId != null);
+  const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
+
+  return { delivered: reachable.length, intended: reachable.length, unreachable };
+}
+
+// --- Багрепорты ---------------------------------------------------------
+
+/** Живёт между вызовами по той же причине, что `mockSwapsLocked` выше: отметил
+ *  «Разобрал» — и следующий `getBugReports` должен помнить об этом. */
+interface MockBugReport {
+  id: number;
+  authorId: number;
+  text: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedById: number | null;
+}
+
+const MOCK_BUG_REPORTS: MockBugReport[] = [
+  {
+    id: 1,
+    authorId: 3,
+    text: "Кнопка «Обмен» не открывается на Андроиде — тап проваливается сквозь карточку",
+    createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    resolvedAt: null,
+    resolvedById: null,
+  },
+  {
+    id: 2,
+    authorId: 5,
+    text: "В расписании на выходные не видно моей смены, хотя в боте пришло напоминание",
+    createdAt: new Date(Date.now() - 26 * 3600_000).toISOString(),
+    resolvedAt: new Date(Date.now() - 20 * 3600_000).toISOString(),
+    resolvedById: 1,
+  },
+];
+
+function bugReportView(report: MockBugReport): BugReportRow {
+  return {
+    id: report.id,
+    authorName: personName(report.authorId),
+    text: report.text,
+    createdAt: report.createdAt,
+    resolvedAt: report.resolvedAt,
+    resolvedByName: report.resolvedById != null ? personName(report.resolvedById) : null,
+  };
+}
+
+export async function mockGetBugReports(status: "open" | "all"): Promise<BugReportRow[]> {
+  await delay(200);
+  const rows = status === "open" ? MOCK_BUG_REPORTS.filter((r) => r.resolvedAt == null) : MOCK_BUG_REPORTS;
+  // Свежие сверху — тем же порядком, что и `listBugReports` на сервере.
+  return [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id).map(bugReportView);
+}
+
+export async function mockResolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }> {
+  await delay(200);
+  const report = MOCK_BUG_REPORTS.find((r) => r.id === id);
+  if (!report) throw new Error("Багрепорт не найден");
+  report.resolvedAt = resolved ? new Date().toISOString() : null;
+  report.resolvedById = resolved ? MOCK_ME.id : null;
+  return { id: report.id, resolvedAt: report.resolvedAt };
 }

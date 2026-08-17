@@ -17,15 +17,17 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
+import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import {
   notifyUser,
   notifyAdmins,
+  notifyBugReport,
   swapAcceptedText,
   swapDeclinedText,
   swapAcceptedAdminText,
@@ -38,6 +40,7 @@ import {
 import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { outsidePoolFacts } from "../swap/duty-notice";
 import { safeErrorMessage } from "../util/safe-error";
+import { openBugPrompt, getBugPending, clearBugPending, shouldCapture, submitBugReport, resolveBugReport } from "../bugs/bug-service";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
 // plain Telegram chat text — Telegram syncs history to every signed-in device
@@ -148,7 +151,8 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
 }
 
 /**
- * Три входа в мини-апп: сам список смен и две формы самозаписи.
+ * Входы в мини-апп: список смен, две формы самозаписи и — только у админов —
+ * экран анонсов.
  *
  * Именно inline-кнопками, и это единственный способ, а не выбор оформления.
  * Мини-апп, запущенный из кнопки *обычной* клавиатуры, не получает `initData` —
@@ -161,14 +165,17 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
  * самим Telegram, `initData` приезжает именно в нём.
  *
  * Формы во второй строке, а не в первой: смены смотрят каждый день, а
- * больничный ставят несколько раз в год.
+ * больничный ставят несколько раз в год. Функция не знает сама, кто перед
+ * ней — решает вызывающий (`sendMiniApp`), тем же правилом, что и `menuFor`.
  */
-export function miniAppKeyboard(publicUrl: string): InlineKeyboard {
-  return new InlineKeyboard()
+export function miniAppKeyboard(publicUrl: string, opts: { isAdmin: boolean }): InlineKeyboard {
+  const kb = new InlineKeyboard()
     .webApp("📋 Открыть смены", `${publicUrl}/app/`)
     .row()
     .webApp("🤒 Больничный", `${publicUrl}/app/?screen=sick`)
     .webApp("📌 Мероприятие", `${publicUrl}/app/?screen=event`);
+  if (opts.isAdmin) kb.row().webApp("📣 Анонс", `${publicUrl}/app/?screen=announce`);
+  return kb;
 }
 
 export function createBot(deps: BotDeps): Bot {
@@ -423,7 +430,11 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
       return;
     }
-    await ctx.reply("Что открыть:", { reply_markup: miniAppKeyboard(config.publicUrl) });
+    await ctx.reply("Что открыть:", {
+      reply_markup: miniAppKeyboard(config.publicUrl, {
+        isAdmin: who.me.isAdmin || config.adminTelegramIds.includes(from.id),
+      }),
+    });
   }
 
   /** Monday of the week `offset` weeks from the current one, in team time. */
@@ -475,6 +486,52 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("week", (ctx) => sendWeek(ctx));
 
   /**
+   * «Сообщить о проблеме»: бот спрашивает, человек отвечает.
+   *
+   * `force_reply` — не украшение: Telegram сам ставит курсор в поле ввода и
+   * привязывает ответ к этому сообщению, поэтому обычный путь не требует от
+   * человека ничего, кроме «набрать и отправить». Окно в базе — страховка на
+   * случай, когда он свернул чат и написал отдельным сообщением.
+   */
+  async function startBugReport(ctx: Context): Promise<void> {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    const sent = await ctx.reply(
+      "Опиши, что не так — одним сообщением. Чем конкретнее, тем быстрее починим.",
+      { reply_markup: { force_reply: true, input_field_placeholder: "Что сломалось?" } },
+    );
+    openBugPrompt(db, who.me.id, sent.message_id, new Date());
+  }
+
+  /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
+   *  разбираются раньше и сюда не доходят. */
+  async function captureBugReport(ctx: Context, text: string): Promise<void> {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) return;
+    const pending = getBugPending(db, who.me.id);
+    if (!pending) return;
+    if (!shouldCapture(pending, ctx.msg?.reply_to_message?.message_id, new Date())) return;
+
+    const res = submitBugReport(db, who.me.id, text, new Date());
+    if (!res.ok) {
+      await ctx.reply(res.reason);
+      return;
+    }
+    // Аудит уже записал `submitBugReport` — второй записи здесь не нужно,
+    // иначе одна жалоба легла бы в журнал дважды. Сверено с bug-service.ts.
+    clearBugPending(db, who.me.id);
+    await ctx.reply("Записал, спасибо 🙏 Разберёмся.");
+    await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
+  }
+
+  /**
    * Нажатая кнопка постоянной клавиатуры. Telegram присылает её обычным
    * текстовым сообщением, поэтому единственный ключ — точное совпадение метки.
    * Кнопка «Мои смены» сюда не попадает: она `web_app`, её нажатие открывает
@@ -499,6 +556,10 @@ export function createBot(deps: BotDeps): Bot {
     else if (text === BTN_MY_SHIFTS) await sendMiniApp(ctx);
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
+    else if (text === BTN_BUG) await startBugReport(ctx);
+    // Последним и только здесь: всё, что выше, — метки кнопок, и они всегда кнопки.
+    // На остальное бот молчит, как молчал, — если окна ожидания нет.
+    else await captureBugReport(ctx, text);
   });
 
   /**
@@ -592,6 +653,66 @@ export function createBot(deps: BotDeps): Bot {
     await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: remindersKeyboard(enabled) }));
   });
 
+  /**
+   * «Не писать мне про это» под админским уведомлением.
+   *
+   * Как и у напоминаний, вид берётся из callback-данных, а человек — из того,
+   * кто нажал: чужие уведомления выключить нечем. Проверка на админа нужна
+   * отдельно — кнопка живёт в чате вечно, а админа могли разжаловать.
+   */
+  bot.callbackQuery(/^notice:mute:([a-z_]+)$/, async (ctx) => {
+    const kind = ADMIN_NOTICE_KINDS.find((k) => k === ctx.match[1]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    if (!kind) {
+      await ctx.answerCallbackQuery({ text: "Такого вида уведомлений больше нет" });
+      return;
+    }
+    if (!who.me.isAdmin && !config.adminTelegramIds.includes(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это настройка администратора" });
+      return;
+    }
+    setNoticeMuted(db, who.me.id, kind, true);
+    await ctx.answerCallbackQuery({ text: "Больше не буду 🔕" });
+    // Существенное — до косметики: человек должен знать, где вернуть обратно.
+    await ctx.reply(
+      `«${ADMIN_NOTICE_LABELS[kind].title}» больше не пишу. Вернуть — в мини-аппе, «Админ» → «Настройки».`,
+    );
+    // Снимается только кнопка: текст уведомления по-прежнему нужен человеку.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  /**
+   * «Разобрал» под багрепортом.
+   *
+   * Проверка на админа — отдельно от `acting`, как и у `notice:mute` выше:
+   * кнопка живёт в чате Telegram вечно, а админа могли разжаловать.
+   */
+  bot.callbackQuery(/^bug:resolve:(\d+)$/, async (ctx) => {
+    const id = Number(ctx.match[1]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    if (!who.me.isAdmin && !config.adminTelegramIds.includes(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это может только админ" });
+      return;
+    }
+    // `resolveBugReport` уже пишет аудит сама (сверено с bug-service.ts) —
+    // второй вызов здесь задвоил бы запись.
+    const updated = resolveBugReport(db, id, who.me.id, true, new Date());
+    if (!updated) {
+      await ctx.answerCallbackQuery({ text: "Сообщение не найдено" });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Отметил ✅" });
+    await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {
     const m = ctx.match;
     const action = m[1] as "accept" | "decline";
@@ -641,6 +762,7 @@ export function createBot(deps: BotDeps): Bot {
       await notifyAdmins(
         bot,
         db,
+        "swaps",
         swapAcceptedAdminText(
           swapAuditPayload(db, res.request),
           outsidePoolFacts(db, res.request).map(dutyNoticeForAdmins),
@@ -722,6 +844,7 @@ export function createBot(deps: BotDeps): Bot {
     await notifyAdmins(
       bot,
       db,
+      "weekend",
       action === "confirm" ? weekendConfirmedAdminText(me.displayName, slotLine) : weekendDeclinedAdminText(me.displayName, slotLine),
     );
 

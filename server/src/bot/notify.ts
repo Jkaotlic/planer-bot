@@ -1,9 +1,11 @@
 import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
 import { listAdmins, listActive, getEmployeeById } from "../repo/employees";
+import { isNoticeMuted } from "../repo/notice-prefs";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
 import type { OutsidePoolFact } from "../swap/duty-notice";
+import type { AdminNoticeKind } from "@planer/shared";
 
 // --- Swap text builders ------------------------------------------------------
 //
@@ -124,14 +126,32 @@ export function weekendUnassignedText(slotLine: string): string {
   return `Тебя сняли с выходной смены: ${slotLine}. Если это неожиданно — спроси у админа.`;
 }
 
-export async function notifyUser(bot: Bot, telegramUserId: number, text: string): Promise<boolean> {
+/**
+ * `keyboard` — необязательный четвёртый параметр, а не новая функция: у
+ * `notifyUser` уже полтора десятка вызывающих без клавиатуры, и им незачем
+ * знать, что где-то ещё она есть. Опущенный аргумент — это `undefined`, то
+ * есть в точности прежнее поведение.
+ */
+export async function notifyUser(bot: Bot, telegramUserId: number, text: string, keyboard?: InlineKeyboard): Promise<boolean> {
   try {
-    await bot.api.sendMessage(telegramUserId, text);
+    await bot.api.sendMessage(telegramUserId, text, keyboard ? { reply_markup: keyboard } : undefined);
     return true;
   } catch (err) {
     console.error(`notifyUser: failed for ${telegramUserId}:`, safeErrorMessage(err));
     return false;
   }
+}
+
+/**
+ * Кнопка «выключить это письмо» — тот же билдер, которым `notifyAdmins`
+ * собирает свою клавиатуру, вынесенный наружу для писем, которые уходят не
+ * через неё (см. `birthday-notice.ts`: у них свой список адресатов —
+ * `adminRecipients`, а не все админы, — и свой цикл рассылки). Один билдер,
+ * чтобы строка колбэка `notice:mute:<kind>` не расходилась между местами,
+ * которые её собирают.
+ */
+export function noticeMuteKeyboard(kind: AdminNoticeKind): InlineKeyboard {
+  return new InlineKeyboard().text("🔕 Не писать мне про это", `notice:mute:${kind}`);
 }
 
 /**
@@ -281,13 +301,65 @@ export async function notifyHandoverFan(
   }
 }
 
-export async function notifyAdmins(bot: Bot, db: Db, text: string): Promise<void> {
+/**
+ * Письмо всем достижимым админам.
+ *
+ * `kind` — обязательный, и это главное в этой сигнатуре. Необязательный параметр
+ * со значением по умолчанию однажды дал бы девятый вызов, который молча нельзя
+ * выключить, и заметили бы это по жалобе. Здесь же tsc не даст добавить админское
+ * уведомление, не решив, к какому виду оно относится.
+ */
+export async function notifyAdmins(
+  bot: Bot,
+  db: Db,
+  kind: AdminNoticeKind,
+  text: string,
+  /** Кнопка про само событие — например «Разобрал» у багрепорта. Едет ПЕРВОЙ
+   *  строкой, над выключателем: она про то, что человек только что прочитал, а
+   *  выключатель — про поток вообще. */
+  action?: { text: string; data: string },
+): Promise<void> {
+  // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
+  // `notifyReminder`: за настройкой, о существовании которой не знаешь, не ходят.
+  // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
+  // него на экране.
+  const kb = new InlineKeyboard();
+  if (action) kb.text(action.text, action.data).row();
+  kb.text("🔕 Не писать мне про это", `notice:mute:${kind}`);
+  for (const admin of listAdmins(db)) {
+    if (admin.telegramUserId == null) continue;
+    // Единственное место на весь проект, где эта проверка делается. Если она
+    // понадобится где-то ещё — значит, письмо шлют мимо `notifyAdmins`, и чинить
+    // надо это, а не копировать условие.
+    if (isNoticeMuted(db, admin.id, kind)) continue;
+    try {
+      await bot.api.sendMessage(admin.telegramUserId, text, { reply_markup: kb });
+    } catch (err) {
+      console.error(`notifyAdmins(${kind}): failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
+    }
+  }
+}
+
+/** Багрепорт админам, с кнопкой «Разобрал». Через `notifyAdmins`, а не своим
+ *  циклом, — чтобы выключатель вида `bug_reports` работал и здесь. */
+export async function notifyBugReport(bot: Bot, db: Db, reportId: number, text: string): Promise<void> {
+  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` });
+}
+
+/**
+ * То же самое, но выключить это нельзя.
+ *
+ * Отдельная функция, а не флаг «невыключаемый вид», намеренно: читающий место
+ * вызова должен видеть, что письмо пройдёт сквозь любые настройки, не ходя за
+ * определением. Сегодня так уходит ровно одно — «смену никто не взял».
+ */
+export async function notifyAdminsAlways(bot: Bot, db: Db, text: string): Promise<void> {
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
     try {
       await bot.api.sendMessage(admin.telegramUserId, text);
     } catch (err) {
-      console.error(`notifyAdmins: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
+      console.error(`notifyAdminsAlways: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
   }
 }
