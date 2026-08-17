@@ -547,7 +547,25 @@ export interface UpcomingBirthday {
   campaign: Collection | null;
 }
 
+/**
+ * Всё, что нужно при открытии, одним ответом.
+ *
+ * Не «ещё один способ прочитать то же» — а способ не платить за семь соединений.
+ * Мини-апп открывают через облачный релей KeenDNS, у которого измеренное
+ * TLS-рукопожатие 1.5–6.8 с на каждое новое соединение и только HTTP/1.1.
+ */
+export interface Bootstrap {
+  me: Me;
+  myShifts: { shifts: Shift[]; today: string };
+  teamSchedule: TeamSchedule;
+  templates: Template[];
+  swaps: SwapRequest[];
+  weekendSlots: WeekendSlotView[];
+  weekendOffers: WeekendOffer[];
+}
+
 export interface ApiClient {
+  getBootstrap(from: string, to: string): Promise<Bootstrap>;
   getMe(): Promise<Me>;
   /** Turns this person's own shift reminders on or off. */
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
@@ -907,6 +925,29 @@ async function fetchSwaps(): Promise<SwapRequest[]> {
 }
 
 export const realClient: ApiClient = {
+  async getBootstrap(from, to) {
+    const raw = await authorizedGet<{
+      me: Me;
+      myShifts: { shifts: Shift[]; today: string };
+      teamSchedule: TeamSchedule;
+      templates: { templates: Template[] };
+      swaps: { swaps: SwapRequest[] };
+      weekendSlots: { slots: WeekendSlotView[] };
+      weekendOffers: { offers: WeekendOffer[] };
+    }>(`/api/bootstrap?from=${from}&to=${to}`);
+    // Части приходят в тех же обёртках, что у одиночных ручек, — распаковка
+    // здесь, чтобы экраны видели ровно те же формы, что и раньше.
+    return {
+      me: raw.me,
+      myShifts: raw.myShifts,
+      teamSchedule: raw.teamSchedule,
+      templates: raw.templates.templates,
+      swaps: raw.swaps.swaps,
+      weekendSlots: raw.weekendSlots.slots,
+      weekendOffers: raw.weekendOffers.offers,
+    };
+  },
+
   getMe: () => authorizedGet<Me>("/api/me"),
 
   async setRemindersEnabled(enabled) {
@@ -1159,6 +1200,18 @@ export const realClient: ApiClient = {
 };
 
 const devClient: ApiClient = {
+  async getBootstrap(from, to) {
+    // Через СВОИ ЖЕ методы, а не напрямую в мок-функции. Иначе подмена одной
+    // ручки (`vi.spyOn(apiClient, "getMyShifts")`) перестаёт влиять на старт, и
+    // экранные тесты начинают видеть данные дев-ростера вместо своей фикстуры —
+    // ровно это и случилось на четырёх тестах, когда старт стал одним запросом.
+    const [me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers] = await Promise.all([
+      this.getMe(), this.getMyShifts(), this.getTeamSchedule(from, to), this.getTemplates(),
+      this.getSwaps(), this.getWeekendSlots(), this.getWeekendOffers(),
+    ]);
+    return { me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers };
+  },
+
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),

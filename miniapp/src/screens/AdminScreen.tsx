@@ -9,8 +9,7 @@ import { AdminJournal } from "./admin/AdminJournal";
 import { AdminSettings } from "./admin/AdminSettings";
 import { SectionChips, SectionPanel } from "../components/SectionChips";
 import { toISODate } from "../lib/week";
-
-export type AdminSection = "schedule" | "weekend" | "employees" | "collections" | "announce" | "bugs" | "journal" | "settings";
+import type { AdminSection } from "./admin-section";
 
 const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "schedule", label: "Расписание" },
@@ -22,15 +21,6 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "journal", label: "Журнал" },
   { key: "settings", label: "Настройки" },
 ];
-
-/** Раздел, на котором открыться, если мини-апп запущен ссылкой из бота.
- *  Своя функция, а не `screenFromSearch`: та отвечает за формы-оверлеи
- *  (больничный, мероприятие), а это — про вкладку админа. Один параметр,
- *  но два разных вопроса к нему. */
-export function adminSectionFromSearch(search: string): AdminSection | null {
-  const value = new URLSearchParams(search).get("screen");
-  return value === "announce" ? "announce" : null;
-}
 
 /**
  * The admin-only "Админ" tab: a scrolling chip row over the admin surfaces
@@ -60,3 +50,5 @@ export function AdminScreen({ initialSection }: { initialSection?: AdminSection 
     </div>
   );
 }
+
+export default AdminScreen;

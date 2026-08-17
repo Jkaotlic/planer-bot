@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { adminSectionFromSearch } from "./AdminScreen";
+import { adminSectionFromSearch } from "./admin-section";
 
 describe("adminSectionFromSearch", () => {
   it("?screen=announce открывает раздел анонсов", () => {
