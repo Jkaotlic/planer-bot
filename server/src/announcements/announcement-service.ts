@@ -1,0 +1,79 @@
+import type { Bot } from "grammy";
+import { addressOf } from "@planer/shared";
+import type { Db } from "../db/client";
+import type { Employee } from "../db/schema";
+import { getEmployeeById, listActive } from "../repo/employees";
+import { notifyUser } from "../bot/notify";
+
+/**
+ * Рассылка произвольного текста команде.
+ *
+ * Единственный поток в системе, который проходит сквозь ВСЕ настройки: и
+ * `remindersEnabled`, и `notification_mutes`. Отписаться от объявлений нельзя —
+ * иначе фича не даёт того, ради чего заводится. Поэтому он такой один, и поэтому
+ * рассылать умеют только админы.
+ */
+
+/** Лимит Telegram — 4096, подпись отправителя съедает часть, и запас нужен на
+ *  случай длинных имён. Ограничение это про сообщение, а не про базу. */
+export const ANNOUNCEMENT_TEXT_MAX = 2000;
+
+/** Один процесс обслуживает и API, и long-polling бота: тридцать сообщений ему
+ *  безразличны, три тысячи — нет. Ростер команды — десятки человек, так что
+ *  потолок не мешает работе и ловит только явную ошибку или злоупотребление. */
+export const ANNOUNCEMENT_RECIPIENTS_MAX = 200;
+
+export type Audience = { kind: "all" } | { kind: "picked"; employeeIds: readonly number[] };
+
+export function announcementText(senderName: string, text: string): string {
+  return `📣 Объявление от ${senderName}:\n\n${text}`;
+}
+
+/**
+ * Кому уйдёт и кому не уйдёт.
+ *
+ * `excludedFromAssignment` НЕ исключается: это правило про раздачу смен, а не
+ * про право знать новость. Отправитель исключается всегда.
+ */
+export function announcementRecipients(
+  db: Db,
+  audience: Audience,
+  senderId: number,
+): { reachable: Employee[]; unreachable: string[] } {
+  // Архивный в `pool` при явном выборе ПОПАДАЕТ, и это не недосмотр: письмо ему
+  // не уйдёт, но назвать его надо поимённо — админ, не увидевший имени в отчёте,
+  // решит, что письмо ушло. `listActive` архивных не отдаёт вовсе, поэтому в
+  // ветке «всем» их и нет.
+  const pool =
+    audience.kind === "all"
+      ? listActive(db).filter((e) => e.id !== senderId)
+      : audience.employeeIds
+          .map((id) => getEmployeeById(db, id))
+          .filter((e): e is Employee => e != null && e.id !== senderId);
+
+  return {
+    reachable: pool.filter((e) => e.isActive && e.telegramUserId != null),
+    unreachable: pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName),
+  };
+}
+
+export async function sendAnnouncement(
+  // `Bot | null | undefined`, а не `Bot | null`: маршрут отдаёт сюда `AppDeps.bot`,
+  // который объявлен необязательным. Сервер поднимается и с плохим токеном.
+  bot: Bot | null | undefined,
+  db: Db,
+  input: { senderId: number; text: string; audience: Audience },
+): Promise<{ delivered: number; intended: number; unreachable: string[] }> {
+  const sender = getEmployeeById(db, input.senderId);
+  const { reachable, unreachable } = announcementRecipients(db, input.audience, input.senderId);
+  const message = announcementText(sender ? addressOf(sender) : "администратора", input.text);
+
+  let delivered = 0;
+  for (const person of reachable) {
+    if (person.telegramUserId == null) continue;
+    // Один закрытый чат не обрывает рассылку: следующие в списке и есть те, до
+    // кого ещё можно достучаться. Тот же приём, что в `notifyVacantSlot`.
+    if (bot && (await notifyUser(bot, person.telegramUserId, message))) delivered += 1;
+  }
+  return { delivered, intended: reachable.length, unreachable };
+}

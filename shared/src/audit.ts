@@ -42,6 +42,7 @@ export const AUDIT_TYPES = [
   "collection_created", "collection_updated", "collection_sent",
   "collection_closed", "collection_deleted",
   "reminder_undeliverable", "reminders_dispatched",
+  "announcement_sent",
 ] as const;
 
 export type AuditType = (typeof AUDIT_TYPES)[number];
@@ -455,6 +456,15 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     icon: "🔔",
     title: "Разосланы напоминания на завтра",
     lines: [`на ${dayLabel(p.forDate)}`, `${num(p.sent) ?? 0} из ${num(p.considered) ?? 0} человек`],
+  }),
+
+  announcement_sent: (p) => ({
+    icon: "📣",
+    title: "Разослано объявление",
+    lines: [
+      String(p.text ?? ""),
+      `Кому: ${p.audience === "all" ? "всей команде" : "выбранным"} · дошло ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`,
+    ],
   }),
 };
 

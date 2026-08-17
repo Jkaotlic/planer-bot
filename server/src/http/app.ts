@@ -112,6 +112,12 @@ import {
   collectionsForWorker,
 } from "../collections/collection-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
+import {
+  ANNOUNCEMENT_TEXT_MAX,
+  ANNOUNCEMENT_RECIPIENTS_MAX,
+  sendAnnouncement,
+  type Audience,
+} from "../announcements/announcement-service";
 
 export interface AppDeps {
   db: Db;
@@ -618,6 +624,49 @@ export function createApp(deps: AppDeps): Hono<Env> {
       title,
     });
     return c.json({ ok: true });
+  });
+
+  /**
+   * Рассылка объявления команде.
+   *
+   * Превью-эндпоинта нет намеренно: у сбора текст собирается сервером из
+   * шаблона, и админ обязан увидеть результат; текст анонса — ровно то, что
+   * админ напечатал, и ходить за ним на сервер незачем. Кто достижим, решает и
+   * докладывает этот маршрут, в одном месте.
+   */
+  app.post("/api/admin/announcements", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
+    if (text.length > ANNOUNCEMENT_TEXT_MAX) {
+      return c.json({ error: `Слишком длинно — не больше ${ANNOUNCEMENT_TEXT_MAX} символов` }, 400);
+    }
+
+    let audience: Audience;
+    if (body.audience === "all") {
+      audience = { kind: "all" };
+    } else {
+      const ids = Array.isArray(body.audience) ? body.audience : null;
+      if (!ids || ids.some((id) => typeof id !== "number")) {
+        return c.json({ error: "audience — «all» или список id" }, 400);
+      }
+      if (ids.length === 0) return c.json({ error: "Некому отправлять — никто не выбран" }, 400);
+      if (ids.length > ANNOUNCEMENT_RECIPIENTS_MAX) {
+        return c.json({ error: `Слишком много адресатов — не больше ${ANNOUNCEMENT_RECIPIENTS_MAX}` }, 400);
+      }
+      audience = { kind: "picked", employeeIds: ids as number[] };
+    }
+
+    const senderId = c.get("auth").employeeId;
+    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
+    recordAudit(db, "announcement_sent", senderId, {
+      text,
+      audience: audience.kind === "all" ? "all" : "picked",
+      delivered: result.delivered,
+      intended: result.intended,
+      unreachable: result.unreachable,
+    });
+    return c.json(result);
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */
