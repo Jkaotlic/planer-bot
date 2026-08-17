@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { callbackDataOf, recordApi, stubBotInfo } from "./testbot";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, createAdminEmployee } from "../repo/employees";
@@ -12,25 +13,9 @@ import type { Db } from "../db/client";
 
 const config = testConfig();
 
-interface SentMessage {
-  chat_id: number | string;
-  text: string;
-  reply_markup?: { inline_keyboard: { text: string; callback_data?: string }[][] };
-}
-
 function testBot(db: Db) {
-  const bot = createBot({ db, config });
-  bot.botInfo = {
-    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const sent: SentMessage[] = [];
-  const answers: string[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    if (method === "sendMessage") sent.push(payload as SentMessage);
-    if (method === "answerCallbackQuery") answers.push((payload as { text?: string }).text ?? "");
-    return { ok: true, result: {} } as never;
-  });
+  const bot = stubBotInfo(createBot({ db, config }));
+  const { sent, answers } = recordApi(bot);
   return { bot, sent, answers };
 }
 
@@ -98,8 +83,7 @@ describe("handover buttons", () => {
 
     const offer = sent.find((m) => m.chat_id === 202);
     expect(offer).toBeDefined();
-    const buttons = offer!.reply_markup!.inline_keyboard.flat();
-    expect(buttons.map((b) => b.callback_data)).toEqual([
+    expect(callbackDataOf(offer!)).toEqual([
       `handover:take:${handover.id}`,
       `handover:decline:${handover.id}`,
     ]);
@@ -158,7 +142,7 @@ describe("handover buttons", () => {
     await bot.handleUpdate(callbackUpdate(202, `handover:decline:${handover.id}`));
 
     const fan = sent.find((m) => m.chat_id === 203);
-    expect(fan!.reply_markup!.inline_keyboard.flat().map((b) => b.callback_data)).toEqual([
+    expect(callbackDataOf(fan!)).toEqual([
       `handover:take:${handover.id}`,
     ]);
   });

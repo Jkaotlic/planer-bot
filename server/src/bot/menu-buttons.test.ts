@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { recordApi, stubBotInfo } from "./testbot";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
@@ -18,16 +19,8 @@ import type { Db } from "../db/client";
 const config = testConfig();
 
 function testBot(db: Db) {
-  const bot = createBot({ db, config });
-  bot.botInfo = {
-    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const calls: { method: string; payload: any }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    calls.push({ method, payload });
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(createBot({ db, config }));
+  const { calls } = recordApi(bot);
   return { bot, calls };
 }
 
