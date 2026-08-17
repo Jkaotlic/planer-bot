@@ -3,19 +3,10 @@ import { createBot } from "./bot";
 import { BTN_MY_SHIFTS } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok",
-  adminTelegramIds: [111],
-  teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:",
-  jwtSecret: "test-jwt-secret-that-is-long-enough-0123",
-  publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3,
-  handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 /** Same shape as `bot.test.ts`'s `testBot`, kept local: this file only needs
  *  the raw `sendMessage` payload (to read `reply_markup`), not the trimmed

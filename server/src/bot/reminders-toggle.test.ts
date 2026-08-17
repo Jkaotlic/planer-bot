@@ -2,14 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createBot, remindersKeyboard, remindersStateText } from "./bot";
 import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 /** A bot whose outgoing calls are captured instead of sent. */
 function testBot(db: Db) {

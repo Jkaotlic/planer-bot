@@ -6,14 +6,10 @@ import { createEmployee, linkTelegramAccount, getByTelegramId, setEmployeeRestri
 import { listShiftsInRange } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 function testBot() {
   const bot = new Bot("12345:tok");
   bot.botInfo = { id: 1, is_bot: true, first_name: "P", username: "p_bot",

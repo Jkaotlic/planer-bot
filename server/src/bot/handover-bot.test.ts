@@ -7,14 +7,10 @@ import { getHandover, listDeclines } from "../repo/handovers";
 import { shifts, type Shift } from "../db/schema";
 import { startHandovers, offerTo } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 interface SentMessage {
   chat_id: number | string;

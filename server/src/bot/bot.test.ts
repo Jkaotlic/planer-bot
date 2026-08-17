@@ -10,14 +10,10 @@ import { expressInterest, assignSlot, payrollRows, interestedForSlot } from "../
 import { createVacantSlot, getAssignment } from "../repo/weekend";
 import { auditLog, shiftTemplates } from "../db/schema";
 import { setTemplateRoles } from "../repo/template-roles";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 /** A bot with botInfo set (skips getMe) and a transformer capturing outgoing sendMessage. */
 function testBot(db: Db) {
