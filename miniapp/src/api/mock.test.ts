@@ -18,6 +18,8 @@ import {
   mockSendCollection,
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
+  mockGetNoticePrefs,
+  mockSetNoticePref,
   MOCK_ME,
 } from "./mock";
 
@@ -341,5 +343,33 @@ describe("мок сборов", () => {
     expect(rows.some((r) => r.collection.id === visible.id)).toBe(true);
 
     await expect(mockGetCollectionPreview(hidden.id)).rejects.toThrow("not_found");
+  });
+});
+
+describe("уведомления администратора: mockGetNoticePrefs / mockSetNoticePref", () => {
+  afterEach(async () => {
+    // Мут-состояние живёт в модульном Set (как mockSwapsLocked чуть выше в
+    // mock.ts) — вернуть все виды во включённое состояние, иначе тест, что
+    // мутировал вид, протечёт в следующий.
+    const { kinds } = await mockGetNoticePrefs();
+    await Promise.all(kinds.filter((k) => !k.enabled).map((k) => mockSetNoticePref(k.kind, true)));
+  });
+
+  it("по умолчанию отдаёт все шесть видов включёнными", async () => {
+    const { kinds } = await mockGetNoticePrefs();
+    expect(kinds).toHaveLength(6);
+    expect(kinds.every((k) => k.enabled)).toBe(true);
+  });
+
+  it("выключение вида переживает перечитывание и не задевает остальные", async () => {
+    await mockSetNoticePref("swaps", false);
+
+    const afterMute = await mockGetNoticePrefs();
+    expect(afterMute.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(false);
+    expect(afterMute.kinds.filter((k) => k.kind !== "swaps").every((k) => k.enabled)).toBe(true);
+
+    await mockSetNoticePref("swaps", true);
+    const afterUnmute = await mockGetNoticePrefs();
+    expect(afterUnmute.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(true);
   });
 });

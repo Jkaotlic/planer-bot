@@ -66,3 +66,54 @@ describe("real team schedule client", () => {
     expect(requests.some((request) => request.url.includes("/api/employees"))).toBe(false);
   });
 });
+
+describe("real notice prefs client", () => {
+  it("reads GET /api/me/notifications and writes PATCH with {kind, enabled}", async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ url, method, body });
+
+      if (url.endsWith("/api/auth")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/me/notifications") && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            kinds: [{ kind: "swaps", title: "Обмены сменами", hint: "Кто с кем поменялся сменами.", enabled: true }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/api/me/notifications") && method === "PATCH") {
+        return new Response(JSON.stringify({ kind: "swaps", enabled: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+
+    const { realClient } = await import("./client");
+
+    const prefs = await realClient.getNoticePrefs();
+    expect(prefs.kinds).toEqual([
+      { kind: "swaps", title: "Обмены сменами", hint: "Кто с кем поменялся сменами.", enabled: true },
+    ]);
+
+    const saved = await realClient.setNoticePref("swaps", false);
+    expect(saved).toEqual({ kind: "swaps", enabled: false });
+
+    // Метод, путь и тело — перепутать любой из трёх значило бы молча выключить
+    // не тот вид письма или вовсе не дойти до сервера.
+    expect(requests.filter((request) => request.url.endsWith("/api/me/notifications"))).toEqual([
+      { url: "/api/me/notifications", method: "GET", body: undefined },
+      { url: "/api/me/notifications", method: "PATCH", body: { kind: "swaps", enabled: false } },
+    ]);
+  });
+});
