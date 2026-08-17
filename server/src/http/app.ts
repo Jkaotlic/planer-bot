@@ -24,6 +24,7 @@ import {
   rememberTelegramProfile,
 } from "../repo/employees";
 import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
+import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
@@ -33,6 +34,7 @@ import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notic
 import { createNoticeBuffer } from "../schedule/notice-buffer";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
 import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
+import { listBugReports, resolveBugReport } from "../bugs/bug-service";
 import {
   notifyUser,
   notifyAdmins,
@@ -74,6 +76,8 @@ import {
   addressOf,
   normalizePreferredName,
   PREFERRED_NAME_MAX,
+  ADMIN_NOTICE_KINDS,
+  ADMIN_NOTICE_LABELS,
   type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
@@ -109,6 +113,12 @@ import {
   collectionsForWorker,
 } from "../collections/collection-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
+import {
+  ANNOUNCEMENT_TEXT_MAX,
+  ANNOUNCEMENT_RECIPIENTS_MAX,
+  sendAnnouncement,
+  type Audience,
+} from "../announcements/announcement-service";
 
 export interface AppDeps {
   db: Db;
@@ -305,6 +315,47 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Returned so the greeting can update without a second round trip.
       address: addressOf(employee),
     });
+  });
+
+  /**
+   * Что писать этому админу.
+   *
+   * `requireAdmin`, а не `requireAuth`: этих писем не получает никто, кроме
+   * админов, и переключатель, который у работника ничего не меняет, — ложь в
+   * интерфейсе, а не безобидная лишняя настройка.
+   *
+   * Адресат берётся из токена, id в пути нет — чужие уведомления выключить нечем,
+   * тем же правилом, что и в `/api/me/settings`.
+   */
+  app.get("/api/me/notifications", requireAdmin(db, config.jwtSecret), (c) => {
+    const muted = new Set(listMutedKinds(db, c.get("auth").employeeId));
+    return c.json({
+      kinds: ADMIN_NOTICE_KINDS.map((kind) => ({
+        kind,
+        title: ADMIN_NOTICE_LABELS[kind].title,
+        hint: ADMIN_NOTICE_LABELS[kind].hint,
+        enabled: !muted.has(kind),
+      })),
+    });
+  });
+
+  app.patch("/api/me/notifications", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; enabled?: unknown };
+    if (typeof body.enabled !== "boolean") return c.json({ error: "enabled должен быть true или false" }, 400);
+    // Проверяем по списку, а не по типу: тело приходит из сети, и `as AdminNoticeKind`
+    // завёл бы строку с любым мусором в `kind`.
+    const kind = ADMIN_NOTICE_KINDS.find((k) => k === body.kind);
+    if (!kind) return c.json({ error: "неизвестный вид уведомления" }, 400);
+
+    const id = c.get("auth").employeeId;
+    setNoticeMuted(db, id, kind, !body.enabled);
+    recordAudit(db, "notice_prefs_changed", id, {
+      employeeId: id,
+      kind,
+      title: ADMIN_NOTICE_LABELS[kind].title,
+      enabled: body.enabled,
+    });
+    return c.json({ kind, enabled: body.enabled });
   });
 
   app.route("/", createReadRoutes({ db, config }));
@@ -576,6 +627,49 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ ok: true });
   });
 
+  /**
+   * Рассылка объявления команде.
+   *
+   * Превью-эндпоинта нет намеренно: у сбора текст собирается сервером из
+   * шаблона, и админ обязан увидеть результат; текст анонса — ровно то, что
+   * админ напечатал, и ходить за ним на сервер незачем. Кто достижим, решает и
+   * докладывает этот маршрут, в одном месте.
+   */
+  app.post("/api/admin/announcements", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
+    if (text.length > ANNOUNCEMENT_TEXT_MAX) {
+      return c.json({ error: `Слишком длинно — не больше ${ANNOUNCEMENT_TEXT_MAX} символов` }, 400);
+    }
+
+    let audience: Audience;
+    if (body.audience === "all") {
+      audience = { kind: "all" };
+    } else {
+      const ids = Array.isArray(body.audience) ? body.audience : null;
+      if (!ids || ids.some((id) => typeof id !== "number")) {
+        return c.json({ error: "audience — «all» или список id" }, 400);
+      }
+      if (ids.length === 0) return c.json({ error: "Некому отправлять — никто не выбран" }, 400);
+      if (ids.length > ANNOUNCEMENT_RECIPIENTS_MAX) {
+        return c.json({ error: `Слишком много адресатов — не больше ${ANNOUNCEMENT_RECIPIENTS_MAX}` }, 400);
+      }
+      audience = { kind: "picked", employeeIds: ids as number[] };
+    }
+
+    const senderId = c.get("auth").employeeId;
+    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
+    recordAudit(db, "announcement_sent", senderId, {
+      text,
+      audience: audience.kind === "all" ? "all" : "picked",
+      delivered: result.delivered,
+      intended: result.intended,
+      unreachable: result.unreachable,
+    });
+    return c.json(result);
+  });
+
   /** The full «кто когда что менял» history: filtered by type and date, paged. */
   app.get("/api/admin/journal", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
@@ -615,6 +709,49 @@ export function createApp(deps: AppDeps): Hono<Env> {
         payload: row.payload,
       })),
     });
+  });
+
+  /**
+   * Багрепорты списком — ради этого и заводилась таблица: в чате сообщение
+   * тонет за сутки, здесь оно остаётся, пока кто-то не отметит «Разобрал».
+   *
+   * `requireAdmin`, а не `requireAuth`: это свободный текст живого человека,
+   * и видеть чужие жалобы работнику незачем.
+   */
+  app.get("/api/admin/bug-reports", requireAdmin(db, config.jwtSecret), (c) => {
+    const status = c.req.query("status") ?? "open";
+    if (status !== "open" && status !== "all") {
+      return c.json({ error: "status должен быть open или all" }, 400);
+    }
+    const reports = listBugReports(db, status);
+    return c.json({
+      reports: reports.map(({ report, authorName, resolvedByName }) => ({
+        id: report.id,
+        authorName,
+        text: report.text,
+        createdAt: report.createdAt,
+        resolvedAt: report.resolvedAt,
+        resolvedByName,
+      })),
+    });
+  });
+
+  /**
+   * «Разобрал» / «вернуть в работу» — переключатель, тем же узором, что
+   * «Собрали, закрыть» у сборов: неотменяемое нажатие не стоит ничего, а
+   * промах отправляет баг обратно в список, а не теряет его.
+   *
+   * `resolveBugReport` сам пишет строку в журнал — второй `recordAudit` здесь
+   * задвоил бы событие.
+   */
+  app.post("/api/admin/bug-reports/:id/resolve", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { resolved?: unknown };
+    if (typeof body.resolved !== "boolean") {
+      return c.json({ error: "resolved должен быть true или false" }, 400);
+    }
+    const updated = resolveBugReport(db, Number(c.req.param("id")), c.get("auth").employeeId, body.resolved, new Date());
+    if (!updated) return c.json({ error: "not_found" }, 404);
+    return c.json({ id: updated.id, resolvedAt: updated.resolvedAt });
   });
 
   /** «Кто сколько отдежурил» — people × kinds over a period. */
@@ -883,6 +1020,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       await notifyAdmins(
         bot,
         db,
+        "swaps",
         swapAcceptedAdminText(
           swapAuditPayload(res.request),
           outsidePoolFacts(db, res.request).map(dutyNoticeForAdmins),
@@ -1109,7 +1247,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       employeeId: c.get("auth").employeeId, employeeName: name,
     });
     if (bot) {
-      await notifyAdmins(bot, db, weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
+      await notifyAdmins(bot, db, "weekend", weekendConfirmedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
   });
@@ -1125,7 +1263,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       employeeId: c.get("auth").employeeId, employeeName: name,
     });
     if (bot) {
-      await notifyAdmins(bot, db, weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
+      await notifyAdmins(bot, db, "weekend", weekendDeclinedAdminText(name, slot ? slotLineOf(slot) : "выходную смену"));
     }
     return c.json({ ok: true });
   });

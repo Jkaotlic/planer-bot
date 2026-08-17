@@ -59,7 +59,7 @@ describe("notify", () => {
     admin(db, "Игорь", 222);
     createEmployee(db, { displayName: "Работник" }); // non-admin, unlinked — must NOT be messaged
     const { bot, sent } = testBot();
-    await notifyAdmins(bot, db, "обмен состоялся");
+    await notifyAdmins(bot, db, "swaps", "обмен состоялся");
     expect(sent.map((s) => s.chat_id).sort()).toEqual([111, 222]);
     expect(sent.every((s) => s.text === "обмен состоялся")).toBe(true);
   });
@@ -71,11 +71,11 @@ describe("notify", () => {
     admin(db, "Игорь", 222);
     const { bot, sent } = testBotFailing(111);
     try {
-      await expect(notifyAdmins(bot, db, "обмен состоялся")).resolves.toBeUndefined();
+      await expect(notifyAdmins(bot, db, "swaps", "обмен состоялся")).resolves.toBeUndefined();
       expect(sent.map((s) => s.chat_id)).toEqual([222]);
       expect(errorLog).toHaveBeenCalledTimes(1);
       expect(errorLog).toHaveBeenCalledWith(
-        "notifyAdmins: failed for 111:",
+        "notifyAdmins(swaps): failed for 111:",
         "telegram down",
       );
     } finally {
@@ -104,7 +104,7 @@ describe("notify", () => {
     archiveEmployee(db, inactive.id, "2026-07-01");
     admin(db, "Игорь", 222);
     const { bot, sent } = testBot();
-    await notifyAdmins(bot, db, "обмен состоялся");
+    await notifyAdmins(bot, db, "swaps", "обмен состоялся");
     expect(sent.map((s) => s.chat_id)).toEqual([222]);
   });
 

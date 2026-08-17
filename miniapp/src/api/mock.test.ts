@@ -18,6 +18,11 @@ import {
   mockSendCollection,
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
+  mockGetNoticePrefs,
+  mockSetNoticePref,
+  mockSendAnnouncement,
+  mockGetBugReports,
+  mockResolveBugReport,
   MOCK_ME,
 } from "./mock";
 
@@ -341,5 +346,117 @@ describe("мок сборов", () => {
     expect(rows.some((r) => r.collection.id === visible.id)).toBe(true);
 
     await expect(mockGetCollectionPreview(hidden.id)).rejects.toThrow("not_found");
+  });
+});
+
+describe("уведомления администратора: mockGetNoticePrefs / mockSetNoticePref", () => {
+  afterEach(async () => {
+    // Мут-состояние живёт в модульном Set (как mockSwapsLocked чуть выше в
+    // mock.ts) — вернуть все виды во включённое состояние, иначе тест, что
+    // мутировал вид, протечёт в следующий.
+    const { kinds } = await mockGetNoticePrefs();
+    await Promise.all(kinds.filter((k) => !k.enabled).map((k) => mockSetNoticePref(k.kind, true)));
+  });
+
+  it("по умолчанию отдаёт все шесть видов включёнными", async () => {
+    const { kinds } = await mockGetNoticePrefs();
+    expect(kinds).toHaveLength(6);
+    expect(kinds.every((k) => k.enabled)).toBe(true);
+  });
+
+  it("выключение вида переживает перечитывание и не задевает остальные", async () => {
+    await mockSetNoticePref("swaps", false);
+
+    const afterMute = await mockGetNoticePrefs();
+    expect(afterMute.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(false);
+    expect(afterMute.kinds.filter((k) => k.kind !== "swaps").every((k) => k.enabled)).toBe(true);
+
+    await mockSetNoticePref("swaps", true);
+    const afterUnmute = await mockGetNoticePrefs();
+    expect(afterUnmute.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(true);
+  });
+});
+
+describe("mockSendAnnouncement", () => {
+  it("считает адресатов по тому же списку, что отдаёт getAdminEmployees, а не по своему", async () => {
+    // Не сверяем с числами из фикстуры напрямую: если фикстуру когда-нибудь
+    // подвинут, тест должен остаться верным описанию — «мок использует тот же
+    // источник», а не «в фикстуре сейчас пять активных».
+    // «Всем» набирает пул из активных — так же, как `listActive` на сервере
+    // (`announcementRecipients`): архивный в этот пул не попадает вовсе, и
+    // недостижимым его «Всем» не назовёт — назвать его может только явный выбор.
+    const roster = await employeesMock.getAdminEmployees();
+    const pool = roster.filter((e) => e.isActive && e.id !== MOCK_ME.id);
+    const expectedReachable = pool.filter((e) => e.telegramUserId != null);
+    const expectedUnreachableNames = pool
+      .filter((e) => e.telegramUserId == null)
+      .map((e) => e.displayName)
+      .sort();
+
+    const result = await mockSendAnnouncement("Текст анонса", "all");
+
+    expect(result.delivered).toBe(expectedReachable.length);
+    expect(result.intended).toBe(expectedReachable.length);
+    expect([...result.unreachable].sort()).toEqual(expectedUnreachableNames);
+  });
+
+  it("«Всем» не зовёт отправителя — он ни в счёте, ни в списке недостижимых", async () => {
+    const result = await mockSendAnnouncement("Текст анонса", "all");
+    expect(result.unreachable).not.toContain(MOCK_ME.displayName);
+  });
+
+  it("явно выбранный архивный или без телеграма попадает в отчёт поимённо, а не пропадает", async () => {
+    // id 3 — «Марк Волков», активен, но без телеграма; id 6 — «Света Орлова», в архиве.
+    const result = await mockSendAnnouncement("Текст анонса", [3, 6, 4]);
+    expect(result.delivered).toBe(1); // только id 4 достижим
+    expect(result.unreachable.sort()).toEqual(["Марк Волков", "Света Орлова"]);
+  });
+
+  it("повтор id в списке не удваивает адресата", async () => {
+    const result = await mockSendAnnouncement("Текст анонса", [4, 4]);
+    expect(result.delivered).toBe(1);
+    expect(result.intended).toBe(1);
+  });
+
+  it("пустой текст отклоняется — так же, как это делает сервер", async () => {
+    await expect(mockSendAnnouncement("   ", "all")).rejects.toThrow("Текст объявления пустой");
+  });
+});
+
+describe("mockGetBugReports / mockResolveBugReport", () => {
+  afterEach(async () => {
+    // Фикстура живёт в модульном массиве — вернуть её в стартовое состояние,
+    // иначе тест, что дёрнул resolve, протечёт в соседний (id 1 открыт, id 2 разобран).
+    await mockResolveBugReport(1, false);
+    await mockResolveBugReport(2, true);
+  });
+
+  it("status=open прячет разобранные", async () => {
+    const rows = await mockGetBugReports("open");
+    expect(rows.map((r) => r.id)).toEqual([1]);
+  });
+
+  it("status=all отдаёт всё, свежие сверху — тем же порядком, что и сервис", async () => {
+    const rows = await mockGetBugReports("all");
+    expect(rows.map((r) => r.id)).toEqual([1, 2]);
+  });
+
+  it("resolve проставляет автора и время и обратим", async () => {
+    const resolved = await mockResolveBugReport(1, true);
+    expect(resolved.id).toBe(1);
+    expect(resolved.resolvedAt).not.toBeNull();
+
+    const afterResolve = await mockGetBugReports("all");
+    const row = afterResolve.find((r) => r.id === 1)!;
+    expect(row.resolvedByName).toBe(MOCK_ME.displayName);
+    expect((await mockGetBugReports("open")).map((r) => r.id)).not.toContain(1);
+
+    const reopened = await mockResolveBugReport(1, false);
+    expect(reopened.resolvedAt).toBeNull();
+    expect((await mockGetBugReports("open")).map((r) => r.id)).toContain(1);
+  });
+
+  it("несуществующий id — отказ, а не тихий успех", async () => {
+    await expect(mockResolveBugReport(999, true)).rejects.toThrow();
   });
 });

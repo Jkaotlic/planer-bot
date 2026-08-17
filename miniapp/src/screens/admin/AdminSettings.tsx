@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { formatAuditMoment } from "@planer/shared";
 import { Button, Cell, List, Section, Spinner, Switch } from "@telegram-apps/telegram-ui";
-import { apiClient, type AdminSettings as AdminSettingsData, type SwapLockResult } from "../../api/client";
+import { apiClient, type AdminSettings as AdminSettingsData, type NoticePref, type SwapLockResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { withNotifyNotice } from "../../lib/shift";
 
 /**
- * «Настройки» (admin, mobile): пока один тумблер — общий замок обменов сменами.
- * Он пишет сразу всей команде и отменяет чужие незакрытые заявки, поэтому
+ * «Настройки» (admin, mobile): общий замок обменов сменами и то, какие письма
+ * этот админ вообще получает.
+ *
+ * Замок пишет сразу всей команде и отменяет чужие незакрытые заявки, поэтому
  * первое нажатие только «взводит» подтверждение (`confirming`), а отправляет —
  * второе. Тот же узор, что у кнопки рассылки на «Сборах»
  * (`AdminCollections.tsx`).
@@ -16,6 +18,8 @@ import { withNotifyNotice } from "../../lib/shift";
  * Ошибка сохранения рисуется рядом с тумблером, а не вместо него — тот же
  * приём, что и в веб-консоли (`SettingsScreen.tsx`): этот экран не должен
  * превращаться в тупик без перезагрузки, как уже дважды случалось в проекте.
+ * Список видов уведомлений ниже переживает свою ошибку тем же способом: тумблер
+ * откатывается назад, а не гасит весь экран.
  */
 export function AdminSettings() {
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
@@ -23,6 +27,12 @@ export function AdminSettings() {
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<SwapLockResult | null>(null);
+
+  const [noticePrefs, setNoticePrefs] = useState<NoticePref[] | null>(null);
+  const [noticeLoadError, setNoticeLoadError] = useState<string | null>(null);
+  // По виду письма, а не одна общая: переключение «Обмены сменами» не должно
+  // гасить ошибку, оставшуюся от неудачной попытки на «Дни рождения».
+  const [noticeErrors, setNoticeErrors] = useState<Record<string, string>>({});
 
   async function reload() {
     try {
@@ -32,53 +42,50 @@ export function AdminSettings() {
     }
   }
 
+  async function reloadNoticePrefs() {
+    try {
+      const { kinds } = await apiClient.getNoticePrefs();
+      setNoticePrefs(kinds);
+    } catch (err) {
+      setNoticeLoadError(err instanceof Error ? err.message : "Не удалось загрузить список уведомлений");
+    }
+  }
+
+  async function toggleNotice(kind: string, next: boolean) {
+    // Оптимистично, как «Напоминания о сменах» (`RemindersSwitch`): тумблер,
+    // отстающий от пальца, читается как сломанный. Catch ниже возвращает его
+    // назад, если сервер не согласился.
+    setNoticePrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled: next } : p)) ?? prev);
+    setNoticeErrors((prev) => {
+      const rest = { ...prev };
+      delete rest[kind];
+      return rest;
+    });
+    try {
+      const saved = await apiClient.setNoticePref(kind, next);
+      setNoticePrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled: saved.enabled } : p)) ?? prev);
+    } catch (err) {
+      setNoticePrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled: !next } : p)) ?? prev);
+      setNoticeErrors((prev) => ({ ...prev, [kind]: err instanceof Error ? err.message : "Не удалось сохранить" }));
+    }
+  }
+
   useEffect(() => {
     void reload();
-    // Загружается один раз; тумблер ниже перечитывает состояние сам.
+    void reloadNoticePrefs();
+    // Загружается один раз; тумблеры ниже перечитывают состояние сами.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (error && !settings) {
-    return (
-      <ScreenScroll>
-        <List>
-          <Section header="Настройки">
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-            </CardShell>
-          </Section>
-        </List>
-      </ScreenScroll>
-    );
-  }
-
-  if (!settings) {
-    return (
-      <ScreenScroll>
-        <List>
-          <Section header="Настройки">
-            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-              <Spinner size="m" />
-            </div>
-          </Section>
-        </List>
-      </ScreenScroll>
-    );
-  }
-
-  const locked = settings.swapsLocked;
-  const actionLabel = locked ? "Открыть обмены" : "Закрыть обмены";
-  const confirmLabel = locked ? "Да, открыть" : "Да, закрыть";
-  const whoLabel =
-    settings.swapsLockUpdatedAt === null
-      ? "Ни разу не меняли"
-      : `${locked ? "Закрыл" : "Открыл"} ${settings.swapsLockUpdatedBy ?? "неизвестно кто"} · ${formatAuditMoment(settings.swapsLockUpdatedAt)}`;
-
   async function handleConfirm() {
+    // Кнопка, которая это вызывает, отрисовывается только когда `settings`
+    // загружен (см. `renderSwapsSection` ниже) — проверка здесь только защищает
+    // типы от гипотетической гонки, а не меняет обычный путь.
+    if (!settings) return;
     setSaving(true);
     setError(null);
     try {
-      const outcome = await apiClient.setSwapsLock(!locked);
+      const outcome = await apiClient.setSwapsLock(!settings.swapsLocked);
       setConfirming(false);
       setResult(outcome);
       // reload() ловит свои ошибки сам — она не может провалить этот try.
@@ -91,77 +98,158 @@ export function AdminSettings() {
     }
   }
 
-  const resultLine = result
-    ? withNotifyNotice(
-        result.locked ? `Обмены закрыты. Отменено заявок: ${result.cancelled}.` : "Обмены открыты.",
-        result,
-      )
-    : null;
+  /**
+   * Содержимое секции «Настройки» (замок обменов) — своя загрузка, своя ошибка,
+   * свой спиннер. Раньше сбой или ожидание `GET /api/admin/settings` подменяли
+   * весь экран через ранний `return` из компонента, из-за чего секция «Что мне
+   * писать» ниже становилась недостижимой, даже если её собственный запрос
+   * успел отработать. Теперь каждая секция отвечает сама за себя.
+   */
+  function renderSwapsSection() {
+    if (error && !settings) {
+      return (
+        <CardShell>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+        </CardShell>
+      );
+    }
+
+    if (!settings) {
+      return (
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spinner size="m" />
+        </div>
+      );
+    }
+
+    const locked = settings.swapsLocked;
+    const actionLabel = locked ? "Открыть обмены" : "Закрыть обмены";
+    const confirmLabel = locked ? "Да, открыть" : "Да, закрыть";
+    const whoLabel =
+      settings.swapsLockUpdatedAt === null
+        ? "Ни разу не меняли"
+        : `${locked ? "Закрыл" : "Открыл"} ${settings.swapsLockUpdatedBy ?? "неизвестно кто"} · ${formatAuditMoment(settings.swapsLockUpdatedAt)}`;
+
+    const resultLine = result
+      ? withNotifyNotice(
+          result.locked ? `Обмены закрыты. Отменено заявок: ${result.cancelled}.` : "Обмены открыты.",
+          result,
+        )
+      : null;
+
+    return (
+      <>
+        {/* Тумблер только показывает состояние — он выключен, потому что менять
+            его можно исключительно через кнопки ниже (с подтверждением). */}
+        <Cell
+          after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
+          description={whoLabel}
+        >
+          Обмены смен — {locked ? "Закрыты" : "Открыты"}
+        </Cell>
+
+        <CardStack>
+          <CardShell>
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+              Закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде.
+            </div>
+          </CardShell>
+
+          {error && (
+            <CardShell>
+              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+            </CardShell>
+          )}
+
+          {resultLine && (
+            <CardShell>
+              <div style={{ fontSize: 13.5 }}>{resultLine}</div>
+            </CardShell>
+          )}
+
+          <CardShell>
+            {confirming ? (
+              <>
+                <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+                  {locked
+                    ? "Открыть обмены обратно?"
+                    : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
+                </div>
+                <Button size="s" mode="filled" stretched disabled={saving} onClick={() => void handleConfirm()}>
+                  {saving ? "Отправляю…" : confirmLabel}
+                </Button>
+                <Button size="s" mode="gray" stretched disabled={saving} onClick={() => setConfirming(false)}>
+                  Отмена
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="s"
+                mode="bezeled"
+                stretched
+                disabled={saving}
+                onClick={() => {
+                  setResult(null);
+                  setError(null);
+                  setConfirming(true);
+                }}
+              >
+                {actionLabel}
+              </Button>
+            )}
+          </CardShell>
+        </CardStack>
+      </>
+    );
+  }
 
   return (
     <ScreenScroll>
       <List>
-        <Section header="Настройки">
-          {/* Тумблер только показывает состояние — он выключен, потому что менять
-              его можно исключительно через кнопки ниже (с подтверждением). */}
-          <Cell
-            after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
-            description={whoLabel}
-          >
-            Обмены смен — {locked ? "Закрыты" : "Открыты"}
-          </Cell>
+        <Section header="Настройки">{renderSwapsSection()}</Section>
 
-          <CardStack>
-            <CardShell>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                Закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде.
+        <Section header="Что мне писать">
+          {noticePrefs === null ? (
+            noticeLoadError ? (
+              <CardStack>
+                <CardShell>
+                  <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{noticeLoadError}</div>
+                </CardShell>
+              </CardStack>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+                <Spinner size="m" />
               </div>
-            </CardShell>
+            )
+          ) : (
+            <>
+              {noticePrefs.map((pref) => (
+                <div key={pref.kind}>
+                  <Cell
+                    Component="label"
+                    after={<Switch checked={pref.enabled} onChange={(e) => void toggleNotice(pref.kind, e.target.checked)} />}
+                    multiline
+                    description={pref.hint}
+                  >
+                    {pref.title}
+                  </Cell>
+                  {noticeErrors[pref.kind] && (
+                    <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+                      {noticeErrors[pref.kind]}
+                    </div>
+                  )}
+                </div>
+              ))}
 
-            {error && (
-              <CardShell>
-                <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-              </CardShell>
-            )}
-
-            {resultLine && (
-              <CardShell>
-                <div style={{ fontSize: 13.5 }}>{resultLine}</div>
-              </CardShell>
-            )}
-
-            <CardShell>
-              {confirming ? (
-                <>
-                  <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-                    {locked
-                      ? "Открыть обмены обратно?"
-                      : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
+              <CardStack>
+                <CardShell>
+                  <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                    Письмо «смену никто не взял» приходит всегда — его выключить нельзя.
                   </div>
-                  <Button size="s" mode="filled" stretched disabled={saving} onClick={() => void handleConfirm()}>
-                    {saving ? "Отправляю…" : confirmLabel}
-                  </Button>
-                  <Button size="s" mode="gray" stretched disabled={saving} onClick={() => setConfirming(false)}>
-                    Отмена
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  size="s"
-                  mode="bezeled"
-                  stretched
-                  disabled={saving}
-                  onClick={() => {
-                    setResult(null);
-                    setError(null);
-                    setConfirming(true);
-                  }}
-                >
-                  {actionLabel}
-                </Button>
-              )}
-            </CardShell>
-          </CardStack>
+                </CardShell>
+              </CardStack>
+            </>
+          )}
         </Section>
       </List>
     </ScreenScroll>

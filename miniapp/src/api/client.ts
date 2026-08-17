@@ -63,6 +63,11 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  mockGetNoticePrefs,
+  mockSetNoticePref,
+  mockSendAnnouncement,
+  mockGetBugReports,
+  mockResolveBugReport,
   employeesMock,
 } from "./mock";
 
@@ -279,6 +284,45 @@ export interface SwapLockResult {
   cancelled: number;
   delivered: number;
   intended: number;
+}
+
+/** Один вид админского письма и его тумблер — экран «Настройки» → «Что мне писать». */
+export interface NoticePref {
+  kind: string;
+  title: string;
+  hint: string;
+  enabled: boolean;
+}
+
+export interface NoticePrefs {
+  kinds: NoticePref[];
+}
+
+/** Зеркалит `ANNOUNCEMENT_TEXT_MAX` из `server/src/announcements/announcement-service.ts`.
+ *  Не импортируется оттуда: тот модуль тянет `grammy`, серверную зависимость,
+ *  которой не место в бандле мини-аппа. Разойдись значения — счётчик соврёт на
+ *  пару символов, но 400 всё равно решает сервер; здесь только подсказка. */
+export const ANNOUNCEMENT_TEXT_MAX = 2000;
+
+/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/admin/announcements`. */
+export type AnnouncementAudience = "all" | number[];
+
+/** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
+export interface AnnouncementResult {
+  delivered: number;
+  intended: number;
+  unreachable: string[];
+}
+
+/** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
+ *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */
+export interface BugReportRow {
+  id: number;
+  authorName: string;
+  text: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
@@ -596,6 +640,14 @@ export interface ApiClient {
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
+  getNoticePrefs(): Promise<NoticePrefs>;
+  setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
+  /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
+   *  не даёт, текст анонса и так ровно тот, что напечатал админ. */
+  sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
+  getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
+  /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
+  resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -1093,6 +1145,17 @@ export const realClient: ApiClient = {
 
   getSettings: () => authorizedGet<AdminSettings>("/api/admin/settings"),
   setSwapsLock: (locked) => authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked }),
+  getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
+  setNoticePref: (kind, enabled) =>
+    authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
+  sendAnnouncement: (text, audience) =>
+    authorizedPostJson<AnnouncementResult>("/api/admin/announcements", { text, audience }),
+  async getBugReports(status) {
+    const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
+    return reports;
+  },
+  resolveBugReport: (id, resolved) =>
+    authorizedPostJson<{ id: number; resolvedAt: string | null }>(`/api/admin/bug-reports/${id}/resolve`, { resolved }),
 };
 
 const devClient: ApiClient = {
@@ -1152,6 +1215,11 @@ const devClient: ApiClient = {
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
+  getNoticePrefs: () => mockGetNoticePrefs(),
+  setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
+  sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
+  getBugReports: (status) => mockGetBugReports(status),
+  resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };
 
 /**
