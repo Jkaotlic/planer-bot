@@ -11,6 +11,7 @@ import {
 import type { Db } from "../db/client";
 import { collections, type Collection, type Employee } from "../db/schema";
 import { getEmployeeById, listActive } from "../repo/employees";
+import { isNoticeMuted } from "../repo/notice-prefs";
 
 /**
  * A collection of money — the birthday kind and the hand-made kind, on one code
@@ -195,9 +196,17 @@ export function recipientsOf(db: Db, honoureeId: number | null): Employee[] {
   );
 }
 
-/** Who gets an admin nudge: reachable admins, minus the honouree. */
+/** Кому уходит админский нудж: достижимые админы, минус виновник торжества,
+ *  минус выключившие себе этот вид.
+ *
+ *  Проверка здесь, а не в двух циклах `birthday-notice`, потому что эта функция
+ *  и есть «кому писать про сборы»: у неё ровно два вызывающих, и оба про это.
+ *  Сама рассылка сбора команде идёт через `recipientsOf` и никаких выключателей
+ *  не знает — от объявления о сборе не отписываются. */
 export function adminRecipients(db: Db, honoureeId: number | null): Employee[] {
-  return recipientsOf(db, honoureeId).filter((employee) => employee.isAdmin);
+  return recipientsOf(db, honoureeId).filter(
+    (employee) => employee.isAdmin && !isNoticeMuted(db, employee.id, "celebrations"),
+  );
 }
 
 /**

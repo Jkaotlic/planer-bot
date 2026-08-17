@@ -141,6 +141,13 @@
       "when": 1786564409247,
       "tag": "0019_light_slapstick",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1786951602863,
+      "tag": "0020_petite_living_tribunal",
+      "breakpoints": true
     }
   ]
 }
