@@ -9,6 +9,7 @@ import {
   type Shift,
   type Template,
   type TemplateRolesView,
+  type Viewer,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
 import { BalanceRail } from "./components/BalanceRail";
@@ -102,6 +103,8 @@ export function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
+  /** Кто вошёл — для подписи в футере сайдбара. */
+  const [viewer, setViewer] = useState<Viewer | null>(null);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
@@ -137,6 +140,15 @@ export function App() {
       setTemplates(t);
       setEvents(ev);
       setTemplateRoles(roles);
+      // Своим запросом и отдельным catch: «кто я» — это подпись в футере, и её
+      // отказ не повод показать экран «Повторить» вместо всей консоли. Не сумев
+      // спросить, консоль остаётся безымянной — это честнее чужого имени.
+      void apiClient
+        .getMe()
+        .then((me) => {
+          if (!cancelled()) setViewer(me);
+        })
+        .catch(() => {});
     } catch (err) {
       if (cancelled()) return;
       if (err instanceof AuthRequiredError) setNeedLogin(true);
@@ -336,9 +348,9 @@ export function App() {
     }
   }
 
-  // Active: the roster now carries the archive too, and a former admin sitting in
-  // it must not become the name in the sidebar.
-  const admin = employees?.find((e) => e.isAdmin && e.isActive);
+  // Кто вошёл, а не «кто-нибудь из админов»: прежде здесь стоял
+  // `employees.find((e) => e.isAdmin && e.isActive)`, и при двух админах футер
+  // показывал чужое имя.
   // Archived workers don't appear in the live schedule or the add-entry picker.
   const activeEmployees = employees?.filter((e) => e.isActive) ?? null;
 
@@ -346,7 +358,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar active={nav} onChange={setNav} adminLabel={admin ? `${admin.address} · админ` : "Админ"} />
+      <Sidebar active={nav} onChange={setNav} adminLabel={viewer ? `${viewer.address} · админ` : "Админ"} />
       <div className="main-column">
         {bootError ? (
           <div className="centered-fill">
