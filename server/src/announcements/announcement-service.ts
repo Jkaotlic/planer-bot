@@ -25,8 +25,15 @@ export const ANNOUNCEMENT_RECIPIENTS_MAX = 200;
 
 export type Audience = { kind: "all" } | { kind: "picked"; employeeIds: readonly number[] };
 
+/**
+ * Без предлога «от» намеренно: он требует родительного падежа, а имя приходит
+ * как есть из `addressOf` — не склонённое. «От Аня» читается как сломанный
+ * русский при каждой отправке, и заводить склонятель ради одной строки
+ * (отдельный модуль, длинный хвост исключений) того не стоит. Разделитель «·»
+ * работает с любым именем, включая прозвища и нерусские, без падежа вообще.
+ */
 export function announcementText(senderName: string, text: string): string {
-  return `📣 Объявление от ${senderName}:\n\n${text}`;
+  return `📣 Объявление · ${senderName}\n\n${text}`;
 }
 
 /**
@@ -44,10 +51,16 @@ export function announcementRecipients(
   // не уйдёт, но назвать его надо поимённо — админ, не увидевший имени в отчёте,
   // решит, что письмо ушло. `listActive` архивных не отдаёт вовсе, поэтому в
   // ветке «всем» их и нет.
+  //
+  // `new Set(...)` — маршрут принимает произвольный JSON от кого угодно (curl,
+  // Postman, будущий клиент), и повтор id в теле не обязан быть намеренным.
+  // Без дедупа человек получил бы письмо дважды, а `delivered`/`intended` и имя
+  // в `unreachable` задвоились бы. Дедуп здесь, а не в маршруте: тогда защита
+  // действует на оба входа функции, а не только на HTTP.
   const pool =
     audience.kind === "all"
       ? listActive(db).filter((e) => e.id !== senderId)
-      : audience.employeeIds
+      : [...new Set(audience.employeeIds)]
           .map((id) => getEmployeeById(db, id))
           .filter((e): e is Employee => e != null && e.id !== senderId);
 

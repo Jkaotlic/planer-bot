@@ -31,10 +31,10 @@ function linked(db: Db, name: string, tgId: number, isAdmin = false) {
 
 describe("анонс", () => {
   it("подписан отправителем — анонимной рассылке в рабочем чате нечего ответить", () => {
-    // `announcementText` не склоняет имя — придумывать своё склонение по одной
-    // строке нельзя (см. заголовок `shared/src/address.ts`), поэтому подпись
-    // именительная: «от Аня», не «от Ани».
-    expect(announcementText("Аня", "В пятницу переезд")).toBe("📣 Объявление от Аня:\n\nВ пятницу переезд");
+    // Без предлога «от»: он требует родительного падежа, а `addressOf` имя не
+    // склоняет — «от Аня» читалось бы как сломанный русский при каждой
+    // отправке. Разделитель «·» корректен для любого имени без падежа вообще.
+    expect(announcementText("Аня", "В пятницу переезд")).toBe("📣 Объявление · Аня\n\nВ пятницу переезд");
   });
 
   it("уходит выбранным и не уходит остальным", async () => {
@@ -96,6 +96,31 @@ describe("анонс", () => {
     expect(sent.map((m) => m.chat_id).sort()).toEqual([222, 444]);
     expect(res.delivered).toBe(2);
     expect(res.intended).toBe(3);
+  });
+
+  it("повтор id в picked не дублирует ни письмо, ни счётчики", async () => {
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const igor = linked(db, "Игорь", 222);
+
+    const { bot, sent } = testBot();
+    const res = await sendAnnouncement(bot, db, {
+      senderId: anya.id,
+      text: "Собрание",
+      audience: { kind: "picked", employeeIds: [igor.id, igor.id, igor.id] },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(res).toMatchObject({ delivered: 1, intended: 1, unreachable: [] });
+  });
+
+  it("повтор id недостижимого в picked не дублирует имя в unreachable", () => {
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i-none" }); // без Telegram
+
+    const picked = announcementRecipients(db, { kind: "picked", employeeIds: [marc.id, marc.id] }, anya.id);
+    expect(picked.unreachable).toEqual(["Марк"]);
   });
 
   it("архивный не считается адресатом даже при явном выборе", async () => {
