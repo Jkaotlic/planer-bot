@@ -291,12 +291,23 @@ export async function notifyHandoverFan(
  * выключить, и заметили бы это по жалобе. Здесь же tsc не даст добавить админское
  * уведомление, не решив, к какому виду оно относится.
  */
-export async function notifyAdmins(bot: Bot, db: Db, kind: AdminNoticeKind, text: string): Promise<void> {
+export async function notifyAdmins(
+  bot: Bot,
+  db: Db,
+  kind: AdminNoticeKind,
+  text: string,
+  /** Кнопка про само событие — например «Разобрал» у багрепорта. Едет ПЕРВОЙ
+   *  строкой, над выключателем: она про то, что человек только что прочитал, а
+   *  выключатель — про поток вообще. */
+  action?: { text: string; data: string },
+): Promise<void> {
   // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
   // `notifyReminder`: за настройкой, о существовании которой не знаешь, не ходят.
   // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
   // него на экране.
-  const kb = new InlineKeyboard().text("🔕 Не писать мне про это", `notice:mute:${kind}`);
+  const kb = new InlineKeyboard();
+  if (action) kb.text(action.text, action.data).row();
+  kb.text("🔕 Не писать мне про это", `notice:mute:${kind}`);
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
     // Единственное место на весь проект, где эта проверка делается. Если она
@@ -309,6 +320,12 @@ export async function notifyAdmins(bot: Bot, db: Db, kind: AdminNoticeKind, text
       console.error(`notifyAdmins(${kind}): failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
   }
+}
+
+/** Багрепорт админам, с кнопкой «Разобрал». Через `notifyAdmins`, а не своим
+ *  циклом, — чтобы выключатель вида `bug_reports` работал и здесь. */
+export async function notifyBugReport(bot: Bot, db: Db, reportId: number, text: string): Promise<void> {
+  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` });
 }
 
 /**

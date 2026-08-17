@@ -23,10 +23,11 @@ import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import {
   notifyUser,
   notifyAdmins,
+  notifyBugReport,
   swapAcceptedText,
   swapDeclinedText,
   swapAcceptedAdminText,
@@ -39,6 +40,7 @@ import {
 import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { outsidePoolFacts } from "../swap/duty-notice";
 import { safeErrorMessage } from "../util/safe-error";
+import { openBugPrompt, getBugPending, clearBugPending, shouldCapture, submitBugReport, resolveBugReport } from "../bugs/bug-service";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
 // plain Telegram chat text — Telegram syncs history to every signed-in device
@@ -484,6 +486,52 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("week", (ctx) => sendWeek(ctx));
 
   /**
+   * «Сообщить о проблеме»: бот спрашивает, человек отвечает.
+   *
+   * `force_reply` — не украшение: Telegram сам ставит курсор в поле ввода и
+   * привязывает ответ к этому сообщению, поэтому обычный путь не требует от
+   * человека ничего, кроме «набрать и отправить». Окно в базе — страховка на
+   * случай, когда он свернул чат и написал отдельным сообщением.
+   */
+  async function startBugReport(ctx: Context): Promise<void> {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    const sent = await ctx.reply(
+      "Опиши, что не так — одним сообщением. Чем конкретнее, тем быстрее починим.",
+      { reply_markup: { force_reply: true, input_field_placeholder: "Что сломалось?" } },
+    );
+    openBugPrompt(db, who.me.id, sent.message_id, new Date());
+  }
+
+  /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
+   *  разбираются раньше и сюда не доходят. */
+  async function captureBugReport(ctx: Context, text: string): Promise<void> {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) return;
+    const pending = getBugPending(db, who.me.id);
+    if (!pending) return;
+    if (!shouldCapture(pending, ctx.msg?.reply_to_message?.message_id, new Date())) return;
+
+    const res = submitBugReport(db, who.me.id, text, new Date());
+    if (!res.ok) {
+      await ctx.reply(res.reason);
+      return;
+    }
+    // Аудит уже записал `submitBugReport` — второй записи здесь не нужно,
+    // иначе одна жалоба легла бы в журнал дважды. Сверено с bug-service.ts.
+    clearBugPending(db, who.me.id);
+    await ctx.reply("Записал, спасибо 🙏 Разберёмся.");
+    await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
+  }
+
+  /**
    * Нажатая кнопка постоянной клавиатуры. Telegram присылает её обычным
    * текстовым сообщением, поэтому единственный ключ — точное совпадение метки.
    * Кнопка «Мои смены» сюда не попадает: она `web_app`, её нажатие открывает
@@ -508,6 +556,10 @@ export function createBot(deps: BotDeps): Bot {
     else if (text === BTN_MY_SHIFTS) await sendMiniApp(ctx);
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
+    else if (text === BTN_BUG) await startBugReport(ctx);
+    // Последним и только здесь: всё, что выше, — метки кнопок, и они всегда кнопки.
+    // На остальное бот молчит, как молчал, — если окна ожидания нет.
+    else await captureBugReport(ctx, text);
   });
 
   /**
@@ -630,6 +682,34 @@ export function createBot(deps: BotDeps): Bot {
       `«${ADMIN_NOTICE_LABELS[kind].title}» больше не пишу. Вернуть — в мини-аппе, «Админ» → «Настройки».`,
     );
     // Снимается только кнопка: текст уведомления по-прежнему нужен человеку.
+    await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  /**
+   * «Разобрал» под багрепортом.
+   *
+   * Проверка на админа — отдельно от `acting`, как и у `notice:mute` выше:
+   * кнопка живёт в чате Telegram вечно, а админа могли разжаловать.
+   */
+  bot.callbackQuery(/^bug:resolve:(\d+)$/, async (ctx) => {
+    const id = Number(ctx.match[1]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    if (!who.me.isAdmin && !config.adminTelegramIds.includes(ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это может только админ" });
+      return;
+    }
+    // `resolveBugReport` уже пишет аудит сама (сверено с bug-service.ts) —
+    // второй вызов здесь задвоил бы запись.
+    const updated = resolveBugReport(db, id, who.me.id, true, new Date());
+    if (!updated) {
+      await ctx.answerCallbackQuery({ text: "Сообщение не найдено" });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Отметил ✅" });
     await safeEdit(() => ctx.editMessageReplyMarkup());
   });
 
