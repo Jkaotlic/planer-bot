@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { pluralRecords, rosterImportSummaryLine } from "@planer/shared";
+import { pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import { Button, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import {
   apiClient,
@@ -8,7 +8,6 @@ import {
   type RosterPersonResolution,
 } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
-import { readCsvFile, type CsvEncoding } from "../../lib/csv-encoding";
 import { withNotifyNotice } from "../../lib/shift";
 
 /** Everything the confirm step needs, held together so a stale piece can't be applied. */

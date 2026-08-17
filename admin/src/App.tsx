@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { pluralRecords, rosterImportSummaryLine } from "@planer/shared";
+import { pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
   AuthRequiredError,
@@ -25,7 +25,6 @@ import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
-import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
