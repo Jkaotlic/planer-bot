@@ -1,4 +1,4 @@
-import { allowedByPool, countsForBalance } from "@planer/shared";
+import { allowedByPool, countsForBalance, UNRECOGNISED_KIND } from "@planer/shared";
 import type { Employee, Shift, Template, TemplateRolesView } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 
@@ -36,14 +36,6 @@ interface Load {
   byKind: Record<string, number>;
   total: number;
 }
-
-/**
- * A roster cell the import could not read. Real work of an unknown kind, so it
- * counts — but under its own name, never under a preset's and never inside the
- * custom-time bucket. Same string as the server's `seedWorkerLoad` and the report,
- * on purpose: one entry must not read as «День» here and «не распознано» there.
- */
-const UNRECOGNISED_KIND = "Не распознано (?)";
 
 /**
  * Which bucket an entry counts toward, or `null` when it counts toward none —

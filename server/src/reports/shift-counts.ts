@@ -1,4 +1,4 @@
-import { countsForBalance } from "@planer/shared";
+import { countsForBalance, UNRECOGNISED_KIND } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listActive } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
@@ -30,15 +30,6 @@ export interface ShiftCountsReport {
 
 /** A one-off entry with no preset behind it — grouped under a single column. */
 const CUSTOM_KIND = "Своё время";
-
-/**
- * A roster cell the import could not read (see `unrecognisedCode` on the shifts
- * table). It is a shift of unknown kind — real work, so it must count — but it is
- * not the same thing as somebody hand-timing a shift, so it gets its own column
- * rather than hiding inside «Своё время». The «?» matches how the mini app already
- * marks such a cell.
- */
-const UNRECOGNISED_KIND = "Не распознано (?)";
 
 export function buildShiftCountsReport(db: Db, from: string, to: string): ShiftCountsReport {
   const templates = listActiveTemplates(db);

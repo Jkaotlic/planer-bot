@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
-import { allowedByPool, countsForBalance, resolveShiftTimes } from "@planer/shared";
+import { allowedByPool, countsForBalance, isAbsence, resolveShiftTimes, UNRECOGNISED_KIND } from "@planer/shared";
 import {
   apiClient,
   type Employee,
@@ -41,11 +41,6 @@ const FRIDAY_INDEX = 4;
 /** Categories that carry explicit clock times (a single-day worked entry). */
 function needsTime(category: Category): boolean {
   return category === "shift" || category === "duty" || category === "offsite" || category === "weekend_work";
-}
-
-/** All-day absences that can span several days and have no clock times. */
-function isMultiDay(category: Category): boolean {
-  return category === "vacation" || category === "sick_leave" || category === "business_trip";
 }
 
 /**
@@ -662,7 +657,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
       // Duty/offsite carry the "Место / примечание" as their title; a custom-time
       // shift has none — clear any stale preset name so it isn't mislabelled.
       input.title = category === "duty" || category === "offsite" ? title.trim() || null : null;
-    } else if (isMultiDay(category)) {
+    } else if (isAbsence(category)) {
       if (endDate && endDate !== date) input.endDate = endDate;
     }
     return input;
@@ -762,7 +757,7 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
 
       {needsTime(category) && categoryPresets.length === 0 && <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />}
 
-      {isMultiDay(category) && (
+      {isAbsence(category) && (
         <Select header="По какой день" value={endDate} onChange={(e) => setEndDate(e.target.value)}>
           {dayOptions(weekDates, endDate)
             .filter((iso) => iso >= date)
@@ -847,14 +842,6 @@ function shiftKind(s: Pick<Shift, "templateId" | "title">, nameById: ReadonlyMap
   }
   return s.title ?? "Своё время";
 }
-
-/**
- * A roster cell the import could not read. Real work of an unknown kind, so it
- * counts — but under its own name, never under a preset's and never inside the
- * custom-time bucket. Same string as the server's `seedWorkerLoad` and the report,
- * on purpose: one entry must not read as «День» here and «не распознано» there.
- */
-const UNRECOGNISED_KIND = "Не распознано (?)";
 
 /**
  * Which bucket an entry counts toward, or `null` when it counts toward none —
