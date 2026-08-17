@@ -24,6 +24,7 @@ import {
   rememberTelegramProfile,
 } from "../repo/employees";
 import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
+import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
 import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
@@ -74,6 +75,8 @@ import {
   addressOf,
   normalizePreferredName,
   PREFERRED_NAME_MAX,
+  ADMIN_NOTICE_KINDS,
+  ADMIN_NOTICE_LABELS,
   type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
@@ -305,6 +308,47 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Returned so the greeting can update without a second round trip.
       address: addressOf(employee),
     });
+  });
+
+  /**
+   * Что писать этому админу.
+   *
+   * `requireAdmin`, а не `requireAuth`: этих писем не получает никто, кроме
+   * админов, и переключатель, который у работника ничего не меняет, — ложь в
+   * интерфейсе, а не безобидная лишняя настройка.
+   *
+   * Адресат берётся из токена, id в пути нет — чужие уведомления выключить нечем,
+   * тем же правилом, что и в `/api/me/settings`.
+   */
+  app.get("/api/me/notifications", requireAdmin(db, config.jwtSecret), (c) => {
+    const muted = new Set(listMutedKinds(db, c.get("auth").employeeId));
+    return c.json({
+      kinds: ADMIN_NOTICE_KINDS.map((kind) => ({
+        kind,
+        title: ADMIN_NOTICE_LABELS[kind].title,
+        hint: ADMIN_NOTICE_LABELS[kind].hint,
+        enabled: !muted.has(kind),
+      })),
+    });
+  });
+
+  app.patch("/api/me/notifications", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; enabled?: unknown };
+    if (typeof body.enabled !== "boolean") return c.json({ error: "enabled должен быть true или false" }, 400);
+    // Проверяем по списку, а не по типу: тело приходит из сети, и `as AdminNoticeKind`
+    // завёл бы строку с любым мусором в `kind`.
+    const kind = ADMIN_NOTICE_KINDS.find((k) => k === body.kind);
+    if (!kind) return c.json({ error: "неизвестный вид уведомления" }, 400);
+
+    const id = c.get("auth").employeeId;
+    setNoticeMuted(db, id, kind, !body.enabled);
+    recordAudit(db, "notice_prefs_changed", id, {
+      employeeId: id,
+      kind,
+      title: ADMIN_NOTICE_LABELS[kind].title,
+      enabled: body.enabled,
+    });
+    return c.json({ kind, enabled: body.enabled });
   });
 
   app.route("/", createReadRoutes({ db, config }));

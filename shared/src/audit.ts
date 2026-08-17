@@ -33,7 +33,7 @@ export const AUDIT_TYPES = [
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
   "employee_restrictions_changed",
-  "employee_invite_issued", "settings_changed",
+  "employee_invite_issued", "settings_changed", "notice_prefs_changed",
   "template_roles_changed", "template_rotation_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
   "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
@@ -349,6 +349,14 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     }
     return { icon: "⚙", title: "Работник изменил настройки", lines };
   },
+
+  // Отдельно от `settings_changed`: на вопрос «почему админ перестал получать
+  // письма» должна отвечать строка журнала, а не догадка.
+  notice_prefs_changed: (p) => ({
+    icon: "🔕",
+    title: p.enabled ? "Включил(а) себе уведомления" : "Выключил(а) себе уведомления",
+    lines: [String(p.title ?? p.kind ?? "")],
+  }),
 
   template_roles_changed: (p) => ({
     icon: "🎚",
