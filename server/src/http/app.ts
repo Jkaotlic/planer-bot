@@ -8,9 +8,10 @@ import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
+import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
-import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping } from "../repo/shifts";
+import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -181,7 +182,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);
     if (/FOREIGN KEY/i.test(msg)) return c.json({ error: "invalid_reference" }, 400);
-    console.error("unhandled error:", err);
+    // Через редактор, как весь остальной сервер: сюда попадает ЛЮБАЯ ошибка
+    // роута, и если однажды кто-то дёрнет `bot.api.*` прямо из обработчика (а не
+    // через `notify.ts`), в лог уедет полный URL запроса к Telegram вместе с
+    // токеном. Стек печатается тоже редактированным — он и нужен, чтобы понять,
+    // где упало.
+    console.error("unhandled error:", redactSecrets(err instanceof Error ? (err.stack ?? msg) : msg));
     return c.json({ error: "internal" }, 500);
   });
 
@@ -792,12 +798,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return target.isActive ? null : `«${target.displayName}» в архиве — восстановите его, прежде чем ставить записи`;
   };
 
+  /**
+   * «Место» — отдельное поле пресета, а не часть его имени.
+   *
+   * Импорт ростера пишет оба (`roster-codec`: `title: preset.name,
+   * location: preset.location`), а обе админки — только заголовок: поле формы
+   * называется «Место / примечание» и уезжает в `title`. Читатель у `location`
+   * есть — карточка команды рисует строку «Место: …», — поэтому одно и то же
+   * дежурство на одном и том же месте показывало его, если пришло из CSV, и
+   * молчало, если его завёл админ (на живых данных 83 против 74 у тех же
+   * пресетов). Правило стоит у решения, а не у двери: через него идут создание,
+   * правка и «Заполнить неделю».
+   *
+   * Присланное явно место сильнее: пресет описывает запись по умолчанию, а не
+   * вопреки тому, что о ней сказали.
+   */
+  const withPresetLocation = <T extends { templateId?: number | null; location?: string | null }>(input: T): T => {
+    if (input.location != null || input.templateId == null) return input;
+    const preset = getTemplate(db, input.templateId);
+    return preset?.location ? { ...input, location: preset.location } : input;
+  };
+
   app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
-    const entry = createShift(db, parsed.data);
+    const entry = createShift(db, withPresetLocation(parsed.data));
     recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now: teamNow(config.teamTz),
@@ -855,6 +882,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // пресета в обеих формах всегда шлёт `templateId` вместе с часами.
     if (patch.start !== undefined && patch.templateId === undefined) patch.templateId = null;
 
+    // Место идёт за пресетом — тем, с которым запись останется. Пресет сменился —
+    // приезжает место нового; пресет сняли (отсутствие, своё время) — уезжает и
+    // место, иначе «Место: Поклонка» осталось бы на отпуске, и это увидела бы вся
+    // команда. Правка, назвавшая место сама, остаётся сильнее.
+    if (patch.location === undefined && patch.templateId !== undefined) {
+      patch.location = patch.templateId == null ? null : (getTemplate(db, patch.templateId)?.location ?? null);
+    }
+
     const merged = {
       category,
       date: patch.date ?? existing.date,
@@ -878,8 +913,32 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // thing that can mark a cell unread (pinned by its own API test).
     const namesTheEntry = ["templateId", "title", "start", "end", "category"] as const;
     const clearsUnread = existing.unrecognisedCode != null && namesTheEntry.some((field) => patch[field] !== undefined);
+
+    // Смена уезжает на другое число — висящий обмен становится невозможен, потому
+    // что меняться можно только внутри одного дня (его решение от 2026-08-03).
+    // Payload собирается ДО правки: письмо говорит «Было: … ↔ …», то есть называет
+    // те смены, о которых договаривались, а не ту, что получилась.
+    const movedToAnotherDay = patch.date !== undefined && patch.date !== existing.date;
+    const swapsToExpire = movedToAnotherDay
+      ? listPendingSwapsForShift(db, id).map((request) => ({ request, payload: swapAuditPayload(request) }))
+      : [];
+
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
+    if (movedToAnotherDay) {
+      const expired = new Set(expirePendingSwapsForShift(db, id).map((r) => r.id));
+      for (const { request, payload } of swapsToExpire) {
+        if (!expired.has(request.id)) continue;
+        // Актор — админ, перенёсший смену: в обмене никто из двоих ничего не делал,
+        // ровно поэтому сказать надо обоим (то же правило, что у удаления записи).
+        recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
+        if (!bot) continue;
+        for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
+          const tg = tgOf(employeeId);
+          if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
+        }
+      }
+    }
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
@@ -903,7 +962,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     const dates = parsed.data.entries.map((e) => e.date).sort();
     const { result: entries, diffs } = withScheduleDiff(db, { from: dates[0]!, to: dates.at(-1)! }, () =>
-      db.transaction(() => parsed.data.entries.map((input) => createShift(db, input))),
+      db.transaction(() => parsed.data.entries.map((input) => createShift(db, withPresetLocation(input)))),
     );
     for (const entry of entries) recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = await notifyScheduleChange(db, bot, {

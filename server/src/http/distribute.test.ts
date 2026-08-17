@@ -5,13 +5,9 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 const initDataFor = (id: number) =>
   signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id, first_name: "T" }) }, config.botToken);
 const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>

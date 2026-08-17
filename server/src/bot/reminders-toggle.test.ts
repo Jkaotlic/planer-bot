@@ -1,26 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
+import { recordApi, stubBotInfo } from "./testbot";
 import { makeTestDb } from "../db/testdb";
 import { createBot, remindersKeyboard, remindersStateText } from "./bot";
 import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 /** A bot whose outgoing calls are captured instead of sent. */
 function testBot(db: Db) {
-  const bot = createBot({ db, config });
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
-  const calls: { method: string; payload: Record<string, unknown> }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    calls.push({ method, payload: payload as Record<string, unknown> });
-    return { ok: true, result: {} } as never;
-  });
+  const bot = stubBotInfo(createBot({ db, config }), { id: 42, first_name: "P", username: "p_bot" });
+  const { calls } = recordApi(bot);
   return { bot, calls };
 }
 
@@ -119,8 +110,7 @@ describe("the reminders switch in the bot", () => {
     const db = makeTestDb();
     worker(db, "Смирнова Аня", 209);
     const bot = createBot({ db, config });
-    bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-      can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+    stubBotInfo(bot, { first_name: "P", username: "p_bot" });
     const calls: { method: string; payload: Record<string, unknown> }[] = [];
     bot.api.config.use((_prev, method, payload) => {
       calls.push({ method, payload: payload as Record<string, unknown> });

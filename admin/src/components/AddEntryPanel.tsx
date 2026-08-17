@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { resolveShiftTimes } from "@planer/shared";
+import { isAbsence, resolveShiftTimes } from "@planer/shared";
 import type { EntryCategory } from "@planer/shared";
 import type { Employee, NewEntryInput, Shift, Template } from "../api/client";
 import { ALL_CATEGORIES, categoryLabel } from "../categories";
@@ -24,11 +24,6 @@ const FRIDAY_INDEX = 4;
 /** Categories that need an explicit start/end (a "Смена"-style single-day entry). */
 function needsTime(category: EntryCategory): boolean {
   return category === "shift" || category === "duty" || category === "offsite" || category === "weekend_work";
-}
-
-/** Categories that can span multiple days (no clock times). */
-function isMultiDay(category: EntryCategory): boolean {
-  return category === "vacation" || category === "sick_leave" || category === "business_trip";
 }
 
 /** Modal for creating a schedule entry — or, when `existing` is passed, editing one in place. */
@@ -120,7 +115,7 @@ export function AddEntryPanel({
       input.end = end;
       // Duty/offsite carry the place as their title; a custom-time shift has none.
       input.title = category === "duty" || category === "offsite" ? title.trim() || null : null;
-    } else if (isMultiDay(category)) {
+    } else if (isAbsence(category)) {
       if (endDate && endDate !== date) input.endDate = endDate;
     }
 
@@ -256,7 +251,7 @@ export function AddEntryPanel({
           </div>
         )}
 
-        {isMultiDay(category) && (
+        {isAbsence(category) && (
           <div className="field-group">
             <label className="field-label" htmlFor="entry-end-date">
               По какой день

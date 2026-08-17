@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import { Button, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import {
   apiClient,
@@ -7,7 +8,6 @@ import {
   type RosterPersonResolution,
 } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
-import { readCsvFile, type CsvEncoding } from "../../lib/csv-encoding";
 import { withNotifyNotice } from "../../lib/shift";
 
 /** Everything the confirm step needs, held together so a stale piece can't be applied. */
@@ -48,15 +48,6 @@ export function importBlocker(state: Pick<RosterImportState, "preview" | "overwr
   return null;
 }
 
-/** "1 запись" / "2 записи" / "5 записей". */
-export function pluralRecords(count: number): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return `${count} записей`;
-  if (mod10 === 1) return `${count} запись`;
-  if (mod10 >= 2 && mod10 <= 4) return `${count} записи`;
-  return `${count} записей`;
-}
 
 /** "01.06.2026 — 30.06.2026", the way the file itself writes dates. */
 export function formatPeriod(from: string, to: string): string {
@@ -73,35 +64,6 @@ export function monthRangeOf(today: string): { from: string; to: string } {
   return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(lastDay)}` };
 }
 
-/** The one-line result of a finished import, for the success notice. */
-export function summaryLine(summary: {
-  entriesInserted: number;
-  entriesDeleted: number;
-  cellsPreserved: number;
-  employeesCreated: number;
-  swapsExpired?: number;
-  unknowns?: { name: string; date: string; code: string }[];
-}): string {
-  const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
-  if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
-  if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
-  if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
-  const line = `CSV загружен: ${parts.join(", ")}`;
-  // Unreadable cells no longer stop the import, so the count has to travel with the
-  // success notice — otherwise «загружено» is the last thing said about a file that
-  // put question marks in the grid.
-  const unreadable = summary.unknowns?.length ?? 0;
-  const withUnknowns = unreadable > 0
-    ? `${line}. ⚠ Не понял ${unreadable} ${unreadable === 1 ? "клетку" : "клеток"} — они стоят со знаком «?»`
-    : line;
-  // Replacing a month can invalidate swaps people were still waiting on. They get
-  // told in chat; the admin who caused it should see it here rather than find out
-  // from the person asking why their request says «Истекло».
-  const expired = summary.swapsExpired ?? 0;
-  return expired > 0
-    ? `${withUnknowns}. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
-    : withUnknowns;
-}
 
 interface Props {
   /** Active workers, offered as rename targets in the reconciliation list. */
@@ -192,7 +154,7 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
     // поле ошибки к этому моменту уже не существует (`setState(null)` только что
     // его убрал), поэтому идёт через `onError`, а не теряется молча.
     setState(null);
-    onNotice(withNotifyNotice(summaryLine(summary), summary.notified));
+    onNotice(withNotifyNotice(rosterImportSummaryLine(summary), summary.notified));
     try {
       await onImported();
     } catch (err) {

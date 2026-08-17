@@ -6,6 +6,7 @@ import {
   isAbsence,
   nextDate,
   toMinutes,
+  UNRECOGNISED_KIND,
   type FillSlot,
   type WorkerLoad,
 } from "@planer/shared";
@@ -84,11 +85,9 @@ function shiftKind(
  * the column comment on `shifts`). It is real work of an unknown kind, so it must
  * add to the total the same as any other shift, but it must never be filed under a
  * named kind (that would claim to know what it was) or under the custom-time
- * bucket (that means somebody hand-timed a shift, which this is not). Keep this in
- * sync with the identical bucket in reports/shift-counts.ts — same meaning, same
- * label, so the report and the balance never disagree about what this is.
+ * bucket (that means somebody hand-timed a shift, which this is not). Название
+ * бакета живёт в `@planer/shared` — одно на раздачу, отчёт и обе консоли.
  */
-const UNRECOGNISED_KIND = "Не распознано (?)";
 
 function crossesMidnight(start: string, end: string): boolean {
   return toMinutes(end) < toMinutes(start);

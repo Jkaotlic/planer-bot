@@ -1,5 +1,6 @@
 import { Bot } from "grammy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { recordApi, stubBotInfo } from "../bot/testbot";
 
 import type { Db } from "../db/client";
 import { makeTestDb } from "../db/testdb";
@@ -13,17 +14,8 @@ const WINDOW_MS = 20_000;
 /** A bot whose `sendMessage` calls land in `sent` instead of hitting the network —
  *  same helper shape as `http/employees.test.ts`, reused rather than reinvented. */
 function testBot() {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = {
-    id: 1, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false,
-    supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
-    return { ok: true, result: {} } as never;
-  });
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 1, first_name: "P", username: "p_bot" });
+  const { sent } = recordApi(bot);
   return { bot, sent };
 }
 

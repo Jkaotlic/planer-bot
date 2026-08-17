@@ -1004,9 +1004,7 @@ function SendBlock({
           : preview.recipients.map((person) => person.displayName).join(", ")}
       </div>
 
-      {preview.blocker ? (
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>{preview.blocker}</div>
-      ) : confirming ? (
+      {confirming ? (
         <>
           <div style={{ fontSize: 13, lineHeight: 1.45 }}>
             Отправить {recipientsPhrase(preview.recipients.length)}? Отменить будет нельзя — сообщения уйдут сразу.
@@ -1019,9 +1017,18 @@ function SendBlock({
           </Button>
         </>
       ) : (
-        <Button size="s" mode="bezeled" stretched disabled={busy} onClick={onArm}>
-          {sendButtonLabel(preview)}
-        </Button>
+        <>
+          {/* Кнопка остаётся на месте и погашенной, причина — подписью под ней.
+              Прежде непустой блокер её ЗАМЕНЯЛ текстом, и здесь это било сильнее,
+              чем в консоли: блокер набран тем же серым мелким шрифтом, что соседние
+              пояснения, то есть на месте кнопки человек видел ещё один абзац. */}
+          <Button size="s" mode="bezeled" stretched disabled={busy || preview.blocker != null} onClick={onArm}>
+            {sendButtonLabel(preview)}
+          </Button>
+          {preview.blocker ? (
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>{preview.blocker}</div>
+          ) : null}
+        </>
       )}
     </>
   );

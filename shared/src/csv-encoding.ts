@@ -8,6 +8,11 @@ export interface DecodedCsv {
 /**
  * Turns an uploaded roster file into text.
  *
+ * Живёт в `@planer/shared`, а не по копии в каждой консоли: копии были помечены
+ * «MIRROR … byte for byte» и совпадали, но обе морды от shared и так зависят —
+ * переезд сюда убирает зеркало насовсем. Ни DOM, ни React здесь нет: `TextDecoder`
+ * и `Blob` есть и в браузере, и в Node.
+ *
  * `File.text()` always assumes UTF-8. Excel on Windows still saves CSV as
  * windows-1251, and decoding those bytes as UTF-8 turns every ФИО into mojibake —
  * which then matches nobody in the database, so a confirmed import would quietly

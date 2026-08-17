@@ -24,7 +24,6 @@ const app = appModule as unknown as {
     overwrite: boolean;
     resolutions: RosterPersonResolution[];
   }) => string | null;
-  pluralRecords: (count: number) => string;
 };
 
 describe("roster import reconciliation", () => {
@@ -68,16 +67,5 @@ describe("applying over a period that already has entries", () => {
         { csvName: "Второй", action: "rename", employeeId: 2 },
       ],
     })).toBe("Один сотрудник выбран для нескольких строк CSV");
-  });
-});
-
-describe("pluralRecords", () => {
-  it("declines «запись» the way Russian actually does", () => {
-    expect([0, 1, 2, 5, 11, 12, 14, 21, 22, 25, 101, 111].map(app.pluralRecords)).toEqual([
-      "0 записей", "1 запись", "2 записи", "5 записей",
-      "11 записей", "12 записей", "14 записей",
-      "21 запись", "22 записи", "25 записей",
-      "101 запись", "111 записей",
-    ]);
   });
 });

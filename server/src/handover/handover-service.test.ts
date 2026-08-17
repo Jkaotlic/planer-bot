@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
@@ -68,21 +69,8 @@ function auditTypes(db: TestDb): string[] {
  *  между отправителем и `sendMessage` стоит `notifyAdmins`, а не фейковый
  *  `messenger` из `deps()` выше. */
 function testBot() {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = {
-    id: 42,
-    is_bot: true,
-    first_name: "P",
-    username: "p_bot",
-    can_join_groups: false,
-    can_read_all_group_messages: false,
-    supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const wire: { chat_id: number | string; text: string }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    if (method === "sendMessage") wire.push(payload as { chat_id: number | string; text: string });
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+  const { sent: wire } = recordApi(bot);
   return { bot, wire };
 }
 

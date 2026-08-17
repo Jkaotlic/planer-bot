@@ -1,32 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
+import { recordApi, stubBotInfo } from "./testbot";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, createAdminEmployee } from "../repo/employees";
 import { listShiftsInRange } from "../repo/shifts";
 import { createVacantSlot, listInterestedEmployeeIds, getVacantSlot } from "../repo/weekend";
 import { expressInterest, assignSlot } from "../weekend/weekend-service";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 function testBot(db: Db) {
-  const bot = createBot({ db, config });
-  bot.botInfo = {
-    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string }[] = [];
-  const calls: { method: string; payload: any }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    calls.push({ method, payload });
-    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(createBot({ db, config }));
+  const { sent, calls } = recordApi(bot);
   return { bot, sent, calls };
 }
 
@@ -35,10 +22,7 @@ function testBot(db: Db) {
  *  already sent before it. */
 function testBotFailingMethod(db: Db, failingMethod: string) {
   const bot = createBot({ db, config });
-  bot.botInfo = {
-    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
+  stubBotInfo(bot);
   const sent: { chat_id: number | string; text: string }[] = [];
   const calls: { method: string; payload: any }[] = [];
   bot.api.config.use((_prev, method, payload) => {
