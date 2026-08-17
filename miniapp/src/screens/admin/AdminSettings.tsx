@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { formatAuditMoment } from "@planer/shared";
 import { Button, Cell, List, Section, Spinner, Switch } from "@telegram-apps/telegram-ui";
-import { apiClient, type AdminSettings as AdminSettingsData, type SwapLockResult } from "../../api/client";
+import { apiClient, type AdminSettings as AdminSettingsData, type NoticePref, type SwapLockResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { withNotifyNotice } from "../../lib/shift";
 
 /**
- * «Настройки» (admin, mobile): пока один тумблер — общий замок обменов сменами.
- * Он пишет сразу всей команде и отменяет чужие незакрытые заявки, поэтому
+ * «Настройки» (admin, mobile): общий замок обменов сменами и то, какие письма
+ * этот админ вообще получает.
+ *
+ * Замок пишет сразу всей команде и отменяет чужие незакрытые заявки, поэтому
  * первое нажатие только «взводит» подтверждение (`confirming`), а отправляет —
  * второе. Тот же узор, что у кнопки рассылки на «Сборах»
  * (`AdminCollections.tsx`).
@@ -16,6 +18,8 @@ import { withNotifyNotice } from "../../lib/shift";
  * Ошибка сохранения рисуется рядом с тумблером, а не вместо него — тот же
  * приём, что и в веб-консоли (`SettingsScreen.tsx`): этот экран не должен
  * превращаться в тупик без перезагрузки, как уже дважды случалось в проекте.
+ * Список видов уведомлений ниже переживает свою ошибку тем же способом: тумблер
+ * откатывается назад, а не гасит весь экран.
  */
 export function AdminSettings() {
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
@@ -23,6 +27,12 @@ export function AdminSettings() {
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<SwapLockResult | null>(null);
+
+  const [noticePrefs, setNoticePrefs] = useState<NoticePref[] | null>(null);
+  const [noticeLoadError, setNoticeLoadError] = useState<string | null>(null);
+  // По виду письма, а не одна общая: переключение «Обмены сменами» не должно
+  // гасить ошибку, оставшуюся от неудачной попытки на «Дни рождения».
+  const [noticeErrors, setNoticeErrors] = useState<Record<string, string>>({});
 
   async function reload() {
     try {
@@ -32,9 +42,38 @@ export function AdminSettings() {
     }
   }
 
+  async function reloadNoticePrefs() {
+    try {
+      const { kinds } = await apiClient.getNoticePrefs();
+      setNoticePrefs(kinds);
+    } catch (err) {
+      setNoticeLoadError(err instanceof Error ? err.message : "Не удалось загрузить список уведомлений");
+    }
+  }
+
+  async function toggleNotice(kind: string, next: boolean) {
+    // Оптимистично, как «Напоминания о сменах» (`RemindersSwitch`): тумблер,
+    // отстающий от пальца, читается как сломанный. Catch ниже возвращает его
+    // назад, если сервер не согласился.
+    setNoticePrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled: next } : p)) ?? prev);
+    setNoticeErrors((prev) => {
+      const rest = { ...prev };
+      delete rest[kind];
+      return rest;
+    });
+    try {
+      const saved = await apiClient.setNoticePref(kind, next);
+      setNoticePrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled: saved.enabled } : p)) ?? prev);
+    } catch (err) {
+      setNoticePrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled: !next } : p)) ?? prev);
+      setNoticeErrors((prev) => ({ ...prev, [kind]: err instanceof Error ? err.message : "Не удалось сохранить" }));
+    }
+  }
+
   useEffect(() => {
     void reload();
-    // Загружается один раз; тумблер ниже перечитывает состояние сам.
+    void reloadNoticePrefs();
+    // Загружается один раз; тумблеры ниже перечитывают состояние сами.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -162,6 +201,50 @@ export function AdminSettings() {
               )}
             </CardShell>
           </CardStack>
+        </Section>
+
+        <Section header="Что мне писать">
+          {noticePrefs === null ? (
+            noticeLoadError ? (
+              <CardStack>
+                <CardShell>
+                  <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{noticeLoadError}</div>
+                </CardShell>
+              </CardStack>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+                <Spinner size="m" />
+              </div>
+            )
+          ) : (
+            <>
+              {noticePrefs.map((pref) => (
+                <div key={pref.kind}>
+                  <Cell
+                    Component="label"
+                    after={<Switch checked={pref.enabled} onChange={(e) => void toggleNotice(pref.kind, e.target.checked)} />}
+                    multiline
+                    description={pref.hint}
+                  >
+                    {pref.title}
+                  </Cell>
+                  {noticeErrors[pref.kind] && (
+                    <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+                      {noticeErrors[pref.kind]}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <CardStack>
+                <CardShell>
+                  <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                    Письмо «смену никто не взял» приходит всегда — его выключить нельзя.
+                  </div>
+                </CardShell>
+              </CardStack>
+            </>
+          )}
         </Section>
       </List>
     </ScreenScroll>
