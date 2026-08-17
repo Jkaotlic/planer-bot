@@ -43,6 +43,7 @@ export const AUDIT_TYPES = [
   "collection_closed", "collection_deleted",
   "reminder_undeliverable", "reminders_dispatched",
   "announcement_sent",
+  "bug_report_created", "bug_report_resolved",
 ] as const;
 
 export type AuditType = (typeof AUDIT_TYPES)[number];
@@ -465,6 +466,13 @@ const DESCRIBERS: Record<AuditType, Describer> = {
       String(p.text ?? ""),
       `Кому: ${p.audience === "all" ? "всей команде" : "выбранным"} · дошло ${num(p.delivered) ?? 0} из ${num(p.intended) ?? 0}`,
     ],
+  }),
+
+  bug_report_created: (p) => ({ icon: "🐞", title: "Сообщение о проблеме", lines: [String(p.text ?? "")] }),
+  bug_report_resolved: (p) => ({
+    icon: "🐞",
+    title: p.resolved ? "Проблема разобрана" : "Проблема снова открыта",
+    lines: [String(p.text ?? "")],
   }),
 };
 

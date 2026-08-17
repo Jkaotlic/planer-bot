@@ -314,6 +314,37 @@ export const notificationMutes = sqliteTable(
 
 export type NotificationMute = typeof notificationMutes.$inferSelect;
 
+/**
+ * Кому бот задал вопрос «что не так» и ждёт ответа.
+ *
+ * `employeeId` первичным ключом: окно одно на человека, второе нажатие заменяет
+ * первое. Две строки с разными `promptMessageId` означали бы, что непонятно,
+ * на какое приглашение смотреть.
+ *
+ * В базе, а не в памяти процесса: рестарт сервиса здесь и есть деплой, случается
+ * регулярно, и молча съеденный багрепорт — худшее, что эта кнопка может сделать.
+ * Человек уверен, что сообщил; админ ничего не получил; узнать неоткуда.
+ */
+export const bugReportPending = sqliteTable("bug_report_pending", {
+  employeeId: integer().primaryKey().references(() => employees.id),
+  /** На что смотреть, если человек ответит реплаем, а не просто следующим сообщением. */
+  promptMessageId: integer().notNull(),
+  createdAt: createdAt(),
+});
+
+/** Жалоба на бота от живого человека. Своя таблица, а не строка в журнале:
+ *  у неё есть жизнь после доставки — «новый» и «разобран». */
+export const bugReports = sqliteTable("bug_reports", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  employeeId: integer().notNull().references(() => employees.id),
+  text: text().notNull(),
+  createdAt: createdAt(),
+  resolvedAt: integer({ mode: "timestamp" }),
+  resolvedByEmployeeId: integer().references(() => employees.id),
+});
+
+export type BugReport = typeof bugReports.$inferSelect;
+
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;
 export type ShiftTemplate = typeof shiftTemplates.$inferSelect;
