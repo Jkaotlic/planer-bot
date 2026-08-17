@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { recordApi, stubBotInfo } from "../bot/testbot";
 import { eq } from "drizzle-orm";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
@@ -12,14 +13,8 @@ import type { Db } from "../db/client";
 
 /** Bot with botInfo set (skips getMe) and a transformer capturing outgoing sendMessage. */
 function testBot() {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+  const { sent } = recordApi(bot);
   return { bot, sent };
 }
 
@@ -30,8 +25,7 @@ function testBot() {
  */
 function refusingBot(errorCode: number, description: string) {
   const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+  stubBotInfo(bot, { first_name: "P", username: "p_bot" });
   const state = { attempts: 0 };
   bot.api.config.use((_prev, method) => {
     if (method === "sendMessage") {
@@ -316,8 +310,7 @@ describe("who a reminder is addressed to", () => {
     createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
 
     const bot = new Bot("12345:tok");
-    bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-      can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+    stubBotInfo(bot, { first_name: "P", username: "p_bot" });
     const payloads: Record<string, unknown>[] = [];
     bot.api.config.use((_prev, method, payload) => {
       if (method === "sendMessage") payloads.push(payload as Record<string, unknown>);
@@ -388,8 +381,7 @@ describe("one bad shift does not end the evening", () => {
       createShift(db, { date: TOMORROW, start: "08:30", end: "17:30", employeeId: second.id });
 
       const bot = new Bot("12345:tok");
-      bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-        can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+      stubBotInfo(bot, { first_name: "P", username: "p_bot" });
       const sent: { chat_id: number | string }[] = [];
       bot.api.config.use((_prev, method, payload) => {
         if (method === "sendMessage") {

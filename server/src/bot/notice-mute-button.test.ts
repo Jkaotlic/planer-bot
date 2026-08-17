@@ -1,28 +1,19 @@
 import { describe, it, expect } from "vitest";
+import { callbackDataOf, recordApi, stubBotInfo } from "./testbot";
 import { Bot } from "grammy";
 import { notifyAdmins, notifyAdminsAlways } from "./notify";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { isNoticeMuted, listMutedKinds } from "../repo/notice-prefs";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 function testBot() {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string; reply_markup?: any }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    if (method === "sendMessage") sent.push(payload as any);
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+  const { sent } = recordApi(bot);
   return { bot, sent };
 }
 
@@ -31,8 +22,7 @@ function testBot() {
  *  routing rather than a bare `Bot`. */
 function testCreatedBot(db: Db) {
   const bot = createBot({ db, config });
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+  stubBotInfo(bot, { first_name: "P", username: "p_bot" });
   const calls: { method: string; payload: Record<string, unknown> }[] = [];
   bot.api.config.use((_prev, method, payload) => {
     calls.push({ method, payload: payload as Record<string, unknown> });
@@ -71,9 +61,9 @@ describe("кнопка «не писать мне про это»", () => {
 
     await notifyAdmins(bot, db, "self_entries", "Игорь поставил себе больничный");
 
-    const buttons = sent[0]?.reply_markup?.inline_keyboard?.flat() ?? [];
+    const buttons = callbackDataOf(sent[0]!);
     expect(buttons).toHaveLength(1);
-    expect(buttons[0].callback_data).toBe("notice:mute:self_entries");
+    expect(buttons[0]).toBe("notice:mute:self_entries");
   });
 
   it("НЕ едет с эскалацией — её выключить нельзя, и кнопка обещала бы обратное", async () => {

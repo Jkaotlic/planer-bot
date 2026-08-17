@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, index, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type {
   SwapStatus,
   EntryCategory,
@@ -101,7 +101,17 @@ export const shifts = sqliteTable("shifts", {
   unrecognisedCode: text(),
   createdAt: createdAt(),
   updatedAt: createdAt().$onUpdate(() => new Date()),
-});
+},
+  /**
+   * Самая читаемая таблица проекта и самая растущая (≈ +500 строк в месяц).
+   *
+   * `(date)` — расписание за неделю и за месяц: обе сетки, командный ответ,
+   * отчёты, выгрузка ростера. `(employee_id, date)` — история одного человека:
+   * баланс, честное распределение (28 чтений за одно «Распределить честно»),
+   * «мои смены». До индексов оба шли полным сканом.
+   */
+  (t) => [index("shift_date").on(t.date), index("shift_employee_date").on(t.employeeId, t.date)],
+);
 
 export const swapRequests = sqliteTable("swap_requests", {
   id: integer().primaryKey({ autoIncrement: true }),
@@ -124,7 +134,24 @@ export const swapRequests = sqliteTable("swap_requests", {
   message: text(),
   createdAt: createdAt(),
   resolvedAt: integer({ mode: "timestamp" }),
-});
+},
+  /**
+   * По одному на каждую сторону, а не составной: обе выборки — это `OR`
+   * («мои обмены» по двум колонкам работника, висящие заявки по двум колонкам
+   * смены), и составной индекс на `OR` не работает, а два отдельных SQLite
+   * умеет объединить.
+   *
+   * Заявок в базе единицы, и сама по себе таблица индексов не просила — но
+   * «висящие заявки на эту смену» с 2026-08-17 спрашиваются при КАЖДОМ переносе
+   * даты записи, то есть на пути правки графика.
+   */
+  (t) => [
+    index("swap_from_employee").on(t.fromEmployeeId),
+    index("swap_to_employee").on(t.toEmployeeId),
+    index("swap_from_shift").on(t.fromShiftId),
+    index("swap_to_shift").on(t.toShiftId),
+  ],
+);
 
 /**
  * A shift its owner cannot work, on its way to somebody who can.
@@ -203,7 +230,15 @@ export const auditLog = sqliteTable("audit_log", {
   actorEmployeeId: integer().references(() => employees.id),
   payload: text({ mode: "json" }).notNull(),
   createdAt: createdAt(),
-});
+},
+  /**
+   * Ровно в том порядке, в котором журнал читают: `order by created_at desc, id desc`.
+   * Дорого стоило не нахождение строк, а сортировка ВСЕЙ таблицы ради пятидесяти
+   * верхних (`USE TEMP B-TREE FOR ORDER BY`), а этот индекс SQLite читает назад.
+   * Фильтры (тип, актор, диапазон дат) остаются поверх — они и так сужают выборку.
+   */
+  (t) => [index("audit_created").on(t.createdAt, t.id)],
+);
 
 export const vacantSlots = sqliteTable("vacant_slots", {
   id: integer().primaryKey({ autoIncrement: true }),
@@ -215,7 +250,11 @@ export const vacantSlots = sqliteTable("vacant_slots", {
   note: text(),
   status: text().$type<"open" | "assigned" | "closed">().notNull().default("open"),
   createdAt: createdAt(),
-});
+},
+  /** Слоты читаются по дате — «свободные смены в выходные» и проверка дубля
+   *  при публикации. Слотов пока единицы, но растут они так же, как расписание. */
+  (t) => [index("vacant_slot_date").on(t.date)],
+);
 
 export const slotInterest = sqliteTable(
   "slot_interest",

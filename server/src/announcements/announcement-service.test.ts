@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { stubBotInfo, type SentMessage } from "../bot/testbot";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setRemindersEnabled, setEmployeeRestrictions } from "../repo/employees";
@@ -8,17 +9,18 @@ import { announcementText, announcementRecipients, sendAnnouncement } from "./an
 import type { Db } from "../db/client";
 
 function testBot(failId?: number) {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string }[] = [];
+  // Транспорт свой, а не `recordApi`: этому тесту нужен бот, у которого отправка
+  // конкретному человеку ПАДАЕТ — так проверяется, что рассылка не считает
+  // недошедшее дошедшим. Подделка `botInfo` общая.
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+  const sent: SentMessage[] = [];
   bot.api.config.use((_prev, method, payload) => {
     if (method === "sendMessage") {
-      const p = payload as { chat_id: number | string; text: string };
-      if (p.chat_id === failId) throw new Error("telegram down");
-      sent.push(p);
+      const message = payload as unknown as SentMessage;
+      if (message.chat_id === failId) throw new Error("telegram down");
+      sent.push(message);
     }
-    return { ok: true, result: {} } as any;
+    return { ok: true, result: {} } as never;
   });
   return { bot, sent };
 }

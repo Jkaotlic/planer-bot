@@ -1,18 +1,15 @@
 import { describe, it, expect } from "vitest";
+import { stubBotInfo, type ApiCall } from "./testbot";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { BTN_BUG, BTN_WEEK } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { openBugPrompt, listBugReports } from "../bugs/bug-service";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 
 /**
  * Бот, чьи исходящие вызовы перехвачены, а не отправлены Telegram.
@@ -22,19 +19,18 @@ const config: Config = {
  * ожидания (`promptMessageId` в базе — `NOT NULL`).
  */
 function testBot(db: Db) {
-  const bot = createBot({ db, config });
-  bot.botInfo = {
-    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const calls: { method: string; payload: any }[] = [];
+  // Транспорт свой, а не `recordApi`: багрепорт запоминает `message_id` ответа
+  // (по нему потом дописывается «Разобрал»), поэтому отправка обязана отдавать
+  // растущий id, а не пустой результат. Подделка `botInfo` общая.
+  const bot = stubBotInfo(createBot({ db, config }));
+  const calls: ApiCall[] = [];
   let nextMessageId = 5000;
   bot.api.config.use((_prev, method, payload) => {
     calls.push({ method, payload });
     if (method === "sendMessage" || method === "sendPhoto") {
-      return { ok: true, result: { message_id: nextMessageId++ } } as any;
+      return { ok: true, result: { message_id: nextMessageId++ } } as never;
     }
-    return { ok: true, result: {} } as any;
+    return { ok: true, result: {} } as never;
   });
   return { bot, calls };
 }

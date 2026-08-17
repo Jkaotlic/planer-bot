@@ -7,14 +7,10 @@ import { getHandover, listHandoversForEntry } from "../../repo/handovers";
 import { signInitData } from "../../auth/telegram";
 import { teamNow } from "../../util/team-time";
 import { addDaysIso } from "@planer/shared";
-import type { Config } from "../../config";
+import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-jwt-secret-that-is-long-enough-0123", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig({ adminTelegramIds: [] });
 
 const initDataFor = (id: number) =>
   signInitData(

@@ -53,6 +53,21 @@ export function isAbsence(category: EntryCategory): boolean {
   return ABSENCES.has(category);
 }
 
+/**
+ * Клетка ростера, которую импорт не смог прочитать («Ко» и подобное) — своя
+ * колонка в балансе и в отчёте.
+ *
+ * Это настоящая работа неизвестного вида: в `total` она идёт, как любая смена, но
+ * ни под именем пресета (это значило бы «мы знаем, что там было»), ни в бакете
+ * «Своё время» (это значит «часы поставили руками», а тут не так).
+ *
+ * Одна константа на все четыре читателя — сервер (раздача и отчёт) и обе консоли.
+ * Раньше строка была объявлена в каждом из них, а рядом стояло «keep this in sync»:
+ * разъехались бы молча, и тогда одна и та же запись читалась бы «День» в балансе и
+ * «не распознано» в отчёте.
+ */
+export const UNRECOGNISED_KIND = "Не распознано (?)";
+
 /** Categories that count toward the fair-distribution balance (work, not absences). */
 export function countsForBalance(category: EntryCategory): boolean {
   return BALANCE_COUNTED.has(category);

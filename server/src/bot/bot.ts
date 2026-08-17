@@ -205,6 +205,22 @@ export function createBot(deps: BotDeps): Bot {
     return { ok: true, me };
   }
 
+  /**
+   * Действует ли этот человек как админ.
+   *
+   * Два источника прав, и оба обязаны спрашиваться вместе: флаг в базе и
+   * `ADMIN_TELEGRAM_IDS` (его решение от 2026-07-30 — список даёт права). Правило
+   * стояло тремя одинаковыми выражениями подряд, каждое со своим `!`, а
+   * рассогласование здесь означало бы админскую кнопку, работающую у одного и
+   * молчащую у другого.
+   *
+   * Не путать с чистой проверкой `adminTelegramIds.includes(...)` ниже: та отвечает
+   * на другой вопрос — «пускать ли архивного», задокументированное исключение.
+   */
+  function actsAsAdmin(me: Employee, tgId: number): boolean {
+    return me.isAdmin || config.adminTelegramIds.includes(tgId);
+  }
+
   /** Что можно доложить к текстовому ответу: у `/admin` это отключённое превью ссылки. */
   type MenuExtra = { link_preview_options?: { is_disabled: boolean } };
 
@@ -431,9 +447,7 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     await ctx.reply("Что открыть:", {
-      reply_markup: miniAppKeyboard(config.publicUrl, {
-        isAdmin: who.me.isAdmin || config.adminTelegramIds.includes(from.id),
-      }),
+      reply_markup: miniAppKeyboard(config.publicUrl, { isAdmin: actsAsAdmin(who.me, from.id) }),
     });
   }
 
@@ -671,7 +685,7 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: "Такого вида уведомлений больше нет" });
       return;
     }
-    if (!who.me.isAdmin && !config.adminTelegramIds.includes(ctx.from.id)) {
+    if (!actsAsAdmin(who.me, ctx.from.id)) {
       await ctx.answerCallbackQuery({ text: "Это настройка администратора" });
       return;
     }
@@ -698,7 +712,7 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: who.text });
       return;
     }
-    if (!who.me.isAdmin && !config.adminTelegramIds.includes(ctx.from.id)) {
+    if (!actsAsAdmin(who.me, ctx.from.id)) {
       await ctx.answerCallbackQuery({ text: "Это может только админ" });
       return;
     }

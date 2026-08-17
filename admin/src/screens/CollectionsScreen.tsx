@@ -926,9 +926,7 @@ function SendBlock({
         )}
       </div>
 
-      {preview.blocker ? (
-        <div className="birthday-blocker">{preview.blocker}</div>
-      ) : confirming ? (
+      {confirming ? (
         <div className="birthday-confirm">
           <span>
             Отправить {recipientsPhrase(preview.recipients.length)}? Отменить будет нельзя — сообщения уйдут сразу.
@@ -941,11 +939,18 @@ function SendBlock({
           </button>
         </div>
       ) : (
-        <div className="journal-controls">
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={onArm}>
-            {sendButtonLabel(preview)}
-          </button>
-        </div>
+        <>
+          {/* Кнопка остаётся на месте и погашенной, а причина стоит подписью под
+              ней. Прежде непустой блокер её ЗАМЕНЯЛ абзацем текста — владелец
+              создал сбор и не нашёл, чем его разослать: человек ищет кнопку, а
+              на её месте читается описание, а не «вот чего не хватает». */}
+          <div className="journal-controls">
+            <button type="button" className="btn btn-primary" disabled={busy || preview.blocker != null} onClick={onArm}>
+              {sendButtonLabel(preview)}
+            </button>
+          </div>
+          {preview.blocker ? <div className="birthday-blocker">{preview.blocker}</div> : null}
+        </>
       )}
     </>
   );

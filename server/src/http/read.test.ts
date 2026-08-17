@@ -4,7 +4,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
-import type { Config } from "../config";
+import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 import { employees } from "../db/schema";
 import { eq } from "drizzle-orm";
@@ -15,11 +15,7 @@ import {
   templatesResponseSchema,
 } from "@planer/shared";
 
-const config: Config = {
-  botToken: "12345:tok", adminTelegramIds: [111], teamTz: "Europe/Moscow",
-  databaseUrl: ":memory:", jwtSecret: "test-secret-16chars-min", publicUrl: "https://x.keenetic.pro",
-  handoverFanHours: 3, handoverEscalateHours: 12,
-};
+const config = testConfig();
 const initDataFor = (id: number) =>
   signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id, first_name: "T" }) }, config.botToken);
 const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>

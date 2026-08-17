@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
   AuthRequiredError,
@@ -9,6 +10,7 @@ import {
   type Shift,
   type Template,
   type TemplateRolesView,
+  type Viewer,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
 import { BalanceRail } from "./components/BalanceRail";
@@ -23,7 +25,6 @@ import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
-import { readCsvFile, type CsvEncoding } from "./lib/csv-encoding";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
@@ -73,15 +74,6 @@ export function rosterImportBlocker(state: Pick<RosterImportState, "preview" | "
   return validateRosterResolutions(state.resolutions);
 }
 
-/** "1 запись" / "2 записи" / "5 записей" — the feedback line reads as Russian, not as a log. */
-export function pluralRecords(count: number): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return `${count} записей`;
-  if (mod10 === 1) return `${count} запись`;
-  if (mod10 >= 2 && mod10 <= 4) return `${count} записи`;
-  return `${count} записей`;
-}
 
 /** App shell: sidebar nav + top bar + the schedule grid (this task's scope). */
 export function App() {
@@ -102,6 +94,8 @@ export function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
+  /** Кто вошёл — для подписи в футере сайдбара. */
+  const [viewer, setViewer] = useState<Viewer | null>(null);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
@@ -137,6 +131,15 @@ export function App() {
       setTemplates(t);
       setEvents(ev);
       setTemplateRoles(roles);
+      // Своим запросом и отдельным catch: «кто я» — это подпись в футере, и её
+      // отказ не повод показать экран «Повторить» вместо всей консоли. Не сумев
+      // спросить, консоль остаётся безымянной — это честнее чужого имени.
+      void apiClient
+        .getMe()
+        .then((me) => {
+          if (!cancelled()) setViewer(me);
+        })
+        .catch(() => {});
     } catch (err) {
       if (cancelled()) return;
       if (err instanceof AuthRequiredError) setNeedLogin(true);
@@ -272,17 +275,14 @@ export function App() {
     // то есть в никуда. `scheduleError` — то же место, где уже показывают отказ
     // загрузки расписания, поэтому отказ здесь не теряется молча, как раньше.
     setRosterImport(null);
-    const parts = [`добавлено ${pluralRecords(summary.entriesInserted)}`];
-    if (summary.entriesDeleted > 0) parts.push(`заменено ${pluralRecords(summary.entriesDeleted)}`);
-    if (summary.cellsPreserved > 0) parts.push(`не тронуто ${pluralRecords(summary.cellsPreserved)}`);
-    if (summary.employeesCreated > 0) parts.push(`новых сотрудников — ${summary.employeesCreated}`);
-    // Mirror of `summaryLine` in miniapp/src/screens/admin/AdminRosterCsv.tsx.
-    const expired = summary.swapsExpired;
-    const tail = expired > 0
-      ? `. ⚠ ${expired === 1 ? "1 заявка на обмен стала неактуальной" : `${expired} заявок на обмен стали неактуальны`} — обеим сторонам написали`
-      : "";
-    const base = `CSV загружен: ${parts.join(", ")}${tail}`;
-    setRosterNotice({ kind: "success", text: withNotifyNotice(base, summary.notified) });
+    // Одна сводка на обе консоли (`@planer/shared`). Здесь была своя сборка с
+    // комментарием «Mirror of `summaryLine`», и зеркалом она не была: хвоста про
+    // нераспознанные клетки в ней не хватало, то есть после файла со знаками «?»
+    // консоль говорила только «CSV загружен».
+    setRosterNotice({
+      kind: "success",
+      text: withNotifyNotice(rosterImportSummaryLine(summary), summary.notified),
+    });
     try {
       await Promise.all([
         refreshEmployees(),
@@ -336,9 +336,9 @@ export function App() {
     }
   }
 
-  // Active: the roster now carries the archive too, and a former admin sitting in
-  // it must not become the name in the sidebar.
-  const admin = employees?.find((e) => e.isAdmin && e.isActive);
+  // Кто вошёл, а не «кто-нибудь из админов»: прежде здесь стоял
+  // `employees.find((e) => e.isAdmin && e.isActive)`, и при двух админах футер
+  // показывал чужое имя.
   // Archived workers don't appear in the live schedule or the add-entry picker.
   const activeEmployees = employees?.filter((e) => e.isActive) ?? null;
 
@@ -346,7 +346,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar active={nav} onChange={setNav} adminLabel={admin ? `${admin.address} · админ` : "Админ"} />
+      <Sidebar active={nav} onChange={setNav} adminLabel={viewer ? `${viewer.address} · админ` : "Админ"} />
       <div className="main-column">
         {bootError ? (
           <div className="centered-fill">
