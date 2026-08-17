@@ -370,7 +370,21 @@ export interface SwapLockResult {
   intended: number;
 }
 
+/**
+ * Кто вошёл в консоль — ровно столько, сколько нужно подписи в сайдбаре.
+ *
+ * Консоль этого не спрашивала вовсе и подписывалась ПЕРВЫМ активным админом из
+ * ростера: при двух админах в футере стояло чужое имя. Ручка `/api/me` на
+ * сервере была всё это время, ей пользовался только мини-апп.
+ */
+export interface Viewer {
+  id: number;
+  displayName: string;
+  address: string;
+}
+
 export interface ApiClient {
+  getMe(): Promise<Viewer>;
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
   getTemplates(): Promise<Template[]>;
@@ -670,6 +684,8 @@ async function authorizedDelete<T>(path: string): Promise<T> {
 
 /** Экспортируется ради теста про сетевой сбой — в приложение уходит `apiClient` ниже. */
 export const realClient: ApiClient = {
+  getMe: () => authorizedGet<Viewer>("/api/me"),
+
   getEmployees: () => employeesApi.getAdminEmployees(),
 
   // Консоли из ответа нужны только записи: ростер она рисует из собственного
@@ -874,6 +890,8 @@ export const realClient: ApiClient = {
 };
 
 const devClient: ApiClient = {
+  getMe: async () => ({ id: 1, displayName: "Админов Админ", address: "Админ" }),
+
   getEmployees: () => employeesMock.getAdminEmployees(),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
   getTemplates: () => mockGetTemplates(),
