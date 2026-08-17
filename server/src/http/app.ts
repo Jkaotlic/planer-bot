@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { z } from "zod";
 import type { Bot } from "grammy";
 import type { Db } from "../db/client";
@@ -147,6 +148,29 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const noticeBuffer = createNoticeBuffer({ db, bot });
 
   app.use("*", securityHeaders());
+
+  /**
+   * Сжатие всего, что сжимается — раньше не было вовсе.
+   *
+   * Мини-апп открывают с телефона через облачный релей KeenDNS, а сервер отдавал
+   * бандл несжатым: на `Accept-Encoding: gzip` в ответе не было ни одного
+   * `Content-Encoding`, `Content-Length` — 558 КБ на один файл. Тот же бандл в
+   * gzip весит 157 КБ, то есть холодный вход стоил в 3.5 раза больше байт, чем
+   * нужно. И холодным он становится после КАЖДОГО деплоя: хеш файла меняется, и
+   * `immutable`-кэш телефона к новому имени не подходит.
+   *
+   * Стоит здесь, сразу за заголовками безопасности, чтобы накрыть и статику
+   * `/app`, и `/admin` — их монтирует `index.ts` позже, но `"*"`-middleware
+   * оборачивает всё, что зарегистрировано на этом же приложении.
+   *
+   * Список типов — умолчание hono: картинки и шрифты уже сжаты, их не трогаем.
+   * Порог «меньше килобайта не сжимаем» hono проверяет по `Content-Length`, а
+   * `c.json()` его не ставит, поэтому мелкие ответы тоже едут сжатыми — лишние
+   * байты там единицы, и выравнивать это не стоит усложнения. `Vary:
+   * Accept-Encoding` middleware ставит сам — без него релей мог бы отдать сжатое
+   * тело клиенту, который сжатия не просил.
+   */
+  app.use("*", compress());
 
   // Coarse flood protection for the whole app — see rate-limit.ts for keying
   // details and why the numbers are sized as a shared ceiling rather than a
