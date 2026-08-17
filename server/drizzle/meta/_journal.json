@@ -148,6 +148,13 @@
       "when": 1786951602863,
       "tag": "0020_petite_living_tribunal",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1786955406423,
+      "tag": "0021_loose_clint_barton",
+      "breakpoints": true
     }
   ]
 }
