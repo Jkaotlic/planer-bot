@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import { collectionTitle } from "@planer/shared";
 import type { Db } from "../db/client";
-import { notifyUser } from "../bot/notify";
+import { notifyUser, noticeMuteKeyboard } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
 import { adminRecipients } from "../collections/collection-service";
@@ -47,8 +47,12 @@ export async function runBirthdayNoticeTick(db: Db, bot: Bot, today: string): Pr
       ? adminNoticeReadyMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil)
       : adminNoticeMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil);
     let delivered = 0;
+    // The mute button rides along even though this loop bypasses `notifyAdmins`
+    // (it has its own recipient list — `adminRecipients` — not every admin).
+    // The moment an admin wants "celebrations" off is exactly now, with the
+    // message on screen, not whenever they happen to find the switch.
     for (const admin of admins) {
-      if (await notifyUser(bot, admin.telegramUserId!, text)) delivered += 1;
+      if (await notifyUser(bot, admin.telegramUserId!, text, noticeMuteKeyboard("celebrations"))) delivered += 1;
     }
 
     // Mark it either way: a Telegram outage must not turn into a nag loop, and
@@ -73,8 +77,10 @@ export async function runBirthdayNoticeTick(db: Db, bot: Bot, today: string): Pr
     const title = collectionTitle(round, personName);
     const text = scheduleNoticeMessage(title, round.collectUrl, round.kind);
     let delivered = 0;
+    // See the same button above — a general collection round is `celebrations`
+    // too, so the same switch covers it.
     for (const admin of admins) {
-      if (await notifyUser(bot, admin.telegramUserId!, text)) delivered += 1;
+      if (await notifyUser(bot, admin.telegramUserId!, text, noticeMuteKeyboard("celebrations"))) delivered += 1;
     }
 
     // Marked either way: a Telegram outage must not become a nag loop. The date

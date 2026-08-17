@@ -3,7 +3,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { issueToken } from "../auth/jwt";
 import { createApp } from "./app";
-import { ANNOUNCEMENT_TEXT_MAX } from "../announcements/announcement-service";
+import { ANNOUNCEMENT_TEXT_MAX, ANNOUNCEMENT_RECIPIENTS_MAX } from "../announcements/announcement-service";
 import type { Db } from "../db/client";
 
 const config = { jwtSecret: "s", teamTz: "Europe/Moscow", publicUrl: "http://x", adminTelegramIds: [] } as any;
@@ -69,6 +69,40 @@ describe("POST /api/admin/announcements", () => {
       body: JSON.stringify({ text: "Собрание", audience: [] }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("адресатов больше потолка — 400, а не рассылка на весь чат бота", async () => {
+    // Потолок про то, что один процесс обслуживает и HTTP API, и long-polling
+    // бота: «широкая» рассылка задела бы чат всей команды. Реальные сотрудники
+    // тут не нужны — проверка длины срабатывает раньше, чем список адресатов
+    // вообще смотрит в базу.
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const app = createApp({ db, config });
+    const ids = Array.from({ length: ANNOUNCEMENT_RECIPIENTS_MAX + 1 }, (_, i) => i + 1000);
+
+    const res = await app.request("/api/admin/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Собрание", audience: ids }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/адресат/i);
+  });
+
+  it("ровно на потолке — принимается", async () => {
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const app = createApp({ db, config });
+    const ids = Array.from({ length: ANNOUNCEMENT_RECIPIENTS_MAX }, (_, i) => i + 1000);
+
+    const res = await app.request("/api/admin/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Собрание", audience: ids }),
+    });
+    expect(res.status).toBe(200);
   });
 
   it("нормальная рассылка — 200, отчёт о доставке, и строка в журнале", async () => {

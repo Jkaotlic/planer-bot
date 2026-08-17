@@ -126,14 +126,32 @@ export function weekendUnassignedText(slotLine: string): string {
   return `Тебя сняли с выходной смены: ${slotLine}. Если это неожиданно — спроси у админа.`;
 }
 
-export async function notifyUser(bot: Bot, telegramUserId: number, text: string): Promise<boolean> {
+/**
+ * `keyboard` — необязательный четвёртый параметр, а не новая функция: у
+ * `notifyUser` уже полтора десятка вызывающих без клавиатуры, и им незачем
+ * знать, что где-то ещё она есть. Опущенный аргумент — это `undefined`, то
+ * есть в точности прежнее поведение.
+ */
+export async function notifyUser(bot: Bot, telegramUserId: number, text: string, keyboard?: InlineKeyboard): Promise<boolean> {
   try {
-    await bot.api.sendMessage(telegramUserId, text);
+    await bot.api.sendMessage(telegramUserId, text, keyboard ? { reply_markup: keyboard } : undefined);
     return true;
   } catch (err) {
     console.error(`notifyUser: failed for ${telegramUserId}:`, safeErrorMessage(err));
     return false;
   }
+}
+
+/**
+ * Кнопка «выключить это письмо» — тот же билдер, которым `notifyAdmins`
+ * собирает свою клавиатуру, вынесенный наружу для писем, которые уходят не
+ * через неё (см. `birthday-notice.ts`: у них свой список адресатов —
+ * `adminRecipients`, а не все админы, — и свой цикл рассылки). Один билдер,
+ * чтобы строка колбэка `notice:mute:<kind>` не расходилась между местами,
+ * которые её собирают.
+ */
+export function noticeMuteKeyboard(kind: AdminNoticeKind): InlineKeyboard {
+  return new InlineKeyboard().text("🔕 Не писать мне про это", `notice:mute:${kind}`);
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setRemindersEnabled, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { ADMIN_NOTICE_KINDS } from "@planer/shared";
 import { announcementText, announcementRecipients, sendAnnouncement } from "./announcement-service";
@@ -68,6 +68,22 @@ describe("анонс", () => {
 
     // Отправитель копию не получает — он секунду назад нажал кнопку.
     expect(sent.map((m) => m.chat_id).sort()).toEqual([222, 333]);
+  });
+
+  it("«всем» доходит и до исключённого из раздачи смен — это про право знать новость, а не про пул", async () => {
+    // `excludedFromAssignment` — правило автораздачи (см. `notifyVacantSlot`),
+    // а не запрет на чтение объявлений. Кто-нибудь однажды «наведёт порядок»,
+    // скопировав фильтр оттуда, — этот тест должен покраснеть в тот момент.
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const marc = linked(db, "Марк", 333);
+    setEmployeeRestrictions(db, marc.id, { excludedFromAssignment: true });
+
+    const { bot, sent } = testBot();
+    const res = await sendAnnouncement(bot, db, { senderId: anya.id, text: "Переезд", audience: { kind: "all" } });
+
+    expect(sent.map((m) => m.chat_id)).toEqual([333]);
+    expect(res).toMatchObject({ delivered: 1, intended: 1, unreachable: [] });
   });
 
   it("человек без Telegram попадает в unreachable, а не в delivered", async () => {

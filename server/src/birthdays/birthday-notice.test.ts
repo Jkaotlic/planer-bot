@@ -38,6 +38,23 @@ describe("runBirthdayNoticeTick", () => {
     expect(sent[0]!.text).toContain("Именинник");
   });
 
+  it("carries the mute button for the `celebrations` kind — these letters bypass `notifyAdmins`, so nothing else attaches it", async () => {
+    const db = makeTestDb();
+    const { bot } = fakeBot();
+    person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+
+    const sendMessage = bot.api.sendMessage as unknown as { mock: { calls: unknown[][] } };
+    const options = sendMessage.mock.calls[0]?.[2] as
+      | { reply_markup?: { inline_keyboard: { text: string; callback_data?: string }[][] } }
+      | undefined;
+    const buttons = options?.reply_markup?.inline_keyboard.flat() ?? [];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.callback_data).toBe("notice:mute:celebrations");
+  });
+
   it("never messages the team — only admins", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
