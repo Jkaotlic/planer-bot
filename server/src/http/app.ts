@@ -217,6 +217,45 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.get("/api/health", (c) => c.json({ ok: true }));
 
+  /**
+   * Всё, что мини-апп читает при открытии, — одним запросом.
+   *
+   * Старт делал две волны: `/api/me`, а следом шесть запросов параллельно. Байты
+   * тут не главное — главное соединения: мини-апп открывают с телефона через
+   * облачный релей KeenDNS, а замер этого пути дал TLS-рукопожатие 1.5–6.8 с,
+   * скорость 11–58 КБ/с и только HTTP/1.1, то есть без мультиплексирования. Под
+   * каждый параллельный запрос браузер поднимает своё соединение и платит
+   * рукопожатие заново.
+   *
+   * Форма ответа НЕ собирается заново: роут опрашивает те же самые роуты внутри
+   * процесса, без сети. Поэтому «сборный» ответ не может разойтись с одиночными —
+   * он буквально из них и состоит, и это проверено сверкой в тесте. Любой отказ
+   * части (истёкший токен, кривой диапазон) уезжает наружу как есть: клиент
+   * различает 401 и 400 ровно так же, как различал их до сборки.
+   */
+  app.get("/api/bootstrap", requireAuth(db, config.jwtSecret), async (c) => {
+    const authorization = c.req.header("Authorization") ?? "";
+    const range = `from=${encodeURIComponent(c.req.query("from") ?? "")}&to=${encodeURIComponent(c.req.query("to") ?? "")}`;
+    const parts = {
+      me: "/api/me",
+      myShifts: "/api/my/shifts",
+      teamSchedule: `/api/team/schedule?${range}`,
+      templates: "/api/templates",
+      swaps: "/api/swaps",
+      weekendSlots: "/api/weekend/slots",
+      weekendOffers: "/api/weekend/offers",
+    };
+    const answers = await Promise.all(
+      Object.entries(parts).map(async ([key, path]) => {
+        const res = await app.request(path, { headers: { Authorization: authorization } });
+        return { key, status: res.status, body: (await res.json()) as unknown };
+      }),
+    );
+    const failed = answers.find((answer) => answer.status !== 200);
+    if (failed) return c.json(failed.body as Record<string, unknown>, failed.status as 400);
+    return c.json(Object.fromEntries(answers.map((answer) => [answer.key, answer.body])));
+  });
+
   // Tighter budget than the app-wide limiter above — this endpoint is
   // normally called once per session (the frontend caches the token it gets
   // back) — but "tight" still has to swallow the whole team logging in at

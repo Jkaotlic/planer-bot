@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
@@ -8,7 +8,21 @@ import { SelfEntryScreen, screenFromSearch, type SelfEntryMode } from "./screens
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { AdminScreen, adminSectionFromSearch } from "./screens/AdminScreen";
+import { adminSectionFromSearch } from "./screens/admin-section";
+
+/**
+ * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
+ *
+ * Восемь админских экранов — это 218 КБ исходников из 530, и работнику (а их
+ * двадцать семь из двадцати восьми) они не нужны никогда. Мини-апп открывают с
+ * телефона через облачный релей KeenDNS, у которого измеренная скорость 11–58
+ * КБ/с: каждый килобайт основного бандла все платят на входе.
+ *
+ * Данные админских разделов и раньше грузились только по показу — а вот КОД
+ * лежал в общем бандле; комментарий в `AdminScreen` про «открыть вкладку дешёво»
+ * говорил про запросы, не про байты.
+ */
+const AdminScreen = lazy(() => import("./screens/AdminScreen"));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
@@ -79,22 +93,15 @@ export function App() {
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
 
+    // Одним запросом, а не «getMe, потом шесть параллельно». Дело не в байтах, а в
+    // соединениях: мини-апп открывают через облачный релей KeenDNS, у которого
+    // измеренное TLS-рукопожатие 1.5–6.8 с на КАЖДОЕ новое соединение и только
+    // HTTP/1.1 — под каждый параллельный запрос браузер поднимает своё.
     apiClient
-      .getMe()
-      .then((me) =>
-        Promise.all([
-          Promise.resolve(me),
-          apiClient.getMyShifts(),
-          apiClient.getTeamSchedule(from, to).then((schedule) => schedule.shifts),
-          apiClient.getTemplates(),
-          apiClient.getSwaps(),
-          apiClient.getWeekendSlots(),
-          apiClient.getWeekendOffers(),
-        ]),
-      )
-      .then(([me, myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers]) => {
+      .getBootstrap(from, to)
+      .then(({ me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers }) => {
         if (!cancelled) {
-          setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers });
+          setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
         }
       })
       .catch((err: unknown) => {
@@ -220,16 +227,12 @@ export function App() {
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
     try {
-      const [myShifts, teamShifts, templates, swaps, weekendSlots, weekendOffers] = await Promise.all([
-        apiClient.getMyShifts(),
-        apiClient.getTeamSchedule(from, to).then((schedule) => schedule.shifts),
-        // Re-pulled with the rest so an admin's preset edits (a renamed or
-        // recoloured Утро/День/…) reach the worker's rows too.
-        apiClient.getTemplates(),
-        apiClient.getSwaps(),
-        apiClient.getWeekendSlots(),
-        apiClient.getWeekendOffers(),
-      ]);
+      // Тем же одним запросом, что и старт: перезагрузка случается на каждом
+      // переключении вкладки и возврате в приложение, то есть чаще, чем старт.
+      // Пресеты перечитываются вместе с остальным, чтобы правка админа (имя или
+      // цвет «Утро»/«День») доезжала и до строк работника.
+      const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = await apiClient.getBootstrap(from, to);
+      const teamShifts = teamSchedule.shifts;
       setData((prev) =>
         prev
           ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
@@ -392,7 +395,11 @@ export function App() {
         />
       )}
       {tab === "admin" && data.me.isAdmin && (
-        <AdminScreen initialSection={adminSectionFromSearch(window.location.search) ?? undefined} />
+        // Заглушка — на секунду и только у админа: кусок кэшируется как
+        // `immutable`, поэтому платится один раз на устройство.
+        <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю админку…</div>}>
+          <AdminScreen initialSection={adminSectionFromSearch(window.location.search) ?? undefined} />
+        </Suspense>
       )}
       {refreshError && (
         <div
