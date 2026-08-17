@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { recordApi, stubBotInfo } from "./testbot";
 import { Bot } from "grammy";
 import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapAcceptedAdminText, dutyNoticeForReceiver, dutyNoticeForAdmins } from "./notify";
 import { makeTestDb } from "../db/testdb";
@@ -6,22 +7,15 @@ import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestri
 import type { Db } from "../db/client";
 
 function testBot() {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    if (method === "sendMessage") sent.push(payload as { chat_id: number | string; text: string });
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+  const { sent } = recordApi(bot);
   return { bot, sent };
 }
 
 /** Like testBot, but sendMessage throws for the given chat_id (or for all sends, when "all"). */
 function testBotFailing(failId: number | "all") {
   const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 42, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
+  stubBotInfo(bot, { first_name: "P", username: "p_bot" });
   const sent: { chat_id: number | string; text: string }[] = [];
   bot.api.config.use((_prev, method, payload) => {
     if (method === "sendMessage") {

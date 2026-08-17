@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
@@ -36,11 +37,8 @@ function worker(db: Db, name: string, tgId: number) {
  *  same shape as `swaps.test.ts`'s helper, needed here to prove which restriction
  *  flag talks to people and which stays silent. */
 function testBot() {
-  const bot = new Bot("12345:tok");
-  bot.botInfo = { id: 1, is_bot: true, first_name: "P", username: "p_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false } as unknown as typeof bot.botInfo;
-  const sent: { chat_id: number | string; text: string }[] = [];
-  bot.api.config.use((_p, m, payload) => { if (m === "sendMessage") sent.push(payload as { chat_id: number | string; text: string }); return { ok: true, result: {} } as any; });
+  const bot = stubBotInfo(new Bot("12345:tok"), { id: 1, first_name: "P", username: "p_bot" });
+  const { sent } = recordApi(bot);
   return { bot, sent };
 }
 // acceptSwap validates shift start against real wall-clock "now", so fixture dates must

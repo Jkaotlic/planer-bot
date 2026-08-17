@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { recordApi, stubBotInfo } from "./testbot";
 import { createBot } from "./bot";
 import { BTN_MY_SHIFTS } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
@@ -12,16 +13,8 @@ const config = testConfig();
  *  the raw `sendMessage` payload (to read `reply_markup`), not the trimmed
  *  `{chat_id, text}` view the shared helper elsewhere returns. */
 function testBot(db: Db) {
-  const bot = createBot({ db, config });
-  bot.botInfo = {
-    id: 42, is_bot: true, first_name: "Planer", username: "planer_bot",
-    can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false,
-  } as unknown as typeof bot.botInfo;
-  const calls: { method: string; payload: Record<string, unknown> }[] = [];
-  bot.api.config.use((_prev, method, payload) => {
-    calls.push({ method, payload: payload as Record<string, unknown> });
-    return { ok: true, result: {} } as any;
-  });
+  const bot = stubBotInfo(createBot({ db, config }));
+  const { calls } = recordApi(bot);
   return { bot, calls };
 }
 
