@@ -233,9 +233,9 @@ Expected: FAIL — ошибки «Expected 4 arguments, but got 3» в `bot.ts`,
 
 Импорт в шапке дополнить `notifyAdminsAlways`.
 
-- [ ] **Шаг 9: Дни рождения и сборы**
+- [ ] **Шаг 9: Дни рождения и сборы — здесь ничего**
 
-`server/src/birthdays/birthday-notice.ts` шлёт через `adminRecipients` + собственный цикл, а не через `notifyAdmins` — трогать его в этой задаче не нужно, вид `celebrations` начнёт применяться в Задаче 2. Проверить это глазами: `grep -n "notifyAdmins\|sendMessage" server/src/birthdays/birthday-notice.ts`. Если вызов `notifyAdmins` там всё же есть — проставить `"celebrations"`.
+`server/src/birthdays/birthday-notice.ts` шлёт мимо `notifyAdmins`: через `adminRecipients` и собственный цикл `notifyUser`. В этой задаче он не правится, и вид `celebrations` пока не имеет отправителя — это известно и закрывается Задачей 2, шагом 6а. Проверить, что положение дел не изменилось: `grep -n "notifyAdmins" server/src/birthdays/birthday-notice.ts` — пусто.
 
 - [ ] **Шаг 10: Поправить существующий тест**
 
@@ -476,10 +476,54 @@ export function listMutedKinds(db: Db, employeeId: number): AdminNoticeKind[] {
 
 Импорт: `import { isNoticeMuted } from "../repo/notice-prefs";`. `notifyAdminsAlways` не трогать — в этом весь её смысл.
 
+- [ ] **Шаг 6а: Дни рождения и сборы — второй, и последний, отправитель админам**
+
+`server/src/birthdays/birthday-notice.ts` шлёт мимо `notifyAdmins`: через `adminRecipients` и собственный цикл. Без этого шага тумблер «Дни рождения и сборы» рисовался бы и не делал ничего.
+
+Фильтр ставится внутрь `adminRecipients` в `server/src/collections/collection-service.ts` — она используется ТОЛЬКО двумя вызовами birthday-notice, поэтому это одно место, а не два. Рассылки сбора всей команде она не касается: та идёт через `recipientsOf`.
+
+```ts
+/** Кому уходит админский нудж: достижимые админы, минус виновник торжества,
+ *  минус выключившие себе этот вид.
+ *
+ *  Проверка здесь, а не в двух циклах `birthday-notice`, потому что эта функция
+ *  и есть «кому писать про сборы»: у неё ровно два вызывающих, и оба про это.
+ *  Сама рассылка сбора команде идёт через `recipientsOf` и никаких выключателей
+ *  не знает — от объявления о сборе не отписываются. */
+export function adminRecipients(db: Db, honoureeId: number | null): Employee[] {
+  return recipientsOf(db, honoureeId).filter(
+    (employee) => employee.isAdmin && !isNoticeMuted(db, employee.id, "celebrations"),
+  );
+}
+```
+
+Тест — в тот же `server/src/bot/notice-mutes.test.ts`:
+
+```ts
+  it("выключивший «дни рождения» выпадает из списка нуджей, а второй админ остаётся", async () => {
+    const { adminRecipients } = await import("../collections/collection-service");
+    const db = makeTestDb();
+    const anya = admin(db, "Аня", 111);
+    admin(db, "Игорь", 222);
+    setNoticeMuted(db, anya.id, "celebrations", true);
+
+    expect(adminRecipients(db, null).map((e) => e.displayName)).toEqual(["Игорь"]);
+  });
+
+  it("рассылка сбора команде выключателей не знает — от неё не отписываются", async () => {
+    const { recipientsOf } = await import("../collections/collection-service");
+    const db = makeTestDb();
+    const anya = admin(db, "Аня", 111);
+    setNoticeMuted(db, anya.id, "celebrations", true);
+
+    expect(recipientsOf(db, null).map((e) => e.displayName)).toContain("Аня");
+  });
+```
+
 - [ ] **Шаг 7: Прогнать — зелено**
 
 Run: `npx vitest run server/src/bot/notice-mutes.test.ts`
-Expected: PASS, 6 тестов.
+Expected: PASS, 8 тестов.
 
 - [ ] **Шаг 8: Полный гейт**
 
@@ -537,7 +581,7 @@ describe("GET/PATCH /api/me/notifications", () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i1", isAdmin: true });
     setNoticeMuted(db, anya.id, "swaps", true);
-    const app = createApp({ db, config, bot: null });
+    const app = createApp({ db, config });
 
     const res = await app.request("/api/me/notifications", {
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}` },
@@ -552,7 +596,7 @@ describe("GET/PATCH /api/me/notifications", () => {
   it("работнику отвечает 403 — этих писем он не получает вовсе", async () => {
     const db = makeTestDb();
     const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i2" });
-    const app = createApp({ db, config, bot: null });
+    const app = createApp({ db, config });
 
     const res = await app.request("/api/me/notifications", {
       headers: { Authorization: `Bearer ${await tokenFor(marc.id, false)}` },
@@ -564,7 +608,7 @@ describe("GET/PATCH /api/me/notifications", () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i1", isAdmin: true });
     const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "i2", isAdmin: true });
-    const app = createApp({ db, config, bot: null });
+    const app = createApp({ db, config });
     const auth = { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" };
 
     const off = await app.request("/api/me/notifications", {
@@ -589,7 +633,7 @@ describe("GET/PATCH /api/me/notifications", () => {
   it("несуществующий вид — 400, а не тихо созданная строка", async () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i1", isAdmin: true });
-    const app = createApp({ db, config, bot: null });
+    const app = createApp({ db, config });
 
     const res = await app.request("/api/me/notifications", {
       method: "PATCH",
@@ -935,7 +979,7 @@ git commit -m "feat(мини-апп): переключатели уведомл�
 
 **Interfaces:**
 - Consumes: `listActive`, `getEmployeeById`, `addressOf`, `notifyUser`.
-- Produces: `ANNOUNCEMENT_TEXT_MAX = 2000`, `ANNOUNCEMENT_RECIPIENTS_MAX = 200`, `type Audience = { kind: "all" } | { kind: "picked"; employeeIds: readonly number[] }`, `announcementText(senderName: string, text: string): string`, `announcementRecipients(db: Db, audience: Audience, senderId: number): { reachable: Employee[]; unreachable: string[] }`, `sendAnnouncement(bot: Bot | null, db: Db, input: { senderId: number; text: string; audience: Audience }): Promise<{ delivered: number; intended: number; unreachable: string[] }>`; маршрут `POST /api/admin/announcements`; тип события `announcement_sent`.
+- Produces: `ANNOUNCEMENT_TEXT_MAX = 2000`, `ANNOUNCEMENT_RECIPIENTS_MAX = 200`, `type Audience = { kind: "all" } | { kind: "picked"; employeeIds: readonly number[] }`, `announcementText(senderName: string, text: string): string`, `announcementRecipients(db: Db, audience: Audience, senderId: number): { reachable: Employee[]; unreachable: string[] }`, `sendAnnouncement(bot: Bot | null | undefined, db: Db, input: { senderId: number; text: string; audience: Audience }): Promise<{ delivered: number; intended: number; unreachable: string[] }>`; маршрут `POST /api/admin/announcements`; тип события `announcement_sent`.
 
 - [ ] **Шаг 1: Написать падающий тест сервиса**
 
@@ -1123,7 +1167,9 @@ export function announcementRecipients(
 }
 
 export async function sendAnnouncement(
-  bot: Bot | null,
+  // `Bot | null | undefined`, а не `Bot | null`: маршрут отдаёт сюда `AppDeps.bot`,
+  // который объявлен необязательным. Сервер поднимается и с плохим токеном.
+  bot: Bot | null | undefined,
   db: Db,
   input: { senderId: number; text: string; audience: Audience },
 ): Promise<{ delivered: number; intended: number; unreachable: string[] }> {
@@ -1349,7 +1395,7 @@ git commit -m "feat(мини-апп): экран анонсов и вход в �
 - Modify: `shared/src/audit.ts`
 
 **Interfaces:**
-- Produces: `BUG_TEXT_MAX = 2000`, `BUG_REPORTS_PER_HOUR = 5`, `BUG_PENDING_TTL_MS = 900_000`, `openBugPrompt(db, employeeId, promptMessageId): void`, `getBugPending(db, employeeId): { promptMessageId: number; createdAt: Date } | null`, `clearBugPending(db, employeeId): void`, `shouldCapture(pending, replyToMessageId, now): boolean`, `submitBugReport(db, employeeId, text, now): { ok: true; report: BugReport } | { ok: false; reason: string }`, `listBugReports(db, status): BugReportView[]`, `resolveBugReport(db, id, adminId, resolved, now): BugReport | null`; типы событий `bug_report_created`, `bug_report_resolved`.
+- Produces: `BUG_TEXT_MAX = 2000`, `BUG_REPORTS_PER_HOUR = 5`, `BUG_PENDING_TTL_MS = 900_000`, `openBugPrompt(db, employeeId, promptMessageId, now): void`, `getBugPending(db, employeeId): { promptMessageId: number; createdAt: Date } | null`, `clearBugPending(db, employeeId): void`, `shouldCapture(pending, replyToMessageId, now): boolean`, `submitBugReport(db, employeeId, text, now): { ok: true; report: BugReport } | { ok: false; reason: string }`, `listBugReports(db, status): BugReportView[]`, `resolveBugReport(db, id, adminId, resolved, now): BugReport | null`; типы событий `bug_report_created`, `bug_report_resolved`.
 
 - [ ] **Шаг 1: Написать падающий тест**
 
@@ -1400,8 +1446,8 @@ describe("окно ожидания багрепорта", () => {
   it("второе нажатие заменяет окно, а не заводит второе", () => {
     const db = makeTestDb();
     const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i1" });
-    openBugPrompt(db, marc.id, 10);
-    openBugPrompt(db, marc.id, 20);
+    openBugPrompt(db, marc.id, 10, T0);
+    openBugPrompt(db, marc.id, 20, T0);
     expect(getBugPending(db, marc.id)?.promptMessageId).toBe(20);
   });
 });
@@ -1518,6 +1564,33 @@ Expected: новый файл с `CREATE TABLE bug_report_pending` и `CREATE TA
 - [ ] **Шаг 5: Репозиторий и сервис**
 
 `server/src/repo/bugs.ts` — голые запросы: `upsertPending`, `selectPending`, `deletePending`, `insertReport`, `countReportsSince`, `selectReports`, `updateResolved`.
+
+**`createdAt` пишется явно, из переданного `now`, а не дефолтом БД** — и это не вкусовщина. Дефолт `unixepoch()` ставит реальное время, а тесты выше подают `T0` и `plus(3600_001)`; сравнивать вымышленный `now` с реальной меткой бессмысленно, и тест на «шестой за час» оказался бы зелёным при любой реализации потолка. Инжектируемое время — единственное, что делает этот потолок проверяемым:
+
+```ts
+export function insertReport(db: Db, employeeId: number, text: string, now: Date): BugReport {
+  return db.insert(bugReports).values({ employeeId, text, createdAt: now }).returning().all()[0]!;
+}
+
+export function upsertPending(db: Db, employeeId: number, promptMessageId: number, now: Date): void {
+  db.insert(bugReportPending)
+    .values({ employeeId, promptMessageId, createdAt: now })
+    .onConflictDoUpdate({
+      target: bugReportPending.employeeId,
+      set: { promptMessageId, createdAt: now },
+    })
+    .run();
+}
+
+/** Сколько багрепортов этот человек прислал начиная с момента `since`. */
+export function countReportsSince(db: Db, employeeId: number, since: Date): number {
+  return db
+    .select()
+    .from(bugReports)
+    .where(and(eq(bugReports.employeeId, employeeId), gte(bugReports.createdAt, since)))
+    .all().length;
+}
+```
 
 `server/src/bugs/bug-service.ts` — правила:
 
@@ -1673,7 +1746,7 @@ export const BTN_BUG = "🐞 Проблема";
       "Опиши, что не так — одним сообщением. Чем конкретнее, тем быстрее починим.",
       { reply_markup: { force_reply: true, input_field_placeholder: "Что сломалось?" } },
     );
-    openBugPrompt(db, who.me.id, sent.message_id);
+    openBugPrompt(db, who.me.id, sent.message_id, new Date());
   }
 
   /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
