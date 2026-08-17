@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fatalLine, installFatalHandlers } from "./fatal-log";
 
 /**
@@ -59,5 +59,38 @@ describe("дамп необработанного падения", () => {
     expect(exits).toEqual([1, 1]);
     expect(logged).toHaveLength(2);
     for (const line of logged) expect(line).not.toContain(CREDENTIAL);
+  });
+});
+
+/**
+ * `app.onError` — единственный обработчик, ловящий вообще всё, — печатал сырую
+ * ошибку, тогда как весь остальной сервер пропускает её через редактор. Отмечено
+ * по дороге линзой `privacy` как хрупкость: сегодня все вызовы Telegram API
+ * обёрнуты в `notify.ts`, и до `onError` они не доходят. Выстрелит в день, когда
+ * кто-нибудь дёрнет `bot.api.*` прямо из роута.
+ */
+describe("500 в роуте не уносит токен в лог", () => {
+  it("сырой дамп ошибки роута проходит через редактор", async () => {
+    const { createApp } = await import("../http/app");
+    const { makeTestDb } = await import("../db/testdb");
+    const { testConfig } = await import("../test-config");
+
+    const app = createApp({ db: makeTestDb(), config: testConfig() });
+    // Роут, которого нет, до onError не доходит — нужен обработчик, который бросит.
+    app.get("/api/boom", () => {
+      throw new Error(`request to https://api.telegram.org/bot${CREDENTIAL}/sendMessage failed`);
+    });
+
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
+    const res = await app.request("/api/boom");
+    spy.mockRestore();
+
+    expect(res.status).toBe(500);
+    const printed = logged.flat().map(String).join(" ");
+    expect(printed).not.toContain(CREDENTIAL);
+    expect(printed).toContain("bot[REDACTED_BOT_TOKEN]");
   });
 });
