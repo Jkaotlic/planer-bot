@@ -149,7 +149,8 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
 }
 
 /**
- * Три входа в мини-апп: сам список смен и две формы самозаписи.
+ * Входы в мини-апп: список смен, две формы самозаписи и — только у админов —
+ * экран анонсов.
  *
  * Именно inline-кнопками, и это единственный способ, а не выбор оформления.
  * Мини-апп, запущенный из кнопки *обычной* клавиатуры, не получает `initData` —
@@ -162,14 +163,17 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
  * самим Telegram, `initData` приезжает именно в нём.
  *
  * Формы во второй строке, а не в первой: смены смотрят каждый день, а
- * больничный ставят несколько раз в год.
+ * больничный ставят несколько раз в год. Функция не знает сама, кто перед
+ * ней — решает вызывающий (`sendMiniApp`), тем же правилом, что и `menuFor`.
  */
-export function miniAppKeyboard(publicUrl: string): InlineKeyboard {
-  return new InlineKeyboard()
+export function miniAppKeyboard(publicUrl: string, opts: { isAdmin: boolean }): InlineKeyboard {
+  const kb = new InlineKeyboard()
     .webApp("📋 Открыть смены", `${publicUrl}/app/`)
     .row()
     .webApp("🤒 Больничный", `${publicUrl}/app/?screen=sick`)
     .webApp("📌 Мероприятие", `${publicUrl}/app/?screen=event`);
+  if (opts.isAdmin) kb.row().webApp("📣 Анонс", `${publicUrl}/app/?screen=announce`);
+  return kb;
 }
 
 export function createBot(deps: BotDeps): Bot {
@@ -424,7 +428,11 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
       return;
     }
-    await ctx.reply("Что открыть:", { reply_markup: miniAppKeyboard(config.publicUrl) });
+    await ctx.reply("Что открыть:", {
+      reply_markup: miniAppKeyboard(config.publicUrl, {
+        isAdmin: who.me.isAdmin || config.adminTelegramIds.includes(from.id),
+      }),
+    });
   }
 
   /** Monday of the week `offset` weeks from the current one, in team time. */

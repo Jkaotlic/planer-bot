@@ -8,7 +8,7 @@ import { SelfEntryScreen, screenFromSearch, type SelfEntryMode } from "./screens
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { AdminScreen } from "./screens/AdminScreen";
+import { AdminScreen, adminSectionFromSearch } from "./screens/AdminScreen";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
@@ -32,7 +32,10 @@ interface AppData {
  * lightweight overlay state (not a tab) opened from a shift's "Обменять"
  * affordance, with its own back action instead of the tab bar. */
 export function App() {
-  const [tab, setTab] = useState<TabKey>("mine");
+  // Кнопка «📣 Анонс» в боте открывает мини-апп сразу на нужной вкладке.
+  const [tab, setTab] = useState<TabKey>(() =>
+    adminSectionFromSearch(window.location.search) ? "admin" : "mine",
+  );
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
   // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
@@ -379,7 +382,9 @@ export function App() {
           }
         />
       )}
-      {tab === "admin" && data.me.isAdmin && <AdminScreen />}
+      {tab === "admin" && data.me.isAdmin && (
+        <AdminScreen initialSection={adminSectionFromSearch(window.location.search) ?? undefined} />
+      )}
       {refreshError && (
         <div
           role="status"
