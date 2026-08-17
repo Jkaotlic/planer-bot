@@ -37,6 +37,13 @@ describe("окно ожидания багрепорта", () => {
   it("реплай на чужое сообщение — не багрепорт", () => {
     const pending = { promptMessageId: 77, createdAt: T0 };
     expect(shouldCapture(pending, 999, plus(BUG_PENDING_TTL_MS + 1))).toBe(false);
+    // Тот же реплай мимо приглашения, но окно ещё свежее. Без этой строки тест
+    // выше доказывает только «протухло окно», а не «реплай не туда»: удали
+    // ветку `if (replyToMessageId !== undefined) return false`, и предыдущая
+    // строка всё равно останется зелёной — просроченное окно и само вернуло бы
+    // false. Здесь окно свежее, так что зелёный ответ возможен только через
+    // проверку реплая.
+    expect(shouldCapture(pending, 999, plus(60_000))).toBe(false);
   });
 
   it("второе нажатие заменяет окно, а не заводит второе", () => {
@@ -65,9 +72,17 @@ describe("приём багрепорта", () => {
   it("сохраняет текст и отдаёт запись", () => {
     const db = makeTestDb();
     const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i1" });
-    const res = submitBugReport(db, marc.id, "Кнопка «График» рисует прошлую неделю", T0);
+    // Пробелы по краям специально: `submitBugReport` обязан тримить перед
+    // записью, и до этой правки ни один тест не сверял сохранённый `text` —
+    // только код ветки отказа на пустой строке. Реализация, кладущая пустой,
+    // чужой или нетримленный текст, оставалась бы зелёной.
+    const res = submitBugReport(db, marc.id, "  Кнопка «График» рисует прошлую неделю  ", T0);
     expect(res.ok).toBe(true);
-    expect(listBugReports(db, "open")).toHaveLength(1);
+    if (!res.ok) throw new Error("не создался");
+    expect(res.report.text).toBe("Кнопка «График» рисует прошлую неделю");
+    const open = listBugReports(db, "open");
+    expect(open).toHaveLength(1);
+    expect(open[0]?.report.text).toBe("Кнопка «График» рисует прошлую неделю");
   });
 
   it("пустой текст не принимается", () => {
@@ -82,6 +97,16 @@ describe("приём багрепорта", () => {
     const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i1" });
     const res = submitBugReport(db, marc.id, "я".repeat(BUG_TEXT_MAX + 1), T0);
     expect(res.ok).toBe(false);
+  });
+
+  // Без этого случая `>` в проверке длины мог бы незаметно стать `>=`, и
+  // текст ровно в лимит начал бы отклоняться — тест выше этого не ловит,
+  // он проверяет только «на один символ больше».
+  it("текст ровно в лимит принимается", () => {
+    const db = makeTestDb();
+    const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i1" });
+    const res = submitBugReport(db, marc.id, "я".repeat(BUG_TEXT_MAX), T0);
+    expect(res.ok).toBe(true);
   });
 
   it("шестой за час отклоняется, а через час снова можно", () => {
@@ -118,6 +143,38 @@ describe("статус багрепорта", () => {
 
     const back = resolveBugReport(db, created.report.id, anya.id, false, plus(2000));
     expect(back?.resolvedAt).toBeNull();
+    // Половина обратимости — без этой строки реализация могла бы обнулять
+    // `resolvedAt`, но забыть `resolvedByEmployeeId`, и запись осталась бы
+    // «снова открыта», но с чужим именем разобравшего.
+    expect(back?.resolvedByEmployeeId).toBeNull();
     expect(listBugReports(db, "open")).toHaveLength(1);
+  });
+
+  // Гонка двух админов: второй жмёт «Разобрал» по записи, которую первый уже
+  // удалил бы (тут — по id, которого никогда не было). Ветка `!updated` в
+  // `resolveBugReport` ни разу не исполнялась ни одним тестом; без нее
+  // `recordAudit` упал бы на `updated.text` при отсутствующей записи.
+  it("resolveBugReport несуществующего id — null, а не падение", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i1", isAdmin: true });
+    expect(resolveBugReport(db, 999, anya.id, true, T0)).toBeNull();
+  });
+});
+
+describe("порядок списка", () => {
+  // Админский экран следующей задачи опирается на «свежие сверху», и
+  // вторичный ключ по `id` — на то, чтобы два багрепорта в одну секунду не
+  // перемешались произвольно. Без явного теста оба свойства undetected.
+  it("свежие сверху, тай-брейк по id при одинаковой секунде", () => {
+    const db = makeTestDb();
+    const marc = createEmployee(db, { displayName: "Марк", inviteToken: "i1" });
+    const first = submitBugReport(db, marc.id, "первый", T0);
+    const second = submitBugReport(db, marc.id, "второй", plus(1000));
+    // Та же секунда, что у second — намеренно, чтобы разница решалась только id.
+    const third = submitBugReport(db, marc.id, "третий", plus(1000));
+    if (!first.ok || !second.ok || !third.ok) throw new Error("не создался");
+
+    const ids = listBugReports(db, "all").map((v) => v.report.id);
+    expect(ids).toEqual([third.report.id, second.report.id, first.report.id]);
   });
 });
