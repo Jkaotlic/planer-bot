@@ -77,47 +77,15 @@ export function AdminSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (error && !settings) {
-    return (
-      <ScreenScroll>
-        <List>
-          <Section header="Настройки">
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-            </CardShell>
-          </Section>
-        </List>
-      </ScreenScroll>
-    );
-  }
-
-  if (!settings) {
-    return (
-      <ScreenScroll>
-        <List>
-          <Section header="Настройки">
-            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-              <Spinner size="m" />
-            </div>
-          </Section>
-        </List>
-      </ScreenScroll>
-    );
-  }
-
-  const locked = settings.swapsLocked;
-  const actionLabel = locked ? "Открыть обмены" : "Закрыть обмены";
-  const confirmLabel = locked ? "Да, открыть" : "Да, закрыть";
-  const whoLabel =
-    settings.swapsLockUpdatedAt === null
-      ? "Ни разу не меняли"
-      : `${locked ? "Закрыл" : "Открыл"} ${settings.swapsLockUpdatedBy ?? "неизвестно кто"} · ${formatAuditMoment(settings.swapsLockUpdatedAt)}`;
-
   async function handleConfirm() {
+    // Кнопка, которая это вызывает, отрисовывается только когда `settings`
+    // загружен (см. `renderSwapsSection` ниже) — проверка здесь только защищает
+    // типы от гипотетической гонки, а не меняет обычный путь.
+    if (!settings) return;
     setSaving(true);
     setError(null);
     try {
-      const outcome = await apiClient.setSwapsLock(!locked);
+      const outcome = await apiClient.setSwapsLock(!settings.swapsLocked);
       setConfirming(false);
       setResult(outcome);
       // reload() ловит свои ошибки сам — она не может провалить этот try.
@@ -130,78 +98,115 @@ export function AdminSettings() {
     }
   }
 
-  const resultLine = result
-    ? withNotifyNotice(
-        result.locked ? `Обмены закрыты. Отменено заявок: ${result.cancelled}.` : "Обмены открыты.",
-        result,
-      )
-    : null;
+  /**
+   * Содержимое секции «Настройки» (замок обменов) — своя загрузка, своя ошибка,
+   * свой спиннер. Раньше сбой или ожидание `GET /api/admin/settings` подменяли
+   * весь экран через ранний `return` из компонента, из-за чего секция «Что мне
+   * писать» ниже становилась недостижимой, даже если её собственный запрос
+   * успел отработать. Теперь каждая секция отвечает сама за себя.
+   */
+  function renderSwapsSection() {
+    if (error && !settings) {
+      return (
+        <CardShell>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+        </CardShell>
+      );
+    }
+
+    if (!settings) {
+      return (
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spinner size="m" />
+        </div>
+      );
+    }
+
+    const locked = settings.swapsLocked;
+    const actionLabel = locked ? "Открыть обмены" : "Закрыть обмены";
+    const confirmLabel = locked ? "Да, открыть" : "Да, закрыть";
+    const whoLabel =
+      settings.swapsLockUpdatedAt === null
+        ? "Ни разу не меняли"
+        : `${locked ? "Закрыл" : "Открыл"} ${settings.swapsLockUpdatedBy ?? "неизвестно кто"} · ${formatAuditMoment(settings.swapsLockUpdatedAt)}`;
+
+    const resultLine = result
+      ? withNotifyNotice(
+          result.locked ? `Обмены закрыты. Отменено заявок: ${result.cancelled}.` : "Обмены открыты.",
+          result,
+        )
+      : null;
+
+    return (
+      <>
+        {/* Тумблер только показывает состояние — он выключен, потому что менять
+            его можно исключительно через кнопки ниже (с подтверждением). */}
+        <Cell
+          after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
+          description={whoLabel}
+        >
+          Обмены смен — {locked ? "Закрыты" : "Открыты"}
+        </Cell>
+
+        <CardStack>
+          <CardShell>
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+              Закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде.
+            </div>
+          </CardShell>
+
+          {error && (
+            <CardShell>
+              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+            </CardShell>
+          )}
+
+          {resultLine && (
+            <CardShell>
+              <div style={{ fontSize: 13.5 }}>{resultLine}</div>
+            </CardShell>
+          )}
+
+          <CardShell>
+            {confirming ? (
+              <>
+                <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+                  {locked
+                    ? "Открыть обмены обратно?"
+                    : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
+                </div>
+                <Button size="s" mode="filled" stretched disabled={saving} onClick={() => void handleConfirm()}>
+                  {saving ? "Отправляю…" : confirmLabel}
+                </Button>
+                <Button size="s" mode="gray" stretched disabled={saving} onClick={() => setConfirming(false)}>
+                  Отмена
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="s"
+                mode="bezeled"
+                stretched
+                disabled={saving}
+                onClick={() => {
+                  setResult(null);
+                  setError(null);
+                  setConfirming(true);
+                }}
+              >
+                {actionLabel}
+              </Button>
+            )}
+          </CardShell>
+        </CardStack>
+      </>
+    );
+  }
 
   return (
     <ScreenScroll>
       <List>
-        <Section header="Настройки">
-          {/* Тумблер только показывает состояние — он выключен, потому что менять
-              его можно исключительно через кнопки ниже (с подтверждением). */}
-          <Cell
-            after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
-            description={whoLabel}
-          >
-            Обмены смен — {locked ? "Закрыты" : "Открыты"}
-          </Cell>
-
-          <CardStack>
-            <CardShell>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                Закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде.
-              </div>
-            </CardShell>
-
-            {error && (
-              <CardShell>
-                <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-              </CardShell>
-            )}
-
-            {resultLine && (
-              <CardShell>
-                <div style={{ fontSize: 13.5 }}>{resultLine}</div>
-              </CardShell>
-            )}
-
-            <CardShell>
-              {confirming ? (
-                <>
-                  <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-                    {locked
-                      ? "Открыть обмены обратно?"
-                      : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
-                  </div>
-                  <Button size="s" mode="filled" stretched disabled={saving} onClick={() => void handleConfirm()}>
-                    {saving ? "Отправляю…" : confirmLabel}
-                  </Button>
-                  <Button size="s" mode="gray" stretched disabled={saving} onClick={() => setConfirming(false)}>
-                    Отмена
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  size="s"
-                  mode="bezeled"
-                  stretched
-                  disabled={saving}
-                  onClick={() => {
-                    setResult(null);
-                    setError(null);
-                    setConfirming(true);
-                  }}
-                >
-                  {actionLabel}
-                </Button>
-              )}
-            </CardShell>
-          </CardStack>
-        </Section>
+        <Section header="Настройки">{renderSwapsSection()}</Section>
 
         <Section header="Что мне писать">
           {noticePrefs === null ? (
