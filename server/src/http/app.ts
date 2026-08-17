@@ -10,7 +10,7 @@ import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { listActiveTemplates, getTemplate } from "../repo/templates";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
-import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping } from "../repo/shifts";
+import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -907,8 +907,32 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // thing that can mark a cell unread (pinned by its own API test).
     const namesTheEntry = ["templateId", "title", "start", "end", "category"] as const;
     const clearsUnread = existing.unrecognisedCode != null && namesTheEntry.some((field) => patch[field] !== undefined);
+
+    // Смена уезжает на другое число — висящий обмен становится невозможен, потому
+    // что меняться можно только внутри одного дня (его решение от 2026-08-03).
+    // Payload собирается ДО правки: письмо говорит «Было: … ↔ …», то есть называет
+    // те смены, о которых договаривались, а не ту, что получилась.
+    const movedToAnotherDay = patch.date !== undefined && patch.date !== existing.date;
+    const swapsToExpire = movedToAnotherDay
+      ? listPendingSwapsForShift(db, id).map((request) => ({ request, payload: swapAuditPayload(request) }))
+      : [];
+
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
+    if (movedToAnotherDay) {
+      const expired = new Set(expirePendingSwapsForShift(db, id).map((r) => r.id));
+      for (const { request, payload } of swapsToExpire) {
+        if (!expired.has(request.id)) continue;
+        // Актор — админ, перенёсший смену: в обмене никто из двоих ничего не делал,
+        // ровно поэтому сказать надо обоим (то же правило, что у удаления записи).
+        recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
+        if (!bot) continue;
+        for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
+          const tg = tgOf(employeeId);
+          if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
+        }
+      }
+    }
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),

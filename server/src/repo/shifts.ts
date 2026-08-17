@@ -51,6 +51,29 @@ export function updateShift(db: Db, id: number, patch: Partial<NewShift>): Shift
 }
 
 /**
+ * Гасит висящие заявки на обмен этой сменой, саму смену не трогая.
+ *
+ * Обмен идёт только внутри одного дня (его решение от 2026-08-03), поэтому смена,
+ * уехавшая на другое число, делает договорённость невозможной — ровно как её
+ * удаление, только запись жива. Указатели на смену остаются: она на месте, и
+ * архив по-прежнему может назвать обе стороны обмена.
+ *
+ * Как и `deleteShift`, отдаёт погашенные наружу: сказать обеим сторонам может
+ * только вызывающий — у репозитория нет бота и не должно быть.
+ */
+export function expirePendingSwapsForShift(db: Db, shiftId: number): SwapRequest[] {
+  return db
+    .update(swapRequests)
+    .set({ status: "expired", resolvedAt: new Date() })
+    .where(and(
+      eq(swapRequests.status, "pending"),
+      or(eq(swapRequests.fromShiftId, shiftId), eq(swapRequests.toShiftId, shiftId)),
+    ))
+    .returning()
+    .all();
+}
+
+/**
  * Removes an entry, taking the rows that point at it with it — except the swap
  * requests, which outlive it.
  *
