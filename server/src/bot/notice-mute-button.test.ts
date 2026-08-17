@@ -4,7 +4,7 @@ import { notifyAdmins, notifyAdminsAlways } from "./notify";
 import { createBot } from "./bot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { isNoticeMuted } from "../repo/notice-prefs";
+import { isNoticeMuted, listMutedKinds } from "../repo/notice-prefs";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 
@@ -107,6 +107,22 @@ describe("кнопка «не писать мне про это»", () => {
     expect(calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
     const replies = calls.filter((c) => c.method === "sendMessage").map((c) => String(c.payload.text));
     expect(replies.join("\n")).toMatch(/мини-апп/i);
+  });
+
+  // Кнопка живёт в чате Telegram вечно, а список видов — нет: вид могут
+  // переименовать или убрать, и тогда старое письмо принесёт данные, которых в
+  // системе больше не существует. Отвечать на это надо внятной фразой, а не
+  // молчанием и не строкой-мусором в `notification_mutes`.
+  it("нажатие на кнопку с исчезнувшим видом отвечает внятно и ничего не пишет в базу", async () => {
+    const db = makeTestDb();
+    const anya = admin(db, "Аня", 304);
+    const { bot, calls } = testCreatedBot(db);
+
+    await bot.handleUpdate(tapUpdate(304, "notice:mute:reports_digest") as never);
+
+    const answer = calls.find((c) => c.method === "answerCallbackQuery");
+    expect(answer?.payload.text).toBe("Такого вида уведомлений больше нет");
+    expect(listMutedKinds(db, anya.id)).toEqual([]);
   });
 
   it("не даёт разжалованному из админов выключить чужую настройку", async () => {
