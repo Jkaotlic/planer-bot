@@ -20,7 +20,7 @@
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p client/tsconfig.json && tsc -p server/tsconfig.json && tsc -p admin/tsconfig.json && tsc -p miniapp/tsconfig.json"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.7",
+    "@biomejs/biome": "^2.5.8",
     "jsdom": "^30.0.1",
     "typescript": "^5.6.0",
     "vitest": "^4.1.10"
