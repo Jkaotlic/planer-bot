@@ -721,3 +721,132 @@ describe("правка целой недели одним письмом", () =>
     expect(text).toContain("11:00–20:00 · Вечер");
   });
 });
+
+// «Место» — это отдельное поле пресета, а не часть его имени. Импорт ростера
+// пишет оба (`roster-codec`: `title: preset.name, location: preset.location`),
+// а обе админки — только заголовок: поле формы называется «Место / примечание»
+// и уезжает в `title`. Читатель у `location` есть — карточка команды рисует
+// строку «Место: …», — поэтому одно и то же дежурство на одном и том же месте
+// показывало его, если пришло из CSV, и молчало, если его завёл админ руками.
+// На живых данных на момент находки: 83 дежурства с местом против 74 без, у тех
+// же самых пресетов (в августе 41 против 53).
+describe("запись наследует место своего пресета", () => {
+  // Пресеты приходят миграцией: 5 — «Дежурство · Поклонка» с местом «Поклонка»,
+  // 8 — «Дежурство · Вавилова 19», 7 — «Дежурство · Телефон» БЕЗ места.
+  const POKLONKA = 5;
+  const VAVILOVA = 8;
+  const PHONE = 7;
+
+  it("создание берёт место из пресета, хотя тело его не назвало", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Дежурный Дима" });
+
+    // Ровно то, что шлёт форма в режиме пресета: пресет, часы и его имя.
+    const res = await app.request("/api/admin/entries", authedJson(admin, {
+      employeeId: w.id, date: "2026-08-04", category: "duty",
+      templateId: POKLONKA, start: "09:00", end: "18:00", title: "Дежурство · Поклонка",
+    }));
+
+    expect(res.status).toBe(201);
+    expect(getShift(db, (await res.json()).entry.id as number)!.location).toBe("Поклонка");
+  });
+
+  it("пресет без места оставляет поле пустым, а не пустой строкой", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Телефонный Тимур" });
+
+    const res = await app.request("/api/admin/entries", authedJson(admin, {
+      employeeId: w.id, date: "2026-08-04", category: "duty",
+      templateId: PHONE, start: "09:00", end: "18:00", title: "Дежурство · Телефон",
+    }));
+
+    expect(getShift(db, (await res.json()).entry.id as number)!.location).toBeNull();
+  });
+
+  it("место, присланное явно, сильнее места пресета", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Явный Ярослав" });
+
+    const res = await app.request("/api/admin/entries", authedJson(admin, {
+      employeeId: w.id, date: "2026-08-04", category: "duty", templateId: POKLONKA,
+      start: "09:00", end: "18:00", title: "Дежурство · Поклонка", location: "Другой адрес",
+    }));
+
+    expect(getShift(db, (await res.json()).entry.id as number)!.location).toBe("Другой адрес");
+  });
+
+  it("смена пресета переносит место за ним", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Переездный Пётр" });
+    const entry = createShift(db, {
+      date: "2026-08-04", category: "duty", templateId: POKLONKA,
+      start: "09:00", end: "18:00", title: "Дежурство · Поклонка", location: "Поклонка", employeeId: w.id,
+    });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      date: "2026-08-04", category: "duty", templateId: VAVILOVA,
+      start: "09:00", end: "18:00", title: "Дежурство · Вавилова 19",
+    }, "PATCH"));
+
+    expect(getShift(db, entry.id)!.location).toBe("Вавилова 19");
+  });
+
+  it("отпуск места не носит: снятый пресет уносит его с собой", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Отпускной Олег" });
+    const entry = createShift(db, {
+      date: "2026-08-04", category: "duty", templateId: POKLONKA,
+      start: "09:00", end: "18:00", title: "Дежурство · Поклонка", location: "Поклонка", employeeId: w.id,
+    });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { category: "vacation" }, "PATCH"));
+
+    const after = getShift(db, entry.id)!;
+    expect(after.category).toBe("vacation");
+    // Пресет и подпись уже снимались безусловно (`8eb9937`) — место из той же
+    // семьи: «Место: Поклонка» на отпуске это неправда, которую видит вся команда.
+    expect(after.location).toBeNull();
+  });
+
+  it("перенос записи на другой день место не трогает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Сдвинутый Семён" });
+    const entry = createShift(db, {
+      date: "2026-08-04", category: "duty", templateId: POKLONKA,
+      start: "09:00", end: "18:00", title: "Дежурство · Поклонка", location: "Поклонка", employeeId: w.id,
+    });
+
+    await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: "2026-08-05" }, "PATCH"));
+
+    expect(getShift(db, entry.id)!.location).toBe("Поклонка");
+  });
+
+  it("«Заполнить неделю» тоже наследует место", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const w = createEmployee(db, { displayName: "Недельный Никита" });
+
+    const res = await app.request("/api/admin/entries/bulk", authedJson(admin, {
+      entries: [
+        { employeeId: w.id, date: "2026-08-04", category: "duty", templateId: POKLONKA, start: "09:00", end: "18:00", title: "Дежурство · Поклонка" },
+        { employeeId: w.id, date: "2026-08-05", category: "duty", templateId: POKLONKA, start: "09:00", end: "18:00", title: "Дежурство · Поклонка" },
+      ],
+    }));
+
+    expect(res.status).toBe(201);
+    expect(listShiftsInRange(db, "2026-08-04", "2026-08-05").map((s) => s.location)).toEqual(["Поклонка", "Поклонка"]);
+  });
+});
