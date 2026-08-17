@@ -39,6 +39,8 @@ export interface HandoverMessenger {
   /** A plain message with nothing to tap. */
   plain(employeeId: number, text: string): Promise<void>;
   admins(text: string): Promise<void>;
+  /** Письмо, которое админ не может себе выключить: смена осталась без человека. */
+  adminsAlways(text: string): Promise<void>;
 }
 
 export interface HandoverDeps {
@@ -142,7 +144,7 @@ export async function startHandovers(
     if (handoverCandidates(db, shift).length === 0) {
       const escalated = updateHandover(db, handover.id, { status: "fanned", escalatedAt: new Date() })!;
       recordAudit(db, "handover_escalated", input.employeeId, auditPayload(db, escalated, shift, null));
-      await deps.messenger.admins(
+      await deps.messenger.adminsAlways(
         handoverEscalationText(nameOf(db, input.employeeId) ?? "Работник", lineOf(shift), [], 0),
       );
       made.push(escalated);
@@ -297,7 +299,7 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
 
   const updated = updateHandover(db, handoverId, { escalatedAt: new Date() })!;
   recordAudit(db, "handover_escalated", null, auditPayload(db, updated, shift, null));
-  await deps.messenger.admins(
+  await deps.messenger.adminsAlways(
     handoverEscalationText(
       nameOf(db, handover.fromEmployeeId) ?? "Работник",
       lineOf(shift),

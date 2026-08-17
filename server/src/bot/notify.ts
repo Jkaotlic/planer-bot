@@ -4,6 +4,7 @@ import { listAdmins, listActive, getEmployeeById } from "../repo/employees";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
 import type { OutsidePoolFact } from "../swap/duty-notice";
+import type { AdminNoticeKind } from "@planer/shared";
 
 // --- Swap text builders ------------------------------------------------------
 //
@@ -281,13 +282,39 @@ export async function notifyHandoverFan(
   }
 }
 
-export async function notifyAdmins(bot: Bot, db: Db, text: string): Promise<void> {
+/**
+ * Письмо всем достижимым админам.
+ *
+ * `kind` — обязательный, и это главное в этой сигнатуре. Необязательный параметр
+ * со значением по умолчанию однажды дал бы девятый вызов, который молча нельзя
+ * выключить, и заметили бы это по жалобе. Здесь же tsc не даст добавить админское
+ * уведомление, не решив, к какому виду оно относится.
+ */
+export async function notifyAdmins(bot: Bot, db: Db, kind: AdminNoticeKind, text: string): Promise<void> {
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
     try {
       await bot.api.sendMessage(admin.telegramUserId, text);
     } catch (err) {
-      console.error(`notifyAdmins: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
+      console.error(`notifyAdmins(${kind}): failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
+    }
+  }
+}
+
+/**
+ * То же самое, но выключить это нельзя.
+ *
+ * Отдельная функция, а не флаг «невыключаемый вид», намеренно: читающий место
+ * вызова должен видеть, что письмо пройдёт сквозь любые настройки, не ходя за
+ * определением. Сегодня так уходит ровно одно — «смену никто не взял».
+ */
+export async function notifyAdminsAlways(bot: Bot, db: Db, text: string): Promise<void> {
+  for (const admin of listAdmins(db)) {
+    if (admin.telegramUserId == null) continue;
+    try {
+      await bot.api.sendMessage(admin.telegramUserId, text);
+    } catch (err) {
+      console.error(`notifyAdminsAlways: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
   }
 }

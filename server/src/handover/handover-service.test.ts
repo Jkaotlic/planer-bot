@@ -34,6 +34,9 @@ function deps(db: Db) {
       admins: async (text: string) => {
         sent.push({ to: "admins", text });
       },
+      adminsAlways: async (text: string) => {
+        sent.push({ to: "admins", text });
+      },
     },
   };
 }
