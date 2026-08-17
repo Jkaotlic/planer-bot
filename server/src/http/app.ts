@@ -792,12 +792,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return target.isActive ? null : `«${target.displayName}» в архиве — восстановите его, прежде чем ставить записи`;
   };
 
+  /**
+   * «Место» — отдельное поле пресета, а не часть его имени.
+   *
+   * Импорт ростера пишет оба (`roster-codec`: `title: preset.name,
+   * location: preset.location`), а обе админки — только заголовок: поле формы
+   * называется «Место / примечание» и уезжает в `title`. Читатель у `location`
+   * есть — карточка команды рисует строку «Место: …», — поэтому одно и то же
+   * дежурство на одном и том же месте показывало его, если пришло из CSV, и
+   * молчало, если его завёл админ (на живых данных 83 против 74 у тех же
+   * пресетов). Правило стоит у решения, а не у двери: через него идут создание,
+   * правка и «Заполнить неделю».
+   *
+   * Присланное явно место сильнее: пресет описывает запись по умолчанию, а не
+   * вопреки тому, что о ней сказали.
+   */
+  const withPresetLocation = <T extends { templateId?: number | null; location?: string | null }>(input: T): T => {
+    if (input.location != null || input.templateId == null) return input;
+    const preset = getTemplate(db, input.templateId);
+    return preset?.location ? { ...input, location: preset.location } : input;
+  };
+
   app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
-    const entry = createShift(db, parsed.data);
+    const entry = createShift(db, withPresetLocation(parsed.data));
     recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now: teamNow(config.teamTz),
@@ -855,6 +876,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // пресета в обеих формах всегда шлёт `templateId` вместе с часами.
     if (patch.start !== undefined && patch.templateId === undefined) patch.templateId = null;
 
+    // Место идёт за пресетом — тем, с которым запись останется. Пресет сменился —
+    // приезжает место нового; пресет сняли (отсутствие, своё время) — уезжает и
+    // место, иначе «Место: Поклонка» осталось бы на отпуске, и это увидела бы вся
+    // команда. Правка, назвавшая место сама, остаётся сильнее.
+    if (patch.location === undefined && patch.templateId !== undefined) {
+      patch.location = patch.templateId == null ? null : (getTemplate(db, patch.templateId)?.location ?? null);
+    }
+
     const merged = {
       category,
       date: patch.date ?? existing.date,
@@ -903,7 +932,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     const dates = parsed.data.entries.map((e) => e.date).sort();
     const { result: entries, diffs } = withScheduleDiff(db, { from: dates[0]!, to: dates.at(-1)! }, () =>
-      db.transaction(() => parsed.data.entries.map((input) => createShift(db, input))),
+      db.transaction(() => parsed.data.entries.map((input) => createShift(db, withPresetLocation(input)))),
     );
     for (const entry of entries) recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = await notifyScheduleChange(db, bot, {
