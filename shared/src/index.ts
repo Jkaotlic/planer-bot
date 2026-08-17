@@ -9,6 +9,7 @@ export * from "./audit";
 export * from "./schedule-palette";
 export * from "./distribute";
 export * from "./reminder";
+export * from "./roster-summary";
 export * from "./rotation";
 export * from "./birthday";
 export * from "./collection";

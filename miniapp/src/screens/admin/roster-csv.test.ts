@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { pluralRecords, rosterImportSummaryLine as summaryLine } from "@planer/shared";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import type { RosterImportPreview, RosterPersonResolution } from "../../api/client";
 import {
@@ -9,8 +10,6 @@ import {
   importBlocker,
   initialResolutions,
   monthRangeOf,
-  pluralRecords,
-  summaryLine,
 } from "./AdminRosterCsv";
 
 const preview: RosterImportPreview = {
