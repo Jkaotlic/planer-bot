@@ -20,6 +20,25 @@ export function isSelfWritable(category: EntryCategory): boolean {
 }
 
 /**
+ * Что может завести себе наблюдатель.
+ *
+ * Отдельное множество, а не третий элемент в `SELF_WRITABLE`: то отвечает на
+ * вопрос «что работник ставит себе сам», и ответ на него по-прежнему «ровно
+ * два». Смена здесь появляется не потому, что стала самозаписываемой вообще,
+ * а потому, что у наблюдателя её больше некому поставить — в раздаче его нет.
+ */
+const OBSERVER_SELF_WRITABLE: ReadonlySet<EntryCategory> = new Set([...SELF_WRITABLE, "shift"]);
+
+export interface SelfEntryAccess {
+  /** `canAddOwnShifts` вызывающей стороны. */
+  ownShifts?: boolean;
+}
+
+function writableFor(access: SelfEntryAccess): ReadonlySet<EntryCategory> {
+  return access.ownShifts ? OBSERVER_SELF_WRITABLE : SELF_WRITABLE;
+}
+
+/**
  * На сколько дней назад можно начать больничный.
  *
  * Граница между «сообщаю о факте, который уже случился» и «переписываю
@@ -53,14 +72,20 @@ export interface SelfEntryDraft {
  * к самой записи, а не к тому, кто её пишет. Вторая копия этих правил здесь
  * разъехалась бы с первой.
  */
-export function selfEntryRefusal(draft: SelfEntryDraft, today: string): string | null {
-  if (!isSelfWritable(draft.category)) return "Такую запись ставит админ";
+export function selfEntryRefusal(draft: SelfEntryDraft, today: string, access: SelfEntryAccess = {}): string | null {
+  if (!writableFor(access).has(draft.category)) return "Такую запись ставит админ";
 
   const offset = dayNumber(draft.date) - dayNumber(today);
+  // Задним числом — только больничный: он сообщает о факте, который уже
+  // случился. Смена и мероприятие — это план, и «поставить себе вчерашнюю
+  // смену» переписывает отчётность, а не планирует.
   const earliest = draft.category === "sick_leave" ? -SICK_BACKDATE_DAYS : 0;
   if (offset < earliest) {
-    return draft.category === "sick_leave"
-      ? `Больничный можно поставить не раньше чем за ${SICK_BACKDATE_DAYS} дней до сегодня — если нужно раньше, попроси админа`
+    if (draft.category === "sick_leave") {
+      return `Больничный можно поставить не раньше чем за ${SICK_BACKDATE_DAYS} дней до сегодня — если нужно раньше, попроси админа`;
+    }
+    return draft.category === "shift"
+      ? "Смену можно поставить на сегодня или вперёд"
       : "Мероприятие ставится на сегодня или вперёд";
   }
   if (offset > SELF_ENTRY_HORIZON_DAYS) return "Слишком далеко — дальше полугода графика ещё нет";
@@ -87,8 +112,9 @@ export function selfEntryRefusal(draft: SelfEntryDraft, today: string): string |
 export function selfEntryEditRefusal(
   entry: { category: EntryCategory; date: string; endDate?: string | null },
   today: string,
+  access: SelfEntryAccess = {},
 ): string | null {
-  if (!isSelfWritable(entry.category)) return "Такую запись правит админ";
+  if (!writableFor(access).has(entry.category)) return "Такую запись правит админ";
   if ((entry.endDate ?? entry.date) < today) return "Запись уже кончилась — если что-то не так, напиши админу";
   return null;
 }

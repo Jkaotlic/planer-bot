@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { shiftDurationHours, isWeekend, isAbsence, type EntryCategory } from "@planer/shared";
+import { shiftDurationHours, isWeekend, isAbsence, takesPartInAssignment, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { weekendAssignments, type VacantSlot, type WeekendAssignment } from "../db/schema";
 import {
@@ -95,7 +95,8 @@ export function expressInterest(db: Db, slotId: number, employeeId: number, toda
   // `openSlotsForWorker`), so this door is normally never even reached — but
   // the route takes `slotId` from the request body, so it has to refuse here
   // too, not just leave the tab empty.
-  if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return { ok: false, reason: "excluded" };
+  const requester = getEmployeeById(db, employeeId);
+  if (!requester || !takesPartInAssignment(requester)) return { ok: false, reason: "excluded" };
   addInterest(db, slotId, employeeId);
   return { ok: true };
 }
@@ -129,7 +130,10 @@ export function interestedForSlot(
     // it with no explanation where the admin was looking. His decision,
     // 2026-08-07: drop them from the list rather than mark them — the flag means
     // «не участвует в выходных».
-    .filter((employeeId) => isOnStaff(db, employeeId) && !getEmployeeById(db, employeeId)?.excludedFromAssignment)
+    .filter((employeeId) => {
+      const person = getEmployeeById(db, employeeId);
+      return isOnStaff(db, employeeId) && person != null && takesPartInAssignment(person);
+    })
     .map((employeeId) => ({
       employeeId,
       name: getEmployeeById(db, employeeId)?.displayName ?? "Неизвестно",
@@ -160,7 +164,8 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   // mini-app's «Выходные» tab is empty for them — but the route takes an
   // employeeId from the request body, and an interest row recorded before the
   // exclusion (or a direct API call) still has to hit a real refusal here.
-  if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return { ok: false, reason: "excluded" };
+  const candidate = getEmployeeById(db, employeeId);
+  if (!candidate || !takesPartInAssignment(candidate)) return { ok: false, reason: "excluded" };
   if (!listInterestedEmployeeIds(db, slotId).includes(employeeId)) return { ok: false, reason: "not_interested" };
 
   // slotId+employeeId is unique, so a second assign for the same pair always lands here.
@@ -327,7 +332,8 @@ export function openSlotsForWorker(
   // decision, 2026-08-07: the tab is empty, not "visible but disabled". A
   // disabled «Хочу» would need explaining, and the flag is deliberately never
   // explained to the person it's set on (see `assignSlot`'s silent refusal).
-  if (getEmployeeById(db, employeeId)?.excludedFromAssignment === true) return [];
+  const viewer = getEmployeeById(db, employeeId);
+  if (!viewer || !takesPartInAssignment(viewer)) return [];
   const mine = new Set(listMyInterestSlotIds(db, employeeId));
   return listOpenSlots(db, fromDate).map((slot) => ({
     slot,

@@ -26,6 +26,7 @@ import type {
   NoticePrefs,
   AnnouncementAudience,
   AnnouncementResult,
+  AnnouncementRecipient,
   BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
@@ -82,11 +83,22 @@ export const MOCK_ME: Me = {
   remindersEnabled: true,
   swapsLocked: false,
   excludedFromSwaps: false,
+  // Дев-мок всегда админ (см. комментарий выше) — наблюдателя тут не пощупать
+  // руками, зато экран, скрытый и от админа, и от наблюдателя, виден сразу.
+  isObserver: false,
+  selfScheduleEnabled: false,
+  canAnnounce: true,
 };
 
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {
   await delay(200);
   MOCK_ME.remindersEnabled = enabled;
+  return enabled;
+}
+
+export async function mockSetSelfScheduleEnabled(enabled: boolean): Promise<boolean> {
+  await delay(200);
+  MOCK_ME.selfScheduleEnabled = enabled;
   return enabled;
 }
 
@@ -107,15 +119,15 @@ export async function mockSetPreferredName(preferredName: string | null): Promis
  * employee-without-shifts state.
  */
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 100001, birthDate: "03-14", preferredName: null, address: "Аня Смирнова", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
   // Живой пример погашенной кнопки в «Обмены» (см. `mockGetTeamSchedule` ниже,
   // которая теперь читает это же поле, а не отдельный список).
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: true },
-  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29", preferredName: null, address: "Нина Белова", excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: true, isObserver: false, selfScheduleEnabled: false },
+  { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
+  { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
+  { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
+  { id: 7, displayName: "Нина Белова", isAdmin: false, isActive: true, telegramUserId: 100007, birthDate: "02-29", preferredName: null, address: "Нина Белова", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
 ];
 
 function personName(employeeId: number): string {
@@ -1482,6 +1494,8 @@ export async function mockApplyRosterImport(
         address: resolution.csvName,
         excludedFromAssignment: false,
         excludedFromSwaps: false,
+        isObserver: false,
+        selfScheduleEnabled: false,
       });
     }
   }
@@ -1543,6 +1557,21 @@ export async function mockSetNoticePref(kind: string, enabled: boolean): Promise
   if (enabled) mockMutedKinds.delete(kind);
   else mockMutedKinds.add(kind);
   return { kind, enabled };
+}
+
+/**
+ * Кому уйдёт «всем» — глазами отправителя, с id, а не именами. Тот же пул,
+ * что и ветка «всем» в `mockSendAnnouncement`, зеркалит серверный
+ * `announcementRoster`: непривязанный к телеграму виден и назван, а не
+ * пропадает из списка.
+ */
+export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecipient[]> {
+  await delay(150);
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id).map((e) => ({
+    id: e.id,
+    displayName: e.displayName,
+    reachable: e.telegramUserId != null,
+  }));
 }
 
 /**

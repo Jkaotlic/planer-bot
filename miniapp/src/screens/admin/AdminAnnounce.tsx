@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Button, List, Placeholder, Section, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
-import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementResult, type Employee } from "../../api/client";
+import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 
 /**
- * «Анонсы» (admin): вольный текст всей команде или выбранным.
+ * «Анонсы»: вольный текст всей команде или выбранным. Открыт и админу (вкладка
+ * «Админ»), и наблюдателю (своя вкладка «Анонс», см. `TabBar`) — у обоих
+ * `canAnnounce`, и экран один на двоих: разница в правах, а не в вёрстке.
  *
  * Единственная рассылка в системе, которая проходит сквозь ВСЕ настройки
  * уведомлений — отписаться от неё нельзя (см. `announcement-service.ts`).
@@ -15,14 +17,15 @@ import { ScreenScroll } from "../../components/ScreenScroll";
  * до того — поимённый список тех, кому уйдёт, а не только число.
  *
  * Превью-эндпоинта на сервере нет намеренно (текст анонса — ровно то, что
- * напечатал админ, ходить за ним на сервер незачем), поэтому список
- * получателей и подсчёт недостижимых собирает сам экран — тем же списком
- * работников, что грузит «Работники» (`getAdminEmployees`), а не вторым
- * запросом.
+ * напечатал отправитель, ходить за ним на сервер незачем), но КОМУ уйдёт и
+ * кто недостижим считает сервер (`GET /api/announcements/recipients`), а не
+ * этот экран сам по списку работников: у наблюдателя нет доступа к
+ * `getAdminEmployees` (админской ручке), а «сам себе не шлёт» и «есть ли
+ * телеграм» — то же самое правило, что применяет сама отправка, и держать
+ * его здесь второй копией значило бы дать ему разъехаться с сервером.
  */
 export function AdminAnnounce() {
-  const [employees, setEmployees] = useState<Employee[] | null>(null);
-  const [viewerId, setViewerId] = useState<number | null>(null);
+  const [recipients, setRecipients] = useState<AnnouncementRecipient[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [audienceMode, setAudienceMode] = useState<"all" | "picked">("all");
@@ -36,12 +39,10 @@ export function AdminAnnounce() {
     let cancelled = false;
     void (async () => {
       try {
-        const [me, list] = await Promise.all([apiClient.getMe(), apiClient.getAdminEmployees()]);
-        if (cancelled) return;
-        setViewerId(me.id);
-        setEmployees(list);
+        const list = await apiClient.getAnnouncementRecipients();
+        if (!cancelled) setRecipients(list);
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Не удалось загрузить работников");
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Не удалось загрузить получателей");
       }
     })();
     return () => {
@@ -56,7 +57,7 @@ export function AdminAnnounce() {
       </ScreenScroll>
     );
   }
-  if (!employees) {
+  if (!recipients) {
     return (
       <ScreenScroll style={{ display: "flex", justifyContent: "center", paddingTop: 48 }}>
         <Spinner size="l" />
@@ -64,14 +65,12 @@ export function AdminAnnounce() {
     );
   }
 
-  // Сам себе анонс не шлёт никто — тем же правилом, что «Кому» у сборов.
-  const active = employees.filter((e) => e.isActive && e.id !== viewerId);
-  const recipients = audienceMode === "all" ? active : active.filter((e) => selectedIds.has(e.id));
-  // Выбранный явно, но без телеграма или уже в архиве, в отчёт попадёт — но
-  // не в это число: сервер его тоже не отправит. Показываем заранее, а не
-  // только в отчёте после отправки, чтобы «кому уйдёт» не расходилось с тем,
-  // что реально дойдёт.
-  const reachable = recipients.filter((e) => e.telegramUserId != null);
+  // Сервер уже исключил самого отправителя и архивных — здесь только выбор.
+  const picked = audienceMode === "all" ? recipients : recipients.filter((e) => selectedIds.has(e.id));
+  // Выбранный явно, но без телеграма, в отчёт попадёт — но не в это число:
+  // сервер его тоже не отправит. Показываем заранее, а не только в отчёте
+  // после отправки, чтобы «кому уйдёт» не расходилось с тем, что реально дойдёт.
+  const reachable = picked.filter((e) => e.reachable);
   const overLimit = text.length > ANNOUNCEMENT_TEXT_MAX;
   const canSend = text.trim().length > 0 && !overLimit && reachable.length > 0;
 
@@ -162,17 +161,17 @@ export function AdminAnnounce() {
 
               {audienceMode === "picked" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 10 }}>
-                  {active.length === 0 ? (
+                  {recipients.length === 0 ? (
                     <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Выбирать некого.</div>
                   ) : (
-                    active.map((e) => (
+                    recipients.map((e) => (
                       <label
                         key={e.id}
                         style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}
                       >
                         <input type="checkbox" checked={selectedIds.has(e.id)} onChange={() => toggle(e.id)} />
                         <span>{e.displayName}</span>
-                        {e.telegramUserId == null && (
+                        {!e.reachable && (
                           <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>— не привязан</span>
                         )}
                       </label>
@@ -236,3 +235,8 @@ export function AdminAnnounce() {
     </ScreenScroll>
   );
 }
+
+// Именованный экспорт — для `AdminScreen` (статический импорт, уже часть его
+// куска); экспорт по умолчанию — для наблюдателя, у которого «Анонс» это своя
+// вкладка, а не раздел админки, и грузится собственным `lazy()`-куском в App.
+export default AdminAnnounce;

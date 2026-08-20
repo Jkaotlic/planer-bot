@@ -1,4 +1,4 @@
-import { shiftsOverlap } from "@planer/shared";
+import { shiftsOverlap, canSwap } from "@planer/shared";
 import type { Db } from "../db/client";
 import { type Employee, type Shift } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -47,7 +47,7 @@ export function handoverCandidates(
   const pool = new Set(shift.templateId != null ? getTemplateRoles(db, shift.templateId).pool : []);
 
   return listActive(db)
-    .filter((employee) => employee.id !== shift.employeeId && !excluded.has(employee.id) && !employee.excludedFromSwaps)
+    .filter((employee) => employee.id !== shift.employeeId && !excluded.has(employee.id) && canSwap(employee))
     .filter(
       (employee) =>
         !around.some((mine) => mine.employeeId === employee.id && mine.id !== shift.id && standsInTheWay(mine, shift)),

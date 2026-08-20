@@ -19,3 +19,4 @@ export * from "./handover";
 export * from "./address";
 export * from "./api";
 export * from "./notifications";
+export * from "./access";

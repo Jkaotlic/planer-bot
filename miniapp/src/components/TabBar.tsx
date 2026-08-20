@@ -1,18 +1,27 @@
 import { Tabbar } from "@telegram-apps/telegram-ui";
 
-export type TabKey = "mine" | "team" | "swaps" | "weekend" | "admin";
+export type TabKey = "mine" | "team" | "swaps" | "weekend" | "admin" | "announce";
 
 export interface TabBarProps {
   active: TabKey;
   onChange: (tab: TabKey) => void;
   /** When true, an extra "Админ" tab is shown; hidden entirely for regular workers. */
   isAdmin: boolean;
+  /** Наблюдатель: вне раздачи, обменов и передачи смен — «Обмены» и «Выходные»
+   *  ему не показывают вовсе, а не серым: там нет ни одной кнопки, которая
+   *  сработала бы, и пустая вкладка хуже отсутствующей. */
+  isObserver: boolean;
+  /** Кому можно слать анонсы — `isAdmin || isObserver`, посчитано сервером
+   *  (`me.canAnnounce`). У админа своя копия уже внутри вкладки «Админ», и
+   *  вторая здесь сбивала бы — см. условие ниже. */
+  canAnnounce: boolean;
 }
 
-/** Bottom navigation: "Смены", "Команда", "Обмены", "Выходные" (работа в выходные дни), and — for admins only — "Админ". */
-export function TabBar({ active, onChange, isAdmin }: TabBarProps) {
-  // Built as an array (rather than inline JSX with a `&&`) so the optional
-  // admin item stays a bare element — `Tabbar` types its children as a plain
+/** Bottom navigation: "Смены", "Команда", и по роли — "Обмены"/"Выходные" для
+ *  работника, "Анонс" для наблюдателя, "Админ" для админа. */
+export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce }: TabBarProps) {
+  // Built as an array (rather than inline JSX with a `&&`) so every optional
+  // item stays a bare element — `Tabbar` types its children as a plain
   // element array and rejects the `false` a short-circuit would leave behind.
   const items = [
     <Tabbar.Item key="mine" selected={active === "mine"} text="Смены" onClick={() => onChange("mine")}>
@@ -21,17 +30,29 @@ export function TabBar({ active, onChange, isAdmin }: TabBarProps) {
     <Tabbar.Item key="team" selected={active === "team"} text="Команда" onClick={() => onChange("team")}>
       <PeopleIcon />
     </Tabbar.Item>,
-    <Tabbar.Item key="swaps" selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
-      <SwapIcon />
-    </Tabbar.Item>,
-    <Tabbar.Item key="weekend" selected={active === "weekend"} text="Выходные" onClick={() => onChange("weekend")}>
-      <MarketIcon />
-    </Tabbar.Item>,
   ];
+  if (!isObserver) {
+    items.push(
+      <Tabbar.Item key="swaps" selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
+        <SwapIcon />
+      </Tabbar.Item>,
+      <Tabbar.Item key="weekend" selected={active === "weekend"} text="Выходные" onClick={() => onChange("weekend")}>
+        <MarketIcon />
+      </Tabbar.Item>,
+    );
+  }
   if (isAdmin) {
     items.push(
       <Tabbar.Item key="admin" selected={active === "admin"} text="Админ" onClick={() => onChange("admin")}>
         <ShieldIcon />
+      </Tabbar.Item>,
+    );
+  } else if (canAnnounce) {
+    // `!isAdmin` в условии: у админа «Анонс» уже живёт внутри «Админ», и
+    // вторая вкладка с тем же экраном была бы дублем, а не удобством.
+    items.push(
+      <Tabbar.Item key="announce" selected={active === "announce"} text="Анонс" onClick={() => onChange("announce")}>
+        <AnnounceIcon />
       </Tabbar.Item>,
     );
   }
@@ -82,6 +103,16 @@ function MarketIcon() {
       <path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10" />
       <path d="M11 10V4.5a1.5 1.5 0 0 1 3 0V10" />
       <path d="M14 10.5V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1a5 5 0 0 1-4.3-2.5L4 14a1.6 1.6 0 0 1 2.6-1.8L8 14V8" />
+    </svg>
+  );
+}
+
+/** A megaphone — the observer-only "Анонс" tab icon. */
+function AnnounceIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 10v4a1 1 0 0 0 1 1h2l4 4V5l-4 4H4a1 1 0 0 0-1 1z" />
+      <path d="M15 8a4 4 0 0 1 0 8M18 5a8 8 0 0 1 0 14" />
     </svg>
   );
 }

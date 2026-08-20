@@ -18,6 +18,8 @@ const adminRow = {
   birthDate: "03-14",
   excludedFromAssignment: false,
   excludedFromSwaps: false,
+  isObserver: false,
+  selfScheduleEnabled: false,
 };
 
 describe("схемы домена employees", () => {

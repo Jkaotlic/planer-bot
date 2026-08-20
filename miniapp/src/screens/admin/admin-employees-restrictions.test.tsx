@@ -21,8 +21,8 @@ import { AdminEmployeesScreen } from "./AdminEmployeesScreen";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, preferredName: null, address: "Аня", excludedFromAssignment: false, excludedFromSwaps: false },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, preferredName: null, address: "Игорь", excludedFromAssignment: true, excludedFromSwaps: false },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, preferredName: null, address: "Аня", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, preferredName: null, address: "Игорь", excludedFromAssignment: true, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
 ];
 
 let root: Root | null = null;
@@ -114,5 +114,54 @@ describe("галки ограничений на карточке работни
     const neighbour = el.querySelector('[data-employee-id="2"]')!;
     expect(neighbour.textContent ?? "").not.toContain("сеть недоступна");
     expect(checkboxIn(el, 2, "Не участвует в назначениях")).toBeTruthy();
+  });
+});
+
+/**
+ * Тумблер «Наблюдатель» — Задача 8.
+ *
+ * Осознанное решение из брифа: у наблюдателя две галки ограничений ниже
+ * рисуются `disabled` и значением ИЗ БАЗЫ, а не эффективным («и так вне
+ * назначений из-за роли»). Админ должен видеть, куда человек вернётся, когда
+ * роль снимут — не то, что происходит с ним сейчас.
+ */
+describe("тумблер «Наблюдатель» на карточке работника (мини-апп)", () => {
+  it("после включения тумблер остаётся включённым (тот же дефект, что и у ограничений)", async () => {
+    const save = vi.spyOn(apiClient, "setEmployeeObserver").mockResolvedValue(undefined);
+    const el = await mount();
+
+    await toggle(checkboxIn(el, 1, "Наблюдатель"));
+
+    expect(save).toHaveBeenCalledWith(1, true);
+    expect(checkboxIn(el, 1, "Наблюдатель").checked).toBe(true);
+  });
+
+  it("у наблюдателя обе галки ограничений выключены из ввода и показывают значение из базы", async () => {
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([
+      {
+        id: 5, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: 15,
+        birthDate: null, preferredName: null, address: "Марк",
+        // В базе исключён из назначений ДО роли — при снятии роли он должен
+        // остаться исключённым, поэтому галка обязана показывать `true`, а не
+        // «участвует», хоть распределение и так его сейчас пропускает.
+        excludedFromAssignment: true, excludedFromSwaps: false,
+        isObserver: true, selfScheduleEnabled: false,
+      },
+    ]);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(AdminEmployeesScreen, null)));
+    });
+    await settle();
+
+    const assignment = checkboxIn(host, 5, "Не участвует в назначениях");
+    const swaps = checkboxIn(host, 5, "Не участвует в обменах");
+    expect(assignment.checked).toBe(true); // значение из базы, не эффективное
+    expect(assignment.disabled).toBe(true);
+    expect(swaps.checked).toBe(false);
+    expect(swaps.disabled).toBe(true);
+    expect(host.querySelector(`[data-employee-id="5"]`)!.textContent ?? "").toContain("управляется ролью");
   });
 });

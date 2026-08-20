@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { canAddOwnShifts } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -23,6 +24,12 @@ import { adminSectionFromSearch } from "./screens/admin-section";
  * говорил про запросы, не про байты.
  */
 const AdminScreen = lazy(() => import("./screens/AdminScreen"));
+// «Анонс» наблюдателя — своя вкладка, не раздел админки, и её код не должен
+// тянуть за собой оставшиеся семь админских экранов: тот же приём, что выше,
+// применённый к одному компоненту вместо всех восьми. У админа «Анонс» уже
+// доезжает вместе с `AdminScreen`; для наблюдателя это отдельный, более
+// мелкий кусок.
+const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
@@ -118,8 +125,14 @@ export function App() {
   // кнопке, а ссылку могли просто переслать не-админу. `AdminScreen` не рисуется
   // без прав, а `TabBar` вовсе не показывает вкладку «Админ» не-админу — без
   // этой поправки человек попадал бы в пустое тело без подсвеченной вкладки.
+  //
+  // У наблюдателя этот же угад — неправильный, но не ошибка: его копия той же
+  // ссылки означает «Анонс», его законную вкладку, а не «admin». Сбрасывать
+  // его на «Мои смены» так же, как обычного работника, было бы неправильно —
+  // ссылку прислали не по ошибке, просто угадали не ту вкладку.
   useEffect(() => {
-    if (data && tab === "admin" && !data.me.isAdmin) setTab("mine");
+    if (!data || tab !== "admin" || data.me.isAdmin) return;
+    setTab(data.me.isObserver ? "announce" : "mine");
   }, [data, tab]);
 
   useEffect(() => {
@@ -304,13 +317,22 @@ export function App() {
     );
   }
 
-  if (selfEntryMode) {
+  // `?screen=shift` — единственный из трёх адресов, где право на форму не
+  // всеобщее: ссылку могли переслать, а тумблер «Веду свой график сам» —
+  // выключить (или роль наблюдателя — снять) между открытием меню бота и
+  // тапом, тот же угад, что уже разобран для вкладки «Админ» выше. Без этой
+  // проверки форма открылась бы и тут же ответила отказом `selfEntryRefusal`
+  // («Такую запись ставит админ») — работающая на вид ссылка, ведущая в
+  // тупик, хуже отсутствующей.
+  const shiftFormAllowed = selfEntryMode !== "shift" || canAddOwnShifts(data.me);
+  if (selfEntryMode && shiftFormAllowed) {
     return (
       <SelfEntryScreen
         mode={selfEntryMode}
         today={data.today}
         shifts={data.myShifts}
         templates={data.templates}
+        ownShifts={canAddOwnShifts(data.me)}
         onCancel={() => setSelfEntryMode(null)}
         onCreate={handleCreateSelfEntry}
         onUpdate={handleUpdateSelfEntry}
@@ -354,6 +376,9 @@ export function App() {
           onSelfEntry={setSelfEntryMode}
           onRemindersChanged={(remindersEnabled) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
+          }
+          onSelfScheduleChanged={(selfScheduleEnabled) =>
+            setData((prev) => (prev ? { ...prev, me: { ...prev.me, selfScheduleEnabled } } : prev))
           }
           onAddressChanged={({ preferredName, address }) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))
@@ -401,6 +426,11 @@ export function App() {
           <AdminScreen initialSection={adminSectionFromSearch(window.location.search) ?? undefined} />
         </Suspense>
       )}
+      {tab === "announce" && data.me.canAnnounce && !data.me.isAdmin && (
+        <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю анонс…</div>}>
+          <AnnounceScreen />
+        </Suspense>
+      )}
       {refreshError && (
         <div
           role="status"
@@ -428,6 +458,8 @@ export function App() {
           void reloadData();
         }}
         isAdmin={data.me.isAdmin}
+        isObserver={data.me.isObserver}
+        canAnnounce={data.me.canAnnounce}
       />
     </div>
   );

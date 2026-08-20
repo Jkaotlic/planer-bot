@@ -11,6 +11,8 @@ export interface EmployeesScreenProps {
   onChanged: () => Promise<void>;
   /** Patches a just-saved restriction flag into the parent's own state — see `setRestriction`. */
   onRestrictionsSaved: (id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
+  /** Patches a just-saved role flag into the parent's own state — see `setObserver`. */
+  onObserverSaved: (id: number, isObserver: boolean) => void;
 }
 
 /**
@@ -44,7 +46,7 @@ export function refusalText(message: string): string {
  * "Работники" screen: active/archived worker lists with archive/restore
  * actions, plus a dialog to add a new worker and hand them an invite link.
  */
-export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: EmployeesScreenProps) {
+export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onObserverSaved }: EmployeesScreenProps) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
@@ -98,6 +100,22 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: E
     }
   }
 
+  // Та же логика, что у `setRestriction`, и по той же причине — патчит
+  // подтверждённое значение в родительское состояние вместо перечитывания
+  // экрана. Mirrors the Mini App's `AdminEmployeesScreen.setObserver`.
+  async function setObserver(id: number, isObserver: boolean) {
+    setBusyId(id);
+    setRowError(null);
+    try {
+      await apiClient.setEmployeeObserver(id, isObserver);
+      onObserverSaved(id, isObserver);
+    } catch (err) {
+      setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось сохранить роль" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function showInvite(employee: Employee, regenerate = false) {
     setRowError(null);
     try {
@@ -131,6 +149,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: E
         onBirthDate={(id, birthDate) => withBusy(id, () => apiClient.setBirthDate(id, birthDate))}
         onShowInvite={(employee) => void showInvite(employee)}
         onSetRestrictions={setRestriction}
+        onSetObserver={(id, isObserver) => void setObserver(id, isObserver)}
       />
 
       <CollapsibleArchive title="Архив" items={archived}>
@@ -146,6 +165,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved }: E
                 onAction={() => withBusy(employee.id, () => apiClient.restoreEmployee(employee.id))}
                 onRename={(name) => withBusy(employee.id, () => apiClient.renameEmployee(employee.id, name))}
                 onSetRestrictions={(patch) => setRestriction(employee.id, patch)}
+                onSetObserver={(isObserver) => void setObserver(employee.id, isObserver)}
               />
             ))}
           </div>
@@ -191,9 +211,12 @@ interface EmployeesSectionProps {
   onBirthDate?: (id: number, birthDate: string | null) => void;
   /** Every row gets the «Ограничения» checkboxes — active and archived alike. */
   onSetRestrictions: (id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
+  /** Every row gets the «Наблюдатель» toggle — active and archived alike, same as
+   *  the two checkboxes below it. */
+  onSetObserver: (id: number, isObserver: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -216,6 +239,7 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, r
               onRename={onRename ? (name) => onRename(employee.id, name) : undefined}
               onShowInvite={onShowInvite ? () => onShowInvite(employee) : undefined}
               onSetRestrictions={(patch) => onSetRestrictions(employee.id, patch)}
+              onSetObserver={(isObserver) => onSetObserver(employee.id, isObserver)}
             />
           ))}
         </div>
@@ -237,6 +261,7 @@ function EmployeeRow({
   onReorder,
   onBirthDate,
   onSetRestrictions,
+  onSetObserver,
 }: {
   employee: Employee;
   actionLabel: string;
@@ -252,6 +277,9 @@ function EmployeeRow({
   onReorder?: (position: number) => void;
   onBirthDate?: (birthDate: string | null) => void;
   onSetRestrictions: (patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
+  /** Every row gets the «Наблюдатель» toggle — active and archived alike, same as
+   *  the two checkboxes below it. */
+  onSetObserver: (isObserver: boolean) => void;
 }) {
   const palette = personPalette(employee.id);
   const linked = employee.telegramUserId != null;
@@ -349,25 +377,51 @@ function EmployeeRow({
           <label className="employee-restriction-checkbox">
             <input
               type="checkbox"
-              checked={employee.excludedFromAssignment}
+              checked={employee.isObserver}
               disabled={busy}
+              onChange={() => onSetObserver(!employee.isObserver)}
+            />
+            Наблюдатель
+            <span className="employee-restriction-hint">
+              — смотрит график, ведёт свой, шлёт анонсы. Вне раздачи, обменов и передачи смен
+            </span>
+          </label>
+          <label
+            className="employee-restriction-checkbox"
+            style={employee.isObserver ? { cursor: "default" } : undefined}
+          >
+            <input
+              type="checkbox"
+              // Значение из базы, а не эффективное («и так вне назначений из-за
+              // роли») — админ должен видеть, куда человек вернётся, когда роль
+              // снимут, а не то, что происходит с ним сейчас. Mirrors the Mini
+              // App's AdminEmployeesScreen.
+              checked={employee.excludedFromAssignment}
+              disabled={busy || employee.isObserver}
               onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
             />
             Не участвует в назначениях
             <span className="employee-restriction-hint">
-              — бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно
+              {employee.isObserver
+                ? "— управляется ролью «Наблюдатель»"
+                : "— бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно"}
             </span>
           </label>
-          <label className="employee-restriction-checkbox">
+          <label
+            className="employee-restriction-checkbox"
+            style={employee.isObserver ? { cursor: "default" } : undefined}
+          >
             <input
               type="checkbox"
               checked={employee.excludedFromSwaps}
-              disabled={busy}
+              disabled={busy || employee.isObserver}
               onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
             />
             Не участвует в обменах
             <span className="employee-restriction-hint">
-              — ни предложить, ни принять обмен; открытые заявки будут отменены
+              {employee.isObserver
+                ? "— управляется ролью «Наблюдатель»"
+                : "— ни предложить, ни принять обмен; открытые заявки будут отменены"}
             </span>
           </label>
         </div>

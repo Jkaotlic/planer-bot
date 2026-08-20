@@ -119,7 +119,7 @@ describe("real notice prefs client", () => {
 });
 
 describe("real announcements client", () => {
-  it("posts {text, audience} to /api/admin/announcements and hands back the server's report unchanged", async () => {
+  it("posts {text, audience} to /api/announcements and hands back the server's report unchanged", async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -133,7 +133,7 @@ describe("real announcements client", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      if (url.endsWith("/api/admin/announcements") && method === "POST") {
+      if (url.endsWith("/api/announcements") && method === "POST") {
         return new Response(
           JSON.stringify({ delivered: 2, intended: 3, unreachable: ["Марк Волков"] }),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -146,12 +146,41 @@ describe("real announcements client", () => {
     const result = await realClient.sendAnnouncement("Завтра собрание в 10:00", [2, 3, 4]);
 
     expect(result).toEqual({ delivered: 2, intended: 3, unreachable: ["Марк Волков"] });
-    expect(requests.filter((request) => request.url.endsWith("/api/admin/announcements"))).toEqual([
+    // Путь без /admin/: рассылать умеют и наблюдатели, которым админский
+    // префикс закрыт сплошным гейтом — перепутать путь значило бы молча не
+    // дойти до сервера для них.
+    expect(requests.filter((request) => request.url.endsWith("/api/announcements"))).toEqual([
       {
-        url: "/api/admin/announcements",
+        url: "/api/announcements",
         method: "POST",
         body: { text: "Завтра собрание в 10:00", audience: [2, 3, 4] },
       },
     ]);
+  });
+
+  it("reads the recipient list from /api/announcements/recipients, not the admin employee list", async () => {
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (url.endsWith("/api/auth")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/announcements/recipients") && method === "GET") {
+        return new Response(
+          JSON.stringify({ recipients: [{ id: 2, displayName: "Игорь", reachable: true }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+
+    const { realClient } = await import("./client");
+    const recipients = await realClient.getAnnouncementRecipients();
+
+    expect(recipients).toEqual([{ id: 2, displayName: "Игорь", reachable: true }]);
   });
 });

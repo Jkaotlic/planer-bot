@@ -51,6 +51,7 @@ async function render(props: Partial<Parameters<typeof SelfEntryScreen>[0]> = {}
     today: TODAY,
     shifts: [] as Shift[],
     templates: [],
+    ownShifts: false,
     onCancel: vi.fn(),
     onCreate,
     onUpdate: vi.fn(async () => {}),

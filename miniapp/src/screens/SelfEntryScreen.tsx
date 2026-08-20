@@ -8,11 +8,14 @@ import { EntryChip } from "../components/EntryChip";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { formatTimeRange } from "../lib/shift";
 
-/** Какую из двух форм открыли. Категория — производная, см. `categoryOf`. */
-export type SelfEntryMode = "sick" | "event";
+/** Какую из трёх форм открыли. Категория — производная, см. `categoryOf`.
+ *  «shift» — своя смена наблюдателя, третья форма поверх исходных двух. */
+export type SelfEntryMode = "sick" | "event" | "shift";
 
 function categoryOf(mode: SelfEntryMode): Category {
-  return mode === "sick" ? "sick_leave" : "offsite";
+  if (mode === "sick") return "sick_leave";
+  if (mode === "shift") return "shift";
+  return "offsite";
 }
 
 /**
@@ -43,7 +46,7 @@ export function defaultEventEnd(start: string): string {
  */
 export function screenFromSearch(search: string): SelfEntryMode | null {
   const value = new URLSearchParams(search).get("screen");
-  return value === "sick" || value === "event" ? value : null;
+  return value === "sick" || value === "event" || value === "shift" ? value : null;
 }
 
 /**
@@ -54,13 +57,19 @@ export function screenFromSearch(search: string): SelfEntryMode | null {
  * там, где сервер ответит отказом, — наблюдаемый дефект, а не расхождение
  * вкусов. Отдельной ручки под этот список нет намеренно: всё нужное уже приехало
  * с «Моими сменами».
+ *
+ * `ownShifts` — тот же флаг, что решает `selfEntryRefusal` на сервере: без него
+ * `selfEntryEditRefusal` не признаёт категорию «shift» вообще, и своя смена
+ * наблюдателя молча выпала бы из списка — не «показали отказ», а «сделали вид,
+ * что записи не существует».
  */
 export function mySelfEntries<T extends { category: Category; date: string; endDate: string | null }>(
   shifts: readonly T[],
   today: string,
+  access: { ownShifts?: boolean } = {},
 ): T[] {
   return shifts
-    .filter((entry) => selfEntryEditRefusal(entry, today) === null)
+    .filter((entry) => selfEntryEditRefusal(entry, today, access) === null)
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -92,6 +101,11 @@ export interface SelfEntryScreenProps {
   /** Мои ближайшие записи целиком: список внизу выбирает из них свои. */
   shifts: readonly Shift[];
   templates: readonly Template[];
+  /** `canAddOwnShifts(me)` — открывает категорию «shift» для `selfEntryRefusal`
+   *  и `selfEntryEditRefusal`. Работнику всегда `false`: у него формы «shift»
+   *  просто нет, но тот же расчёт отказа не должен молча решать за него иначе,
+   *  чем решит сервер. */
+  ownShifts: boolean;
   onCancel: () => void;
   /** Возвращает смены, оставшиеся без человека, — про них форма спросит вторым шагом. */
   onCreate: (input: SelfEntryInput) => Promise<HandoverDraft[]>;
@@ -114,6 +128,7 @@ export function SelfEntryScreen({
   today,
   shifts,
   templates,
+  ownShifts,
   onCancel,
   onCreate,
   onUpdate,
@@ -141,7 +156,8 @@ export function SelfEntryScreen({
   const [error, setError] = useState<string | null>(null);
 
   const isSick = category === "sick_leave";
-  const mine = mySelfEntries(shifts, today);
+  const isShift = category === "shift";
+  const mine = mySelfEntries(shifts, today, { ownShifts });
 
   function resetForm() {
     setEditingId(null);
@@ -168,14 +184,17 @@ export function SelfEntryScreen({
   }
 
   function draft(): SelfEntryInput {
-    return isSick
-      ? { category: "sick_leave", date, endDate: endDate || null }
-      : { category: "offsite", date, start, end, title: title.trim(), location: location.trim() || null };
+    if (isSick) return { category: "sick_leave", date, endDate: endDate || null };
+    if (isShift) return { category: "shift", date, start, end, location: location.trim() || null };
+    return { category: "offsite", date, start, end, title: title.trim(), location: location.trim() || null };
   }
 
-  /** Причина отказа до запроса — та же функция, что решит на сервере. */
-  const refusal = selfEntryRefusal({ category, date, endDate: isSick ? endDate || null : null }, today);
-  const titleMissing = !isSick && title.trim().length === 0;
+  /** Причина отказа до запроса — та же функция, что решит на сервере. Тот же
+   *  `ownShifts`, что открывает категорию «shift» в списке ниже: без него
+   *  своя смена наблюдателя получила бы «Такую запись ставит админ» даже с
+   *  включённым тумблером. */
+  const refusal = selfEntryRefusal({ category, date, endDate: isSick ? endDate || null : null }, today, { ownShifts });
+  const titleMissing = category === "offsite" && title.trim().length === 0;
   const rangeInverted = isSick && !!endDate && endDate < date;
   const timesInverted = !isSick && end <= start;
 
@@ -246,20 +265,22 @@ export function SelfEntryScreen({
           <BackIcon />
         </IconButton>
         <Title level="2" weight="2">
-          {isSick ? "Больничный" : "Мероприятие"}
+          {isSick ? "Больничный" : isShift ? "Смена" : "Мероприятие"}
         </Title>
       </header>
 
       <List>
         <Section
-          header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : "Что и когда"}
+          header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
           footer={
             isSick
               ? "Админам уйдёт письмо: они увидят, какие смены остались без человека."
-              : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
+              : isShift
+                ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
+                : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
           }
         >
-          {!isSick && (
+          {category === "offsite" && (
             <div style={{ padding: "2px 12px 8px" }}>
               <Input
                 header="Название"
@@ -321,7 +342,7 @@ export function SelfEntryScreen({
           </div>
         )}
         <Button size="l" stretched mode="filled" loading={submitting} disabled={submitting || !!refusal} onClick={() => void handleSubmit()}>
-          {editingId != null ? "Сохранить" : isSick ? "Поставить больничный" : "Записать мероприятие"}
+          {editingId != null ? "Сохранить" : isSick ? "Поставить больничный" : isShift ? "Поставить себе смену" : "Записать мероприятие"}
         </Button>
         {editingId != null && (
           <div style={{ paddingTop: 8 }}>
@@ -407,7 +428,7 @@ export function SelfEntryScreen({
                   </span>
                 }
               >
-                {entry.title ?? (entry.category === "sick_leave" ? "Больничный" : "Мероприятие")}
+                {entry.title ?? (entry.category === "sick_leave" ? "Больничный" : entry.category === "shift" ? "Смена" : "Мероприятие")}
               </Cell>
             ))
           )}
