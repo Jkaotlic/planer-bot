@@ -70,3 +70,27 @@ describe("что работник может ещё править", () => {
     expect(selfEntryEditRefusal({ category: "shift", date: day(5) }, TODAY)).not.toBeNull();
   });
 });
+
+describe("что может наблюдатель с включённым своим графиком", () => {
+  it("смену работник себе не ставит, а наблюдатель с включённым графиком — ставит", () => {
+    const draft = { category: "shift" as const, date: "2026-09-01" };
+    const today = "2026-08-20";
+    expect(selfEntryRefusal(draft, today)).toBe("Такую запись ставит админ");
+    expect(selfEntryRefusal(draft, today, { ownShifts: true })).toBeNull();
+  });
+
+  it("своя смена ставится на сегодня или вперёд — задним числом только больничный", () => {
+    expect(selfEntryRefusal({ category: "shift", date: "2026-08-19" }, "2026-08-20", { ownShifts: true })).toBe(
+      "Смену можно поставить на сегодня или вперёд",
+    );
+  });
+
+  it("свою смену можно править, пока она не кончилась", () => {
+    const entry = { category: "shift" as const, date: "2026-08-25", endDate: null };
+    expect(selfEntryEditRefusal(entry, "2026-08-20")).toBe("Такую запись правит админ");
+    expect(selfEntryEditRefusal(entry, "2026-08-20", { ownShifts: true })).toBeNull();
+    expect(selfEntryEditRefusal({ ...entry, date: "2026-08-01" }, "2026-08-20", { ownShifts: true })).toBe(
+      "Запись уже кончилась — если что-то не так, напиши админу",
+    );
+  });
+});

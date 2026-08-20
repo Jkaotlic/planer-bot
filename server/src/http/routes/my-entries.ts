@@ -7,6 +7,7 @@ import {
   eachDayIso,
   selfEntryRefusal,
   selfEntryEditRefusal,
+  canAddOwnShifts,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -62,34 +63,54 @@ const eventBody = z.object({
   location: z.string().trim().max(200).nullish(),
 });
 
-const selfEntryBody = z.discriminatedUnion("category", [sickBody, eventBody]);
+const shiftBody = z.object({
+  category: z.literal("shift"),
+  date: dateStr,
+  start: timeStr,
+  end: timeStr,
+  location: z.string().trim().max(200).nullish(),
+});
+
+const selfEntryBody = z.discriminatedUnion("category", [sickBody, eventBody, shiftBody]);
 
 /** Entry rows this feature writes; the fields the two forms can produce. */
 type SelfEntryBody = z.infer<typeof selfEntryBody>;
 
 /** The row shape both write paths hand to the database, per category. */
 function rowFor(body: SelfEntryBody) {
-  return body.category === "sick_leave"
-    ? {
-        category: "sick_leave" as const,
-        date: body.date,
-        // `null`, not `undefined`: dropping «по какое» has to actually shorten a
-        // sick leave, and `undefined` would leave the old value in place on update.
-        endDate: body.endDate ?? null,
-        start: null,
-        end: null,
-        title: null,
-        location: null,
-      }
-    : {
-        category: "offsite" as const,
-        date: body.date,
-        endDate: null,
-        start: body.start,
-        end: body.end,
-        title: body.title,
-        location: body.location ?? null,
-      };
+  if (body.category === "sick_leave") {
+    return {
+      category: "sick_leave" as const,
+      date: body.date,
+      // `null`, not `undefined`: dropping «по какое» has to actually shorten a
+      // sick leave, and `undefined` would leave the old value in place on update.
+      endDate: body.endDate ?? null,
+      start: null,
+      end: null,
+      title: null,
+      location: null,
+    };
+  }
+  if (body.category === "shift") {
+    return {
+      category: "shift" as const,
+      date: body.date,
+      endDate: null,
+      start: body.start,
+      end: body.end,
+      title: null,
+      location: body.location ?? null,
+    };
+  }
+  return {
+    category: "offsite" as const,
+    date: body.date,
+    endDate: null,
+    start: body.start,
+    end: body.end,
+    title: body.title,
+    location: body.location ?? null,
+  };
 }
 
 /** Worker-owned writes: sick leave and events, on oneself and nobody else. */
@@ -120,7 +141,18 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const employeeId = c.get("auth").employeeId;
     const today = teamNow(config.teamTz).date;
 
-    const refusal = selfEntryRefusal(body, today);
+    const me = getEmployeeById(db, employeeId);
+    if (!me) return c.json({ error: "not_found" }, 404);
+    const ownShifts = canAddOwnShifts(me);
+    // 403, а не 400: тумблер выключен — значит, право есть, но спит, и экран
+    // должен предложить его включить, а не сказать «так нельзя вообще».
+    // Работник сюда не попадает: у него нет роли, и его отобьёт `selfEntryRefusal`
+    // словами «Такую запись ставит админ» — тем же 400, что и до этой правки.
+    if (body.category === "shift" && me.isObserver && !ownShifts) {
+      return c.json({ error: "Свой график выключен — включи его в настройках" }, 403);
+    }
+
+    const refusal = selfEntryRefusal(body, today, { ownShifts });
     if (refusal) return c.json({ error: refusal }, 400);
     const shape = shapeError(body);
     if (shape) return c.json({ error: shape }, 400);
@@ -135,11 +167,17 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
         selfEntryCreatedText(nameOf(db, employeeId) ?? "Работник", entry, riskLines(employeeId, entry)),
       );
     }
-    // Только больничный: мероприятие 14:00–16:00 смену 09:00–18:00 не
+    // Наблюдатель выведен из передачи смен целиком: предлагать его смену
+    // команде некому и незачем, а его больничный никакой чужой работы не
+    // освобождает.
+    //
+    // Иначе — только больничный: мероприятие 14:00–16:00 смену 09:00–18:00 не
     // освобождает, и предлагать её кому-то значило бы снять с человека работу,
     // которую он и не собирался пропускать.
     const handovers =
-      entry.category === "sick_leave" ? await startHandovers(handoverDeps(), { sickEntry: entry, employeeId }) : [];
+      entry.category === "sick_leave" && !me.isObserver
+        ? await startHandovers(handoverDeps(), { sickEntry: entry, employeeId })
+        : [];
     return c.json({ entry, handovers: handoverDraftViews(db, handovers) }, 201);
   });
 
@@ -157,15 +195,22 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // and «я не болею, я на конференции» is a different record, not an edit.
     if (existing.category !== body.category) return c.json({ error: "Вид записи менять нельзя" }, 400);
 
+    const me = getEmployeeById(db, employeeId);
+    if (!me) return c.json({ error: "not_found" }, 404);
+    const ownShifts = canAddOwnShifts(me);
+    if (body.category === "shift" && me.isObserver && !ownShifts) {
+      return c.json({ error: "Свой график выключен — включи его в настройках" }, 403);
+    }
+
     const today = teamNow(config.teamTz).date;
     // BOTH rules, and this is not belt-and-braces. `selfEntryEditRefusal` asks
     // whether the OLD record may still be touched; `selfEntryRefusal` asks where
     // it is being moved TO. With only the first, an entry ending today could be
     // dragged a year out; with only the second, a sick leave that ended last
     // month could be rewritten as long as the new dates look fine.
-    const editRefusal = selfEntryEditRefusal(existing, today);
+    const editRefusal = selfEntryEditRefusal(existing, today, { ownShifts });
     if (editRefusal) return c.json({ error: editRefusal }, 400);
-    const moveRefusal = selfEntryRefusal(body, today);
+    const moveRefusal = selfEntryRefusal(body, today, { ownShifts });
     if (moveRefusal) return c.json({ error: moveRefusal }, 400);
     const shape = shapeError(body);
     if (shape) return c.json({ error: shape }, 400);
@@ -175,7 +220,8 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     if (!updated) return c.json({ error: "not_found" }, 404);
 
     recordAudit(db, "self_entry_updated", employeeId, { before, after: entryAuditPayload(db, updated) });
-    if (updated.category === "sick_leave") {
+    // Наблюдатель выведен из передачи смен целиком: см. комментарий у POST.
+    if (updated.category === "sick_leave" && !me.isObserver) {
       // Порядок важен: сперва гасим дни, которые больничный больше не покрывает,
       // потом открываем те, до которых он теперь дотянулся. Продление — это
       // правка той же записи, и смена нового дня остаётся без человека точно так
@@ -200,19 +246,23 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // Read it before it is gone — the journal has to be able to say what went.
     const existing = getShift(db, Number(c.req.param("id")));
     if (!existing || existing.employeeId !== employeeId) return c.json({ error: "not_found" }, 404);
-    const refusal = selfEntryEditRefusal(existing, teamNow(config.teamTz).date);
+    const me = getEmployeeById(db, employeeId);
+    if (!me) return c.json({ error: "not_found" }, 404);
+    const ownShifts = canAddOwnShifts(me);
+    const refusal = selfEntryEditRefusal(existing, teamNow(config.teamTz).date, { ownShifts });
     if (refusal) return c.json({ error: refusal }, 400);
 
-    // Normally empty here: only `sick_leave` and `offsite` reach this line, and
-    // neither is swappable, so no pending swap can point at one. Not ASSUMED
-    // empty, though — an admin re-categorising a shift that already carried a
-    // pending swap makes it reachable, and the admin delete route handles it.
-    // Two delete paths treating one swap differently is the same class of defect
-    // as two journals.
+    // Normally empty here: only `sick_leave`, `offsite` and (for a self-scheduling
+    // observer) `shift` reach this line, and none of the three is swappable, so no
+    // pending swap can point at one. Not ASSUMED empty, though — an admin
+    // re-categorising a shift that already carried a pending swap makes it
+    // reachable, and the admin delete route handles it. Two delete paths treating
+    // one swap differently is the same class of defect as two journals.
     // Гасим ДО удаления записи: `cancelHandoversForEntry` читает смены, чтобы
     // назвать их в письме «выходить не нужно», а после `deleteShift` называть
     // будет нечего.
-    if (existing.category === "sick_leave") {
+    // Наблюдатель выведен из передачи смен целиком: см. комментарий у POST.
+    if (existing.category === "sick_leave" && !me.isObserver) {
       await cancelHandoversForEntry(handoverDeps(), existing.id, []);
       // Затем отвязать: `sickEntryId` — внешний ключ, и `deleteShift` без этого
       // отвечает `invalid_reference`. Строки передач остаются как история.
