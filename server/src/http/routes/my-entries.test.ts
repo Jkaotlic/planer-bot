@@ -18,6 +18,27 @@ import { teamNow } from "../../util/team-time";
 import { addDaysIso } from "@planer/shared";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
+import { cancelHandoversForEntry, detachHandoversFromEntry, startHandovers } from "../../handover/handover-service";
+
+/**
+ * Спай, а не мок: реализация — настоящая (`importOriginal`), подменяются
+ * только сами функции-обёртки. Нужен ровно для одного вопроса — «эту функцию
+ * вообще позвали?» — который проверка по итогу в базе не может задать
+ * напрямую: у наблюдателя список смен для передачи и так пуст без своей
+ * смены на дату, и тест на пустой результат не отличил бы работающий гейт от
+ * отсутствующего (см. находку про POST-тест выше). Для PATCH и DELETE
+ * заводить наблюдателю вторую смену ради того же трюка не обязательно — спай
+ * ловит сам факт вызова, не его последствия.
+ */
+vi.mock("../../handover/handover-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../handover/handover-service")>();
+  return {
+    ...actual,
+    cancelHandoversForEntry: vi.fn(actual.cancelHandoversForEntry),
+    detachHandoversFromEntry: vi.fn(actual.detachHandoversFromEntry),
+    startHandovers: vi.fn(actual.startHandovers),
+  };
+});
 
 /** A bot that records what it was asked to send instead of talking to Telegram. */
 function fakeBot() {
@@ -329,8 +350,15 @@ describe("своя смена наблюдателя", () => {
 
   it("больничный наблюдателя не поднимает лестницу передачи смены", async () => {
     const db = makeTestDb();
-    observerWorker(db, 605, "Аня", true);
+    const me = observerWorker(db, 605, "Аня", true);
     worker(db, 606, "Игорь");
+    // Своя смена на тот же день — обязательна. Без неё `startHandovers` строит
+    // пустой список смен для передачи ДО того, как гейт вообще успевает
+    // сработать (`handover-service.ts`: список кандидатов строится из смен
+    // самого болеющего), и «handovers: []» была бы пустой в любом случае —
+    // проверка не отличила бы работающее правило от отсутствующего. Со своей
+    // сменой на дату больничного список без гейта был бы непустым.
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 605);
 
@@ -360,6 +388,110 @@ describe("своя смена наблюдателя", () => {
     })));
 
     expect(listHandoversForEntry(db, (await res.json()).entry.id)).not.toHaveLength(0);
+  });
+});
+
+/**
+ * POST уже доказан выше — на своей смене, чтобы «пусто» не совпадало с «пусто
+ * независимо от гейта». PATCH и DELETE несут тот же самый `&& !me.isObserver`,
+ * скопированный в код по брифу, но до этого раунда ревью ни один тест не
+ * проверял его В ЭТИХ ДВУХ местах отдельно — только то, что происходит в
+ * POST. «Условие стоит в коде» и «условие работает» — разные утверждения, и
+ * здесь у PATCH и DELETE было только первое.
+ */
+describe("гейт передачи смены в PATCH и DELETE — наблюдатель", () => {
+  it("PATCH: у наблюдателя лестница не поднимается — cancelHandoversForEntry/startHandovers не позваны", async () => {
+    const db = makeTestDb();
+    const me = observerWorker(db, 616, "Аня", true);
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 616);
+
+    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "sick_leave", date: day(1),
+    })));
+    const entryId = (await created.json()).entry.id;
+    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const startBefore = vi.mocked(startHandovers).mock.calls.length;
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
+      category: "sick_leave", date: day(1), endDate: day(2),
+    }, "PATCH")));
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBe(cancelBefore);
+    expect(vi.mocked(startHandovers).mock.calls.length).toBe(startBefore);
+  });
+
+  it("PATCH: у обычного работника лестница поднимается — вызовы реально происходят", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 617, "Аня");
+    const mate = worker(db, 618, "Игорь");
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    expect(mate.id).toBeDefined();
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 617);
+
+    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "sick_leave", date: day(1),
+    })));
+    const entryId = (await created.json()).entry.id;
+    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const startBefore = vi.mocked(startHandovers).mock.calls.length;
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
+      category: "sick_leave", date: day(1), endDate: day(2),
+    }, "PATCH")));
+
+    expect(res.status).toBe(200);
+    // «Не позваны» у наблюдателя опирается на «позваны» здесь — тот же путь,
+    // тот же db-стейт, только без роли.
+    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    expect(vi.mocked(startHandovers).mock.calls.length).toBeGreaterThan(startBefore);
+  });
+
+  it("DELETE: у наблюдателя detachHandoversFromEntry/cancelHandoversForEntry не позваны", async () => {
+    const db = makeTestDb();
+    const me = observerWorker(db, 619, "Аня", true);
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 619);
+
+    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "sick_leave", date: day(1),
+    })));
+    const entryId = (await created.json()).entry.id;
+    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const detachBefore = vi.mocked(detachHandoversFromEntry).mock.calls.length;
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBe(cancelBefore);
+    expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBe(detachBefore);
+  });
+
+  it("DELETE: у обычного работника detach/cancel реально позваны", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 620, "Аня");
+    const mate = worker(db, 621, "Игорь");
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    expect(mate.id).toBeDefined();
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 620);
+
+    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "sick_leave", date: day(1),
+    })));
+    const entryId = (await created.json()).entry.id;
+    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const detachBefore = vi.mocked(detachHandoversFromEntry).mock.calls.length;
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBeGreaterThan(detachBefore);
   });
 });
 
