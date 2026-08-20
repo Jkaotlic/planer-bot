@@ -70,6 +70,24 @@ export function announcementRecipients(
   };
 }
 
+/**
+ * Кому уйдёт объявление «всем», глазами отправителя, — с id, а не с именами.
+ *
+ * `announcementRecipients` отвечает на тот же вопрос, но её `unreachable` —
+ * список имён: он едет в отчёт человеку, и id там не нужны. Экрану «Анонс»
+ * нужны как раз id, и сверять два ответа по имени нельзя — тёзки. Поэтому
+ * пул тут собирается тем же правилом, что и в ветке «всем» выше, и живёт
+ * в одном файле с ним.
+ */
+export function announcementRoster(
+  db: Db,
+  senderId: number,
+): { id: number; displayName: string; reachable: boolean }[] {
+  return listActive(db)
+    .filter((e) => e.id !== senderId)
+    .map((e) => ({ id: e.id, displayName: e.displayName, reachable: e.telegramUserId != null }));
+}
+
 export async function sendAnnouncement(
   // `Bot | null | undefined`, а не `Bot | null`: маршрут отдаёт сюда `AppDeps.bot`,
   // который объявлен необязательным. Сервер поднимается и с плохим токеном.

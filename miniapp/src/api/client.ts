@@ -66,6 +66,7 @@ import {
   mockGetNoticePrefs,
   mockSetNoticePref,
   mockSendAnnouncement,
+  mockGetAnnouncementRecipients,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -304,7 +305,7 @@ export interface NoticePrefs {
  *  пару символов, но 400 всё равно решает сервер; здесь только подсказка. */
 export const ANNOUNCEMENT_TEXT_MAX = 2000;
 
-/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/admin/announcements`. */
+/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/announcements`. */
 export type AnnouncementAudience = "all" | number[];
 
 /** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
@@ -312,6 +313,14 @@ export interface AnnouncementResult {
   delivered: number;
   intended: number;
   unreachable: string[];
+}
+
+/** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
+ *  Без телефонов и инвайт-токенов: экрану «Анонс» нужны ровно имя и «дойдёт ли». */
+export interface AnnouncementRecipient {
+  id: number;
+  displayName: string;
+  reachable: boolean;
 }
 
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
@@ -661,8 +670,10 @@ export interface ApiClient {
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
-   *  не даёт, текст анонса и так ровно тот, что напечатал админ. */
+   *  не даёт, текст анонса и так ровно тот, что напечатал админ или наблюдатель. */
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
+  /** Кому уйдёт анонс «всем», глазами того, кто его пишет — для выбора адресатов. */
+  getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
   resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
@@ -1190,7 +1201,11 @@ export const realClient: ApiClient = {
   setNoticePref: (kind, enabled) =>
     authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
   sendAnnouncement: (text, audience) =>
-    authorizedPostJson<AnnouncementResult>("/api/admin/announcements", { text, audience }),
+    authorizedPostJson<AnnouncementResult>("/api/announcements", { text, audience }),
+  async getAnnouncementRecipients() {
+    const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
+    return recipients;
+  },
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
     return reports;
@@ -1271,6 +1286,7 @@ const devClient: ApiClient = {
   getNoticePrefs: () => mockGetNoticePrefs(),
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
+  getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

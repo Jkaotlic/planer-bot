@@ -26,6 +26,7 @@ import type {
   NoticePrefs,
   AnnouncementAudience,
   AnnouncementResult,
+  AnnouncementRecipient,
   BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
@@ -1552,6 +1553,21 @@ export async function mockSetNoticePref(kind: string, enabled: boolean): Promise
  * телеграма, даже выбранный явно, попадает в пул и в `unreachable` поимённо, а
  * не пропадает молча; отправитель исключается всегда.
  */
+/**
+ * Кому уйдёт «всем» — глазами отправителя, с id, а не именами. Тот же пул,
+ * что и ветка «всем» в `mockSendAnnouncement`, зеркалит серверный
+ * `announcementRoster`: непривязанный к телеграму виден и назван, а не
+ * пропадает из списка.
+ */
+export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecipient[]> {
+  await delay(150);
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id).map((e) => ({
+    id: e.id,
+    displayName: e.displayName,
+    reachable: e.telegramUserId != null,
+  }));
+}
+
 export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
   await delay(300);
   if (!text.trim()) throw new Error("Текст объявления пустой");
