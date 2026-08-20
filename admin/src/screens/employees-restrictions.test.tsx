@@ -53,6 +53,7 @@ function Harness({ initial }: { initial: Employee[] }) {
     employees,
     onChanged: async () => {},
     onRestrictionsSaved: (id, patch) => setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e))),
+    onObserverSaved: (id, isObserver) => setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, isObserver } : e))),
   });
 }
 
