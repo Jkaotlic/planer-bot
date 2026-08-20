@@ -317,7 +317,15 @@ export function App() {
     );
   }
 
-  if (selfEntryMode) {
+  // `?screen=shift` — единственный из трёх адресов, где право на форму не
+  // всеобщее: ссылку могли переслать, а тумблер «Веду свой график сам» —
+  // выключить (или роль наблюдателя — снять) между открытием меню бота и
+  // тапом, тот же угад, что уже разобран для вкладки «Админ» выше. Без этой
+  // проверки форма открылась бы и тут же ответила отказом `selfEntryRefusal`
+  // («Такую запись ставит админ») — работающая на вид ссылка, ведущая в
+  // тупик, хуже отсутствующей.
+  const shiftFormAllowed = selfEntryMode !== "shift" || canAddOwnShifts(data.me);
+  if (selfEntryMode && shiftFormAllowed) {
     return (
       <SelfEntryScreen
         mode={selfEntryMode}

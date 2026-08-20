@@ -20,6 +20,9 @@ describe("вход по кнопке из бота", () => {
   it("?screen=event открывает форму мероприятия", () => {
     expect(screenFromSearch("?screen=event")).toBe("event");
   });
+  it("?screen=shift открывает форму своей смены", () => {
+    expect(screenFromSearch("?screen=shift")).toBe("shift");
+  });
   it("мусор не открывает ничего", () => {
     expect(screenFromSearch("?screen=%D1%84%D1%8B%D0%B2")).toBeNull();
     expect(screenFromSearch("")).toBeNull();
