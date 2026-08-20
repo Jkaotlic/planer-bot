@@ -21,6 +21,7 @@ afterEach(async () => {
 const me: Me = {
   id: 7, displayName: "Игорь Петров", address: "Игорь", preferredName: null,
   isAdmin: false, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
+  isObserver: false, selfScheduleEnabled: false, canAnnounce: false,
 };
 
 let nextId = 1;
@@ -39,7 +40,8 @@ async function renderScreen(shifts: Shift[]) {
   root = createRoot(host);
   const screen = createElement(MyShiftsScreen, {
     me, today: WEDNESDAY, shifts, templates: [],
-    onProposeSwap: () => {}, onSelfEntry: () => {}, onRemindersChanged: () => {}, onAddressChanged: () => {},
+    onProposeSwap: () => {}, onSelfEntry: () => {}, onRemindersChanged: () => {},
+    onSelfScheduleChanged: () => {}, onAddressChanged: () => {},
   });
   await act(async () => root!.render(createElement(AppRoot, null, screen)));
   return host.textContent ?? "";

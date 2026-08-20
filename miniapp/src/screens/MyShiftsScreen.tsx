@@ -1,11 +1,13 @@
 import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
 import { swapBlockReason } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
+import type { SelfEntryMode } from "./SelfEntryScreen";
 import { AddressField } from "../components/AddressField";
 import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
 import { RemindersSwitch } from "../components/RemindersSwitch";
+import { SelfScheduleSwitch } from "../components/SelfScheduleSwitch";
 import { groupUpcomingByWeek, remainingThisWeek } from "../lib/upcoming";
 import { pluralizeRu } from "../lib/shift";
 
@@ -30,18 +32,30 @@ export interface MyShiftsScreenProps {
   templates: readonly Template[];
   /** Opens the "Предложить обмен" flow for the tapped shift. */
   onProposeSwap: (shift: Shift) => void;
-  /** Открывает форму больничного или мероприятия — тот же оверлей, в который
-   *  ведут кнопки бота. */
-  onSelfEntry: (mode: "sick" | "event") => void;
+  /** Открывает форму больничного, мероприятия или (для наблюдателя) своей
+   *  смены — тот же оверлей, в который ведут кнопки бота. */
+  onSelfEntry: (mode: SelfEntryMode) => void;
   /** Keeps `me` in step when the reminders switch is flipped. */
   onRemindersChanged: (enabled: boolean) => void;
+  /** Keeps `me` in step when the self-schedule switch is flipped — наблюдатель. */
+  onSelfScheduleChanged: (enabled: boolean) => void;
   /** Keeps `me` in step when the greeting name is saved. */
   onAddressChanged: (next: { preferredName: string | null; address: string }) => void;
 }
 
 /** «Мои смены»: приветствие с остатком недели, ближайшие записи секциями по
  *  неделям, и переключатель напоминаний. Прошедших дней здесь нет. */
-export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, onSelfEntry, onRemindersChanged, onAddressChanged }: MyShiftsScreenProps) {
+export function MyShiftsScreen({
+  me,
+  today,
+  shifts,
+  templates,
+  onProposeSwap,
+  onSelfEntry,
+  onRemindersChanged,
+  onSelfScheduleChanged,
+  onAddressChanged,
+}: MyShiftsScreenProps) {
   const weeks = groupUpcomingByWeek(shifts, today);
   const rest = remainingThisWeek(shifts, today);
   const summary =
@@ -79,6 +93,14 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
             <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("event")}>
               📌 Мероприятие
             </Button>
+            {/* Только у наблюдателя с включённым тумблером — у остальных график
+                ведёт админ, и кнопка, отвечающая 403 на каждое нажатие, хуже
+                отсутствующей. */}
+            {me.selfScheduleEnabled && (
+              <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("shift")}>
+                🕒 Поставить себе смену
+              </Button>
+            )}
           </div>
         </Section>
       </List>
@@ -109,6 +131,11 @@ export function MyShiftsScreen({ me, today, shifts, templates, onProposeSwap, on
       <List>
         <Section header="Уведомления">
           <RemindersSwitch enabled={me.remindersEnabled} onChanged={onRemindersChanged} />
+          {/* Рядом с напоминаниями, не отдельной секцией: это тоже личная
+              настройка, а не общий раздел — и видна только наблюдателю. */}
+          {me.isObserver && (
+            <SelfScheduleSwitch enabled={me.selfScheduleEnabled} onChanged={onSelfScheduleChanged} />
+          )}
         </Section>
       </List>
 

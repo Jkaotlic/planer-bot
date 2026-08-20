@@ -14,6 +14,7 @@ import {
   mockDeclineSwap,
   mockGetMe,
   mockSetRemindersEnabled,
+  mockSetSelfScheduleEnabled,
   mockSetPreferredName,
   mockGetMyShifts,
   mockGetSwaps,
@@ -119,8 +120,21 @@ export interface Me {
   /** Admin's global «Обменять» switch — the screen must grey the button out
    *  rather than show it live and get refused on tap. */
   swapsLocked: boolean;
-  /** Admin took this person specifically out of swaps. */
+  /** Admin took this person specifically out of swaps — always `true` here for
+   *  an observer, even if the underlying flag in the database is off: this is
+   *  the EFFECTIVE value (`shared/access.ts`'s `canSwap`), and the UI never has
+   *  to know the role exists to grey the «Обменять» button out for one. */
   excludedFromSwaps: boolean;
+  /** Роль «Наблюдатель»: смотрит график, ведёт свой (если включил тумблер),
+   *  шлёт анонсы — вне раздачи, обменов и передачи смен. См. `access.ts`. */
+  isObserver: boolean;
+  /** Личный тумблер наблюдателя «Веду свой график сам». У обычного работника
+   *  всегда `false` — сервер не читает эту колонку для чужой роли. */
+  selfScheduleEnabled: boolean;
+  /** Видна ли этому человеку вкладка «Анонс» — `isAdmin || isObserver`
+   *  (`canAnnounce` в `access.ts`), уже посчитано сервером, чтобы клиент не
+   *  дублировал правило. */
+  canAnnounce: boolean;
 }
 
 export type SwapStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
@@ -250,7 +264,10 @@ export interface NewEntryInput {
  */
 export type SelfEntryInput =
   | { category: "sick_leave"; date: string; endDate?: string | null }
-  | { category: "offsite"; date: string; start: string; end: string; title: string; location?: string | null };
+  | { category: "offsite"; date: string; start: string; end: string; title: string; location?: string | null }
+  // Собственная смена наблюдателя — третья форма, зеркалит `shiftBody` на
+  // сервере. Без `title`: смена не мероприятие, называть её нечем и незачем.
+  | { category: "shift"; date: string; start: string; end: string; location?: string | null };
 
 /**
  * Смена, оставшаяся без человека из-за больничного, и кому её можно предложить.
@@ -578,6 +595,9 @@ export interface ApiClient {
   getMe(): Promise<Me>;
   /** Turns this person's own shift reminders on or off. */
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
+  /** Тумблер наблюдателя «Веду свой график сам» — 403 у обычного работника,
+   *  сервер проверяет `isObserver` сам, экран сюда его и не подпускает. */
+  setSelfScheduleEnabled(enabled: boolean): Promise<boolean>;
   /** `null` clears it and hands the greeting back to Telegram's name. */
   setPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }>;
   getMyShifts(): Promise<{ shifts: Shift[]; today: string }>;
@@ -971,6 +991,15 @@ export const realClient: ApiClient = {
     return res.remindersEnabled;
   },
 
+  async setSelfScheduleEnabled(enabled) {
+    // `/api/me/settings` эхает обратно `remindersEnabled`/`preferredName`/`address`
+    // — общий ответ на три разных поля, и `selfScheduleEnabled` среди них нет.
+    // 200 здесь и есть подтверждение: отказ (не наблюдатель) пришёл бы `Error`'ом
+    // из `authorizedPatchJson`, и до `return` дело не дошло бы.
+    await authorizedPatchJson("/api/me/settings", { selfScheduleEnabled: enabled });
+    return enabled;
+  },
+
   setPreferredName: (preferredName) =>
     authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
 
@@ -1234,6 +1263,7 @@ const devClient: ApiClient = {
 
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
+  setSelfScheduleEnabled: (enabled) => mockSetSelfScheduleEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getMyShifts: () => mockGetMyShifts(),
   getTeamSchedule: async (from, to) => withEmployeeNames(await mockGetTeamSchedule(from, to)),
