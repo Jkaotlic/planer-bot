@@ -78,9 +78,15 @@ export function whenLabel(birthday: UpcomingBirthday): string {
   return `${birthday.birthDateLabel} · ${describeDaysUntil(birthday.daysUntil)}`;
 }
 
-/** "1 коллеге" / "5 коллегам" — the dative the send button is written in. */
+/**
+ * "1 коллеге" / "5 коллегам" / "21 коллеге" — the dative the send button is
+ * written in. The dative has no 2–4 vs 5+ split (unlike `recipientsSubject`
+ * below) — only "ends in 1, except 11" gets the singular. Before this rule
+ * had the "except 11" half, a team of 21 read "Отправить 21 коллегам?".
+ */
 export function recipientsPhrase(count: number): string {
-  return `${count} ${count === 1 ? "коллеге" : "коллегам"}`;
+  const singular = count % 10 === 1 && count % 100 !== 11;
+  return `${count} ${singular ? "коллеге" : "коллегам"}`;
 }
 
 /**
