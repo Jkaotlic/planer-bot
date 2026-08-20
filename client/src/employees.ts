@@ -64,6 +64,13 @@ export function createEmployeesApi(transport: Transport) {
       await transport.patch(`/api/admin/employees/${id}`, patch);
     },
 
+    // Роль «Наблюдатель». Тот же маршрут `PATCH`, что и ограничения, но
+    // отдельный метод — сервер пишет её отдельной строкой аудита, и снятие
+    // роли не переписывает `excludedFrom*`.
+    async setEmployeeObserver(id: number, isObserver: boolean): Promise<void> {
+      await transport.patch(`/api/admin/employees/${id}`, { isObserver });
+    },
+
     async reorderEmployee(id: number, position: number): Promise<AdminEmployeeDto[]> {
       const { employees } = (await transport.post(`/api/admin/employees/${id}/order`, {
         position,

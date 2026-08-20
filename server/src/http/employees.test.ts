@@ -715,6 +715,78 @@ describe("PATCH /api/admin/employees/:id (restriction flags)", () => {
   });
 });
 
+describe("PATCH /api/admin/employees/:id (роль наблюдателя)", () => {
+  it("админ включает и снимает роль наблюдателя", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const target = worker(db, "Игорь", 333);
+
+    const on = await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: true }, "PATCH"));
+    expect(on.status).toBe(200);
+    expect((await on.json()).employee.isObserver).toBe(true);
+    expect(getEmployeeById(db, target.id)!.isObserver).toBe(true);
+
+    const off = await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: false }, "PATCH"));
+    expect(off.status).toBe(200);
+    expect((await off.json()).employee.isObserver).toBe(false);
+    expect(getEmployeeById(db, target.id)!.isObserver).toBe(false);
+  });
+
+  // Тот же запрос от админа проходит (тест выше) — 403 здесь именно про право,
+  // а не про какую-то другую причину отказа.
+  it("работник не может выдать себе роль", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const me = worker(db, "Марк", 643);
+
+    const res = await app.request(`/api/admin/employees/${me.id}`, authedJson(await tokenFor(app, 643), { isObserver: true }, "PATCH"));
+    expect(res.status).toBe(403);
+    expect(getEmployeeById(db, me.id)!.isObserver).toBe(false);
+  });
+
+  it("PATCH отклоняет нелогическое значение isObserver", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const target = worker(db, "Игорь", 333);
+
+    const res = await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: "yes" }, "PATCH"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("isObserver должен быть true или false");
+    expect(getEmployeeById(db, target.id)!.isObserver).toBe(false);
+  });
+
+  it("смена роли попадает в журнал рядом с восстановлением ограничений", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const adminEmployeeId = getByTelegramId(db, 111)!.id;
+    const target = worker(db, "Игорь", 333);
+
+    await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: true }, "PATCH"));
+
+    const event = listRecentAudit(db, 10).find((row) => row.type === "employee_observer_changed");
+    expect(event?.actorEmployeeId).toBe(adminEmployeeId);
+    expect(event?.payload).toMatchObject({ employeeId: target.id, displayName: "Игорь", before: false, after: true });
+  });
+
+  // Осознанное решение из брифа: снятие роли не должно переписывать
+  // исключения — админ должен видеть, куда человек вернётся.
+  it("снятие роли не трогает исключения из назначений/обменов", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const target = worker(db, "Игорь", 333);
+    await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { excludedFromAssignment: true }, "PATCH"));
+
+    await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: true }, "PATCH"));
+    await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: false }, "PATCH"));
+
+    expect(getEmployeeById(db, target.id)!.excludedFromAssignment).toBe(true);
+  });
+});
+
 describe("worker order", () => {
   it("moves a worker, renumbers the rest and records who did it", async () => {
     const db = makeTestDb();

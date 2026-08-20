@@ -249,8 +249,12 @@ export function setEmployeeAdmin(db: Db, id: number, isAdmin: boolean): Employee
  * галочки, которые ставит админ по случаю, а это — утверждение о человеке,
  * из которого поведение следует само. Исключения при этом НЕ переписываются:
  * снятие роли должно вернуть человека туда, где он был до неё.
+ *
+ * Берёт `DbOrTx`, не `Db` — `PATCH /api/admin/employees/:id` пишет эту роль в
+ * той же транзакции, что и остальные правки карточки, той же причиной, что и
+ * у `setEmployeeRestrictions`.
  */
-export function setEmployeeObserver(db: Db, id: number, isObserver: boolean): Employee | undefined {
+export function setEmployeeObserver(db: DbOrTx, id: number, isObserver: boolean): Employee | undefined {
   return db.update(employees).set({ isObserver }).where(eq(employees.id, id)).returning().all()[0];
 }
 
