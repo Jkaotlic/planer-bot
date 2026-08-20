@@ -244,6 +244,21 @@ export function setEmployeeAdmin(db: Db, id: number, isAdmin: boolean): Employee
   return db.update(employees).set({ isAdmin }).where(eq(employees.id, id)).returning().all()[0];
 }
 
+/**
+ * Роль наблюдателя. Отдельно от `setEmployeeRestrictions` намеренно: та пишет
+ * галочки, которые ставит админ по случаю, а это — утверждение о человеке,
+ * из которого поведение следует само. Исключения при этом НЕ переписываются:
+ * снятие роли должно вернуть человека туда, где он был до неё.
+ */
+export function setEmployeeObserver(db: Db, id: number, isObserver: boolean): Employee | undefined {
+  return db.update(employees).set({ isObserver }).where(eq(employees.id, id)).returning().all()[0];
+}
+
+/** Тумблер «веду свой график сам» — его ставит сам наблюдатель, не админ. */
+export function setSelfScheduleEnabled(db: Db, id: number, enabled: boolean): Employee | undefined {
+  return db.update(employees).set({ selfScheduleEnabled: enabled }).where(eq(employees.id, id)).returning().all()[0];
+}
+
 /** ФИО as it is compared for «этот человек уже есть»: trimmed, case-folded. */
 export function normalizeFullName(displayName: string): string {
   return displayName.trim().toLocaleLowerCase("ru");

@@ -35,6 +35,15 @@ export const employees = sqliteTable("employees", {
   excludedFromAssignment: integer({ mode: "boolean" }).notNull().default(false),
   /** An admin took this person out of swaps, both ways: neither propose nor accept. */
   excludedFromSwaps: integer({ mode: "boolean" }).notNull().default(false),
+  /** Человек в графике, но вне командной механики: раздачи, обменов, передачи
+   *  смены и сбора выходных. Не «архив» и не «исключён» — он смотрит график и
+   *  рассылает объявления. Что именно из этого следует, решает `shared/src/access.ts`,
+   *  а не двадцать проверок по коду. */
+  isObserver: integer({ mode: "boolean" }).notNull().default(false),
+  /** Наблюдатель сам решил вести свой график. Выключено по умолчанию: пока он
+   *  этого не захотел, его интерфейс остаётся смотровым. Ставит его он сам,
+   *  а не админ, — поэтому поле не в `setEmployeeRestrictions`. */
+  selfScheduleEnabled: integer({ mode: "boolean" }).notNull().default(false),
   prepBufferMin: integer().notNull().default(60),
   inviteToken: text().unique(),
   archivedAt: integer({ mode: "timestamp" }),
