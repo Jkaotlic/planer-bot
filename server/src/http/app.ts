@@ -6,7 +6,7 @@ import type { Db } from "../db/client";
 import type { Config } from "../config";
 import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
-import { requireAuth, requireAdmin, type Env } from "./middleware";
+import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { redactSecrets } from "../util/safe-error";
@@ -123,6 +123,7 @@ import {
   ANNOUNCEMENT_TEXT_MAX,
   ANNOUNCEMENT_RECIPIENTS_MAX,
   sendAnnouncement,
+  announcementRoster,
   type Audience,
 } from "../announcements/announcement-service";
 
@@ -410,6 +411,68 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Returned so the greeting can update without a second round trip.
       address: addressOf(employee),
     });
+  });
+
+  /**
+   * Рассылка объявления команде.
+   *
+   * Свой маршрут, а не `/api/admin/announcements`: рассылать умеют и админы, и
+   * наблюдатели (`canAnnounce`), а сплошной `requireAdmin` на `/api/admin/*` —
+   * защита от роута, забывшего свой гейт, и её нельзя раздвигать под одно
+   * исключение.
+   *
+   * Превью-эндпоинта нет намеренно: у сбора текст собирается сервером из
+   * шаблона, и отправитель обязан увидеть результат; текст анонса — ровно то,
+   * что он напечатал, и ходить за ним на сервер незачем. Кто достижим, решает и
+   * докладывает этот маршрут, в одном месте.
+   */
+  app.post("/api/announcements", requireAnnouncer(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
+    if (text.length > ANNOUNCEMENT_TEXT_MAX) {
+      return c.json({ error: `Слишком длинно — не больше ${ANNOUNCEMENT_TEXT_MAX} символов` }, 400);
+    }
+
+    let audience: Audience;
+    if (body.audience === "all") {
+      audience = { kind: "all" };
+    } else {
+      const ids = Array.isArray(body.audience) ? body.audience : null;
+      if (!ids || ids.some((id) => typeof id !== "number")) {
+        return c.json({ error: "audience — «all» или список id" }, 400);
+      }
+      if (ids.length === 0) return c.json({ error: "Некому отправлять — никто не выбран" }, 400);
+      if (ids.length > ANNOUNCEMENT_RECIPIENTS_MAX) {
+        return c.json({ error: `Слишком много адресатов — не больше ${ANNOUNCEMENT_RECIPIENTS_MAX}` }, 400);
+      }
+      audience = { kind: "picked", employeeIds: ids as number[] };
+    }
+
+    const senderId = c.get("auth").employeeId;
+    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
+    recordAudit(db, "announcement_sent", senderId, {
+      text,
+      audience: audience.kind === "all" ? "all" : "picked",
+      delivered: result.delivered,
+      intended: result.intended,
+      unreachable: result.unreachable,
+    });
+    return c.json(result);
+  });
+
+  /**
+   * Кому уйдёт объявление — глазами того, кто его пишет.
+   *
+   * Узкий список вместо админского `GET /api/admin/employees`: наблюдателю
+   * незачем видеть телефоны и инвайт-токены, а экрану нужны ровно имя и
+   * «дойдёт ли». Заодно это снимает копию правила достижимости, которую
+   * экран «Анонс» считал у себя: теперь и список, и отправка отвечают на
+   * вопрос одним и тем же кодом — `announcementRoster` в `announcement-service.ts`.
+   */
+  app.get("/api/announcements/recipients", requireAnnouncer(db, config.jwtSecret), (c) => {
+    const senderId = c.get("auth").employeeId;
+    return c.json({ recipients: announcementRoster(db, senderId) });
   });
 
   /**
@@ -720,49 +783,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
       title,
     });
     return c.json({ ok: true });
-  });
-
-  /**
-   * Рассылка объявления команде.
-   *
-   * Превью-эндпоинта нет намеренно: у сбора текст собирается сервером из
-   * шаблона, и админ обязан увидеть результат; текст анонса — ровно то, что
-   * админ напечатал, и ходить за ним на сервер незачем. Кто достижим, решает и
-   * докладывает этот маршрут, в одном месте.
-   */
-  app.post("/api/admin/announcements", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
-    const text = typeof body.text === "string" ? body.text.trim() : "";
-    if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
-    if (text.length > ANNOUNCEMENT_TEXT_MAX) {
-      return c.json({ error: `Слишком длинно — не больше ${ANNOUNCEMENT_TEXT_MAX} символов` }, 400);
-    }
-
-    let audience: Audience;
-    if (body.audience === "all") {
-      audience = { kind: "all" };
-    } else {
-      const ids = Array.isArray(body.audience) ? body.audience : null;
-      if (!ids || ids.some((id) => typeof id !== "number")) {
-        return c.json({ error: "audience — «all» или список id" }, 400);
-      }
-      if (ids.length === 0) return c.json({ error: "Некому отправлять — никто не выбран" }, 400);
-      if (ids.length > ANNOUNCEMENT_RECIPIENTS_MAX) {
-        return c.json({ error: `Слишком много адресатов — не больше ${ANNOUNCEMENT_RECIPIENTS_MAX}` }, 400);
-      }
-      audience = { kind: "picked", employeeIds: ids as number[] };
-    }
-
-    const senderId = c.get("auth").employeeId;
-    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
-    recordAudit(db, "announcement_sent", senderId, {
-      text,
-      audience: audience.kind === "all" ? "all" : "picked",
-      delivered: result.delivered,
-      intended: result.intended,
-      unreachable: result.unreachable,
-    });
-    return c.json(result);
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */

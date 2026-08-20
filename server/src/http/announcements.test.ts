@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
 import { issueToken } from "../auth/jwt";
 import { createApp } from "./app";
 import { ANNOUNCEMENT_TEXT_MAX, ANNOUNCEMENT_RECIPIENTS_MAX } from "../announcements/announcement-service";
+import { listRecentAudit } from "../repo/audit";
 import type { Db } from "../db/client";
 
 const config = { jwtSecret: "s", teamTz: "Europe/Moscow", publicUrl: "http://x", adminTelegramIds: [] } as any;
@@ -18,13 +20,27 @@ function linked(db: Db, name: string, tgId: number, isAdmin = false) {
   return e;
 }
 
-describe("POST /api/admin/announcements", () => {
-  it("работнику отвечает 403 — рассылать умеют только админы", async () => {
+/** Наблюдатель с телеграмом — как `linked`, но с ролью. */
+function observerLinked(db: Db, name: string, tgId: number) {
+  const e = linked(db, name, tgId);
+  setEmployeeObserver(db, e.id, true);
+  return e;
+}
+
+/** A bot that records what it was asked to send instead of talking to Telegram. */
+function fakeBot() {
+  const sent: { to: number; text: string }[] = [];
+  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  return { bot: bot as unknown as Bot, sent };
+}
+
+describe("POST /api/announcements", () => {
+  it("работнику отвечает 403 — рассылать умеют только админы и наблюдатели", async () => {
     const db = makeTestDb();
     const marc = linked(db, "Марк", 111);
     const app = createApp({ db, config });
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(marc.id, false)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "Собрание", audience: "all" }),
@@ -32,12 +48,53 @@ describe("POST /api/admin/announcements", () => {
     expect(res.status).toBe(403);
   });
 
+  it("наблюдатель рассылает, работник — нет", async () => {
+    const db = makeTestDb();
+    const anya = observerLinked(db, "Аня", 631);
+    const igor = linked(db, "Игорь", 632);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+
+    const okRes = await app.request("/api/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await tokenFor(anya.id, false)}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Завтра планёрка в 10", audience: "all" }),
+    });
+    expect(okRes.status).toBe(200);
+    expect(sent.map((m) => m.to)).toEqual([632]);
+
+    const denied = await app.request("/api/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await tokenFor(igor.id, false)}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "И мне можно?", audience: "all" }),
+    });
+    expect(denied.status).toBe(403);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("рассылка наблюдателя оставляет след в журнале", async () => {
+    const db = makeTestDb();
+    const me = observerLinked(db, "Марк", 633);
+    linked(db, "Даша", 634);
+    const { bot } = fakeBot();
+    const app = createApp({ db, config, bot });
+
+    await app.request("/api/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await tokenFor(me.id, false)}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Тест", audience: "all" }),
+    });
+
+    const entry = listRecentAudit(db, 10).find((a) => a.type === "announcement_sent");
+    expect(entry?.actorEmployeeId).toBe(me.id);
+  });
+
   it("пустой текст — 400", async () => {
     const db = makeTestDb();
     const anya = linked(db, "Аня", 111, true);
     const app = createApp({ db, config });
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "   ", audience: "all" }),
@@ -50,7 +107,7 @@ describe("POST /api/admin/announcements", () => {
     const anya = linked(db, "Аня", 111, true);
     const app = createApp({ db, config });
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "а".repeat(ANNOUNCEMENT_TEXT_MAX + 1), audience: "all" }),
@@ -63,7 +120,7 @@ describe("POST /api/admin/announcements", () => {
     const anya = linked(db, "Аня", 111, true);
     const app = createApp({ db, config });
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "Собрание", audience: [] }),
@@ -81,7 +138,7 @@ describe("POST /api/admin/announcements", () => {
     const app = createApp({ db, config });
     const ids = Array.from({ length: ANNOUNCEMENT_RECIPIENTS_MAX + 1 }, (_, i) => i + 1000);
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "Собрание", audience: ids }),
@@ -97,7 +154,7 @@ describe("POST /api/admin/announcements", () => {
     const app = createApp({ db, config });
     const ids = Array.from({ length: ANNOUNCEMENT_RECIPIENTS_MAX }, (_, i) => i + 1000);
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "Собрание", audience: ids }),
@@ -112,7 +169,7 @@ describe("POST /api/admin/announcements", () => {
     linked(db, "Марк", 333);
     const app = createApp({ db, config });
 
-    const res = await app.request("/api/admin/announcements", {
+    const res = await app.request("/api/announcements", {
       method: "POST",
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text: "Собрание в 15:00", audience: [igor.id] }),
@@ -128,5 +185,42 @@ describe("POST /api/admin/announcements", () => {
     });
     const events = (await journal.json()).events as { type: string }[];
     expect(events.some((e) => e.type === "announcement_sent")).toBe(true);
+  });
+});
+
+describe("GET /api/announcements/recipients", () => {
+  it("отдаёт имена без телефонов и токенов, и без самого отправителя", async () => {
+    const db = makeTestDb();
+    const me = observerLinked(db, "Аня", 635);
+    const mate = linked(db, "Игорь", 636);
+    // Не привязан к телеграму — виден и назван, но не «достижим»: если бы он
+    // пропадал из списка, отправитель решил бы, что письмо ему всё равно ушло.
+    const noTelegram = createEmployee(db, { displayName: "Марк", inviteToken: "i-noreach" });
+    const app = createApp({ db, config });
+
+    const res = await app.request("/api/announcements/recipients", {
+      headers: { Authorization: `Bearer ${await tokenFor(me.id, false)}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { recipients: { id: number; displayName: string; reachable: boolean }[] };
+
+    expect(body.recipients).toEqual(
+      expect.arrayContaining([
+        { id: mate.id, displayName: "Игорь", reachable: true },
+        { id: noTelegram.id, displayName: "Марк", reachable: false },
+      ]),
+    );
+    expect(body.recipients).toHaveLength(2);
+    expect(body.recipients.map((r) => r.id)).not.toContain(me.id);
+  });
+
+  it("работнику список не показывают", async () => {
+    const db = makeTestDb();
+    const marc = linked(db, "Марк", 637);
+    const app = createApp({ db, config });
+    const res = await app.request("/api/announcements/recipients", {
+      headers: { Authorization: `Bearer ${await tokenFor(marc.id, false)}` },
+    });
+    expect(res.status).toBe(403);
   });
 });
