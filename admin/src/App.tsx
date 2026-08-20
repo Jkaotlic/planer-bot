@@ -163,6 +163,13 @@ export function App() {
     setEmployees((prev) => prev?.map((e) => (e.id === id ? { ...e, ...patch } : e)) ?? prev);
   }
 
+  /** Same reasoning as `patchEmployeeRestrictions` — patches the confirmed role
+   *  straight into local state instead of re-fetching. Mirrors the Mini App's
+   *  `AdminEmployeesScreen.setObserver`. */
+  function patchEmployeeObserver(id: number, isObserver: boolean) {
+    setEmployees((prev) => prev?.map((e) => (e.id === id ? { ...e, isObserver } : e)) ?? prev);
+  }
+
   useEffect(() => {
     let cancelled = false;
     void loadWeek(() => cancelled);
@@ -358,7 +365,12 @@ export function App() {
         ) : !employees || !templates ? (
           <div className="centered-fill">Загрузка…</div>
         ) : nav === "employees" ? (
-          <EmployeesScreen employees={employees} onChanged={refreshEmployees} onRestrictionsSaved={patchEmployeeRestrictions} />
+          <EmployeesScreen
+            employees={employees}
+            onChanged={refreshEmployees}
+            onRestrictionsSaved={patchEmployeeRestrictions}
+            onObserverSaved={patchEmployeeObserver}
+          />
         ) : nav === "kinds" ? (
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "weekend" ? (

@@ -52,7 +52,7 @@ async function mount() {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(EmployeesScreen, { employees: EMPLOYEES, onChanged: async () => {}, onRestrictionsSaved: () => {} }));
+    root!.render(createElement(EmployeesScreen, { employees: EMPLOYEES, onChanged: async () => {}, onRestrictionsSaved: () => {}, onObserverSaved: () => {} }));
   });
   await settle();
   return host;
