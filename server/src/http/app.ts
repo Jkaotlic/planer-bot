@@ -207,6 +207,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // so a route that forgets its inline requireAdmin still can't leak. The per-route
   // guards below stay as belt-and-suspenders.
   app.use("/api/admin/*", requireAdmin(db, config.jwtSecret));
+  // Same defence for /api/announcements/*: today only the two routes below live
+  // there, and both keep requireAnnouncer inline — this guards the THIRD route
+  // that will one day land under this prefix and forget its own gate.
+  app.use("/api/announcements/*", requireAnnouncer(db, config.jwtSecret));
 
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);

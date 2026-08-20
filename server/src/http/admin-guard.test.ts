@@ -67,3 +67,31 @@ describe("blanket /api/admin/* guard", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// Тот же довод, что у /api/admin/*: оба маршрута рассылки (`POST
+// /api/announcements`, `GET /api/announcements/recipients`) держат
+// requireAnnouncer инлайном сегодня, но ничего не защищает третий маршрут,
+// который однажды появится под этим префиксом и забудет свой гейт.
+describe("blanket /api/announcements/* guard", () => {
+  it("blocks a made-up announcements path for a plain worker, even with no inline guard", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Игорь", inviteToken: "inv-555" });
+    linkTelegramAccount(db, "inv-555", 555);
+    const app = createApp({ db, config });
+    // A path under /api/announcements/ that has no handler: the guard must
+    // still 403 (not 404) for someone who can neither admin nor announce.
+    const res = await app.request("/api/announcements/does-not-exist", {
+      headers: { Authorization: `Bearer ${await tokenFor(app, 555)}` },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("lets an admin through to a real announcements route", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const res = await app.request("/api/announcements/recipients", {
+      headers: { Authorization: `Bearer ${await tokenFor(app, 111)}` },
+    });
+    expect(res.status).toBe(200);
+  });
+});

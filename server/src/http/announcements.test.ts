@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
 import { issueToken } from "../auth/jwt";
 import { createApp } from "./app";
 import { ANNOUNCEMENT_TEXT_MAX, ANNOUNCEMENT_RECIPIENTS_MAX } from "../announcements/announcement-service";
@@ -46,6 +46,35 @@ describe("POST /api/announcements", () => {
       body: JSON.stringify({ text: "Собрание", audience: "all" }),
     });
     expect(res.status).toBe(403);
+  });
+
+  // Спека называет оба случая явно (§«Проверка»), и `requireAnnouncer` их
+  // обрабатывает раньше `canAnnounce` — но до сих пор их не проверял ни один тест.
+  it("без токена — 401, а не 403", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+
+    const res = await app.request("/api/announcements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Собрание", audience: "all" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("архивный наблюдатель — 401: роль не действует у неактивного", async () => {
+    const db = makeTestDb();
+    const anya = observerLinked(db, "Аня", 631);
+    const token = await tokenFor(anya.id, false);
+    archiveEmployee(db, anya.id, "9999-01-01");
+    const app = createApp({ db, config });
+
+    const res = await app.request("/api/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Собрание", audience: "all" }),
+    });
+    expect(res.status).toBe(401);
   });
 
   it("наблюдатель рассылает, работник — нет", async () => {
