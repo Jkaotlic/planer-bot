@@ -358,9 +358,9 @@ describe("уведомления администратора: mockGetNoticePref
     await Promise.all(kinds.filter((k) => !k.enabled).map((k) => mockSetNoticePref(k.kind, true)));
   });
 
-  it("по умолчанию отдаёт все шесть видов включёнными", async () => {
+  it("по умолчанию отдаёт все семь видов включёнными", async () => {
     const { kinds } = await mockGetNoticePrefs();
-    expect(kinds).toHaveLength(6);
+    expect(kinds).toHaveLength(7);
     expect(kinds.every((k) => k.enabled)).toBe(true);
   });
 
