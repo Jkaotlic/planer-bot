@@ -80,6 +80,7 @@ import {
   PREFERRED_NAME_MAX,
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
+  takesPartInAssignment,
   type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
@@ -1458,7 +1459,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // No bot to actually send through, but the count must still agree with what
       // notifyVacantSlot would have reported — same exclusion filter, or an admin
       // running without a bot configured sees a different, dishonest number.
-      : { delivered: 0, intended: listActive(db).filter((employee) => !employee.excludedFromAssignment).length };
+      : { delivered: 0, intended: listActive(db).filter((employee) => takesPartInAssignment(employee)).length };
     recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, {
       slotId: slot.id,
       slot: slotLineOf(slot),
