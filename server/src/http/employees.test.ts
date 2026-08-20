@@ -3,7 +3,7 @@ import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, listForAdmin, reorderEmployee, archiveEmployee, setEmployeeAdmin } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, listForAdmin, reorderEmployee, archiveEmployee, setEmployeeAdmin, setEmployeeObserver } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { createSwapRequest, getSwapRequest } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
@@ -784,6 +784,107 @@ describe("PATCH /api/admin/employees/:id (роль наблюдателя)", () 
     await app.request(`/api/admin/employees/${target.id}`, authedJson(admin, { isObserver: false }, "PATCH"));
 
     expect(getEmployeeById(db, target.id)!.excludedFromAssignment).toBe(true);
+  });
+});
+
+// Роль «Наблюдатель» значит «вне обменов» ровно тем же гейтом, что и
+// `excludedFromSwaps` (`canSwap` в shared/src/access.ts): выдача роли обязана
+// гасить открытые заявки этого человека тем же путём, что и поднятая
+// галочка — иначе заявка остаётся в базе живой, а принять её не может уже
+// ни одна сторона (наблюдателю запрещает роль, а встречную сторону саму
+// никто не спрашивал).
+describe("PATCH /api/admin/employees/:id (роль наблюдателя гасит открытые обмены)", () => {
+  it("выдача роли гасит висящую заявку — обеим сторонам письмо, в журнале запись", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня Смирнова", 201);
+    const igor = worker(db, "Игорь Петров", 202);
+    const anyaShift = createShift(db, { date: daysFromNow(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: daysFromNow(3), start: "09:00", end: "18:00", employeeId: igor.id });
+    const swap = createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+
+    const res = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { isObserver: true }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(getSwapRequest(db, swap.id)?.status).toBe("cancelled");
+    expect(sent.some((s) => s.chat_id === 201)).toBe(true); // Ане — «тебе закрыли обмены»
+    expect(sent.some((s) => s.chat_id === 202)).toBe(true); // Игорю — что его заявка отменена
+    const event = listRecentAudit(db, 10).find((row) => row.type === "employee_observer_changed");
+    expect(event?.payload).toMatchObject({ employeeId: anya.id, before: false, after: true });
+  });
+
+  // Парный: тот же расклад, но PATCH не трогает роль — заявка не гаснет.
+  it("PATCH другого поля ту же заявку не трогает", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня Смирнова", 201);
+    const igor = worker(db, "Игорь Петров", 202);
+    const anyaShift = createShift(db, { date: daysFromNow(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: daysFromNow(3), start: "09:00", end: "18:00", employeeId: igor.id });
+    const swap = createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+
+    const res = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { excludedFromAssignment: true }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(getSwapRequest(db, swap.id)?.status).toBe("pending");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("повторный PATCH isObserver:true на уже наблюдателе не гасит и не шлёт писем", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня Смирнова", 201);
+    const igor = worker(db, "Игорь Петров", 202);
+    setEmployeeObserver(db, anya.id, true); // уже наблюдатель ДО этой заявки
+    const anyaShift = createShift(db, { date: daysFromNow(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: daysFromNow(3), start: "09:00", end: "18:00", employeeId: igor.id });
+    // Заявка заведена напрямую через репозиторий (как и в соседних тестах
+    // файла) — сервис создания обмена наблюдателю такое не разрешил бы, а
+    // здесь нужна ЗАВИСШАЯ заявка независимо от пути её появления.
+    const swap = createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+
+    const res = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { isObserver: true }, "PATCH"));
+    expect(res.status).toBe(200);
+
+    expect(getSwapRequest(db, swap.id)?.status).toBe("pending"); // доступ не менялся — гасить нечего
+    expect(sent).toHaveLength(0);
+  });
+
+  it("одновременная выдача роли и галочки гасит заявку один раз (по числу писем)", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня Смирнова", 201);
+    const igor = worker(db, "Игорь Петров", 202);
+    const anyaShift = createShift(db, { date: daysFromNow(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: daysFromNow(3), start: "09:00", end: "18:00", employeeId: igor.id });
+    const swap = createSwapRequest(db, {
+      fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id,
+    });
+
+    const res = await app.request(
+      `/api/admin/employees/${anya.id}`,
+      authedJson(admin, { isObserver: true, excludedFromSwaps: true }, "PATCH"),
+    );
+    expect(res.status).toBe(200);
+
+    expect(getSwapRequest(db, swap.id)?.status).toBe("cancelled");
+    // Одно письмо на человека — не два (по одному на каждую причину).
+    expect(sent.filter((s) => s.chat_id === 201)).toHaveLength(1);
+    expect(sent.filter((s) => s.chat_id === 202)).toHaveLength(1);
   });
 });
 
