@@ -3,7 +3,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { createBot } from "./bot";
 import { BTN_MY_SHIFTS } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeObserver, setSelfScheduleEnabled } from "../repo/employees";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -77,5 +77,73 @@ describe("вход в мини-апп по кнопке «Мои смены»: �
     expect(webAppLabels(reply!.payload.reply_markup)).not.toContain("📣 Анонс");
     // Смены и обе формы самозаписи остаются — эта строка не про их отсутствие.
     expect(webAppLabels(reply!.payload.reply_markup)).toEqual(["📋 Открыть смены", "🤒 Больничный", "📌 Мероприятие"]);
+  });
+});
+
+describe("наблюдателю кнопка анонса видна не по флагу isAdmin, а по canAnnounce", () => {
+  it("наблюдателю (isObserver=true, isAdmin=false) кнопка анонса видна", async () => {
+    const db = makeTestDb();
+    const daria = createEmployee(db, { displayName: "Даша Орлова", inviteToken: "d" });
+    setEmployeeObserver(db, daria.id, true);
+    linkTelegramAccount(db, "d", 444);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(myShiftsTap(444));
+
+    const reply = calls.find((c) => c.method === "sendMessage" && c.payload.text === "Что открыть:");
+    expect(reply).toBeDefined();
+    // Держит `canAnnounce`, а не `isAdmin`: у этого человека isAdmin=false, и
+    // старое условие `if (opts.isAdmin)` эту кнопку не показало бы вовсе.
+    expect(webAppLabels(reply!.payload.reply_markup)).toContain("📣 Анонс");
+  });
+});
+
+describe("наблюдателю с включённым тумблером «Веду свой график сам» — кнопка «📅 Своя смена»", () => {
+  // Заголовок раньше обещал «рядом с больничным и мероприятием», хотя ассерт
+  // ниже проверяет только наличие кнопки: соседство — вопрос вёрстки
+  // клавиатуры, а не правила роли, и этот тест его не доказывает.
+  it("тумблер включён — кнопка есть", async () => {
+    const db = makeTestDb();
+    const nina = createEmployee(db, { displayName: "Нина Соколова", inviteToken: "n" });
+    setEmployeeObserver(db, nina.id, true);
+    setSelfScheduleEnabled(db, nina.id, true);
+    linkTelegramAccount(db, "n", 555);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(myShiftsTap(555));
+
+    const reply = calls.find((c) => c.method === "sendMessage" && c.payload.text === "Что открыть:");
+    expect(reply).toBeDefined();
+    expect(webAppLabels(reply!.payload.reply_markup)).toContain("📅 Своя смена");
+  });
+
+  // Парный отрицательный случай: роли наблюдателя одной недостаточно — нужен
+  // ещё и включённый тумблер, иначе кнопка вела бы на форму, которая ответит
+  // «Такую запись ставит админ» на каждое нажатие.
+  it("роль есть, тумблер выключен — кнопки нет", async () => {
+    const db = makeTestDb();
+    const oleg = createEmployee(db, { displayName: "Олег Быков", inviteToken: "o" });
+    setEmployeeObserver(db, oleg.id, true);
+    linkTelegramAccount(db, "o", 666);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(myShiftsTap(666));
+
+    const reply = calls.find((c) => c.method === "sendMessage" && c.payload.text === "Что открыть:");
+    expect(reply).toBeDefined();
+    expect(webAppLabels(reply!.payload.reply_markup)).not.toContain("📅 Своя смена");
+  });
+
+  it("обычному работнику (не наблюдателю) кнопки тоже нет", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Павел Титов", inviteToken: "p" });
+    linkTelegramAccount(db, "p", 777);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(myShiftsTap(777));
+
+    const reply = calls.find((c) => c.method === "sendMessage" && c.payload.text === "Что открыть:");
+    expect(reply).toBeDefined();
+    expect(webAppLabels(reply!.payload.reply_markup)).not.toContain("📅 Своя смена");
   });
 });

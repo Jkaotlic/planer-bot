@@ -1,7 +1,7 @@
 import { and, eq, inArray, lte, max } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { templatePool, templatePreference, employees, shifts, shiftTemplates } from "../db/schema";
-import type { RotationCandidate, RotationUnit } from "@planer/shared";
+import { takesPartInAssignment, type RotationCandidate, type RotationUnit } from "@planer/shared";
 import { listActive } from "./employees";
 
 /**
@@ -81,7 +81,7 @@ export function rotationCandidatesFor(db: Db, templateId: number, asOf: string):
   // ★ hint on both consoles — showing them as «next up» would invite exactly the
   // assignment the flag exists to prevent.
   const eligible = listActive(db).filter(
-    (employee) => !employee.excludedFromAssignment && (pool.size === 0 || pool.has(employee.id)),
+    (employee) => takesPartInAssignment(employee) && (pool.size === 0 || pool.has(employee.id)),
   );
 
   const lastHeld = new Map<number, string>();

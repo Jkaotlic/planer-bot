@@ -24,6 +24,7 @@ const NO_LINK = "Нет ссылки на сбор — вставь её, пре
 const ME: Me = {
   id: 9, displayName: "Админ Админов", address: "Админ", preferredName: null,
   isAdmin: true, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
+  isObserver: false, selfScheduleEnabled: false, canAnnounce: true,
 };
 
 function collection(patch: Partial<Collection> = {}): Collection {

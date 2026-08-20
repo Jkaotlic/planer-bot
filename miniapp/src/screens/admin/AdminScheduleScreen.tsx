@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
-import { allowedByPool, countsForBalance, isAbsence, resolveShiftTimes, UNRECOGNISED_KIND } from "@planer/shared";
+import { allowedByPool, countsForBalance, isAbsence, resolveShiftTimes, takesPartInAssignment, UNRECOGNISED_KIND } from "@planer/shared";
 import {
   apiClient,
   type Employee,
@@ -810,7 +810,7 @@ function TimeRow({ start, end, onStart, onEnd }: { start: string; end: string; o
   );
 }
 
-interface FillWeekPanelProps {
+export interface FillWeekPanelProps {
   employees: readonly Employee[];
   templates: readonly Template[];
   weekDates: readonly string[];
@@ -871,7 +871,7 @@ export function balanceKindOf(
  * this week — the very thing «Распределить честно» evens out — so the admin can
  * spread work by eye. A hint, not an enforced rule.
  */
-function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCancel, onFilled }: FillWeekPanelProps) {
+export function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCancel, onFilled }: FillWeekPanelProps) {
   const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
   /** Per-day choice, encoded: "" = выходной, "p:<id>" = preset, "c:<category>" = a
    * category that has no preset (отпуск/больничный/командировка/…). Same option set
@@ -1004,7 +1004,10 @@ function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCance
         {employees.map((e) => (
           <option key={e.id} value={e.id}>
             {e.displayName}
-            {e.excludedFromAssignment ? " · вне назначений" : ""}
+            {/* Эффективное право, не сырая галочка: наблюдатель (`isObserver`) вне
+                раздачи ровно так же, как и человек с поднятым `excludedFromAssignment`,
+                а роль его галочку не трогает — без этого он шёл бы без пометки. */}
+            {!takesPartInAssignment(e) ? " · вне назначений" : ""}
           </option>
         ))}
       </Select>

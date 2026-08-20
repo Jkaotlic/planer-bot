@@ -14,6 +14,7 @@ import {
   mockDeclineSwap,
   mockGetMe,
   mockSetRemindersEnabled,
+  mockSetSelfScheduleEnabled,
   mockSetPreferredName,
   mockGetMyShifts,
   mockGetSwaps,
@@ -66,6 +67,7 @@ import {
   mockGetNoticePrefs,
   mockSetNoticePref,
   mockSendAnnouncement,
+  mockGetAnnouncementRecipients,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -92,8 +94,10 @@ export interface TeamEmployee {
   id: number;
   displayName: string;
   rosterOrder: number | null;
-  /** Admin took them out of swaps — the propose-swap candidate list must not
-   *  offer them, and the "Обменять" screen shouldn't count them as a duplicate. */
+  /** The EFFECTIVE value (`shared/access.ts`'s `canSwap`) — always `true` for
+   *  an observer even if the underlying flag in the database is off. The
+   *  propose-swap candidate list must not offer them, and the "Обменять"
+   *  screen shouldn't count them as a duplicate. */
   excludedFromSwaps: boolean;
 }
 
@@ -118,8 +122,21 @@ export interface Me {
   /** Admin's global «Обменять» switch — the screen must grey the button out
    *  rather than show it live and get refused on tap. */
   swapsLocked: boolean;
-  /** Admin took this person specifically out of swaps. */
+  /** Admin took this person specifically out of swaps — always `true` here for
+   *  an observer, even if the underlying flag in the database is off: this is
+   *  the EFFECTIVE value (`shared/access.ts`'s `canSwap`), and the UI never has
+   *  to know the role exists to grey the «Обменять» button out for one. */
   excludedFromSwaps: boolean;
+  /** Роль «Наблюдатель»: смотрит график, ведёт свой (если включил тумблер),
+   *  шлёт анонсы — вне раздачи, обменов и передачи смен. См. `access.ts`. */
+  isObserver: boolean;
+  /** Личный тумблер наблюдателя «Веду свой график сам». У обычного работника
+   *  всегда `false` — сервер не читает эту колонку для чужой роли. */
+  selfScheduleEnabled: boolean;
+  /** Видна ли этому человеку вкладка «Анонс» — `isAdmin || isObserver`
+   *  (`canAnnounce` в `access.ts`), уже посчитано сервером, чтобы клиент не
+   *  дублировал правило. */
+  canAnnounce: boolean;
 }
 
 export type SwapStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
@@ -249,7 +266,10 @@ export interface NewEntryInput {
  */
 export type SelfEntryInput =
   | { category: "sick_leave"; date: string; endDate?: string | null }
-  | { category: "offsite"; date: string; start: string; end: string; title: string; location?: string | null };
+  | { category: "offsite"; date: string; start: string; end: string; title: string; location?: string | null }
+  // Собственная смена наблюдателя — третья форма, зеркалит `shiftBody` на
+  // сервере. Без `title`: смена не мероприятие, называть её нечем и незачем.
+  | { category: "shift"; date: string; start: string; end: string; location?: string | null };
 
 /**
  * Смена, оставшаяся без человека из-за больничного, и кому её можно предложить.
@@ -304,7 +324,7 @@ export interface NoticePrefs {
  *  пару символов, но 400 всё равно решает сервер; здесь только подсказка. */
 export const ANNOUNCEMENT_TEXT_MAX = 2000;
 
-/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/admin/announcements`. */
+/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/announcements`. */
 export type AnnouncementAudience = "all" | number[];
 
 /** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
@@ -312,6 +332,14 @@ export interface AnnouncementResult {
   delivered: number;
   intended: number;
   unreachable: string[];
+}
+
+/** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
+ *  Без телефонов и инвайт-токенов: экрану «Анонс» нужны ровно имя и «дойдёт ли». */
+export interface AnnouncementRecipient {
+  id: number;
+  displayName: string;
+  reachable: boolean;
 }
 
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
@@ -569,6 +597,9 @@ export interface ApiClient {
   getMe(): Promise<Me>;
   /** Turns this person's own shift reminders on or off. */
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
+  /** Тумблер наблюдателя «Веду свой график сам» — 403 у обычного работника,
+   *  сервер проверяет `isObserver` сам, экран сюда его и не подпускает. */
+  setSelfScheduleEnabled(enabled: boolean): Promise<boolean>;
   /** `null` clears it and hands the greeting back to Telegram's name. */
   setPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }>;
   getMyShifts(): Promise<{ shifts: Shift[]; today: string }>;
@@ -613,6 +644,11 @@ export interface ApiClient {
    *  this person's open swap requests and notifies them — the caller doesn't
    *  need to do anything else for that to happen. */
   setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>;
+  /** Роль «Наблюдатель»: смотрит график, ведёт свой, шлёт анонсы — вне
+   *  раздачи, обменов и передачи смен. Снятие роли не переписывает
+   *  `excludedFromAssignment`/`excludedFromSwaps` — админ должен видеть, куда
+   *  человек вернётся. */
+  setEmployeeObserver(id: number, isObserver: boolean): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
@@ -661,8 +697,10 @@ export interface ApiClient {
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
-   *  не даёт, текст анонса и так ровно тот, что напечатал админ. */
+   *  не даёт, текст анонса и так ровно тот, что напечатал админ или наблюдатель. */
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
+  /** Кому уйдёт анонс «всем», глазами того, кто его пишет — для выбора адресатов. */
+  getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
   resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
@@ -955,6 +993,15 @@ export const realClient: ApiClient = {
     return res.remindersEnabled;
   },
 
+  async setSelfScheduleEnabled(enabled) {
+    // `/api/me/settings` эхает обратно `remindersEnabled`/`preferredName`/`address`
+    // — общий ответ на три разных поля, и `selfScheduleEnabled` среди них нет.
+    // 200 здесь и есть подтверждение: отказ (не наблюдатель) пришёл бы `Error`'ом
+    // из `authorizedPatchJson`, и до `return` дело не дошло бы.
+    await authorizedPatchJson("/api/me/settings", { selfScheduleEnabled: enabled });
+    return enabled;
+  },
+
   setPreferredName: (preferredName) =>
     authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
 
@@ -1190,7 +1237,11 @@ export const realClient: ApiClient = {
   setNoticePref: (kind, enabled) =>
     authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
   sendAnnouncement: (text, audience) =>
-    authorizedPostJson<AnnouncementResult>("/api/admin/announcements", { text, audience }),
+    authorizedPostJson<AnnouncementResult>("/api/announcements", { text, audience }),
+  async getAnnouncementRecipients() {
+    const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
+    return recipients;
+  },
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
     return reports;
@@ -1214,6 +1265,7 @@ const devClient: ApiClient = {
 
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
+  setSelfScheduleEnabled: (enabled) => mockSetSelfScheduleEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getMyShifts: () => mockGetMyShifts(),
   getTeamSchedule: async (from, to) => withEmployeeNames(await mockGetTeamSchedule(from, to)),
@@ -1271,6 +1323,7 @@ const devClient: ApiClient = {
   getNoticePrefs: () => mockGetNoticePrefs(),
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
+  getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

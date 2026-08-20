@@ -21,7 +21,7 @@ import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, canAnnounce, canAddOwnShifts } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import {
@@ -151,8 +151,9 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
 }
 
 /**
- * Входы в мини-апп: список смен, две формы самозаписи и — только у админов —
- * экран анонсов.
+ * Входы в мини-апп: список смен, до трёх форм самозаписи и — только у тех,
+ * кто может слать анонсы (`canAnnounce`: админы и наблюдатели) — экран
+ * анонсов.
  *
  * Именно inline-кнопками, и это единственный способ, а не выбор оформления.
  * Мини-апп, запущенный из кнопки *обычной* клавиатуры, не получает `initData` —
@@ -167,14 +168,23 @@ export function remindersKeyboard(enabled: boolean): InlineKeyboard {
  * Формы во второй строке, а не в первой: смены смотрят каждый день, а
  * больничный ставят несколько раз в год. Функция не знает сама, кто перед
  * ней — решает вызывающий (`sendMiniApp`), тем же правилом, что и `menuFor`.
+ *
+ * «📅 Своя смена» — той же строкой, что «Больничный»/«Мероприятие»: та же
+ * форма самозаписи, третья по счёту. `?screen=shift` на мини-апповой стороне
+ * (`SelfEntryScreen.screenFromSearch`) открывает её напрямую, а
+ * `App.tsx` повторно проверяет `canAddOwnShifts(me)` при загрузке — ссылку
+ * могли переслать, а тумблер выключить между открытием меню бота и тапом.
  */
-export function miniAppKeyboard(publicUrl: string, opts: { isAdmin: boolean }): InlineKeyboard {
+export function miniAppKeyboard(publicUrl: string, opts: { canAnnounce: boolean; canAddOwnShifts: boolean }): InlineKeyboard {
   const kb = new InlineKeyboard()
     .webApp("📋 Открыть смены", `${publicUrl}/app/`)
     .row()
     .webApp("🤒 Больничный", `${publicUrl}/app/?screen=sick`)
     .webApp("📌 Мероприятие", `${publicUrl}/app/?screen=event`);
-  if (opts.isAdmin) kb.row().webApp("📣 Анонс", `${publicUrl}/app/?screen=announce`);
+  if (opts.canAddOwnShifts) kb.webApp("📅 Своя смена", `${publicUrl}/app/?screen=shift`);
+  // `canAnnounce`, не `isAdmin`: наблюдатель шлёт анонсы (задача 6), и кнопка,
+  // видимая только админу, спрятала бы вход в его же законную вкладку.
+  if (opts.canAnnounce) kb.row().webApp("📣 Анонс", `${publicUrl}/app/?screen=announce`);
   return kb;
 }
 
@@ -447,7 +457,14 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     await ctx.reply("Что открыть:", {
-      reply_markup: miniAppKeyboard(config.publicUrl, { isAdmin: actsAsAdmin(who.me, from.id) }),
+      // `actsAsAdmin` — тот же аллоулист-фолбэк, что и у остальных админских
+      // проверок в этом файле: `ADMIN_TELEGRAM_IDS` даёт права до того, как
+      // строка в базе о них узнает, и потерять это здесь — значит на время
+      // спрятать кнопку от живого админа.
+      reply_markup: miniAppKeyboard(config.publicUrl, {
+        canAnnounce: canAnnounce(who.me) || actsAsAdmin(who.me, from.id),
+        canAddOwnShifts: canAddOwnShifts(who.me),
+      }),
     });
   }
 

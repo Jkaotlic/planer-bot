@@ -133,6 +133,25 @@ export function AdminEmployeesScreen() {
     }
   }
 
+  // Та же логика, что у `setRestriction` — патчит подтверждённое значение в
+  // локальный список, а не перечитывает весь экран, по той же причине (гонка
+  // PATCH/GET, см. коммент выше). Ошибка ложится в ту же карту `restrictionErrors`
+  // — с точки зрения строки это тот же блок карточки, что и два чекбокса под ним.
+  async function setObserver(id: number, isObserver: boolean) {
+    setBusyId(id);
+    setRestrictionErrors((prev) => withoutError(prev, id));
+    try {
+      await apiClient.setEmployeeObserver(id, isObserver);
+      setEmployees((prev) => prev?.map((e) => (e.id === id ? { ...e, isObserver } : e)) ?? prev);
+    } catch (err) {
+      setRestrictionErrors((prev) =>
+        withError(prev, id, err instanceof Error ? refusalText(err.message) : "Не удалось сохранить роль"),
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handleAdd(name: string) {
     setAdding(true);
     setError(null);
@@ -231,6 +250,7 @@ export function AdminEmployeesScreen() {
                 invite={rowInvite?.employeeId === e.id ? rowInvite : null}
                 error={rowError?.employeeId === e.id ? rowError.message : null}
                 onSetRestrictions={(patch) => void setRestriction(e.id, patch)}
+                onSetObserver={(isObserver) => void setObserver(e.id, isObserver)}
                 restrictionError={restrictionErrors.get(e.id) ?? null}
               />
             ))
@@ -252,6 +272,7 @@ export function AdminEmployeesScreen() {
                 invite={rowInvite?.employeeId === e.id ? rowInvite : null}
                 error={rowError?.employeeId === e.id ? rowError.message : null}
                 onSetRestrictions={(patch) => void setRestriction(e.id, patch)}
+                onSetObserver={(isObserver) => void setObserver(e.id, isObserver)}
                 restrictionError={restrictionErrors.get(e.id) ?? null}
               />
             ))
@@ -277,6 +298,7 @@ export function EmployeeRow({
   onReorder,
   onBirthDate,
   onSetRestrictions,
+  onSetObserver,
   restrictionError,
 }: {
   employee: Employee;
@@ -302,6 +324,9 @@ export function EmployeeRow({
   onShowInvite?: () => void;
   /** Every row gets the «Ограничения» checkboxes — active and archived alike. */
   onSetRestrictions: (patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }) => void;
+  /** Every row gets the «Наблюдатель» toggle — active and archived alike, same
+   *  as the two checkboxes below it. */
+  onSetObserver: (isObserver: boolean) => void;
   /** Why this row's last restriction save was refused, shown right here — see `restrictionErrors`. */
   restrictionError?: string | null;
 }) {
@@ -439,30 +464,62 @@ export function EmployeeRow({
         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5, cursor: "pointer" }}>
           <input
             type="checkbox"
-            checked={employee.excludedFromAssignment}
+            checked={employee.isObserver}
             disabled={busy}
+            style={{ marginTop: 2 }}
+            onChange={() => onSetObserver(!employee.isObserver)}
+          />
+          <span>
+            Наблюдатель
+            <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12 }}>
+              Смотрит график, ведёт свой, шлёт анонсы. Вне раздачи, обменов и передачи смен.
+            </span>
+          </span>
+        </label>
+        <label
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5,
+            cursor: employee.isObserver ? "default" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            // Значение из базы, а не эффективное («и так вне назначений из-за
+            // роли») — админ должен видеть, куда человек вернётся, когда роль
+            // снимут, а не то, что происходит с ним сейчас.
+            checked={employee.excludedFromAssignment}
+            disabled={busy || employee.isObserver}
             style={{ marginTop: 2 }}
             onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
           />
           <span>
             Не участвует в назначениях
             <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12 }}>
-              бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно
+              {employee.isObserver
+                ? "управляется ролью «Наблюдатель»"
+                : "бот не ставит его при распределении и не зовёт на выходные; вручную поставить можно"}
             </span>
           </span>
         </label>
-        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5, cursor: "pointer" }}>
+        <label
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5,
+            cursor: employee.isObserver ? "default" : "pointer",
+          }}
+        >
           <input
             type="checkbox"
             checked={employee.excludedFromSwaps}
-            disabled={busy}
+            disabled={busy || employee.isObserver}
             style={{ marginTop: 2 }}
             onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
           />
           <span>
             Не участвует в обменах
             <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12 }}>
-              ни предложить, ни принять обмен; открытые заявки будут отменены
+              {employee.isObserver
+                ? "управляется ролью «Наблюдатель»"
+                : "ни предложить, ни принять обмен; открытые заявки будут отменены"}
             </span>
           </span>
         </label>

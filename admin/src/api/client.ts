@@ -403,6 +403,10 @@ export interface ApiClient {
    *  this person's open swap requests and notifies them — the caller doesn't
    *  need to do anything else for that to happen. */
   setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>;
+  /** Роль «Наблюдатель»: смотрит график, ведёт свой (если включил тумблер), шлёт
+   *  анонсы — вне раздачи, обменов и передачи смен. Снятие роли не трогает
+   *  `excludedFrom*` выше — они остаются такими же, как были до неё. */
+  setEmployeeObserver(id: number, isObserver: boolean): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */
@@ -726,6 +730,7 @@ export const realClient: ApiClient = {
   setBirthDate: (id, birthDate) => employeesApi.setBirthDate(id, birthDate),
   renameEmployee: (id, displayName) => employeesApi.renameEmployee(id, displayName),
   setEmployeeRestrictions: (id, patch) => employeesApi.setEmployeeRestrictions(id, patch),
+  setEmployeeObserver: (id, isObserver) => employeesApi.setEmployeeObserver(id, isObserver),
   getEmployeeInvite: (id, regenerate) => employeesApi.getEmployeeInvite(id, regenerate),
 
   async getWeekendSlots() {
@@ -906,6 +911,7 @@ const devClient: ApiClient = {
   renameEmployee: (id, displayName) => employeesMock.renameEmployee(id, displayName),
   setBirthDate: (id, birthDate) => employeesMock.setBirthDate(id, birthDate),
   setEmployeeRestrictions: (id, patch) => employeesMock.setEmployeeRestrictions(id, patch),
+  setEmployeeObserver: (id, isObserver) => employeesMock.setEmployeeObserver(id, isObserver),
   reorderEmployee: (id, position) => employeesMock.reorderEmployee(id, position),
   getEmployeeInvite: (id, regenerate) => employeesMock.getEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),

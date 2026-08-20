@@ -6,7 +6,7 @@ import type { Db } from "../db/client";
 import type { Config } from "../config";
 import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
-import { requireAuth, requireAdmin, type Env } from "./middleware";
+import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { redactSecrets } from "../util/safe-error";
@@ -24,6 +24,7 @@ import {
   setRemindersEnabled,
   setPreferredName,
   rememberTelegramProfile,
+  setSelfScheduleEnabled,
 } from "../repo/employees";
 import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
@@ -80,6 +81,9 @@ import {
   PREFERRED_NAME_MAX,
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
+  takesPartInAssignment,
+  canSwap,
+  canAnnounce,
   type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
@@ -119,6 +123,7 @@ import {
   ANNOUNCEMENT_TEXT_MAX,
   ANNOUNCEMENT_RECIPIENTS_MAX,
   sendAnnouncement,
+  announcementRoster,
   type Audience,
 } from "../announcements/announcement-service";
 
@@ -202,6 +207,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // so a route that forgets its inline requireAdmin still can't leak. The per-route
   // guards below stay as belt-and-suspenders.
   app.use("/api/admin/*", requireAdmin(db, config.jwtSecret));
+  // Same defence for /api/announcements/*: today only the two routes below live
+  // there, and both keep requireAnnouncer inline — this guards the THIRD route
+  // that will one day land under this prefix and forget its own gate.
+  app.use("/api/announcements/*", requireAnnouncer(db, config.jwtSecret));
 
   app.onError((err, c) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -342,7 +351,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       /** The swap rule travels together with "who am I": the screen must grey
        *  out the «Обменять» button, not show it live and get refused on tap. */
       swapsLocked: isSwapsLocked(db),
-      excludedFromSwaps: me.excludedFromSwaps,
+      /** Эффективное, а не то, что лежит в строке: единственный потребитель —
+       *  гейт кнопки «Обменять», и ему нужен ответ «можно ли», а не «какую
+       *  галочку поставил админ». Роль наблюдателя перекрывает галочку. */
+      excludedFromSwaps: !canSwap(me),
+      isObserver: me.isObserver,
+      selfScheduleEnabled: me.selfScheduleEnabled,
+      canAnnounce: canAnnounce(me),
     });
   });
 
@@ -351,12 +366,20 @@ export function createApp(deps: AppDeps): Hono<Env> {
    *  A patch, not a form — the two fields live on different screens and are saved
    *  by different gestures, so either may arrive alone. */
   app.patch("/api/me/settings", requireAuth(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { remindersEnabled?: unknown; preferredName?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      remindersEnabled?: unknown;
+      preferredName?: unknown;
+      selfScheduleEnabled?: unknown;
+    };
     const hasReminders = body.remindersEnabled !== undefined;
     const hasPreferred = body.preferredName !== undefined;
-    if (!hasReminders && !hasPreferred) return c.json({ error: "нечего сохранять" }, 400);
+    const hasSelfSchedule = body.selfScheduleEnabled !== undefined;
+    if (!hasReminders && !hasPreferred && !hasSelfSchedule) return c.json({ error: "нечего сохранять" }, 400);
     if (hasReminders && typeof body.remindersEnabled !== "boolean") {
       return c.json({ error: "remindersEnabled должен быть true или false" }, 400);
+    }
+    if (hasSelfSchedule && typeof body.selfScheduleEnabled !== "boolean") {
+      return c.json({ error: "selfScheduleEnabled должен быть true или false" }, 400);
     }
     const preferred = hasPreferred ? normalizePreferredName(body.preferredName) : null;
     if (preferred && !preferred.ok) {
@@ -366,16 +389,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = c.get("auth").employeeId;
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    if (hasSelfSchedule) {
+      // Не 400: поле существует и понято — его просто некому применить.
+      // Иначе тумблер стал бы способом обойти роль.
+      if (!employee.isObserver) return c.json({ error: "forbidden" }, 403);
+      employee = setSelfScheduleEnabled(db, id, body.selfScheduleEnabled as boolean) ?? employee;
+    }
     if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
-    // Одно действие человека — одна строка журнала: маршрут принимает оба поля
-    // разом, и делить его на два события значило бы врать о том, что он сделал.
+    // Одно действие человека — одна строка журнала: маршрут принимает несколько
+    // полей разом, и делить его на несколько событий значило бы врать о том,
+    // что он сделал.
     recordAudit(db, "settings_changed", id, {
       employeeId: id,
       displayName: employee.displayName,
       ...(hasReminders ? { remindersEnabled: employee.remindersEnabled } : {}),
       ...(preferred?.ok ? { preferredName: employee.preferredName } : {}),
+      ...(hasSelfSchedule ? { selfScheduleEnabled: employee.selfScheduleEnabled } : {}),
     });
 
     return c.json({
@@ -384,6 +415,68 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Returned so the greeting can update without a second round trip.
       address: addressOf(employee),
     });
+  });
+
+  /**
+   * Рассылка объявления команде.
+   *
+   * Свой маршрут, а не `/api/admin/announcements`: рассылать умеют и админы, и
+   * наблюдатели (`canAnnounce`), а сплошной `requireAdmin` на `/api/admin/*` —
+   * защита от роута, забывшего свой гейт, и её нельзя раздвигать под одно
+   * исключение.
+   *
+   * Превью-эндпоинта нет намеренно: у сбора текст собирается сервером из
+   * шаблона, и отправитель обязан увидеть результат; текст анонса — ровно то,
+   * что он напечатал, и ходить за ним на сервер незачем. Кто достижим, решает и
+   * докладывает этот маршрут, в одном месте.
+   */
+  app.post("/api/announcements", requireAnnouncer(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
+    if (text.length > ANNOUNCEMENT_TEXT_MAX) {
+      return c.json({ error: `Слишком длинно — не больше ${ANNOUNCEMENT_TEXT_MAX} символов` }, 400);
+    }
+
+    let audience: Audience;
+    if (body.audience === "all") {
+      audience = { kind: "all" };
+    } else {
+      const ids = Array.isArray(body.audience) ? body.audience : null;
+      if (!ids || ids.some((id) => typeof id !== "number")) {
+        return c.json({ error: "audience — «all» или список id" }, 400);
+      }
+      if (ids.length === 0) return c.json({ error: "Некому отправлять — никто не выбран" }, 400);
+      if (ids.length > ANNOUNCEMENT_RECIPIENTS_MAX) {
+        return c.json({ error: `Слишком много адресатов — не больше ${ANNOUNCEMENT_RECIPIENTS_MAX}` }, 400);
+      }
+      audience = { kind: "picked", employeeIds: ids as number[] };
+    }
+
+    const senderId = c.get("auth").employeeId;
+    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
+    recordAudit(db, "announcement_sent", senderId, {
+      text,
+      audience: audience.kind === "all" ? "all" : "picked",
+      delivered: result.delivered,
+      intended: result.intended,
+      unreachable: result.unreachable,
+    });
+    return c.json(result);
+  });
+
+  /**
+   * Кому уйдёт объявление — глазами того, кто его пишет.
+   *
+   * Узкий список вместо админского `GET /api/admin/employees`: наблюдателю
+   * незачем видеть телефоны и инвайт-токены, а экрану нужны ровно имя и
+   * «дойдёт ли». Заодно это снимает копию правила достижимости, которую
+   * экран «Анонс» считал у себя: теперь и список, и отправка отвечают на
+   * вопрос одним и тем же кодом — `announcementRoster` в `announcement-service.ts`.
+   */
+  app.get("/api/announcements/recipients", requireAnnouncer(db, config.jwtSecret), (c) => {
+    const senderId = c.get("auth").employeeId;
+    return c.json({ recipients: announcementRoster(db, senderId) });
   });
 
   /**
@@ -694,49 +787,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
       title,
     });
     return c.json({ ok: true });
-  });
-
-  /**
-   * Рассылка объявления команде.
-   *
-   * Превью-эндпоинта нет намеренно: у сбора текст собирается сервером из
-   * шаблона, и админ обязан увидеть результат; текст анонса — ровно то, что
-   * админ напечатал, и ходить за ним на сервер незачем. Кто достижим, решает и
-   * докладывает этот маршрут, в одном месте.
-   */
-  app.post("/api/admin/announcements", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
-    const text = typeof body.text === "string" ? body.text.trim() : "";
-    if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
-    if (text.length > ANNOUNCEMENT_TEXT_MAX) {
-      return c.json({ error: `Слишком длинно — не больше ${ANNOUNCEMENT_TEXT_MAX} символов` }, 400);
-    }
-
-    let audience: Audience;
-    if (body.audience === "all") {
-      audience = { kind: "all" };
-    } else {
-      const ids = Array.isArray(body.audience) ? body.audience : null;
-      if (!ids || ids.some((id) => typeof id !== "number")) {
-        return c.json({ error: "audience — «all» или список id" }, 400);
-      }
-      if (ids.length === 0) return c.json({ error: "Некому отправлять — никто не выбран" }, 400);
-      if (ids.length > ANNOUNCEMENT_RECIPIENTS_MAX) {
-        return c.json({ error: `Слишком много адресатов — не больше ${ANNOUNCEMENT_RECIPIENTS_MAX}` }, 400);
-      }
-      audience = { kind: "picked", employeeIds: ids as number[] };
-    }
-
-    const senderId = c.get("auth").employeeId;
-    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
-    recordAudit(db, "announcement_sent", senderId, {
-      text,
-      audience: audience.kind === "all" ? "all" : "picked",
-      delivered: result.delivered,
-      intended: result.intended,
-      unreachable: result.unreachable,
-    });
-    return c.json(result);
   });
 
   /** The full «кто когда что менял» history: filtered by type and date, paged. */
@@ -1458,7 +1508,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // No bot to actually send through, but the count must still agree with what
       // notifyVacantSlot would have reported — same exclusion filter, or an admin
       // running without a bot configured sees a different, dishonest number.
-      : { delivered: 0, intended: listActive(db).filter((employee) => !employee.excludedFromAssignment).length };
+      : { delivered: 0, intended: listActive(db).filter((employee) => takesPartInAssignment(employee)).length };
     recordAudit(db, "weekend_slot_created", c.get("auth").employeeId, {
       slotId: slot.id,
       slot: slotLineOf(slot),

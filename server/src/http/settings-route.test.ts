@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, setEmployeeObserver } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { createSwapRequest } from "../repo/swaps";
 import { signInitData } from "../auth/telegram";
@@ -127,6 +127,30 @@ describe("PATCH /api/me/settings", () => {
       method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ remindersEnabled: false }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it("тумблер своего графика ставит наблюдатель, работнику — 403", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+
+    const observer = createEmployee(db, { displayName: "Игорь", inviteToken: "tok-622" });
+    linkTelegramAccount(db, "tok-622", 622);
+    setEmployeeObserver(db, observer.id, true);
+    const observerToken = await tokenFor(app, 622);
+
+    const plain = createEmployee(db, { displayName: "Марк", inviteToken: "tok-623" });
+    linkTelegramAccount(db, "tok-623", 623);
+    const workerToken = await tokenFor(app, 623);
+
+    const ok = await app.request("/api/me/settings", patch(observerToken, { selfScheduleEnabled: true }));
+    expect(ok.status).toBe(200);
+    expect(getEmployeeById(db, observer.id)!.selfScheduleEnabled).toBe(true);
+
+    // Не 400: поле понято, его просто некому применить — иначе тумблер стал бы
+    // способом обойти роль наблюдателя.
+    const denied = await app.request("/api/me/settings", patch(workerToken, { selfScheduleEnabled: true }));
+    expect(denied.status).toBe(403);
+    expect(getEmployeeById(db, plain.id)!.selfScheduleEnabled).toBe(false);
   });
 });
 

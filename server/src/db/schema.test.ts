@@ -14,6 +14,7 @@ import { makeTestDb } from "./testdb";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
+import { createEmployee, setEmployeeObserver, setSelfScheduleEnabled, setEmployeeRestrictions } from "../repo/employees";
 
 describe("schema", () => {
   it("declares all six tables with expected sqlite names", () => {
@@ -84,5 +85,33 @@ describe("role configuration columns", () => {
     const emp = db.insert(employees).values({ displayName: "Аня" }).returning().all()[0]!;
     db.insert(templatePool).values({ templateId: tpl.id, employeeId: emp.id }).run();
     expect(() => db.insert(templatePool).values({ templateId: tpl.id, employeeId: emp.id }).run()).toThrow(/UNIQUE/i);
+  });
+});
+
+describe("роль наблюдателя", () => {
+  it("новый работник наблюдателем не становится", () => {
+    const db = makeTestDb();
+    const person = createEmployee(db, { displayName: "Аня" });
+    expect(person.isObserver).toBe(false);
+    expect(person.selfScheduleEnabled).toBe(false);
+  });
+
+  it("тумблер своего графика живёт отдельно от роли", () => {
+    const db = makeTestDb();
+    const person = createEmployee(db, { displayName: "Игорь" });
+    const observer = setEmployeeObserver(db, person.id, true)!;
+    expect(observer.isObserver).toBe(true);
+    // Роль сама по себе график вести не разрешает — это второе, личное решение.
+    expect(observer.selfScheduleEnabled).toBe(false);
+    expect(setSelfScheduleEnabled(db, person.id, true)!.selfScheduleEnabled).toBe(true);
+  });
+
+  it("снятие роли не трогает исключения, которые ставил админ", () => {
+    const db = makeTestDb();
+    const person = createEmployee(db, { displayName: "Марк" });
+    setEmployeeRestrictions(db, person.id, { excludedFromSwaps: true });
+    setEmployeeObserver(db, person.id, true);
+    const back = setEmployeeObserver(db, person.id, false)!;
+    expect(back.excludedFromSwaps).toBe(true);
   });
 });
