@@ -710,7 +710,9 @@ const selfEntryBody = z.discriminatedUnion("category", [sickBody, eventBody, shi
         : [];
 ```
 
-и тем же условием обернуть блок `cancelHandoversForEntry` / `startHandovers` в `PATCH` и `cancelHandoversForEntry` / `detachHandoversFromEntry` в `DELETE`.
+**Роль закрывает ЗАПУСК лестницы и никогда — её уборку.** Поэтому условие вешается только на `startHandovers` в `POST` и в `PATCH`. `cancelHandoversForEntry` в `PATCH` и `DELETE`, а также `detachHandoversFromEntry` в `DELETE` зовутся безусловно для любой `sick_leave`: отвязка от внешнего ключа — гигиена базы, а не правило роли, а письмо «выходить не нужно» — долг перед теми, кому веер уже разослали.
+
+Обёрнутая отвязка даёт настоящий 500: работник заболел → лестница поднялась → админ сделал его наблюдателем → он удаляет тот больничный → `deleteShift` бьётся об `handovers.sickEntryId`. Тест на этот сценарий обязателен, и он outcome-based: ответ 200, запись удалена, передачи отвязаны.
 
 - [ ] **Step 8: Прогнать**
 
