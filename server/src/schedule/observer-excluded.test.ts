@@ -26,8 +26,14 @@ function observer(db: Db, displayName: string) {
 describe("наблюдатель вне командной механики", () => {
   it("не попадает в честную раздачу", () => {
     const db = makeTestDb();
-    createEmployee(db, { displayName: "Аня" });
+    // Наблюдатель заводится ПЕРВЫМ, то есть получает меньший employeeId. Это не
+    // случайность: последний критерий тай-брейка в distributeFairly (shared/src/
+    // distribute.ts) — возрастание employeeId, и при равной нагрузке смена уходит
+    // младшему id. Заведи наблюдателя вторым — и смена досталась бы Ане просто по
+    // тай-брейку, тест зеленел бы и без правила «наблюдатель вне раздачи». Порядок
+    // здесь — то, что делает красный прогон (см. отчёт задачи) настоящим красным.
     const watcher = observer(db, "Игорь");
+    createEmployee(db, { displayName: "Аня" });
     // Пустая смена, которую раздача обязана кому-то отдать.
     createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", employeeId: null });
 
