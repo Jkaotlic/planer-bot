@@ -20,7 +20,7 @@ import { AdminRosterCsv } from "./AdminRosterCsv";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Волков Илья", isAdmin: false, isActive: true, telegramUserId: 1, birthDate: null, address: "Волков Илья", preferredName: null, excludedFromAssignment: false, excludedFromSwaps: false },
+  { id: 1, displayName: "Волков Илья", isAdmin: false, isActive: true, telegramUserId: 1, birthDate: null, address: "Волков Илья", preferredName: null, excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
 ];
 
 const PREVIEW: RosterImportPreview = {

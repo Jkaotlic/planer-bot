@@ -37,6 +37,8 @@ const toDto = (employee: AdminEmployeeDto): AdminEmployeeDto => ({
   birthDate: employee.birthDate,
   excludedFromAssignment: employee.excludedFromAssignment,
   excludedFromSwaps: employee.excludedFromSwaps,
+  isObserver: employee.isObserver,
+  selfScheduleEnabled: employee.selfScheduleEnabled,
 });
 
 export function createEmployeesMock(opts: EmployeesMockOptions) {
@@ -66,6 +68,8 @@ export function createEmployeesMock(opts: EmployeesMockOptions) {
         birthDate: null,
         excludedFromAssignment: false,
         excludedFromSwaps: false,
+        isObserver: false,
+        selfScheduleEnabled: false,
       };
       state.employees.push(employee);
       const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
@@ -125,6 +129,15 @@ export function createEmployeesMock(opts: EmployeesMockOptions) {
       if (patch.excludedFromSwaps !== undefined) employee.excludedFromSwaps = patch.excludedFromSwaps;
     },
 
+    // Роль «Наблюдатель». Отдельный метод, а не третье поле в `setEmployeeRestrictions`:
+    // на сервере это тоже отдельная запись в аудите — и снятие роли не трогает
+    // ограничения выше, см. `setEmployeeObserver` на сервере.
+    async setEmployeeObserver(id: number, isObserver: boolean): Promise<void> {
+      await delay(delayMs);
+      const employee = find(id);
+      if (employee) employee.isObserver = isObserver;
+    },
+
     /** Как на сервере: переставить одного, затем перенумеровать всех подряд. */
     async reorderEmployee(id: number, position: number): Promise<AdminEmployeeDto[]> {
       await delay(delayMs);
@@ -163,16 +176,19 @@ export function seedEmployeesMockState(): EmployeesMockState {
         id: 1, displayName: "Аня", preferredName: "Аня", address: "Аня", isAdmin: true,
         isActive: true, telegramUserId: 555, birthDate: "03-14",
         excludedFromAssignment: false, excludedFromSwaps: false,
+        isObserver: false, selfScheduleEnabled: false,
       },
       {
         id: 2, displayName: "Игорь", preferredName: null, address: "Игорь", isAdmin: false,
         isActive: true, telegramUserId: null, birthDate: null,
         excludedFromAssignment: false, excludedFromSwaps: false,
+        isObserver: false, selfScheduleEnabled: false,
       },
       {
         id: 3, displayName: "Марк", preferredName: null, address: "Марк", isAdmin: false,
         isActive: false, telegramUserId: null, birthDate: null,
         excludedFromAssignment: true, excludedFromSwaps: true,
+        isObserver: false, selfScheduleEnabled: false,
       },
     ],
   };

@@ -32,7 +32,7 @@ export const AUDIT_TYPES = [
   "distribution_applied", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
-  "employee_restrictions_changed",
+  "employee_restrictions_changed", "employee_observer_changed",
   "employee_invite_issued", "settings_changed", "notice_prefs_changed",
   "template_roles_changed", "template_rotation_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
@@ -341,6 +341,15 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     }
     return { icon: "🚦", title: "Изменены ограничения работника", lines };
   },
+  // Отдельно от `employee_restrictions_changed`: роль — не галочка, которую
+  // ставит админ по случаю, а утверждение о человеке, из которого следует всё
+  // остальное. Строка журнала обязана называть это переменой роли, а не
+  // «ограничением».
+  employee_observer_changed: (p) => ({
+    icon: "🧭",
+    title: p.after === true ? "Назначена роль «Наблюдатель»" : "Роль «Наблюдатель» снята",
+    lines: [personLabel(p, "displayName")],
+  }),
   settings_changed: (p) => {
     const lines = [personLabel(p, "displayName")];
     if (typeof p.remindersEnabled === "boolean") {

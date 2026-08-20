@@ -42,6 +42,14 @@ export const adminEmployeeSchema = z
     birthDate: z.string().nullable(),
     excludedFromAssignment: z.boolean(),
     excludedFromSwaps: z.boolean(),
+    /** Роль «Наблюдатель»: смотрит график, ведёт свой, шлёт анонсы — вне
+     *  раздачи, обменов и передачи смен. Снятие роли не трогает исключения
+     *  выше — они остаются такими же, как были до неё. */
+    isObserver: z.boolean(),
+    /** Тумблер «веду свой график сам», доступный только наблюдателю. Хранится
+     *  и отдаётся всегда — снятая роль его не обнуляет, чтобы значение не
+     *  терялось при повторном включении. */
+    selfScheduleEnabled: z.boolean(),
   })
   .strict();
 export type AdminEmployeeDto = z.infer<typeof adminEmployeeSchema>;

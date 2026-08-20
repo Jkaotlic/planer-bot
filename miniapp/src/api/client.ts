@@ -622,6 +622,11 @@ export interface ApiClient {
    *  this person's open swap requests and notifies them — the caller doesn't
    *  need to do anything else for that to happen. */
   setEmployeeRestrictions(id: number, patch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean }): Promise<void>;
+  /** Роль «Наблюдатель»: смотрит график, ведёт свой, шлёт анонсы — вне
+   *  раздачи, обменов и передачи смен. Снятие роли не переписывает
+   *  `excludedFromAssignment`/`excludedFromSwaps` — админ должен видеть, куда
+   *  человек вернётся. */
+  setEmployeeObserver(id: number, isObserver: boolean): Promise<void>;
   /** Move a worker to `position` (1-based). The server renumbers the rest. */
   reorderEmployee(id: number, position: number): Promise<Employee[]>;
   /** (Re)issue the invite link for a worker who hasn't linked Telegram yet. */

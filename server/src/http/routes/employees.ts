@@ -31,6 +31,7 @@ import {
   restoreEmployee,
   setBirthDate,
   setEmployeeAdmin,
+  setEmployeeObserver,
   setEmployeeRestrictions,
   setInviteToken,
   setPreferredName,
@@ -68,6 +69,8 @@ function toAdminEmployee(employee: EmployeeRow): AdminEmployeeDto {
     birthDate: employee.birthDate,
     excludedFromAssignment: employee.excludedFromAssignment,
     excludedFromSwaps: employee.excludedFromSwaps,
+    isObserver: employee.isObserver,
+    selfScheduleEnabled: employee.selfScheduleEnabled,
   };
 }
 
@@ -130,14 +133,15 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     const id = Number(c.req.param("id"));
     const body = (await c.req.json().catch(() => ({}))) as {
       displayName?: unknown; birthDate?: unknown; preferredName?: unknown;
-      excludedFromAssignment?: unknown; excludedFromSwaps?: unknown;
+      excludedFromAssignment?: unknown; excludedFromSwaps?: unknown; isObserver?: unknown;
     };
     const hasName = body.displayName !== undefined;
     const hasBirthday = body.birthDate !== undefined;
     const hasPreferred = body.preferredName !== undefined;
     const hasExcludedAssignment = body.excludedFromAssignment !== undefined;
     const hasExcludedSwaps = body.excludedFromSwaps !== undefined;
-    if (!hasName && !hasBirthday && !hasPreferred && !hasExcludedAssignment && !hasExcludedSwaps) {
+    const hasObserver = body.isObserver !== undefined;
+    if (!hasName && !hasBirthday && !hasPreferred && !hasExcludedAssignment && !hasExcludedSwaps && !hasObserver) {
       return c.json({ error: "displayName is required" }, 400);
     }
 
@@ -157,6 +161,9 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     }
     if (hasExcludedSwaps && typeof body.excludedFromSwaps !== "boolean") {
       return c.json({ error: "excludedFromSwaps должен быть true или false" }, 400);
+    }
+    if (hasObserver && typeof body.isObserver !== "boolean") {
+      return c.json({ error: "isObserver должен быть true или false" }, 400);
     }
 
     let employee = getEmployeeById(db, id);
@@ -182,10 +189,13 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       });
     }
 
-    if (hasExcludedAssignment || hasExcludedSwaps) {
+    if (hasExcludedAssignment || hasExcludedSwaps || hasObserver) {
       const restrictionsPatch: { excludedFromAssignment?: boolean; excludedFromSwaps?: boolean } = {};
       if (hasExcludedAssignment) restrictionsPatch.excludedFromAssignment = body.excludedFromAssignment as boolean;
       if (hasExcludedSwaps) restrictionsPatch.excludedFromSwaps = body.excludedFromSwaps as boolean;
+      // Отдельный снимок: роль — не одна из двух галочек-ограничений, у неё
+      // своя строка журнала (см. коммент к `setEmployeeObserver`).
+      const beforeObserver = employee.isObserver;
 
       // Whether this PATCH newly excludes the person from swaps is already
       // knowable from the request body and the snapshot above. Read the
@@ -197,12 +207,13 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
         ? pendingSwapsForEmployee(db, id)
         : { pending: [], payloads: [] };
 
-      // The flag and the cancellations are one fact — half of it landing is
-      // worse than neither (an admin would see the flag set while the
-      // buttons still worked). Same shape as `setSwapLock`.
+      // The flag(s), the role and the cancellations are one fact — half of it
+      // landing is worse than neither (an admin would see the flag set while
+      // the buttons still worked). Same shape as `setSwapLock`.
       db.transaction((tx) => {
-        employee = setEmployeeRestrictions(tx, id, restrictionsPatch) ?? employee;
+        if (hasExcludedAssignment || hasExcludedSwaps) employee = setEmployeeRestrictions(tx, id, restrictionsPatch) ?? employee;
         if (willExcludeFromSwaps) cancelSwapsForEmployeeTx(tx, pending);
+        if (hasObserver) employee = setEmployeeObserver(tx, id, body.isObserver as boolean) ?? employee;
       });
 
       const afterRestrictions = { excludedFromAssignment: employee.excludedFromAssignment, excludedFromSwaps: employee.excludedFromSwaps };
@@ -217,6 +228,17 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
           displayName: employee.displayName,
           before: beforeRestrictions,
           after: afterRestrictions,
+        });
+      }
+
+      // Своя строка журнала, тем же правилом «пишем только реальную смену»:
+      // повторная отправка того же значения не должна плодить записи.
+      if (hasObserver && employee.isObserver !== beforeObserver) {
+        recordAudit(db, "employee_observer_changed", c.get("auth").employeeId, {
+          employeeId: id,
+          displayName: employee.displayName,
+          before: beforeObserver,
+          after: employee.isObserver,
         });
       }
 
