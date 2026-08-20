@@ -3,7 +3,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { createBot } from "./bot";
 import { BTN_MY_SHIFTS } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -77,5 +77,23 @@ describe("вход в мини-апп по кнопке «Мои смены»: �
     expect(webAppLabels(reply!.payload.reply_markup)).not.toContain("📣 Анонс");
     // Смены и обе формы самозаписи остаются — эта строка не про их отсутствие.
     expect(webAppLabels(reply!.payload.reply_markup)).toEqual(["📋 Открыть смены", "🤒 Больничный", "📌 Мероприятие"]);
+  });
+});
+
+describe("наблюдателю кнопка анонса видна не по флагу isAdmin, а по canAnnounce", () => {
+  it("наблюдателю (isObserver=true, isAdmin=false) кнопка анонса видна", async () => {
+    const db = makeTestDb();
+    const daria = createEmployee(db, { displayName: "Даша Орлова", inviteToken: "d" });
+    setEmployeeObserver(db, daria.id, true);
+    linkTelegramAccount(db, "d", 444);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(myShiftsTap(444));
+
+    const reply = calls.find((c) => c.method === "sendMessage" && c.payload.text === "Что открыть:");
+    expect(reply).toBeDefined();
+    // Держит `canAnnounce`, а не `isAdmin`: у этого человека isAdmin=false, и
+    // старое условие `if (opts.isAdmin)` эту кнопку не показало бы вовсе.
+    expect(webAppLabels(reply!.payload.reply_markup)).toContain("📣 Анонс");
   });
 });
