@@ -83,11 +83,22 @@ export const MOCK_ME: Me = {
   remindersEnabled: true,
   swapsLocked: false,
   excludedFromSwaps: false,
+  // Дев-мок всегда админ (см. комментарий выше) — наблюдателя тут не пощупать
+  // руками, зато экран, скрытый и от админа, и от наблюдателя, виден сразу.
+  isObserver: false,
+  selfScheduleEnabled: false,
+  canAnnounce: true,
 };
 
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {
   await delay(200);
   MOCK_ME.remindersEnabled = enabled;
+  return enabled;
+}
+
+export async function mockSetSelfScheduleEnabled(enabled: boolean): Promise<boolean> {
+  await delay(200);
+  MOCK_ME.selfScheduleEnabled = enabled;
   return enabled;
 }
 
