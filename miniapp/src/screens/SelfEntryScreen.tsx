@@ -46,7 +46,7 @@ export function defaultEventEnd(start: string): string {
  */
 export function screenFromSearch(search: string): SelfEntryMode | null {
   const value = new URLSearchParams(search).get("screen");
-  return value === "sick" || value === "event" ? value : null;
+  return value === "sick" || value === "event" || value === "shift" ? value : null;
 }
 
 /**
