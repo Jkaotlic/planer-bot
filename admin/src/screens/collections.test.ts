@@ -166,6 +166,21 @@ describe("recipientsPhrase", () => {
     expect(recipientsPhrase(5)).toBe("5 коллегам");
     expect(recipientsPhrase(0)).toBe("0 коллегам");
   });
+
+  /**
+   * В дательном падеже нет различия 2–4 / 5+ (в отличие от `recipientsSubject`
+   * выше) — единственная граница «оканчивается на 1, кроме 11». До этого теста
+   * функция проверяла ровно `count === 1`, и команда из 21 человека читала
+   * «Отправить 21 коллегам?» — не гипотетический случай: в команде 32 человека.
+   */
+  it("«оканчивается на 1, кроме 11» — граница, а не только count === 1", () => {
+    expect(recipientsPhrase(1)).toBe("1 коллеге");
+    expect(recipientsPhrase(2)).toBe("2 коллегам");
+    expect(recipientsPhrase(5)).toBe("5 коллегам");
+    expect(recipientsPhrase(11)).toBe("11 коллегам");
+    expect(recipientsPhrase(21)).toBe("21 коллеге");
+    expect(recipientsPhrase(32)).toBe("32 коллегам");
+  });
 });
 
 describe("recipientsSubject", () => {
