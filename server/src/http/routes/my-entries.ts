@@ -160,12 +160,14 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const entry = createShift(db, { ...rowFor(body), employeeId });
     recordAudit(db, "self_entry_created", employeeId, entryAuditPayload(db, entry));
     if (bot) {
-      await notifyAdmins(
-        bot,
-        db,
-        "self_entries",
-        selfEntryCreatedText(nameOf(db, employeeId) ?? "Работник", entry, riskLines(employeeId, entry)),
-      );
+      // Один и тот же поступок, но разные потоки: у наблюдателя это «человек
+      // ведёт свой график», у работника — «работник выпал из смены».
+      const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
+      // Только больничный и мероприятие освобождают чужую работу — своя смена
+      // наблюдателя ничего не освобождает, и строка «а на этот день оставалось…»
+      // там означала бы неправду.
+      const lines = entry.category === "shift" ? [] : riskLines(employeeId, entry);
+      await notifyAdmins(bot, db, noticeKind, selfEntryCreatedText(nameOf(db, employeeId) ?? "Работник", entry, lines));
     }
     // Наблюдатель выведен из передачи смен целиком: предлагать его смену
     // команде некому и незачем, а его больничный никакой чужой работы не
@@ -231,11 +233,14 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
     }
     if (bot) {
+      // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
+      const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
+      const lines = updated.category === "shift" ? [] : riskLines(employeeId, updated);
       await notifyAdmins(
         bot,
         db,
-        "self_entries",
-        selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", existing, updated, riskLines(employeeId, updated)),
+        noticeKind,
+        selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", existing, updated, lines),
       );
     }
     return c.json({ entry: updated });
@@ -285,7 +290,9 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     }
 
     if (bot) {
-      await notifyAdmins(bot, db, "self_entries", selfEntryDeletedText(nameOf(db, employeeId) ?? "Работник", existing));
+      // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
+      const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
+      await notifyAdmins(bot, db, noticeKind, selfEntryDeletedText(nameOf(db, employeeId) ?? "Работник", existing));
     }
     return c.json({ ok: true });
   });

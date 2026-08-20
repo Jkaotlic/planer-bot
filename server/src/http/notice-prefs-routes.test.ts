@@ -23,7 +23,7 @@ describe("GET/PATCH /api/me/notifications", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kinds: { kind: string; enabled: boolean; title: string }[] };
-    expect(body.kinds).toHaveLength(6);
+    expect(body.kinds).toHaveLength(7);
     expect(body.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(false);
     expect(body.kinds.find((k) => k.kind === "weekend")?.enabled).toBe(true);
   });

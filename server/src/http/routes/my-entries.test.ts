@@ -12,6 +12,7 @@ import {
 import { createShift, getShift, listShiftsInRange } from "../../repo/shifts";
 import { listRecentAudit } from "../../repo/audit";
 import { listHandoversForEntry } from "../../repo/handovers";
+import { setNoticeMuted } from "../../repo/notice-prefs";
 import { signInitData } from "../../auth/telegram";
 import { teamNow } from "../../util/team-time";
 import { addDaysIso } from "@planer/shared";
@@ -359,5 +360,45 @@ describe("своя смена наблюдателя", () => {
     })));
 
     expect(listHandoversForEntry(db, (await res.json()).entry.id)).not.toHaveLength(0);
+  });
+});
+
+describe("письмо админам про правку наблюдателя", () => {
+  it("правку наблюдателя админам шлёт отдельный вид письма, и его можно выключить", async () => {
+    const db = makeTestDb();
+    observerWorker(db, 611, "Аня", true);
+    const boss = worker(db, 612, "Игорь");
+    setEmployeeAdmin(db, boss.id, true);
+    const quiet = worker(db, 613, "Марк");
+    setEmployeeAdmin(db, quiet.id, true);
+    setNoticeMuted(db, quiet.id, "observer_entries", true);
+
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 611);
+
+    await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "shift", date: day(1), start: "09:00", end: "18:00",
+    })));
+
+    expect(sent.map((m) => m.to)).toEqual([612]);
+    expect(sent[0]!.text).toContain("поставил(а) себе смену");
+  });
+
+  it("больничный обычного работника по-прежнему идёт видом self_entries", async () => {
+    const db = makeTestDb();
+    worker(db, 614, "Даша");
+    const boss = worker(db, 615, "Игорь");
+    setEmployeeAdmin(db, boss.id, true);
+    setNoticeMuted(db, boss.id, "observer_entries", true);
+
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 614);
+
+    await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })));
+
+    // Мьют «наблюдателей» не должен глушить письма про команду.
+    expect(sent.map((m) => m.to)).toContain(615);
   });
 });
