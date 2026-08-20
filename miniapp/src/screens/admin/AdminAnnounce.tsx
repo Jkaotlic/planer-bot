@@ -66,8 +66,7 @@ export function AdminAnnounce() {
   }
 
   // Сервер уже исключил самого отправителя и архивных — здесь только выбор.
-  const active = recipients;
-  const picked = audienceMode === "all" ? active : active.filter((e) => selectedIds.has(e.id));
+  const picked = audienceMode === "all" ? recipients : recipients.filter((e) => selectedIds.has(e.id));
   // Выбранный явно, но без телеграма, в отчёт попадёт — но не в это число:
   // сервер его тоже не отправит. Показываем заранее, а не только в отчёте
   // после отправки, чтобы «кому уйдёт» не расходилось с тем, что реально дойдёт.
@@ -162,10 +161,10 @@ export function AdminAnnounce() {
 
               {audienceMode === "picked" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 10 }}>
-                  {active.length === 0 ? (
+                  {recipients.length === 0 ? (
                     <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Выбирать некого.</div>
                   ) : (
-                    active.map((e) => (
+                    recipients.map((e) => (
                       <label
                         key={e.id}
                         style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}
