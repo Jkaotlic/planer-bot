@@ -1,5 +1,5 @@
 import type { Db } from "../db/client";
-import type { EntryCategory } from "@planer/shared";
+import { canSwap, type EntryCategory } from "@planer/shared";
 import { listActiveInRosterOrder } from "./employees";
 import { listShiftsOverlapping } from "./shifts";
 
@@ -45,7 +45,10 @@ export function readTeamSchedule(db: Db, from: string, to: string): TeamSchedule
     id: employee.id,
     displayName: employee.displayName,
     rosterOrder: employee.rosterOrder,
-    excludedFromSwaps: employee.excludedFromSwaps,
+    // Эффективное, а не поле строки: сетка гасит «Обменять» на чужой смене
+    // этим значением, и роль наблюдателя обязана перекрывать снятую галочку —
+    // тем же правилом, что и в `GET /api/me`.
+    excludedFromSwaps: !canSwap(employee),
   }));
   const activeIds = new Set(active.map((employee) => employee.id));
   const shifts = listShiftsOverlapping(db, from, to)
