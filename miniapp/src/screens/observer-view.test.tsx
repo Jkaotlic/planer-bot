@@ -9,7 +9,9 @@ import { App } from "../App";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** Тот же ответ, что отдаёт `/api/bootstrap`, с подменённым «кто я». */
-function bootstrapAs(me: Partial<{ isObserver: boolean; canAnnounce: boolean; selfScheduleEnabled: boolean }>) {
+function bootstrapAs(
+  me: Partial<{ isAdmin: boolean; isObserver: boolean; canAnnounce: boolean; selfScheduleEnabled: boolean }>,
+) {
   return {
     me: {
       id: 1, displayName: "Аня", address: "Аня", preferredName: null,
@@ -78,5 +80,22 @@ describe("мини-апп глазами наблюдателя", () => {
   it("с включённым — кнопка есть", async () => {
     const el = await mountAs({ isObserver: true, selfScheduleEnabled: true });
     expect(el.textContent ?? "").toContain("Поставить себе смену");
+  });
+
+  // Снятие роли не гасит `selfScheduleEnabled` в БД (осознанно, см. спеку) — колонка
+  // «переживает» роль. Экран обязан читать эффективное право (`canAddOwnShifts`), а не
+  // сырой тумблер, иначе бывший наблюдатель видит кнопку, нажатие на которую ничего не
+  // делает, и сам убрать её не может: тумблер спрятан за `isObserver`.
+  it("у бывшего наблюдателя с уцелевшим тумблером кнопки нет", async () => {
+    const el = await mountAs({ isObserver: false, selfScheduleEnabled: true });
+    expect(el.textContent ?? "").not.toContain("Поставить себе смену");
+  });
+
+  // Вкладка «Анонс» — часть общей нижней панели у наблюдателя; у админа то же право
+  // (`canAnnounce`) уже покрыто админкой, и повторной вкладки быть не должно — иначе
+  // рассылка стала бы доступна из двух разных мест с разным списком получателей.
+  it("у админа с canAnnounce отдельной вкладки «Анонс» нет — она уже в админке", async () => {
+    const el = await mountAs({ isAdmin: true, canAnnounce: true });
+    expect(hasTab(el, "Анонс")).toBe(false);
   });
 });

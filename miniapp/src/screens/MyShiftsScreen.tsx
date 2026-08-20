@@ -1,5 +1,5 @@
 import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
-import { swapBlockReason } from "@planer/shared";
+import { canAddOwnShifts, swapBlockReason } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
 import { AddressField } from "../components/AddressField";
@@ -93,10 +93,12 @@ export function MyShiftsScreen({
             <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("event")}>
               📌 Мероприятие
             </Button>
-            {/* Только у наблюдателя с включённым тумблером — у остальных график
-                ведёт админ, и кнопка, отвечающая 403 на каждое нажатие, хуже
-                отсутствующей. */}
-            {me.selfScheduleEnabled && (
+            {/* Эффективное право (`canAddOwnShifts`), не сырой тумблер: снятие роли
+                намеренно не гасит `selfScheduleEnabled` в БД (см. спеку), поэтому у
+                бывшего наблюдателя галочка может остаться поднятой — кнопка, ведущая
+                на форму, которая никогда не откроется (`App.tsx`), и отвечающая 403
+                на каждое нажатие, хуже отсутствующей. */}
+            {canAddOwnShifts(me) && (
               <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("shift")}>
                 🕒 Поставить себе смену
               </Button>
