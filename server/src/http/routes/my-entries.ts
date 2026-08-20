@@ -222,15 +222,21 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     if (!updated) return c.json({ error: "not_found" }, 404);
 
     recordAudit(db, "self_entry_updated", employeeId, { before, after: entryAuditPayload(db, updated) });
-    // Наблюдатель выведен из передачи смен целиком: см. комментарий у POST.
-    if (updated.category === "sick_leave" && !me.isObserver) {
+    if (updated.category === "sick_leave") {
       // Порядок важен: сперва гасим дни, которые больничный больше не покрывает,
       // потом открываем те, до которых он теперь дотянулся. Продление — это
       // правка той же записи, и смена нового дня остаётся без человека точно так
       // же, как в первый день.
       const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
+      // `cancelHandoversForEntry` — БЕЗУСЛОВНО, не под `!me.isObserver`. Роль
+      // закрывает ЗАПУСК лестницы, а не её уборку: если лестница когда-то
+      // поднялась (человек был обычным работником), укороченный больничный
+      // обязан погасить дни, о которых людям уже написали, — независимо от
+      // того, кем этот человек стал с тех пор.
       await cancelHandoversForEntry(handoverDeps(), updated.id, covered);
-      await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
+      // А вот НОВУЮ лестницу для наблюдателя запускать по-прежнему нельзя —
+      // тут гейт остаётся: см. комментарий у POST.
+      if (!me.isObserver) await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
     }
     if (bot) {
       // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
@@ -266,8 +272,18 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // Гасим ДО удаления записи: `cancelHandoversForEntry` читает смены, чтобы
     // назвать их в письме «выходить не нужно», а после `deleteShift` называть
     // будет нечего.
-    // Наблюдатель выведен из передачи смен целиком: см. комментарий у POST.
-    if (existing.category === "sick_leave" && !me.isObserver) {
+    //
+    // Оба вызова — БЕЗУСЛОВНО, не под `!me.isObserver`. Роль закрывает ЗАПУСК
+    // лестницы (см. POST), а не её уборку: отвязка от `sickEntryId` — гигиена
+    // внешнего ключа, а не правило роли (без неё `deleteShift` отвечает
+    // `invalid_reference` для ЛЮБОЙ записи с висящей передачей, кем бы её
+    // владелец ни был), а письмо «выходить не нужно» — долг перед теми, кому
+    // уже разослали веер, и этот долг не аннулируется чужим повышением до
+    // наблюдателя. Раньше оба вызова были под гейтом — это ломало удаление
+    // именно того больничного, что подняло лестницу, пока человек ещё был
+    // обычным работником, а потом стал наблюдателем: `deleteShift` падал на
+    // FK, потому что отвязка молча пропускалась вместе с остальным блоком.
+    if (existing.category === "sick_leave") {
       await cancelHandoversForEntry(handoverDeps(), existing.id, []);
       // Затем отвязать: `sickEntryId` — внешний ключ, и `deleteShift` без этого
       // отвечает `invalid_reference`. Строки передач остаются как история.

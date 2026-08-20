@@ -11,7 +11,7 @@ import {
 } from "../../repo/employees";
 import { createShift, getShift, listShiftsInRange } from "../../repo/shifts";
 import { listRecentAudit } from "../../repo/audit";
-import { listHandoversForEntry } from "../../repo/handovers";
+import { listHandoversForEntry, getHandover } from "../../repo/handovers";
 import { setNoticeMuted } from "../../repo/notice-prefs";
 import { signInitData } from "../../auth/telegram";
 import { teamNow } from "../../util/team-time";
@@ -392,15 +392,20 @@ describe("своя смена наблюдателя", () => {
 });
 
 /**
- * POST уже доказан выше — на своей смене, чтобы «пусто» не совпадало с «пусто
- * независимо от гейта». PATCH и DELETE несут тот же самый `&& !me.isObserver`,
- * скопированный в код по брифу, но до этого раунда ревью ни один тест не
- * проверял его В ЭТИХ ДВУХ местах отдельно — только то, что происходит в
- * POST. «Условие стоит в коде» и «условие работает» — разные утверждения, и
- * здесь у PATCH и DELETE было только первое.
+ * Роль закрывает ЗАПУСК лестницы, а не её уборку.
+ *
+ * Первая версия гейта (раунд 2 ревью) заворачивала PATCH и DELETE целиком в
+ * `&& !me.isObserver` — по образцу POST. Это было смазанной границей: POST
+ * решает «начинать ли», а PATCH и DELETE могут иметь дело с лестницей,
+ * поднятой ДО того, как человек стал наблюдателем (обычный работник заболел,
+ * лестница пошла, потом админ сделал его наблюдателем). Гасить её и
+ * отвязывать от FK нужно всегда — иначе `deleteShift` падает на живой
+ * `handovers.sickEntryId`, а укороченный больничный оставляет неактуальные
+ * предложения висеть. Только СТАРТ новой лестницы (`startHandovers`)
+ * остаётся под ролью.
  */
-describe("гейт передачи смены в PATCH и DELETE — наблюдатель", () => {
-  it("PATCH: у наблюдателя лестница не поднимается — cancelHandoversForEntry/startHandovers не позваны", async () => {
+describe("гейт передачи смены — роль закрывает запуск, не уборку", () => {
+  it("PATCH: у наблюдателя startHandovers не зовётся, cancelHandoversForEntry зовётся всегда", async () => {
     const db = makeTestDb();
     const me = observerWorker(db, 616, "Аня", true);
     createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
@@ -419,11 +424,13 @@ describe("гейт передачи смены в PATCH и DELETE — наблю
     }, "PATCH")));
 
     expect(res.status).toBe(200);
-    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBe(cancelBefore);
+    // Гашение — не под ролью: зовётся всегда, даже если гасить нечего.
+    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    // А новый запуск — под ролью, как и в POST.
     expect(vi.mocked(startHandovers).mock.calls.length).toBe(startBefore);
   });
 
-  it("PATCH: у обычного работника лестница поднимается — вызовы реально происходят", async () => {
+  it("PATCH: у обычного работника оба вызова происходят", async () => {
     const db = makeTestDb();
     const me = worker(db, 617, "Аня");
     const mate = worker(db, 618, "Игорь");
@@ -444,13 +451,14 @@ describe("гейт передачи смены в PATCH и DELETE — наблю
     }, "PATCH")));
 
     expect(res.status).toBe(200);
-    // «Не позваны» у наблюдателя опирается на «позваны» здесь — тот же путь,
-    // тот же db-стейт, только без роли.
+    // Опорная точка для теста выше: без роли позваны оба — значит «не позван
+    // startHandovers у наблюдателя» доказывает именно гейт, а не то, что
+    // вызывать было нечего.
     expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
     expect(vi.mocked(startHandovers).mock.calls.length).toBeGreaterThan(startBefore);
   });
 
-  it("DELETE: у наблюдателя detachHandoversFromEntry/cancelHandoversForEntry не позваны", async () => {
+  it("DELETE: у наблюдателя cancelHandoversForEntry и detachHandoversFromEntry зовутся тоже", async () => {
     const db = makeTestDb();
     const me = observerWorker(db, 619, "Аня", true);
     createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
@@ -467,11 +475,14 @@ describe("гейт передачи смены в PATCH и DELETE — наблю
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, undefined, "DELETE")));
 
     expect(res.status).toBe(200);
-    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBe(cancelBefore);
-    expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBe(detachBefore);
+    // Раунд 2 проверял обратное («не позваны») — это и был смазанный гейт.
+    // Уборка не под ролью: у наблюдателя оба вызова происходят точно так же,
+    // как у обычного работника.
+    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBeGreaterThan(detachBefore);
   });
 
-  it("DELETE: у обычного работника detach/cancel реально позваны", async () => {
+  it("DELETE: у обычного работника оба вызова происходят", async () => {
     const db = makeTestDb();
     const me = worker(db, 620, "Аня");
     const mate = worker(db, 621, "Игорь");
@@ -492,6 +503,94 @@ describe("гейт передачи смены в PATCH и DELETE — наблю
     expect(res.status).toBe(200);
     expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
     expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBeGreaterThan(detachBefore);
+  });
+});
+
+/**
+ * Регресс с ролью, поменявшейся ПОСЛЕ того, как лестница уже поднялась.
+ *
+ * Это ровно тот сценарий, на котором прошлый раунд гейта ломался: обычный
+ * работник заболевает — лестница поднимается по-настоящему (не спай, а
+ * реальные строки `handovers`, потому что тут важно именно поведение с
+ * живым FK) — админ ПОСЛЕ ЭТОГО делает его наблюдателем — и через тот же
+ * маршрут `/api/my/entries` человек правит или удаляет свой старый больничный.
+ * До этого исправления `DELETE` падал на `FOREIGN KEY constraint failed`
+ * (редактор ошибок сервера превращает это в `invalid_reference`, 400 — но не
+ * 200 — то есть запись НЕ удаляется, а API возвращает ошибку по операции,
+ * которая обязана была пройти).
+ */
+describe("роль поменялась после того, как лестница уже поднялась", () => {
+  it("DELETE не падает, запись удаляется, передачи отвязаны — а не висят на удалённой записи", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 622, "Аня");
+    const mate = worker(db, 623, "Игорь");
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 622);
+
+    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "sick_leave", date: day(1),
+    })));
+    expect(created.status).toBe(201);
+    const entryId = (await created.json()).entry.id;
+    // Лестница действительно поднялась, пока Аня была обычным работником —
+    // иначе весь остальной тест доказывал бы пустоту, которая была бы пустой
+    // и без сценария.
+    const raised = listHandoversForEntry(db, entryId);
+    expect(raised.length).toBeGreaterThan(0);
+    expect(mate.id).toBeDefined();
+
+    // Админ повышает её ПОСЛЕ того, как лестница уже стоит.
+    setEmployeeObserver(db, me.id, true);
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(getShift(db, entryId)).toBeUndefined();
+    // Отвязаны, а не висят: `listHandoversForEntry` ищет по `sickEntryId`,
+    // и после отвязки строки под этим id больше не находятся —
+    // хотя сами строки передач остались как история (`getHandover` по id).
+    expect(listHandoversForEntry(db, entryId)).toHaveLength(0);
+    for (const h of raised) {
+      const after = getHandover(db, h.id);
+      expect(after).toBeDefined();
+      expect(after!.sickEntryId).toBeNull();
+    }
+  });
+
+  it("PATCH (укоротить старый больничный) тоже не падает и гасит лишний день", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 624, "Аня");
+    const mate = worker(db, 625, "Игорь");
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    createShift(db, { date: day(2), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 624);
+
+    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "sick_leave", date: day(1), endDate: day(2),
+    })));
+    expect(created.status).toBe(201);
+    const entryId = (await created.json()).entry.id;
+    const raised = listHandoversForEntry(db, entryId);
+    // Оба дня — иначе укорачивать нечего.
+    expect(raised.length).toBeGreaterThanOrEqual(2);
+    expect(mate.id).toBeDefined();
+
+    setEmployeeObserver(db, me.id, true);
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
+      category: "sick_leave", date: day(1), endDate: day(1),
+    }, "PATCH")));
+
+    expect(res.status).toBe(200);
+    // День 2 больше не покрыт больничным — его передача должна погаситься
+    // (`cancelled`), а не остаться висеть предложением на смену, которую
+    // болеющий на самом деле выйдет работать.
+    const stillLive = listHandoversForEntry(db, entryId).filter((h) => h.status === "offered" || h.status === "fanned");
+    const day2Shift = listShiftsInRange(db, day(2), day(2)).find((s) => s.employeeId === me.id && s.category === "shift");
+    expect(stillLive.some((h) => h.shiftId === day2Shift?.id)).toBe(false);
   });
 });
 
