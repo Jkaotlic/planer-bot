@@ -1549,13 +1549,6 @@ export async function mockSetNoticePref(kind: string, enabled: boolean): Promise
 }
 
 /**
- * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
- * — иначе экран в dev показал бы одних людей, а мок отчитывался бы про других.
- * Правила ровно те, что у сервера (`announcementRecipients`): архивный или без
- * телеграма, даже выбранный явно, попадает в пул и в `unreachable` поимённо, а
- * не пропадает молча; отправитель исключается всегда.
- */
-/**
  * Кому уйдёт «всем» — глазами отправителя, с id, а не именами. Тот же пул,
  * что и ветка «всем» в `mockSendAnnouncement`, зеркалит серверный
  * `announcementRoster`: непривязанный к телеграму виден и назван, а не
@@ -1570,6 +1563,13 @@ export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecip
   }));
 }
 
+/**
+ * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
+ * — иначе экран в dev показал бы одних людей, а мок отчитывался бы про других.
+ * Правила ровно те, что у сервера (`announcementRecipients`): архивный или без
+ * телеграма, даже выбранный явно, попадает в пул и в `unreachable` поимённо, а
+ * не пропадает молча; отправитель исключается всегда.
+ */
 export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
   await delay(300);
   if (!text.trim()) throw new Error("Текст объявления пустой");
