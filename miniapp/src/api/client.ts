@@ -94,8 +94,10 @@ export interface TeamEmployee {
   id: number;
   displayName: string;
   rosterOrder: number | null;
-  /** Admin took them out of swaps — the propose-swap candidate list must not
-   *  offer them, and the "Обменять" screen shouldn't count them as a duplicate. */
+  /** The EFFECTIVE value (`shared/access.ts`'s `canSwap`) — always `true` for
+   *  an observer even if the underlying flag in the database is off. The
+   *  propose-swap candidate list must not offer them, and the "Обменять"
+   *  screen shouldn't count them as a duplicate. */
   excludedFromSwaps: boolean;
 }
 
