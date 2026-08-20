@@ -161,7 +161,7 @@ describe("наблюдатель вне командной механики", ()
   // ни считать его в `intended`, иначе «дошло до N из M» врёт о том, кого спросили.
   it("notifyVacantSlot пропускает наблюдателя и не считает его в intended", async () => {
     const db = makeTestDb();
-    const partner = createEmployee(db, { displayName: "Аня", inviteToken: "i-111" });
+    createEmployee(db, { displayName: "Аня", inviteToken: "i-111" });
     linkTelegramAccount(db, "i-111", 111);
     const person = createEmployee(db, { displayName: "Игорь", inviteToken: "i-222" });
     linkTelegramAccount(db, "i-222", 222);
