@@ -3,6 +3,9 @@ import type { EntryCategory } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
+  AnnouncementAudience,
+  AnnouncementRecipient,
+  AnnouncementResult,
   Employee,
   FeedEvent,
   NewEntryInput,
@@ -1043,4 +1046,49 @@ export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult>
     delivered: team.filter((e) => e.telegramUserId != null).length,
     intended: team.length,
   };
+}
+
+// --- Анонсы ---------------------------------------------------------------
+// Мок зеркалит `mockGetAnnouncementRecipients`/`mockSendAnnouncement` из
+// `miniapp/src/api/mock.ts`: тот же пул, то же правило self-exclude. У консоли
+// в DEV нет своего логина — «я» это `viewerEmployeeId()`, тот же приём, что уже
+// применяется у `setSwapsLock` и сборов выше.
+
+/**
+ * Кому уйдёт «всем» — глазами отправителя. Тот же пул, что и ветка «всем» в
+ * `mockSendAnnouncement` ниже: непривязанный к телеграму виден и назван, а не
+ * пропадает из списка.
+ */
+export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecipient[]> {
+  await delay(150);
+  const self = viewerEmployeeId();
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== self).map((e) => ({
+    id: e.id,
+    displayName: e.displayName,
+    reachable: e.telegramUserId != null,
+  }));
+}
+
+/**
+ * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
+ * — иначе экран в DEV показал бы одних людей, а мок отчитывался бы про других.
+ * Архивный или без телеграма, даже выбранный явно, попадает в пул и в
+ * `unreachable` поимённо, а не пропадает молча; отправитель исключается всегда.
+ */
+export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
+  await delay(300);
+  if (!text.trim()) throw new Error("Текст объявления пустой");
+
+  const self = viewerEmployeeId();
+  const pool =
+    audience === "all"
+      ? EMPLOYEES.filter((e) => e.isActive && e.id !== self)
+      : [...new Set(audience)]
+          .map((id) => EMPLOYEES.find((e) => e.id === id))
+          .filter((e): e is Employee => e != null && e.id !== self);
+
+  const reachable = pool.filter((e) => e.isActive && e.telegramUserId != null);
+  const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
+
+  return { delivered: reachable.length, intended: reachable.length, unreachable };
 }

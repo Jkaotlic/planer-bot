@@ -44,6 +44,8 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  mockGetAnnouncementRecipients,
+  mockSendAnnouncement,
 } from "./mock";
 
 /**
@@ -370,6 +372,32 @@ export interface SwapLockResult {
   intended: number;
 }
 
+/** Зеркалит `ANNOUNCEMENT_TEXT_MAX` из `server/src/announcements/announcement-service.ts`.
+ *  Не импортируется оттуда: тот модуль тянет `grammy`, серверную зависимость, которой
+ *  не место в бандле консоли. Разойдись значения — счётчик соврёт на пару символов,
+ *  но 400 всё равно решает сервер; здесь только подсказка. Само число и это же
+ *  рассуждение уже есть в `miniapp/src/api/client.ts` — константа не общая (нет в
+ *  `@planer/shared`), поэтому продублирована так же, как её продублировал мини-апп. */
+export const ANNOUNCEMENT_TEXT_MAX = 2000;
+
+/** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/announcements`. */
+export type AnnouncementAudience = "all" | number[];
+
+/** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
+export interface AnnouncementResult {
+  delivered: number;
+  intended: number;
+  unreachable: string[];
+}
+
+/** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
+ *  Без телефонов и инвайт-токенов: экрану «Анонсы» нужны ровно имя и «дойдёт ли». */
+export interface AnnouncementRecipient {
+  id: number;
+  displayName: string;
+  reachable: boolean;
+}
+
 /**
  * Кто вошёл в консоль — ровно столько, сколько нужно подписи в сайдбаре.
  *
@@ -443,6 +471,12 @@ export interface ApiClient {
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
+  /** Кому уйдёт анонс, глазами того, кто его пишет — сервер уже исключил
+   *  самого отправителя и архивных. */
+  getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
+  /** Рассылает объявление команде или выбранным. Подтверждение — на
+   *  вызывающем, тот же узор, что у `sendCollection`. */
+  sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
 }
 
 /** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
@@ -892,6 +926,14 @@ export const realClient: ApiClient = {
   setSwapsLock(locked) {
     return authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked });
   },
+
+  async getAnnouncementRecipients() {
+    const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
+    return recipients;
+  },
+
+  sendAnnouncement: (text, audience) =>
+    authorizedPostJson<AnnouncementResult>("/api/announcements", { text, audience }),
 };
 
 const devClient: ApiClient = {
@@ -942,6 +984,8 @@ const devClient: ApiClient = {
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
+  getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
+  sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
 };
 
 /**

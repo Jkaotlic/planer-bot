@@ -1997,6 +1997,50 @@ input[type="time"] {
   line-height: 1.5;
 }
 
+/* ---------- Анонсы ---------- */
+
+.announce-counter {
+  max-width: 620px;
+  margin: 4px 0 12px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--hint);
+}
+
+/* Тот же сигнал, что у превышенного лимита где-либо ещё: заранее, а не только
+   отказом сервера после клика «Отправить». */
+.announce-counter.over {
+  color: var(--destructive);
+}
+
+.announce-audience {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.announce-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 14px;
+  max-width: 620px;
+}
+
+.announce-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.announce-unreachable {
+  color: var(--hint);
+  font-size: 12px;
+}
+
 /* ---------- Настройки ---------- */
 
 .settings-intro {
