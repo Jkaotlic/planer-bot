@@ -6,6 +6,7 @@ import {
   type AnnouncementRecipient,
   type AnnouncementResult,
 } from "../api/client";
+import { recipientsPhrase } from "./CollectionsScreen";
 
 /**
  * «Анонсы»: вольный текст всей команде или выбранным людям — из десктопной консоли.
@@ -180,8 +181,7 @@ export function AnnounceScreen() {
       {confirming ? (
         <div className="birthday-confirm">
           <span>
-            Отправить {reachable.length} {reachable.length === 1 ? "коллеге" : "коллегам"}? Отменить будет нельзя —
-            сообщение уйдёт сразу.
+            Отправить {recipientsPhrase(reachable.length)}? Отменить будет нельзя — сообщение уйдёт сразу.
           </span>
           <button type="button" className="btn btn-primary" disabled={sending} onClick={() => void handleSend()}>
             {sending ? "Отправляю…" : "Да, отправить"}
