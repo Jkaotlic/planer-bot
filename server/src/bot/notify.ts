@@ -5,7 +5,7 @@ import { isNoticeMuted } from "../repo/notice-prefs";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
 import type { OutsidePoolFact } from "../swap/duty-notice";
-import type { AdminNoticeKind } from "@planer/shared";
+import { takesPartInAssignment, type AdminNoticeKind } from "@planer/shared";
 
 // --- Swap text builders ------------------------------------------------------
 //
@@ -226,7 +226,7 @@ export async function notifyVacantSlot(
   // A call for weekend volunteers is an assignment offer, so people an admin took
   // out of assignments are out of this too. Filtered before `intended` is measured,
   // or «дошло до N из M» would count people we deliberately never wrote to.
-  const team = listActive(db).filter((employee) => !employee.excludedFromAssignment);
+  const team = listActive(db).filter((employee) => takesPartInAssignment(employee));
   let delivered = 0;
   for (const e of team) {
     if (e.telegramUserId == null) continue;

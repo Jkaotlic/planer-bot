@@ -5,6 +5,7 @@ import {
   countsForBalance,
   isAbsence,
   nextDate,
+  takesPartInAssignment,
   toMinutes,
   UNRECOGNISED_KIND,
   type FillSlot,
@@ -217,7 +218,7 @@ export function buildDistribution(
   // `empty_pool` / `nobody_free` split below is judged against this list.
   const active = listActive(db);
   const workers = active
-    .filter((employee) => !employee.excludedFromAssignment)
+    .filter((employee) => takesPartInAssignment(employee))
     .map((e) => seedWorkerLoad(db, e.id, from, to, nameById));
 
   const chosen = distributeFairly(slots, workers);

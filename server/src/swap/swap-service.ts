@@ -1,5 +1,5 @@
 import { and, eq, ne, or } from "drizzle-orm";
-import { isSwappable, validateSwap, nextSwapStatus, isAdminBlockReason, type Shift as DomainShift } from "@planer/shared";
+import { isSwappable, validateSwap, nextSwapStatus, isAdminBlockReason, canSwap, type Shift as DomainShift } from "@planer/shared";
 import type { Db } from "../db/client";
 import { shifts, swapRequests, type Shift as DbShift, type SwapRequest } from "../db/schema";
 import { getShift, listShiftsByEmployee } from "../repo/shifts";
@@ -31,9 +31,18 @@ function timedOthers(db: Db, employeeId: number, excludeShiftId: number): Domain
 function restrictionsFor(db: Db, fromEmployeeId: number, toEmployeeId: number) {
   return {
     swapsLocked: isSwapsLocked(db),
-    fromExcluded: getEmployeeById(db, fromEmployeeId)?.excludedFromSwaps === true,
-    toExcluded: getEmployeeById(db, toEmployeeId)?.excludedFromSwaps === true,
+    fromExcluded: isBlocked(db, fromEmployeeId),
+    toExcluded: isBlocked(db, toEmployeeId),
   };
+}
+
+/** «Этому обмен закрыт» — роль или галочка, для обеих сторон одинаково.
+ *  Отсутствующий в базе работник НЕ считается заблокированным здесь: его ловит
+ *  отдельная проверка валидации со своим текстом отказа, и подменять её значило
+ *  бы менять текст отказа заодно с ролью. */
+function isBlocked(db: Db, employeeId: number): boolean {
+  const person = getEmployeeById(db, employeeId);
+  return person != null && !canSwap(person);
 }
 
 export function createSwap(
