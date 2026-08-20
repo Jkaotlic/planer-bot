@@ -24,6 +24,7 @@ import {
   setRemindersEnabled,
   setPreferredName,
   rememberTelegramProfile,
+  setSelfScheduleEnabled,
 } from "../repo/employees";
 import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
@@ -81,6 +82,8 @@ import {
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
   takesPartInAssignment,
+  canSwap,
+  canAnnounce,
   type EntryCategory,
 } from "@planer/shared";
 import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
@@ -343,7 +346,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       /** The swap rule travels together with "who am I": the screen must grey
        *  out the «Обменять» button, not show it live and get refused on tap. */
       swapsLocked: isSwapsLocked(db),
-      excludedFromSwaps: me.excludedFromSwaps,
+      /** Эффективное, а не то, что лежит в строке: единственный потребитель —
+       *  гейт кнопки «Обменять», и ему нужен ответ «можно ли», а не «какую
+       *  галочку поставил админ». Роль наблюдателя перекрывает галочку. */
+      excludedFromSwaps: !canSwap(me),
+      isObserver: me.isObserver,
+      selfScheduleEnabled: me.selfScheduleEnabled,
+      canAnnounce: canAnnounce(me),
     });
   });
 
@@ -352,12 +361,20 @@ export function createApp(deps: AppDeps): Hono<Env> {
    *  A patch, not a form — the two fields live on different screens and are saved
    *  by different gestures, so either may arrive alone. */
   app.patch("/api/me/settings", requireAuth(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { remindersEnabled?: unknown; preferredName?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      remindersEnabled?: unknown;
+      preferredName?: unknown;
+      selfScheduleEnabled?: unknown;
+    };
     const hasReminders = body.remindersEnabled !== undefined;
     const hasPreferred = body.preferredName !== undefined;
-    if (!hasReminders && !hasPreferred) return c.json({ error: "нечего сохранять" }, 400);
+    const hasSelfSchedule = body.selfScheduleEnabled !== undefined;
+    if (!hasReminders && !hasPreferred && !hasSelfSchedule) return c.json({ error: "нечего сохранять" }, 400);
     if (hasReminders && typeof body.remindersEnabled !== "boolean") {
       return c.json({ error: "remindersEnabled должен быть true или false" }, 400);
+    }
+    if (hasSelfSchedule && typeof body.selfScheduleEnabled !== "boolean") {
+      return c.json({ error: "selfScheduleEnabled должен быть true или false" }, 400);
     }
     const preferred = hasPreferred ? normalizePreferredName(body.preferredName) : null;
     if (preferred && !preferred.ok) {
@@ -367,16 +384,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = c.get("auth").employeeId;
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    if (hasSelfSchedule) {
+      // Не 400: поле существует и понято — его просто некому применить.
+      // Иначе тумблер стал бы способом обойти роль.
+      if (!employee.isObserver) return c.json({ error: "forbidden" }, 403);
+      employee = setSelfScheduleEnabled(db, id, body.selfScheduleEnabled as boolean) ?? employee;
+    }
     if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
-    // Одно действие человека — одна строка журнала: маршрут принимает оба поля
-    // разом, и делить его на два события значило бы врать о том, что он сделал.
+    // Одно действие человека — одна строка журнала: маршрут принимает несколько
+    // полей разом, и делить его на несколько событий значило бы врать о том,
+    // что он сделал.
     recordAudit(db, "settings_changed", id, {
       employeeId: id,
       displayName: employee.displayName,
       ...(hasReminders ? { remindersEnabled: employee.remindersEnabled } : {}),
       ...(preferred?.ok ? { preferredName: employee.preferredName } : {}),
+      ...(hasSelfSchedule ? { selfScheduleEnabled: employee.selfScheduleEnabled } : {}),
     });
 
     return c.json({

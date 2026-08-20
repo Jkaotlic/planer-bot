@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, setEmployeeObserver } from "../repo/employees";
 import { signInitData } from "../auth/telegram";
 import { employees } from "../db/schema";
 import { testConfig } from "../test-config";
@@ -120,6 +120,25 @@ describe("app auth", () => {
     expect((await ok.json()).isAdmin).toBe(true);
     const no = await app.request("/api/me");
     expect(no.status).toBe(401);
+  });
+
+  it("наблюдателю /api/me говорит роль и что обмены ему закрыты", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const me = createEmployee(db, { displayName: "Аня", inviteToken: "tok-621" });
+    linkTelegramAccount(db, "tok-621", 621);
+    setEmployeeObserver(db, me.id, true);
+    const token = (await (await app.request(authReq(621))).json()).token as string;
+
+    const body = await (await app.request("/api/me", { headers: { Authorization: `Bearer ${token}` } })).json();
+
+    expect(body.isObserver).toBe(true);
+    expect(body.canAnnounce).toBe(true);
+    expect(body.selfScheduleEnabled).toBe(false);
+    // Галочка в базе снята — экран всё равно обязан погасить «Обменять»:
+    // наблюдателю обмены закрыты ролью, а не персональной настройкой.
+    expect(getEmployeeById(db, me.id)!.excludedFromSwaps).toBe(false);
+    expect(body.excludedFromSwaps).toBe(true);
   });
 });
 
