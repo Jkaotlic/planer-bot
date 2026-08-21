@@ -9,6 +9,8 @@ import type {
   Employee,
   Me,
   NewEntryInput,
+  NewEntryRangeInput,
+  EntryRangeResult,
   NewSlotInput,
   PayrollRow,
   RosterImportPreview,
@@ -59,6 +61,9 @@ import {
   selfEntryEditRefusal,
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
+  planEntryRange,
+  eachDayIso,
+  isAbsence,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -549,6 +554,44 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
   };
   ALL_ENTRIES.push(created);
   return { entry: created, notified: mockReach(input.employeeId != null ? [input.employeeId] : []) };
+}
+
+/**
+ * Демо-расстановка диапазоном.
+ *
+ * Дни считает та же `planEntryRange`, что и сервер, а не своё похожее правило:
+ * мок со своим счётом — второй источник правды, расходящийся с продом молча и
+ * именно там, где демо показывают человеку.
+ */
+export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult> {
+  await delay(300);
+  const busyDates = ALL_ENTRIES.filter((s) => s.employeeId === input.employeeId).flatMap((s) =>
+    eachDayIso(s.date, s.endDate ?? s.date),
+  );
+  const plan = planEntryRange({
+    from: input.from,
+    to: input.to,
+    category: input.category,
+    includeWeekends: input.includeWeekends ?? false,
+    busyDates,
+  });
+  const spans = isAbsence(input.category) && input.to !== input.from;
+  const created: Shift[] = plan.days.map((date) => ({
+    id: nextId++,
+    date,
+    start: input.start ?? null,
+    end: input.end ?? null,
+    endDate: spans ? input.to : null,
+    category: input.category,
+    title: input.title ?? null,
+    location: input.location ?? null,
+    templateId: input.templateId ?? null,
+    employeeId: input.employeeId,
+    unrecognisedCode: null,
+    employeeName: personName(input.employeeId),
+  }));
+  ALL_ENTRIES.push(...created);
+  return { created, skipped: plan.skipped, notified: mockReach(created.length > 0 ? [input.employeeId] : []) };
 }
 
 /** Один запрос вместо цикла — DEV-мок отвечает так же, чтобы «Заполнить неделю»

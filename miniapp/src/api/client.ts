@@ -3,6 +3,7 @@ import { createEmployeesApi, createReadApi, createTransport } from "@planer/clie
 import type {
   AdminEmployeeDto,
   CreateEmployeeResponse,
+  EntryRangeSkip,
   ScheduleEntryDto,
   TeamScheduleResponse,
   TemplateDto,
@@ -27,6 +28,7 @@ import {
   mockDeclineOffer,
   mockGetTemplates,
   mockCreateEntry,
+  mockCreateEntryRange,
   mockCreateEntries,
   mockUpdateEntry,
   mockDeleteEntry,
@@ -254,6 +256,33 @@ export interface NewEntryInput {
   location?: string;
   /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
   title?: string | null;
+}
+
+/**
+ * «Расставить с какого по какое» — зеркало `NewEntryRangeInput` консоли.
+ *
+ * Отдельный вход, а не `NewEntryInput` с двумя датами: у обычной записи
+ * `endDate` означает полосу отсутствия, а здесь `to` — «до какого дня
+ * расставлять». Одно поле в двух смыслах читалось бы неправильно ровно там, где
+ * ошибка дороже всего.
+ */
+export interface NewEntryRangeInput {
+  employeeId: number;
+  from: string;
+  to: string;
+  category: Category;
+  start?: string;
+  end?: string;
+  templateId?: number;
+  location?: string;
+  title?: string | null;
+  includeWeekends?: boolean;
+}
+
+export interface EntryRangeResult {
+  created: Shift[];
+  skipped: EntryRangeSkip[];
+  notified: NotifyReach;
 }
 
 /**
@@ -655,6 +684,7 @@ export interface ApiClient {
   getEmployeeInvite(id: number, regenerate?: boolean): Promise<{ inviteToken: string; inviteLink: string | null }>;
   getTemplates(): Promise<Template[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
+  createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
   /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
    *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
@@ -1066,6 +1096,8 @@ export const realClient: ApiClient = {
   getTemplates: () => readApi.getTemplates() as Promise<Template[]>,
 
   createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
+
+  createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
   createEntries: (inputs) =>
     authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
   updateEntry: (id, input) =>
@@ -1288,6 +1320,7 @@ const devClient: ApiClient = {
   ...employeesMock,
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
+  createEntryRange: (input) => mockCreateEntryRange(input),
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),

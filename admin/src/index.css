@@ -1317,6 +1317,23 @@ input[type="search"] {
   outline-offset: -1px;
 }
 
+/* Чекбокс и итог диапазона: строка «поставится N дней» стоит прямо под ним,
+   потому что именно она отвечает на вопрос, который галочка задаёт. */
+.range-weekends {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.range-preview {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--hint);
+  line-height: 1.4;
+}
+
 .category-select {
   display: flex;
   flex-wrap: wrap;

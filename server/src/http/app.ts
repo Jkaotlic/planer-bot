@@ -30,7 +30,7 @@ import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
-import { createEntrySchema, updateEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -71,6 +71,10 @@ import {
   isWeekend,
   isAbsence,
   countsForBalance,
+  categoryLabel,
+  resolveShiftTimes,
+  planEntryRange,
+  eachDayIso,
   dateStr,
   timeStr,
   dayNumber,
@@ -136,6 +140,19 @@ export interface AppDeps {
 function displayNameOf(u: TelegramUser): string {
   const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
   return name || u.username || "Без имени";
+}
+
+/**
+ * «Утро 08:00–17:00» / «Отпуск» — чем расстановку назовут в журнале.
+ *
+ * Из тела запроса, а не из созданной записи: записей может не быть вовсе (все
+ * дни пропущены), а строка журнала обязана сказать, что именно пытались
+ * поставить, — иначе «Расставлено диапазоном · 0 поставлено» не отвечает ни на
+ * один вопрос, который к ней возникает.
+ */
+function rangeLabel(input: { title?: string | null; category: EntryCategory; start?: string | null; end?: string | null }): string {
+  const name = input.title?.trim() || categoryLabel(input.category);
+  return input.start && input.end ? `${name} ${input.start}–${input.end}` : name;
 }
 
 export function createApp(deps: AppDeps): Hono<Env> {
@@ -943,6 +960,88 @@ export function createApp(deps: AppDeps): Hono<Env> {
       actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now: teamNow(config.teamTz),
     });
     return c.json({ entry, notified }, 201);
+  });
+
+  /**
+   * «Расставить с какого по какое» — его пункт 6 от 2026-08-21.
+   *
+   * Работа записывается ПО ЗАПИСИ НА ДЕНЬ, а не одной строкой с `endDate`, и это
+   * не выбор реализации: `entryDateError` запрещает второе намеренно — смена с
+   * полосой рисуется в каждый её день, а баланс и отчёт считают её один раз, то
+   * есть одна смена показана пятью. Отсутствие, наоборот, живёт полосой, и
+   * дробить его по дням значило бы тридцать строк вместо одной. Что из двух —
+   * решает категория, а не вызывающий: обе формы шлют сюда одно и то же тело.
+   *
+   * Занятый день пропускается, а не получает вторую смену поверх первой:
+   * «поверх» нельзя прочитать иначе как ошибку, а пропуск виден в ответе.
+   *
+   * Одна строка аудита и одно письмо работнику на всю расстановку: тридцать
+   * `entry_created` подряд сделали бы журнал нечитаемым, а тридцать писем —
+   * ровно тот инцидент, из которого вырос `noticeBuffer`.
+   */
+  app.post("/api/admin/entries/range", requireAdmin(db, config.jwtSecret), async (c) => {
+    const parsed = rangeEntrySchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    const input = parsed.data;
+    const archived = archivedTargetError(input.employeeId);
+    if (archived) return c.json({ error: archived }, 400);
+
+    // Занят — значит в этот день у человека уже что-то стоит, любой категории:
+    // вторую смену поверх первой ставить нельзя, а поверх отпуска — тем более.
+    // `listShiftsOverlapping`, а не `listShiftsInRange`: отпуск, начавшийся до
+    // `from`, второй не видит вовсе, и смена встала бы посреди него.
+    const busyDates = new Set<string>();
+    for (const row of listShiftsOverlapping(db, input.from, input.to)) {
+      if (row.employeeId !== input.employeeId) continue;
+      for (const day of eachDayIso(row.date, row.endDate ?? row.date)) busyDates.add(day);
+    }
+
+    const plan = planEntryRange({
+      from: input.from,
+      to: input.to,
+      category: input.category,
+      includeWeekends: input.includeWeekends,
+      busyDates: [...busyDates],
+    });
+
+    const { from, to, includeWeekends, ...entryFields } = input;
+    const now = teamNow(config.teamTz);
+    // Часы считаются НА КАЖДЫЙ ДЕНЬ, а не берутся из тела один раз: у пресета
+    // своя пятница, и смена, растянутая на неделю одними часами, ставит в
+    // пятницу 18:00 вместо 16:45 — ровно то сокращение, ради которого
+    // пятничные часы в пресете и заведены. Тело всё равно их несёт: форма
+    // показывает часы выбранного пресета, и без них не прошла бы валидация
+    // «рабочей записи нужно время».
+    const preset = input.templateId != null ? getTemplate(db, input.templateId) : undefined;
+    const created = db.transaction(() =>
+      plan.days.map((date) => {
+        const times = preset ? resolveShiftTimes(preset, date) : null;
+        return createShift(db, withPresetLocation({
+          ...entryFields,
+          date,
+          ...(times ?? {}),
+          // Отсутствие — одна запись на всю полосу; у работы полосы не бывает.
+          endDate: isAbsence(input.category) && to !== from ? to : null,
+        }));
+      }),
+    );
+
+    let notified = { delivered: 0, intended: 0 };
+    for (const entry of created) {
+      notified = noticeBuffer.register({ actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now });
+    }
+
+    recordAudit(db, "entries_range_created", c.get("auth").employeeId, {
+      employeeId: input.employeeId,
+      employeeName: nameOfDb(db, input.employeeId),
+      from,
+      to,
+      label: rangeLabel(input),
+      created: created.length,
+      skipped: plan.skipped.length,
+    });
+
+    return c.json({ created, skipped: plan.skipped, notified }, 201);
   });
 
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
