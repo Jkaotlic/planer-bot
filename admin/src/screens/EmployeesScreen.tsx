@@ -237,7 +237,11 @@ function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
       {employees.length === 0 ? (
-        <div className="employees-empty">{emptyLabel}</div>
+        // `fullOrder` — ПОЛНЫЙ ростер секции, не найденный поиском: пустой
+        // список бывает по двум разным причинам, и подпись обязана называть
+        // ту, что случилась — иначе «Пока нет активных работников» соврёт
+        // при полном ростере, если поиск просто ничего не нашёл.
+        <div className="employees-empty">{fullOrder.length === 0 ? emptyLabel : "Никого с таким именем нет."}</div>
       ) : (
         <div className="employees-list">
           {employees.map((employee) => (
