@@ -1207,7 +1207,8 @@ button {
 select,
 input[type="text"],
 input[type="date"],
-input[type="time"] {
+input[type="time"],
+input[type="search"] {
   width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
@@ -1215,6 +1216,51 @@ input[type="time"] {
   background: var(--surface);
   color: var(--text);
   font-size: 14px;
+}
+
+.person-search {
+  margin-bottom: 8px;
+}
+
+.person-picker-chosen {
+  font-size: 12.5px;
+  color: var(--hint);
+}
+
+.person-picker-list {
+  max-height: 208px;
+  overflow-y: auto;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+}
+
+.person-picker-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+/* Прежний `<select disabled>` браузер серил сам; свою кнопку красит только
+   это правило — без него замороженная строка (например, виновник сбора,
+   который команда уже прочитала) выглядит нажимаемой, хоть клик и не сработает. */
+.person-picker-row:disabled {
+  cursor: default;
+}
+
+.person-picker-row:hover:not(:disabled) {
+  background: var(--surface-secondary);
+}
+
+.person-picker-row.selected {
+  border-color: transparent;
+  outline: 2px solid var(--button);
+  outline-offset: -1px;
 }
 
 .category-select {
@@ -2039,6 +2085,26 @@ input[type="time"] {
 .announce-unreachable {
   color: var(--hint);
   font-size: 12px;
+}
+
+/* ---------- Баги ---------- */
+
+.bug-card {
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.bug-card-meta {
+  font-size: 12.5px;
+  color: var(--hint);
+}
+
+.bug-card-text {
+  margin: 4px 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ---------- Настройки ---------- */

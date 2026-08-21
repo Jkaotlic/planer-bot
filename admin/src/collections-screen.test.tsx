@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiClient, type Collection, type CollectionPreview, type CollectionRow } from "./api/client";
+import { apiClient, type Collection, type CollectionPreview, type CollectionRow, type Employee } from "./api/client";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 
 /**
@@ -33,6 +33,16 @@ function row(patch: Partial<CollectionRow> & { collection: Collection }): Collec
     title: patch.collection.title ?? "Сбор",
     status: "pending",
     active: true,
+    ...patch,
+  };
+}
+
+function employee(patch: Partial<Employee> = {}): Employee {
+  return {
+    id: 5, displayName: "Иванова Анна", isAdmin: false, isActive: true, telegramUserId: null,
+    birthDate: null, preferredName: null, address: "Иванова",
+    excludedFromAssignment: false, excludedFromSwaps: false,
+    isObserver: false, selfScheduleEnabled: false,
     ...patch,
   };
 }
@@ -86,6 +96,14 @@ function inputByLabel(el: HTMLElement, label: string): HTMLInputElement {
 function buttonByText(el: HTMLElement, text: string): HTMLButtonElement {
   const found = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === text);
   if (!found) throw new Error(`не нашёл кнопку с подписью «${text}»`);
+  return found;
+}
+
+function personRow(el: HTMLElement, name: string): HTMLButtonElement {
+  const found = [...el.querySelectorAll<HTMLButtonElement>(".person-picker-row")].find((r) =>
+    (r.textContent ?? "").includes(name),
+  );
+  if (!found) throw new Error(`не нашёл строку пикера «${name}»`);
   return found;
 }
 
@@ -164,5 +182,59 @@ describe("CollectionsScreen", () => {
 
     expect(load).toHaveBeenCalledWith(22);
     expect(load).not.toHaveBeenCalledWith(11);
+  });
+});
+
+/**
+ * `PersonPicker` сам по себе проверен изолированно (`person-picker.test.tsx`),
+ * но это не проверяет, что «Сборы» подключили его правильно: что клик по
+ * строке кладёт id туда же, куда клал `<select>`, и что `disabled` приходит
+ * от того же условия, что и раньше. Второе особенно дорого молчаливой
+ * поломкой: `subjectFrozen` — это «команда уже прочитала, на что скидывается,
+ * менять виновника нельзя», и если блокировка потеряется при переносе на
+ * `PersonPicker`, ничего не откажет громко — админ просто сможет тихо
+ * переставить виновника сбора, который люди уже видели.
+ */
+describe("PersonPicker подключён к экрану «Сборы»", () => {
+  it("клик по строке пикера уходит в create тем же employeeId, что клал <select>", async () => {
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getEmployees").mockResolvedValue([employee({ id: 5, displayName: "Иванова Анна" })]);
+    vi.spyOn(apiClient, "getCollections").mockResolvedValue([]);
+    const create = vi
+      .spyOn(apiClient, "createCollection")
+      .mockResolvedValue(collection({ id: 99, title: "Кофемашина" }));
+
+    const el = await mount();
+    await type(inputByLabel(el, "Повод"), "Кофемашина");
+    // Выбор ДОЛЖЕН пережить клик — иначе следующая проверка ловит только то,
+    // что кнопка «Создать» вообще нажимается, а не то, что id дошёл до запроса.
+    await act(async () => { personRow(el, "Иванова Анна").click(); });
+    await act(async () => { buttonByText(el, "Создать").click(); });
+    await settle();
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ employeeId: 5 }));
+  });
+
+  it("замороженный повод (команда уже прочитала, на что скидывается) блокирует и выбор человека", async () => {
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getEmployees").mockResolvedValue([employee({ id: 5, displayName: "Иванова Анна" })]);
+    vi.spyOn(apiClient, "getCollections").mockResolvedValue([
+      row({
+        collection: collection({ id: 1, title: "Кофемашина", employeeId: 5, sendCount: 1 }),
+        personName: "Иванова Анна",
+      }),
+    ]);
+    vi.spyOn(apiClient, "getCollectionPreview").mockResolvedValue(preview({ sendCount: 1 }));
+
+    const el = await mount();
+    await act(async () => { buttonByText(el, "Открыть").click(); });
+    await settle();
+
+    // Строго внутри открытой карточки — у формы «Новый сбор» выше на экране
+    // свой PersonPicker, и он ничем не заморожен.
+    const card = el.querySelector<HTMLElement>('[data-testid="collection-card"]')!;
+    const rows = [...card.querySelectorAll<HTMLButtonElement>(".person-picker-row")];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.disabled).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { recordApi, stubBotInfo } from "./testbot";
 import type { Bot } from "grammy";
-import { createBot } from "./bot";
+import { createBot, publishBotCommands } from "./bot";
 import { BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import {
@@ -307,5 +307,61 @@ describe("вход в мини-апп", () => {
     await bot.handleUpdate(groupTextUpdate(1104, BTN_MY_SHIFTS));
 
     expect(calls).toEqual([]);
+  });
+});
+
+describe("/menu — универсальный возврат раскладки", () => {
+  it("привязанному работнику присылает раскладку без кнопки админки", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 777);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(commandUpdate(777, "/menu"));
+
+    const labels = keyboardLabels(calls.find((c) => c.method === "sendMessage")?.payload);
+    expect(labels).toContain(BTN_WEEK);
+    expect(labels).toContain(BTN_REMINDERS);
+    expect(labels).not.toContain(BTN_ADMIN);
+  });
+
+  it("админу присылает раскладку с кнопкой админки", async () => {
+    const db = makeTestDb();
+    const worker = linkedWorker(db, 778);
+    setEmployeeAdmin(db, worker.id, true);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(commandUpdate(778, "/menu"));
+
+    expect(keyboardLabels(calls.find((c) => c.method === "sendMessage")?.payload)).toContain(BTN_ADMIN);
+  });
+
+  it("незнакомцу отвечает «Сначала отправь /start» и раскладки не шлёт", async () => {
+    const db = makeTestDb();
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(commandUpdate(998, "/menu"));
+
+    const reply = calls.find((c) => c.method === "sendMessage")!;
+    expect(reply.payload.text).toContain("/start");
+    expect(keyboardLabels(reply.payload)).toBeNull();
+  });
+
+  it("в группу не уходит — бот вообще ничего не отправляет", async () => {
+    // Раньше тест проверял только «клавиатуры в ответе нет», а не «ответа нет
+    // вовсе» — «Кнопки на месте 👇» без раскладки всё равно ушло бы в группу и
+    // соврало бы: бот как будто ответил тому, кто написал, а на самом деле
+    // текст увидела бы вся группа. Спека требует полного молчания.
+    const db = makeTestDb();
+    linkedWorker(db, 779);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(groupCommandUpdate(779, "/menu"));
+
+    expect(calls).toEqual([]);
+  });
+
+  it("/menu перечислена в меню команд бота — иначе о ней никто не узнает", async () => {
+    const db = makeTestDb();
+    const { bot, calls } = testBot(db);
+    await publishBotCommands(bot);
+
+    const published = calls.find((c) => c.method === "setMyCommands")!;
+    expect(published.payload.commands.map((c: { command: string }) => c.command)).toContain("menu");
   });
 });

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { filterPeople } from "@planer/shared";
 import { Button, List, Placeholder, Section, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
+import { PersonSearch } from "../../components/PersonSearch";
 import { ScreenScroll } from "../../components/ScreenScroll";
 
 /**
@@ -30,6 +32,7 @@ export function AdminAnnounce() {
   const [text, setText] = useState("");
   const [audienceMode, setAudienceMode] = useState<"all" | "picked">("all");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
+  const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +69,13 @@ export function AdminAnnounce() {
   }
 
   // Сервер уже исключил самого отправителя и архивных — здесь только выбор.
+  // Фильтруется ТОЛЬКО отрисовка. `selectedIds` живёт своей жизнью, а «Уйдёт»
+  // ниже считается из полного списка: анонс не отзывается и идёт сквозь все
+  // настройки тишины, и поиск, роняющий выбор скрытых, однажды отправит
+  // сообщение не тем.
   const picked = audienceMode === "all" ? recipients : recipients.filter((e) => selectedIds.has(e.id));
+  // Список рисуется из отфильтрованного — но только рисуется, см. комментарий выше.
+  const filteredRecipients = filterPeople(recipients, query);
   // Выбранный явно, но без телеграма, в отчёт попадёт — но не в это число:
   // сервер его тоже не отправит. Показываем заранее, а не только в отчёте
   // после отправки, чтобы «кому уйдёт» не расходилось с тем, что реально дойдёт.
@@ -160,23 +169,29 @@ export function AdminAnnounce() {
               </SegmentedControl>
 
               {audienceMode === "picked" && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 10 }}>
-                  {recipients.length === 0 ? (
-                    <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Выбирать некого.</div>
-                  ) : (
-                    recipients.map((e) => (
-                      <label
-                        key={e.id}
-                        style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}
-                      >
-                        <input type="checkbox" checked={selectedIds.has(e.id)} onChange={() => toggle(e.id)} />
-                        <span>{e.displayName}</span>
-                        {!e.reachable && (
-                          <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>— не привязан</span>
-                        )}
-                      </label>
-                    ))
-                  )}
+                <div style={{ marginTop: 10 }}>
+                  <PersonSearch value={query} onChange={setQuery} count={recipients.length} disabled={sending} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {recipients.length === 0 ? (
+                      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Выбирать некого.</div>
+                    ) : filteredRecipients.length === 0 ? (
+                      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Никого с таким именем нет.</div>
+                    ) : (
+                      filteredRecipients.map((e) => (
+                        <label
+                          key={e.id}
+                          className="announce-picker-row"
+                          style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}
+                        >
+                          <input type="checkbox" checked={selectedIds.has(e.id)} disabled={sending} onChange={() => toggle(e.id)} />
+                          <span>{e.displayName}</span>
+                          {!e.reachable && (
+                            <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>— не привязан</span>
+                          )}
+                        </label>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -184,7 +199,10 @@ export function AdminAnnounce() {
                 Уйдёт {reachable.length === 0 ? "некому" : `${reachable.length}:`}
               </div>
               {reachable.length > 0 && (
-                <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                <div
+                  className="announce-recipients-preview"
+                  style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}
+                >
                   {reachable.map((e) => e.displayName).join(", ")}
                 </div>
               )}
