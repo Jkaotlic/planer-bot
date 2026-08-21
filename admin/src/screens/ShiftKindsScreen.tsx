@@ -67,6 +67,15 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     }
   }
 
+  // Запрос принадлежит открытой карточке, а не экрану: без сброса здесь
+  // закрыть карточку A с непустым поиском и открыть B значило бы, что B
+  // открывается уже отфильтрованной — под запрос, который в контексте B
+  // никто не вводил.
+  function toggleOpen(templateId: number) {
+    setOpenId((current) => (current === templateId ? null : templateId));
+    setQuery("");
+  }
+
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
     setBusyId(kind.templateId);
     setError(null);
@@ -104,7 +113,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             onQueryChange={setQuery}
             open={openId === kind.templateId}
             busy={busyId === kind.templateId}
-            onToggleOpen={() => setOpenId(openId === kind.templateId ? null : kind.templateId)}
+            onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
           />
