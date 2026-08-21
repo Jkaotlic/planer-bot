@@ -543,6 +543,13 @@ export function createBot(deps: BotDeps): Bot {
    * привязывает ответ к этому сообщению, поэтому обычный путь не требует от
    * человека ничего, кроме «набрать и отправить». Окно в базе — страховка на
    * случай, когда он свернул чат и написал отдельным сообщением.
+   *
+   * Кнопка выхода едет ОТДЕЛЬНЫМ, вторым сообщением, а не в этом же
+   * `reply_markup`: у Telegram это одно поле, а не два, и `force_reply` с
+   * `inline_keyboard` в нём физически не уживаются (см. типы grammy —
+   * `InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply`).
+   * Раз вопрос уже безальтернативно занял поле, кнопке остаётся только новое
+   * сообщение.
    */
   async function startBugReport(ctx: Context): Promise<void> {
     const from = ctx.from;
@@ -557,6 +564,9 @@ export function createBot(deps: BotDeps): Bot {
       { reply_markup: { force_reply: true, input_field_placeholder: "Что сломалось?" } },
     );
     openBugPrompt(db, who.me.id, sent.message_id, new Date());
+    await ctx.reply("Передумал — вернись в меню.", {
+      reply_markup: { inline_keyboard: [[{ text: "🏠 В меню", callback_data: "bug:cancel" }]] },
+    });
   }
 
   /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
@@ -765,6 +775,29 @@ export function createBot(deps: BotDeps): Bot {
     }
     await ctx.answerCallbackQuery({ text: "Отметил ✅" });
     await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  /**
+   * «🏠 В меню» под вопросом багрепорта.
+   *
+   * Гасит окно ожидания — без этого следующее написанное человеком сообщение,
+   * адресованное совсем не боту, уехало бы админам багрепортом.
+   *
+   * Раскладка возвращается НОВЫМ сообщением, а не правкой этого: постоянная
+   * клавиатура едет только с отправкой, отредактировать её в уже отправленное
+   * Telegram не даёт. Правкой снимается лишь сама inline-кнопка, чтобы её нельзя
+   * было нажать второй раз и получить второе «кнопки на месте».
+   */
+  bot.callbackQuery(/^bug:cancel$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    clearBugPending(db, who.me.id);
+    await ctx.answerCallbackQuery({ text: "Ок, не буду ждать" });
+    await safeEdit(() => ctx.editMessageReplyMarkup());
+    await ctx.reply("Кнопки на месте 👇", { reply_markup: menuFor(ctx.from.id, ctx.chat?.type) });
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {

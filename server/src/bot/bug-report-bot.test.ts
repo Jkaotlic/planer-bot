@@ -5,7 +5,7 @@ import { createBot } from "./bot";
 import { BTN_BUG, BTN_WEEK } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { openBugPrompt, listBugReports } from "../bugs/bug-service";
+import { openBugPrompt, listBugReports, getBugPending } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -204,5 +204,54 @@ describe("кнопка «Разобрал»", () => {
     await bot.handleUpdate(tapUpdate(608, `bug:resolve:${id}`));
 
     expect(listBugReports(db, "all")[0]!.report.resolvedAt).toBeNull();
+  });
+});
+
+describe("выход из багрепорта", () => {
+  it("«🏠 В меню» гасит окно: следующее сообщение уже не становится багрепортом", async () => {
+    const db = makeTestDb();
+    const anya = worker(db, "Аня", 621);
+    const { bot } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(621, BTN_BUG));
+    await bot.handleUpdate(tapUpdate(621, "bug:cancel"));
+    await bot.handleUpdate(textUpdate(621, "просто пишу коллеге"));
+
+    expect(getBugPending(db, anya.id)).toBeNull();
+    expect(listBugReports(db, "all")).toHaveLength(0);
+  });
+
+  it("«🏠 В меню» присылает новое сообщение с раскладкой — правкой старого её не вернуть", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 622);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(622, BTN_BUG));
+    const before = calls.filter((c) => c.method === "sendMessage").length;
+    await bot.handleUpdate(tapUpdate(622, "bug:cancel"));
+
+    const sent = calls.filter((c) => c.method === "sendMessage");
+    expect(sent.length).toBe(before + 1);
+    const labels = (sent.at(-1)!.payload.reply_markup?.keyboard ?? []).flat().map((b: { text: string }) => b.text);
+    expect(labels).toContain(BTN_WEEK);
+  });
+
+  // Развилка из брифа: Telegram не разрешает `force_reply` и `inline_keyboard`
+  // в одном `reply_markup` — это одно поле (см. @grammyjs/types methods.d.ts,
+  // `reply_markup?: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply`),
+  // а не два. Поэтому кнопка выхода едет ВТОРЫМ сообщением, и тест проверяет
+  // его, а не правку вопроса.
+  it("вопрос сопровождается вторым сообщением с кнопкой выхода — иначе о ней неоткуда узнать", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 623);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(623, BTN_BUG));
+
+    const sent = calls.filter((c) => c.method === "sendMessage");
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.payload.reply_markup.force_reply).toBe(true);
+    const data = (sent[1]!.payload.reply_markup?.inline_keyboard ?? []).flat().map((b: { callback_data: string }) => b.callback_data);
+    expect(data).toContain("bug:cancel");
   });
 });
