@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
+import { PersonPicker } from "../../components/PersonPicker";
 import { allowedByPool, countsForBalance, isAbsence, resolveShiftTimes, takesPartInAssignment, UNRECOGNISED_KIND } from "@planer/shared";
 import {
   apiClient,
@@ -700,14 +701,13 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
     <CardShell>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
-          <Select header="Работник" value={employeeId} onChange={(e) => setEmployeeId(Number(e.target.value))}>
-            <option value={0}>— не назначен —</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.displayName}
-              </option>
-            ))}
-          </Select>
+          <PersonPicker
+            label="Работник"
+            people={employees}
+            value={employeeId}
+            onChange={setEmployeeId}
+            emptyOptionLabel="— не назначен —"
+          />
         </div>
         <div style={{ flex: 1 }}>
           <Select header="День" value={date} onChange={(e) => { setDate(e.target.value); setEndDate(e.target.value); }}>
@@ -996,21 +996,20 @@ export function FillWeekPanel({ employees, templates, weekDates, shifts, roles, 
 
   return (
     <CardShell>
-      <Select header="Работник" value={employeeId} onChange={(e) => setEmployeeId(Number(e.target.value))}>
-        <option value={0}>— выберите —</option>
-        {/* Не фильтруем: «Заполнить неделю» — ручная постановка, админ называет
-            человека сам, и по решению заказчика это разрешено. Пометка нужна, чтобы
-            не выбрать по инерции того, кого бот сам никогда бы не поставил. */}
-        {employees.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.displayName}
-            {/* Эффективное право, не сырая галочка: наблюдатель (`isObserver`) вне
-                раздачи ровно так же, как и человек с поднятым `excludedFromAssignment`,
-                а роль его галочку не трогает — без этого он шёл бы без пометки. */}
-            {!takesPartInAssignment(e) ? " · вне назначений" : ""}
-          </option>
-        ))}
-      </Select>
+      {/* Не фильтруем: «Заполнить неделю» — ручная постановка, админ называет
+          человека сам, и по решению заказчика это разрешено. Пометка нужна, чтобы
+          не выбрать по инерции того, кого бот сам никогда бы не поставил. */}
+      <PersonPicker
+        label="Работник"
+        people={employees}
+        value={employeeId}
+        onChange={setEmployeeId}
+        emptyOptionLabel="— выберите —"
+        // Эффективное право, не сырая галочка: наблюдатель (`isObserver`) вне
+        // раздачи ровно так же, как и человек с поднятым `excludedFromAssignment`,
+        // а роль его галочку не трогает — без этого он шёл бы без пометки.
+        note={(e) => (!takesPartInAssignment(e) ? "· вне назначений" : null)}
+      />
 
       {/* Fairness hint: who holds how many of each shift kind this week — exactly
           what «Распределить честно» evens out, so the panel matches the button. */}
