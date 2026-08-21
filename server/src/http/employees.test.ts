@@ -6,7 +6,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, listForAdmin, reorderEmployee, archiveEmployee, setEmployeeAdmin, setEmployeeObserver } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { createSwapRequest, getSwapRequest } from "../repo/swaps";
-import { listRecentAudit } from "../repo/audit";
+import { listRecentAudit, recordAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import { testConfig } from "../test-config";
@@ -364,6 +364,25 @@ describe("GET /api/admin/events", () => {
     // newest-first
     const timestamps = body.events.map((e: { createdAt: string | number }) => new Date(e.createdAt).getTime());
     expect([...timestamps]).toEqual([...timestamps].sort((a, b) => b - a));
+  });
+
+  // Правило сюрприза применяется и здесь, а не только в журнале: лента справа
+  // читается тем же админом на том же экране, и сбор на него самого рассказывал
+  // ему про его же подарок.
+  it("withholds collection events about the viewer (the surprise rule)", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const adminToken = await tokenFor(app, 111);
+    const admin = getByTelegramId(db, 111)!;
+    const igor = worker(db, "Игорь", 333);
+
+    recordAudit(db, "collection_sent", igor.id, { employeeId: admin.id, title: "Свадьба", delivered: 5, intended: 6 });
+    recordAudit(db, "collection_sent", igor.id, { employeeId: igor.id, title: "Юбилей", delivered: 5, intended: 6 });
+
+    const body = await (await app.request("/api/admin/events", bearer(adminToken))).json();
+    const titles = body.events.map((e: { payload: { title?: string } }) => e.payload?.title);
+    expect(titles).toContain("Юбилей");
+    expect(titles).not.toContain("Свадьба");
   });
 
   it("gates events to admins (403)", async () => {

@@ -448,7 +448,7 @@ export function App() {
                       команде, и половина команды в ней — это не «отфильтровано», а
                       неверное число. */}
                   <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
-                  <EventsFeed events={events} />
+                  <EventsFeed events={events} onOpenJournal={() => setNav("log")} />
                 </aside>
               </div>
             )}

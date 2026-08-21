@@ -528,7 +528,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.route("/", createEmployeesRoutes({ db, config, bot }));
 
   app.get("/api/admin/events", requireAdmin(db, config.jwtSecret), (c) => {
-    const events = listRecentAudit(db, 30).map((row) => ({
+    const events = listRecentAudit(db, 30, c.get("auth").employeeId).map((row) => ({
       id: row.id,
       type: row.type,
       createdAt: row.createdAt,
