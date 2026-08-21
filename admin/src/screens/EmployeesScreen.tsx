@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
+import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
+import { PersonSearch } from "../components/PersonSearch";
 import { initialsOf, personPalette } from "../lib/people";
 
 export interface EmployeesScreenProps {
@@ -61,9 +62,11 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
    * AdminEmployeesScreen.
    */
   const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
+  const [query, setQuery] = useState("");
 
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
+  const visibleActive = filterPeople(active, query);
 
   async function withBusy(id: number, action: () => Promise<void>) {
     setBusyId(id);
@@ -135,9 +138,12 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
         </button>
       </div>
 
+      <PersonSearch value={query} onChange={setQuery} count={employees.length} disabled={busyId !== null} />
+
       <EmployeesSection
         title="Активные"
-        employees={active}
+        employees={visibleActive}
+        fullOrder={active}
         emptyLabel="Пока нет активных работников"
         actionLabel="Архивировать"
         busyId={busyId}
@@ -152,10 +158,13 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
         onSetObserver={(id, isObserver) => void setObserver(id, isObserver)}
       />
 
+      {/* `items` — весь архив, не найденное: заголовок и сам факт наличия
+          секции не должны мигать оттого, что поиск временно не нашёл
+          архивного человека. Фильтр применяется только к строкам внутри. */}
       <CollapsibleArchive title="Архив" items={archived}>
         {(rows) => (
           <div className="employees-list">
-            {rows.map((employee) => (
+            {filterPeople(rows, query).map((employee) => (
               <EmployeeRow
                 key={employee.id}
                 employee={employee}
@@ -193,6 +202,13 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
 interface EmployeesSectionProps {
   title: string;
   employees: readonly Employee[];
+  /**
+   * Полный (не отфильтрованный поиском) порядок — источник позиции для
+   * `PositionField`. Считать позицию по `employees` значило бы переставлять
+   * человека не туда, стоило кому-то что-нибудь набрать в поиске: «второй из
+   * трёх найденных» и «второй из всего ростера» — разные люди.
+   */
+  fullOrder: readonly Employee[];
   emptyLabel: string;
   actionLabel: string;
   busyId: number | null;
@@ -216,7 +232,7 @@ interface EmployeesSectionProps {
   onSetObserver: (id: number, isObserver: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -224,11 +240,14 @@ function EmployeesSection({ title, employees, emptyLabel, actionLabel, busyId, r
         <div className="employees-empty">{emptyLabel}</div>
       ) : (
         <div className="employees-list">
-          {employees.map((employee, index) => (
+          {employees.map((employee) => (
             <EmployeeRow
               key={employee.id}
               employee={employee}
-              position={onReorder ? index + 1 : undefined}
+              // Позиция — место в РОСТЕРЕ, а не в том, что осталось после поиска.
+              // Считать её по видимому индексу значило бы переставлять человека
+              // не туда, стоило кому-то что-нибудь набрать в поиске.
+              position={onReorder ? fullOrder.findIndex((e) => e.id === employee.id) + 1 : undefined}
               onReorder={onReorder ? (position) => onReorder(employee.id, position) : undefined}
               onBirthDate={onBirthDate ? (birthDate) => onBirthDate(employee.id, birthDate) : undefined}
               actionLabel={actionLabel}
