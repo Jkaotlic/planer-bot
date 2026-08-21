@@ -23,6 +23,7 @@ import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
+import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
@@ -380,6 +381,8 @@ export function App() {
           <CollectionsScreen />
         ) : nav === "announce" ? (
           <AnnounceScreen />
+        ) : nav === "bugs" ? (
+          <BugsScreen />
         ) : nav === "log" ? (
           <JournalScreen />
         ) : nav === "settings" ? (
