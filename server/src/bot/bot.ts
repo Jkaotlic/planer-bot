@@ -524,8 +524,12 @@ export function createBot(deps: BotDeps): Bot {
    * человек, не ответивший на вопрос багрепорта, остаётся без кнопок и без
    * способа их вернуть — `/start` для этого не выглядит и в меню команд подписан
    * про другое. Кому раскладка положена, решает `menuFor`, а не это место.
+   *
+   * Приватный чат только — как у `sendWeek`. Раскладка личная; в общем чате
+   * «Кнопки на месте» было бы неправдой для всех, кроме того, кто написал.
    */
   bot.command("menu", async (ctx) => {
+    if (ctx.chat?.type !== "private") return;
     const from = ctx.from;
     if (!from) return;
     const who = acting(from.id);
@@ -544,12 +548,19 @@ export function createBot(deps: BotDeps): Bot {
    * человека ничего, кроме «набрать и отправить». Окно в базе — страховка на
    * случай, когда он свернул чат и написал отдельным сообщением.
    *
-   * Кнопка выхода едет ОТДЕЛЬНЫМ, вторым сообщением, а не в этом же
-   * `reply_markup`: у Telegram это одно поле, а не два, и `force_reply` с
-   * `inline_keyboard` в нём физически не уживаются (см. типы grammy —
+   * Кнопка выхода едет ОТДЕЛЬНЫМ сообщением, а не в этом же `reply_markup`: у
+   * Telegram это одно поле, а не два, и `force_reply` с `inline_keyboard` в нём
+   * физически не уживаются (см. типы grammy —
    * `InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply`).
-   * Раз вопрос уже безальтернативно занял поле, кнопке остаётся только новое
-   * сообщение.
+   *
+   * И едет ПЕРВОЙ, до вопроса, а не после. Последним в чате должен остаться
+   * вопрос: свайп-реплай на последнее сообщение — обычный жест, и именно он
+   * обязан попасть на вопрос с `force_reply`. Уйди кнопка второй (и, значит,
+   * последней), тот же реплай попал бы на неё — `replyToMessageId` не совпал бы
+   * с `promptMessageId`, `shouldCapture` в bug-service.ts молча вернул бы
+   * `false`, и жалоба потерялась бы без следа: ни записи в базе, ни ответа
+   * человеку. `openBugPrompt` по-прежнему запоминает id ВОПРОСА — теперь это id
+   * второго сообщения, а не первого.
    */
   async function startBugReport(ctx: Context): Promise<void> {
     const from = ctx.from;
@@ -559,14 +570,14 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
       return;
     }
+    await ctx.reply("Если передумал — вернись в меню.", {
+      reply_markup: { inline_keyboard: [[{ text: "🏠 В меню", callback_data: "bug:cancel" }]] },
+    });
     const sent = await ctx.reply(
       "Опиши, что не так — одним сообщением. Чем конкретнее, тем быстрее починим.",
       { reply_markup: { force_reply: true, input_field_placeholder: "Что сломалось?" } },
     );
     openBugPrompt(db, who.me.id, sent.message_id, new Date());
-    await ctx.reply("Передумал — вернись в меню.", {
-      reply_markup: { inline_keyboard: [[{ text: "🏠 В меню", callback_data: "bug:cancel" }]] },
-    });
   }
 
   /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
@@ -797,7 +808,10 @@ export function createBot(deps: BotDeps): Bot {
     clearBugPending(db, who.me.id);
     await ctx.answerCallbackQuery({ text: "Ок, не буду ждать" });
     await safeEdit(() => ctx.editMessageReplyMarkup());
-    await ctx.reply("Кнопки на месте 👇", { reply_markup: menuFor(ctx.from.id, ctx.chat?.type) });
+    // `replyWithMenu`, а не руками собранный `menuFor(ctx.from.id, ...)`: в
+    // callback-контексте `ctx.from` есть всегда, так что замена побайтово
+    // эквивалентна, а хелпер уже есть рядом и делает ровно это.
+    await replyWithMenu(ctx, "Кнопки на месте 👇");
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {
