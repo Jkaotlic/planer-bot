@@ -644,6 +644,13 @@ button {
 .employee-row-name {
   font-size: 14px;
   font-weight: 600;
+  /* Та же обрезка, что в сетке: карточка работника не должна расти вверх из-за
+     длинного имени, иначе список людей идёт ступеньками. */
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .employee-row-spacer {
@@ -825,6 +832,12 @@ button {
 .employee-name {
   font-size: 14px;
   font-weight: 600;
+  /* Одной строкой: перенос делал строку выше соседних, и вся неделя после неё
+     съезжала по вертикали. Полное имя — в `title`. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .day-cell {
@@ -836,6 +849,32 @@ button {
 
 .day-cell.weekend-col {
   background: color-mix(in srgb, var(--destructive) 4%, transparent);
+}
+
+/* Сегодня — вертикальная подсветка на всю высоту сетки плюс метка в шапке.
+   Подложка слабее выходной и другого тона, чтобы суббота-сегодня читалась и
+   выходным, и сегодняшним днём одновременно, а не сливалась в одно пятно. */
+.day-cell.today-col {
+  background: color-mix(in srgb, var(--link) 7%, transparent);
+}
+
+.day-cell.weekend-col.today-col {
+  background: color-mix(in srgb, var(--link) 7%, color-mix(in srgb, var(--destructive) 4%, transparent));
+}
+
+.schedule-table thead th.today-col {
+  color: var(--link);
+}
+
+.schedule-table thead th.today-col .dom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--link);
+  color: var(--button-text);
 }
 
 .day-cell-inner {

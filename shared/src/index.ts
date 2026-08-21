@@ -7,6 +7,7 @@ export * from "./swap";
 export * from "./category";
 export * from "./entry-range";
 export * from "./entry-kinds";
+export * from "./person-identity";
 export * from "./audit";
 export * from "./schedule-palette";
 export * from "./distribute";

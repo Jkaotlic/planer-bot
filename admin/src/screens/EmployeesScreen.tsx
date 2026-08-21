@@ -346,7 +346,7 @@ function EmployeeRow({
           }}
         />
       ) : (
-        <span className="employee-row-name">{employee.displayName}</span>
+        <span className="employee-row-name" title={employee.displayName}>{employee.displayName}</span>
       )}
       {!editing && (
         <>

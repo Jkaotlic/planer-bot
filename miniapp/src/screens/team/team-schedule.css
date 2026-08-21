@@ -106,13 +106,39 @@
 
 .team-group__people {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   margin-top: 8px;
+  padding: 0;
+  list-style: none;
 }
 
-.team-group__people span {
+.team-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  overflow-wrap: anywhere;
+}
+
+.team-person__avatar {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* Имя одной строкой: прежнее `overflow-wrap: anywhere` рвало фамилию посреди
+   слова, и «Константинопольск/ий» читался как две разные строки списка. */
+.team-person__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .team-no-time {
