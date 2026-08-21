@@ -17,6 +17,7 @@ import {
   type UpcomingBirthday,
 } from "../api/client";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
+import { PersonPicker } from "../components/PersonPicker";
 import { initialsOf, personPalette } from "../lib/people";
 import { withNotifyNotice } from "../lib/notify-text";
 
@@ -428,20 +429,14 @@ function NewCollectionForm({
         </label>
 
         {/* Виновника можно не выбирать — это и есть общий сбор. */}
-        <label className="birthday-label">
-          Кому
-          <select
-            aria-label="Кому"
-            value={employeeId}
-            disabled={busy}
-            onChange={(e) => setEmployeeId(Number(e.target.value))}
-          >
-            <option value={0}>Общий сбор — на всех</option>
-            {employees.filter((e) => e.isActive).map((e) => (
-              <option key={e.id} value={e.id}>{e.displayName}</option>
-            ))}
-          </select>
-        </label>
+        <PersonPicker
+          label="Кому"
+          people={employees.filter((e) => e.isActive)}
+          value={employeeId}
+          onChange={setEmployeeId}
+          emptyOptionLabel="Общий сбор — на всех"
+          disabled={busy}
+        />
 
         <CollectionFields
           busy={busy}
@@ -807,20 +802,14 @@ function CollectionEditor({
               onChange={(e) => { setTitle(e.target.value); setConfirming(false); }}
             />
           </label>
-          <label className="birthday-label">
-            Кому
-            <select
-              aria-label="Кому сбор"
-              value={employeeId}
-              disabled={busy || subjectFrozen}
-              onChange={(e) => { setEmployeeId(Number(e.target.value)); setConfirming(false); }}
-            >
-              <option value={0}>Общий сбор — на всех</option>
-              {employees.filter((e) => e.isActive).map((e) => (
-                <option key={e.id} value={e.id}>{e.displayName}</option>
-              ))}
-            </select>
-          </label>
+          <PersonPicker
+            label="Кому"
+            people={employees.filter((e) => e.isActive)}
+            value={employeeId}
+            onChange={(id) => { setEmployeeId(id); setConfirming(false); }}
+            emptyOptionLabel="Общий сбор — на всех"
+            disabled={busy || subjectFrozen}
+          />
           {subjectFrozen && (
             <div className="birthday-blocker">
               Повод и виновника менять уже нельзя: команда прочитала, на что скидывается.
