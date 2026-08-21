@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
+import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { Avatar, Button, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
 import { CardShell, CardStack, MetaLine } from "../../components/Card";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
+import { PersonSearch } from "../../components/PersonSearch";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { withError, withoutError } from "../../lib/error-map";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -74,6 +75,7 @@ export function AdminEmployeesScreen() {
    * of problem (several independently-actionable rows on one long scroll).
    */
   const [restrictionErrors, setRestrictionErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  const [query, setQuery] = useState("");
 
   async function reload() {
     setEmployees(await apiClient.getAdminEmployees());
@@ -210,6 +212,7 @@ export function AdminEmployeesScreen() {
 
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
+  const visibleActive = filterPeople(active, query);
 
   return (
     <ScreenScroll>
@@ -230,14 +233,19 @@ export function AdminEmployeesScreen() {
         )}
 
         <Section header={`Активные · ${active.length}`}>
-          {active.length === 0 ? (
+          <PersonSearch value={query} onChange={setQuery} count={active.length} disabled={busyId !== null} />
+          {visibleActive.length === 0 ? (
             <Placeholder description="Пока нет активных работников" />
           ) : (
-            active.map((e, index) => (
+            visibleActive.map((e) => (
               <EmployeeRow
                 key={e.id}
                 employee={e}
-                position={index + 1}
+                // Позиция — место в РОСТЕРЕ, а не в том, что осталось после
+                // поиска: считать её по видимому индексу значило бы
+                // переставлять человека не туда, стоило кому-то что-нибудь
+                // набрать в поиске. Mirrors console's `EmployeesSection`.
+                position={active.findIndex((a) => a.id === e.id) + 1}
                 onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
                 onBirthDate={(birthDate) => withBusy(e.id, () => apiClient.setBirthDate(e.id, birthDate))}
                 actionLabel="В архив"
