@@ -23,17 +23,6 @@ export function categoryLabel(category: EntryCategory): string {
   return CATEGORY_LABELS[category];
 }
 
-/** All categories a new entry can be created with, in the order the add-panel offers them. */
-export const ALL_CATEGORIES: readonly EntryCategory[] = [
-  "shift",
-  "vacation",
-  "sick_leave",
-  "duty",
-  "offsite",
-  "business_trip",
-  "weekend_work",
-];
-
 /** Minimal shape needed to colour an entry — avoids importing the api types here. */
 interface ColourableEntry {
   category: EntryCategory;

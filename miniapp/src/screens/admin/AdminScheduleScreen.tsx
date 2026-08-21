@@ -1,7 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
-import { allowedByPool, countsForBalance, isAbsence, resolveShiftTimes, takesPartInAssignment, UNRECOGNISED_KIND } from "@planer/shared";
+import {
+  ABSENCE_CATEGORIES,
+  allowedByPool,
+  countsForBalance,
+  CUSTOM_TIME_CATEGORIES,
+  describeEntryRangePlan,
+  describeEntryRangeResult,
+  isAbsence,
+  planEntryRange,
+  resolveShiftTimes,
+  takesPartInAssignment,
+  UNRECOGNISED_KIND,
+  workPresets,
+} from "@planer/shared";
 import {
   apiClient,
   type Employee,
@@ -23,7 +36,6 @@ import { createLatestRequestGate } from "../../lib/request-gate";
 import {
   addDays,
   dayOfMonth,
-  dayOptions,
   formatDayLabel,
   formatWeekRangeLabel,
   isCurrentPeriod,
@@ -300,12 +312,14 @@ export function AdminScheduleScreen() {
     }
   }
 
-  async function handleSaved(notified: { delivered: number; intended: number }) {
+  async function handleSaved(notified: { delivered: number; intended: number }, summary?: string) {
     setEditing(null);
     await loadWeek(from, to);
-    // Своего сообщения об успехе у сохранения записи нет — «дошло не до всех»
+    // У одиночной записи своего сообщения об успехе нет — «дошло не до всех»
     // говорим, только когда есть что сказать, иначе экран молчит, как раньше.
-    setNotice(notifyPendingNotice(notified));
+    // У расстановки диапазоном есть: часть дней могла быть пропущена, и молчание
+    // читалось бы как «встало всё».
+    setNotice(summary ? withNotifyNotice(summary, notified) : notifyPendingNotice(notified));
   }
 
   async function handleFilled(count: number, notified: { delivered: number; intended: number }) {
@@ -375,7 +389,6 @@ export function AdminScheduleScreen() {
               <EntryForm
                 employees={employees}
                 templates={templates}
-                weekDates={weekDates}
                 existing={editing === "new" ? null : editing}
                 defaultDate={selectedDate}
                 onCancel={() => setEditing(null)}
@@ -556,124 +569,159 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
 interface EntryFormProps {
   employees: readonly Employee[];
   templates: readonly Template[];
-  weekDates: readonly string[];
   existing: Shift | null;
   defaultDate: string;
   onCancel: () => void;
-  onSaved: (notified: { delivered: number; intended: number }) => Promise<void>;
+  /** `summary` приходит только от расстановки диапазоном: у неё есть что сказать
+   *  вслух — сколько дней встало и сколько пропущено. */
+  onSaved: (notified: { delivered: number; intended: number }, summary?: string) => Promise<void>;
 }
 
 /**
- * Create/edit form for one schedule entry. Enforces the same category↔time
- * coupling as the desktop `AddEntryPanel`: `shift` picks a preset (or a custom
- * time), the other timed categories take explicit start/end, and the all-day
- * absences take an optional multi-day range instead.
+ * Что именно выбрано в списке «Что ставим».
+ *
+ * Зеркало `Choice` из десктопной `AddEntryPanel`: у пресета категория своя, и
+ * называть её отдельно приходится ровно в двух случаях — своё время (взять
+ * неоткуда) и отсутствие (пресетов у него не бывает).
  */
-function EntryForm({ employees, templates, weekDates, existing, defaultDate, onCancel, onSaved }: EntryFormProps) {
-  const initialCategory: Category = existing?.category ?? "shift";
+type EntryChoice =
+  | { kind: "preset"; templateId: number }
+  | { kind: "custom"; category: Category }
+  | { kind: "absence"; category: Category };
+
+function initialEntryChoice(existing: Shift | null, presets: readonly Template[]): EntryChoice {
+  if (existing) {
+    if (existing.templateId != null && presets.some((t) => t.id === existing.templateId)) {
+      return { kind: "preset", templateId: existing.templateId };
+    }
+    if (isAbsence(existing.category)) return { kind: "absence", category: existing.category };
+    return { kind: "custom", category: existing.category };
+  }
+  const first = presets[0];
+  return first ? { kind: "preset", templateId: first.id } : { kind: "custom", category: "shift" };
+}
+
+/**
+ * Форма одной записи графика — зеркало десктопной `AddEntryPanel`, слово в слово.
+ *
+ * Шага «Категория» здесь больше нет: смены и дежурства идут одним списком
+ * (`workPresets` из `@planer/shared` — тот же порядок, что в консоли), а
+ * категория берётся из пресета. Спрашивается она ровно там, где её взять
+ * неоткуда: «Своё время» и отсутствия.
+ *
+ * День — пара настоящих полей даты. Прежний выпадающий список предлагал семь
+ * дат показанной недели, и поставить что-нибудь на следующий месяц было нельзя
+ * вовсе.
+ */
+function EntryForm({ employees, templates, existing, defaultDate, onCancel, onSaved }: EntryFormProps) {
+  const presets = workPresets(templates);
+
   const [employeeId, setEmployeeId] = useState<number>(existing?.employeeId ?? 0);
-  const [date, setDate] = useState<string>(existing?.date ?? defaultDate);
-  const [endDate, setEndDate] = useState<string>(existing?.endDate ?? existing?.date ?? defaultDate);
-  const [category, setCategory] = useState<Category>(initialCategory);
-  // Default the preset to the one matching the entry's current title (so editing
-  // a "День" shift and switching to presets shows "День", not always "Утро");
-  // failing that, the first preset of the entry's category.
-  const [templateId, setTemplateId] = useState<number | null>(
-    templates.find((t) => t.name === existing?.title)?.id ??
-      templates.find((t) => t.category === initialCategory)?.id ??
-      templates[0]?.id ??
-      null,
-  );
-  // Editing an existing timed entry round-trips its exact clock times, so start in "custom" mode.
-  const [customTime, setCustomTime] = useState<boolean>(existing != null && existing.start != null);
+  const [from, setFrom] = useState<string>(existing?.date ?? defaultDate);
+  const [to, setTo] = useState<string>(existing?.endDate ?? existing?.date ?? defaultDate);
+  const [choice, setChoice] = useState<EntryChoice>(() => initialEntryChoice(existing, presets));
   const [start, setStart] = useState<string>(existing?.start ?? "09:00");
   const [end, setEnd] = useState<string>(existing?.end ?? "18:00");
   const [title, setTitle] = useState<string>(existing?.title ?? "");
+  const [includeWeekends, setIncludeWeekends] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const isFriday = weekdayIndex(date) === FRIDAY_INDEX;
+  const selectedPreset = choice.kind === "preset" ? presets.find((t) => t.id === choice.templateId) : undefined;
+  const category: Category = selectedPreset?.category ?? (choice.kind === "preset" ? "shift" : choice.category);
+  const absence = isAbsence(category);
+  const isFriday = weekdayIndex(from) === FRIDAY_INDEX;
 
-  // Правило «в пятницу — пятничные часы» живёт в @planer/shared: пятничные часы
-  // допускают null, и локальная копия этого не учитывала.
-  function templateTimes(template: Template): { start: string; end: string } {
-    return resolveShiftTimes(template, date);
-  }
+  // Диапазон — только у создания: править сразу десять записей одним движением
+  // здесь не предлагается, это отдельная работа с отдельной ценой ошибки.
+  const isRange = !existing && to > from;
+  const showTo = !existing || absence;
+  const plan = planEntryRange({ from, to, category, includeWeekends, busyDates: [] });
 
-  /** Presets the picker offers for a category — e.g. shift → Утро/День/Вечер/Ночь, duty → Поклонка. */
-  function presetsFor(cat: Category): Template[] {
-    return templates.filter((t) => t.category === cat);
-  }
+  /** Значение списка «Что ставим»: пресет по id, «своё время» или отсутствие по категории. */
+  const choiceValue = choice.kind === "preset" ? `p:${choice.templateId}` : choice.kind === "custom" ? "custom" : `a:${choice.category}`;
 
-  const categoryPresets = presetsFor(category);
-  // Preset mode applies only to timed categories that actually have presets; the
-  // rest (offsite, weekend_work) always take explicit start/end.
-  const inPresetMode = needsTime(category) && !customTime && categoryPresets.length > 0;
-
-  /** Selecting a preset also prefills the place field from its default location (used if the admin then switches to "Своё время"). */
-  function selectTemplate(id: number) {
-    setTemplateId(id);
-    const template = templates.find((t) => t.id === id);
-    if (template?.location != null && (template.category === "duty" || template.category === "offsite")) {
-      setTitle(template.location);
-    }
-  }
-
-  function selectCategory(next: Category) {
-    setCategory(next);
+  function selectChoice(value: string) {
     setFormError(null);
-    setCustomTime(false);
-    // Reset the preset to the first one of the new category (or none).
-    const first = presetsFor(next)[0] ?? null;
-    setTemplateId(first?.id ?? null);
-    if (first?.location != null && (next === "duty" || next === "offsite")) setTitle(first.location);
+    if (value === "custom") {
+      setChoice({ kind: "custom", category: absence ? "shift" : category });
+      return;
+    }
+    if (value.startsWith("a:")) {
+      setChoice({ kind: "absence", category: value.slice(2) as Category });
+      return;
+    }
+    const templateId = Number(value.slice(2));
+    setChoice({ kind: "preset", templateId });
+    // Место пресета приезжает в подпись — пригодится, если человек потом
+    // переключится на «Своё время».
+    const template = presets.find((t) => t.id === templateId);
+    if (template?.location != null) setTitle(template.location);
   }
 
-  function buildInput(): NewEntryInput | null {
-    const input: NewEntryInput = { date, category };
-    if (employeeId) input.employeeId = employeeId;
-
-    if (inPresetMode) {
-      const template = categoryPresets.find((t) => t.id === templateId) ?? categoryPresets[0];
-      if (!template) {
-        setFormError("Выберите пресет или укажите своё время");
-        return null;
-      }
-      const times = templateTimes(template);
-      input.templateId = template.id;
-      input.start = times.start;
-      input.end = times.end;
-      // The title always follows the chosen preset — otherwise editing a "День"
-      // entry to the "Утро" preset would keep showing the stale old name. For the
-      // duty preset the name already carries the place ("Дежурство · Поклонка").
-      input.title = template.name;
-    } else if (needsTime(category)) {
-      if (!start || !end) {
-        setFormError("Укажите время начала и окончания");
-        return null;
-      }
-      input.start = start;
-      input.end = end;
-      // Duty/offsite carry the "Место / примечание" as their title; a custom-time
-      // shift has none — clear any stale preset name so it isn't mislabelled.
-      input.title = category === "duty" || category === "offsite" ? title.trim() || null : null;
-    } else if (isAbsence(category)) {
-      if (endDate && endDate !== date) input.endDate = endDate;
+  /** Общая часть тела для обеих ручек — одна, чтобы они не разъехались. */
+  function entryFields(): Omit<NewEntryInput, "date"> | null {
+    const base = employeeId ? { employeeId } : {};
+    if (selectedPreset) {
+      const times = resolveShiftTimes(selectedPreset, from);
+      return {
+        ...base,
+        category: selectedPreset.category,
+        templateId: selectedPreset.id,
+        start: times.start,
+        end: times.end,
+        // Подпись всегда идёт за пресетом: иначе правка «Дня» на «Утро» оставила
+        // бы старое имя.
+        title: selectedPreset.name,
+      };
     }
-    return input;
+    if (absence) return { ...base, category };
+    if (!start || !end) {
+      setFormError("Укажите время начала и окончания");
+      return null;
+    }
+    return {
+      ...base,
+      category,
+      start,
+      end,
+      // Место дежурства и мероприятия несёт подпись; у смены со своим временем её нет.
+      title: category === "duty" || category === "offsite" ? title.trim() || null : null,
+    };
   }
 
   async function handleSave() {
     setFormError(null);
-    const input = buildInput();
-    if (!input) return;
+    if (to < from) {
+      setFormError("«По» не может быть раньше, чем «с»");
+      return;
+    }
+    if (isRange && plan.days.length === 0) {
+      setFormError("В этом диапазоне не остаётся ни одного дня");
+      return;
+    }
+    const fields = entryFields();
+    if (!fields) return;
+
     setSaving(true);
     try {
-      const { notified } = existing
-        ? await apiClient.updateEntry(existing.id, input)
-        : await apiClient.createEntry(input);
-      await onSaved(notified);
+      if (isRange) {
+        if (!employeeId) {
+          setFormError("Выберите работника");
+          return;
+        }
+        const result = await apiClient.createEntryRange({ ...fields, employeeId, from, to, includeWeekends });
+        await onSaved(result.notified, describeEntryRangeResult(result));
+      } else {
+        const input: NewEntryInput = { ...fields, date: from };
+        // Полоса отсутствия — единственный случай, когда `endDate` доезжает до базы.
+        if (absence && to !== from) input.endDate = to;
+        const { notified } = existing
+          ? await apiClient.updateEntry(existing.id, input)
+          : await apiClient.createEntry(input);
+        await onSaved(notified);
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Не удалось сохранить запись");
     } finally {
@@ -699,83 +747,87 @@ function EntryForm({ employees, templates, weekDates, existing, defaultDate, onC
 
   return (
     <CardShell>
+      <PersonPicker
+        label="Работник"
+        people={employees}
+        value={employeeId}
+        onChange={setEmployeeId}
+        emptyOptionLabel="— не назначен —"
+      />
+
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
-          <PersonPicker
-            label="Работник"
-            people={employees}
-            value={employeeId}
-            onChange={setEmployeeId}
-            emptyOptionLabel="— не назначен —"
+          <Input
+            header={showTo ? "С" : "День"}
+            type="date"
+            value={from}
+            onChange={(e) => {
+              const next = e.target.value;
+              setFrom(next);
+              if (next > to) setTo(next);
+            }}
           />
         </div>
-        <div style={{ flex: 1 }}>
-          <Select header="День" value={date} onChange={(e) => { setDate(e.target.value); setEndDate(e.target.value); }}>
-            {dayOptions(weekDates, date).map((iso) => (
-              <option key={iso} value={iso}>
-                {formatDayLabel(iso)}
-              </option>
-            ))}
-          </Select>
-        </div>
+        {showTo && (
+          <div style={{ flex: 1 }}>
+            <Input header="По" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        )}
       </div>
 
-      <Select header="Категория" value={category} onChange={(e) => selectCategory(e.target.value as Category)}>
-        {ORDERED_CATEGORIES.map((c) => (
-          <option key={c} value={c}>
-            {categoryLabel(c)}
+      {/* Смены и дежурства в одном списке, без шага «Категория»: до 2026-08-21
+          увидеть дежурство, не сказав сперва «Дежурство», было нельзя. */}
+      <Select header={`Что ставим${isFriday ? " · пятница, сокращённый" : ""}`} value={choiceValue} onChange={(e) => selectChoice(e.target.value)}>
+        {presets.map((t) => {
+          const times = resolveShiftTimes(t, from);
+          return (
+            <option key={t.id} value={`p:${t.id}`}>
+              {t.name} · {times.start}–{times.end}
+            </option>
+          );
+        })}
+        <option value="custom">Своё время</option>
+        {ABSENCE_CATEGORIES.map((c) => (
+          <option key={c} value={`a:${c}`}>
+            {categoryLabel(c as Category)}
           </option>
         ))}
       </Select>
 
-      {inPresetMode && (
-        <>
-          <Select header={`Пресет${isFriday ? " · пятница, сокращённый" : ""}`} value={templateId ?? ""} onChange={(e) => selectTemplate(Number(e.target.value))}>
-            {categoryPresets.map((t) => {
-              const times = templateTimes(t);
-              return (
-                <option key={t.id} value={t.id}>
-                  {t.name} · {times.start}–{times.end}
-                </option>
-              );
-            })}
-          </Select>
-          <button type="button" onClick={() => setCustomTime(true)} style={linkButtonStyle}>
-            Своё время
-          </button>
-        </>
-      )}
-
-      {needsTime(category) && customTime && categoryPresets.length > 0 && (
+      {choice.kind === "custom" && (
         <>
           <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />
-          <button type="button" onClick={() => setCustomTime(false)} style={linkButtonStyle}>
-            Вернуться к пресетам
-          </button>
+          {/* Здесь категорию всё-таки спрашиваем: у записи без пресета взять её
+              неоткуда, и это единственное место, где она осталась вопросом. */}
+          <Select header="Вид" value={category} onChange={(e) => setChoice({ kind: "custom", category: e.target.value as Category })}>
+            {CUSTOM_TIME_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {categoryLabel(c as Category)}
+              </option>
+            ))}
+          </Select>
         </>
       )}
 
-      {needsTime(category) && categoryPresets.length === 0 && <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />}
-
-      {isAbsence(category) && (
-        <Select header="По какой день" value={endDate} onChange={(e) => setEndDate(e.target.value)}>
-          {dayOptions(weekDates, endDate)
-            .filter((iso) => iso >= date)
-            .map((iso) => (
-              <option key={iso} value={iso}>
-                {formatDayLabel(iso)}
-              </option>
-            ))}
-        </Select>
-      )}
-
-      {(category === "duty" || category === "offsite") && !inPresetMode && (
+      {(category === "duty" || category === "offsite") && choice.kind !== "preset" && (
         <Input
           header="Место / примечание"
           placeholder={category === "duty" ? "Например, Вавилова" : "Например, Ярмарка вакансий"}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
+      )}
+
+      {isRange && !absence && (
+        <>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+            <input type="checkbox" checked={includeWeekends} onChange={(e) => setIncludeWeekends(e.target.checked)} />
+            Включая выходные
+          </label>
+          <div data-testid="range-preview" style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+            Поставится {describeEntryRangePlan(plan)}. Дни, где у человека уже что-то стоит, пропустятся.
+          </div>
+        </>
       )}
 
       {formError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{formError}</div>}
@@ -1111,12 +1163,3 @@ export function FillWeekPanel({ employees, templates, weekDates, shifts, roles, 
   );
 }
 
-const linkButtonStyle: CSSProperties = {
-  alignSelf: "flex-start",
-  border: "none",
-  background: "none",
-  padding: "2px 0",
-  fontSize: 14,
-  color: "var(--tgui--link_color)",
-  cursor: "pointer",
-};
