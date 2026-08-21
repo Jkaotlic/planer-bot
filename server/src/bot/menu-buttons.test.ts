@@ -343,13 +343,17 @@ describe("/menu — универсальный возврат раскладки
     expect(keyboardLabels(reply.payload)).toBeNull();
   });
 
-  it("в группу не уходит — раскладку увидели бы все участники", async () => {
+  it("в группу не уходит — бот вообще ничего не отправляет", async () => {
+    // Раньше тест проверял только «клавиатуры в ответе нет», а не «ответа нет
+    // вовсе» — «Кнопки на месте 👇» без раскладки всё равно ушло бы в группу и
+    // соврало бы: бот как будто ответил тому, кто написал, а на самом деле
+    // текст увидела бы вся группа. Спека требует полного молчания.
     const db = makeTestDb();
     linkedWorker(db, 779);
     const { bot, calls } = testBot(db);
     await bot.handleUpdate(groupCommandUpdate(779, "/menu"));
 
-    expect(keyboardLabels(calls.find((c) => c.method === "sendMessage")?.payload)).toBeNull();
+    expect(calls).toEqual([]);
   });
 
   it("/menu перечислена в меню команд бота — иначе о ней никто не узнает", async () => {
