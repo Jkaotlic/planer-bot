@@ -1246,7 +1246,14 @@ input[type="search"] {
   cursor: pointer;
 }
 
-.person-picker-row:hover {
+/* Прежний `<select disabled>` браузер серил сам; свою кнопку красит только
+   это правило — без него замороженная строка (например, виновник сбора,
+   который команда уже прочитала) выглядит нажимаемой, хоть клик и не сработает. */
+.person-picker-row:disabled {
+  cursor: default;
+}
+
+.person-picker-row:hover:not(:disabled) {
   background: var(--surface-secondary);
 }
 

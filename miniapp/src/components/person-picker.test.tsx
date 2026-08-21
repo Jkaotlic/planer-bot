@@ -76,6 +76,19 @@ describe("выбор одного человека в мини-аппе", () => 
     expect(el.querySelector(".person-picker-chosen")!.textContent).toContain("Семёнов Марк");
   });
 
+  it("строка «Выбран» несёт пометку — список со скроллом может её спрятать в самой строке", async () => {
+    // Список ограничен maxHeight со скроллом: на паре десятков человек выбранная
+    // строка с пометкой запросто вне видимой области, а «Выбран» — единственное,
+    // что тогда напоминает про «этого бот сам бы не поставил».
+    const el = await mountPicker({
+      people: SIX,
+      value: 2,
+      onChange: vi.fn(),
+      note: (p) => (p.id === 2 ? "· вне назначений" : null),
+    });
+    expect(el.querySelector(".person-picker-chosen")!.textContent).toContain("вне назначений");
+  });
+
   it("поиск не меняет выбор: набрал, стёр — выбран тот же", async () => {
     const onChange = vi.fn();
     const el = await mountPicker({ people: SIX, value: 3, onChange });

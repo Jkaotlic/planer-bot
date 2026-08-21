@@ -94,4 +94,11 @@ describe("выбор одного человека", () => {
     expect(el.querySelector('input[aria-label="Поиск по имени"]')).toBeNull();
     expect(el.querySelectorAll(".person-picker-row")).toHaveLength(3);
   });
+
+  it("список доступно назван подписью — два пикера на «Сборах» иначе неразличимы по aria", async () => {
+    const el = await mountPicker({ people: SIX, value: 0, onChange: vi.fn() });
+    const list = el.querySelector(".person-picker-list");
+    expect(list?.getAttribute("role")).toBe("group");
+    expect(list?.getAttribute("aria-label")).toBe("Кому");
+  });
 });
