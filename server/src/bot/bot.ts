@@ -129,6 +129,7 @@ export async function publishBotCommands(bot: Bot): Promise<void> {
     await bot.api.setMyCommands([
       { command: "start", description: "Начать и открыть смены" },
       { command: "week", description: "График команды на неделю" },
+      { command: "menu", description: "Вернуть кнопки под полем ввода" },
       { command: "notifications", description: "Напоминания о сменах — включить или выключить" },
     ]);
   } catch (err) {
@@ -517,6 +518,25 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("week", (ctx) => sendWeek(ctx));
 
   /**
+   * Возврат нижней раскладки из любого состояния.
+   *
+   * Нужна из-за `force_reply`: Telegram подменяет им раскладку полем ответа, и
+   * человек, не ответивший на вопрос багрепорта, остаётся без кнопок и без
+   * способа их вернуть — `/start` для этого не выглядит и в меню команд подписан
+   * про другое. Кому раскладка положена, решает `menuFor`, а не это место.
+   */
+  bot.command("menu", async (ctx) => {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    await replyWithMenu(ctx, "Кнопки на месте 👇");
+  });
+
+  /**
    * «Сообщить о проблеме»: бот спрашивает, человек отвечает.
    *
    * `force_reply` — не украшение: Telegram сам ставит курсор в поле ввода и
@@ -558,7 +578,10 @@ export function createBot(deps: BotDeps): Bot {
     // Аудит уже записал `submitBugReport` — второй записи здесь не нужно,
     // иначе одна жалоба легла бы в журнал дважды. Сверено с bug-service.ts.
     clearBugPending(db, who.me.id);
-    await ctx.reply("Записал, спасибо 🙏 Разберёмся.");
+    // Через `replyWithMenu`, а не голым `ctx.reply`: вопрос был задан с
+    // `force_reply`, и раскладку у человека Telegram на это время убрал. Обычный
+    // путь «нажал → написал → отправил» обязан возвращать её сам, без лишнего тапа.
+    await replyWithMenu(ctx, "Записал, спасибо 🙏 Разберёмся.");
     await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
   }
 

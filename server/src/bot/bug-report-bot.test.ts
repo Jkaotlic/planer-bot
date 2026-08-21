@@ -157,6 +157,21 @@ describe("багрепорт из бота", () => {
   });
 });
 
+describe("ответ «Записал» возвращает раскладку", () => {
+  it("ответ «Записал» несёт раскладку — обычный путь не заканчивается пропавшими кнопками", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 611);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(611, BTN_BUG));
+    await bot.handleUpdate(textUpdate(611, "Кнопка не нажимается"));
+
+    const confirmation = calls.filter((c) => c.method === "sendMessage").find((c) => String(c.payload.text).includes("Записал"))!;
+    const labels = (confirmation.payload.reply_markup?.keyboard ?? []).flat().map((b: { text: string }) => b.text);
+    expect(labels).toContain(BTN_WEEK);
+  });
+});
+
 describe("кнопка «Разобрал»", () => {
   // Отдельная проверка от `acting`, потому что кнопка живёт в чате вечно, а
   // админа могли разжаловать (решение из брифа) — обычный `isAdmin` в базе не
