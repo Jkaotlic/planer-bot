@@ -21,6 +21,7 @@ import { Sidebar, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
+import { ChecklistScreen } from "./screens/ChecklistScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
@@ -378,6 +379,8 @@ export function App() {
           />
         ) : nav === "kinds" ? (
           <ShiftKindsScreen employees={employees ?? []} />
+        ) : nav === "checklist" ? (
+          <ChecklistScreen />
         ) : nav === "weekend" ? (
           <WeekendAdminScreen />
         ) : nav === "collections" ? (

@@ -88,6 +88,24 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     }
   }
 
+  async function saveChecklist(kind: TemplateRolesView, requiresChecklist: boolean) {
+    // Оптимистично, как и допуск рядом: галочка обязана отзываться сразу, иначе
+    // на медленной сети её жмут второй раз.
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, requiresChecklist } : item)) ?? current,
+    );
+    setBusyId(kind.templateId);
+    setError(null);
+    try {
+      await apiClient.setTemplateChecklist(kind.templateId, requiresChecklist);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setError(err instanceof Error ? err.message : "Не удалось сохранить чек-лист");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (error && !kinds) return <div className="centered-fill">{error}</div>;
   if (!kinds) return <div className="centered-fill">Загрузка…</div>;
 
@@ -116,6 +134,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
+            onChecklist={(requiresChecklist) => saveChecklist(kind, requiresChecklist)}
           />
         ))}
       </div>
@@ -133,6 +152,7 @@ function KindCard({
   onToggleOpen,
   onChange,
   onRotationUnit,
+  onChecklist,
 }: {
   kind: TemplateRolesView;
   employees: Employee[];
@@ -143,6 +163,7 @@ function KindCard({
   onToggleOpen: () => void;
   onChange: (patch: Partial<TemplateRolesView>) => void;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
+  onChecklist: (requiresChecklist: boolean) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -228,6 +249,20 @@ function KindCard({
               <p className="kind-rotation-hint">Очередь появится, когда в допущенных кто-нибудь будет.</p>
             )}
           </div>
+
+          {/* Галочка стоит здесь, а не на экране «Чек-лист»: «кому он положен» —
+              свойство вида смены, ровно как допуск и очередь рядом. «Утренний
+              дежурный» из часов не выводится, и решает это он, а не догадка. */}
+          <label className="kind-checklist">
+            <input
+              type="checkbox"
+              checked={kind.requiresChecklist}
+              disabled={busy}
+              onChange={(e) => void onChecklist(e.target.checked)}
+            />
+            Требует чек-лист
+            <span className="kind-rotation-note">— дежурному придёт список проверок с началом смены</span>
+          </label>
 
           <PersonSearch value={query} onChange={onQueryChange} count={employees.length} disabled={busy} />
 

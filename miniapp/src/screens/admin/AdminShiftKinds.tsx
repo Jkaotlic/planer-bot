@@ -101,6 +101,24 @@ export function AdminShiftKinds({
     }
   }
 
+  async function saveChecklist(kind: TemplateRolesView, requiresChecklist: boolean) {
+    // Оптимистично, как и допуск: галочка обязана отзываться сразу, иначе на
+    // медленной сети её жмут второй раз.
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, requiresChecklist } : item)) ?? current,
+    );
+    setBusyId(kind.templateId);
+    setErrors((prev) => withoutError(prev, kind.templateId));
+    try {
+      await apiClient.setTemplateChecklist(kind.templateId, requiresChecklist);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить чек-лист"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
     setBusyId(kind.templateId);
     setErrors((prev) => withoutError(prev, kind.templateId));
@@ -161,6 +179,7 @@ export function AdminShiftKinds({
             onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
+            onChecklist={(requiresChecklist) => saveChecklist(kind, requiresChecklist)}
           />
         ))}
 
@@ -187,6 +206,7 @@ function KindCard({
   onToggleOpen,
   onChange,
   onRotationUnit,
+  onChecklist,
 }: {
   kind: TemplateRolesView;
   employees: Employee[];
@@ -199,6 +219,7 @@ function KindCard({
   onToggleOpen: () => void;
   onChange: (patch: Partial<TemplateRolesView>) => void;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
+  onChecklist: (requiresChecklist: boolean) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -294,6 +315,19 @@ function KindCard({
                 <option value="week">по неделям</option>
               </select>
             </label>
+            {/* Галочка живёт здесь, а не на экране чек-листа: «кому он положен» —
+                свойство вида смены, как допуск и очередь рядом. Зеркало
+                консольного `ShiftKindsScreen`. */}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 10 }}>
+              <input
+                type="checkbox"
+                checked={kind.requiresChecklist}
+                disabled={busy}
+                onChange={(e) => void onChecklist(e.target.checked)}
+              />
+              Требует чек-лист
+            </label>
+
             {queue && queue.queue.length > 0 ? (
               <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.45 }}>
                 Следующие: {queue.queue.slice(0, 3).map((turn) => turn.label).join(" → ")}
