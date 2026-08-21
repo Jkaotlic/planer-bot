@@ -38,17 +38,26 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
 }) {
   const [query, setQuery] = useState("");
 
-  const chosenName = value === 0 ? emptyOptionLabel : people.find((p) => p.id === value)?.displayName;
+  // Объект, а не голое имя: строке «Выбран» ниже нужна и пометка `note`, а её
+  // не достать из одного `displayName`.
+  const chosenPerson = value === 0 ? null : people.find((p) => p.id === value);
+  const chosenLabel = value === 0 ? emptyOptionLabel : chosenPerson?.displayName;
+  const chosenMark = chosenPerson ? note?.(chosenPerson) : null;
   const filtered = filterPeople(people, query);
 
   return (
     <Section header={label}>
-      {chosenName != null && (
+      {chosenLabel != null && (
         <div
           className="person-picker-chosen"
           style={{ padding: "8px 24px 4px", fontSize: 13, color: "var(--tgui--hint_color)" }}
         >
-          Выбран: {chosenName}
+          {/* Пометка обязана быть и здесь, не только в строке списка: список
+              ограничен `maxHeight` со скроллом, и при паре десятков человек
+              выбранная строка со своей пометкой запросто окажется вне
+              видимой области — а «Выбран» существует именно на этот случай. */}
+          Выбран: {chosenLabel}
+          {chosenMark ? ` ${chosenMark}` : ""}
         </div>
       )}
       <div style={{ padding: "0 12px 8px" }}>
@@ -57,8 +66,14 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
       {/* Ограничена по высоте с прокруткой: без этого два десятка строк
           растянули бы форму на весь экран. */}
       <div className="person-picker-list" style={{ maxHeight: 220, overflowY: "auto" }}>
+        {/* type="button" — явно: ButtonCell рендерит `<button>` без атрибута
+            `type`, то есть по умолчанию `type="submit"`. Сегодня на этих
+            экранах нет родных `<form>`, поэтому не проявляется, но
+            консольный зеркальный PersonPicker ставит `type="button"` явно —
+            и здесь для того же: чтобы обе копии не разъезжались тихо. */}
         {emptyOptionLabel != null && (
           <ButtonCell
+            type="button"
             className={`person-picker-row${value === 0 ? " selected" : ""}`}
             aria-pressed={value === 0}
             after={value === 0 ? "✓" : undefined}
@@ -73,6 +88,7 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
           return (
             <ButtonCell
               key={person.id}
+              type="button"
               className={`person-picker-row${value === person.id ? " selected" : ""}`}
               aria-pressed={value === person.id}
               after={value === person.id ? "✓" : undefined}

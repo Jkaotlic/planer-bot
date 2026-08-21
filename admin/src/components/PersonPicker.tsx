@@ -37,7 +37,11 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
       <span className="field-label">{label}</span>
       {chosenName != null && <div className="person-picker-chosen">Выбран: {chosenName}</div>}
       <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />
-      <div className="person-picker-list">
+      {/* `role="group" aria-label={label}` — иначе список ничем не связан с
+          подписью над ним: у заменённых `<select>` было `aria-label="Кому"` /
+          `aria-label="Кому сбор"`, и на «Сборах» с двумя пикерами их можно
+          было различить по доступному имени, а у голого списка строк — нет. */}
+      <div className="person-picker-list" role="group" aria-label={label}>
         {emptyOptionLabel != null && (
           <button
             type="button"
