@@ -54,3 +54,46 @@ textarea {
 .tab-bar-fit > div {
   background-color: var(--tg-theme-secondary-bg-color, var(--tg-theme-bg-color, #ffffff));
 }
+
+/* ---------- Чек-лист дежурного ---------- */
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 8px;
+}
+
+/* Кнопка, а не чекбокс с подписью: цель тапа — вся строка, и на телефоне это
+   разница между «попал» и «попал во второй раз». */
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.checklist-item:disabled {
+  opacity: 0.6;
+}
+
+.checklist-item__box {
+  flex: 0 0 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Сделанное гасится, но не зачёркивается: зачёркнутый текст на телефоне
+   читается хуже, а список ещё перечитывают — «что я уже проверил». */
+.checklist-item--done .checklist-item__title {
+  color: var(--tgui--hint_color);
+}

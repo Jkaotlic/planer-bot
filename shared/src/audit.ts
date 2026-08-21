@@ -34,7 +34,7 @@ export const AUDIT_TYPES = [
   "employee_archived", "employee_restored", "employee_admin_changed",
   "employee_restrictions_changed", "employee_observer_changed",
   "employee_invite_issued", "settings_changed", "notice_prefs_changed",
-  "template_roles_changed", "template_rotation_changed",
+  "template_roles_changed", "template_rotation_changed", "template_checklist_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
   "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
@@ -43,6 +43,7 @@ export const AUDIT_TYPES = [
   "collection_closed", "collection_deleted",
   "reminder_undeliverable", "reminders_dispatched",
   "announcement_sent",
+  "checklist_completed",
   "bug_report_created", "bug_report_resolved",
 ] as const;
 
@@ -394,6 +395,11 @@ const DESCRIBERS: Record<AuditType, Describer> = {
       `${num(p.poolSize) ?? 0} допущено · ${num(p.preferred) ?? 0} с приоритетом`,
     ],
   }),
+  template_checklist_changed: (p) => ({
+    icon: "☑️",
+    title: p.requiresChecklist === true ? "Виду смены назначен чек-лист" : "С вида смены снят чек-лист",
+    lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`],
+  }),
   template_rotation_changed: (p) => ({
     icon: "🎚",
     title: "Изменена очередь",
@@ -494,6 +500,14 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     ],
   }),
 
+  // Одна строка на пройденный чек-лист, а не на каждый тап: интересен факт
+  // «прошёл», а по строке на пункт журнал утопило бы на день вперёд.
+  checklist_completed: (p) => ({
+    icon: "☑️",
+    title: "Чек-лист пройден",
+    lines: [`${personLabel(p)} · ${dayLabel(p.date)}`, `${num(p.total) ?? 0} ${pluralItems(num(p.total) ?? 0)}`],
+  }),
+
   bug_report_created: (p) => ({ icon: "🐞", title: "Сообщение о проблеме", lines: [String(p.text ?? "")] }),
   bug_report_resolved: (p) => ({
     icon: "🐞",
@@ -501,6 +515,16 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     lines: [String(p.text ?? "")],
   }),
 };
+
+/** «1 пункт / 2 пункта / 5 пунктов». */
+function pluralItems(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return "пунктов";
+  if (mod10 === 1) return "пункт";
+  if (mod10 >= 2 && mod10 <= 4) return "пункта";
+  return "пунктов";
+}
 
 /**
  * Событие журнала словами.

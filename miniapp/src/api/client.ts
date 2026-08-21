@@ -29,6 +29,12 @@ import {
   mockGetTemplates,
   mockCreateEntry,
   mockCreateEntryRange,
+  mockGetMyChecklist,
+  mockMarkChecklistItem,
+  mockGetChecklistItems,
+  mockAddChecklistItem,
+  mockRenameChecklistItem,
+  mockRemoveChecklistItem,
   mockCreateEntries,
   mockUpdateEntry,
   mockDeleteEntry,
@@ -61,6 +67,7 @@ import {
   mockGetTemplateQueue,
   mockSetRotationUnit,
   mockSaveTemplateRoles,
+  mockSetTemplateChecklist,
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
@@ -279,6 +286,20 @@ export interface NewEntryRangeInput {
   includeWeekends?: boolean;
 }
 
+/** Чек-лист дежурного на день — то, что видит сам работник. */
+export interface MyChecklist {
+  date: string;
+  /** Положен ли он сегодня. `false` и при пустом списке пунктов: проходить нечего. */
+  required: boolean;
+  items: ChecklistItem[];
+  markedItemIds: number[];
+}
+
+export interface ChecklistItem {
+  id: number;
+  title: string;
+}
+
 export interface EntryRangeResult {
   created: Shift[];
   skipped: EntryRangeSkip[];
@@ -462,6 +483,8 @@ export interface TemplateRolesView {
   pool: number[];
   /** employeeId -> weight. Present means "asked for this kind". */
   preference: Record<number, number>;
+  /** Требует ли этот вид смены прохождения чек-листа дежурного. */
+  requiresChecklist: boolean;
 }
 
 /** One person's place in the queue for a kind of shift, already worded for display. */
@@ -685,6 +708,12 @@ export interface ApiClient {
   getTemplates(): Promise<Template[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
+  getMyChecklist(date: string): Promise<MyChecklist>;
+  markChecklistItem(date: string, itemId: number, done: boolean): Promise<MyChecklist>;
+  getChecklistItems(): Promise<ChecklistItem[]>;
+  addChecklistItem(title: string): Promise<ChecklistItem>;
+  renameChecklistItem(id: number, title: string): Promise<ChecklistItem>;
+  removeChecklistItem(id: number): Promise<ChecklistItem[]>;
   /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
    *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
@@ -719,6 +748,7 @@ export interface ApiClient {
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
+  setTemplateChecklist(templateId: number, requiresChecklist: boolean): Promise<void>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
@@ -1098,6 +1128,17 @@ export const realClient: ApiClient = {
   createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
 
   createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
+
+  getMyChecklist: (date) => authorizedGet<MyChecklist>(`/api/my/checklist?date=${date}`),
+  markChecklistItem: (date, itemId, done) =>
+    authorizedPostJson<MyChecklist>("/api/my/checklist/mark", { date, itemId, done }),
+  getChecklistItems: () => authorizedGet<{ items: ChecklistItem[] }>("/api/admin/checklist/items").then((r) => r.items),
+  addChecklistItem: (title) =>
+    authorizedPostJson<{ item: ChecklistItem }>("/api/admin/checklist/items", { title }).then((r) => r.item),
+  renameChecklistItem: (id, title) =>
+    authorizedPatchJson<{ item: ChecklistItem }>(`/api/admin/checklist/items/${id}`, { title }).then((r) => r.item),
+  removeChecklistItem: (id) =>
+    authorizedDelete<{ items: ChecklistItem[] }>(`/api/admin/checklist/items/${id}`).then((r) => r.items),
   createEntries: (inputs) =>
     authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
   updateEntry: (id, input) =>
@@ -1242,6 +1283,10 @@ export const realClient: ApiClient = {
     if (!res.ok) throw new Error(await errorMessage(path, res));
   },
 
+  async setTemplateChecklist(templateId, requiresChecklist) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { requiresChecklist });
+  },
+
   async getRosterCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -1321,6 +1366,12 @@ const devClient: ApiClient = {
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
   createEntryRange: (input) => mockCreateEntryRange(input),
+  getMyChecklist: (date) => mockGetMyChecklist(date),
+  markChecklistItem: (date, itemId, done) => mockMarkChecklistItem(date, itemId, done),
+  getChecklistItems: () => mockGetChecklistItems(),
+  addChecklistItem: (title) => mockAddChecklistItem(title),
+  renameChecklistItem: (id, title) => mockRenameChecklistItem(id, title),
+  removeChecklistItem: (id) => mockRemoveChecklistItem(id),
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
@@ -1348,6 +1399,7 @@ const devClient: ApiClient = {
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
+  setTemplateChecklist: (templateId, requiresChecklist) => mockSetTemplateChecklist(templateId, requiresChecklist),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),

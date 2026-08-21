@@ -10,6 +10,7 @@ import { createApp } from "./http/app";
 import { createBot, publishBotCommands } from "./bot/bot";
 import { shutdownSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
+import { runChecklistTick } from "./reminders/checklist-tick";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { runHandoverTick } from "./handover/handover-tick";
 import { createHandoverMessenger } from "./handover/handover-messenger";
@@ -51,6 +52,9 @@ setInterval(() => {
   ticking = true;
   runTicksIndependently([
     { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz)) },
+    // Четвёртым в тот же массив: чек-лист уходит с началом смены дежурного, а
+    // не по общему часу, поэтому ему нужен тот же пятиминутный тик.
+    { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },
     { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz).date) },
     // Третьим в тот же массив, а не своим setInterval: `runTicksIndependently`
     // и написан затем, чтобы падение одного тика не гасило соседей.

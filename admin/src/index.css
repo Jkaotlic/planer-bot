@@ -2273,3 +2273,35 @@ input[type="search"] {
   border: 1px solid var(--button);
   font-size: 13px;
 }
+
+/* ---------- Чек-лист ---------- */
+
+/* Номер пункта, а не маркер списка: порядок здесь несёт смысл — дежурный идёт
+   по этажу сверху вниз, и переставить пункт местами это изменить процедуру. */
+.checklist-order {
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-secondary);
+  color: var(--hint);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-chip-done {
+  background: color-mix(in srgb, var(--button) 16%, transparent);
+  color: var(--button);
+}
+
+.kind-checklist {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 0 4px;
+  font-size: 13.5px;
+  cursor: pointer;
+}

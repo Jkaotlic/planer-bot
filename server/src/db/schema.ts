@@ -73,6 +73,14 @@ export const shiftTemplates = sqliteTable("shift_templates", {
   sendReminder: integer({ mode: "boolean" }).notNull().default(false),
   sortOrder: integer().notNull().default(0),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
+  /**
+   * Требует ли этот вид смены прохождения чек-листа.
+   *
+   * Свойство ПРЕСЕТА, а не догадка про часы: «утренний дежурный» из времени не
+   * выводится — 07:00 бывает и у смены, а дежурство бывает вечерним. Что считать
+   * дежурством с проверкой, решает админ галочкой на «Видах смен».
+   */
+  requiresChecklist: integer({ mode: "boolean" }).notNull().default(false),
   /** How many people this preset needs per weekday, Mon..Sun — 7 comma-separated ints.
    *  '0,0,0,0,0,0,0' (the default) means "not a role": never materialised, today's behaviour.
    *  '1,1,1,1,1,0,0' — the five roles that need exactly one person every working day.
@@ -468,6 +476,51 @@ export const collections = sqliteTable(
       .where(sql`${t.kind} = 'birthday'`),
   ],
 );
+
+
+/**
+ * Пункт чек-листа дежурного.
+ *
+ * Содержимое — данные, а не код: процедуру пишет команда, а не этот репозиторий.
+ * Таблица приезжает пустой, и пока в ней ноль активных пунктов, бот про чек-лист
+ * молчит.
+ */
+export const checklistItems = sqliteTable("checklist_items", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  title: text().notNull(),
+  sortOrder: integer().notNull().default(0),
+  /**
+   * Убранный пункт гасится, а не удаляется: на него ссылаются вчерашние отметки,
+   * а «что проверяли в августе» — ровно то, ради чего чек-лист заводят.
+   */
+  isActive: integer({ mode: "boolean" }).notNull().default(true),
+  createdAt: createdAt(),
+});
+
+/**
+ * Отметка: такой-то человек такого-то числа прошёл такой-то пункт.
+ *
+ * Без сущности «прогон чек-листа»: она не отвечала бы ни на один вопрос, который
+ * к чек-листу возникает, зато потребовала бы решать, что с ней делать, когда
+ * смену передали другому.
+ */
+export const checklistMarks = sqliteTable(
+  "checklist_marks",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    date: text().notNull(),
+    employeeId: integer().notNull().references(() => employees.id),
+    itemId: integer().notNull().references(() => checklistItems.id),
+    doneAt: createdAt(),
+  },
+  // Отметка идемпотентна: двойной тап не должен оставлять две записи.
+  (t) => [uniqueIndex("checklist_mark_unique").on(t.date, t.employeeId, t.itemId)],
+);
+
+export type ChecklistItem = typeof checklistItems.$inferSelect;
+export type NewChecklistItem = typeof checklistItems.$inferInsert;
+export type ChecklistMark = typeof checklistMarks.$inferSelect;
+export type NewChecklistMark = typeof checklistMarks.$inferInsert;
 
 export type VacantSlot = typeof vacantSlots.$inferSelect;
 export type NewVacantSlot = typeof vacantSlots.$inferInsert;

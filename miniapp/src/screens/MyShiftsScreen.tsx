@@ -3,6 +3,7 @@ import { canAddOwnShifts, swapBlockReason } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
 import { AddressField } from "../components/AddressField";
+import { ChecklistCard } from "../components/ChecklistCard";
 import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
@@ -80,6 +81,12 @@ export function MyShiftsScreen({
             roster is written «Фамилия Имя». See `addressOf` in @planer/shared. */}
         <GreetingHero name={me.address} summary={summary} />
       </div>
+
+      {/* Чек-лист — самое верхнее, что есть на экране в тот день, когда он
+          положен: человек открывает мини-аппу по кнопке из утреннего
+          сообщения, и искать его под списком смен ему незачем. В остальные
+          дни карточки нет вовсе. */}
+      <ChecklistCard today={today} />
 
       {/* Вход в самозапись стоит НАД списком смен: список не имеет нижней
           границы, и кнопка под ним у человека с плотным графиком оказалась бы

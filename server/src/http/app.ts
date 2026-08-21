@@ -10,7 +10,7 @@ import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middlew
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { redactSecrets } from "../util/safe-error";
-import { listActiveTemplates, getTemplate } from "../repo/templates";
+import { listActiveTemplates, getTemplate, setTemplateRequiresChecklist } from "../repo/templates";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
@@ -66,6 +66,7 @@ import { teamNow } from "../util/team-time";
 import { createEmployeesRoutes } from "./routes/employees";
 import { createReadRoutes } from "./routes/read";
 import { createMyEntryRoutes } from "./routes/my-entries";
+import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
 import {
   isWeekend,
@@ -541,6 +542,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.route("/", createMyEntryRoutes({ db, config, bot }));
   app.route("/", createMyHandoverRoutes({ db, config, bot }));
+  app.route("/", createChecklistRoutes(db, config));
 
   app.route("/", createEmployeesRoutes({ db, config, bot }));
 
@@ -1354,6 +1356,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         name: template.name,
         category: template.category,
         accent: template.accent,
+        requiresChecklist: template.requiresChecklist,
         ...(roles.get(template.id) ?? { pool: [], preference: {} }),
       })),
     });
@@ -1376,6 +1379,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
       asOf,
       queue: queue.map((turn) => ({ ...turn, label: describeTurn(turn, template.rotationUnit) })),
     });
+  });
+
+  /**
+   * Галочка «Требует чек-лист» у вида смены.
+   *
+   * Своей ручкой, а не полем в `roles`: там лежит «кто допущен и кто просил» —
+   * про людей, а это про саму смену. Одно тело на два разных решения означало
+   * бы, что правка допуска молча трогает чек-лист.
+   */
+  app.put("/api/admin/templates/:id/checklist", requireAdmin(db, config.jwtSecret), async (c) => {
+    const templateId = Number(c.req.param("id"));
+    if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
+    const parsed = z.object({ requiresChecklist: z.boolean() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    setTemplateRequiresChecklist(db, templateId, parsed.data.requiresChecklist);
+    recordAudit(db, "template_checklist_changed", c.get("auth").employeeId, {
+      templateId,
+      templateName: getTemplate(db, templateId)?.name ?? null,
+      requiresChecklist: parsed.data.requiresChecklist,
+    });
+    return c.json({ templateId, requiresChecklist: parsed.data.requiresChecklist });
   });
 
   app.put("/api/admin/templates/:id/rotation", requireAdmin(db, config.jwtSecret), async (c) => {

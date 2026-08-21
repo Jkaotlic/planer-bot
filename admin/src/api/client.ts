@@ -13,6 +13,12 @@ import {
   employeesMock,
   mockCreateEntry,
   mockCreateEntryRange,
+  mockGetChecklistItems,
+  mockAddChecklistItem,
+  mockRenameChecklistItem,
+  mockRemoveChecklistItem,
+  mockReorderChecklistItem,
+  mockGetChecklistDay,
   mockUpdateEntry,
   mockDeleteEntry,
   mockGetEvents,
@@ -42,6 +48,7 @@ import {
   mockGetTemplateQueue,
   mockSetRotationUnit,
   mockSaveTemplateRoles,
+  mockSetTemplateChecklist,
   mockPreviewRosterImport,
   mockApplyRosterImport,
   mockGetSettings,
@@ -150,6 +157,19 @@ export interface EntryRangeResult {
   created: Shift[];
   skipped: EntryRangeSkip[];
   notified: NotifyReach;
+}
+
+/** Пункт чек-листа дежурного. */
+export interface ChecklistItem {
+  id: number;
+  title: string;
+}
+
+/** Сводка «кто сегодня должен пройти чек-лист и сколько уже отметил». */
+export interface ChecklistDay {
+  date: string;
+  total: number;
+  people: { employeeId: number; displayName: string; done: number }[];
 }
 
 export type WeekendSlotStatus = "open" | "assigned" | "closed";
@@ -276,6 +296,8 @@ export interface TemplateRolesView {
   pool: number[];
   /** employeeId -> weight. Present means "asked for this kind". */
   preference: Record<number, number>;
+  /** Требует ли этот вид смены прохождения чек-листа дежурного. */
+  requiresChecklist: boolean;
 }
 
 /** One person's place in the queue for a kind of shift, already worded for display. */
@@ -476,6 +498,12 @@ export interface ApiClient {
   getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
+  getChecklistItems(): Promise<ChecklistItem[]>;
+  addChecklistItem(title: string): Promise<ChecklistItem>;
+  renameChecklistItem(id: number, title: string): Promise<ChecklistItem>;
+  removeChecklistItem(id: number): Promise<ChecklistItem[]>;
+  reorderChecklistItem(id: number, to: number): Promise<ChecklistItem[]>;
+  getChecklistDay(date: string): Promise<ChecklistDay>;
   updateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   deleteEntry(id: number): Promise<{ notified: NotifyReach }>;
   createEmployee(name: string): Promise<CreateEmployeeResult>;
@@ -525,6 +553,7 @@ export interface ApiClient {
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
+  setTemplateChecklist(templateId: number, requiresChecklist: boolean): Promise<void>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
   getSettings(): Promise<AdminSettings>;
@@ -790,6 +819,17 @@ export const realClient: ApiClient = {
 
   createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
 
+  getChecklistItems: () => authorizedGet<{ items: ChecklistItem[] }>("/api/admin/checklist/items").then((r) => r.items),
+  addChecklistItem: (title) =>
+    authorizedPostJson<{ item: ChecklistItem }>("/api/admin/checklist/items", { title }).then((r) => r.item),
+  renameChecklistItem: (id, title) =>
+    authorizedPatchJson<{ item: ChecklistItem }>(`/api/admin/checklist/items/${id}`, { title }).then((r) => r.item),
+  removeChecklistItem: (id) =>
+    authorizedDelete<{ items: ChecklistItem[] }>(`/api/admin/checklist/items/${id}`).then((r) => r.items),
+  reorderChecklistItem: (id, to) =>
+    authorizedPostJson<{ items: ChecklistItem[] }>(`/api/admin/checklist/items/${id}/order`, { to }).then((r) => r.items),
+  getChecklistDay: (date) => authorizedGet<ChecklistDay>(`/api/admin/checklist/day?date=${date}`),
+
   updateEntry: (id, input) =>
     authorizedPatchJson<{ entry: Shift; notified: NotifyReach }>(`/api/admin/entries/${id}`, input),
 
@@ -950,6 +990,10 @@ export const realClient: ApiClient = {
     await authorizedPutJson(`/api/admin/templates/${templateId}/roles`, { pool, preference });
   },
 
+  async setTemplateChecklist(templateId, requiresChecklist) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { requiresChecklist });
+  },
+
   previewRosterImport(csv) {
     return authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv });
   },
@@ -995,6 +1039,12 @@ const devClient: ApiClient = {
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
   createEntryRange: (input) => mockCreateEntryRange(input),
+  getChecklistItems: () => mockGetChecklistItems(),
+  addChecklistItem: (title) => mockAddChecklistItem(title),
+  renameChecklistItem: (id, title) => mockRenameChecklistItem(id, title),
+  removeChecklistItem: (id) => mockRemoveChecklistItem(id),
+  reorderChecklistItem: (id, to) => mockReorderChecklistItem(id, to),
+  getChecklistDay: (date) => mockGetChecklistDay(date),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
   createEmployee: (name) => employeesMock.createEmployee(name),
@@ -1031,6 +1081,7 @@ const devClient: ApiClient = {
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
+  setTemplateChecklist: (templateId, requiresChecklist) => mockSetTemplateChecklist(templateId, requiresChecklist),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),
