@@ -15,6 +15,7 @@ import {
 import { AddEntryPanel } from "./components/AddEntryPanel";
 import { BalanceRail } from "./components/BalanceRail";
 import { EventsFeed } from "./components/EventsFeed";
+import { PersonSearch } from "./components/PersonSearch";
 import { ScheduleGrid } from "./components/ScheduleGrid";
 import { Sidebar, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -103,6 +104,8 @@ export function App() {
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
   const [rosterImport, setRosterImport] = useState<RosterImportState | null>(null);
   const [rosterNotice, setRosterNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  /** Filters `ScheduleGrid`'s rows — see `PersonSearch` there for why `BalanceRail` doesn't get it. */
+  const [scheduleQuery, setScheduleQuery] = useState("");
   const rosterFileInput = useRef<HTMLInputElement>(null);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
@@ -399,6 +402,7 @@ export function App() {
               onImportRoster={() => rosterFileInput.current?.click()}
               onExportRoster={() => void exportRoster()}
             />
+            <PersonSearch value={scheduleQuery} onChange={setScheduleQuery} count={activeEmployees.length} />
             <input
               ref={rosterFileInput}
               className="visually-hidden"
@@ -437,8 +441,12 @@ export function App() {
                   weekDates={weekDates}
                   onAddClick={openAddPanel}
                   onEntryClick={setEditingEntry}
+                  query={scheduleQuery}
                 />
                 <aside className="right-rail">
+                  {/* BalanceRail НЕ фильтруется: она про справедливость раздачи по ВСЕЙ
+                      команде, и половина команды в ней — это не «отфильтровано», а
+                      неверное число. */}
                   <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
                   <EventsFeed events={events} />
                 </aside>
