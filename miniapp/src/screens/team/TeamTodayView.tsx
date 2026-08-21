@@ -1,5 +1,6 @@
 import type { TodayGroup, TodayModel } from "../../lib/team-schedule";
 import { categoryPaletteForTheme } from "../../categories";
+import { initialsOf, personPalette } from "../../lib/people";
 
 export function TeamTodayView({
   model,
@@ -64,11 +65,22 @@ function TodayGroupCard({
           <strong>{group.title}</strong>
           <span>{group.start && group.end ? `${group.start}–${group.end}` : "Весь день"}</span>
         </div>
-        <div className="team-group__people">
-          {group.people.map((person) => (
-            <span key={`${group.key}:${person.employeeId ?? "open"}`}>{person.displayName}</span>
-          ))}
-        </div>
+        {/* Люди — теми же кружками с инициалами, что в консоли и в «Работниках»:
+            голым списком имён группа из шести человек читалась абзацем текста, а
+            цвет опознаёт человека раньше, чем глаз дочитает фамилию. */}
+        <ul className="team-group__people">
+          {group.people.map((person) => {
+            const palette = personPalette(person.employeeId);
+            return (
+              <li className="team-person" key={`${group.key}:${person.employeeId ?? "open"}`}>
+                <span className="team-person__avatar" style={{ background: palette.bg, color: palette.fg }} aria-hidden="true">
+                  {initialsOf(person.displayName)}
+                </span>
+                <span className="team-person__name">{person.displayName}</span>
+              </li>
+            );
+          })}
+        </ul>
       </div>
     </section>
   );

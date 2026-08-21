@@ -2,7 +2,7 @@ import { filterPeople } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
-import { dayOfMonth, isWeekendIso, weekdayShort } from "../lib/week";
+import { dayOfMonth, isWeekendIso, toISODate, weekdayShort } from "../lib/week";
 
 export interface ScheduleGridProps {
   employees: Employee[];
@@ -16,6 +16,11 @@ export interface ScheduleGridProps {
   onEntryClick: (entry: Shift) => void;
   /** From `PersonSearch` in `App.tsx` — filters which rows render. Absent/empty shows everyone. */
   query?: string;
+  /**
+   * Сегодняшняя дата. Параметром, а не `new Date()` внутри: неделю рисуют и
+   * тесты, и им нужен свой «сегодня». По умолчанию — день браузера.
+   */
+  today?: string;
 }
 
 function endOf(s: Shift): string {
@@ -32,7 +37,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick, query }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick, query, today = toISODate(new Date()) }: ScheduleGridProps) {
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
   const visibleEmployees = filterPeople(employees, query ?? "");
@@ -42,8 +47,15 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
         <thead>
           <tr>
             <th className="employee-col-header">Работник</th>
+            {/* Сегодняшний столбец отмечен: в сетке из семи дней это первый
+                вопрос, который к ней возникает, а до этого сетка отвечала
+                только «где выходные». */}
             {weekDates.map((date) => (
-              <th key={date} className={isWeekendIso(date) ? "weekend-col" : undefined}>
+              <th
+                key={date}
+                className={[isWeekendIso(date) ? "weekend-col" : "", date === today ? "today-col" : ""].filter(Boolean).join(" ") || undefined}
+                aria-current={date === today ? "date" : undefined}
+              >
                 <span className="day-col-header">
                   <span className="dow">{weekdayShort(date)}</span>
                   <span className="dom">{dayOfMonth(date)}</span>
@@ -75,6 +87,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
                   key={date}
                   entries={entriesFor(shifts, employee.id, date)}
                   weekend={isWeekendIso(date)}
+                  today={date === today}
                   onAdd={() => onAddClick(employee.id, date)}
                   onEntryClick={onEntryClick}
                   templates={templates}
@@ -95,7 +108,10 @@ function EmployeeCell({ employee }: { employee: Employee }) {
       <span className="avatar" style={{ background: palette.bg, color: palette.fg }}>
         {initialsOf(employee.displayName)}
       </span>
-      <span className="employee-name">{employee.displayName}</span>
+      {/* Имя одной строкой с обрезкой: длинное «Фамилия Имя» переносилось на
+          вторую и делало строку выше соседних — вся неделя после неё съезжала.
+          Полное имя остаётся во всплывающей подсказке. */}
+      <span className="employee-name" title={employee.displayName}>{employee.displayName}</span>
     </div>
   );
 }
@@ -103,18 +119,20 @@ function EmployeeCell({ employee }: { employee: Employee }) {
 function DayCell({
   entries,
   weekend,
+  today,
   onAdd,
   onEntryClick,
   templates,
 }: {
   entries: Shift[];
   weekend: boolean;
+  today: boolean;
   onAdd: () => void;
   onEntryClick: (entry: Shift) => void;
   templates: readonly Template[];
 }) {
   return (
-    <td className={`day-cell${weekend ? " weekend-col" : ""}`}>
+    <td className={`day-cell${weekend ? " weekend-col" : ""}${today ? " today-col" : ""}`}>
       <div className="day-cell-inner">
         {entries.length > 0 ? (
           <>
