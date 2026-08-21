@@ -243,6 +243,8 @@ function KindCard({
     if (fresh) setQueue(fresh);
   }
 
+  const visiblePeople = filterPeople(employees, query);
+
   return (
     <CardShell>
       <button
@@ -323,7 +325,12 @@ function KindCard({
               (кнопка «Сбросить на «все»» и счётчики выше) считаются и
               сохраняются из полного `employees` — они не должны зависеть от
               того, что набрано в поиске. */}
-          {filterPeople(employees, query).map((employee) => {
+          {visiblePeople.length === 0 && employees.length > 0 && (
+            <div style={{ padding: "10px 0", color: "var(--tgui--hint_color)", fontSize: 13.5 }}>
+              Никого с таким именем нет.
+            </div>
+          )}
+          {visiblePeople.map((employee) => {
             const colours = personPalette(employee.id);
             return (
               <label
