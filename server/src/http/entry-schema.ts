@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { entryCategorySchema, timeStr, dateStr, countsForBalance, isAbsence, isWeekend, type EntryCategory } from "@planer/shared";
+import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, type EntryCategory } from "@planer/shared";
 
 const baseEntry = z.object({
   date: dateStr,
@@ -38,7 +38,10 @@ export function entryTimesError(v: { category: EntryCategory; start?: string | n
  * Returns an error message, or null if coherent.
  */
 export function entryDateError(v: { category: EntryCategory; date: string; endDate?: string | null }): string | null {
-  if (v.category === "weekend_work" && !isWeekend(v.date)) {
+  // Само правило живёт в `categoryFitsDate` (@planer/shared): его второй
+  // читатель — `planEntryRange`, который не должен класть в план день, который
+  // эта проверка потом отвергнет.
+  if (!categoryFitsDate(v.category, v.date)) {
     return "«Работа в выходной» может стоять только на субботу или воскресенье";
   }
   if (v.endDate && v.endDate !== v.date && !isAbsence(v.category)) {
@@ -74,3 +77,51 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
 });
 
 export const updateEntrySchema = baseEntry.partial();
+
+/**
+ * Предел одной расстановки — год с небольшим.
+ *
+ * Не вкусовое число: один процесс обслуживает и API, и long-polling бота, и
+ * «широкий» запрос задевает чат всей команды (см. `CLAUDE.md`). Здесь он вдобавок
+ * создаёт по записи на день, и без предела опечатка в году («2026» → «2126»)
+ * означала бы тридцать шесть тысяч строк в таблице смен.
+ */
+export const MAX_RANGE_DAYS = 366;
+
+/**
+ * Тело «расставить с какого по какое».
+ *
+ * Отдельная схема, а не `createEntrySchema` с двумя датами: у создания одной
+ * записи `endDate` означает полосу отсутствия, а здесь `to` означает «до какого
+ * дня расставлять» — то же поле в двух смыслах читалось бы неправильно ровно
+ * там, где ошибка дороже всего.
+ */
+export const rangeEntrySchema = z
+  .object({
+    from: dateStr,
+    to: dateStr,
+    category: entryCategorySchema.default("shift"),
+    start: timeStr.nullish(),
+    end: timeStr.nullish(),
+    templateId: z.number().int().nullish(),
+    employeeId: z.number().int(),
+    location: z.string().nullish(),
+    title: z.string().nullish(),
+    note: z.string().nullish(),
+    /** Брать ли субботу и воскресенье. К «Работе в выходной» не относится — у неё своё правило. */
+    includeWeekends: z.boolean().default(false),
+  })
+  .superRefine((v, ctx) => {
+    const err = entryTimesError(v);
+    if (err) ctx.addIssue({ code: "custom", path: ["start"], message: err });
+    if (v.to < v.from) ctx.addIssue({ code: "custom", path: ["to"], message: "диапазон не может кончаться раньше, чем начинается" });
+    if (rangeDays(v.from, v.to) > MAX_RANGE_DAYS) {
+      ctx.addIssue({ code: "custom", path: ["to"], message: `за один раз можно расставить не больше ${MAX_RANGE_DAYS} дней` });
+    }
+  });
+
+/** Длина диапазона в днях, включительно. Считается по датам, а не по календарю дней. */
+function rangeDays(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Math.floor(ms / 86_400_000) + 1;
+}

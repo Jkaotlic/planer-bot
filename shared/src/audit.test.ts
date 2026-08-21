@@ -519,3 +519,31 @@ describe("передача смены в журнале", () => {
     }
   });
 });
+
+describe("describeAuditEvent — расстановка диапазоном", () => {
+  // Одна строка вместо тридцати `entry_created`: тридцать подряд сделали бы
+  // журнал и ленту событий нечитаемыми на день вперёд.
+  it("называет, кому, с какого по какое и сколько поставлено", () => {
+    const view = describeAuditEvent({
+      type: "entries_range_created",
+      payload: {
+        employeeId: 3, employeeName: "Марк", from: "2026-09-01", to: "2026-09-07",
+        label: "Утро 08:00–17:00", created: 5, skipped: 2,
+      },
+    });
+    expect(view.title).toBe("Расставлено диапазоном");
+    expect(view.lines[0]).toContain("Марк");
+    expect(view.lines.join(" ")).toContain("1 сентября");
+    expect(view.lines.join(" ")).toContain("7 сентября");
+    expect(view.lines.join(" ")).toContain("Утро 08:00–17:00");
+    expect(view.lines.join(" ")).toContain("5");
+  });
+
+  it("молчит про пропущенные, когда их нет", () => {
+    const view = describeAuditEvent({
+      type: "entries_range_created",
+      payload: { employeeName: "Аня", from: "2026-09-01", to: "2026-09-02", label: "День", created: 2, skipped: 0 },
+    });
+    expect(view.lines.join(" ")).not.toContain("пропущено");
+  });
+});

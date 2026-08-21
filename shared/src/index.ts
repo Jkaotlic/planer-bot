@@ -5,6 +5,7 @@ export * from "./week-model";
 export * from "./overlap";
 export * from "./swap";
 export * from "./category";
+export * from "./entry-range";
 export * from "./audit";
 export * from "./schedule-palette";
 export * from "./distribute";

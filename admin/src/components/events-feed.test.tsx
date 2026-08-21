@@ -30,8 +30,10 @@ const event = (over: Partial<FeedEvent>): FeedEvent => ({
 });
 
 describe("лента «События»", () => {
-  // Ровно та жалоба, ради которой задача: в ленте стояло «Нехаев Андрей —
-  // событие: employee_observer_changed», то есть сырой тип из базы.
+  // Ровно та жалоба, ради которой задача: в ленте стояло «Игорь —
+  // событие: employee_observer_changed», то есть сырой тип из базы. Имя здесь
+  // вымышленное: в жалобе стояло настоящее, и сторож `no-real-names.test.ts`
+  // поймал его в этом самом файле.
   it("называет событие словами, а не типом из базы", async () => {
     const text = (await renderFeed([
       event({ type: "employee_observer_changed", payload: { displayName: "Марк Волков", after: false } }),

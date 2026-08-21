@@ -29,7 +29,7 @@ export const AUDIT_TYPES = [
   // вопрос, который к строке возникает.
   "handover_offered", "handover_declined", "handover_fanned",
   "handover_taken", "handover_escalated", "handover_cancelled",
-  "distribution_applied", "roster_import",
+  "distribution_applied", "entries_range_created", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
   "employee_restrictions_changed", "employee_observer_changed",
@@ -273,6 +273,23 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     icon: "⚖",
     title: "Смены распределены честно",
     lines: [`${dayLabel(p.from)} — ${dayLabel(p.to)}`, `${num(p.count) ?? 0} смен расставлено`],
+  }),
+  // Одна строка на всю расстановку, а не по строке на день: тридцать
+  // `entry_created` подряд сделали бы журнал и ленту нечитаемыми на день вперёд.
+  // Тот же довод и тот же вид, что у `distribution_applied` строкой выше.
+  entries_range_created: (p) => ({
+    icon: "📅",
+    title: "Расставлено диапазоном",
+    lines: [
+      `${personLabel(p)} · ${dayLabel(p.from)} — ${dayLabel(p.to)}`,
+      [
+        str(p.label) ?? "запись",
+        `${num(p.created) ?? 0} поставлено`,
+        // Ноль пропущенных строкой не пишется: «пропущено 0» — это шум, который
+        // читается как «что-то всё-таки не встало».
+        num(p.skipped) ? `пропущено ${num(p.skipped)}` : null,
+      ].filter(Boolean).join(" · "),
+    ],
   }),
   roster_import: (p) => ({
     icon: "📥",
