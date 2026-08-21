@@ -284,6 +284,8 @@ export interface JournalPage {
   offset: number;
   /** Only the types actually present in the log, so the filter offers real options. */
   availableTypes: string[];
+  /** Only the people who actually authored a logged event — not the whole roster. */
+  availableActors: { id: number; displayName: string }[];
   events: JournalEvent[];
 }
 
@@ -464,7 +466,7 @@ export interface ApiClient {
   getRosterCsv(from: string, to: string): Promise<string>;
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
   getShiftCountsCsv(from: string, to: string): Promise<string>;
-  getJournal(params: { types?: string[]; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
+  getJournal(params: { types?: string[]; actor?: number; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
   getBirthdays(): Promise<UpcomingBirthday[]>;
   getBirthdayPreview(employeeId: number): Promise<CollectionPreview>;
   /** Сохраняет раунд ДР; на первом сохранении он и заводится. */
@@ -842,6 +844,7 @@ export const realClient: ApiClient = {
   getJournal(params) {
     const q = new URLSearchParams();
     if (params.types?.length) q.set("types", params.types.join(","));
+    if (params.actor != null) q.set("actor", String(params.actor));
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     q.set("limit", String(params.limit ?? 50));

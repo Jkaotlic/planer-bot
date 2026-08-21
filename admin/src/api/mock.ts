@@ -475,29 +475,47 @@ export async function mockGetTemplateQueue(templateId: number): Promise<Template
 
 const MOCK_JOURNAL_TYPES = ["entry_created", "entry_updated", "entry_deleted", "swap_accepted", "roster_import"];
 
-/** A believable log so the screen can be exercised with no backend. */
-const JOURNAL: JournalEvent[] = Array.from({ length: 34 }, (_, index) => ({
-  id: 1000 - index,
-  type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
-  createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
-  actorName: EMPLOYEES[index % 3]?.displayName ?? null,
-  payload: { entryId: 500 + index, date: dayIso(index % 7) },
-}));
+/** A believable log so the screen can be exercised with no backend.
+ *  `actorEmployeeId` is mock-only bookkeeping — real `JournalEvent` never carries it,
+ *  it exists here so `mockGetJournal` can filter by `actor` the way the server does. */
+const JOURNAL: (JournalEvent & { actorEmployeeId: number | null })[] = Array.from({ length: 34 }, (_, index) => {
+  const actor = EMPLOYEES[index % 3] ?? null;
+  return {
+    id: 1000 - index,
+    type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
+    createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
+    actorName: actor?.displayName ?? null,
+    actorEmployeeId: actor?.id ?? null,
+    payload: { entryId: 500 + index, date: dayIso(index % 7) },
+  };
+});
 
 export async function mockGetJournal(params: {
-  types?: string[]; from?: string; to?: string; limit?: number; offset?: number;
+  types?: string[]; actor?: number; from?: string; to?: string; limit?: number; offset?: number;
 }): Promise<JournalPage> {
   await delay(200);
   const types = params.types ?? [];
-  const matching = JOURNAL.filter((event) => types.length === 0 || types.includes(event.type));
+  const matching = JOURNAL.filter(
+    (event) =>
+      (types.length === 0 || types.includes(event.type)) &&
+      (params.actor == null || event.actorEmployeeId === params.actor),
+  );
   const limit = params.limit ?? 50;
   const offset = params.offset ?? 0;
+  // Только те, кто реально встречается в событиях — не весь ростер, иначе
+  // список предлагал бы людей без единой записи в журнале.
+  const availableActors = [...new Map(
+    JOURNAL.filter((e) => e.actorEmployeeId != null).map((e) => [e.actorEmployeeId!, e.actorName!]),
+  ).entries()]
+    .map(([id, displayName]) => ({ id, displayName }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ru"));
   return {
     total: matching.length,
     limit,
     offset,
     availableTypes: [...new Set(JOURNAL.map((e) => e.type))].sort(),
-    events: matching.slice(offset, offset + limit),
+    availableActors,
+    events: matching.slice(offset, offset + limit).map(({ actorEmployeeId: _actorEmployeeId, ...event }) => event),
   };
 }
 
