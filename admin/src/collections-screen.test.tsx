@@ -115,6 +115,26 @@ async function type(field: HTMLInputElement, value: string) {
 }
 
 describe("CollectionsScreen", () => {
+  // Его правка от 2026-08-21: живые сборы лежали под всем календарём дней
+  // рождения, и до того, ради чего экран открывают чаще всего, приходилось
+  // прокручивать год чужих праздников.
+  it("ставит идущие сборы выше календаря дней рождения", async () => {
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([
+      { employeeId: 7, displayName: "Марк Волков", birthDateLabel: "25 августа", daysUntil: 4,
+        celebratedOn: "2026-08-25", campaign: null } as never,
+    ]);
+    vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getCollections").mockResolvedValue([
+      row({ collection: collection({ id: 1, title: "Кофемашина" }), title: "Кофемашина" }),
+    ]);
+
+    const el = await mount();
+    const headings = [...el.querySelectorAll("h3")].map((h) => (h.textContent ?? "").trim());
+    expect(headings).toContain("Идут сборы");
+    expect(headings.indexOf("Идут сборы")).toBeLessThan(headings.indexOf("Ближайшие дни рождения"));
+    expect(headings.indexOf("Идут сборы")).toBeLessThan(headings.indexOf("Новый сбор"));
+  });
+
   it("рисует активные выше закрытых и называет закрытый закрытым", async () => {
     vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);

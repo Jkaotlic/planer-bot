@@ -85,12 +85,23 @@ export interface Template extends Omit<TemplateDto, "accent"> {
   accent: TemplateAccent;
 }
 
-/** A recent activity item for the "События" feed. */
+/**
+ * Строка ленты «События» — сырое событие журнала плюс уже посчитанное «когда».
+ *
+ * Словами его называет `describeAuditEvent` из `@planer/shared` в самой ленте, а
+ * не этот слой: своя форматилка здесь уже была и умела ровно один тип, которого
+ * в `AUDIT_TYPES` не существует, — все остальные события печатались сырым типом
+ * из базы. Один описатель на журнал и на ленту закрывает этот способ разъехаться.
+ *
+ * `timeLabel` считается тут, потому что он относительный («14 минут назад») и
+ * зависит от момента запроса, а не от события.
+ */
 export interface FeedEvent {
   id: number;
-  kind: "success" | "pending" | "error" | "info";
-  /** Plain text with `**bold**` spans around actor names (rendered by `EventsFeed`). */
-  text: string;
+  type: string;
+  payload: unknown;
+  /** Кто это сделал, или null у события бота — лента подписывает такое «система». */
+  actorName: string | null;
   /** Human-readable relative/absolute time, e.g. "2 часа назад". */
   timeLabel: string;
 }
@@ -511,18 +522,6 @@ interface EventsResponse {
   events: RawAdminEvent[];
 }
 
-/** Payload shape for the `"swap_done"` audit type (see `server/src/swap/swap-service.ts`). */
-interface SwapDonePayload {
-  fromEmployeeId: number;
-  toEmployeeId: number;
-}
-
-function isSwapDonePayload(payload: unknown): payload is SwapDonePayload {
-  if (typeof payload !== "object" || payload === null) return false;
-  const p = payload as Record<string, unknown>;
-  return typeof p.fromEmployeeId === "number" && typeof p.toEmployeeId === "number";
-}
-
 /** 1/2/5-style Russian plural picker, e.g. `pluralRu(3, "час", "часа", "часов")` -> "часа". */
 function pluralRu(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10;
@@ -546,16 +545,9 @@ function formatRelativeRu(iso: string): string {
   return then.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
 }
 
-/** Formats a raw audit-log row into the "События" feed shape, resolving employee names via `namesById`. */
-function toFeedEvent(raw: RawAdminEvent, namesById: ReadonlyMap<number, string>): FeedEvent {
-  const timeLabel = formatRelativeRu(raw.createdAt);
-  if (raw.type === "swap_done" && isSwapDonePayload(raw.payload)) {
-    const fromName = namesById.get(raw.payload.fromEmployeeId) ?? "Коллега";
-    const toName = namesById.get(raw.payload.toEmployeeId) ?? "Коллега";
-    return { id: raw.id, kind: "success", text: `**${fromName}** ⇄ **${toName}** — обмен состоялся`, timeLabel };
-  }
-  const actor = raw.actorName ?? "Кто-то";
-  return { id: raw.id, kind: "info", text: `**${actor}** — событие: ${raw.type}`, timeLabel };
+/** Готовая строка ленты: событие как есть плюс «когда», словами. */
+function toFeedEvent(raw: RawAdminEvent): FeedEvent {
+  return { id: raw.id, type: raw.type, payload: raw.payload, actorName: raw.actorName, timeLabel: formatRelativeRu(raw.createdAt) };
 }
 
 const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
@@ -755,13 +747,12 @@ export const realClient: ApiClient = {
   // консоли нужен перечислимый тип.
   getTemplates: () => readApi.getTemplates() as Promise<Template[]>,
 
+  // Ростер здесь больше не запрашивается: имена нужны были одной ветке про
+  // обмен, которой не существовало, а лента опрашивается каждую минуту — это
+  // был лишний круг к серверу на каждый тик.
   async getEvents() {
-    const [{ events }, { employees }] = await Promise.all([
-      authorizedGet<EventsResponse>("/api/admin/events"),
-      employeesApi.getAdminEmployees().then((employees) => ({ employees })),
-    ]);
-    const namesById = new Map(employees.map((e) => [e.id, e.displayName]));
-    return events.map((raw) => toFeedEvent(raw, namesById));
+    const { events } = await authorizedGet<EventsResponse>("/api/admin/events");
+    return events.map(toFeedEvent);
   },
 
   createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),

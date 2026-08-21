@@ -467,12 +467,15 @@ button {
   gap: 10px;
 }
 
-.feed-dot {
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-top: 5px;
+/* Значок описателя вместо цветной точки: он тот же, что в «Журнале», и несёт
+   вид события сам — точка по четырём тонам этого не умела и требовала
+   отдельной таблицы цветов на каждую тему. Ширина фиксирована, чтобы у всех
+   строк текст начинался по одной вертикали, а не плясал за шириной эмодзи. */
+.feed-icon {
+  flex: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .feed-item-main {
@@ -484,10 +487,43 @@ button {
   line-height: 1.4;
 }
 
+/* Подробность обрезается одной строкой: колонка 300px, а «Кому: всей команде ·
+   дошло 12 из 13» длиннее её — без обрезки лента растёт вдвое и перестаёт
+   читаться взглядом. */
+.feed-detail {
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--hint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .feed-time {
   margin-top: 2px;
   font-size: 11.5px;
   color: var(--hint);
+}
+
+.feed-empty {
+  font-size: 13px;
+  color: var(--hint);
+}
+
+.feed-more {
+  margin-top: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.feed-more:hover {
+  text-decoration: underline;
 }
 
 /* ---------- Работники screen ---------- */
@@ -560,6 +596,24 @@ button {
   /* Не сдвигать текст заголовка при раскрытии: «▸» и «▾» разной ширины. */
   width: 10px;
   flex: none;
+}
+
+/* Восемнадцать экранов консоли показывают отказы этим классом, а правила для
+   него не было вовсе — все они рисовались обычным текстом и терялись ровно
+   тогда, когда человеку надо их заметить. Находка из ledger'а (2026-08-21),
+   починена по пути: файл всё равно правился этим заходом.
+
+   Не просто красный текст: рядом стоит `.employees-empty` того же кегля, и
+   один цвет их не разводит на беглом взгляде — подложка и левая планка делают
+   отказ блоком, а не абзацем. */
+.employees-error {
+  color: var(--destructive);
+  font-size: 13.5px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  border-radius: 10px;
+  border-left: 3px solid var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
 }
 
 .employees-empty {

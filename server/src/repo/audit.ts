@@ -47,6 +47,32 @@ export interface AuditPage {
 }
 
 /**
+ * Правило сюрприза в SQL: строки про сбор, где смотрящий — виновник, не его дело.
+ *
+ * Одна функция на обоих читателей журнала (`queryAudit` и лента `listRecentAudit`),
+ * а не два одинаковых условия: разъехались бы они молча, и именно так это и было —
+ * журнал правило применял, лента справа в консоли нет, и админ читал в ней про
+ * сбор на собственный день рождения.
+ *
+ * В SQL, а не после выборки: фильтрация страницы в JS оставила бы `total`
+ * считающим строки, которых смотрящий не увидит, и листалка обещала бы ещё
+ * страницы там, где их нет.
+ *
+ * `is`, а не `=`: у общего сбора в payload лежит `employeeId: null`, а в
+ * трёхзначной логике SQL `NULL = x` сам по себе NULL, а не false — тогда и
+ * `not (...)` становится NULL, который SQLite в WHERE отбрасывает наравне с
+ * false, молча пряча строки, которые вообще ни про кого. `is` сравнивает NULL
+ * с не-null как обычный false.
+ */
+function notAboutViewer(viewerEmployeeId: number | undefined) {
+  if (viewerEmployeeId == null) return null;
+  return sql`not (
+    ${auditLog.type} in ${HONOUREE_AUDIT_TYPES}
+    and json_extract(${auditLog.payload}, '$.employeeId') is ${viewerEmployeeId}
+  )`;
+}
+
+/**
  * The «кто когда что менял» history: filtered, counted and paged.
  *
  * A date bound covers that whole day, and `to` is inclusive — which is what a
@@ -61,20 +87,8 @@ export function queryAudit(db: Db, query: AuditQuery): AuditPage {
   if (query.actorEmployeeId != null) filters.push(eq(auditLog.actorEmployeeId, query.actorEmployeeId));
   if (query.from) filters.push(gte(auditLog.createdAt, new Date(`${query.from}T00:00:00Z`)));
   if (query.to) filters.push(lte(auditLog.createdAt, new Date(`${query.to}T23:59:59Z`)));
-  // The surprise rule, applied in SQL rather than after the fact: filtering the
-  // page in JS would leave `total` counting rows the viewer never sees, and the
-  // paging would then claim there is more left to show than there actually is.
-  // `is`, not `=`: a general collection stores `employeeId: null`, and SQL's
-  // three-valued logic makes `NULL = x` itself NULL rather than false — that
-  // would turn `not (...)` into NULL too, which SQLite's WHERE drops just like
-  // it drops false, silently hiding rows that were never about anyone in
-  // particular. `is` compares NULL to a non-null value as plain false instead.
-  if (query.viewerEmployeeId != null) {
-    filters.push(sql`not (
-      ${auditLog.type} in ${HONOUREE_AUDIT_TYPES}
-      and json_extract(${auditLog.payload}, '$.employeeId') is ${query.viewerEmployeeId}
-    )`);
-  }
+  const surprise = notAboutViewer(query.viewerEmployeeId);
+  if (surprise) filters.push(surprise);
   const where = filters.length > 0 ? and(...filters) : undefined;
 
   const rows = db
@@ -106,8 +120,22 @@ export function queryAudit(db: Db, query: AuditQuery): AuditPage {
   return { rows, total, availableTypes, availableActors };
 }
 
-export function listRecentAudit(db: Db, limit: number): AuditLog[] {
+/**
+ * Последние события для ленты справа в консоли.
+ *
+ * `viewerEmployeeId` не необязательный довесок, а часть контракта: лента
+ * читается конкретным админом, и правило сюрприза действует в ней ровно так же,
+ * как в журнале.
+ */
+export function listRecentAudit(db: Db, limit: number, viewerEmployeeId?: number): AuditLog[] {
+  const surprise = notAboutViewer(viewerEmployeeId);
   // createdAt has one-second resolution, so two events in the same second tie. `id`
   // breaks the tie by actual write order — otherwise the feed shows them shuffled.
-  return db.select().from(auditLog).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit).all();
+  return db
+    .select()
+    .from(auditLog)
+    .where(surprise ?? undefined)
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
+    .limit(limit)
+    .all();
 }

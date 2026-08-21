@@ -247,6 +247,62 @@ export function AdminCollections() {
   return (
     <ScreenScroll>
       <List>
+        {/* Сообщения о том, что только что произошло, — над всеми списками:
+            они одинаково относятся и к сбору, и к дню рождения, а внутри
+            секции ДР оказывались ниже сбора, о котором рассказывают. */}
+        {(error || notice) && (
+          <Section>
+            <CardStack>
+              {error && (
+                <CardShell>
+                  <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+                </CardShell>
+              )}
+              {notice && (
+                <CardShell>
+                  <div style={{ fontSize: 13.5 }}>{notice}</div>
+                </CardShell>
+              )}
+            </CardStack>
+          </Section>
+        )}
+
+        {/* Идущие сборы — первым делом. Экран открывают, чтобы посмотреть на
+            них или разослать дожим, а календарь дней рождения на год вперёд —
+            справка, за которой сюда не ходят. Порядок тот же, что в консоли:
+            один экран на двух фронтах не должен читаться по-разному. */}
+        <Section header="Идут сборы">
+          <CardStack>
+            <CollectionsList
+              rows={openRows}
+              error={rowsError}
+              // Не «сборов пока не было», когда они были и все закрыты: список
+              // ниже прямо противоречил бы этой фразе.
+              emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
+              employees={employees}
+              viewerId={viewerId}
+              openId={openCollection}
+              onToggle={toggleCollection}
+              onChanged={reloadEverything}
+              onSent={handleSent}
+              onDeleted={handleDeleted}
+            />
+          </CardStack>
+        </Section>
+
+        <Section header="Новый сбор">
+          <CardStack>
+            <NewCollectionForm
+              employees={employees}
+              viewerId={viewerId}
+              onCreated={async () => {
+                setNotice(null);
+                await reloadEverything();
+              }}
+            />
+          </CardStack>
+        </Section>
+
         <Section header="Ближайшие дни рождения">
           <CardStack>
             <CardShell>
@@ -255,18 +311,6 @@ export function AdminCollections() {
                 «Разослать» — и не увидишь перед этим точный текст и поимённый список.
               </div>
             </CardShell>
-
-            {error && (
-              <CardShell>
-                <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-              </CardShell>
-            )}
-
-            {notice && (
-              <CardShell>
-                <div style={{ fontSize: 13.5 }}>{notice}</div>
-              </CardShell>
-            )}
 
             {birthdays.length === 0 && (
               <Placeholder description="Ни у кого не указан день рождения — проставь даты в разделе «Работники»." />
@@ -295,38 +339,6 @@ export function AdminCollections() {
                 }}
               />
             ))}
-          </CardStack>
-        </Section>
-
-        <Section header="Новый сбор">
-          <CardStack>
-            <NewCollectionForm
-              employees={employees}
-              viewerId={viewerId}
-              onCreated={async () => {
-                setNotice(null);
-                await reloadEverything();
-              }}
-            />
-          </CardStack>
-        </Section>
-
-        <Section header="Сборы">
-          <CardStack>
-            <CollectionsList
-              rows={openRows}
-              error={rowsError}
-              // Не «сборов пока не было», когда они были и все закрыты: список
-              // ниже прямо противоречил бы этой фразе.
-              emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
-              employees={employees}
-              viewerId={viewerId}
-              openId={openCollection}
-              onToggle={toggleCollection}
-              onChanged={reloadEverything}
-              onSent={handleSent}
-              onDeleted={handleDeleted}
-            />
           </CardStack>
         </Section>
 

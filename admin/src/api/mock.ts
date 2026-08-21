@@ -259,12 +259,34 @@ export async function mockDeleteEntry(id: number): Promise<{ notified: { deliver
   return { notified: mockReach(removed?.employeeId != null ? [removed.employeeId] : []) };
 }
 
+/**
+ * Демо-лента: настоящие типы и payload'ы, а не готовые фразы.
+ *
+ * Раньше здесь лежал текст, которого живая лента выдать не могла ни при каких
+ * данных, — и демо выглядело лучше прода ровно на том месте, где прод был
+ * сломан. Теперь мок проходит через `describeAuditEvent`, как настоящие события.
+ */
 const EVENTS: readonly FeedEvent[] = [
-  { id: 1, kind: "success", text: "**Аня** ⇄ **Игорь** — обмен состоялся", timeLabel: "2 часа назад" },
-  { id: 2, kind: "pending", text: "**Марк** → **Аня** — ждёт ответа", timeLabel: "5 часов назад" },
-  { id: 3, kind: "error", text: "**Олег** отклонил обмен с **Дашей**", timeLabel: "вчера, 18:40" },
-  { id: 4, kind: "info", text: "Добавлено 6 смен на неделю", timeLabel: "вчера, 09:12" },
-  { id: 5, kind: "success", text: "**Даша** ⇄ **Олег** — обмен состоялся", timeLabel: "2 дня назад" },
+  {
+    id: 1, type: "swap_accepted", actorName: "Игорь Петров", timeLabel: "2 часа назад",
+    payload: { fromName: "Аня Смирнова", fromShift: "ср 12 августа · 09:00–18:00", toName: "Игорь Петров", toShift: "ср 12 августа · 11:00–20:00" },
+  },
+  {
+    id: 2, type: "swap_proposed", actorName: "Марк Волков", timeLabel: "5 часов назад",
+    payload: { fromName: "Марк Волков", fromShift: "пт 14 августа · 07:00–16:00", toName: "Аня Смирнова", toShift: "пт 14 августа · 09:00–18:00" },
+  },
+  {
+    id: 3, type: "announcement_sent", actorName: "Игорь Петров", timeLabel: "вчера, 18:40",
+    payload: { text: "В пятницу планёрка в 10:00", audience: "all", delivered: 12, intended: 13 },
+  },
+  {
+    id: 4, type: "distribution_applied", actorName: "Игорь Петров", timeLabel: "вчера, 09:12",
+    payload: { from: "2026-08-17", to: "2026-08-23", count: 6 },
+  },
+  {
+    id: 5, type: "reminders_dispatched", actorName: null, timeLabel: "2 дня назад",
+    payload: { forDate: "2026-08-20", sent: 12, considered: 13 },
+  },
 ];
 
 export async function mockGetEvents(): Promise<FeedEvent[]> {

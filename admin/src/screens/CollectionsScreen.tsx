@@ -274,13 +274,27 @@ export function CollectionsScreen() {
         <h2 className="employees-title">Сборы</h2>
       </div>
 
-      <p className="birthday-intro">
-        За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
-        «Разослать» — и не увидишь перед этим точный текст и поимённый список.
-      </p>
-
       {error && <div className="employees-error">{error}</div>}
       {notice && <div className="birthday-notice">{notice}</div>}
+
+      {/* Идущие сборы — первым делом, до всего остального. Экран открывают,
+          чтобы посмотреть на них или разослать дожим, а календарь дней рождения
+          на год вперёд — это справка, за которой сюда не ходят. Раньше порядок
+          был обратный, и до живого сбора надо было прокрутить чужой год. */}
+      <h3 className="birthday-group">Идут сборы</h3>
+      <CollectionsList
+        rows={openRows}
+        error={rowsError}
+        // Не «сборов пока не было», когда они были и все закрыты: список ниже
+        // прямо противоречил бы этой фразе.
+        emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
+        employees={employees}
+        openId={openCollection}
+        onToggle={toggleCollection}
+        onChanged={reloadEverything}
+        onSent={handleSent}
+        onDeleted={handleDeleted}
+      />
 
       <h3 className="birthday-group">Новый сбор</h3>
       <NewCollectionForm
@@ -301,6 +315,13 @@ export function CollectionsScreen() {
           }
         }}
       />
+
+      {/* Пояснение стоит над тем, что объясняет: оно про дни рождения, а не
+          про экран целиком, и наверху читалось как вводная ко всей странице. */}
+      <p className="birthday-intro">
+        За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
+        «Разослать» — и не увидишь перед этим точный текст и поимённый список.
+      </p>
 
       <h3 className="birthday-group">Ближайшие дни рождения</h3>
       {birthdays.length === 0 ? (
@@ -323,21 +344,6 @@ export function CollectionsScreen() {
           )}
         </>
       )}
-
-      <h3 className="birthday-group">Сборы</h3>
-      <CollectionsList
-        rows={openRows}
-        error={rowsError}
-        // Не «сборов пока не было», когда они были и все закрыты: список ниже
-        // прямо противоречил бы этой фразе.
-        emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
-        employees={employees}
-        openId={openCollection}
-        onToggle={toggleCollection}
-        onChanged={reloadEverything}
-        onSent={handleSent}
-        onDeleted={handleDeleted}
-      />
 
       {/* Закрытые не мешают живым, но и не пропадают: их ещё открывают заново. */}
       <CollapsibleArchive title="Закрытые" items={closedRows}>
