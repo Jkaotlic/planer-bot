@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { filterPeople } from "@planer/shared";
 import {
   ANNOUNCEMENT_TEXT_MAX,
   apiClient,
@@ -6,6 +7,7 @@ import {
   type AnnouncementRecipient,
   type AnnouncementResult,
 } from "../api/client";
+import { PersonSearch } from "../components/PersonSearch";
 import { recipientsPhrase } from "./CollectionsScreen";
 
 /**
@@ -33,6 +35,7 @@ export function AnnounceScreen() {
   const [text, setText] = useState("");
   const [audienceMode, setAudienceMode] = useState<"all" | "picked">("all");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
+  const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +62,13 @@ export function AnnounceScreen() {
   if (!recipients) return <div className="employees-empty">Загрузка…</div>;
 
   // Сервер уже исключил самого отправителя и архивных — здесь только выбор.
+  // Фильтруется ТОЛЬКО отрисовка. `selectedIds` живёт своей жизнью, а «Уйдёт»
+  // ниже считается из полного списка: анонс не отзывается и идёт сквозь все
+  // настройки тишины, и поиск, роняющий выбор скрытых, однажды отправит
+  // сообщение не тем.
   const picked = audienceMode === "all" ? recipients : recipients.filter((e) => selectedIds.has(e.id));
+  // Список рисуется из отфильтрованного — но только рисуется, см. комментарий выше.
+  const filteredRecipients = filterPeople(recipients, query);
   // Выбранный явно, но без телеграма, в отчёт попадёт — но не в это число:
   // сервер его тоже не отправит. Показываем заранее, а не только в отчёте
   // после отправки, чтобы «кому уйдёт» не расходилось с тем, что реально дойдёт.
@@ -151,10 +160,13 @@ export function AnnounceScreen() {
 
       {audienceMode === "picked" && (
         <div className="announce-picker">
+          <PersonSearch value={query} onChange={setQuery} count={recipients.length} disabled={sending} />
           {recipients.length === 0 ? (
             <div className="employees-empty">Выбирать некого.</div>
+          ) : filteredRecipients.length === 0 ? (
+            <div className="employees-empty">Никого с таким именем нет.</div>
           ) : (
-            recipients.map((e) => (
+            filteredRecipients.map((e) => (
               <label key={e.id} className="announce-picker-row">
                 <input type="checkbox" checked={selectedIds.has(e.id)} disabled={sending} onChange={() => toggle(e.id)} />
                 <span>{e.displayName}</span>

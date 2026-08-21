@@ -1207,7 +1207,8 @@ button {
 select,
 input[type="text"],
 input[type="date"],
-input[type="time"] {
+input[type="time"],
+input[type="search"] {
   width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
@@ -1215,6 +1216,10 @@ input[type="time"] {
   background: var(--surface);
   color: var(--text);
   font-size: 14px;
+}
+
+.person-search {
+  margin-bottom: 8px;
 }
 
 .category-select {
