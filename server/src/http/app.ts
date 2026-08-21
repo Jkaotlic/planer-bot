@@ -72,6 +72,7 @@ import {
   isAbsence,
   countsForBalance,
   categoryLabel,
+  resolveShiftTimes,
   planEntryRange,
   eachDayIso,
   dateStr,
@@ -1005,15 +1006,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const { from, to, includeWeekends, ...entryFields } = input;
     const now = teamNow(config.teamTz);
+    // Часы считаются НА КАЖДЫЙ ДЕНЬ, а не берутся из тела один раз: у пресета
+    // своя пятница, и смена, растянутая на неделю одними часами, ставит в
+    // пятницу 18:00 вместо 16:45 — ровно то сокращение, ради которого
+    // пятничные часы в пресете и заведены. Тело всё равно их несёт: форма
+    // показывает часы выбранного пресета, и без них не прошла бы валидация
+    // «рабочей записи нужно время».
+    const preset = input.templateId != null ? getTemplate(db, input.templateId) : undefined;
     const created = db.transaction(() =>
-      plan.days.map((date) =>
-        createShift(db, withPresetLocation({
+      plan.days.map((date) => {
+        const times = preset ? resolveShiftTimes(preset, date) : null;
+        return createShift(db, withPresetLocation({
           ...entryFields,
           date,
+          ...(times ?? {}),
           // Отсутствие — одна запись на всю полосу; у работы полосы не бывает.
           endDate: isAbsence(input.category) && to !== from ? to : null,
-        })),
-      ),
+        }));
+      }),
     );
 
     let notified = { delivered: 0, intended: 0 };

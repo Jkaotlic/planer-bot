@@ -8,8 +8,10 @@ import type {
   AnnouncementResult,
   BugReportRow,
   Employee,
+  EntryRangeResult,
   FeedEvent,
   NewEntryInput,
+  NewEntryRangeInput,
   NewSlotInput,
   PayrollRow,
   RosterImportPreview,
@@ -42,6 +44,9 @@ import {
   collectionStatus,
   isCollectionActive,
   compareCollections,
+  planEntryRange,
+  eachDayIso,
+  isAbsence,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -231,6 +236,41 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
   });
   ENTRIES.push(created);
   return { entry: created, notified: mockReach(input.employeeId != null ? [input.employeeId] : []) };
+}
+
+/**
+ * Демо-расстановка диапазоном.
+ *
+ * Дни считает та же `planEntryRange`, что и сервер, а не своё похожее правило:
+ * мок, считающий по-своему, — это второй источник правды, который расходится с
+ * продом молча и именно там, где демо показывают человеку.
+ */
+export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult> {
+  await delay(300);
+  const busyDates = ENTRIES.filter((s) => s.employeeId === input.employeeId).flatMap((s) =>
+    eachDayIso(s.date, endOf(s)),
+  );
+  const plan = planEntryRange({
+    from: input.from,
+    to: input.to,
+    category: input.category,
+    includeWeekends: input.includeWeekends ?? false,
+    busyDates,
+  });
+  const isRange = isAbsence(input.category) && input.to !== input.from;
+  const created = plan.days.map((date) =>
+    entry({
+      date,
+      endDate: isRange ? input.to : null,
+      start: input.start ?? null,
+      end: input.end ?? null,
+      category: input.category,
+      title: input.title ?? null,
+      employeeId: input.employeeId,
+    }),
+  );
+  ENTRIES.push(...created);
+  return { created, skipped: plan.skipped, notified: mockReach(created.length > 0 ? [input.employeeId] : []) };
 }
 
 export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeEntryRangePlan, planEntryRange } from "./entry-range";
+import { describeEntryRangePlan, describeEntryRangeResult, planEntryRange } from "./entry-range";
 
 /**
  * Правило «какие дни диапазона получат запись».
@@ -99,5 +99,25 @@ describe("describeEntryRangePlan", () => {
   it("пустой план говорит «0 дней», а не молчит", () => {
     expect(describeEntryRangePlan({ days: [], skipped: [{ date: "x", reason: "busy" }] }))
       .toBe("0 дней · пропущено 1: 1 уже занят");
+  });
+});
+
+describe("describeEntryRangeResult", () => {
+  it("считает поставленные дни, а не строки", () => {
+    const text = describeEntryRangeResult({
+      created: [{ date: "2026-08-24" }, { date: "2026-08-25" }],
+      skipped: [{ date: "2026-08-29", reason: "weekend" }],
+    });
+    expect(text).toBe("Поставлено 2 дня · пропущено 1: 1 выходной");
+  });
+
+  // Недельный отпуск — одна строка в базе. «Поставлено 1 день» про него было бы
+  // неправдой ровно там, где человек проверяет, что получилось.
+  it("полосу отсутствия считает по сроку, а не по числу записей", () => {
+    const text = describeEntryRangeResult({
+      created: [{ date: "2026-08-24", endDate: "2026-08-30" }],
+      skipped: [],
+    });
+    expect(text).toBe("Поставлено 7 дней");
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
+import { describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
   AuthRequiredError,
@@ -103,7 +103,7 @@ export function App() {
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
   const [rosterImport, setRosterImport] = useState<RosterImportState | null>(null);
-  const [rosterNotice, setRosterNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [screenNotice, setScreenNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   /** Filters `ScheduleGrid`'s rows — see `PersonSearch` there for why `BalanceRail` doesn't get it. */
   const [scheduleQuery, setScheduleQuery] = useState("");
   const rosterFileInput = useRef<HTMLInputElement>(null);
@@ -209,9 +209,9 @@ export function App() {
   }
 
   async function previewRosterFile(file: File) {
-    setRosterNotice(null);
+    setScreenNotice(null);
     if (file.size > 1_000_000) {
-      setRosterNotice({ kind: "error", text: "CSV больше 1 МБ — выбери файл поменьше" });
+      setScreenNotice({ kind: "error", text: "CSV больше 1 МБ — выбери файл поменьше" });
       return;
     }
     try {
@@ -232,7 +232,7 @@ export function App() {
       });
     } catch (err) {
       if (err instanceof AuthRequiredError) setNeedLogin(true);
-      else setRosterNotice({ kind: "error", text: err instanceof Error ? err.message : "Не удалось прочитать CSV" });
+      else setScreenNotice({ kind: "error", text: err instanceof Error ? err.message : "Не удалось прочитать CSV" });
     }
   }
 
@@ -291,7 +291,7 @@ export function App() {
     // комментарием «Mirror of `summaryLine`», и зеркалом она не была: хвоста про
     // нераспознанные клетки в ней не хватало, то есть после файла со знаками «?»
     // консоль говорила только «CSV загружен».
-    setRosterNotice({
+    setScreenNotice({
       kind: "success",
       text: withNotifyNotice(rosterImportSummaryLine(summary), summary.notified),
     });
@@ -318,7 +318,7 @@ export function App() {
 
   /** Downloads the shown week's month as CSV — same Blob+anchor pattern as the weekend payroll export. */
   async function exportRoster() {
-    setRosterNotice(null);
+    setScreenNotice(null);
     try {
       // Месяц показанной недели, а не по системным часам: кнопка стоит в одной
       // полосе с переключателем недель, и качают файл ровно затем, чтобы
@@ -338,13 +338,13 @@ export function App() {
       URL.revokeObjectURL(url);
       // Какой месяц уехал в файл — вслух: неделя на экране и месяц в файле
       // совпадают не всегда (неделя на стыке принадлежит месяцу понедельника).
-      setRosterNotice({ kind: "success", text: `Выгружен график за ${formatPeriod(from, to)}` });
+      setScreenNotice({ kind: "success", text: `Выгружен график за ${formatPeriod(from, to)}` });
     } catch (err) {
       // В ту же полосу, что и отказы «Загрузить CSV» рядом: скачивание не удалось —
       // на экране от этого ничего не изменилось, и уносить с собой всю консоль
       // (`error` рисуется вместо любого раздела) ему не за что.
       if (err instanceof AuthRequiredError) setNeedLogin(true);
-      else setRosterNotice({ kind: "error", text: err instanceof Error ? err.message : "Не удалось выгрузить ростер" });
+      else setScreenNotice({ kind: "error", text: err instanceof Error ? err.message : "Не удалось выгрузить ростер" });
     }
   }
 
@@ -414,10 +414,10 @@ export function App() {
                 if (file) void previewRosterFile(file);
               }}
             />
-            {rosterNotice && (
-              <div className={`roster-notice roster-notice-${rosterNotice.kind}`} role="status">
-                {rosterNotice.text}
-                <button type="button" onClick={() => setRosterNotice(null)} aria-label="Закрыть сообщение">×</button>
+            {screenNotice && (
+              <div className={`roster-notice roster-notice-${screenNotice.kind}`} role="status">
+                {screenNotice.text}
+                <button type="button" onClick={() => setScreenNotice(null)} aria-label="Закрыть сообщение">×</button>
               </div>
             )}
             {scheduleError ? (
@@ -462,7 +462,6 @@ export function App() {
           key={editingEntry ? `edit-${editingEntry.id}` : `new-${panelTarget?.employeeId}-${panelTarget?.date}`}
           employees={activeEmployees}
           templates={templates}
-          weekDates={weekDates}
           initialEmployeeId={panelTarget?.employeeId ?? activeEmployees[0]?.id ?? 0}
           initialDate={panelTarget?.date ?? weekDates[0]!}
           existing={editingEntry}
@@ -476,6 +475,18 @@ export function App() {
             setPanelTarget(null);
             setEditingEntry(null);
             await refreshSchedule();
+          }}
+          onSaveRange={async (input) => {
+            const result = await apiClient.createEntryRange(input);
+            setPanelTarget(null);
+            setEditingEntry(null);
+            await refreshSchedule();
+            // Итог говорится вслух: часть дней могла быть пропущена (выходные,
+            // занятые), и молчаливое закрытие панели читалось бы как «встало всё».
+            setScreenNotice({
+              kind: "success",
+              text: withNotifyNotice(describeEntryRangeResult(result), result.notified),
+            });
           }}
           onDelete={
             editingEntry

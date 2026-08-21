@@ -3,6 +3,7 @@ import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/employees";
+import { listActiveTemplates } from "../repo/templates";
 import { createShift, listShiftsInRange } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { NOTICE_WINDOW_MS } from "../schedule/notice-buffer";
@@ -200,5 +201,28 @@ describe("POST /api/admin/entries/range", () => {
       employeeId: igor.id, from: MON, to: SUN, category: "shift", start: "09:00", end: "18:00",
     }));
     expect(res.status).toBe(403);
+  });
+
+  // Пятница у пресета своя, и диапазон обязан это знать: смена, растянутая на
+  // неделю одними и теми же часами, ставит в пятницу 18:00 вместо 16:45 — то
+  // самое сокращение, ради которого пятничные часы в пресете и заведены.
+  it("в пятницу берёт пятничные часы пресета, а не общие", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    // Пресеты заводит миграция, а не тест: у «Дня» пятничные часы 09:00–16:45.
+    const tpl = listActiveTemplates(db).find((t) => t.name === "День")!;
+    expect(tpl.fridayEnd).toBe("16:45");
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: MON, to: "2026-08-28", category: "shift",
+      templateId: tpl.id, start: "09:00", end: "18:00", title: "День",
+    }));
+
+    const rows = listShiftsInRange(db, MON, "2026-08-28");
+    // 2026-08-28 — пятница.
+    expect(rows.find((r) => r.date === "2026-08-28")).toMatchObject({ start: "09:00", end: "16:45" });
+    expect(rows.find((r) => r.date === "2026-08-27")).toMatchObject({ start: "09:00", end: "18:00" });
   });
 });

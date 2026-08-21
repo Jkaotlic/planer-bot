@@ -4,6 +4,7 @@ import type {
   AdminEmployeeDto,
   CreateEmployeeResponse,
   EntryCategory,
+  EntryRangeSkip,
   ScheduleEntryDto,
   TemplateAccent,
   TemplateDto,
@@ -11,6 +12,7 @@ import type {
 import {
   employeesMock,
   mockCreateEntry,
+  mockCreateEntryRange,
   mockUpdateEntry,
   mockDeleteEntry,
   mockGetEvents,
@@ -120,6 +122,34 @@ export interface NewEntryInput {
   location?: string;
   /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
   title?: string | null;
+}
+
+/**
+ * «Расставить с какого по какое».
+ *
+ * Отдельный вход, а не `NewEntryInput` с двумя датами: у обычной записи
+ * `endDate` означает полосу отсутствия, а здесь `to` — «до какого дня
+ * расставлять». Одно поле в двух смыслах читалось бы неправильно ровно там,
+ * где ошибка дороже всего.
+ */
+export interface NewEntryRangeInput {
+  employeeId: number;
+  from: string;
+  to: string;
+  category: EntryCategory;
+  start?: string;
+  end?: string;
+  templateId?: number;
+  location?: string;
+  title?: string | null;
+  /** Брать ли субботу и воскресенье. К «Работе в выходной» не относится — у неё своё правило. */
+  includeWeekends?: boolean;
+}
+
+export interface EntryRangeResult {
+  created: Shift[];
+  skipped: EntryRangeSkip[];
+  notified: NotifyReach;
 }
 
 export type WeekendSlotStatus = "open" | "assigned" | "closed";
@@ -445,6 +475,7 @@ export interface ApiClient {
   getTemplates(): Promise<Template[]>;
   getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
+  createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
   updateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   deleteEntry(id: number): Promise<{ notified: NotifyReach }>;
   createEmployee(name: string): Promise<CreateEmployeeResult>;
@@ -757,6 +788,8 @@ export const realClient: ApiClient = {
 
   createEntry: (input) => authorizedPostJson<{ entry: Shift; notified: NotifyReach }>("/api/admin/entries", input),
 
+  createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
+
   updateEntry: (id, input) =>
     authorizedPatchJson<{ entry: Shift; notified: NotifyReach }>(`/api/admin/entries/${id}`, input),
 
@@ -961,6 +994,7 @@ const devClient: ApiClient = {
   getTemplates: () => mockGetTemplates(),
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
+  createEntryRange: (input) => mockCreateEntryRange(input),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
   createEmployee: (name) => employeesMock.createEmployee(name),

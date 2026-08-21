@@ -93,6 +93,22 @@ export function describeEntryRangePlan(plan: EntryRangePlan): string {
   return `${head} · пропущено ${plan.skipped.length}: ${parts.join(", ")}`;
 }
 
+/**
+ * Итог расстановки словами: «Поставлено 18 дней · пропущено 4: 2 выходных…».
+ *
+ * Дни считаются по СРОКУ созданных записей, а не по их числу: отсутствие
+ * приезжает одной строкой на всю полосу, и «поставлено 1 день» про недельный
+ * отпуск было бы неправдой ровно в том месте, где человек проверяет, что
+ * получилось.
+ */
+export function describeEntryRangeResult(result: {
+  created: readonly { date: string; endDate?: string | null }[];
+  skipped: readonly EntryRangeSkip[];
+}): string {
+  const days = result.created.flatMap((entry) => eachDayIso(entry.date, entry.endDate ?? entry.date));
+  return `Поставлено ${describeEntryRangePlan({ days, skipped: [...result.skipped] })}`;
+}
+
 /** «1 день / 2 дня / 5 дней» — та же 1/2/5, что у остальных счётчиков. */
 function pluralDays(n: number): string {
   const mod10 = n % 10;
