@@ -188,6 +188,8 @@ function KindCard({
     if (fresh) setQueue(fresh);
   }
 
+  const visiblePeople = filterPeople(employees, query);
+
   return (
     <section className="kind-card">
       <button type="button" className="kind-card-head" onClick={onToggleOpen} aria-expanded={open}>
@@ -238,7 +240,10 @@ function KindCard({
               (кнопка «Сбросить на «все»» и счётчики выше) считаются и
               сохраняются из полного `employees` — они не должны зависеть от
               того, что набрано в поиске. */}
-          {filterPeople(employees, query).map((employee) => {
+          {visiblePeople.length === 0 && employees.length > 0 && (
+            <div className="employees-empty">Никого с таким именем нет.</div>
+          )}
+          {visiblePeople.map((employee) => {
             const inPool = kind.pool.includes(employee.id);
             const likes = Boolean(kind.preference[employee.id]);
             const colours = personPalette(employee.id);

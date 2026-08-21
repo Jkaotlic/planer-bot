@@ -96,4 +96,16 @@ describe("поиск в «Видах смен» не подменяет счёт
     // Суть теста: счётчик в заголовке не зависит от того, что набрано в поиске.
     expect((meta.textContent ?? "").trim()).toBe(metaBefore);
   });
+
+  it("поиск без совпадений говорит «Никого с таким именем нет.», а не рисует пустую матрицу молча", async () => {
+    const el = await mount();
+    const head = el.querySelector<HTMLButtonElement>(".kind-card-head")!;
+    await act(async () => head.click());
+    await settle();
+
+    await typeSearch(searchField(el), "нет такого человека");
+
+    expect(el.querySelectorAll(".kind-person-name")).toHaveLength(0);
+    expect(el.textContent ?? "").toContain("Никого с таким именем нет.");
+  });
 });

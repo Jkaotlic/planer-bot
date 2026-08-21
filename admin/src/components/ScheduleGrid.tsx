@@ -53,6 +53,18 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
           </tr>
         </thead>
         <tbody>
+          {/* Полный ростер непуст, а поиск нашёл нулевой — молчаливая пустая
+              таблица читалась бы как «данных нет», хотя они есть и просто не
+              совпали с запросом. Пустой ПОЛНЫЙ `employees` (ростер без единого
+              работника) по-прежнему не рисует ничего — это другая причина, и
+              подменять её этой строкой не стоит. */}
+          {visibleEmployees.length === 0 && employees.length > 0 && (
+            <tr>
+              <td className="employees-empty" colSpan={weekDates.length + 1}>
+                Никого с таким именем нет.
+              </td>
+            </tr>
+          )}
           {visibleEmployees.map((employee) => (
             <tr key={employee.id}>
               <td className="employee-cell">

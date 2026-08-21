@@ -50,8 +50,22 @@ describe("поиск по гриду расписания", () => {
     expect(el.querySelectorAll(".employee-name")).toHaveLength(6);
   });
 
-  it("шапка недели остаётся на месте — поиск фильтрует людей, а не дни", async () => {
+  it("шапка недели остаётся на месте — те же семь дней, что в weekDates, а не подмножество", async () => {
+    // Было: `thead th > 1` — проходит на ЛЮБОЙ шапке в две и больше колонки,
+    // в том числе неполной или перепутанной. `weekDates` — отдельный проп
+    // другого типа, и правдоподобной мутации ФИЛЬТРА, которая уронит именно
+    // эту проверку, не существует; но название теста обещает «те же дни», а
+    // не «дней больше одного» — проверяем то, что обещано.
     const el = await mountGrid(SIX_PEOPLE, { query: "семён" });
-    expect(el.querySelectorAll("thead th").length).toBeGreaterThan(1);
+    const headers = [...el.querySelectorAll("thead th")];
+    expect(headers).toHaveLength(WEEK.length + 1); // «Работник» + 7 дней
+    const days = headers.slice(1).map((th) => th.querySelector(".dom")?.textContent);
+    expect(days).toEqual(WEEK.map((iso) => String(Number(iso.slice(-2)))));
+  });
+
+  it("пустой результат поиска говорит «Никого с таким именем нет.», а не рисует пустую таблицу молча", async () => {
+    const el = await mountGrid(SIX_PEOPLE, { query: "нет такого" });
+    expect(el.querySelectorAll(".employee-name")).toHaveLength(0);
+    expect(el.textContent ?? "").toContain("Никого с таким именем нет.");
   });
 });
