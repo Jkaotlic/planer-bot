@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { exactSchedulePalette } from "@planer/shared";
+import { exactSchedulePalette, filterPeople } from "@planer/shared";
 import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee, type TemplateQueue, type TemplateRolesView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
+import { PersonSearch } from "../../components/PersonSearch";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useEntryPalette } from "../../categories";
 import { withError, withoutError } from "../../lib/error-map";
@@ -56,7 +57,17 @@ export function AdminShiftKinds({
   /** Упавшая начальная загрузка: без неё показывать нечего, и «Повторить» — единственный выход. */
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [query, setQuery] = useState("");
   const active = employees.filter((employee) => employee.isActive);
+
+  // Запрос принадлежит открытой карточке, а не экрану: без сброса здесь
+  // закрыть карточку A с непустым поиском и открыть B значило бы, что B
+  // открывается уже отфильтрованной — под запрос, который в контексте B
+  // никто не вводил. Mirrors console's `toggleOpen`.
+  function toggleOpen(templateId: number) {
+    setOpenId((current) => (current === templateId ? null : templateId));
+    setQuery("");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -142,10 +153,12 @@ export function AdminShiftKinds({
             key={kind.templateId}
             kind={kind}
             employees={active}
+            query={query}
+            onQueryChange={setQuery}
             open={openId === kind.templateId}
             busy={busyId === kind.templateId}
             error={errors.get(kind.templateId)}
-            onToggleOpen={() => setOpenId(openId === kind.templateId ? null : kind.templateId)}
+            onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
           />
@@ -166,6 +179,8 @@ export function AdminShiftKinds({
 function KindCard({
   kind,
   employees,
+  query,
+  onQueryChange,
   open,
   busy,
   error,
@@ -175,6 +190,8 @@ function KindCard({
 }: {
   kind: TemplateRolesView;
   employees: Employee[];
+  query: string;
+  onQueryChange: (value: string) => void;
   open: boolean;
   busy: boolean;
   /** Отказ на последнее действие именно в этой карточке. */
@@ -290,6 +307,8 @@ function KindCard({
             )}
           </div>
 
+          <PersonSearch value={query} onChange={onQueryChange} count={employees.length} disabled={busy} />
+
           <div
             style={{
               display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, padding: "10px 0 6px",
@@ -300,7 +319,11 @@ function KindCard({
             <span style={{ justifySelf: "center" }}>Допущен</span>
             <span style={{ justifySelf: "center" }}>Любит</span>
           </div>
-          {employees.map((employee) => {
+          {/* Фильтруется только отрисовка строк. `kind.pool` и `kind.preference`
+              (кнопка «Сбросить на «все»» и счётчики выше) считаются и
+              сохраняются из полного `employees` — они не должны зависеть от
+              того, что набрано в поиске. */}
+          {filterPeople(employees, query).map((employee) => {
             const colours = personPalette(employee.id);
             return (
               <label
