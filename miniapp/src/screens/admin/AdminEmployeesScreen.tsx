@@ -232,10 +232,21 @@ export function AdminEmployeesScreen() {
           </Section>
         )}
 
+        {/* Один поиск на экран, над обеими секциями — как в консоли: порог
+            «показывать поле» считается от ПОЛНОГО ростера (активные + архив),
+            а не только от активных, иначе поле пропадало бы там, где в консоли
+            остаётся, стоило разделить один и тот же десяток людей на активных
+            и архив. Фильтрует и активных, и (см. ниже) раскрытый архив. */}
+        <Section>
+          <PersonSearch value={query} onChange={setQuery} count={employees.length} disabled={busyId !== null} />
+        </Section>
+
         <Section header={`Активные · ${active.length}`}>
-          <PersonSearch value={query} onChange={setQuery} count={active.length} disabled={busyId !== null} />
           {visibleActive.length === 0 ? (
-            <Placeholder description="Пока нет активных работников" />
+            // `active.length`, не `visibleActive.length`: пустой РОСТЕР и пустой
+            // РЕЗУЛЬТАТ поиска — разные причины, и подпись обязана называть ту,
+            // что случилась, а не всегда одну и ту же.
+            <Placeholder description={active.length === 0 ? "Пока нет активных работников" : "Никого с таким именем нет."} />
           ) : (
             visibleActive.map((e) => (
               <EmployeeRow
@@ -265,9 +276,13 @@ export function AdminEmployeesScreen() {
           )}
         </Section>
 
+        {/* `items` — весь архив, не найденное: заголовок и сам факт наличия
+            секции не должны мигать оттого, что поиск временно не нашёл
+            архивного человека. Фильтр применяется только к строкам внутри —
+            Mirrors console's `EmployeesScreen`. */}
         <CollapsibleArchive title="Архив" items={archived}>
           {(rows) =>
-            rows.map((e) => (
+            filterPeople(rows, query).map((e) => (
               <EmployeeRow
                 key={e.id}
                 employee={e}

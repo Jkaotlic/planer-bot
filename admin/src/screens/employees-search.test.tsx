@@ -109,6 +109,16 @@ describe("поиск работника в консоли", () => {
     expect(rowNames(el)).toEqual(["Семёнов Марк"]);
   });
 
+  it("поиск без совпадений говорит «Никого с таким именем нет.», а не что ростер пуст", async () => {
+    // Ростер полон — пуст только РЕЗУЛЬТАТ поиска, и подпись не должна путать
+    // одно с другим (иначе она соврёт про причину).
+    const el = await mountWith(SIX_PEOPLE);
+    await typeSearch(searchField(el), "нет такого");
+    const empty = el.querySelector(".employees-empty");
+    expect(empty?.textContent).toBe("Никого с таким именем нет.");
+    expect(empty?.textContent).not.toContain("Пока нет активных работников");
+  });
+
   it("позиция в списке считается от полного ростера, а не от найденного", async () => {
     const el = await mountWith(SIX_PEOPLE); // Семёнов — третий из шести
     await typeSearch(searchField(el), "семён");
