@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { apiClient, AuthRequiredError, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
-import { exactSchedulePalette } from "@planer/shared";
+import { exactSchedulePalette, filterPeople } from "@planer/shared";
 import { useEntryPalette } from "../categories";
+import { PersonSearch } from "../components/PersonSearch";
 import { initialsOf, personPalette } from "../lib/people";
 
 /**
@@ -36,6 +37,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const active = employees.filter((employee) => employee.isActive);
 
   useEffect(() => {
@@ -63,6 +65,15 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     } finally {
       setBusyId(null);
     }
+  }
+
+  // Запрос принадлежит открытой карточке, а не экрану: без сброса здесь
+  // закрыть карточку A с непустым поиском и открыть B значило бы, что B
+  // открывается уже отфильтрованной — под запрос, который в контексте B
+  // никто не вводил.
+  function toggleOpen(templateId: number) {
+    setOpenId((current) => (current === templateId ? null : templateId));
+    setQuery("");
   }
 
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
@@ -98,9 +109,11 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             key={kind.templateId}
             kind={kind}
             employees={active}
+            query={query}
+            onQueryChange={setQuery}
             open={openId === kind.templateId}
             busy={busyId === kind.templateId}
-            onToggleOpen={() => setOpenId(openId === kind.templateId ? null : kind.templateId)}
+            onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
           />
@@ -113,6 +126,8 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
 function KindCard({
   kind,
   employees,
+  query,
+  onQueryChange,
   open,
   busy,
   onToggleOpen,
@@ -121,6 +136,8 @@ function KindCard({
 }: {
   kind: TemplateRolesView;
   employees: Employee[];
+  query: string;
+  onQueryChange: (value: string) => void;
   open: boolean;
   busy: boolean;
   onToggleOpen: () => void;
@@ -171,6 +188,8 @@ function KindCard({
     if (fresh) setQueue(fresh);
   }
 
+  const visiblePeople = filterPeople(employees, query);
+
   return (
     <section className="kind-card">
       <button type="button" className="kind-card-head" onClick={onToggleOpen} aria-expanded={open}>
@@ -210,12 +229,21 @@ function KindCard({
             )}
           </div>
 
+          <PersonSearch value={query} onChange={onQueryChange} count={employees.length} disabled={busy} />
+
           <div className="kind-people-head">
             <span>Работник</span>
             <span title="Может брать этот вид смены">Допущен</span>
             <span title="Мягкий приоритет при равном числе таких смен">Любит</span>
           </div>
-          {employees.map((employee) => {
+          {/* Фильтруется только отрисовка строк. `kind.pool` и `kind.preference`
+              (кнопка «Сбросить на «все»» и счётчики выше) считаются и
+              сохраняются из полного `employees` — они не должны зависеть от
+              того, что набрано в поиске. */}
+          {visiblePeople.length === 0 && employees.length > 0 && (
+            <div className="employees-empty">Никого с таким именем нет.</div>
+          )}
+          {visiblePeople.map((employee) => {
             const inPool = kind.pool.includes(employee.id);
             const likes = Boolean(kind.preference[employee.id]);
             const colours = personPalette(employee.id);

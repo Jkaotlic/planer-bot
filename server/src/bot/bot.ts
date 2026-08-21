@@ -129,6 +129,7 @@ export async function publishBotCommands(bot: Bot): Promise<void> {
     await bot.api.setMyCommands([
       { command: "start", description: "Начать и открыть смены" },
       { command: "week", description: "График команды на неделю" },
+      { command: "menu", description: "Вернуть кнопки под полем ввода" },
       { command: "notifications", description: "Напоминания о сменах — включить или выключить" },
     ]);
   } catch (err) {
@@ -517,12 +518,49 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("week", (ctx) => sendWeek(ctx));
 
   /**
+   * Возврат нижней раскладки из любого состояния.
+   *
+   * Нужна из-за `force_reply`: Telegram подменяет им раскладку полем ответа, и
+   * человек, не ответивший на вопрос багрепорта, остаётся без кнопок и без
+   * способа их вернуть — `/start` для этого не выглядит и в меню команд подписан
+   * про другое. Кому раскладка положена, решает `menuFor`, а не это место.
+   *
+   * Приватный чат только — как у `sendWeek`. Раскладка личная; в общем чате
+   * «Кнопки на месте» было бы неправдой для всех, кроме того, кто написал.
+   */
+  bot.command("menu", async (ctx) => {
+    if (ctx.chat?.type !== "private") return;
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    await replyWithMenu(ctx, "Кнопки на месте 👇");
+  });
+
+  /**
    * «Сообщить о проблеме»: бот спрашивает, человек отвечает.
    *
    * `force_reply` — не украшение: Telegram сам ставит курсор в поле ввода и
    * привязывает ответ к этому сообщению, поэтому обычный путь не требует от
    * человека ничего, кроме «набрать и отправить». Окно в базе — страховка на
    * случай, когда он свернул чат и написал отдельным сообщением.
+   *
+   * Кнопка выхода едет ОТДЕЛЬНЫМ сообщением, а не в этом же `reply_markup`: у
+   * Telegram это одно поле, а не два, и `force_reply` с `inline_keyboard` в нём
+   * физически не уживаются (см. типы grammy —
+   * `InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply`).
+   *
+   * И едет ПЕРВОЙ, до вопроса, а не после. Последним в чате должен остаться
+   * вопрос: свайп-реплай на последнее сообщение — обычный жест, и именно он
+   * обязан попасть на вопрос с `force_reply`. Уйди кнопка второй (и, значит,
+   * последней), тот же реплай попал бы на неё — `replyToMessageId` не совпал бы
+   * с `promptMessageId`, `shouldCapture` в bug-service.ts молча вернул бы
+   * `false`, и жалоба потерялась бы без следа: ни записи в базе, ни ответа
+   * человеку. `openBugPrompt` по-прежнему запоминает id ВОПРОСА — теперь это id
+   * второго сообщения, а не первого.
    */
   async function startBugReport(ctx: Context): Promise<void> {
     const from = ctx.from;
@@ -532,6 +570,9 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
       return;
     }
+    await ctx.reply("Если передумал — вернись в меню.", {
+      reply_markup: { inline_keyboard: [[{ text: "🏠 В меню", callback_data: "bug:cancel" }]] },
+    });
     const sent = await ctx.reply(
       "Опиши, что не так — одним сообщением. Чем конкретнее, тем быстрее починим.",
       { reply_markup: { force_reply: true, input_field_placeholder: "Что сломалось?" } },
@@ -558,7 +599,10 @@ export function createBot(deps: BotDeps): Bot {
     // Аудит уже записал `submitBugReport` — второй записи здесь не нужно,
     // иначе одна жалоба легла бы в журнал дважды. Сверено с bug-service.ts.
     clearBugPending(db, who.me.id);
-    await ctx.reply("Записал, спасибо 🙏 Разберёмся.");
+    // Через `replyWithMenu`, а не голым `ctx.reply`: вопрос был задан с
+    // `force_reply`, и раскладку у человека Telegram на это время убрал. Обычный
+    // путь «нажал → написал → отправил» обязан возвращать её сам, без лишнего тапа.
+    await replyWithMenu(ctx, "Записал, спасибо 🙏 Разберёмся.");
     await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
   }
 
@@ -742,6 +786,32 @@ export function createBot(deps: BotDeps): Bot {
     }
     await ctx.answerCallbackQuery({ text: "Отметил ✅" });
     await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  /**
+   * «🏠 В меню» под вопросом багрепорта.
+   *
+   * Гасит окно ожидания — без этого следующее написанное человеком сообщение,
+   * адресованное совсем не боту, уехало бы админам багрепортом.
+   *
+   * Раскладка возвращается НОВЫМ сообщением, а не правкой этого: постоянная
+   * клавиатура едет только с отправкой, отредактировать её в уже отправленное
+   * Telegram не даёт. Правкой снимается лишь сама inline-кнопка, чтобы её нельзя
+   * было нажать второй раз и получить второе «кнопки на месте».
+   */
+  bot.callbackQuery(/^bug:cancel$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    clearBugPending(db, who.me.id);
+    await ctx.answerCallbackQuery({ text: "Ок, не буду ждать" });
+    await safeEdit(() => ctx.editMessageReplyMarkup());
+    // `replyWithMenu`, а не руками собранный `menuFor(ctx.from.id, ...)`: в
+    // callback-контексте `ctx.from` есть всегда, так что замена побайтово
+    // эквивалентна, а хелпер уже есть рядом и делает ровно это.
+    await replyWithMenu(ctx, "Кнопки на месте 👇");
   });
 
   bot.callbackQuery(/^swap:(accept|decline):(\d+)$/, async (ctx) => {

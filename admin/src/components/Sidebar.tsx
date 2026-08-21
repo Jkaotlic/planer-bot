@@ -1,4 +1,4 @@
-export type NavKey = "schedule" | "employees" | "kinds" | "weekend" | "collections" | "announce" | "log" | "settings";
+export type NavKey = "schedule" | "employees" | "kinds" | "weekend" | "collections" | "announce" | "bugs" | "log" | "settings";
 
 export interface SidebarProps {
   active: NavKey;
@@ -14,6 +14,7 @@ const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }
   { key: "weekend", label: "Работа в выходные", icon: <MarketIcon /> },
   { key: "collections", label: "Сборы", icon: <CakeIcon /> },
   { key: "announce", label: "Анонсы", icon: <AnnounceIcon /> },
+  { key: "bugs", label: "Баги", icon: <BugIcon /> },
   { key: "log", label: "Журнал", icon: <LogIcon /> },
   { key: "settings", label: "Настройки", icon: <GearIcon /> },
 ];
@@ -96,6 +97,17 @@ function AnnounceIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 10v4a1 1 0 0 0 1 1h2l4 4V5l-4 4H4a1 1 0 0 0-1 1z" />
       <path d="M15 8a4 4 0 0 1 0 8M18 5a8 8 0 0 1 0 14" />
+    </svg>
+  );
+}
+
+/** Жук — та же метафора, что у кнопки «🐞 Проблема» в боте: человек ищет глазами
+ *  то, что нажимал, а не то, как это называется в базе. */
+function BugIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <rect x="8" y="8" width="8" height="12" rx="4" />
+      <path d="M9 8a3 3 0 0 1 6 0M3 12h5M16 12h5M4 7l3 2M20 7l-3 2M4 18l3-2M20 18l-3-2" />
     </svg>
   );
 }

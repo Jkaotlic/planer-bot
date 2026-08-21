@@ -175,16 +175,17 @@ const PAGE = 50;
 function History() {
   const [page, setPage] = useState<JournalPage | null>(null);
   const [types, setTypes] = useState<string[]>([]);
+  const [actor, setActor] = useState("");
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   /** Bumped by «Повторить». Без него перечитать журнал нечем: эффект зависит от
-   *  фильтра и страницы, а их органы управления при ошибке исчезают с экрана. */
+   *  фильтров и страницы, а их органы управления при ошибке исчезают с экрана. */
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     apiClient
-      .getJournal({ types, limit: PAGE, offset })
+      .getJournal({ types, actor: actor ? Number(actor) : undefined, limit: PAGE, offset })
       .then((next) => {
         if (cancelled) return;
         setPage(next);
@@ -198,7 +199,7 @@ function History() {
     return () => {
       cancelled = true;
     };
-  }, [types, offset, attempt]);
+  }, [types, actor, offset, attempt]);
 
   if (error) {
     return (
@@ -228,6 +229,24 @@ function History() {
           {page.availableTypes.map((type) => (
             <option value={type} key={type}>
               {describeAuditEvent({ type, payload: {} }).title}
+            </option>
+          ))}
+        </select>
+        {/* Фильтр серверный, а не по загруженной странице: total и пагинация считаются
+            на сервере, и клиентский фильтр заставил бы экран врать про то, сколько
+            всего событий нашлось. */}
+        <select
+          aria-label="Кто"
+          value={actor}
+          onChange={(e) => {
+            setOffset(0);
+            setActor(e.target.value);
+          }}
+        >
+          <option value="">Все</option>
+          {page.availableActors.map((available) => (
+            <option value={String(available.id)} key={available.id}>
+              {available.displayName}
             </option>
           ))}
         </select>

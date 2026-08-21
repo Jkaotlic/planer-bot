@@ -46,6 +46,8 @@ import {
   mockSetSwapsLock,
   mockGetAnnouncementRecipients,
   mockSendAnnouncement,
+  mockGetBugReports,
+  mockResolveBugReport,
 } from "./mock";
 
 /**
@@ -121,6 +123,18 @@ export interface VacantSlot {
   location: string | null;
   note: string | null;
   status: WeekendSlotStatus;
+}
+
+/** Один багрепорт списком — контракт `GET /api/admin/bug-reports`. Форма
+ *  скопирована из `miniapp/src/api/client.ts` дословно: два разных DTO под
+ *  одну серверную ручку разъехались бы и остались незамеченными. */
+export interface BugReportRow {
+  id: number;
+  authorName: string;
+  text: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedByName: string | null;
 }
 
 /** One interested worker for a slot, with their confirmed-this-month count driving the fairness hint. */
@@ -270,6 +284,8 @@ export interface JournalPage {
   offset: number;
   /** Only the types actually present in the log, so the filter offers real options. */
   availableTypes: string[];
+  /** Only the people who actually authored a logged event — not the whole roster. */
+  availableActors: { id: number; displayName: string }[];
   events: JournalEvent[];
 }
 
@@ -450,7 +466,7 @@ export interface ApiClient {
   getRosterCsv(from: string, to: string): Promise<string>;
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
   getShiftCountsCsv(from: string, to: string): Promise<string>;
-  getJournal(params: { types?: string[]; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
+  getJournal(params: { types?: string[]; actor?: number; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
   getBirthdays(): Promise<UpcomingBirthday[]>;
   getBirthdayPreview(employeeId: number): Promise<CollectionPreview>;
   /** Сохраняет раунд ДР; на первом сохранении он и заводится. */
@@ -477,6 +493,8 @@ export interface ApiClient {
   /** Рассылает объявление команде или выбранным. Подтверждение — на
    *  вызывающем, тот же узор, что у `sendCollection`. */
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
+  getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
+  resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
 }
 
 /** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
@@ -826,6 +844,7 @@ export const realClient: ApiClient = {
   getJournal(params) {
     const q = new URLSearchParams();
     if (params.types?.length) q.set("types", params.types.join(","));
+    if (params.actor != null) q.set("actor", String(params.actor));
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     q.set("limit", String(params.limit ?? 50));
@@ -934,6 +953,13 @@ export const realClient: ApiClient = {
 
   sendAnnouncement: (text, audience) =>
     authorizedPostJson<AnnouncementResult>("/api/announcements", { text, audience }),
+
+  async getBugReports(status) {
+    const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
+    return reports;
+  },
+  resolveBugReport: (id, resolved) =>
+    authorizedPostJson<{ id: number; resolvedAt: string | null }>(`/api/admin/bug-reports/${id}/resolve`, { resolved }),
 };
 
 const devClient: ApiClient = {
@@ -986,6 +1012,8 @@ const devClient: ApiClient = {
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
+  getBugReports: (status) => mockGetBugReports(status),
+  resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };
 
 /**

@@ -6,6 +6,7 @@ import type {
   AnnouncementAudience,
   AnnouncementRecipient,
   AnnouncementResult,
+  BugReportRow,
   Employee,
   FeedEvent,
   NewEntryInput,
@@ -474,29 +475,47 @@ export async function mockGetTemplateQueue(templateId: number): Promise<Template
 
 const MOCK_JOURNAL_TYPES = ["entry_created", "entry_updated", "entry_deleted", "swap_accepted", "roster_import"];
 
-/** A believable log so the screen can be exercised with no backend. */
-const JOURNAL: JournalEvent[] = Array.from({ length: 34 }, (_, index) => ({
-  id: 1000 - index,
-  type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
-  createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
-  actorName: EMPLOYEES[index % 3]?.displayName ?? null,
-  payload: { entryId: 500 + index, date: dayIso(index % 7) },
-}));
+/** A believable log so the screen can be exercised with no backend.
+ *  `actorEmployeeId` is mock-only bookkeeping — real `JournalEvent` never carries it,
+ *  it exists here so `mockGetJournal` can filter by `actor` the way the server does. */
+const JOURNAL: (JournalEvent & { actorEmployeeId: number | null })[] = Array.from({ length: 34 }, (_, index) => {
+  const actor = EMPLOYEES[index % 3] ?? null;
+  return {
+    id: 1000 - index,
+    type: MOCK_JOURNAL_TYPES[index % MOCK_JOURNAL_TYPES.length]!,
+    createdAt: new Date(Date.now() - index * 3_600_000).toISOString(),
+    actorName: actor?.displayName ?? null,
+    actorEmployeeId: actor?.id ?? null,
+    payload: { entryId: 500 + index, date: dayIso(index % 7) },
+  };
+});
 
 export async function mockGetJournal(params: {
-  types?: string[]; from?: string; to?: string; limit?: number; offset?: number;
+  types?: string[]; actor?: number; from?: string; to?: string; limit?: number; offset?: number;
 }): Promise<JournalPage> {
   await delay(200);
   const types = params.types ?? [];
-  const matching = JOURNAL.filter((event) => types.length === 0 || types.includes(event.type));
+  const matching = JOURNAL.filter(
+    (event) =>
+      (types.length === 0 || types.includes(event.type)) &&
+      (params.actor == null || event.actorEmployeeId === params.actor),
+  );
   const limit = params.limit ?? 50;
   const offset = params.offset ?? 0;
+  // Только те, кто реально встречается в событиях — не весь ростер, иначе
+  // список предлагал бы людей без единой записи в журнале.
+  const availableActors = [...new Map(
+    JOURNAL.filter((e) => e.actorEmployeeId != null).map((e) => [e.actorEmployeeId!, e.actorName!]),
+  ).entries()]
+    .map(([id, displayName]) => ({ id, displayName }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ru"));
   return {
     total: matching.length,
     limit,
     offset,
     availableTypes: [...new Set(JOURNAL.map((e) => e.type))].sort(),
-    events: matching.slice(offset, offset + limit),
+    availableActors,
+    events: matching.slice(offset, offset + limit).map(({ actorEmployeeId: _actorEmployeeId, ...event }) => event),
   };
 }
 
@@ -1091,4 +1110,66 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
   const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
 
   return { delivered: reachable.length, intended: reachable.length, unreachable };
+}
+
+// --- Баги ------------------------------------------------------------------
+// Мок зеркалит `mockGetBugReports`/`mockResolveBugReport` из
+// `miniapp/src/api/mock.ts`: та же форма строки, тот же порядок (свежие
+// сверху), то же правило — отметка обратима, а не одноразовая.
+
+/** Живёт между вызовами по той же причине, что `mockSwapsLocked` выше: отметил
+ *  «Разобрал» — и следующий `getBugReports` должен помнить об этом. */
+interface MockBugReport {
+  id: number;
+  authorId: number;
+  text: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedById: number | null;
+}
+
+const MOCK_BUG_REPORTS: MockBugReport[] = [
+  {
+    id: 1,
+    authorId: 3,
+    text: "Кнопка «Обмен» не открывается на Андроиде — тап проваливается сквозь карточку",
+    createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    resolvedAt: null,
+    resolvedById: null,
+  },
+  {
+    id: 2,
+    authorId: 5,
+    text: "В расписании на выходные не видно моей смены, хотя в боте пришло напоминание",
+    createdAt: new Date(Date.now() - 26 * 3600_000).toISOString(),
+    resolvedAt: new Date(Date.now() - 20 * 3600_000).toISOString(),
+    resolvedById: 1,
+  },
+];
+
+function bugReportView(report: MockBugReport): BugReportRow {
+  return {
+    id: report.id,
+    authorName: personNameOf(report.authorId) ?? "неизвестно кто",
+    text: report.text,
+    createdAt: report.createdAt,
+    resolvedAt: report.resolvedAt,
+    resolvedByName: report.resolvedById != null ? personNameOf(report.resolvedById) : null,
+  };
+}
+
+export async function mockGetBugReports(status: "open" | "all"): Promise<BugReportRow[]> {
+  await delay(200);
+  const rows = status === "open" ? MOCK_BUG_REPORTS.filter((r) => r.resolvedAt == null) : MOCK_BUG_REPORTS;
+  // Свежие сверху — тем же порядком, что и `listBugReports` на сервере.
+  return [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id).map(bugReportView);
+}
+
+export async function mockResolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }> {
+  await delay(200);
+  const report = MOCK_BUG_REPORTS.find((r) => r.id === id);
+  if (!report) throw new Error("Багрепорт не найден");
+  report.resolvedAt = resolved ? new Date().toISOString() : null;
+  report.resolvedById = resolved ? viewerEmployeeId() : null;
+  return { id: report.id, resolvedAt: report.resolvedAt };
 }

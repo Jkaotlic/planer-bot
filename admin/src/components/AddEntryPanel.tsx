@@ -3,6 +3,7 @@ import { isAbsence, resolveShiftTimes } from "@planer/shared";
 import type { EntryCategory } from "@planer/shared";
 import type { Employee, NewEntryInput, Shift, Template } from "../api/client";
 import { ALL_CATEGORIES, categoryLabel } from "../categories";
+import { PersonPicker } from "./PersonPicker";
 import { dayOptions, formatDayLabel, weekdayIndex } from "../lib/week";
 
 export interface AddEntryPanelProps {
@@ -156,20 +157,7 @@ export function AddEntryPanel({
 
         <div className="field-row">
           <div className="field-group" style={{ flex: 1 }}>
-            <label className="field-label" htmlFor="entry-employee">
-              Работник
-            </label>
-            <select
-              id="entry-employee"
-              value={employeeId}
-              onChange={(e) => setEmployeeId(Number(e.target.value))}
-            >
-              {employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.displayName}
-                </option>
-              ))}
-            </select>
+            <PersonPicker label="Работник" people={employees} value={employeeId} onChange={setEmployeeId} />
           </div>
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label" htmlFor="entry-date">

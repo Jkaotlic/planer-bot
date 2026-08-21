@@ -6,7 +6,8 @@ import {
   formatMoney,
   isCollectionActive,
 } from "@planer/shared";
-import { Button, Input, List, Placeholder, Section, Select, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { Button, Input, List, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { PersonPicker } from "../../components/PersonPicker";
 import {
   apiClient,
   type Collection,
@@ -440,21 +441,14 @@ function NewCollectionForm({
           нет: сбор, где ты виновник, сервер тебе потом не отдаст, и созданная
           строка тут же пропала бы с экрана — вместе с возможностью её
           разослать или удалить. */}
-      <Select
-        header="Кому"
+      <PersonPicker
+        label="Кому"
+        people={employees.filter((e) => e.isActive && e.id !== viewerId)}
         value={employeeId}
+        onChange={setEmployeeId}
+        emptyOptionLabel="Общий сбор — на всех"
         disabled={busy}
-        onChange={(e) => setEmployeeId(Number(e.target.value))}
-      >
-        <option value={0}>Общий сбор — на всех</option>
-        {employees
-          .filter((e) => e.isActive && e.id !== viewerId)
-          .map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.displayName}
-            </option>
-          ))}
-      </Select>
+      />
 
       <CollectionFields
         busy={busy}
@@ -864,21 +858,14 @@ function CollectionEditor({
             disabled={busy || subjectFrozen}
             onChange={(e) => { setTitle(e.target.value); setConfirming(false); }}
           />
-          <Select
-            header="Кому"
+          <PersonPicker
+            label="Кому"
+            people={employees.filter((e) => e.isActive && e.id !== viewerId)}
             value={employeeId}
+            onChange={(id) => { setEmployeeId(id); setConfirming(false); }}
+            emptyOptionLabel="Общий сбор — на всех"
             disabled={busy || subjectFrozen}
-            onChange={(e) => { setEmployeeId(Number(e.target.value)); setConfirming(false); }}
-          >
-            <option value={0}>Общий сбор — на всех</option>
-            {employees
-              .filter((e) => e.isActive && e.id !== viewerId)
-              .map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.displayName}
-                </option>
-              ))}
-          </Select>
+          />
           {subjectFrozen && (
             <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, lineHeight: 1.4 }}>
               Повод и виновника менять уже нельзя: команда прочитала, на что скидывается.

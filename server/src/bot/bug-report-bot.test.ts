@@ -5,7 +5,7 @@ import { createBot } from "./bot";
 import { BTN_BUG, BTN_WEEK } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { openBugPrompt, listBugReports } from "../bugs/bug-service";
+import { openBugPrompt, listBugReports, getBugPending } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -22,14 +22,20 @@ function testBot(db: Db) {
   // Транспорт свой, а не `recordApi`: багрепорт запоминает `message_id` ответа
   // (по нему потом дописывается «Разобрал»), поэтому отправка обязана отдавать
   // растущий id, а не пустой результат. Подделка `botInfo` общая.
+  //
+  // `messageId` на каждой записи — сверх того, что даёт общий `ApiCall`: тест
+  // на регресс «реплай на последнее сообщение» (ниже) обязан реплаить на id,
+  // который бот выдал НА САМОМ ДЕЛЕ, а не на угаданный по счётчику.
   const bot = stubBotInfo(createBot({ db, config }));
-  const calls: ApiCall[] = [];
+  const calls: Array<ApiCall & { messageId?: number }> = [];
   let nextMessageId = 5000;
   bot.api.config.use((_prev, method, payload) => {
-    calls.push({ method, payload });
     if (method === "sendMessage" || method === "sendPhoto") {
-      return { ok: true, result: { message_id: nextMessageId++ } } as never;
+      const messageId = nextMessageId++;
+      calls.push({ method, payload, messageId });
+      return { ok: true, result: { message_id: messageId } } as never;
     }
+    calls.push({ method, payload });
     return { ok: true, result: {} } as never;
   });
   return { bot, calls };
@@ -56,6 +62,23 @@ function textUpdate(tgId: number, text: string) {
       chat: { id: tgId, first_name: "T", type: "private" as const },
       from: { id: tgId, is_bot: false, first_name: "T" },
       text,
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
+/** Как `textUpdate`, но явный свайп-реплай на конкретное сообщение — так
+ *  Telegram помечает ответ, когда человек отвечает не в поле ввода, а свайпом
+ *  по сообщению в чате. */
+function replyUpdate(tgId: number, text: string, replyToMessageId: number) {
+  return {
+    update_id: tgId * 10 + 3,
+    message: {
+      message_id: tgId * 10 + 1,
+      date: 1_712_803_046,
+      chat: { id: tgId, first_name: "T", type: "private" as const },
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      text,
+      reply_to_message: { message_id: replyToMessageId },
     },
   } as unknown as Parameters<Bot["handleUpdate"]>[0];
 }
@@ -157,6 +180,21 @@ describe("багрепорт из бота", () => {
   });
 });
 
+describe("ответ «Записал» возвращает раскладку", () => {
+  it("ответ «Записал» несёт раскладку — обычный путь не заканчивается пропавшими кнопками", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 611);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(611, BTN_BUG));
+    await bot.handleUpdate(textUpdate(611, "Кнопка не нажимается"));
+
+    const confirmation = calls.filter((c) => c.method === "sendMessage").find((c) => String(c.payload.text).includes("Записал"))!;
+    const labels = (confirmation.payload.reply_markup?.keyboard ?? []).flat().map((b: { text: string }) => b.text);
+    expect(labels).toContain(BTN_WEEK);
+  });
+});
+
 describe("кнопка «Разобрал»", () => {
   // Отдельная проверка от `acting`, потому что кнопка живёт в чате вечно, а
   // админа могли разжаловать (решение из брифа) — обычный `isAdmin` в базе не
@@ -189,5 +227,80 @@ describe("кнопка «Разобрал»", () => {
     await bot.handleUpdate(tapUpdate(608, `bug:resolve:${id}`));
 
     expect(listBugReports(db, "all")[0]!.report.resolvedAt).toBeNull();
+  });
+});
+
+describe("выход из багрепорта", () => {
+  it("«🏠 В меню» гасит окно: следующее сообщение уже не становится багрепортом", async () => {
+    const db = makeTestDb();
+    const anya = worker(db, "Аня", 621);
+    const { bot } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(621, BTN_BUG));
+    await bot.handleUpdate(tapUpdate(621, "bug:cancel"));
+    await bot.handleUpdate(textUpdate(621, "просто пишу коллеге"));
+
+    expect(getBugPending(db, anya.id)).toBeNull();
+    expect(listBugReports(db, "all")).toHaveLength(0);
+  });
+
+  it("«🏠 В меню» присылает новое сообщение с раскладкой — правкой старого её не вернуть", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 622);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(622, BTN_BUG));
+    const before = calls.filter((c) => c.method === "sendMessage").length;
+    await bot.handleUpdate(tapUpdate(622, "bug:cancel"));
+
+    const sent = calls.filter((c) => c.method === "sendMessage");
+    expect(sent.length).toBe(before + 1);
+    const labels = (sent.at(-1)!.payload.reply_markup?.keyboard ?? []).flat().map((b: { text: string }) => b.text);
+    expect(labels).toContain(BTN_WEEK);
+  });
+
+  // Развилка из брифа: Telegram не разрешает `force_reply` и `inline_keyboard`
+  // в одном `reply_markup` — это одно поле (см. @grammyjs/types methods.d.ts,
+  // `reply_markup?: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply`),
+  // а не два. Поэтому кнопка выхода едет ПЕРВЫМ сообщением, а вопрос с
+  // `force_reply` — ВТОРЫМ и последним: свайп-реплай на последнее сообщение в
+  // чате — обычный жест, и обязан попасть на вопрос, а не на кнопку (см.
+  // следующий тест — что случается, когда это не так).
+  it("кнопка выхода едет первым сообщением, вопрос с force_reply — последним", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 623);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(623, BTN_BUG));
+
+    const sent = calls.filter((c) => c.method === "sendMessage");
+    expect(sent).toHaveLength(2);
+    const data = (sent[0]!.payload.reply_markup?.inline_keyboard ?? []).flat().map((b: { callback_data: string }) => b.callback_data);
+    expect(data).toContain("bug:cancel");
+    expect(sent[1]!.payload.reply_markup.force_reply).toBe(true);
+  });
+
+  it("реплай на последнее из двух сообщений после «🐞 Проблема» не теряется молча", async () => {
+    // Регресс из ревью: до правки порядка последним в чате уходило кнопочное
+    // сообщение («Если передумал…»), а не вопрос. Человек, свернувший чат и
+    // вернувшийся позже, свайпает реплай на ПОСЛЕДНЕЕ сообщение — Telegram
+    // всегда подставляет его id. Раньше это id не совпадал с promptMessageId,
+    // shouldCapture молча возвращал false, и жалоба исчезала: ни записи в
+    // базе, ни ответа автору. Тест реплаит на фактическое последнее сообщение,
+    // каким бы оно ни было, — поэтому падает на старом порядке и проходит на
+    // новом без всякой правки самого теста.
+    const db = makeTestDb();
+    const anya = worker(db, "Аня", 624);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(624, BTN_BUG));
+    const sentSoFar = calls.filter((c) => c.method === "sendMessage");
+    const lastMessageId = sentSoFar.at(-1)!.messageId!;
+
+    await bot.handleUpdate(replyUpdate(624, "Кнопка «Больничный» не открывается", lastMessageId));
+
+    const reports = listBugReports(db, "all");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.report.employeeId).toBe(anya.id);
   });
 });

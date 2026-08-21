@@ -1,3 +1,4 @@
+import { filterPeople } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -13,6 +14,8 @@ export interface ScheduleGridProps {
   onAddClick: (employeeId: number, date: string) => void;
   /** Clicking an existing entry opens it for editing. */
   onEntryClick: (entry: Shift) => void;
+  /** From `PersonSearch` in `App.tsx` — filters which rows render. Absent/empty shows everyone. */
+  query?: string;
 }
 
 function endOf(s: Shift): string {
@@ -29,7 +32,10 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick, query }: ScheduleGridProps) {
+  // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
+  // `weekDates` независимо от того, что набрано в поле.
+  const visibleEmployees = filterPeople(employees, query ?? "");
   return (
     <div className="grid-scroll">
       <table className="schedule-table">
@@ -47,7 +53,19 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
           </tr>
         </thead>
         <tbody>
-          {employees.map((employee) => (
+          {/* Полный ростер непуст, а поиск нашёл нулевой — молчаливая пустая
+              таблица читалась бы как «данных нет», хотя они есть и просто не
+              совпали с запросом. Пустой ПОЛНЫЙ `employees` (ростер без единого
+              работника) по-прежнему не рисует ничего — это другая причина, и
+              подменять её этой строкой не стоит. */}
+          {visibleEmployees.length === 0 && employees.length > 0 && (
+            <tr>
+              <td className="employees-empty" colSpan={weekDates.length + 1}>
+                Никого с таким именем нет.
+              </td>
+            </tr>
+          )}
+          {visibleEmployees.map((employee) => (
             <tr key={employee.id}>
               <td className="employee-cell">
                 <EmployeeCell employee={employee} />

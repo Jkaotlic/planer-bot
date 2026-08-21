@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
+import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { Avatar, Button, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
 import { CardShell, CardStack, MetaLine } from "../../components/Card";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
+import { PersonSearch } from "../../components/PersonSearch";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { withError, withoutError } from "../../lib/error-map";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -74,6 +75,7 @@ export function AdminEmployeesScreen() {
    * of problem (several independently-actionable rows on one long scroll).
    */
   const [restrictionErrors, setRestrictionErrors] = useState<ReadonlyMap<number, string>>(new Map());
+  const [query, setQuery] = useState("");
 
   async function reload() {
     setEmployees(await apiClient.getAdminEmployees());
@@ -210,6 +212,7 @@ export function AdminEmployeesScreen() {
 
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
+  const visibleActive = filterPeople(active, query);
 
   return (
     <ScreenScroll>
@@ -229,15 +232,31 @@ export function AdminEmployeesScreen() {
           </Section>
         )}
 
+        {/* Один поиск на экран, над обеими секциями — как в консоли: порог
+            «показывать поле» считается от ПОЛНОГО ростера (активные + архив),
+            а не только от активных, иначе поле пропадало бы там, где в консоли
+            остаётся, стоило разделить один и тот же десяток людей на активных
+            и архив. Фильтрует и активных, и (см. ниже) раскрытый архив. */}
+        <Section>
+          <PersonSearch value={query} onChange={setQuery} count={employees.length} disabled={busyId !== null} />
+        </Section>
+
         <Section header={`Активные · ${active.length}`}>
-          {active.length === 0 ? (
-            <Placeholder description="Пока нет активных работников" />
+          {visibleActive.length === 0 ? (
+            // `active.length`, не `visibleActive.length`: пустой РОСТЕР и пустой
+            // РЕЗУЛЬТАТ поиска — разные причины, и подпись обязана называть ту,
+            // что случилась, а не всегда одну и ту же.
+            <Placeholder description={active.length === 0 ? "Пока нет активных работников" : "Никого с таким именем нет."} />
           ) : (
-            active.map((e, index) => (
+            visibleActive.map((e) => (
               <EmployeeRow
                 key={e.id}
                 employee={e}
-                position={index + 1}
+                // Позиция — место в РОСТЕРЕ, а не в том, что осталось после
+                // поиска: считать её по видимому индексу значило бы
+                // переставлять человека не туда, стоило кому-то что-нибудь
+                // набрать в поиске. Mirrors console's `EmployeesSection`.
+                position={active.findIndex((a) => a.id === e.id) + 1}
                 onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
                 onBirthDate={(birthDate) => withBusy(e.id, () => apiClient.setBirthDate(e.id, birthDate))}
                 actionLabel="В архив"
@@ -257,9 +276,13 @@ export function AdminEmployeesScreen() {
           )}
         </Section>
 
+        {/* `items` — весь архив, не найденное: заголовок и сам факт наличия
+            секции не должны мигать оттого, что поиск временно не нашёл
+            архивного человека. Фильтр применяется только к строкам внутри —
+            Mirrors console's `EmployeesScreen`. */}
         <CollapsibleArchive title="Архив" items={archived}>
           {(rows) =>
-            rows.map((e) => (
+            filterPeople(rows, query).map((e) => (
               <EmployeeRow
                 key={e.id}
                 employee={e}
