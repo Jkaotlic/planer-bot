@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { exactSchedulePalette, filterPeople } from "@planer/shared";
 import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Employee, type TemplateQueue, type TemplateRolesView } from "../../api/client";
+import { apiClient, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { PersonSearch } from "../../components/PersonSearch";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -45,6 +45,7 @@ export function AdminShiftKinds({
   onClose: () => void;
 }) {
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
+  const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   /**
@@ -72,6 +73,9 @@ export function AdminShiftKinds({
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
+    // Чек-листы рядом с ролями: без их имён выпадающий список показывать нечем.
+    // Молча при отказе — экран про «кто что может», и его беда важнее.
+    apiClient.getChecklists().then((next) => { if (!cancelled) setChecklists(next); }).catch(() => {});
     apiClient
       .getTemplateRoles()
       .then((next) => {
@@ -101,16 +105,16 @@ export function AdminShiftKinds({
     }
   }
 
-  async function saveChecklist(kind: TemplateRolesView, requiresChecklist: boolean) {
+  async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
     // Оптимистично, как и допуск: галочка обязана отзываться сразу, иначе на
     // медленной сети её жмут второй раз.
     setKinds((current) =>
-      current?.map((item) => (item.templateId === kind.templateId ? { ...item, requiresChecklist } : item)) ?? current,
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistId } : item)) ?? current,
     );
     setBusyId(kind.templateId);
     setErrors((prev) => withoutError(prev, kind.templateId));
     try {
-      await apiClient.setTemplateChecklist(kind.templateId, requiresChecklist);
+      await apiClient.setTemplateChecklist(kind.templateId, checklistId);
     } catch (err) {
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить чек-лист"));
@@ -179,7 +183,8 @@ export function AdminShiftKinds({
             onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
-            onChecklist={(requiresChecklist) => saveChecklist(kind, requiresChecklist)}
+            checklists={checklists}
+            onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
           />
         ))}
 
@@ -206,6 +211,7 @@ function KindCard({
   onToggleOpen,
   onChange,
   onRotationUnit,
+  checklists,
   onChecklist,
 }: {
   kind: TemplateRolesView;
@@ -219,7 +225,8 @@ function KindCard({
   onToggleOpen: () => void;
   onChange: (patch: Partial<TemplateRolesView>) => void;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
-  onChecklist: (requiresChecklist: boolean) => Promise<void>;
+  checklists: readonly Checklist[];
+  onChecklist: (checklistId: number | null) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -319,13 +326,23 @@ function KindCard({
                 свойство вида смены, как допуск и очередь рядом. Зеркало
                 консольного `ShiftKindsScreen`. */}
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 10 }}>
-              <input
-                type="checkbox"
-                checked={kind.requiresChecklist}
-                disabled={busy}
-                onChange={(e) => void onChecklist(e.target.checked)}
-              />
-              Требует чек-лист
+              Чек-лист
+              <select
+                value={kind.checklistId ?? ""}
+                disabled={busy || checklists.length === 0}
+                onChange={(e) => void onChecklist(e.target.value ? Number(e.target.value) : null)}
+                style={{
+                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
+                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
+                }}
+              >
+                <option value="">— не нужен —</option>
+                {checklists.map((list) => (
+                  <option key={list.id} value={list.id}>
+                    {list.name}
+                  </option>
+                ))}
+              </select>
             </label>
 
             {queue && queue.queue.length > 0 ? (

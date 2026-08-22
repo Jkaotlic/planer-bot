@@ -1,37 +1,35 @@
 import { useEffect, useState } from "react";
-import { apiClient, AuthRequiredError, type ChecklistDay, type ChecklistItem, type ChecklistSettings } from "../api/client";
+import { apiClient, AuthRequiredError, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../api/client";
 import { toISODate } from "../lib/week";
 
 /**
- * «Чек-лист» — процедура, которую проходит дежурный, и её сегодняшнее состояние.
+ * «Чек-листы» — процедуры, которые проходят дежурные, и их сегодняшнее состояние.
  *
- * Пункты пусты в новой базе намеренно: содержимое проверки пишет команда, а не
- * этот репозиторий. Пока в списке ноль пунктов, бот про чек-лист молчит и в
- * мини-аппе ничего не появляется — экран говорит об этом прямо, чтобы «ничего
- * не приходит» не выглядело поломкой.
+ * Списков несколько, а не один: у дежурного с семи и у дежурного с восьми
+ * проверки разные, и «скоп смен» задаётся тем, какие виды смен на список
+ * ссылаются. Привязка правится здесь же — вопрос «кто это проходит» задают
+ * чек-листу, и обходить ради ответа девять карточек пресетов незачем.
+ *
+ * Списки приезжают пустыми в новой базе намеренно: содержимое проверки пишет
+ * команда, а не этот репозиторий.
  */
-export function ChecklistScreen() {
-  const [items, setItems] = useState<ChecklistItem[] | null>(null);
+export function ChecklistScreen({ templates }: { templates: readonly Template[] }) {
+  const [checklists, setChecklists] = useState<Checklist[] | null>(null);
   const [day, setDay] = useState<ChecklistDay | null>(null);
-  const [settings, setSettings] = useState<ChecklistSettings | null>(null);
   const [draft, setDraft] = useState("");
+  const [openId, setOpenId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const today = toISODate(new Date());
 
   async function reload() {
     try {
-      const [loaded, summary, loadedSettings] = await Promise.all([
-        apiClient.getChecklistItems(),
-        apiClient.getChecklistDay(today),
-        apiClient.getChecklistSettings(),
-      ]);
-      setItems(loaded);
+      const [loaded, summary] = await Promise.all([apiClient.getChecklists(), apiClient.getChecklistDay(today)]);
+      setChecklists(loaded);
       setDay(summary);
-      setSettings(loadedSettings);
     } catch (err) {
       if (err instanceof AuthRequiredError) return;
-      setError(err instanceof Error ? err.message : "Не удалось загрузить чек-лист");
+      setError(err instanceof Error ? err.message : "Не удалось загрузить чек-листы");
     }
   }
 
@@ -56,39 +54,38 @@ export function ChecklistScreen() {
     }
   }
 
-  if (error && !items) return <div className="employees-error">{error}</div>;
-  if (!items) return <div className="employees-empty">Загрузка…</div>;
+  if (error && !checklists) return <div className="employees-error">{error}</div>;
+  if (!checklists) return <div className="employees-empty">Загрузка…</div>;
 
   return (
     <div className="employees-screen">
       <div className="employees-header">
-        <h2 className="employees-title">Чек-лист</h2>
+        <h2 className="employees-title">Чек-листы</h2>
       </div>
 
       <p className="birthday-intro">
-        Список проверок, который дежурный проходит в свою смену. Кому он положен, задаётся галочкой
-        «Требует чек-лист» у вида смены на экране «Виды смен». Пока в списке нет ни одного пункта, бот
-        ничего не присылает.
+        Проверки, которые дежурный проходит в свою смену. Списков может быть несколько — у выходящих
+        в 07:00 и в 08:00 они разные. Кому какой положен, задаётся строкой «Кому положен» внутри
+        списка. Пока в списке нет пунктов, бот по нему ничего не присылает.
       </p>
 
       {error && <div className="employees-error">{error}</div>}
 
-      <h3 className="birthday-group">Пункты</h3>
-      {items.length === 0 ? (
-        <div className="employees-empty">Пунктов пока нет — добавьте первый, и чек-лист начнёт приходить дежурным.</div>
+      {checklists.length === 0 ? (
+        <div className="employees-empty">
+          Чек-листов пока нет — заведите первый, и он начнёт приходить дежурным тех видов смен, которые вы ему укажете.
+        </div>
       ) : (
         <div className="employees-list">
-          {items.map((item, index) => (
-            <ItemRow
-              key={item.id}
-              item={item}
-              index={index}
-              total={items.length}
+          {checklists.map((list) => (
+            <ChecklistCard
+              key={list.id}
+              list={list}
+              templates={templates}
+              open={openId === list.id}
               busy={busy}
-              onRename={(title) => run(() => apiClient.updateChecklistItem(item.id, { title }))}
-              onNote={(note) => run(() => apiClient.updateChecklistItem(item.id, { note }))}
-              onRemove={() => run(() => apiClient.removeChecklistItem(item.id))}
-              onMove={(to) => run(() => apiClient.reorderChecklistItem(item.id, to))}
+              onToggle={() => setOpenId(openId === list.id ? null : list.id)}
+              run={run}
             />
           ))}
         </div>
@@ -97,32 +94,25 @@ export function ChecklistScreen() {
       <div className="field-row" style={{ marginTop: 12 }}>
         <input
           type="text"
-          aria-label="Новый пункт"
-          placeholder="Например, обойти этаж"
+          aria-label="Название чек-листа"
+          placeholder="Например, дежурство с 07:00"
           value={draft}
           disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || !draft.trim()) return;
-            void run(() => apiClient.addChecklistItem(draft.trim())).then(() => setDraft(""));
+            void run(() => apiClient.createChecklist(draft.trim())).then(() => setDraft(""));
           }}
         />
         <button
           type="button"
           className="btn btn-primary"
           disabled={busy || !draft.trim()}
-          onClick={() => void run(() => apiClient.addChecklistItem(draft.trim())).then(() => setDraft(""))}
+          onClick={() => void run(() => apiClient.createChecklist(draft.trim())).then(() => setDraft(""))}
         >
-          Добавить
+          Новый чек-лист
         </button>
       </div>
-
-      <h3 className="birthday-group">Инструкция</h3>
-      {/* Три способа дать дежурному подробности, потому что они закрывают разные
-          случаи: короткое пояснение читается прямо в чате, ссылка ведёт в живой
-          документ, который правят без нас, а файл доходит туда, где интернета
-          может не быть — он приходит в чат и остаётся в нём. */}
-      {settings && <InstructionEditor settings={settings} busy={busy} onSave={(patch) => run(() => apiClient.saveChecklistSettings(patch))} onRemoveDoc={() => run(() => apiClient.removeChecklistDoc())} />}
 
       <h3 className="birthday-group">Сегодня</h3>
       {/* Кто должен пройти и сколько уже отметил. Никаких напоминаний отсюда не
@@ -132,11 +122,12 @@ export function ChecklistScreen() {
       ) : (
         <div className="employees-list">
           {day.people.map((person) => (
-            <div className="employee-row-card" key={person.employeeId}>
+            <div className="employee-row-card" key={`${person.employeeId}:${person.checklistId}`}>
               <span className="employee-row-name" title={person.displayName}>{person.displayName}</span>
+              <span className="status-chip">{person.checklistName}</span>
               <span className="employee-row-spacer" />
-              <span className={`status-chip${person.done >= day.total ? " status-chip-done" : ""}`}>
-                {person.done} из {day.total}
+              <span className={`status-chip${person.done >= person.total ? " status-chip-done" : ""}`}>
+                {person.done} из {person.total}
               </span>
             </div>
           ))}
@@ -146,29 +137,160 @@ export function ChecklistScreen() {
   );
 }
 
-/** Пояснение и ссылка на весь чек-лист плюс состояние приложенного файла. */
+function ChecklistCard({
+  list,
+  templates,
+  open,
+  busy,
+  onToggle,
+  run,
+}: {
+  list: Checklist;
+  templates: readonly Template[];
+  open: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  run: (action: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [itemDraft, setItemDraft] = useState("");
+  const linked = templates.filter((t) => list.templateIds.includes(t.id));
+
+  return (
+    <section className="kind-card">
+      <button type="button" className="kind-card-head" onClick={onToggle} aria-expanded={open}>
+        <span className="kind-name">{list.name}</span>
+        <span className="kind-meta">
+          {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
+          {" · "}
+          {linked.length === 0 ? "никому не назначен" : linked.map((t) => t.name).join(", ")}
+        </span>
+        <span className="kind-chevron">{open ? "▴" : "▾"}</span>
+      </button>
+
+      {open && (
+        <div className="kind-people">
+          {/* «Кому положен» — первым: это и есть тот самый «скоп смен», ради
+              которого списков стало несколько. */}
+          <span className="field-label">Кому положен</span>
+          <div className="category-select">
+            {templates.map((template) => {
+              const on = list.templateIds.includes(template.id);
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  className={`category-option${on ? " selected" : ""}`}
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      apiClient.setChecklistTemplates(
+                        list.id,
+                        on ? list.templateIds.filter((id) => id !== template.id) : [...list.templateIds, template.id],
+                      ),
+                    )
+                  }
+                >
+                  {template.name} · {template.start}
+                </button>
+              );
+            })}
+          </div>
+
+          <span className="field-label" style={{ marginTop: 12 }}>Пункты</span>
+          {list.items.length === 0 ? (
+            <div className="employees-empty">Пунктов пока нет — добавьте первый.</div>
+          ) : (
+            <div className="employees-list">
+              {list.items.map((item, index) => (
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  total={list.items.length}
+                  busy={busy}
+                  onRename={(title) => void run(() => apiClient.updateChecklistItem(item.id, { title }))}
+                  onNote={(note) => void run(() => apiClient.updateChecklistItem(item.id, { note }))}
+                  onRemove={() => void run(() => apiClient.removeChecklistItem(item.id))}
+                  onMove={(to) => void run(() => apiClient.reorderChecklistItem(item.id, to))}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="field-row" style={{ marginTop: 8 }}>
+            <input
+              type="text"
+              aria-label={`Новый пункт в «${list.name}»`}
+              placeholder="Например, обойти этаж"
+              value={itemDraft}
+              disabled={busy}
+              onChange={(e) => setItemDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || !itemDraft.trim()) return;
+                void run(() => apiClient.addChecklistItem(list.id, itemDraft.trim())).then(() => setItemDraft(""));
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !itemDraft.trim()}
+              onClick={() => void run(() => apiClient.addChecklistItem(list.id, itemDraft.trim())).then(() => setItemDraft(""))}
+            >
+              Добавить
+            </button>
+          </div>
+
+          <InstructionEditor
+            list={list}
+            busy={busy}
+            onSave={(patch) => void run(() => apiClient.patchChecklist(list.id, patch))}
+            onRemoveDoc={() => void run(() => apiClient.removeChecklistDoc(list.id))}
+          />
+
+          <div className="panel-actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn-danger"
+              disabled={busy}
+              onClick={() => void run(() => apiClient.deleteChecklist(list.id))}
+            >
+              Удалить чек-лист
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Три способа дать дежурному подробности, потому что они закрывают разные
+ * случаи: короткое пояснение читается прямо в чате, ссылка ведёт в живой
+ * документ, который правят без нас, а файл доходит туда, где интернета может не
+ * быть — он приходит в чат и остаётся в нём.
+ */
 function InstructionEditor({
-  settings,
+  list,
   busy,
   onSave,
   onRemoveDoc,
 }: {
-  settings: ChecklistSettings;
+  list: Checklist;
   busy: boolean;
   onSave: (patch: { note: string | null; docUrl: string | null }) => void;
   onRemoveDoc: () => void;
 }) {
-  const [note, setNote] = useState(settings.note ?? "");
-  const [docUrl, setDocUrl] = useState(settings.docUrl ?? "");
-  const dirty = note !== (settings.note ?? "") || docUrl !== (settings.docUrl ?? "");
+  const [note, setNote] = useState(list.note ?? "");
+  const [docUrl, setDocUrl] = useState(list.docUrl ?? "");
+  const dirty = note !== (list.note ?? "") || docUrl !== (list.docUrl ?? "");
 
   return (
     <div className="checklist-instruction">
-      <label className="field-label" htmlFor="checklist-note">
+      <label className="field-label" htmlFor={`checklist-note-${list.id}`}>
         Пояснение — уходит дежурному в чат вместе со списком
       </label>
       <textarea
-        id="checklist-note"
+        id={`checklist-note-${list.id}`}
         rows={4}
         value={note}
         disabled={busy}
@@ -176,11 +298,11 @@ function InstructionEditor({
         onChange={(e) => setNote(e.target.value)}
       />
 
-      <label className="field-label" htmlFor="checklist-url">
+      <label className="field-label" htmlFor={`checklist-url-${list.id}`}>
         Ссылка на документ
       </label>
       <input
-        id="checklist-url"
+        id={`checklist-url-${list.id}`}
         type="url"
         value={docUrl}
         disabled={busy}
@@ -195,7 +317,7 @@ function InstructionEditor({
           disabled={busy || !dirty}
           onClick={() => onSave({ note: note.trim() || null, docUrl: docUrl.trim() || null })}
         >
-          Сохранить
+          Сохранить инструкцию
         </button>
       </div>
 
@@ -203,16 +325,16 @@ function InstructionEditor({
           Telegram так, чтобы бот потом мог его переслать. Поэтому здесь — что
           приложено и как это заменить, а не форма загрузки. */}
       <div className="checklist-doc">
-        {settings.hasDoc ? (
+        {list.hasDoc ? (
           <>
-            <span>📄 Приложен файл: <b>{settings.docName}</b> — уходит дежурному вместе с чек-листом.</span>
+            <span>📄 Приложен файл: <b>{list.docName}</b> — уходит дежурному вместе с чек-листом.</span>
             <button type="button" className="btn btn-danger" disabled={busy} onClick={onRemoveDoc}>
               Убрать файл
             </button>
           </>
         ) : (
           <span>
-            Файл не приложен. Чтобы приложить — напиши боту <b>/instruction</b> и пришли документ одним сообщением.
+            Файл не приложен. Чтобы приложить — напиши боту <b>/instruction</b> и выбери «{list.name}».
           </span>
         )}
       </div>

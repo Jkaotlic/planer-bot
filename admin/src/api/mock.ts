@@ -7,9 +7,8 @@ import type {
   AnnouncementRecipient,
   AnnouncementResult,
   BugReportRow,
+  Checklist,
   ChecklistDay,
-  ChecklistItem,
-  ChecklistSettings,
   Employee,
   EntryRangeResult,
   FeedEvent,
@@ -477,17 +476,14 @@ export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
     accent: template.accent,
     pool: [...(TEMPLATE_ROLES.get(template.id)?.pool ?? [])],
     preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
-    requiresChecklist: TEMPLATE_CHECKLIST.has(template.id),
+    checklistId: CHECKLISTS.find((l) => l.templateIds.includes(template.id))?.id ?? null,
   }));
 }
 
-/** Виды смен, которым в демо назначен чек-лист. */
-const TEMPLATE_CHECKLIST = new Set<number>();
-
-export async function mockSetTemplateChecklist(templateId: number, requiresChecklist: boolean): Promise<void> {
+export async function mockSetTemplateChecklist(templateId: number, checklistId: number | null): Promise<void> {
   await delay(150);
-  if (requiresChecklist) TEMPLATE_CHECKLIST.add(templateId);
-  else TEMPLATE_CHECKLIST.delete(templateId);
+  for (const list of CHECKLISTS) list.templateIds = list.templateIds.filter((t) => t !== templateId);
+  if (checklistId != null) CHECKLISTS.find((l) => l.id === checklistId)?.templateIds.push(templateId);
 }
 
 export async function mockSaveTemplateRoles(
@@ -1250,82 +1246,141 @@ export async function mockResolveBugReport(id: number, resolved: boolean): Promi
 }
 
 /**
- * Демо-чек-лист.
+ * Демо-чек-листы.
  *
- * Пункты вымышленные и живут только в демо: настоящую процедуру пишет команда
- * на экране «Чек-лист», и боевая таблица приезжает пустой именно затем, чтобы
- * правдоподобная выдумка не ушла людям как инструкция.
+ * Два — чтобы демо показывало ровно то, ради чего сущность заведена: у «с 07:00»
+ * и «с 08:00» свои списки. Пункты вымышленные и живут только здесь: настоящую
+ * процедуру пишет команда, и боевая база приезжает пустой именно затем.
  */
-const CHECKLIST_ITEMS: ChecklistItem[] = [
-  { id: 1, title: "Обойти этаж", note: "По часовой, начиная от лифтов" },
-  { id: 2, title: "Проверить переговорные", note: null },
-  { id: 3, title: "Записать замечания", note: null },
+const CHECKLISTS: Checklist[] = [
+  {
+    id: 1,
+    name: "Дежурство с 07:00",
+    note: "Обход начинаем от лифтов, по часовой.",
+    docUrl: null,
+    docName: "Проверка 47.pdf",
+    hasDoc: true,
+    items: [
+      { id: 1, title: "Открыть 47-й", note: "Ключ на посту" },
+      { id: 2, title: "Обойти этаж", note: null },
+    ],
+    templateIds: [6],
+  },
+  {
+    id: 2,
+    name: "Утро с 08:00",
+    note: null,
+    docUrl: null,
+    docName: null,
+    hasDoc: false,
+    items: [{ id: 3, title: "Проверить переговорные", note: null }],
+    templateIds: [1],
+  },
 ];
-let CHECKLIST_SETTINGS: ChecklistSettings = { note: null, docUrl: null, docName: null, hasDoc: false };
-let nextChecklistId = 4;
+let nextChecklistId = 3;
+let nextChecklistItemId = 4;
 
-export async function mockGetChecklistItems(): Promise<ChecklistItem[]> {
+const findList = (id: number): Checklist => {
+  const found = CHECKLISTS.find((l) => l.id === id);
+  if (!found) throw new Error(`Unknown checklist ${id}`);
+  return found;
+};
+const findByItem = (itemId: number): Checklist => {
+  const found = CHECKLISTS.find((l) => l.items.some((i) => i.id === itemId));
+  if (!found) throw new Error(`Unknown checklist item ${itemId}`);
+  return found;
+};
+
+export async function mockGetChecklists(): Promise<Checklist[]> {
   await delay(140);
-  return [...CHECKLIST_ITEMS];
+  return CHECKLISTS.map((l) => ({ ...l, items: [...l.items], templateIds: [...l.templateIds] }));
 }
 
-export async function mockAddChecklistItem(title: string): Promise<ChecklistItem> {
+export async function mockCreateChecklist(name: string): Promise<Checklist> {
   await delay(140);
-  const item = { id: nextChecklistId++, title, note: null };
-  CHECKLIST_ITEMS.push(item);
-  return item;
+  const created: Checklist = { id: nextChecklistId++, name, note: null, docUrl: null, docName: null, hasDoc: false, items: [], templateIds: [] };
+  CHECKLISTS.push(created);
+  return { ...created };
+}
+
+export async function mockPatchChecklist(
+  id: number,
+  patch: { name?: string; note?: string | null; docUrl?: string | null },
+): Promise<Checklist> {
+  await delay(140);
+  const list = findList(id);
+  if (patch.name !== undefined) list.name = patch.name.trim();
+  if (patch.note !== undefined) list.note = patch.note?.trim() || null;
+  if (patch.docUrl !== undefined) list.docUrl = patch.docUrl?.trim() || null;
+  return { ...list };
+}
+
+export async function mockDeleteChecklist(id: number): Promise<Checklist[]> {
+  await delay(140);
+  const index = CHECKLISTS.findIndex((l) => l.id === id);
+  if (index !== -1) CHECKLISTS.splice(index, 1);
+  return mockGetChecklists();
+}
+
+export async function mockRemoveChecklistDoc(id: number): Promise<Checklist> {
+  await delay(140);
+  const list = findList(id);
+  list.docName = null;
+  list.hasDoc = false;
+  return { ...list };
+}
+
+export async function mockSetChecklistTemplates(id: number, templateIds: number[]): Promise<Checklist> {
+  await delay(140);
+  const list = findList(id);
+  // Как на сервере: вид смены уходит только у СВОЕГО чек-листа, чужие не трогаем.
+  for (const other of CHECKLISTS) {
+    if (other.id === id) continue;
+    other.templateIds = other.templateIds.filter((t) => !templateIds.includes(t));
+  }
+  list.templateIds = [...new Set(templateIds)];
+  return { ...list };
+}
+
+export async function mockAddChecklistItem(checklistId: number, title: string): Promise<Checklist> {
+  await delay(140);
+  const list = findList(checklistId);
+  list.items.push({ id: nextChecklistItemId++, title, note: null });
+  return { ...list };
 }
 
 export async function mockUpdateChecklistItem(
-  id: number,
+  itemId: number,
   patch: { title?: string; note?: string | null },
-): Promise<ChecklistItem> {
+): Promise<Checklist> {
   await delay(140);
-  const item = CHECKLIST_ITEMS.find((i) => i.id === id);
-  if (!item) throw new Error(`Unknown checklist item ${id}`);
+  const list = findByItem(itemId);
+  const item = list.items.find((i) => i.id === itemId)!;
   if (patch.title !== undefined) item.title = patch.title;
   if (patch.note !== undefined) item.note = patch.note?.trim() || null;
-  return item;
+  return { ...list };
 }
 
-export async function mockGetChecklistSettings(): Promise<ChecklistSettings> {
+export async function mockRemoveChecklistItem(itemId: number): Promise<Checklist> {
   await delay(140);
-  return { ...CHECKLIST_SETTINGS };
+  const list = findByItem(itemId);
+  list.items = list.items.filter((i) => i.id !== itemId);
+  return { ...list };
 }
 
-export async function mockSaveChecklistSettings(patch: { note: string | null; docUrl: string | null }): Promise<ChecklistSettings> {
+export async function mockReorderChecklistItem(itemId: number, to: number): Promise<Checklist> {
   await delay(140);
-  CHECKLIST_SETTINGS = { ...CHECKLIST_SETTINGS, note: patch.note?.trim() || null, docUrl: patch.docUrl?.trim() || null };
-  return { ...CHECKLIST_SETTINGS };
-}
-
-export async function mockRemoveChecklistDoc(): Promise<ChecklistSettings> {
-  await delay(140);
-  CHECKLIST_SETTINGS = { ...CHECKLIST_SETTINGS, docName: null, hasDoc: false };
-  return { ...CHECKLIST_SETTINGS };
-}
-
-export async function mockRemoveChecklistItem(id: number): Promise<ChecklistItem[]> {
-  await delay(140);
-  const index = CHECKLIST_ITEMS.findIndex((i) => i.id === id);
-  if (index !== -1) CHECKLIST_ITEMS.splice(index, 1);
-  return [...CHECKLIST_ITEMS];
-}
-
-export async function mockReorderChecklistItem(id: number, to: number): Promise<ChecklistItem[]> {
-  await delay(140);
-  const from = CHECKLIST_ITEMS.findIndex((i) => i.id === id);
-  if (from === -1) return [...CHECKLIST_ITEMS];
-  const [moved] = CHECKLIST_ITEMS.splice(from, 1);
-  if (moved) CHECKLIST_ITEMS.splice(Math.max(0, Math.min(to, CHECKLIST_ITEMS.length)), 0, moved);
-  return [...CHECKLIST_ITEMS];
+  const list = findByItem(itemId);
+  const from = list.items.findIndex((i) => i.id === itemId);
+  const [moved] = list.items.splice(from, 1);
+  if (moved) list.items.splice(Math.max(0, Math.min(to, list.items.length)), 0, moved);
+  return { ...list };
 }
 
 export async function mockGetChecklistDay(date: string): Promise<ChecklistDay> {
   await delay(140);
   return {
     date,
-    total: CHECKLIST_ITEMS.length,
-    people: [{ employeeId: 3, displayName: "Волков Марк", done: 1 }],
+    people: [{ employeeId: 3, displayName: "Волков Марк", checklistId: 1, checklistName: "Дежурство с 07:00", done: 1, total: 2 }],
   };
 }

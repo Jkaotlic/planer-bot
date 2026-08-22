@@ -1,38 +1,55 @@
 import { describe, expect, it } from "vitest";
-import { checklistProgress, checklistText, isChecklistComplete, needsChecklistToday } from "./checklist";
+import { checklistProgress, checklistText, checklistsDueToday, isChecklistComplete } from "./checklist";
 
 const item = (id: number, title: string) => ({ id, title });
 
-describe("needsChecklistToday", () => {
+describe("checklistsDueToday", () => {
   const entry = (over: Record<string, unknown> = {}) => ({
     date: "2026-08-24", employeeId: 3, endDate: null, templateId: 5, ...over,
   });
-  // Галочка стоит на пресете 5.
-  const requires = new Set([5]);
+  // Пресет 5 («с 07:00») ведёт на чек-лист 1, пресет 6 («с 08:00») — на 2.
+  const byTemplate = new Map([[5, 1], [6, 2]]);
 
-  it("положен тому, у кого сегодня стоит запись отмеченного вида", () => {
-    expect(needsChecklistToday([entry()], requires, "2026-08-24", 3)).toBe(true);
+  it("отдаёт чек-лист того вида смены, что стоит сегодня", () => {
+    expect(checklistsDueToday([entry()], byTemplate, "2026-08-24", 3)).toEqual([1]);
   });
 
-  it("не положен, если вид смены галочки не несёт", () => {
-    expect(needsChecklistToday([entry({ templateId: 2 })], requires, "2026-08-24", 3)).toBe(false);
+  /** Ровно то, ради чего правка: у «с семи» и «с восьми» проверки разные. */
+  it("у разных видов смен — разные чек-листы", () => {
+    expect(checklistsDueToday([entry({ templateId: 6 })], byTemplate, "2026-08-24", 3)).toEqual([2]);
   });
 
-  it("не положен в другой день и другому человеку", () => {
-    expect(needsChecklistToday([entry()], requires, "2026-08-25", 3)).toBe(false);
-    expect(needsChecklistToday([entry()], requires, "2026-08-24", 9)).toBe(false);
+  it("две записи разных видов в один день приносят оба списка, по порядку", () => {
+    const day = [entry({ templateId: 6 }), entry({ templateId: 5 })];
+    expect(checklistsDueToday(day, byTemplate, "2026-08-24", 3)).toEqual([2, 1]);
   });
 
-  // Запись без пресета взяться может: смену ставят и «своим временем». Галочка
-  // живёт на пресете, и без него сказать «этот вид требует чек-лист» нечем.
-  it("запись без пресета чек-листа не требует", () => {
-    expect(needsChecklistToday([entry({ templateId: null })], requires, "2026-08-24", 3)).toBe(false);
+  // Один и тот же чек-лист у двух записей — один список, а не два: человек не
+  // проходит одни и те же пункты дважды.
+  it("один и тот же чек-лист не двоится", () => {
+    const day = [entry(), entry({ templateId: 5 })];
+    expect(checklistsDueToday(day, byTemplate, "2026-08-24", 3)).toEqual([1]);
+  });
+
+  it("вид смены без привязки ничего не приносит", () => {
+    expect(checklistsDueToday([entry({ templateId: 2 })], byTemplate, "2026-08-24", 3)).toEqual([]);
+  });
+
+  it("не путает дни и людей", () => {
+    expect(checklistsDueToday([entry()], byTemplate, "2026-08-25", 3)).toEqual([]);
+    expect(checklistsDueToday([entry()], byTemplate, "2026-08-24", 9)).toEqual([]);
+  });
+
+  // Запись без пресета взяться может: смену ставят и «своим временем».
+  // Привязка живёт на пресете, и без него взять её неоткуда.
+  it("запись без пресета чек-листа не приносит", () => {
+    expect(checklistsDueToday([entry({ templateId: null })], byTemplate, "2026-08-24", 3)).toEqual([]);
   });
 
   it("многодневная запись накрывает каждый свой день", () => {
     const span = [entry({ date: "2026-08-24", endDate: "2026-08-26" })];
-    expect(needsChecklistToday(span, requires, "2026-08-25", 3)).toBe(true);
-    expect(needsChecklistToday(span, requires, "2026-08-27", 3)).toBe(false);
+    expect(checklistsDueToday(span, byTemplate, "2026-08-25", 3)).toEqual([1]);
+    expect(checklistsDueToday(span, byTemplate, "2026-08-27", 3)).toEqual([]);
   });
 });
 

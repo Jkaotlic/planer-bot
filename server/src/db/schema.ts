@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, index, integer, text, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, index, integer, text, real, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import type {
   SwapStatus,
   EntryCategory,
@@ -74,13 +74,14 @@ export const shiftTemplates = sqliteTable("shift_templates", {
   sortOrder: integer().notNull().default(0),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
   /**
-   * Требует ли этот вид смены прохождения чек-листа.
+   * Какой чек-лист проходит дежурный этого вида смены. `null` — никакого.
    *
-   * Свойство ПРЕСЕТА, а не догадка про часы: «утренний дежурный» из времени не
-   * выводится — 07:00 бывает и у смены, а дежурство бывает вечерним. Что считать
-   * дежурством с проверкой, решает админ галочкой на «Видах смен».
+   * Ссылка, а не галочка: у «Дежурства с 07:00» и «Утра» проверки разные, и
+   * один список на всех означал бы, что человек с восьми читает пункты про то,
+   * чего в восемь уже не делают. Несколько видов смен могут ссылаться на один и
+   * тот же чек-лист — это и есть «скоп смен».
    */
-  requiresChecklist: integer({ mode: "boolean" }).notNull().default(false),
+  checklistId: integer().references((): AnySQLiteColumn => checklists.id),
   /** How many people this preset needs per weekday, Mon..Sun — 7 comma-separated ints.
    *  '0,0,0,0,0,0,0' (the default) means "not a role": never materialised, today's behaviour.
    *  '1,1,1,1,1,0,0' — the five roles that need exactly one person every working day.
@@ -479,14 +480,38 @@ export const collections = sqliteTable(
 
 
 /**
+ * Чек-лист как сущность: имя, инструкция и набор пунктов.
+ *
+ * Именованный, а не единственный на систему: проверки у дежурного с семи и у
+ * дежурного с восьми разные, и «скоп смен» задаётся тем, какие виды смен на
+ * этот чек-лист ссылаются.
+ *
+ * Инструкция лежит здесь же, тремя полями, потому что закрывает три разных
+ * случая: короткий текст читается прямо в чате, ссылка ведёт в живой документ,
+ * который правят без нас, а файл доходит туда, где интернета может не быть.
+ * `docFileId` — идентификатор файла в Telegram: бот пересылает документ по нему,
+ * и своё хранилище ради одного PDF не заводится.
+ */
+export const checklists = sqliteTable("checklists", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  name: text().notNull(),
+  note: text(),
+  docUrl: text(),
+  docFileId: text(),
+  docName: text(),
+  createdAt: createdAt(),
+});
+
+/**
  * Пункт чек-листа дежурного.
  *
  * Содержимое — данные, а не код: процедуру пишет команда, а не этот репозиторий.
- * Таблица приезжает пустой, и пока в ней ноль активных пунктов, бот про чек-лист
+ * Новый чек-лист приезжает без единого пункта, и пока их ноль, бот про него
  * молчит.
  */
 export const checklistItems = sqliteTable("checklist_items", {
   id: integer().primaryKey({ autoIncrement: true }),
+  checklistId: integer().references(() => checklists.id),
   title: text().notNull(),
   /**
    * Пояснение к пункту: как именно проверять, на что смотреть.
@@ -524,6 +549,8 @@ export const checklistMarks = sqliteTable(
   (t) => [uniqueIndex("checklist_mark_unique").on(t.date, t.employeeId, t.itemId)],
 );
 
+export type Checklist = typeof checklists.$inferSelect;
+export type NewChecklist = typeof checklists.$inferInsert;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type NewChecklistItem = typeof checklistItems.$inferInsert;
 export type ChecklistMark = typeof checklistMarks.$inferSelect;

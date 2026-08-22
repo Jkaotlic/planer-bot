@@ -1,16 +1,16 @@
 import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem, listMarksFor, updateChecklistItem } from "../repo/checklist";
-import { readChecklistSettings, saveChecklistDoc, saveChecklistText } from "../repo/checklist-settings";
+import { createChecklist, getChecklist, setTemplateChecklist, updateChecklist } from "../repo/checklists";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import { shiftTemplates } from "../db/schema";
-import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 
 const config = testConfig();
@@ -31,189 +31,98 @@ function worker(db: Db, name: string, tgId: number) {
   return w;
 }
 
-/** Помечает пресет как требующий чек-лист — то же, что галочка на «Видах смен». */
-function requireChecklistOn(db: Db, templateId: number) {
-  db.update(shiftTemplates).set({ requiresChecklist: true }).where(eq(shiftTemplates.id, templateId)).run();
+const TODAY = "2026-08-24";
+
+/** Пресет по имени — тесты говорят «с 07:00», а не «id 6». */
+function preset(db: Db, name: string) {
+  const found = listActiveTemplates(db).find((t) => t.name === name);
+  if (!found) throw new Error(`нет пресета «${name}»`);
+  return found;
 }
 
-describe("чек-лист: пункты (админ)", () => {
-  it("новая база отдаёт пустой список — процедуру пишет команда", async () => {
+describe("чек-листы (админ)", () => {
+  it("новая база не несёт ни одного чек-листа", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
-    const body = await (await app.request("/api/admin/checklist/items", bearer(admin))).json();
-    expect(body.items).toEqual([]);
+    expect((await (await app.request("/api/admin/checklists", bearer(admin))).json()).checklists).toEqual([]);
   });
 
-  it("заводит, переименовывает и гасит пункт", async () => {
+  it("заводит чек-лист, наполняет его и переименовывает", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
 
-    const created = await (await app.request("/api/admin/checklist/items", authedJson(admin, { title: "Проверить свет" }))).json();
-    expect(created.item.title).toBe("Проверить свет");
+    const created = (await (await app.request("/api/admin/checklists", authedJson(admin, { name: "Дежурство с 07:00" }))).json()).checklist;
+    expect(created).toMatchObject({ name: "Дежурство с 07:00", items: [], templateIds: [] });
 
-    await app.request(`/api/admin/checklist/items/${created.item.id}`, authedJson(admin, { title: "Проверить освещение" }, "PATCH"));
-    let body = await (await app.request("/api/admin/checklist/items", bearer(admin))).json();
-    expect(body.items.map((i: { title: string }) => i.title)).toEqual(["Проверить освещение"]);
+    const withItem = (await (await app.request(`/api/admin/checklists/${created.id}/items`, authedJson(admin, { title: "Открыть 47-й" }))).json()).checklist;
+    expect(withItem.items.map((i: { title: string }) => i.title)).toEqual(["Открыть 47-й"]);
 
-    await app.request(`/api/admin/checklist/items/${created.item.id}`, { method: "DELETE", ...bearer(admin) });
-    body = await (await app.request("/api/admin/checklist/items", bearer(admin))).json();
-    expect(body.items).toEqual([]);
-  });
-
-  it("работника к пунктам не пускает", async () => {
-    const db = makeTestDb();
-    worker(db, "Игорь", 333);
-    const app = createApp({ db, config });
-    const token = await tokenFor(app, 333);
-    expect((await app.request("/api/admin/checklist/items", bearer(token))).status).toBe(403);
-    expect((await app.request("/api/admin/checklist/items", authedJson(token, { title: "Своё" }))).status).toBe(403);
-  });
-});
-
-describe("чек-лист: свой (работник)", () => {
-  const TODAY = "2026-08-24";
-
-  async function stage() {
-    const db = makeTestDb();
-    const igor = worker(db, "Игорь", 333);
-    const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
-    requireChecklistOn(db, duty.id);
-    createShift(db, {
-      date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id,
-    });
-    const app = createApp({ db, config });
-    const token = await tokenFor(app, 333);
-    return { db, app, token, igor };
-  }
-
-  it("молчит, пока в списке нет ни одного пункта", async () => {
-    const { app, token } = await stage();
-    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json();
-    expect(body).toMatchObject({ required: false, items: [] });
-  });
-
-  it("отдаёт пункты тому, у кого сегодня отмеченный вид смены", async () => {
-    const { db, app, token } = await stage();
-    createChecklistItem(db, "Свет");
-    createChecklistItem(db, "Окна");
-    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json();
-    expect(body.required).toBe(true);
-    expect(body.items.map((i: { title: string }) => i.title)).toEqual(["Свет", "Окна"]);
-    expect(body.markedItemIds).toEqual([]);
-  });
-
-  it("не отдаёт чек-лист тому, у кого в этот день его вида смены нет", async () => {
-    const { db, app } = await stage();
-    createChecklistItem(db, "Свет");
-    worker(db, "Аня", 444);
-    const other = await tokenFor(app, 444);
-    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(other))).json();
-    expect(body.required).toBe(false);
-  });
-
-  it("отмечает и снимает отметку, и повтор ничего не ломает", async () => {
-    const { db, app, token, igor } = await stage();
-    const item = createChecklistItem(db, "Свет");
-
-    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: item.id, done: true }));
-    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: item.id, done: true }));
-    expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(1);
-
-    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: item.id, done: false }));
-    expect(listMarksFor(db, TODAY, igor.id)).toEqual([]);
+    const renamed = (await (await app.request(`/api/admin/checklists/${created.id}`, authedJson(admin, { name: "Ранний обход" }, "PATCH"))).json()).checklist;
+    expect(renamed.name).toBe("Ранний обход");
   });
 
   /**
-   * Ручка «мой чек-лист» — про СВОЙ: `employeeId` берётся из подписи, а в теле
-   * его нет вовсе. Иначе отметить за коллегу мог бы кто угодно.
+   * Ровно то, ради чего правка: у «с семи» и «с восьми» свои списки, и они не
+   * пересекаются.
    */
-  it("отметить за коллегу нечем — id в теле не принимается", async () => {
-    const { db, app, token, igor } = await stage();
-    const item = createChecklistItem(db, "Свет");
-    const anya = worker(db, "Аня", 444);
-
-    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: item.id, done: true, employeeId: anya.id }));
-    expect(listMarksFor(db, TODAY, anya.id)).toEqual([]);
-    expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(1);
-  });
-
-  it("не даёт отметиться тому, кому чек-лист сегодня не положен", async () => {
-    const { db, app } = await stage();
-    const item = createChecklistItem(db, "Свет");
-    worker(db, "Аня", 444);
-    const other = await tokenFor(app, 444);
-    const res = await app.request("/api/my/checklist/mark", authedJson(other, { date: TODAY, itemId: item.id, done: true }));
-    expect(res.status).toBe(400);
-  });
-
-  // По строке на каждый тап журнал бы утопило; интересен факт «прошёл».
-  it("пишет в журнал одну строку — когда отмечен последний пункт", async () => {
-    const { db, app, token } = await stage();
-    const first = createChecklistItem(db, "Свет");
-    const second = createChecklistItem(db, "Окна");
-
-    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: first.id, done: true }));
-    expect(listRecentAudit(db, 10).map((e) => e.type)).toEqual([]);
-
-    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: second.id, done: true }));
-    const events = listRecentAudit(db, 10);
-    expect(events.map((e) => e.type)).toEqual(["checklist_completed"]);
-    expect(events[0]!.payload).toMatchObject({ employeeName: "Игорь", date: TODAY, total: 2 });
-  });
-});
-
-describe("галочка «Требует чек-лист» на виде смены", () => {
-  it("приезжает в /templates/roles и переключается", async () => {
+  it("держит два чек-листа, и пункты одного не видны в другом", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
-    const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
+    const early = createChecklist(db, "С 07:00");
+    const late = createChecklist(db, "С 08:00");
+    createChecklistItem(db, early.id, "Открыть 47-й");
+    createChecklistItem(db, late.id, "Проверить переговорные");
 
-    let body = await (await app.request("/api/admin/templates/roles", bearer(admin))).json();
-    expect(body.templates.find((t: { templateId: number }) => t.templateId === duty.id).requiresChecklist).toBe(false);
-
-    const res = await app.request(`/api/admin/templates/${duty.id}/checklist`, authedJson(admin, { requiresChecklist: true }, "PUT"));
-    expect(res.status).toBe(200);
-
-    body = await (await app.request("/api/admin/templates/roles", bearer(admin))).json();
-    expect(body.templates.find((t: { templateId: number }) => t.templateId === duty.id).requiresChecklist).toBe(true);
+    const body = await (await app.request("/api/admin/checklists", bearer(admin))).json();
+    const byName = new Map(body.checklists.map((l: { name: string; items: { title: string }[] }) => [l.name, l.items.map((i) => i.title)]));
+    expect(byName.get("С 07:00")).toEqual(["Открыть 47-й"]);
+    expect(byName.get("С 08:00")).toEqual(["Проверить переговорные"]);
   });
 
-  it("не пускает работника и не знает несуществующий пресет", async () => {
-    const db = makeTestDb();
-    worker(db, "Игорь", 333);
-    const app = createApp({ db, config });
-    const token = await tokenFor(app, 333);
-    const admin = await tokenFor(app, 111);
-    expect((await app.request("/api/admin/templates/1/checklist", authedJson(token, { requiresChecklist: true }, "PUT"))).status).toBe(403);
-    expect((await app.request("/api/admin/templates/9999/checklist", authedJson(admin, { requiresChecklist: true }, "PUT"))).status).toBe(404);
-  });
-});
-
-describe("чек-лист: инструкция", () => {
-  const TODAY = "2026-08-24";
-
-  it("новая база не несёт ни пояснения, ни ссылки, ни файла", async () => {
+  it("привязывает чек-лист сразу к нескольким видам смен — это и есть «скоп»", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
-    const body = await (await app.request("/api/admin/checklist/settings", bearer(admin))).json();
-    expect(body).toEqual({ note: null, docUrl: null, docName: null, hasDoc: false });
+    const list = createChecklist(db, "Ранний обход");
+    const early = preset(db, "Дежурство с 07:00");
+    const opening = preset(db, "Дежурство · Поклонка");
+
+    const body = await (await app.request(`/api/admin/checklists/${list.id}/templates`,
+      authedJson(admin, { templateIds: [early.id, opening.id] }, "PUT"))).json();
+    expect(body.checklist.templateIds.sort()).toEqual([early.id, opening.id].sort());
   });
 
-  it("сохраняет пояснение и ссылку и стирает их пустым", async () => {
+  // Сохранение одного списка не должно молча отвязывать виды смен у соседнего.
+  it("правка привязок одного чек-листа не трогает чужие", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
+    const early = createChecklist(db, "С 07:00");
+    const late = createChecklist(db, "С 08:00");
+    const earlyPreset = preset(db, "Дежурство с 07:00");
+    const morning = preset(db, "Утро");
+    setTemplateChecklist(db, morning.id, late.id);
 
-    let body = await (await app.request("/api/admin/checklist/settings",
-      authedJson(admin, { note: "Обходим по часовой", docUrl: "https://disk.example/47.pdf" }, "PUT"))).json();
-    expect(body).toMatchObject({ note: "Обходим по часовой", docUrl: "https://disk.example/47.pdf" });
+    await app.request(`/api/admin/checklists/${early.id}/templates`, authedJson(admin, { templateIds: [earlyPreset.id] }, "PUT"));
 
-    body = await (await app.request("/api/admin/checklist/settings", authedJson(admin, { note: "", docUrl: "" }, "PUT"))).json();
-    expect(body).toMatchObject({ note: null, docUrl: null });
+    const templates = listActiveTemplates(db);
+    expect(templates.find((t) => t.id === morning.id)!.checklistId).toBe(late.id);
+    expect(templates.find((t) => t.id === earlyPreset.id)!.checklistId).toBe(early.id);
+  });
+
+  it("удаление чек-листа снимает привязку у видов смен", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const list = createChecklist(db, "Обход");
+    const early = preset(db, "Дежурство с 07:00");
+    setTemplateChecklist(db, early.id, list.id);
+
+    await app.request(`/api/admin/checklists/${list.id}`, { method: "DELETE", ...bearer(admin) });
+    expect(listActiveTemplates(db).find((t) => t.id === early.id)!.checklistId).toBeNull();
   });
 
   // `file_id` — ключ к файлу в Telegram. Консоли он не нужен, а наружу отдавать
@@ -222,61 +131,193 @@ describe("чек-лист: инструкция", () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
-    const adminId = (await (await app.request("/api/me", bearer(admin))).json()).id as number;
-    saveChecklistDoc(db, { fileId: "BQACAgIAAxSECRET", fileName: "Проверка 47.pdf" }, adminId);
+    const list = createChecklist(db, "Обход");
+    updateChecklist(db, list.id, { docFileId: "BQACAgIAAxSECRET", docName: "Проверка 47.pdf" });
 
-    const res = await app.request("/api/admin/checklist/settings", bearer(admin));
-    const raw = await res.text();
+    const raw = await (await app.request("/api/admin/checklists", bearer(admin))).text();
     expect(raw).not.toContain("BQACAgIAAxSECRET");
-    expect(JSON.parse(raw)).toMatchObject({ docName: "Проверка 47.pdf", hasDoc: true });
+    expect(JSON.parse(raw).checklists[0]).toMatchObject({ docName: "Проверка 47.pdf", hasDoc: true });
   });
 
-  it("снимает приложенный файл", async () => {
+  it("работника к чек-листам не пускает", async () => {
     const db = makeTestDb();
-    const app = createApp({ db, config });
-    const admin = await tokenFor(app, 111);
-    const adminId = (await (await app.request("/api/me", bearer(admin))).json()).id as number;
-    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, adminId);
-
-    const body = await (await app.request("/api/admin/checklist/doc", { method: "DELETE", ...bearer(admin) })).json();
-    expect(body).toMatchObject({ hasDoc: false, docName: null });
-    expect(readChecklistSettings(db).docFileId).toBeNull();
-  });
-
-  it("дежурному приезжают пояснение, ссылка и имя файла вместе с пунктами", async () => {
-    const db = makeTestDb();
-    const igor = worker(db, "Игорь", 333);
-    const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
-    requireChecklistOn(db, duty.id);
-    createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
-    const item = createChecklistItem(db, "Обойти этаж");
-    updateChecklistItem(db, item.id, { note: "По часовой, от лифтов" });
-    saveChecklistText(db, { note: "Инструкция целиком — в файле", docUrl: "https://disk.example/47.pdf" }, igor.id);
-    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, igor.id);
-
+    worker(db, "Игорь", 333);
     const app = createApp({ db, config });
     const token = await tokenFor(app, 333);
-    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json();
-    expect(body).toMatchObject({
-      required: true,
-      note: "Инструкция целиком — в файле",
+    expect((await app.request("/api/admin/checklists", bearer(token))).status).toBe(403);
+    expect((await app.request("/api/admin/checklists", authedJson(token, { name: "Своё" }))).status).toBe(403);
+  });
+});
+
+describe("чек-лист: свой (работник)", () => {
+  /** Игорь дежурит с 07:00, Аня выходит в «Утро» с 08:00 — у каждого свой список. */
+  async function stage() {
+    const db = makeTestDb();
+    const igor = worker(db, "Игорь", 333);
+    const anya = worker(db, "Аня", 444);
+    const early = createChecklist(db, "С 07:00");
+    const late = createChecklist(db, "С 08:00");
+    createChecklistItem(db, early.id, "Открыть 47-й");
+    createChecklistItem(db, late.id, "Проверить переговорные");
+
+    const earlyPreset = preset(db, "Дежурство с 07:00");
+    const morning = preset(db, "Утро");
+    setTemplateChecklist(db, earlyPreset.id, early.id);
+    setTemplateChecklist(db, morning.id, late.id);
+    createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: earlyPreset.id });
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id, category: "shift", templateId: morning.id });
+
+    const app = createApp({ db, config });
+    return { db, app, igor, anya, early, late, earlyPreset, morning };
+  }
+
+  it("каждому приезжает чек-лист его вида смены, и только он", async () => {
+    const { app } = await stage();
+    const igorBody = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(await tokenFor(app, 333)))).json();
+    const anyaBody = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(await tokenFor(app, 444)))).json();
+
+    expect(igorBody.checklists.map((l: { name: string }) => l.name)).toEqual(["С 07:00"]);
+    expect(igorBody.checklists[0].items.map((i: { title: string }) => i.title)).toEqual(["Открыть 47-й"]);
+    expect(anyaBody.checklists.map((l: { name: string }) => l.name)).toEqual(["С 08:00"]);
+  });
+
+  it("у кого сегодня нет такой смены — ни одного чек-листа", async () => {
+    const { db, app } = await stage();
+    worker(db, "Марк", 555);
+    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(await tokenFor(app, 555)))).json();
+    expect(body.checklists).toEqual([]);
+  });
+
+  it("пустой чек-лист не показывается вовсе — проходить нечего", async () => {
+    const { db, app, igor, earlyPreset } = await stage();
+    const empty = createChecklist(db, "Пустой");
+    setTemplateChecklist(db, earlyPreset.id, empty.id);
+    expect(igor.id).toBeGreaterThan(0);
+    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(await tokenFor(app, 333)))).json();
+    expect(body.checklists).toEqual([]);
+  });
+
+  it("отмечает и снимает отметку, и повтор ничего не ломает", async () => {
+    const { db, app, igor, early } = await stage();
+    const token = await tokenFor(app, 333);
+    const itemId = (await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json()).checklists[0].items[0].id;
+    expect(early.id).toBeGreaterThan(0);
+
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId, done: true }));
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId, done: true }));
+    expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(1);
+
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId, done: false }));
+    expect(listMarksFor(db, TODAY, igor.id)).toEqual([]);
+  });
+
+  /**
+   * Дежурный с восьми не должен закрывать проверки того, кто выходит в семь:
+   * пункт чужого чек-листа — это чужая работа, а не общая.
+   */
+  it("не даёт отметить пункт чужого чек-листа", async () => {
+    const { db, app, late } = await stage();
+    const foreignItem = createChecklistItem(db, late.id, "Ещё пункт");
+    const igorToken = await tokenFor(app, 333);
+    const res = await app.request("/api/my/checklist/mark", authedJson(igorToken, { date: TODAY, itemId: foreignItem.id, done: true }));
+    expect(res.status).toBe(400);
+  });
+
+  it("id в теле не даёт отметиться за коллегу", async () => {
+    const { db, app, igor, anya } = await stage();
+    const token = await tokenFor(app, 333);
+    const itemId = (await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json()).checklists[0].items[0].id;
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId, done: true, employeeId: anya.id }));
+    expect(listMarksFor(db, TODAY, anya.id)).toEqual([]);
+    expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(1);
+  });
+
+  it("пишет в журнал одну строку — когда отмечен последний пункт своего списка", async () => {
+    const { db, app, early } = await stage();
+    createChecklistItem(db, early.id, "Второй пункт");
+    const token = await tokenFor(app, 333);
+    const items = (await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json()).checklists[0].items;
+
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: items[0].id, done: true }));
+    expect(listRecentAudit(db, 10).map((e) => e.type)).toEqual([]);
+
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: items[1].id, done: true }));
+    const events = listRecentAudit(db, 10);
+    expect(events.map((e) => e.type)).toEqual(["checklist_completed"]);
+    expect(events[0]!.payload).toMatchObject({ employeeName: "Игорь", date: TODAY, checklistName: "С 07:00", total: 2 });
+  });
+
+  it("инструкция приезжает вместе с пунктами", async () => {
+    const { db, app, early } = await stage();
+    updateChecklist(db, early.id, { note: "Начинаем от лифтов", docUrl: "https://disk.example/47.pdf" });
+    updateChecklist(db, early.id, { docFileId: "BQACAgIAAx", docName: "Проверка 47.pdf" });
+    const item = createChecklistItem(db, early.id, "Записать замечания");
+    updateChecklistItem(db, item.id, { note: "В журнал на посту" });
+
+    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(await tokenFor(app, 333)))).json();
+    expect(body.checklists[0]).toMatchObject({
+      note: "Начинаем от лифтов",
       docUrl: "https://disk.example/47.pdf",
       docName: "Проверка 47.pdf",
     });
-    expect(body.items[0]).toMatchObject({ title: "Обойти этаж", note: "По часовой, от лифтов" });
+    expect(body.checklists[0].items[1]).toMatchObject({ title: "Записать замечания", note: "В журнал на посту" });
   });
 
-  // Инструкция — часть чек-листа, и в день, когда он не положен, её тоже нет:
-  // иначе экран показывал бы «вот документ дежурного» тому, кто сегодня не дежурит.
-  it("не отдаёт инструкцию тому, кому чек-лист сегодня не положен", async () => {
-    const db = makeTestDb();
-    const igor = worker(db, "Игорь", 333);
-    createChecklistItem(db, "Обойти этаж");
-    saveChecklistText(db, { note: "Обходим по часовой", docUrl: "https://disk.example/47.pdf" }, igor.id);
+  it("сводка дня называет каждому его чек-лист", async () => {
+    const { app } = await stage();
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    const byName = new Map(body.people.map((p: { displayName: string; checklistName: string }) => [p.displayName, p.checklistName]));
+    expect(byName.get("Игорь")).toBe("С 07:00");
+    expect(byName.get("Аня")).toBe("С 08:00");
+  });
+});
 
+describe("привязка чек-листа к виду смены", () => {
+  it("приезжает в /templates/roles и переключается", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const list = createChecklist(db, "Ранний обход");
+    const early = preset(db, "Дежурство с 07:00");
+
+    let body = await (await app.request("/api/admin/templates/roles", bearer(admin))).json();
+    expect(body.templates.find((t: { templateId: number }) => t.templateId === early.id).checklistId).toBeNull();
+
+    const res = await app.request(`/api/admin/templates/${early.id}/checklist`, authedJson(admin, { checklistId: list.id }, "PUT"));
+    expect(res.status).toBe(200);
+
+    body = await (await app.request("/api/admin/templates/roles", bearer(admin))).json();
+    expect(body.templates.find((t: { templateId: number }) => t.templateId === early.id).checklistId).toBe(list.id);
+  });
+
+  it("снимается через null", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const list = createChecklist(db, "Ранний обход");
+    const early = preset(db, "Дежурство с 07:00");
+    db.update(shiftTemplates).set({ checklistId: list.id }).where(eq(shiftTemplates.id, early.id)).run();
+
+    await app.request(`/api/admin/templates/${early.id}/checklist`, authedJson(admin, { checklistId: null }, "PUT"));
+    expect(listActiveTemplates(db).find((t) => t.id === early.id)!.checklistId).toBeNull();
+  });
+
+  it("не знает несуществующий чек-лист и несуществующий пресет", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const early = preset(db, "Дежурство с 07:00");
+    expect((await app.request(`/api/admin/templates/${early.id}/checklist`, authedJson(admin, { checklistId: 9999 }, "PUT"))).status).toBe(400);
+    expect((await app.request("/api/admin/templates/9999/checklist", authedJson(admin, { checklistId: null }, "PUT"))).status).toBe(404);
+    expect(getChecklist(db, 9999)).toBeUndefined();
+  });
+
+  it("не пускает работника", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
     const app = createApp({ db, config });
     const token = await tokenFor(app, 333);
-    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json();
-    expect(body).toMatchObject({ required: false, note: null, docUrl: null, docName: null });
+    expect((await app.request("/api/admin/templates/1/checklist", authedJson(token, { checklistId: null }, "PUT"))).status).toBe(403);
   });
 });

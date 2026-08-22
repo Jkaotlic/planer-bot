@@ -5,9 +5,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem, setMark, updateChecklistItem } from "../repo/checklist";
-import { saveChecklistDoc, saveChecklistText } from "../repo/checklist-settings";
-import { shiftTemplates } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { createChecklist, setTemplateChecklist, updateChecklist } from "../repo/checklists";
 import { testConfig } from "../test-config";
 import { runChecklistTick } from "./checklist-tick";
 import type { Db } from "../db/client";
@@ -39,10 +37,11 @@ function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: bo
     db.run(`update employees set reminders_enabled = 0 where id = ${igor.id}` as never);
   }
   const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
-  db.update(shiftTemplates).set({ requiresChecklist: true }).where(eq(shiftTemplates.id, duty.id)).run();
+  const list = createChecklist(db, "Обход 47-го");
+  setTemplateChecklist(db, duty.id, list.id);
   createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
-  for (const title of opts.items ?? ["Свет", "Окна"]) createChecklistItem(db, title);
-  return { db, igor, duty };
+  for (const title of opts.items ?? ["Свет", "Окна"]) createChecklistItem(db, list.id, title);
+  return { db, igor, duty, list };
 }
 
 describe("runChecklistTick", () => {
@@ -96,9 +95,9 @@ describe("runChecklistTick", () => {
     expect(sent).toEqual([]);
   });
 
-  it("не пишет тому, чей вид смены галочки не несёт", async () => {
+  it("не пишет тому, чей вид смены к чек-листу не привязан", async () => {
     const { db, igor, duty } = stage();
-    db.update(shiftTemplates).set({ requiresChecklist: false }).where(eq(shiftTemplates.id, duty.id)).run();
+    setTemplateChecklist(db, duty.id, null);
     expect(igor.id).toBeGreaterThan(0);
     const { bot, sent } = fakeBot();
     expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);
@@ -108,8 +107,8 @@ describe("runChecklistTick", () => {
   // Человек мог начать в мини-аппе и открыть чат: сообщение обязано показывать
   // уже сделанное сделанным, иначе оно спорит с экраном.
   it("показывает уже отмеченные пункты отмеченными", async () => {
-    const { db, igor } = stage();
-    const item = createChecklistItem(db, "Двери");
+    const { db, igor, list: stageList } = stage();
+    const item = createChecklistItem(db, stageList.id, "Двери");
     setMark(db, { date: TODAY, employeeId: igor.id, itemId: item.id, done: true });
     const { bot, sent } = fakeBot();
     await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
@@ -119,10 +118,10 @@ describe("runChecklistTick", () => {
   });
 
   it("кладёт в сообщение общее пояснение и пояснения пунктов", async () => {
-    const { db } = stage({ items: [] });
-    const item = createChecklistItem(db, "Обойти этаж");
+    const { db, list } = stage({ items: [] });
+    const item = createChecklistItem(db, list.id, "Обойти этаж");
     updateChecklistItem(db, item.id, { note: "По часовой, от лифтов" });
-    saveChecklistText(db, { note: "Начинаем с 47-го", docUrl: null }, 1);
+    updateChecklist(db, list.id, { note: "Начинаем с 47-го" });
 
     const { bot, sent } = fakeBot();
     await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
@@ -133,8 +132,8 @@ describe("runChecklistTick", () => {
   // Файл живёт в Telegram и пересылается по `file_id`: своё хранилище ради
   // одного PDF означало бы бэкапы, права и чистку — всё то, что Telegram делает сам.
   it("присылает приложенный файл вместе с чек-листом", async () => {
-    const { db } = stage();
-    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, 1);
+    const { db, list } = stage();
+    updateChecklist(db, list.id, { docFileId: "BQACAgIAAx", docName: "Проверка 47.pdf" });
     const { bot, sent, docs } = fakeBot();
 
     await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
@@ -152,8 +151,8 @@ describe("runChecklistTick", () => {
 
   // Один файл в день, ровно как одно сообщение: тик крутится каждые пять минут.
   it("не шлёт файл повторно на следующем тике", async () => {
-    const { db } = stage();
-    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, 1);
+    const { db, list } = stage();
+    updateChecklist(db, list.id, { docFileId: "BQACAgIAAx", docName: "Проверка 47.pdf" });
     const { bot, docs } = fakeBot();
     await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
     await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" });
@@ -161,8 +160,8 @@ describe("runChecklistTick", () => {
   });
 
   it("ссылка на инструкцию едет кнопкой, а не текстом в теле", async () => {
-    const { db } = stage();
-    saveChecklistText(db, { note: null, docUrl: "https://disk.example/47.pdf" }, 1);
+    const { db, list } = stage();
+    updateChecklist(db, list.id, { docUrl: "https://disk.example/47.pdf" });
     const bot = fakeBot();
     const calls: unknown[] = [];
     (bot.bot as unknown as { api: { sendMessage: (...a: unknown[]) => Promise<void> } }).api.sendMessage =

@@ -183,6 +183,13 @@
       "when": 1787311871604,
       "tag": "0025_checklist_instructions",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1787315471604,
+      "tag": "0026_checklists_per_kind",
+      "breakpoints": true
     }
   ]
 }

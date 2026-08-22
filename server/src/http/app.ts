@@ -10,7 +10,8 @@ import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middlew
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { redactSecrets } from "../util/safe-error";
-import { listActiveTemplates, getTemplate, setTemplateRequiresChecklist } from "../repo/templates";
+import { listActiveTemplates, getTemplate } from "../repo/templates";
+import { getChecklist, setTemplateChecklist } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
@@ -1356,7 +1357,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         name: template.name,
         category: template.category,
         accent: template.accent,
-        requiresChecklist: template.requiresChecklist,
+        checklistId: template.checklistId,
         ...(roles.get(template.id) ?? { pool: [], preference: {} }),
       })),
     });
@@ -1382,7 +1383,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   /**
-   * Галочка «Требует чек-лист» у вида смены.
+   * Какой чек-лист проходит дежурный этого вида смены. `null` — никакого.
    *
    * Своей ручкой, а не полем в `roles`: там лежит «кто допущен и кто просил» —
    * про людей, а это про саму смену. Одно тело на два разных решения означало
@@ -1391,15 +1392,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.put("/api/admin/templates/:id/checklist", requireAdmin(db, config.jwtSecret), async (c) => {
     const templateId = Number(c.req.param("id"));
     if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
-    const parsed = z.object({ requiresChecklist: z.boolean() }).safeParse(await c.req.json().catch(() => ({})));
+    const parsed = z.object({ checklistId: z.number().int().nullable() }).safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
-    setTemplateRequiresChecklist(db, templateId, parsed.data.requiresChecklist);
+    if (parsed.data.checklistId != null && !getChecklist(db, parsed.data.checklistId)) {
+      return c.json({ error: "unknown_checklist" }, 400);
+    }
+    setTemplateChecklist(db, templateId, parsed.data.checklistId);
     recordAudit(db, "template_checklist_changed", c.get("auth").employeeId, {
       templateId,
       templateName: getTemplate(db, templateId)?.name ?? null,
-      requiresChecklist: parsed.data.requiresChecklist,
+      checklistName: parsed.data.checklistId != null ? (getChecklist(db, parsed.data.checklistId)?.name ?? null) : null,
     });
-    return c.json({ templateId, requiresChecklist: parsed.data.requiresChecklist });
+    return c.json({ templateId, checklistId: parsed.data.checklistId });
   });
 
   app.put("/api/admin/templates/:id/rotation", requireAdmin(db, config.jwtSecret), async (c) => {
