@@ -9,6 +9,7 @@ import type {
   BugReportRow,
   ChecklistDay,
   ChecklistItem,
+  ChecklistSettings,
   Employee,
   EntryRangeResult,
   FeedEvent,
@@ -1256,10 +1257,11 @@ export async function mockResolveBugReport(id: number, resolved: boolean): Promi
  * правдоподобная выдумка не ушла людям как инструкция.
  */
 const CHECKLIST_ITEMS: ChecklistItem[] = [
-  { id: 1, title: "Обойти этаж" },
-  { id: 2, title: "Проверить переговорные" },
-  { id: 3, title: "Записать замечания" },
+  { id: 1, title: "Обойти этаж", note: "По часовой, начиная от лифтов" },
+  { id: 2, title: "Проверить переговорные", note: null },
+  { id: 3, title: "Записать замечания", note: null },
 ];
+let CHECKLIST_SETTINGS: ChecklistSettings = { note: null, docUrl: null, docName: null, hasDoc: false };
 let nextChecklistId = 4;
 
 export async function mockGetChecklistItems(): Promise<ChecklistItem[]> {
@@ -1269,17 +1271,38 @@ export async function mockGetChecklistItems(): Promise<ChecklistItem[]> {
 
 export async function mockAddChecklistItem(title: string): Promise<ChecklistItem> {
   await delay(140);
-  const item = { id: nextChecklistId++, title };
+  const item = { id: nextChecklistId++, title, note: null };
   CHECKLIST_ITEMS.push(item);
   return item;
 }
 
-export async function mockRenameChecklistItem(id: number, title: string): Promise<ChecklistItem> {
+export async function mockUpdateChecklistItem(
+  id: number,
+  patch: { title?: string; note?: string | null },
+): Promise<ChecklistItem> {
   await delay(140);
   const item = CHECKLIST_ITEMS.find((i) => i.id === id);
   if (!item) throw new Error(`Unknown checklist item ${id}`);
-  item.title = title;
+  if (patch.title !== undefined) item.title = patch.title;
+  if (patch.note !== undefined) item.note = patch.note?.trim() || null;
   return item;
+}
+
+export async function mockGetChecklistSettings(): Promise<ChecklistSettings> {
+  await delay(140);
+  return { ...CHECKLIST_SETTINGS };
+}
+
+export async function mockSaveChecklistSettings(patch: { note: string | null; docUrl: string | null }): Promise<ChecklistSettings> {
+  await delay(140);
+  CHECKLIST_SETTINGS = { ...CHECKLIST_SETTINGS, note: patch.note?.trim() || null, docUrl: patch.docUrl?.trim() || null };
+  return { ...CHECKLIST_SETTINGS };
+}
+
+export async function mockRemoveChecklistDoc(): Promise<ChecklistSettings> {
+  await delay(140);
+  CHECKLIST_SETTINGS = { ...CHECKLIST_SETTINGS, docName: null, hasDoc: false };
+  return { ...CHECKLIST_SETTINGS };
 }
 
 export async function mockRemoveChecklistItem(id: number): Promise<ChecklistItem[]> {

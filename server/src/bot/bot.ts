@@ -41,6 +41,14 @@ import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { outsidePoolFacts } from "../swap/duty-notice";
 import { safeErrorMessage } from "../util/safe-error";
 import { openBugPrompt, getBugPending, clearBugPending, shouldCapture, submitBugReport, resolveBugReport } from "../bugs/bug-service";
+import {
+  clearChecklistDoc,
+  clearDocPending,
+  docPendingFor,
+  readChecklistSettings,
+  saveChecklistDoc,
+  startDocPending,
+} from "../repo/checklist-settings";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
 // plain Telegram chat text — Telegram syncs history to every signed-in device
@@ -624,6 +632,76 @@ export function createBot(deps: BotDeps): Bot {
    * На всё остальное бот молчит, как молчал до этой клавиатуры. Отвечать на
    * произвольный текст его никто не просил.
    */
+  /**
+   * `/instruction` — приложить дежурным файл с инструкцией.
+   *
+   * Только через бота, и другого пути нет: браузер не умеет положить документ в
+   * Telegram так, чтобы бот потом мог его переслать. Консоль поэтому умеет
+   * только показать, что приложено, и снять — а положить можно здесь.
+   *
+   * Файл никуда не скачивается: хранится `file_id`, и бот пересылает документ по
+   * нему. Своё хранилище ради одного PDF означало бы бэкапы, права и чистку —
+   * всё то, что Telegram уже делает.
+   */
+  async function startInstructionUpload(ctx: Context): Promise<void> {
+    const from = ctx.from;
+    if (!from) return;
+    const who = acting(from.id);
+    if (!who.ok) {
+      await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
+      return;
+    }
+    if (!actsAsAdmin(who.me, from.id)) {
+      await ctx.reply("Инструкцию дежурным прикладывают админы.");
+      return;
+    }
+
+    const current = readChecklistSettings(db);
+    const keyboard = current.docFileId
+      ? { inline_keyboard: [[{ text: "🗑 Убрать инструкцию", callback_data: "checklist:doc:clear" }]] }
+      : undefined;
+    startDocPending(db, who.me.id);
+    await ctx.reply(
+      current.docFileId
+        ? `Сейчас приложено: ${current.docName ?? "файл"}.\nПришли новый файл одним сообщением — он заменит прежний.`
+        : "Пришли файл одним сообщением — я приложу его к чек-листу, и он будет уходить дежурным вместе со списком.",
+      { reply_markup: keyboard },
+    );
+  }
+
+  bot.command("instruction", (ctx) => startInstructionUpload(ctx));
+
+  bot.callbackQuery("checklist:doc:clear", async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Только для админов" });
+      return;
+    }
+    clearChecklistDoc(db, who.me.id);
+    clearDocPending(db);
+    await ctx.answerCallbackQuery({ text: "Убрал" });
+    await ctx.reply("Инструкция снята — дежурным она больше не уходит.");
+  });
+
+  /**
+   * Файл, присланный в открытое окно ожидания, становится инструкцией.
+   *
+   * Окно, а не «любой документ от админа»: админы шлют боту файлы и по другим
+   * поводам, и молча превращать чужой PDF в инструкцию для всей смены нельзя.
+   */
+  bot.on("message:document", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+    const who = acting(ctx.from?.id ?? 0);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from!.id)) return;
+    if (!docPendingFor(db, who.me.id, new Date())) return;
+
+    const doc = ctx.msg.document;
+    saveChecklistDoc(db, { fileId: doc.file_id, fileName: doc.file_name ?? null }, who.me.id);
+    clearDocPending(db);
+    recordAudit(db, "checklist_doc_changed", who.me.id, { fileName: doc.file_name ?? null, attached: true });
+    await ctx.reply(`Приложил «${doc.file_name ?? "файл"}». Дежурные получат его вместе с чек-листом.`);
+  });
+
   bot.on("message:text", async (ctx) => {
     if (ctx.chat.type !== "private") return;
     const text = ctx.msg.text;

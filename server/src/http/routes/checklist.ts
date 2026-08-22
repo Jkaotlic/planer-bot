@@ -9,10 +9,15 @@ import {
   deactivateChecklistItem,
   listMarksFor,
   listMarksOnDate,
-  renameChecklistItem,
   reorderChecklistItem,
   setMark,
+  updateChecklistItem,
 } from "../../repo/checklist";
+import {
+  clearChecklistDoc,
+  readChecklistSettings,
+  saveChecklistText,
+} from "../../repo/checklist-settings";
 import { listShiftsOverlapping } from "../../repo/shifts";
 import { listActiveTemplates } from "../../repo/templates";
 import { getEmployeeById } from "../../repo/employees";
@@ -36,6 +41,27 @@ export function checklistRequiredFor(db: Db, date: string, employeeId: number): 
 }
 
 const titleSchema = z.object({ title: z.string().trim().min(1).max(200) });
+/**
+ * Правка пункта: подпись и/или пояснение, любое поле по отдельности.
+ *
+ * Потолок пояснения — 2000, тот же, что у багрепорта: текст уезжает в сообщение
+ * Telegram, у которого предел 4096 на всё сообщение вместе со списком пунктов.
+ */
+const itemPatchSchema = z
+  .object({ title: z.string().trim().min(1).max(200).optional(), note: z.string().max(2000).nullish() })
+  .refine((v) => v.title !== undefined || v.note !== undefined, { message: "нечего менять" });
+
+/**
+ * Инструкция на весь чек-лист: пояснение и ссылка.
+ *
+ * Файла здесь нет намеренно: он приезжает от Telegram через бота, а не из формы
+ * консоли — браузер не умеет положить файл в Telegram так, чтобы бот потом мог
+ * его переслать.
+ */
+const settingsSchema = z.object({
+  note: z.string().max(2000).nullish(),
+  docUrl: z.string().trim().max(500).nullish(),
+});
 const markSchema = z.object({ date: dateStr, itemId: z.number().int(), done: z.boolean() });
 
 export function createChecklistRoutes(db: Db, config: Config) {
@@ -54,11 +80,34 @@ export function createChecklistRoutes(db: Db, config: Config) {
   });
 
   app.patch("/api/admin/checklist/items/:id", requireAdmin(db, config.jwtSecret), async (c) => {
-    const parsed = titleSchema.safeParse(await c.req.json().catch(() => ({})));
+    const parsed = itemPatchSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
-    const item = renameChecklistItem(db, Number(c.req.param("id")), parsed.data.title);
+    const item = updateChecklistItem(db, Number(c.req.param("id")), parsed.data);
     if (!item) return c.json({ error: "not_found" }, 404);
     return c.json({ item });
+  });
+
+  /** Пояснение и ссылка на инструкцию. Файл — отдельно, через бота. */
+  app.get("/api/admin/checklist/settings", requireAdmin(db, config.jwtSecret), (c) => {
+    const { note, docUrl, docName, docFileId } = readChecklistSettings(db);
+    // `docFileId` наружу не отдаётся: это ключ к файлу в Telegram, а консоли
+    // нужно знать только, приложен ли документ и как он называется.
+    return c.json({ note, docUrl, docName, hasDoc: docFileId != null });
+  });
+
+  app.put("/api/admin/checklist/settings", requireAdmin(db, config.jwtSecret), async (c) => {
+    const parsed = settingsSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    saveChecklistText(db, { note: parsed.data.note ?? null, docUrl: parsed.data.docUrl ?? null }, c.get("auth").employeeId);
+    const { note, docUrl, docName, docFileId } = readChecklistSettings(db);
+    return c.json({ note, docUrl, docName, hasDoc: docFileId != null });
+  });
+
+  /** Снять приложенный файл. Положить его можно только через бота. */
+  app.delete("/api/admin/checklist/doc", requireAdmin(db, config.jwtSecret), (c) => {
+    clearChecklistDoc(db, c.get("auth").employeeId);
+    const { note, docUrl } = readChecklistSettings(db);
+    return c.json({ note, docUrl, docName: null, hasDoc: false });
   });
 
   app.post("/api/admin/checklist/items/:id/order", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -121,11 +170,17 @@ export function createChecklistRoutes(db: Db, config: Config) {
     // Пустой список — не «не положен», а «проходить нечего»: отвечаем
     // `required: false`, и ни бот, ни экран ничего не показывают.
     const required = items.length > 0 && checklistRequiredFor(db, date, employeeId);
+    const settings = readChecklistSettings(db);
     return c.json({
       date,
       required,
       items: required ? items : [],
       markedItemIds: required ? listMarksFor(db, date, employeeId).map((m) => m.itemId) : [],
+      note: required ? settings.note : null,
+      docUrl: required ? settings.docUrl : null,
+      // Имя файла, а не сам файл: документ приходит в чат от бота, и экран
+      // должен сказать, где его искать, а не притворяться, что покажет его сам.
+      docName: required ? settings.docName : null,
     });
   });
 

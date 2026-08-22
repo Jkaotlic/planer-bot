@@ -1719,10 +1719,10 @@ export async function mockResolveBugReport(id: number, resolved: boolean): Promi
  * пишет команда на экране «Чек-лист». В боевой базе таблица приезжает пустой
  * именно затем, чтобы правдоподобная выдумка не ушла людям как инструкция.
  */
-const CHECKLIST_ITEMS: { id: number; title: string }[] = [
-  { id: 1, title: "Обойти этаж" },
-  { id: 2, title: "Проверить переговорные" },
-  { id: 3, title: "Записать замечания" },
+const CHECKLIST_ITEMS: ChecklistItem[] = [
+  { id: 1, title: "Обойти этаж", note: "По часовой, начиная от лифтов" },
+  { id: 2, title: "Проверить переговорные", note: null },
+  { id: 3, title: "Записать замечания", note: null },
 ];
 const CHECKLIST_MARKS = new Set<string>();
 
@@ -1733,6 +1733,9 @@ export async function mockGetMyChecklist(date: string): Promise<MyChecklist> {
     required: CHECKLIST_ITEMS.length > 0,
     items: [...CHECKLIST_ITEMS],
     markedItemIds: CHECKLIST_ITEMS.filter((i) => CHECKLIST_MARKS.has(`${date}:${i.id}`)).map((i) => i.id),
+    note: "Обход начинаем от лифтов, по часовой.",
+    docUrl: null,
+    docName: "Проверка 47.pdf",
   };
 }
 
@@ -1751,16 +1754,8 @@ export async function mockGetChecklistItems(): Promise<ChecklistItem[]> {
 
 export async function mockAddChecklistItem(title: string): Promise<ChecklistItem> {
   await delay(120);
-  const item = { id: nextId++, title };
+  const item = { id: nextId++, title, note: null };
   CHECKLIST_ITEMS.push(item);
-  return item;
-}
-
-export async function mockRenameChecklistItem(id: number, title: string): Promise<ChecklistItem> {
-  await delay(120);
-  const item = CHECKLIST_ITEMS.find((i) => i.id === id);
-  if (!item) throw new Error(`Unknown checklist item ${id}`);
-  item.title = title;
   return item;
 }
 

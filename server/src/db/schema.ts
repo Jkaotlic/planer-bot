@@ -488,6 +488,13 @@ export const collections = sqliteTable(
 export const checklistItems = sqliteTable("checklist_items", {
   id: integer().primaryKey({ autoIncrement: true }),
   title: text().notNull(),
+  /**
+   * Пояснение к пункту: как именно проверять, на что смотреть.
+   *
+   * Отдельно от `title`: строка списка должна оставаться строкой, по которой
+   * ведут пальцем, а подробности — тем, что раскрывают, когда не помнят.
+   */
+  note: text(),
   sortOrder: integer().notNull().default(0),
   /**
    * Убранный пункт гасится, а не удаляется: на него ссылаются вчерашние отметки,

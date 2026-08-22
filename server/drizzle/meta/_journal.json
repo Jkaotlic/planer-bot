@@ -176,6 +176,13 @@
       "when": 1787308271604,
       "tag": "0024_duty_checklist",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1787311871604,
+      "tag": "0025_checklist_instructions",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,8 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { createChecklistItem, listMarksFor } from "../repo/checklist";
+import { createChecklistItem, listMarksFor, updateChecklistItem } from "../repo/checklist";
+import { readChecklistSettings, saveChecklistDoc, saveChecklistText } from "../repo/checklist-settings";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
@@ -188,5 +189,94 @@ describe("галочка «Требует чек-лист» на виде сме
     const admin = await tokenFor(app, 111);
     expect((await app.request("/api/admin/templates/1/checklist", authedJson(token, { requiresChecklist: true }, "PUT"))).status).toBe(403);
     expect((await app.request("/api/admin/templates/9999/checklist", authedJson(admin, { requiresChecklist: true }, "PUT"))).status).toBe(404);
+  });
+});
+
+describe("чек-лист: инструкция", () => {
+  const TODAY = "2026-08-24";
+
+  it("новая база не несёт ни пояснения, ни ссылки, ни файла", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request("/api/admin/checklist/settings", bearer(admin))).json();
+    expect(body).toEqual({ note: null, docUrl: null, docName: null, hasDoc: false });
+  });
+
+  it("сохраняет пояснение и ссылку и стирает их пустым", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    let body = await (await app.request("/api/admin/checklist/settings",
+      authedJson(admin, { note: "Обходим по часовой", docUrl: "https://disk.example/47.pdf" }, "PUT"))).json();
+    expect(body).toMatchObject({ note: "Обходим по часовой", docUrl: "https://disk.example/47.pdf" });
+
+    body = await (await app.request("/api/admin/checklist/settings", authedJson(admin, { note: "", docUrl: "" }, "PUT"))).json();
+    expect(body).toMatchObject({ note: null, docUrl: null });
+  });
+
+  // `file_id` — ключ к файлу в Telegram. Консоли он не нужен, а наружу отдавать
+  // ключи незачем: ей достаточно знать, приложен документ или нет.
+  it("не отдаёт наружу telegram-идентификатор файла", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const adminId = (await (await app.request("/api/me", bearer(admin))).json()).id as number;
+    saveChecklistDoc(db, { fileId: "BQACAgIAAxSECRET", fileName: "Проверка 47.pdf" }, adminId);
+
+    const res = await app.request("/api/admin/checklist/settings", bearer(admin));
+    const raw = await res.text();
+    expect(raw).not.toContain("BQACAgIAAxSECRET");
+    expect(JSON.parse(raw)).toMatchObject({ docName: "Проверка 47.pdf", hasDoc: true });
+  });
+
+  it("снимает приложенный файл", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const adminId = (await (await app.request("/api/me", bearer(admin))).json()).id as number;
+    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, adminId);
+
+    const body = await (await app.request("/api/admin/checklist/doc", { method: "DELETE", ...bearer(admin) })).json();
+    expect(body).toMatchObject({ hasDoc: false, docName: null });
+    expect(readChecklistSettings(db).docFileId).toBeNull();
+  });
+
+  it("дежурному приезжают пояснение, ссылка и имя файла вместе с пунктами", async () => {
+    const db = makeTestDb();
+    const igor = worker(db, "Игорь", 333);
+    const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
+    requireChecklistOn(db, duty.id);
+    createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
+    const item = createChecklistItem(db, "Обойти этаж");
+    updateChecklistItem(db, item.id, { note: "По часовой, от лифтов" });
+    saveChecklistText(db, { note: "Инструкция целиком — в файле", docUrl: "https://disk.example/47.pdf" }, igor.id);
+    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, igor.id);
+
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 333);
+    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json();
+    expect(body).toMatchObject({
+      required: true,
+      note: "Инструкция целиком — в файле",
+      docUrl: "https://disk.example/47.pdf",
+      docName: "Проверка 47.pdf",
+    });
+    expect(body.items[0]).toMatchObject({ title: "Обойти этаж", note: "По часовой, от лифтов" });
+  });
+
+  // Инструкция — часть чек-листа, и в день, когда он не положен, её тоже нет:
+  // иначе экран показывал бы «вот документ дежурного» тому, кто сегодня не дежурит.
+  it("не отдаёт инструкцию тому, кому чек-лист сегодня не положен", async () => {
+    const db = makeTestDb();
+    const igor = worker(db, "Игорь", 333);
+    createChecklistItem(db, "Обойти этаж");
+    saveChecklistText(db, { note: "Обходим по часовой", docUrl: "https://disk.example/47.pdf" }, igor.id);
+
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 333);
+    const body = await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json();
+    expect(body).toMatchObject({ required: false, note: null, docUrl: null, docName: null });
   });
 });

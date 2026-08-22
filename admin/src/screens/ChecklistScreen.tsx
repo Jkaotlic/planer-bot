@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiClient, AuthRequiredError, type ChecklistDay, type ChecklistItem } from "../api/client";
+import { apiClient, AuthRequiredError, type ChecklistDay, type ChecklistItem, type ChecklistSettings } from "../api/client";
 import { toISODate } from "../lib/week";
 
 /**
@@ -13,6 +13,7 @@ import { toISODate } from "../lib/week";
 export function ChecklistScreen() {
   const [items, setItems] = useState<ChecklistItem[] | null>(null);
   const [day, setDay] = useState<ChecklistDay | null>(null);
+  const [settings, setSettings] = useState<ChecklistSettings | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,9 +21,14 @@ export function ChecklistScreen() {
 
   async function reload() {
     try {
-      const [loaded, summary] = await Promise.all([apiClient.getChecklistItems(), apiClient.getChecklistDay(today)]);
+      const [loaded, summary, loadedSettings] = await Promise.all([
+        apiClient.getChecklistItems(),
+        apiClient.getChecklistDay(today),
+        apiClient.getChecklistSettings(),
+      ]);
       setItems(loaded);
       setDay(summary);
+      setSettings(loadedSettings);
     } catch (err) {
       if (err instanceof AuthRequiredError) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить чек-лист");
@@ -79,7 +85,8 @@ export function ChecklistScreen() {
               index={index}
               total={items.length}
               busy={busy}
-              onRename={(title) => run(() => apiClient.renameChecklistItem(item.id, title))}
+              onRename={(title) => run(() => apiClient.updateChecklistItem(item.id, { title }))}
+              onNote={(note) => run(() => apiClient.updateChecklistItem(item.id, { note }))}
               onRemove={() => run(() => apiClient.removeChecklistItem(item.id))}
               onMove={(to) => run(() => apiClient.reorderChecklistItem(item.id, to))}
             />
@@ -110,6 +117,13 @@ export function ChecklistScreen() {
         </button>
       </div>
 
+      <h3 className="birthday-group">Инструкция</h3>
+      {/* Три способа дать дежурному подробности, потому что они закрывают разные
+          случаи: короткое пояснение читается прямо в чате, ссылка ведёт в живой
+          документ, который правят без нас, а файл доходит туда, где интернета
+          может не быть — он приходит в чат и остаётся в нём. */}
+      {settings && <InstructionEditor settings={settings} busy={busy} onSave={(patch) => run(() => apiClient.saveChecklistSettings(patch))} onRemoveDoc={() => run(() => apiClient.removeChecklistDoc())} />}
+
       <h3 className="birthday-group">Сегодня</h3>
       {/* Кто должен пройти и сколько уже отметил. Никаких напоминаний отсюда не
           уходит: во сколько считать день провалившимся — его решение, а не наше. */}
@@ -132,12 +146,87 @@ export function ChecklistScreen() {
   );
 }
 
+/** Пояснение и ссылка на весь чек-лист плюс состояние приложенного файла. */
+function InstructionEditor({
+  settings,
+  busy,
+  onSave,
+  onRemoveDoc,
+}: {
+  settings: ChecklistSettings;
+  busy: boolean;
+  onSave: (patch: { note: string | null; docUrl: string | null }) => void;
+  onRemoveDoc: () => void;
+}) {
+  const [note, setNote] = useState(settings.note ?? "");
+  const [docUrl, setDocUrl] = useState(settings.docUrl ?? "");
+  const dirty = note !== (settings.note ?? "") || docUrl !== (settings.docUrl ?? "");
+
+  return (
+    <div className="checklist-instruction">
+      <label className="field-label" htmlFor="checklist-note">
+        Пояснение — уходит дежурному в чат вместе со списком
+      </label>
+      <textarea
+        id="checklist-note"
+        rows={4}
+        value={note}
+        disabled={busy}
+        placeholder="Например: обход начинаем от лифтов, по часовой."
+        onChange={(e) => setNote(e.target.value)}
+      />
+
+      <label className="field-label" htmlFor="checklist-url">
+        Ссылка на документ
+      </label>
+      <input
+        id="checklist-url"
+        type="url"
+        value={docUrl}
+        disabled={busy}
+        placeholder="https://…"
+        onChange={(e) => setDocUrl(e.target.value)}
+      />
+
+      <div className="panel-actions" style={{ justifyContent: "flex-start" }}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy || !dirty}
+          onClick={() => onSave({ note: note.trim() || null, docUrl: docUrl.trim() || null })}
+        >
+          Сохранить
+        </button>
+      </div>
+
+      {/* Файл кладётся только через бота: браузер не умеет положить документ в
+          Telegram так, чтобы бот потом мог его переслать. Поэтому здесь — что
+          приложено и как это заменить, а не форма загрузки. */}
+      <div className="checklist-doc">
+        {settings.hasDoc ? (
+          <>
+            <span>📄 Приложен файл: <b>{settings.docName}</b> — уходит дежурному вместе с чек-листом.</span>
+            <button type="button" className="btn btn-danger" disabled={busy} onClick={onRemoveDoc}>
+              Убрать файл
+            </button>
+          </>
+        ) : (
+          <span>
+            Файл не приложен. Чтобы приложить — напиши боту <b>/instruction</b> и пришли документ одним сообщением.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ItemRow({
   item,
   index,
   total,
   busy,
   onRename,
+  onNote,
   onRemove,
   onMove,
 }: {
@@ -146,10 +235,13 @@ function ItemRow({
   total: number;
   busy: boolean;
   onRename: (title: string) => void;
+  onNote: (note: string | null) => void;
   onRemove: () => void;
   onMove: (to: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(item.note ?? "");
   const [draft, setDraft] = useState(item.title);
 
   function save() {
@@ -190,15 +282,44 @@ function ItemRow({
         ↓
       </button>
       {!editing && (
-        <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setEditing(true)}>
-          Переименовать
-        </button>
+        <>
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setEditing(true)}>
+            Переименовать
+          </button>
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setNoteOpen((open) => !open)}>
+            {item.note ? "Пояснение ✓" : "Пояснение"}
+          </button>
+        </>
       )}
       {/* «Убрать», а не «Удалить»: пункт гаснет, вчерашние отметки по нему
           остаются, и слово должно обещать ровно это. */}
       <button type="button" className="btn btn-danger" disabled={busy} onClick={onRemove}>
         Убрать
       </button>
+
+      {noteOpen && (
+        <div className="checklist-item-note">
+          <textarea
+            rows={2}
+            value={noteDraft}
+            disabled={busy}
+            aria-label={`Пояснение к пункту «${item.title}»`}
+            placeholder="Как именно проверять"
+            onChange={(e) => setNoteDraft(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || noteDraft === (item.note ?? "")}
+            onClick={() => {
+              onNote(noteDraft.trim() || null);
+              setNoteOpen(false);
+            }}
+          >
+            Сохранить
+          </button>
+        </div>
+      )}
     </div>
   );
 }

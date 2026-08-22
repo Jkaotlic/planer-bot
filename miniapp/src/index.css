@@ -85,6 +85,45 @@ textarea {
   opacity: 0.6;
 }
 
+.checklist-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 18px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.checklist-intro__note {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.checklist-intro__doc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tgui--hint_color);
+}
+
+.checklist-doc-link {
+  align-self: flex-start;
+  font-weight: 600;
+  color: var(--tgui--link_color);
+}
+
+.checklist-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.checklist-item__note {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--tgui--hint_color);
+}
+
 .checklist-item__box {
   flex: 0 0 22px;
   display: flex;
@@ -96,4 +135,14 @@ textarea {
    читается хуже, а список ещё перечитывают — «что я уже проверил». */
 .checklist-item--done .checklist-item__title {
   color: var(--tgui--hint_color);
+}
+
+/* Строки пунктов теперь двухэтажные — выравниваем галочку по первой строке, а
+   не по центру блока, иначе у пункта с пояснением она уезжает вниз. */
+.checklist-item {
+  align-items: flex-start;
+}
+
+.checklist-item__box {
+  margin-top: 1px;
 }

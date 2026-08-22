@@ -9,7 +9,10 @@ import { apiClient, type MyChecklist } from "../api/client";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const TODAY = "2026-08-24";
-const ITEMS = [{ id: 1, title: "Обойти этаж" }, { id: 2, title: "Проверить переговорные" }];
+const ITEMS = [
+  { id: 1, title: "Обойти этаж", note: "По часовой, от лифтов" },
+  { id: 2, title: "Проверить переговорные", note: null },
+];
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -40,7 +43,8 @@ async function mount() {
 }
 
 const state = (over: Partial<MyChecklist> = {}): MyChecklist => ({
-  date: TODAY, required: true, items: ITEMS, markedItemIds: [], ...over,
+  date: TODAY, required: true, items: ITEMS, markedItemIds: [],
+  note: null, docUrl: null, docName: null, ...over,
 });
 
 describe("карточка чек-листа", () => {
@@ -100,5 +104,35 @@ describe("карточка чек-листа", () => {
     await act(async () => [...el.querySelectorAll<HTMLButtonElement>(".checklist-item")][0]!.click());
     await settle();
     expect(el.textContent).toContain("Сеть недоступна");
+  });
+
+  it("показывает пояснение к пункту под ним, а не в подписи", async () => {
+    vi.spyOn(apiClient, "getMyChecklist").mockResolvedValue(state());
+    const el = await mount();
+    const first = el.querySelectorAll(".checklist-item")[0]!;
+    expect(first.querySelector(".checklist-item__title")!.textContent).toBe("Обойти этаж");
+    expect(first.textContent).toContain("По часовой, от лифтов");
+  });
+
+  it("показывает общее пояснение над списком", async () => {
+    vi.spyOn(apiClient, "getMyChecklist").mockResolvedValue(state({ note: "Начинаем с 47-го" }));
+    const el = await mount();
+    expect(el.textContent).toContain("Начинаем с 47-го");
+  });
+
+  it("ссылку на документ даёт ссылкой, по которой можно уйти", async () => {
+    vi.spyOn(apiClient, "getMyChecklist").mockResolvedValue(state({ docUrl: "https://disk.example/47.pdf" }));
+    const el = await mount();
+    const link = el.querySelector<HTMLAnchorElement>("a.checklist-doc-link")!;
+    expect(link.href).toBe("https://disk.example/47.pdf");
+  });
+
+  // Файл живёт в Telegram, мини-апп его не покажет. Молчать про него нельзя:
+  // человек прочитает «инструкция есть» и пойдёт искать её здесь.
+  it("про файл говорит, что он в чате, и не притворяется, что покажет его", async () => {
+    vi.spyOn(apiClient, "getMyChecklist").mockResolvedValue(state({ docName: "Проверка 47.pdf" }));
+    const el = await mount();
+    expect(el.textContent).toContain("Проверка 47.pdf");
+    expect(el.textContent).toContain("в чате с ботом");
   });
 });

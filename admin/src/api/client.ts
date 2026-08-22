@@ -15,7 +15,10 @@ import {
   mockCreateEntryRange,
   mockGetChecklistItems,
   mockAddChecklistItem,
-  mockRenameChecklistItem,
+  mockUpdateChecklistItem,
+  mockGetChecklistSettings,
+  mockSaveChecklistSettings,
+  mockRemoveChecklistDoc,
   mockRemoveChecklistItem,
   mockReorderChecklistItem,
   mockGetChecklistDay,
@@ -163,6 +166,21 @@ export interface EntryRangeResult {
 export interface ChecklistItem {
   id: number;
   title: string;
+  /** Пояснение: как именно проверять. */
+  note: string | null;
+}
+
+/**
+ * Инструкция на весь чек-лист.
+ *
+ * `hasDoc` вместо самого идентификатора файла: это ключ к файлу в Telegram, и
+ * консоли он не нужен — ей достаточно знать, приложено ли что-нибудь.
+ */
+export interface ChecklistSettings {
+  note: string | null;
+  docUrl: string | null;
+  docName: string | null;
+  hasDoc: boolean;
 }
 
 /** Сводка «кто сегодня должен пройти чек-лист и сколько уже отметил». */
@@ -500,7 +518,10 @@ export interface ApiClient {
   createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
   getChecklistItems(): Promise<ChecklistItem[]>;
   addChecklistItem(title: string): Promise<ChecklistItem>;
-  renameChecklistItem(id: number, title: string): Promise<ChecklistItem>;
+  updateChecklistItem(id: number, patch: { title?: string; note?: string | null }): Promise<ChecklistItem>;
+  getChecklistSettings(): Promise<ChecklistSettings>;
+  saveChecklistSettings(patch: { note: string | null; docUrl: string | null }): Promise<ChecklistSettings>;
+  removeChecklistDoc(): Promise<ChecklistSettings>;
   removeChecklistItem(id: number): Promise<ChecklistItem[]>;
   reorderChecklistItem(id: number, to: number): Promise<ChecklistItem[]>;
   getChecklistDay(date: string): Promise<ChecklistDay>;
@@ -822,8 +843,11 @@ export const realClient: ApiClient = {
   getChecklistItems: () => authorizedGet<{ items: ChecklistItem[] }>("/api/admin/checklist/items").then((r) => r.items),
   addChecklistItem: (title) =>
     authorizedPostJson<{ item: ChecklistItem }>("/api/admin/checklist/items", { title }).then((r) => r.item),
-  renameChecklistItem: (id, title) =>
-    authorizedPatchJson<{ item: ChecklistItem }>(`/api/admin/checklist/items/${id}`, { title }).then((r) => r.item),
+  updateChecklistItem: (id, patch) =>
+    authorizedPatchJson<{ item: ChecklistItem }>(`/api/admin/checklist/items/${id}`, patch).then((r) => r.item),
+  getChecklistSettings: () => authorizedGet<ChecklistSettings>("/api/admin/checklist/settings"),
+  saveChecklistSettings: (patch) => authorizedPutJson<ChecklistSettings>("/api/admin/checklist/settings", patch),
+  removeChecklistDoc: () => authorizedDelete<ChecklistSettings>("/api/admin/checklist/doc"),
   removeChecklistItem: (id) =>
     authorizedDelete<{ items: ChecklistItem[] }>(`/api/admin/checklist/items/${id}`).then((r) => r.items),
   reorderChecklistItem: (id, to) =>
@@ -1041,7 +1065,10 @@ const devClient: ApiClient = {
   createEntryRange: (input) => mockCreateEntryRange(input),
   getChecklistItems: () => mockGetChecklistItems(),
   addChecklistItem: (title) => mockAddChecklistItem(title),
-  renameChecklistItem: (id, title) => mockRenameChecklistItem(id, title),
+  updateChecklistItem: (id, patch) => mockUpdateChecklistItem(id, patch),
+  getChecklistSettings: () => mockGetChecklistSettings(),
+  saveChecklistSettings: (patch) => mockSaveChecklistSettings(patch),
+  removeChecklistDoc: () => mockRemoveChecklistDoc(),
   removeChecklistItem: (id) => mockRemoveChecklistItem(id),
   reorderChecklistItem: (id, to) => mockReorderChecklistItem(id, to),
   getChecklistDay: (date) => mockGetChecklistDay(date),

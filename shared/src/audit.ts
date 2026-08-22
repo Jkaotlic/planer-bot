@@ -43,7 +43,7 @@ export const AUDIT_TYPES = [
   "collection_closed", "collection_deleted",
   "reminder_undeliverable", "reminders_dispatched",
   "announcement_sent",
-  "checklist_completed",
+  "checklist_completed", "checklist_doc_changed",
   "bug_report_created", "bug_report_resolved",
 ] as const;
 
@@ -506,6 +506,12 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     icon: "☑️",
     title: "Чек-лист пройден",
     lines: [`${personLabel(p)} · ${dayLabel(p.date)}`, `${num(p.total) ?? 0} ${pluralItems(num(p.total) ?? 0)}`],
+  }),
+
+  checklist_doc_changed: (p) => ({
+    icon: "📄",
+    title: p.attached === true ? "Приложена инструкция дежурного" : "Снята инструкция дежурного",
+    lines: [str(p.fileName) ?? "файл"],
   }),
 
   bug_report_created: (p) => ({ icon: "🐞", title: "Сообщение о проблеме", lines: [String(p.text ?? "")] }),
