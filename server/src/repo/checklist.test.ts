@@ -6,7 +6,7 @@ import {
   createChecklistItem,
   deactivateChecklistItem,
   listMarksFor,
-  renameChecklistItem,
+  updateChecklistItem,
   reorderChecklistItem,
   setMark,
 } from "./checklist";
@@ -31,8 +31,21 @@ describe("checklist repo", () => {
   it("переименование не заводит второй пункт", () => {
     const db = makeTestDb();
     const item = createChecklistItem(db, "Проверить свет");
-    renameChecklistItem(db, item.id, "Проверить освещение");
+    updateChecklistItem(db, item.id, { title: "Проверить освещение" });
     expect(activeChecklistItems(db).map((i) => i.title)).toEqual(["Проверить освещение"]);
+  });
+
+  it("пояснение правится отдельно от подписи и стирается пустым", () => {
+    const db = makeTestDb();
+    const item = createChecklistItem(db, "Обойти этаж");
+    updateChecklistItem(db, item.id, { note: "  По часовой, начиная от лифтов  " });
+    expect(activeChecklistItems(db)[0]).toMatchObject({ title: "Обойти этаж", note: "По часовой, начиная от лифтов" });
+
+    updateChecklistItem(db, item.id, { title: "Обойти 47-й" });
+    expect(activeChecklistItems(db)[0]!.note).toBe("По часовой, начиная от лифтов");
+
+    updateChecklistItem(db, item.id, { note: "   " });
+    expect(activeChecklistItems(db)[0]!.note).toBeNull();
   });
 
   /**

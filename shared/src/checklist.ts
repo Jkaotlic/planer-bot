@@ -20,6 +20,8 @@ export interface ChecklistEntryLike {
 export interface ChecklistItemLike {
   id: number;
   title: string;
+  /** Пояснение: как именно проверять. Может не быть вовсе. */
+  note?: string | null;
 }
 
 /**
@@ -91,6 +93,11 @@ export function checklistText(
 ): string {
   const marked = new Set(markedItemIds);
   const { done, total } = checklistProgress(items, markedItemIds);
-  const lines = items.map((item) => `${marked.has(item.id) ? "✅" : "◻️"} ${item.title}`);
+  // Пояснение идёт отдельной строкой под пунктом, а не в скобках за подписью:
+  // строка списка должна оставаться строкой, по которой ведут пальцем.
+  const lines = items.flatMap((item) => [
+    `${marked.has(item.id) ? "✅" : "◻️"} ${item.title}`,
+    ...(item.note ? [`    ${item.note}`] : []),
+  ]);
   return [...lines, "", `Сделано ${done} из ${total}.`].join("\n");
 }

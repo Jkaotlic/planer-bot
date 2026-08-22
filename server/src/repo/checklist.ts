@@ -18,8 +18,19 @@ export function createChecklistItem(db: Db, title: string): ChecklistItem {
   return db.insert(checklistItems).values({ title, sortOrder: last + 1 }).returning().all()[0]!;
 }
 
-export function renameChecklistItem(db: Db, id: number, title: string): ChecklistItem | undefined {
-  return db.update(checklistItems).set({ title }).where(eq(checklistItems.id, id)).returning().all()[0];
+/** Правит подпись и/или пояснение. `undefined` — «не трогать это поле». */
+export function updateChecklistItem(
+  db: Db,
+  id: number,
+  patch: { title?: string; note?: string | null },
+): ChecklistItem | undefined {
+  const set: { title?: string; note?: string | null } = {};
+  if (patch.title !== undefined) set.title = patch.title;
+  // Пустое пояснение стирается: «задано пустым» и «не задано» — одно и то же,
+  // а пустая строка потом рисовала бы под пунктом пустой отступ.
+  if (patch.note !== undefined) set.note = patch.note?.trim() || null;
+  if (Object.keys(set).length === 0) return db.select().from(checklistItems).where(eq(checklistItems.id, id)).get();
+  return db.update(checklistItems).set(set).where(eq(checklistItems.id, id)).returning().all()[0];
 }
 
 /**

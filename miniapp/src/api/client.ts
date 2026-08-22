@@ -33,7 +33,6 @@ import {
   mockMarkChecklistItem,
   mockGetChecklistItems,
   mockAddChecklistItem,
-  mockRenameChecklistItem,
   mockRemoveChecklistItem,
   mockCreateEntries,
   mockUpdateEntry,
@@ -293,11 +292,19 @@ export interface MyChecklist {
   required: boolean;
   items: ChecklistItem[];
   markedItemIds: number[];
+  /** Пояснение на весь чек-лист. */
+  note: string | null;
+  /** Ссылка на документ с процедурой. */
+  docUrl: string | null;
+  /** Имя файла, который бот прислал в чат. Самого файла у мини-аппа нет. */
+  docName: string | null;
 }
 
 export interface ChecklistItem {
   id: number;
   title: string;
+  /** Пояснение: как именно проверять. */
+  note: string | null;
 }
 
 export interface EntryRangeResult {
@@ -712,7 +719,6 @@ export interface ApiClient {
   markChecklistItem(date: string, itemId: number, done: boolean): Promise<MyChecklist>;
   getChecklistItems(): Promise<ChecklistItem[]>;
   addChecklistItem(title: string): Promise<ChecklistItem>;
-  renameChecklistItem(id: number, title: string): Promise<ChecklistItem>;
   removeChecklistItem(id: number): Promise<ChecklistItem[]>;
   /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
    *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
@@ -1135,8 +1141,6 @@ export const realClient: ApiClient = {
   getChecklistItems: () => authorizedGet<{ items: ChecklistItem[] }>("/api/admin/checklist/items").then((r) => r.items),
   addChecklistItem: (title) =>
     authorizedPostJson<{ item: ChecklistItem }>("/api/admin/checklist/items", { title }).then((r) => r.item),
-  renameChecklistItem: (id, title) =>
-    authorizedPatchJson<{ item: ChecklistItem }>(`/api/admin/checklist/items/${id}`, { title }).then((r) => r.item),
   removeChecklistItem: (id) =>
     authorizedDelete<{ items: ChecklistItem[] }>(`/api/admin/checklist/items/${id}`).then((r) => r.items),
   createEntries: (inputs) =>
@@ -1370,7 +1374,6 @@ const devClient: ApiClient = {
   markChecklistItem: (date, itemId, done) => mockMarkChecklistItem(date, itemId, done),
   getChecklistItems: () => mockGetChecklistItems(),
   addChecklistItem: (title) => mockAddChecklistItem(title),
-  renameChecklistItem: (id, title) => mockRenameChecklistItem(id, title),
   removeChecklistItem: (id) => mockRemoveChecklistItem(id),
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),

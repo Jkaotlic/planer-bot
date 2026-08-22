@@ -4,7 +4,8 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { createChecklistItem, setMark } from "../repo/checklist";
+import { createChecklistItem, setMark, updateChecklistItem } from "../repo/checklist";
+import { saveChecklistDoc, saveChecklistText } from "../repo/checklist-settings";
 import { shiftTemplates } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { testConfig } from "../test-config";
@@ -15,8 +16,16 @@ const config = testConfig();
 
 function fakeBot() {
   const sent: { to: number; text: string }[] = [];
-  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
-  return { bot: bot as unknown as Bot, sent };
+  const docs: { to: number; fileId: string; caption?: string }[] = [];
+  const bot = {
+    api: {
+      sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }),
+      sendDocument: vi.fn(async (to: number, fileId: string, extra?: { caption?: string }) => {
+        docs.push({ to, fileId, caption: extra?.caption });
+      }),
+    },
+  };
+  return { bot: bot as unknown as Bot, sent, docs };
 }
 
 const TODAY = "2026-08-24";
@@ -107,5 +116,62 @@ describe("runChecklistTick", () => {
     expect(sent[0]!.text).toContain("✅ Двери");
     expect(sent[0]!.text).toContain("◻️ Свет");
     expect(sent[0]!.text).toContain("1 из 3");
+  });
+
+  it("кладёт в сообщение общее пояснение и пояснения пунктов", async () => {
+    const { db } = stage({ items: [] });
+    const item = createChecklistItem(db, "Обойти этаж");
+    updateChecklistItem(db, item.id, { note: "По часовой, от лифтов" });
+    saveChecklistText(db, { note: "Начинаем с 47-го", docUrl: null }, 1);
+
+    const { bot, sent } = fakeBot();
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+    expect(sent[0]!.text).toContain("Начинаем с 47-го");
+    expect(sent[0]!.text).toContain("По часовой, от лифтов");
+  });
+
+  // Файл живёт в Telegram и пересылается по `file_id`: своё хранилище ради
+  // одного PDF означало бы бэкапы, права и чистку — всё то, что Telegram делает сам.
+  it("присылает приложенный файл вместе с чек-листом", async () => {
+    const { db } = stage();
+    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, 1);
+    const { bot, sent, docs } = fakeBot();
+
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ to: 333, fileId: "BQACAgIAAx" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("файла нет — документ не шлётся вовсе", async () => {
+    const { db } = stage();
+    const { bot, docs } = fakeBot();
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+    expect(docs).toEqual([]);
+  });
+
+  // Один файл в день, ровно как одно сообщение: тик крутится каждые пять минут.
+  it("не шлёт файл повторно на следующем тике", async () => {
+    const { db } = stage();
+    saveChecklistDoc(db, { fileId: "BQACAgIAAx", fileName: "Проверка 47.pdf" }, 1);
+    const { bot, docs } = fakeBot();
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" });
+    expect(docs).toHaveLength(1);
+  });
+
+  it("ссылка на инструкцию едет кнопкой, а не текстом в теле", async () => {
+    const { db } = stage();
+    saveChecklistText(db, { note: null, docUrl: "https://disk.example/47.pdf" }, 1);
+    const bot = fakeBot();
+    const calls: unknown[] = [];
+    (bot.bot as unknown as { api: { sendMessage: (...a: unknown[]) => Promise<void> } }).api.sendMessage =
+      async (...args: unknown[]) => { calls.push(args); };
+
+    await runChecklistTick(db, bot.bot, config, { date: TODAY, time: "07:05" });
+    const [, text, extra] = calls[0] as [number, string, { reply_markup?: { inline_keyboard: { text: string; url?: string }[][] } }];
+    expect(text).not.toContain("https://disk.example/47.pdf");
+    const urls = extra.reply_markup!.inline_keyboard.flat().filter((b) => b.url);
+    expect(urls.map((b) => b.url)).toContain("https://disk.example/47.pdf");
   });
 });

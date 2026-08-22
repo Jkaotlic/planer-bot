@@ -3,6 +3,7 @@ import { checklistText, needsChecklistToday } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
+import { readChecklistSettings } from "../repo/checklist-settings";
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
@@ -53,7 +54,13 @@ export async function runChecklistTick(
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) continue;
 
     const marked = listMarksFor(db, now.date, employeeId).map((m) => m.itemId);
-    const text = ["Чек-лист на сегодня:", "", checklistText(items, marked)].join("\n");
+    const settings = readChecklistSettings(db);
+    const text = [
+      "Чек-лист на сегодня:",
+      "",
+      ...(settings.note ? [settings.note, ""] : []),
+      checklistText(items, marked),
+    ].join("\n");
     // `web_app`-кнопка в inline-клавиатуре, а не в обычной: из кнопки клавиатуры
     // Telegram не передаёт мини-аппу подпись, и вход падает с 401 — это уже
     // проходили 2026-08-12 (`keyboard.ts` носит тот же комментарий).
@@ -61,8 +68,18 @@ export async function runChecklistTick(
     // открывается по умолчанию, а параметр, которого `screenFromSearch` не
     // знает, обещал бы маршрут, которого нет.
     const kb = new InlineKeyboard().webApp("☑️ Отметить", `${config.publicUrl}/app/`);
+    // Ссылка кнопкой, а не строкой в теле: в тексте она разворачивается превью и
+    // отжимает сам список вниз, а нажать её всё равно надо отдельным касанием.
+    if (settings.docUrl) kb.url("📄 Инструкция", settings.docUrl);
 
     try {
+      // Документ первым: он контекст к списку, а не сноска после него. Один раз
+      // в день — вместе с сообщением, которое дедуплицировано `reminder_log`.
+      if (settings.docFileId) {
+        await bot.api.sendDocument(owner.telegramUserId, settings.docFileId, {
+          caption: settings.docName ? `📄 ${settings.docName}` : "📄 Инструкция дежурного",
+        });
+      }
       await bot.api.sendMessage(owner.telegramUserId, text, { reply_markup: kb });
       addReminder(db, shift.id, CHECKLIST_KIND);
       sent += 1;

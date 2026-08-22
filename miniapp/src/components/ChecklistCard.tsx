@@ -53,6 +53,27 @@ export function ChecklistCard({ today }: { today: string }) {
         header="Чек-лист на сегодня"
         footer={done === total ? "Всё сделано — спасибо." : `Сделано ${done} из ${total}.`}
       >
+        {/* Инструкция стоит НАД пунктами: её читают до обхода, а не после.
+            Все три способа рядом, потому что закрывают разные случаи — короткий
+            текст читается сразу, ссылка ведёт в живой документ, файл уже лежит
+            в чате и доступен там, где интернета может не быть. */}
+        {(state.note || state.docUrl || state.docName) && (
+          <div className="checklist-intro">
+            {state.note && <p className="checklist-intro__note">{state.note}</p>}
+            {state.docUrl && (
+              <a className="checklist-doc-link" href={state.docUrl} target="_blank" rel="noreferrer">
+                📄 Открыть инструкцию
+              </a>
+            )}
+            {/* Файл живёт в Telegram, и показать его здесь нечем. Молчать про
+                него нельзя: человек прочитает «инструкция есть» и пойдёт искать
+                её на этом экране. */}
+            {state.docName && (
+              <p className="checklist-intro__doc">📎 {state.docName} — в чате с ботом, вместе с утренним сообщением.</p>
+            )}
+          </div>
+        )}
+
         <div className="checklist">
           {state.items.map((item) => {
             const checked = marked.has(item.id);
@@ -68,7 +89,12 @@ export function ChecklistCard({ today }: { today: string }) {
                 <span className="checklist-item__box" aria-hidden="true">
                   {busyId === item.id ? <Spinner size="s" /> : checked ? "✅" : "◻️"}
                 </span>
-                <span className="checklist-item__title">{item.title}</span>
+                <span className="checklist-item__body">
+                  <span className="checklist-item__title">{item.title}</span>
+                  {/* Пояснение под подписью, а не в скобках за ней: строка
+                      списка должна оставаться строкой, по которой ведут пальцем. */}
+                  {item.note && <span className="checklist-item__note">{item.note}</span>}
+                </span>
               </button>
             );
           })}
