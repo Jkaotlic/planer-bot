@@ -29,10 +29,16 @@ import {
   mockGetTemplates,
   mockCreateEntry,
   mockCreateEntryRange,
-  mockGetMyChecklist,
+  mockGetMyChecklists,
   mockMarkChecklistItem,
-  mockGetChecklistItems,
+  mockGetChecklists,
+  mockCreateChecklist,
+  mockPatchChecklist,
+  mockDeleteChecklist,
+  mockRemoveChecklistDoc,
+  mockSetChecklistTemplates,
   mockAddChecklistItem,
+  mockUpdateChecklistItem,
   mockRemoveChecklistItem,
   mockCreateEntries,
   mockUpdateEntry,
@@ -285,26 +291,47 @@ export interface NewEntryRangeInput {
   includeWeekends?: boolean;
 }
 
-/** Чек-лист дежурного на день — то, что видит сам работник. */
-export interface MyChecklist {
-  date: string;
-  /** Положен ли он сегодня. `false` и при пустом списке пунктов: проходить нечего. */
-  required: boolean;
-  items: ChecklistItem[];
-  markedItemIds: number[];
-  /** Пояснение на весь чек-лист. */
-  note: string | null;
-  /** Ссылка на документ с процедурой. */
-  docUrl: string | null;
-  /** Имя файла, который бот прислал в чат. Самого файла у мини-аппа нет. */
-  docName: string | null;
-}
-
+/** Пункт чек-листа. */
 export interface ChecklistItem {
   id: number;
   title: string;
   /** Пояснение: как именно проверять. */
   note: string | null;
+}
+
+/** Один чек-лист глазами того, кто его сегодня проходит. */
+export interface MyChecklistView {
+  id: number;
+  name: string;
+  note: string | null;
+  docUrl: string | null;
+  /** Имя файла, который бот прислал в чат. Самого файла у мини-аппа нет. */
+  docName: string | null;
+  items: ChecklistItem[];
+  markedItemIds: number[];
+}
+
+/**
+ * Чек-листы на день.
+ *
+ * Список, а не один: у человека в день бывают две записи разных видов, и каждая
+ * приносит свою процедуру. Пустой — значит сегодня проходить нечего.
+ */
+export interface MyChecklists {
+  date: string;
+  checklists: MyChecklistView[];
+}
+
+/** Чек-лист целиком — для админского экрана. */
+export interface Checklist {
+  id: number;
+  name: string;
+  note: string | null;
+  docUrl: string | null;
+  docName: string | null;
+  hasDoc: boolean;
+  items: ChecklistItem[];
+  templateIds: number[];
 }
 
 export interface EntryRangeResult {
@@ -490,8 +517,8 @@ export interface TemplateRolesView {
   pool: number[];
   /** employeeId -> weight. Present means "asked for this kind". */
   preference: Record<number, number>;
-  /** Требует ли этот вид смены прохождения чек-листа дежурного. */
-  requiresChecklist: boolean;
+  /** Чек-лист, который проходит дежурный этого вида смены. `null` — никакого. */
+  checklistId: number | null;
 }
 
 /** One person's place in the queue for a kind of shift, already worded for display. */
@@ -715,11 +742,17 @@ export interface ApiClient {
   getTemplates(): Promise<Template[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
-  getMyChecklist(date: string): Promise<MyChecklist>;
-  markChecklistItem(date: string, itemId: number, done: boolean): Promise<MyChecklist>;
-  getChecklistItems(): Promise<ChecklistItem[]>;
-  addChecklistItem(title: string): Promise<ChecklistItem>;
-  removeChecklistItem(id: number): Promise<ChecklistItem[]>;
+  getMyChecklists(date: string): Promise<MyChecklists>;
+  markChecklistItem(date: string, itemId: number, done: boolean): Promise<{ checklistId: number; markedItemIds: number[] }>;
+  getChecklists(): Promise<Checklist[]>;
+  createChecklist(name: string): Promise<Checklist>;
+  patchChecklist(id: number, patch: { name?: string; note?: string | null; docUrl?: string | null }): Promise<Checklist>;
+  deleteChecklist(id: number): Promise<Checklist[]>;
+  removeChecklistDoc(id: number): Promise<Checklist>;
+  setChecklistTemplates(id: number, templateIds: number[]): Promise<Checklist>;
+  addChecklistItem(checklistId: number, title: string): Promise<Checklist>;
+  updateChecklistItem(itemId: number, patch: { title?: string; note?: string | null }): Promise<Checklist>;
+  removeChecklistItem(itemId: number): Promise<Checklist>;
   /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
    *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
@@ -754,7 +787,7 @@ export interface ApiClient {
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
-  setTemplateChecklist(templateId: number, requiresChecklist: boolean): Promise<void>;
+  setTemplateChecklist(templateId: number, checklistId: number | null): Promise<void>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
@@ -1135,14 +1168,26 @@ export const realClient: ApiClient = {
 
   createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
 
-  getMyChecklist: (date) => authorizedGet<MyChecklist>(`/api/my/checklist?date=${date}`),
+  getMyChecklists: (date) => authorizedGet<MyChecklists>(`/api/my/checklist?date=${date}`),
   markChecklistItem: (date, itemId, done) =>
-    authorizedPostJson<MyChecklist>("/api/my/checklist/mark", { date, itemId, done }),
-  getChecklistItems: () => authorizedGet<{ items: ChecklistItem[] }>("/api/admin/checklist/items").then((r) => r.items),
-  addChecklistItem: (title) =>
-    authorizedPostJson<{ item: ChecklistItem }>("/api/admin/checklist/items", { title }).then((r) => r.item),
-  removeChecklistItem: (id) =>
-    authorizedDelete<{ items: ChecklistItem[] }>(`/api/admin/checklist/items/${id}`).then((r) => r.items),
+    authorizedPostJson<{ checklistId: number; markedItemIds: number[] }>("/api/my/checklist/mark", { date, itemId, done }),
+  getChecklists: () => authorizedGet<{ checklists: Checklist[] }>("/api/admin/checklists").then((r) => r.checklists),
+  createChecklist: (name) =>
+    authorizedPostJson<{ checklist: Checklist }>("/api/admin/checklists", { name }).then((r) => r.checklist),
+  patchChecklist: (id, patch) =>
+    authorizedPatchJson<{ checklist: Checklist }>(`/api/admin/checklists/${id}`, patch).then((r) => r.checklist),
+  deleteChecklist: (id) =>
+    authorizedDelete<{ checklists: Checklist[] }>(`/api/admin/checklists/${id}`).then((r) => r.checklists),
+  removeChecklistDoc: (id) =>
+    authorizedDelete<{ checklist: Checklist }>(`/api/admin/checklists/${id}/doc`).then((r) => r.checklist),
+  setChecklistTemplates: (id, templateIds) =>
+    authorizedPutJson<{ checklist: Checklist }>(`/api/admin/checklists/${id}/templates`, { templateIds }).then((r) => r.checklist),
+  addChecklistItem: (checklistId, title) =>
+    authorizedPostJson<{ checklist: Checklist }>(`/api/admin/checklists/${checklistId}/items`, { title }).then((r) => r.checklist),
+  updateChecklistItem: (itemId, patch) =>
+    authorizedPatchJson<{ checklist: Checklist }>(`/api/admin/checklist/items/${itemId}`, patch).then((r) => r.checklist),
+  removeChecklistItem: (itemId) =>
+    authorizedDelete<{ checklist: Checklist }>(`/api/admin/checklist/items/${itemId}`).then((r) => r.checklist),
   createEntries: (inputs) =>
     authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
   updateEntry: (id, input) =>
@@ -1287,8 +1332,8 @@ export const realClient: ApiClient = {
     if (!res.ok) throw new Error(await errorMessage(path, res));
   },
 
-  async setTemplateChecklist(templateId, requiresChecklist) {
-    await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { requiresChecklist });
+  async setTemplateChecklist(templateId, checklistId) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { checklistId });
   },
 
   async getRosterCsv(from, to) {
@@ -1370,11 +1415,17 @@ const devClient: ApiClient = {
   getTemplates: () => mockGetTemplates(),
   createEntry: (input) => mockCreateEntry(input),
   createEntryRange: (input) => mockCreateEntryRange(input),
-  getMyChecklist: (date) => mockGetMyChecklist(date),
+  getMyChecklists: (date) => mockGetMyChecklists(date),
   markChecklistItem: (date, itemId, done) => mockMarkChecklistItem(date, itemId, done),
-  getChecklistItems: () => mockGetChecklistItems(),
-  addChecklistItem: (title) => mockAddChecklistItem(title),
-  removeChecklistItem: (id) => mockRemoveChecklistItem(id),
+  getChecklists: () => mockGetChecklists(),
+  createChecklist: (name) => mockCreateChecklist(name),
+  patchChecklist: (id, patch) => mockPatchChecklist(id, patch),
+  deleteChecklist: (id) => mockDeleteChecklist(id),
+  removeChecklistDoc: (id) => mockRemoveChecklistDoc(id),
+  setChecklistTemplates: (id, templateIds) => mockSetChecklistTemplates(id, templateIds),
+  addChecklistItem: (checklistId, title) => mockAddChecklistItem(checklistId, title),
+  updateChecklistItem: (itemId, patch) => mockUpdateChecklistItem(itemId, patch),
+  removeChecklistItem: (itemId) => mockRemoveChecklistItem(itemId),
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),

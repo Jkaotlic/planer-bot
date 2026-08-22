@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { List, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { checklistProgress } from "@planer/shared";
-import { apiClient, type MyChecklist } from "../api/client";
+import { apiClient, type MyChecklistView } from "../api/client";
 
 /**
  * Чек-лист дежурного во вкладке «Мои смены».
@@ -15,31 +15,32 @@ import { apiClient, type MyChecklist } from "../api/client";
  * открытый рядом чат бота показывает другое.
  */
 export function ChecklistCard({ today }: { today: string }) {
-  const [state, setState] = useState<MyChecklist | null>(null);
+  const [lists, setLists] = useState<MyChecklistView[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     apiClient
-      .getMyChecklist(today)
-      .then((loaded) => { if (alive) setState(loaded); })
+      .getMyChecklists(today)
+      .then((loaded) => { if (alive) setLists(loaded.checklists); })
       // Молча: чек-лист — не главное на этом экране, и его отказ не должен
       // выглядеть поломкой смен.
-      .catch(() => { if (alive) setState(null); });
+      .catch(() => { if (alive) setLists([]); });
     return () => { alive = false; };
   }, [today]);
 
-  if (!state?.required || state.items.length === 0) return null;
-
-  const { done, total } = checklistProgress(state.items, state.markedItemIds);
-  const marked = new Set(state.markedItemIds);
+  if (lists.length === 0) return null;
 
   async function toggle(itemId: number, next: boolean) {
     setBusyId(itemId);
     setError(null);
     try {
-      setState(await apiClient.markChecklistItem(today, itemId, next));
+      const { checklistId, markedItemIds } = await apiClient.markChecklistItem(today, itemId, next);
+      // Отметки приходят от сервера и подменяются только у своего списка:
+      // у человека в день бывает два чек-листа, и ответ про один не должен
+      // трогать другой.
+      setLists((current) => current.map((list) => (list.id === checklistId ? { ...list, markedItemIds } : list)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить отметку");
     } finally {
@@ -48,9 +49,34 @@ export function ChecklistCard({ today }: { today: string }) {
   }
 
   return (
+    <>
+      {lists.map((list) => (
+        <ChecklistSection key={list.id} list={list} busyId={busyId} error={error} onToggle={toggle} />
+      ))}
+    </>
+  );
+}
+
+/** Один чек-лист: инструкция, пункты, счётчик. */
+function ChecklistSection({
+  list,
+  busyId,
+  error,
+  onToggle,
+}: {
+  list: MyChecklistView;
+  busyId: number | null;
+  error: string | null;
+  onToggle: (itemId: number, next: boolean) => void;
+}) {
+  const { done, total } = checklistProgress(list.items, list.markedItemIds);
+  const marked = new Set(list.markedItemIds);
+  const state = list;
+
+  return (
     <List>
       <Section
-        header="Чек-лист на сегодня"
+        header={list.name}
         footer={done === total ? "Всё сделано — спасибо." : `Сделано ${done} из ${total}.`}
       >
         {/* Инструкция стоит НАД пунктами: её читают до обхода, а не после.
@@ -84,7 +110,7 @@ export function ChecklistCard({ today }: { today: string }) {
                 className={`checklist-item${checked ? " checklist-item--done" : ""}`}
                 disabled={busyId === item.id}
                 aria-pressed={checked}
-                onClick={() => void toggle(item.id, !checked)}
+                onClick={() => onToggle(item.id, !checked)}
               >
                 <span className="checklist-item__box" aria-hidden="true">
                   {busyId === item.id ? <Spinner size="s" /> : checked ? "✅" : "◻️"}

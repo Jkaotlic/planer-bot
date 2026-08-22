@@ -11,6 +11,7 @@ export type AdminSection =
   | "schedule"
   | "weekend"
   | "employees"
+  | "checklists"
   | "collections"
   | "announce"
   | "bugs"

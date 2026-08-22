@@ -2,20 +2,24 @@ import { and, asc, eq, max } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { checklistItems, checklistMarks, type ChecklistItem, type ChecklistMark } from "../db/schema";
 
-/** Пункты, которые сегодня показывают человеку, в заданном админом порядке. */
-export function activeChecklistItems(db: Db): ChecklistItem[] {
+/** Пункты одного чек-листа, в заданном админом порядке. */
+export function activeChecklistItems(db: Db, checklistId: number): ChecklistItem[] {
   return db
     .select()
     .from(checklistItems)
-    .where(eq(checklistItems.isActive, true))
+    .where(and(eq(checklistItems.checklistId, checklistId), eq(checklistItems.isActive, true)))
     .orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id))
     .all();
 }
 
-/** Новый пункт встаёт в конец списка — админ переставит, если ему нужно иначе. */
-export function createChecklistItem(db: Db, title: string): ChecklistItem {
-  const last = db.select({ n: max(checklistItems.sortOrder) }).from(checklistItems).get()?.n ?? -1;
-  return db.insert(checklistItems).values({ title, sortOrder: last + 1 }).returning().all()[0]!;
+/** Новый пункт встаёт в конец СВОЕГО списка — админ переставит, если нужно иначе. */
+export function createChecklistItem(db: Db, checklistId: number, title: string): ChecklistItem {
+  const last = db
+    .select({ n: max(checklistItems.sortOrder) })
+    .from(checklistItems)
+    .where(eq(checklistItems.checklistId, checklistId))
+    .get()?.n ?? -1;
+  return db.insert(checklistItems).values({ checklistId, title, sortOrder: last + 1 }).returning().all()[0]!;
 }
 
 /** Правит подпись и/или пояснение. `undefined` — «не трогать это поле». */
@@ -45,8 +49,8 @@ export function deactivateChecklistItem(db: Db, id: number): void {
 
 /** Ставит пункт на нужное место, сдвигая остальные. Порядок пишется целиком —
  *  список короткий, а частичный сдвиг оставлял бы дыры в нумерации. */
-export function reorderChecklistItem(db: Db, id: number, toIndex: number): void {
-  const items = activeChecklistItems(db);
+export function reorderChecklistItem(db: Db, checklistId: number, id: number, toIndex: number): void {
+  const items = activeChecklistItems(db, checklistId);
   const from = items.findIndex((item) => item.id === id);
   if (from === -1) return;
   const [moved] = items.splice(from, 1);
@@ -83,6 +87,11 @@ export function setMark(db: Db, input: MarkInput): void {
   db.delete(checklistMarks)
     .where(and(eq(checklistMarks.date, date), eq(checklistMarks.employeeId, employeeId), eq(checklistMarks.itemId, itemId)))
     .run();
+}
+
+/** Пункт по номеру — чтобы узнать, к какому чек-листу он принадлежит. */
+export function getChecklistItem(db: Db, id: number): ChecklistItem | undefined {
+  return db.select().from(checklistItems).where(eq(checklistItems.id, id)).get();
 }
 
 /** Что этот человек отметил в этот день. */

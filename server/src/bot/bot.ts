@@ -41,14 +41,8 @@ import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { outsidePoolFacts } from "../swap/duty-notice";
 import { safeErrorMessage } from "../util/safe-error";
 import { openBugPrompt, getBugPending, clearBugPending, shouldCapture, submitBugReport, resolveBugReport } from "../bugs/bug-service";
-import {
-  clearChecklistDoc,
-  clearDocPending,
-  docPendingFor,
-  readChecklistSettings,
-  saveChecklistDoc,
-  startDocPending,
-} from "../repo/checklist-settings";
+import { getChecklist, listChecklists, updateChecklist } from "../repo/checklists";
+import { clearDocPending, docPendingFor, startDocPending } from "../bugs/doc-pending";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
 // plain Telegram chat text — Telegram syncs history to every signed-in device
@@ -642,6 +636,10 @@ export function createBot(deps: BotDeps): Bot {
    * Файл никуда не скачивается: хранится `file_id`, и бот пересылает документ по
    * нему. Своё хранилище ради одного PDF означало бы бэкапы, права и чистку —
    * всё то, что Telegram уже делает.
+   *
+   * Первым делом спрашивает, К КАКОМУ чек-листу: их несколько, у дежурного с
+   * семи и у дежурного с восьми инструкции разные, и «приложить вообще» — это
+   * вопрос без ответа.
    */
   async function startInstructionUpload(ctx: Context): Promise<void> {
     const from = ctx.from;
@@ -656,31 +654,67 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
 
-    const current = readChecklistSettings(db);
-    const keyboard = current.docFileId
-      ? { inline_keyboard: [[{ text: "🗑 Убрать инструкцию", callback_data: "checklist:doc:clear" }]] }
-      : undefined;
-    startDocPending(db, who.me.id);
-    await ctx.reply(
-      current.docFileId
-        ? `Сейчас приложено: ${current.docName ?? "файл"}.\nПришли новый файл одним сообщением — он заменит прежний.`
-        : "Пришли файл одним сообщением — я приложу его к чек-листу, и он будет уходить дежурным вместе со списком.",
-      { reply_markup: keyboard },
-    );
+    const lists = listChecklists(db);
+    if (lists.length === 0) {
+      await ctx.reply("Сначала заведи чек-лист в консоли — на экране «Чек-листы». Тогда будет к чему прикладывать.");
+      return;
+    }
+
+    await ctx.reply("К какому чек-листу приложить инструкцию?", {
+      reply_markup: {
+        inline_keyboard: lists.map((list) => [
+          {
+            text: list.docFileId ? `${list.name} · заменить файл` : list.name,
+            callback_data: `checklist:doc:${list.id}`,
+          },
+        ]),
+      },
+    });
   }
 
   bot.command("instruction", (ctx) => startInstructionUpload(ctx));
 
-  bot.callbackQuery("checklist:doc:clear", async (ctx) => {
+  bot.callbackQuery(/^checklist:doc:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
       await ctx.answerCallbackQuery({ text: "Только для админов" });
       return;
     }
-    clearChecklistDoc(db, who.me.id);
+    const checklistId = Number(ctx.match[1]);
+    const list = getChecklist(db, checklistId);
+    if (!list) {
+      await ctx.answerCallbackQuery({ text: "Чек-лист удалён" });
+      return;
+    }
+    startDocPending(db, who.me.id, checklistId);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      list.docFileId
+        ? `«${list.name}»: сейчас приложено «${list.docName ?? "файл"}».\nПришли новый файл одним сообщением — он заменит прежний.`
+        : `«${list.name}»: пришли файл одним сообщением — он будет уходить дежурным вместе со списком.`,
+      list.docFileId
+        ? { reply_markup: { inline_keyboard: [[{ text: "🗑 Убрать файл", callback_data: `checklist:docclear:${list.id}` }]] } }
+        : undefined,
+    );
+  });
+
+  bot.callbackQuery(/^checklist:docclear:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Только для админов" });
+      return;
+    }
+    const checklistId = Number(ctx.match[1]);
+    const list = getChecklist(db, checklistId);
+    if (!list) {
+      await ctx.answerCallbackQuery({ text: "Чек-лист удалён" });
+      return;
+    }
+    updateChecklist(db, checklistId, { docFileId: null, docName: null });
     clearDocPending(db);
+    recordAudit(db, "checklist_doc_changed", who.me.id, { fileName: list.docName, attached: false, checklistName: list.name });
     await ctx.answerCallbackQuery({ text: "Убрал" });
-    await ctx.reply("Инструкция снята — дежурным она больше не уходит.");
+    await ctx.reply(`«${list.name}»: инструкция снята — дежурным она больше не уходит.`);
   });
 
   /**
@@ -693,13 +727,23 @@ export function createBot(deps: BotDeps): Bot {
     if (ctx.chat.type !== "private") return;
     const who = acting(ctx.from?.id ?? 0);
     if (!who.ok || !actsAsAdmin(who.me, ctx.from!.id)) return;
-    if (!docPendingFor(db, who.me.id, new Date())) return;
+    const pending = docPendingFor(db, who.me.id, new Date());
+    if (pending == null) return;
+    const list = getChecklist(db, pending);
+    if (!list) {
+      clearDocPending(db);
+      return;
+    }
 
     const doc = ctx.msg.document;
-    saveChecklistDoc(db, { fileId: doc.file_id, fileName: doc.file_name ?? null }, who.me.id);
+    updateChecklist(db, pending, { docFileId: doc.file_id, docName: doc.file_name ?? "Инструкция" });
     clearDocPending(db);
-    recordAudit(db, "checklist_doc_changed", who.me.id, { fileName: doc.file_name ?? null, attached: true });
-    await ctx.reply(`Приложил «${doc.file_name ?? "файл"}». Дежурные получат его вместе с чек-листом.`);
+    recordAudit(db, "checklist_doc_changed", who.me.id, {
+      fileName: doc.file_name ?? null,
+      attached: true,
+      checklistName: list.name,
+    });
+    await ctx.reply(`Приложил «${doc.file_name ?? "файл"}» к чек-листу «${list.name}». Дежурные получат его вместе со списком.`);
   });
 
   bot.on("message:text", async (ctx) => {

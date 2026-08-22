@@ -380,7 +380,7 @@ export function App() {
         ) : nav === "kinds" ? (
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "checklist" ? (
-          <ChecklistScreen />
+          <ChecklistScreen templates={templates ?? []} />
         ) : nav === "weekend" ? (
           <WeekendAdminScreen />
         ) : nav === "collections" ? (

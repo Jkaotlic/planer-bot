@@ -1,9 +1,9 @@
 import { InlineKeyboard, type Bot } from "grammy";
-import { checklistText, needsChecklistToday } from "@planer/shared";
+import { checklistText, checklistsDueToday } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
-import { readChecklistSettings } from "../repo/checklist-settings";
+import { getChecklist } from "../repo/checklists";
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
@@ -33,11 +33,10 @@ export async function runChecklistTick(
   config: Config,
   now: { date: string; time: string },
 ): Promise<number> {
-  const items = activeChecklistItems(db);
-  if (items.length === 0) return 0;
-
-  const requiring = new Set(listActiveTemplates(db).filter((t) => t.requiresChecklist).map((t) => t.id));
-  if (requiring.size === 0) return 0;
+  const byTemplate = new Map(
+    listActiveTemplates(db).flatMap((t) => (t.checklistId != null ? [[t.id, t.checklistId] as const] : [])),
+  );
+  if (byTemplate.size === 0) return 0;
 
   const today = listShiftsOverlapping(db, now.date, now.date);
   let sent = 0;
@@ -45,7 +44,15 @@ export async function runChecklistTick(
   for (const shift of today) {
     const employeeId = shift.employeeId;
     if (employeeId == null) continue;
-    if (!needsChecklistToday([shift], requiring, now.date, employeeId)) continue;
+    // Чек-лист берётся у ЭТОЙ смены, а не «какой-нибудь сегодняшний»: у человека
+    // в один день бывают две записи разных видов, и каждая приносит свой список
+    // в своё время.
+    const [checklistId] = checklistsDueToday([shift], byTemplate, now.date, employeeId);
+    if (checklistId == null) continue;
+    const list = getChecklist(db, checklistId);
+    const items = activeChecklistItems(db, checklistId);
+    if (!list || items.length === 0) continue;
+
     // Смена ещё не началась — человек не на этаже, и проверять нечего.
     if (shift.start != null && now.time < shift.start) continue;
     if (hasReminder(db, shift.id, CHECKLIST_KIND)) continue;
@@ -54,9 +61,9 @@ export async function runChecklistTick(
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) continue;
 
     const marked = listMarksFor(db, now.date, employeeId).map((m) => m.itemId);
-    const settings = readChecklistSettings(db);
+    const settings = { note: list.note, docUrl: list.docUrl, docFileId: list.docFileId, docName: list.docName };
     const text = [
-      "Чек-лист на сегодня:",
+      `${list.name} — на сегодня:`,
       "",
       ...(settings.note ? [settings.note, ""] : []),
       checklistText(items, marked),

@@ -25,30 +25,37 @@ export interface ChecklistItemLike {
 }
 
 /**
- * Положен ли человеку чек-лист в этот день.
+ * Какие чек-листы человек проходит в этот день.
  *
  * Признак — вид смены, а не часы: «утренний дежурный» из времени не выводится
  * (07:00 бывает и у смены, а дежурство бывает вечерним), и гадать здесь значит
- * однажды прислать чек-лист не тому. Что считать дежурством с проверкой, решает
- * админ галочкой на пресете.
+ * однажды прислать чек-лист не тому. Какой именно чек-лист у какого вида смены,
+ * решает админ на «Видах смен».
  *
- * Запись без пресета чек-листа не требует: галочка живёт на пресете, и у смены,
- * поставленной «своим временем», сказать это нечем.
+ * Множество, а не «да/нет»: у человека в один день бывает две записи разных
+ * видов, и каждая приносит свой список. Порядок — как в расписании, чтобы у
+ * ранней смены проверки шли первыми.
+ *
+ * Запись без пресета чек-листа не приносит: привязка живёт на пресете, и у
+ * смены, поставленной «своим временем», взять её неоткуда.
  */
-export function needsChecklistToday(
+export function checklistsDueToday(
   entries: readonly ChecklistEntryLike[],
-  templatesRequiringChecklist: ReadonlySet<number>,
+  checklistIdByTemplate: ReadonlyMap<number, number>,
   date: string,
   employeeId: number,
-): boolean {
-  return entries.some(
-    (entry) =>
-      entry.employeeId === employeeId &&
-      entry.templateId != null &&
-      templatesRequiringChecklist.has(entry.templateId) &&
-      entry.date <= date &&
-      (entry.endDate ?? entry.date) >= date,
-  );
+): number[] {
+  const due: number[] = [];
+  for (const entry of entries) {
+    if (entry.employeeId !== employeeId) continue;
+    if (entry.templateId == null) continue;
+    if (entry.date > date || (entry.endDate ?? entry.date) < date) continue;
+    const checklistId = checklistIdByTemplate.get(entry.templateId);
+    // Один и тот же чек-лист у двух записей дня — это один чек-лист, а не два:
+    // человек не проходит одни и те же пункты дважды.
+    if (checklistId != null && !due.includes(checklistId)) due.push(checklistId);
+  }
+  return due;
 }
 
 export interface ChecklistProgress {

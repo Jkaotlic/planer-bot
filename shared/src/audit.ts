@@ -43,7 +43,7 @@ export const AUDIT_TYPES = [
   "collection_closed", "collection_deleted",
   "reminder_undeliverable", "reminders_dispatched",
   "announcement_sent",
-  "checklist_completed", "checklist_doc_changed",
+  "checklist_completed", "checklist_doc_changed", "checklist_changed",
   "bug_report_created", "bug_report_resolved",
 ] as const;
 
@@ -397,8 +397,10 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   }),
   template_checklist_changed: (p) => ({
     icon: "☑️",
-    title: p.requiresChecklist === true ? "Виду смены назначен чек-лист" : "С вида смены снят чек-лист",
-    lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`],
+    title: str(p.checklistName) ? "Виду смены назначен чек-лист" : "С вида смены снят чек-лист",
+    lines: [
+      [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, str(p.checklistName)].filter(Boolean).join(" → "),
+    ],
   }),
   template_rotation_changed: (p) => ({
     icon: "🎚",
@@ -505,9 +507,17 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   checklist_completed: (p) => ({
     icon: "☑️",
     title: "Чек-лист пройден",
-    lines: [`${personLabel(p)} · ${dayLabel(p.date)}`, `${num(p.total) ?? 0} ${pluralItems(num(p.total) ?? 0)}`],
+    lines: [
+      `${personLabel(p)} · ${dayLabel(p.date)}`,
+      [str(p.checklistName), `${num(p.total) ?? 0} ${pluralItems(num(p.total) ?? 0)}`].filter(Boolean).join(" · "),
+    ],
   }),
 
+  checklist_changed: (p) => ({
+    icon: "☑️",
+    title: p.action === "deleted" ? "Удалён чек-лист" : "Заведён чек-лист",
+    lines: [str(p.name) ?? "чек-лист"],
+  }),
   checklist_doc_changed: (p) => ({
     icon: "📄",
     title: p.attached === true ? "Приложена инструкция дежурного" : "Снята инструкция дежурного",
