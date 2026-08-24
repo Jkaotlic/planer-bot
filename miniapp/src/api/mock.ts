@@ -4,8 +4,6 @@ import type { Category } from "../categories";
 import type {
   AdminSettings,
   AdminSlotView,
-  DistributeResult,
-  UnfilledSlot,
   Employee,
   Me,
   NewEntryInput,
@@ -174,7 +172,7 @@ function entry(draft: EntryDraft): Shift {
 
 // A full week across a six-person active roster (Пн=0 .. Вс=6). Аня (id 1) is the
 // caller — her entries double as "my shifts" and appear in the team view.
-// Mutable: the admin schedule screen's create/update/delete/distribute
+// Mutable: the admin schedule screen's create/update/delete
 // mutators operate on this same array so the team/my views reflect edits
 // without a reload.
 // Preset-backed entries carry their `templateId` (see TEMPLATES below), which is
@@ -757,46 +755,6 @@ export async function mockDeleteSelfEntry(id: number): Promise<void> {
   const refusal = selfEntryEditRefusal(ALL_ENTRIES[index]!, toISODate(new Date()));
   if (refusal) throw new Error(refusal);
   ALL_ENTRIES.splice(index, 1);
-}
-
-/**
- * A deliberately simple stand-in for the server's fair-distribution pass:
- * hands every still-unassigned entry in the window to whichever active worker
- * is currently carrying the fewest entries that week (ties broken by id).
- * `apply` writes the choices back onto `ALL_ENTRIES`; otherwise it's a preview.
- */
-export async function mockDistribute(from: string, to: string, apply: boolean): Promise<DistributeResult> {
-  await delay(300);
-  const activeIds = EMPLOYEES.filter((e) => e.isActive).map((e) => e.id);
-  const load = new Map<number, number>(activeIds.map((id) => [id, 0]));
-  for (const s of ALL_ENTRIES) {
-    if (s.employeeId != null && load.has(s.employeeId) && overlapsRange(s, from, to)) {
-      load.set(s.employeeId, (load.get(s.employeeId) ?? 0) + 1);
-    }
-  }
-  const assignments: { shiftId: number; employeeId: number }[] = [];
-  // Same contract as the server's: a slot it could not place comes back said out
-  // loud, so the dev screen shows the real notice rather than a silent shortfall.
-  const unfilled: UnfilledSlot[] = [];
-  for (const shift of ALL_ENTRIES.filter((s) => s.employeeId == null && overlapsRange(s, from, to))) {
-    let best = activeIds[0];
-    if (best == null) {
-      unfilled.push({ shiftId: shift.id, date: shift.date, kind: shift.title ?? "Своё время", reason: "nobody_free" });
-      continue;
-    }
-    for (const id of activeIds) {
-      if ((load.get(id) ?? 0) < (load.get(best) ?? 0)) best = id;
-    }
-    assignments.push({ shiftId: shift.id, employeeId: best });
-    load.set(best, (load.get(best) ?? 0) + 1);
-    if (apply) {
-      shift.employeeId = best;
-      shift.employeeName = personName(best);
-    }
-  }
-  // Превью ничего не пишет, поэтому и не уведомляет — тот же контракт, что у сервера.
-  const notified = apply ? mockReach(assignments.map((a) => a.employeeId)) : { delivered: 0, intended: 0 };
-  return { applied: apply, assignments, unfilled, notified };
 }
 
 // --- Работа в выходные дни (admin) + учёт часов ------------------------------

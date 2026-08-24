@@ -30,7 +30,7 @@ export function canAnnounce(e: Pick<AccessSubject, "isAdmin" | "isObserver">): b
   return e.isAdmin || e.isObserver;
 }
 
-/** Берёт ли его «Распределить честно», ★-очередь и назначение выходных. */
+/** Берёт ли его очередь дежурств и назначение выходных. */
 export function takesPartInAssignment(e: Pick<AccessSubject, "isObserver" | "excludedFromAssignment">): boolean {
   return !e.isObserver && !e.excludedFromAssignment;
 }

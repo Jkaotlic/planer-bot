@@ -9,11 +9,9 @@ import {
   type RosterPersonResolution,
   type Shift,
   type Template,
-  type TemplateRolesView,
   type Viewer,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
-import { BalanceRail } from "./components/BalanceRail";
 import { EventsFeed } from "./components/EventsFeed";
 import { PersonSearch } from "./components/PersonSearch";
 import { ScheduleGrid } from "./components/ScheduleGrid";
@@ -85,9 +83,6 @@ export function App() {
   const [weekMonday, setWeekMonday] = useState(() => mondayOf(new Date()));
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
-  /** Pools and preferences, for the ★ in the balance rail — it ranks by the same rule
-   *  the server does, and cannot do that without them. */
-  const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
   // Две разные беды, и раньше они лежали в одном поле, которое рисовалось вместо
@@ -126,17 +121,15 @@ export function App() {
   async function loadBootstrap(cancelled: () => boolean = () => false) {
     setBootError(null);
     try {
-      const [e, t, ev, roles] = await Promise.all([
+      const [e, t, ev] = await Promise.all([
         apiClient.getEmployees(),
         apiClient.getTemplates(),
         apiClient.getEvents(),
-        apiClient.getTemplateRoles(),
       ]);
       if (cancelled()) return;
       setEmployees(e);
       setTemplates(t);
       setEvents(ev);
-      setTemplateRoles(roles);
       // Своим запросом и отдельным catch: «кто я» — это подпись в футере, и её
       // отказ не повод показать экран «Повторить» вместо всей консоли. Не сумев
       // спросить, консоль остаётся безымянной — это честнее чужого имени.
@@ -447,10 +440,6 @@ export function App() {
                   query={scheduleQuery}
                 />
                 <aside className="right-rail">
-                  {/* BalanceRail НЕ фильтруется: она про справедливость раздачи по ВСЕЙ
-                      команде, и половина команды в ней — это не «отфильтровано», а
-                      неверное число. */}
-                  <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
                   <EventsFeed events={events} onOpenJournal={() => setNav("log")} />
                 </aside>
               </div>

@@ -3,8 +3,6 @@ import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinne
 import { PersonPicker } from "../../components/PersonPicker";
 import {
   ABSENCE_CATEGORIES,
-  allowedByPool,
-  countsForBalance,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   describeEntryRangeResult,
@@ -12,7 +10,6 @@ import {
   planEntryRange,
   resolveShiftTimes,
   takesPartInAssignment,
-  UNRECOGNISED_KIND,
   workPresets,
 } from "@planer/shared";
 import {
@@ -21,7 +18,6 @@ import {
   type NewEntryInput,
   type Shift,
   type Template,
-  type TemplateRolesView,
 } from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
@@ -77,91 +73,10 @@ export function showsWeekSwitcher(state: {
   return !state.csvOpen && !state.kindsOpen && !state.fillOpen && state.editing === null;
 }
 
-/** Who may take a kind of shift, and who asked for it — the two things the server
- *  applies before fairness, keyed by kind because that is how the tallies below are
- *  identified. MIRRORS `KindRoles` in the console's BalanceRail. */
-export interface KindRoles {
-  /** Employee ids allowed to take this kind. Empty means everyone. */
-  pool: readonly number[];
-  /** employeeId -> weight, higher wins. Absent means they didn't ask. */
-  preference: Readonly<Record<number, number>>;
-}
-
-export function rolesByKind(roles: readonly TemplateRolesView[]): Map<string, KindRoles> {
-  return new Map(roles.map((r) => [r.name, { pool: r.pool, preference: r.preference }]));
-}
-
-/**
- * Who «Распределить честно» hands the next shift of each kind to, in the server's own
- * order (`distributeFairly`): the pool as a hard filter, then fewest of that kind,
- * then who asked for it, then fewest shifts overall, then lowest id.
- *
- * The pool and the preference used to be missing here, which was harmless only while
- * no preset had a pool: the ★ would land on whoever held fewest of a duty across the
- * whole team — including people who may not take that duty at all — and the button
- * would then hand it to somebody else. A hint the admin believes has to rank by the
- * real rule.
- *
- * A kind with nobody eligible gets no entry, so no ★ at all: better a blank than a
- * name that cannot be picked. MIRRORS `nextPickByKind` in the console's BalanceRail.
- */
-export function nextPickByKind(
-  loads: readonly { employeeId: number; byKind: Record<string, number>; total: number }[],
-  kinds: readonly string[],
-  byKind: ReadonlyMap<string, KindRoles>,
-): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const kind of kinds) {
-    // A kind with no preset behind it (a one-off time, an old row) has no roles, which
-    // reads as "everyone" — the same as an unconfigured preset.
-    const kindRoles = byKind.get(kind);
-    const pool = kindRoles?.pool;
-    const preferenceOf = (employeeId: number) => kindRoles?.preference[employeeId] ?? 0;
-    const ranked = loads
-      // An empty pool means everyone — the server's own rule, imported rather than
-      // restated, so it cannot drift.
-      .filter((l) => allowedByPool(pool, l.employeeId))
-      .sort(
-        (a, b) =>
-          (a.byKind[kind] ?? 0) - (b.byKind[kind] ?? 0) ||
-          preferenceOf(b.employeeId) - preferenceOf(a.employeeId) ||
-          a.total - b.total ||
-          a.employeeId - b.employeeId,
-      );
-    const first = ranked[0];
-    if (first) out.set(kind, first.employeeId);
-  }
-  return out;
-}
-
-/**
- * What «⚖ Распределить честно» reports back.
- *
- * The count alone was a half-truth: a slot nobody could take is skipped by design,
- * so «Распределено смен: 3» over five empty cells read as success. A skipped slot
- * now gets said out loud, and the two reasons are kept apart — an emptied pool is a
- * setting to fix on «кто что может», everyone being away is just the week.
- */
-export function distributeNotice(
-  assigned: number,
-  unfilled: readonly { kind: string; reason: "empty_pool" | "nobody_free" }[],
-): string {
-  const head = assigned > 0 ? `Распределено смен: ${assigned}.` : "Не распределено ни одной смены.";
-  if (unfilled.length === 0) {
-    return assigned > 0 ? head : "Все смены уже распределены — свободных не было.";
-  }
-  const brokenPools = [...new Set(unfilled.filter((s) => s.reason === "empty_pool").map((s) => s.kind))];
-  if (brokenPools.length > 0) {
-    const kinds = brokenPools.map((kind) => `«${kind}»`).join(", ");
-    return `${head} Не удалось: ${unfilled.length}. У ${kinds} в пуле не осталось активных людей — проверь «кто что может».`;
-  }
-  return `${head} Не удалось: ${unfilled.length} — все, кто может, заняты или в отпуске.`;
-}
-
 /**
  * "Расписание" (admin, mobile): a day-at-a-time editor. Pick a day from the
  * week strip, see everyone working it, tap an entry to edit or delete it, add
- * new entries, and fairly auto-distribute the visible week. The desktop's
+ * new entries, and fill a whole week for one person. The desktop's
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
@@ -171,9 +86,6 @@ export function AdminScheduleScreen() {
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  /** Pools and preferences, for the ★ in «Заполнить неделю» — it ranks by the same rule
-   *  the server does, and cannot do that without them. */
-  const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [error, setError] = useState<string | null>(null);
   /**
    * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
@@ -184,7 +96,6 @@ export function AdminScheduleScreen() {
    */
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [distributing, setDistributing] = useState(false);
   /** null = closed, "new" = add form, a Shift = editing that entry. */
   const [editing, setEditing] = useState<Shift | "new" | null>(null);
   /** When true, the day view is replaced by the "Заполнить неделю" bulk-fill flow. */
@@ -199,9 +110,9 @@ export function AdminScheduleScreen() {
   const to = weekDates[6]!;
   const today = toISODate(new Date());
 
-  // «⚖ Распределить честно» and «📅 Заполнить неделю» both hold the week they
-  // started on in a closure and, being async, can still be running after the
-  // admin taps to a different week. Without this, whichever fetch resolves
+  // «📅 Заполнить неделю» и импорт файла держат в замыкании ту неделю, на
+  // которой начались, и, будучи асинхронными, могут доработать уже после того,
+  // как админ ушёл на другую неделю. Without this, whichever fetch resolves
   // last wins outright — possibly the stale one — and the header can end up
   // showing week N+1 while the list still shows week N. Same idea as
   // `team-schedule.ts`'s gate: every fetch that ends in `setShifts` registers
@@ -209,8 +120,8 @@ export function AdminScheduleScreen() {
   // newest one.
   const gate = useRef(createLatestRequestGate());
 
-  /** Отказ не пробрасывается: зовущие («Сохранить», «Заполнить неделю», импорт,
-   *  «Распределить честно») своё дело уже сделали, и провалившееся перечитывание
+  /** Отказ не пробрасывается: зовущие («Сохранить», «Заполнить неделю», импорт)
+   *  своё дело уже сделали, и провалившееся перечитывание
    *  не повод говорить им, что не удалось сохранить. Оно докладывает о себе само —
    *  на месте дня, с кнопкой «Повторить». */
   async function loadWeek(fromIso: string, toIso: string) {
@@ -235,12 +146,11 @@ export function AdminScheduleScreen() {
   // Roster + templates load once; they don't change with the visible week.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates(), apiClient.getTemplateRoles()])
-      .then(([emps, tmpls, roles]) => {
+    Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates()])
+      .then(([emps, tmpls]) => {
         if (cancelled) return;
         setEmployees(emps.filter((e) => e.isActive));
         setTemplates(tmpls);
-        setTemplateRoles(roles);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -252,7 +162,7 @@ export function AdminScheduleScreen() {
 
   // Schedule reloads whenever the visible week changes. Registers with the same
   // gate as `loadWeek` — navigating here must supersede a still-running
-  // «Распределить честно» / «Заполнить неделю» from the week just left, exactly
+  // «Заполнить неделю» from the week just left, exactly
   // as a second navigation here already supersedes (via `cancelled`) a first.
   useEffect(() => {
     let cancelled = false;
@@ -296,21 +206,6 @@ export function AdminScheduleScreen() {
   const dayEntries = (shifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
     .sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""));
-
-  async function handleDistribute() {
-    setDistributing(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await apiClient.distribute(from, to, true);
-      await loadWeek(from, to);
-      setNotice(withNotifyNotice(distributeNotice(result.assignments.length, result.unfilled ?? []), result.notified));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось распределить");
-    } finally {
-      setDistributing(false);
-    }
-  }
 
   async function handleSaved(notified: { delivered: number; intended: number }, summary?: string) {
     setEditing(null);
@@ -362,8 +257,6 @@ export function AdminScheduleScreen() {
                 employees={employees}
                 templates={templates}
                 weekDates={weekDates}
-                shifts={shifts ?? []}
-                roles={templateRoles}
                 onCancel={() => setFillOpen(false)}
                 onFilled={handleFilled}
               />
@@ -418,16 +311,13 @@ export function AdminScheduleScreen() {
               <Button size="m" mode="filled" stretched onClick={() => setEditing("new")}>
                 ＋ Добавить
               </Button>
-              <Button size="m" mode="bezeled" stretched loading={distributing} disabled={distributing} onClick={() => void handleDistribute()}>
-                ⚖ Распределить честно
-              </Button>
-              <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => setFillOpen(true)}>
+              <Button size="m" mode="bezeled" stretched onClick={() => setFillOpen(true)}>
                 📅 Заполнить неделю
               </Button>
-              <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => { setNotice(null); setError(null); setCsvOpen(true); }}>
+              <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setCsvOpen(true); }}>
                 📄 График файлом (CSV)
               </Button>
-              <Button size="m" mode="bezeled" stretched disabled={distributing} onClick={() => { setNotice(null); setError(null); setKindsOpen(true); }}>
+              <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setKindsOpen(true); }}>
                 ⚙ Кто что может
               </Button>
             </div>
@@ -866,64 +756,19 @@ export interface FillWeekPanelProps {
   employees: readonly Employee[];
   templates: readonly Template[];
   weekDates: readonly string[];
-  /** The visible week's team schedule, used only to compute the fairness hint. */
-  shifts: readonly Shift[];
-  /** Pools and preferences — without them the ★ can only guess, and a guess the admin
-   *  believes is worse than no hint at all. */
-  roles: readonly TemplateRolesView[];
   onCancel: () => void;
   onFilled: (count: number, notified: { delivered: number; intended: number }) => Promise<void>;
 }
 
-/** A worker's load on the visible week, in the very terms «Распределить честно» ranks them by. */
-interface WorkerLoad {
-  employee: Employee;
-  byKind: Record<string, number>;
-  total: number;
-}
-
-/**
- * Which kind of shift an entry is — mirrors the server's `shiftKind`: prefer the
- * preset it came from, fall back to its title (rows that predate templateId being
- * stored), and lump one-off custom times into a single bucket.
- */
-function shiftKind(s: Pick<Shift, "templateId" | "title">, nameById: ReadonlyMap<number, string>): string {
-  if (s.templateId != null) {
-    const name = nameById.get(s.templateId);
-    if (name) return name;
-  }
-  return s.title ?? "Своё время";
-}
-
-/**
- * Which bucket an entry counts toward, or `null` when it counts toward none —
- * the reading half of the ★, mirroring the server's seeding.
- *
- * The unread mark is checked **before** the times, because the two are not
- * exclusive: the import writes such a cell with no times at all, but a cell edited
- * before «правка снимает пометку» kept its mark and gained hours, and the live
- * schedule holds one. Checking times first dropped the untimed ones from the count
- * entirely and filed the timed one under its title — two different disagreements
- * with the server, on the same column.
- */
-export function balanceKindOf(
-  s: Pick<Shift, "category" | "start" | "end" | "templateId" | "title" | "unrecognisedCode">,
-  nameById: ReadonlyMap<number, string>,
-): string | null {
-  if (!countsForBalance(s.category)) return null;
-  if (s.unrecognisedCode != null) return UNRECOGNISED_KIND;
-  if (s.start == null || s.end == null) return null;
-  return shiftKind(s, nameById);
-}
-
 /**
  * "Заполнить неделю": pick a worker, choose a preset (or "выходной") per day of
- * the visible week, and create one entry per chosen day in a single pass. A
- * fairness panel shows how many shifts of each kind every worker already holds
- * this week — the very thing «Распределить честно» evens out — so the admin can
- * spread work by eye. A hint, not an enforced rule.
+ * the visible week, and create one entry per chosen day in a single pass.
+ *
+ * Рядом стояла таблица «смены на неделе по видам» со «★ — кому раздача отдаст
+ * следующую». Она ушла вместе с самой раздачей: подсказка про решение функции,
+ * которой больше нет, — это не подсказка.
  */
-export function FillWeekPanel({ employees, templates, weekDates, shifts, roles, onCancel, onFilled }: FillWeekPanelProps) {
+export function FillWeekPanel({ employees, templates, weekDates, onCancel, onFilled }: FillWeekPanelProps) {
   const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
   /** Per-day choice, encoded: "" = выходной, "p:<id>" = preset, "c:<category>" = a
    * category that has no preset (отпуск/больничный/командировка/…). Same option set
@@ -937,44 +782,6 @@ export function FillWeekPanel({ employees, templates, weekDates, shifts, roles, 
   const chosenDays = weekDates.filter((iso) => byDay[iso]);
   /** Categories with no preset of their own — offered directly alongside the presets. */
   const plainCategories = ORDERED_CATEGORIES.filter((c) => !templates.some((t) => t.category === c));
-
-  // Per-kind tallies for the visible week, recomputed whenever the schedule changes.
-  const { loads, kinds } = useMemo(() => {
-    const nameById = new Map(templates.map((t) => [t.id, t.name]));
-    const loads: WorkerLoad[] = employees.map((e) => ({ employee: e, byKind: {}, total: 0 }));
-    const byId = new Map(loads.map((l) => [l.employee.id, l]));
-    /** Kinds actually present this week — an all-zero row would just be noise. */
-    const kinds: string[] = [];
-    for (const s of shifts) {
-      if (s.employeeId == null) continue;
-      const kind = balanceKindOf(s, nameById);
-      if (kind == null) continue;
-      const load = byId.get(s.employeeId);
-      if (!load) continue; // entry left on an archived worker — not a candidate for new slots
-      load.byKind[kind] = (load.byKind[kind] ?? 0) + 1;
-      load.total += 1;
-      if (!kinds.includes(kind)) kinds.push(kind);
-    }
-    // Presets first, in the order this panel offers them; kinds that live only on
-    // entries (old rows, one-off times) sort after them.
-    const presetOrder = new Map(templates.map((t, i) => [t.name, i]));
-    const rankOf = (kind: string) => presetOrder.get(kind) ?? templates.length;
-    kinds.sort((a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b, "ru"));
-    return { loads, kinds };
-  }, [employees, shifts, templates]);
-
-  /** Who «Распределить честно» would hand the next shift of each kind to. It can't know
-   *  who'll be free on the day, so it stays a hint — but it ranks by the server's real
-   *  rule, pool and preference included (see `nextPickByKind`). */
-  const nextByKind = useMemo(
-    () =>
-      nextPickByKind(
-        loads.map((l) => ({ employeeId: l.employee.id, byKind: l.byKind, total: l.total })),
-        kinds,
-        rolesByKind(roles),
-      ),
-    [loads, kinds, roles],
-  );
 
   function templateTimesFor(template: Template, iso: string): { start: string; end: string } {
     return resolveShiftTimes(template, iso);
@@ -1062,55 +869,6 @@ export function FillWeekPanel({ employees, templates, weekDates, shifts, roles, 
         // а роль его галочку не трогает — без этого он шёл бы без пометки.
         note={(e) => (!takesPartInAssignment(e) ? "· вне назначений" : null)}
       />
-
-      {/* Fairness hint: who holds how many of each shift kind this week — exactly
-          what «Распределить честно» evens out, so the panel matches the button. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2 }}>
-        <span style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>Смены на неделе по видам</span>
-        {kinds.length === 0 ? (
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>На этой неделе смен пока нет.</span>
-        ) : (
-          loads.map((l) => (
-            <div
-              key={l.employee.id}
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, fontSize: 13.5 }}
-            >
-              <span style={{ flexShrink: 0, color: "var(--tgui--text_color)" }}>{l.employee.address}</span>
-              {/* Preset names can be long ("Дежурство · Поклонка"), so the tallies wrap
-                  instead of pushing the row off a phone screen. */}
-              <span
-                style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: 5, rowGap: 2 }}
-              >
-                {kinds.map((kind, i) => {
-                  const next = nextByKind.get(kind) === l.employee.id;
-                  return (
-                    <span
-                      key={kind}
-                      style={{
-                        whiteSpace: "nowrap",
-                        color: next ? "var(--tgui--link_color)" : "var(--tgui--hint_color)",
-                        fontWeight: next ? 600 : 400,
-                      }}
-                    >
-                      {next ? "★ " : ""}
-                      {kind} {l.byKind[kind] ?? 0}
-                      {/* Dot trails its own tally so a wrapped line never starts with a stray separator. */}
-                      {i < kinds.length - 1 && (
-                        <span style={{ color: "var(--tgui--hint_color)", fontWeight: 400 }}> ·</span>
-                      )}
-                    </span>
-                  );
-                })}
-              </span>
-            </div>
-          ))
-        )}
-        {kinds.length > 0 && (
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
-            ★ — кому «Распределить честно» отдаст следующую смену такого вида, если он свободен.
-          </span>
-        )}
-      </div>
 
       <Select header="Все будни одним вариантом (Сб/Вс не трогаем)" value="" onChange={(e) => setWholeWeek(e.target.value)}>
         <option value="">— по дням —</option>

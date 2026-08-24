@@ -48,7 +48,6 @@ import {
   mockDeleteSelfEntry,
   mockOfferHandover,
   mockSkipHandover,
-  mockDistribute,
   mockGetAdminWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -482,31 +481,6 @@ export interface PayrollRow {
   hours: number;
 }
 
-/** One shift the fair-distribution pass would (or did) hand to a worker. */
-export interface DistributionAssignment {
-  shiftId: number;
-  employeeId: number;
-}
-
-/** A slot the pass walked past: nobody in its pool is still on the roster
- *  (`empty_pool` — a setting to fix), or everyone eligible was busy or away
- *  (`nobody_free` — just the week). */
-export interface UnfilledSlot {
-  shiftId: number;
-  date: string;
-  kind: string;
-  reason: "empty_pool" | "nobody_free";
-}
-
-/** Result of `POST /api/admin/distribute`: whether it was applied, the chosen
- *  assignments, and the slots it could not fill. */
-export interface DistributeResult {
-  applied: boolean;
-  assignments: DistributionAssignment[];
-  unfilled: UnfilledSlot[];
-  notified: NotifyReach;
-}
-
 /** A preset plus who may take it and who asked for it. An empty pool means everyone. */
 export interface TemplateRolesView {
   templateId: number;
@@ -758,7 +732,6 @@ export interface ApiClient {
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
   updateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   deleteEntry(id: number): Promise<{ notified: NotifyReach }>;
-  distribute(from: string, to: string, apply: boolean): Promise<DistributeResult>;
   getAdminWeekendSlots(): Promise<AdminSlotView[]>;
   /** The slot, plus how many of the team the «нужен человек» broadcast reached —
    *  only people who linked Telegram can be told at all. */
@@ -1194,8 +1167,6 @@ export const realClient: ApiClient = {
     authorizedPatchJson<{ entry: Shift; notified: NotifyReach }>(`/api/admin/entries/${id}`, input),
   deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
-  distribute: (from, to, apply) =>
-    authorizedPostJson<DistributeResult>("/api/admin/distribute", { from, to, apply }),
 
   async getAdminWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
@@ -1429,7 +1400,6 @@ const devClient: ApiClient = {
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
-  distribute: (from, to, apply) => mockDistribute(from, to, apply),
   getAdminWeekendSlots: () => mockGetAdminWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),

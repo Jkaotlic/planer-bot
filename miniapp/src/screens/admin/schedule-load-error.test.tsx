@@ -15,7 +15,7 @@ import { AdminScheduleScreen } from "./AdminScheduleScreen";
  * То есть сообщает, что день пуст, хотя просто не смог его прочитать.
  *
  * Любая перезагрузка через `loadWeek` (после сохранения записи, «Заполнить
- * неделю», импорта CSV, «Распределить честно») сначала ставит `shifts = null`, а
+ * неделю», импорта CSV) сначала ставит `shifts = null`, а
  * ловца у неё нет вовсе: отказ оставлял вечный спиннер, и объяснения к нему не
  * было нигде — у формы записи он прилетал в `formError` уже закрытой формы.
  *
@@ -84,11 +84,24 @@ describe("упавшая неделя в мобильной админке ви�
     expect(el.textContent ?? "").not.toContain("Failed to fetch");
   });
 
-  it("перезагрузка после «Распределить честно» не оставляет вечный спиннер", async () => {
+  it("перезагрузка после «Заполнить неделю» не оставляет вечный спиннер", async () => {
     const el = await mount();
 
+    // «Заполнить неделю» — один из зовущих `loadWeek`; раньше эту же ветку
+    // проверяли кнопкой «Распределить честно», которой больше нет.
+    await click(button(el, "📅 Заполнить неделю"));
+    const weekSelect = el.querySelector("select") as HTMLSelectElement;
+    const preset = [...weekSelect.options].find((o) => o.value.startsWith("p:"))!;
+    await act(async () => {
+      weekSelect.value = preset.value;
+      weekSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+
+    vi.spyOn(apiClient, "createEntries").mockResolvedValue({ created: 5, notified: { delivered: 0, intended: 0 } });
     vi.spyOn(apiClient, "getTeamSchedule").mockRejectedValue(new Error("Failed to fetch"));
-    await click(button(el, "⚖ Распределить честно"));
+    const fill = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith("Заполнить ("))!;
+    await click(fill as HTMLElement);
 
     // До починки здесь висел спиннер: `loadWeek` снимает записи и ловца не имеет.
     expect(button(el, "Повторить")).toBeTruthy();

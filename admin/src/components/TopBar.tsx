@@ -9,11 +9,7 @@ export interface TopBarProps {
   onExportRoster: () => void;
 }
 
-/** Week switcher + primary actions, above the schedule grid.
- *
- *  «Распределить честно» is deliberately absent: the console never had a client
- *  method for it, so the button sat here permanently disabled and read as broken
- *  software. The feature itself works — it lives in the Mini App's «Админ» tab. */
+/** Week switcher + primary actions, above the schedule grid. */
 export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onAddEntry, onImportRoster, onExportRoster }: TopBarProps) {
   return (
     <div className="topbar">

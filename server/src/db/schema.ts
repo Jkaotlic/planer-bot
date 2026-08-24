@@ -29,9 +29,9 @@ export const employees = sqliteTable("employees", {
   isAdmin: integer({ mode: "boolean" }).notNull().default(false),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
   remindersEnabled: integer({ mode: "boolean" }).notNull().default(true),
-  /** An admin took this person out of AUTOMATIC placement: «Распределить честно»,
-   *  the ★ queue, the weekend call for volunteers, and weekend assignment. An admin
-   *  can still place them by hand — this is not archiving. */
+  /** An admin took this person out of AUTOMATIC placement: очередь дежурств
+   *  («кому следующему»), the weekend call for volunteers, and weekend assignment.
+   *  An admin can still place them by hand — this is not archiving. */
   excludedFromAssignment: integer({ mode: "boolean" }).notNull().default(false),
   /** An admin took this person out of swaps, both ways: neither propose nor accept. */
   excludedFromSwaps: integer({ mode: "boolean" }).notNull().default(false),
@@ -125,8 +125,7 @@ export const shifts = sqliteTable("shifts", {
    *
    * `(date)` — расписание за неделю и за месяц: обе сетки, командный ответ,
    * отчёты, выгрузка ростера. `(employee_id, date)` — история одного человека:
-   * баланс, честное распределение (28 чтений за одно «Распределить честно»),
-   * «мои смены». До индексов оба шли полным сканом.
+   * баланс, очередь дежурств, «мои смены». До индексов оба шли полным сканом.
    */
   (t) => [index("shift_date").on(t.date), index("shift_employee_date").on(t.employeeId, t.date)],
 );

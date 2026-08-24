@@ -11,8 +11,9 @@ import { listActive } from "./employees";
  * unconfigured preset looks like, and it is also why nobody ever needs
  * "excluding": the people who don't do Поклонка simply aren't in its pool.
  *
- * A preference is a soft tiebreak, never a filter: see `distributeFairly`, where
- * it sits between "fewest of this kind" and "fewest overall".
+ * A preference is a soft tiebreak, never a filter. Так его читала честная
+ * раздача, снятая 2026-08-24; сегодня «любит» ничего не решает само по себе и
+ * ждёт следующего читателя — экран «Кто что может» его по-прежнему хранит.
  */
 
 export interface TemplateRoles {
