@@ -1048,6 +1048,15 @@ button {
   font-weight: 700;
 }
 
+/* Тот же значок вида смены, но в строке внутри карточки человека — там он стоит
+   рядом с чекбоксами, и полноразмерный отжимал бы имя вида. */
+.kind-swatch-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
 .kind-name {
   font-size: 14.5px;
   font-weight: 600;

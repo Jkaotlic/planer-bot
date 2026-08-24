@@ -1,54 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { poolSummary, toggleId, togglePreference } from "./ShiftKindsScreen";
+import type { PersonKindRole } from "@planer/shared";
+import { personSummary } from "./ShiftKindsScreen";
 
-describe("poolSummary", () => {
-  it("calls an empty pool «все», not «никто»", () => {
-    // The whole difference between the screen reading as a whitelist and as a
-    // blacklist: an unconfigured preset admits everyone.
-    expect(poolSummary(0, 26)).toBe("все (26)");
-  });
-
-  it("counts a configured pool against the roster", () => {
-    expect(poolSummary(5, 26)).toBe("5 из 26");
-    expect(poolSummary(26, 26)).toBe("26 из 26");
-  });
+const role = (patch: Partial<PersonKindRole>): PersonKindRole => ({
+  templateId: 1, name: "Утро", allowed: true, preferred: false, poolIsEmpty: true, ...patch,
 });
 
-describe("toggleId", () => {
-  it("adds somebody who isn't there and removes somebody who is", () => {
-    expect(toggleId([1, 2], 3)).toEqual([1, 2, 3]);
-    expect(toggleId([1, 2, 3], 2)).toEqual([1, 3]);
+/**
+ * Зеркало `miniapp/src/screens/admin/shift-kinds.test.ts`: одна и та же фраза на
+ * двух фронтах, и если они разъедутся — упадёт один из двух файлов.
+ */
+describe("personSummary", () => {
+  it("считает допущенные виды, а не отмеченные вручную", () => {
+    // Пустой список допущенных — это «могут все», и в сводке человека он обязан
+    // считаться допуском: иначе экран читался бы как «Игорь не может ничего».
+    expect(personSummary([role({}), role({ templateId: 2, name: "Дежурство", allowed: false, poolIsEmpty: false })]))
+      .toBe("допущен к 1 из 2");
   });
 
-  it("never mutates the array it was given", () => {
-    const before = [1, 2];
-    toggleId(before, 3);
-    expect(before).toEqual([1, 2]);
-  });
-});
-
-describe("togglePreference", () => {
-  it("turns a preference on with weight 1 and off by removing it", () => {
-    expect(togglePreference({}, 4)).toEqual({ 4: 1 });
-    expect(togglePreference({ 4: 1 }, 4)).toEqual({});
+  it("говорит «ко всем», когда допущен везде", () => {
+    expect(personSummary([role({}), role({ templateId: 2, allowed: true, poolIsEmpty: false })]))
+      .toBe("допущен ко всем (2)");
   });
 
-  it("keeps a weight somebody else already has", () => {
-    expect(togglePreference({ 7: 3 }, 4)).toEqual({ 7: 3, 4: 1 });
+  it("считает «любит» отдельной строкой", () => {
+    expect(personSummary([role({ preferred: true }), role({ templateId: 2, allowed: false, poolIsEmpty: false })]))
+      .toBe("допущен к 1 из 2 · любит: 1");
   });
 
-  it("clears whatever the weight was, not just weight 1", () => {
-    expect(togglePreference({ 4: 5 }, 4)).toEqual({});
-  });
-
-  it("never mutates the object it was given", () => {
-    const before = { 4: 1 };
-    togglePreference(before, 7);
-    expect(before).toEqual({ 4: 1 });
+  it("без видов смен ничего не выдумывает", () => {
+    expect(personSummary([])).toBe("видов смен пока нет");
   });
 });
-
-// The Mini App carries its own copy of these three helpers on purpose — it
-// depends on neither this console nor its styles. The identical expectations
-// live in miniapp/src/screens/admin/shift-kinds.test.ts; if the two ever
-// disagree, one of the two files starts failing.
