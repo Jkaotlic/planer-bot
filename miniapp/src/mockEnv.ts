@@ -72,6 +72,8 @@ const initDataRaw = new URLSearchParams([
 
 // Only active in local development: lets the mini app run in a plain browser
 // tab (no real Telegram client) by imitating the bridge it talks to.
+const fullscreenMock = new URLSearchParams(window.location.search).has("fs");
+
 if (import.meta.env.DEV) {
   mockTelegramEnv({
     launchParams: {
@@ -87,6 +89,22 @@ if (import.meta.env.DEV) {
       // SDK's mount/request calls resolve instead of hanging.
       if (event[0] === "web_app_request_theme") {
         emitEvent("theme_changed", { theme_params: themeParams });
+        return;
+      }
+      // Инсеты. В настоящем клиенте их присылает Telegram; здесь — мы сами,
+      // иначе `mountViewport` ждёт ответа, которого не будет, и CSS-переменные
+      // не появляются вовсе.
+      //
+      // `?fs=1` в адресе включает значения полноэкранного режима: так вёрстку
+      // под шапку клиента можно посмотреть в обычном браузере, не собирая бота
+      // и не открывая приложение с телефона. Числа — с iPhone 15 (чёлка 47,
+      // шапка клиента 56).
+      if (event[0] === "web_app_request_safe_area") {
+        emitEvent("safe_area_changed", { top: fullscreenMock ? 47 : 0, bottom: fullscreenMock ? 34 : 0, left: 0, right: 0 });
+        return;
+      }
+      if (event[0] === "web_app_request_content_safe_area") {
+        emitEvent("content_safe_area_changed", { top: fullscreenMock ? 56 : 0, bottom: 0, left: 0, right: 0 });
         return;
       }
       if (event[0] === "web_app_request_viewport") {

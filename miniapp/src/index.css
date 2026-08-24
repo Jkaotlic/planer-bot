@@ -10,6 +10,38 @@ body,
   height: 100%;
 }
 
+/* ---------- Полноэкранный режим (Launch Mode = Fullscreen) ----------
+   В нём клиент рисует свою шапку — «Закрыть» слева, «⌄ ⋯» справа — ПОВЕРХ
+   страницы, а не над ней. Без отступа заголовок экрана оказывается под этими
+   кнопками: ровно то, что было видно на «Команде».
+
+   Два слагаемых, а не одно: `safe-area-inset-top` — это железо (чёлка,
+   динамический остров), `content-safe-area-inset-top` — высота шапки клиента.
+   В обычном режиме оба приходят нулями, поэтому вёрстка одна на оба случая и
+   ветвлений по `isFullscreen` не нужно.
+
+   Переменные ставит SDK (`bindViewportCssVars` в `init.ts`); запасные нули в
+   `var(..., 0px)` — на случай клиента постарше Bot API 8.0, где инсетов нет. */
+:root {
+  --app-inset-top: calc(
+    var(--tg-viewport-safe-area-inset-top, 0px) + var(--tg-viewport-content-safe-area-inset-top, 0px)
+  );
+  --app-inset-left: var(--tg-viewport-safe-area-inset-left, 0px);
+  --app-inset-right: var(--tg-viewport-safe-area-inset-right, 0px);
+  /* `max` из двух источников: `env()` работает в обычном режиме (страница под
+     системной панелью жестов), а `--tg-viewport-*` — в полноэкранном, где
+     webview занимает весь экран и `env()` возвращает ноль. */
+  --app-inset-bottom: max(env(safe-area-inset-bottom), var(--tg-viewport-safe-area-inset-bottom, 0px));
+}
+
+/* На `#root`, а не на каждом экране: отступ нужен всем корневым состояниям —
+   вкладкам, формам-оверлеям, заглушке загрузки и экрану ошибки. */
+#root {
+  padding-top: var(--app-inset-top);
+  padding-left: var(--app-inset-left);
+  padding-right: var(--app-inset-right);
+}
+
 body {
   margin: 0;
   background-color: var(--tg-theme-bg-color, #ffffff);
@@ -53,6 +85,10 @@ textarea {
    underneath it. Nothing behind a navigation bar should be legible. */
 .tab-bar-fit > div {
   background-color: var(--tg-theme-secondary-bg-color, var(--tg-theme-bg-color, #ffffff));
+  /* Подписи вкладок иначе оказываются под системной полоской-индикатором: сам
+     `telegram-ui` объявляет `--tgui--safe_area_inset_bottom`, но нигде её не
+     применяет, а в полноэкранном режиме под баром впервые появляется железо. */
+  padding-bottom: var(--app-inset-bottom);
 }
 
 /* ---------- Чек-лист дежурного ---------- */
