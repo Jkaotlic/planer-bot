@@ -99,21 +99,21 @@ describe("модель недели", () => {
 
   it("записи без пресета ключуются по категории: строка легенды на цвет, а не на «•»", () => {
     // Обе рисуются одной «•», но красятся по категории — слить их в один ключ
-    // значило бы показать один квадрат за два разных. Категории с собственной
-    // палитрой (отпуск, командировка, мероприятие) сюда не относятся: у них своя
-    // буква и своя строка.
+    // значило бы показать один квадрат за два разных. Состояния с собственной
+    // палитрой (отпуск, командировка, мероприятие, больничный, работа в
+    // выходной) сюда не относятся: у них своя буква и своя строка.
     const shifts = [
-      entry({ date: MONDAY, templateId: null, category: "weekend_work", title: "Ярмарка" }),
+      entry({ date: MONDAY, templateId: null, category: "shift", title: "Своё время" }),
       entry({
         date: MONDAY, employeeId: 2, templateId: null,
-        category: "sick_leave", title: "Больничный", start: null, end: null,
+        category: "duty", title: "Подмена", start: null, end: null,
       }),
     ];
     const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
     expect(legend).toHaveLength(2);
     expect(legend.every((item) => item.code === "•")).toBe(true);
-    expect(legend.map((item) => item.category).sort()).toEqual(["sick_leave", "weekend_work"]);
-    expect(legend.map((item) => item.label).sort()).toEqual(["Больничный", "Ярмарка"]);
+    expect(legend.map((item) => item.category).sort()).toEqual(["duty", "shift"]);
+    expect(legend.map((item) => item.label).sort()).toEqual(["Подмена", "Своё время"]);
   });
 
   it("мероприятие и командировка получают свою букву, а не общую точку", () => {
@@ -126,6 +126,21 @@ describe("модель недели", () => {
     ];
     const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
     expect(legend.map((item) => item.code).sort()).toEqual(["К", "М"]);
+  });
+
+  it("больничный и работа в выходной — тоже со своей буквой и названием состояния", () => {
+    // Последние два состояния, что оставались точкой. Легенда называет
+    // состояние, а не заголовок записи: «Ярмарка» стоит в самой клетке.
+    const shifts = [
+      entry({ date: MONDAY, templateId: null, category: "weekend_work", title: "Ярмарка" }),
+      entry({
+        date: MONDAY, employeeId: 2, templateId: null,
+        category: "sick_leave", title: "Больничный", start: null, end: null,
+      }),
+    ];
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
+    expect(legend.map((item) => item.code).sort()).toEqual(["Б", "РВ"]);
+    expect(legend.map((item) => item.label).sort()).toEqual(["Больничный", "Работа в выходной"]);
   });
 
   it("расшифровка называет состояние, а не заголовок конкретной записи", () => {
@@ -154,7 +169,7 @@ describe("модель недели", () => {
     const shifts = [
       entry({ date: "2026-08-04", templateId: 2, start: "20:00", end: "08:00" }), // Ночь
       entry({ date: "2026-08-03" }), // День
-      entry({ date: "2026-08-05", templateId: null, category: "sick_leave", title: "Больничный", start: null, end: null }),
+      entry({ date: "2026-08-05", templateId: null, category: "shift", title: "Своё время", start: null, end: null }),
     ];
     const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
     expect(legend.map((item) => item.code)).toEqual(["Д", "Н", "•"]);
