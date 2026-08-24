@@ -8,8 +8,8 @@ import { AdminShiftKinds } from "./AdminShiftKinds";
 
 /**
  * Зеркало консольного `admin/src/screens/shift-kinds-search.test.tsx`: пустой
- * результат поиска в открытой карточке должен сказать «Никого с таким именем
- * нет.», а не молча нарисовать матрицу без единой строки.
+ * результат поиска должен сказать «Никого с таким именем нет.», а не молча
+ * нарисовать список без единой строки.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -77,13 +77,9 @@ async function typeSearch(field: HTMLInputElement, value: string) {
   await settle(2);
 }
 
-describe("поиск в «Видах смен» (мини-апп)", () => {
+describe("поиск в «Кто что может» (мини-апп)", () => {
   it("поиск без совпадений говорит «Никого с таким именем нет.», а не рисует пустую матрицу молча", async () => {
     const el = await mount();
-    const head = el.querySelector("button[aria-expanded]") as HTMLButtonElement;
-    await act(async () => head.click());
-    await settle();
-
     await typeSearch(searchField(el), "нет такого человека");
 
     expect(el.textContent ?? "").toContain("Никого с таким именем нет.");
