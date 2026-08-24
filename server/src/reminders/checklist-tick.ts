@@ -1,9 +1,10 @@
-import { InlineKeyboard, type Bot } from "grammy";
+import { existsSync } from "node:fs";
+import { InlineKeyboard, InputFile, type Bot } from "grammy";
 import { checklistText, checklistsDueToday } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
-import { getChecklist } from "../repo/checklists";
+import { getChecklist, updateChecklist } from "../repo/checklists";
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
@@ -61,7 +62,10 @@ export async function runChecklistTick(
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) continue;
 
     const marked = listMarksFor(db, now.date, employeeId).map((m) => m.itemId);
-    const settings = { note: list.note, docUrl: list.docUrl, docFileId: list.docFileId, docName: list.docName };
+    const settings = {
+      note: list.note, docUrl: list.docUrl, docFileId: list.docFileId,
+      docName: list.docName, docPath: list.docPath,
+    };
     const text = [
       `${list.name} — на сегодня:`,
       "",
@@ -82,10 +86,23 @@ export async function runChecklistTick(
     try {
       // Документ первым: он контекст к списку, а не сноска после него. Один раз
       // в день — вместе с сообщением, которое дедуплицировано `reminder_log`.
+      const caption = settings.docName ? `📄 ${settings.docName}` : "📄 Инструкция дежурного";
       if (settings.docFileId) {
-        await bot.api.sendDocument(owner.telegramUserId, settings.docFileId, {
-          caption: settings.docName ? `📄 ${settings.docName}` : "📄 Инструкция дежурного",
-        });
+        await bot.api.sendDocument(owner.telegramUserId, settings.docFileId, { caption });
+      } else if (settings.docPath && existsSync(settings.docPath)) {
+        // С диска — только первый раз. Ответ Telegram содержит идентификатор
+        // файла, и он же становится кэшем: следующая отправка не читает диск и
+        // не гонит мегабайты через канал, который держит и API, и бота.
+        //
+        // Файла может не оказаться на месте — его могли убрать руками; список
+        // дежурному нужен всё равно, поэтому это не ошибка, а пропуск.
+        const posted = await bot.api.sendDocument(
+          owner.telegramUserId,
+          new InputFile(settings.docPath, settings.docName ?? undefined),
+          { caption },
+        );
+        const fileId = posted?.document?.file_id;
+        if (fileId) updateChecklist(db, list.id, { docFileId: fileId });
       }
       await bot.api.sendMessage(owner.telegramUserId, text, { reply_markup: kb });
       addReminder(db, shift.id, CHECKLIST_KIND);
