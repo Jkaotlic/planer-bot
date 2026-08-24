@@ -28,6 +28,7 @@ import { getEmployeeById } from "../../repo/employees";
 import { recordAudit } from "../../repo/audit";
 import { teamNow } from "../../util/team-time";
 import { requireAdmin, requireAuth, type Env } from "../middleware";
+import { MAX_DOC_BYTES, removeChecklistDoc, safeDocName, writeChecklistDoc } from "../checklist-doc";
 
 /** Какой чек-лист у какого вида смены — карта, которой отвечает `checklistsDueToday`. */
 export function checklistByTemplate(db: Db): Map<number, number> {
@@ -67,7 +68,7 @@ const checklistPatchSchema = z
   })
   .refine((v) => v.name !== undefined || v.note !== undefined || v.docUrl !== undefined, { message: "нечего менять" });
 
-/** Наружу отдаём всё, кроме `docFileId`: это ключ к файлу в Telegram, и фронтам он не нужен. */
+/** Наружу отдаём всё, кроме `docFileId` и пути на диске: это внутренние ключи к файлу, фронтам они не нужны. */
 function checklistView(db: Db, id: number) {
   const list = getChecklist(db, id);
   if (!list) return null;
@@ -77,7 +78,9 @@ function checklistView(db: Db, id: number) {
     note: list.note,
     docUrl: list.docUrl,
     docName: list.docName,
-    hasDoc: list.docFileId != null,
+    // Файл есть, если он лежит на диске ИЛИ уже закэширован в Telegram: до
+    // первой рассылки второго ещё нет, а показать «приложен» надо сразу.
+    hasDoc: list.docFileId != null || list.docPath != null,
     items: activeChecklistItems(db, list.id).map((item) => ({ id: item.id, title: item.title, note: item.note })),
     templateIds: listActiveTemplates(db).filter((t) => t.checklistId === list.id).map((t) => t.id),
   };
@@ -118,11 +121,43 @@ export function createChecklistRoutes(db: Db, config: Config) {
     return c.json({ checklists: allViews() });
   });
 
-  /** Снять приложенный файл. Положить его можно только через бота. */
+  /**
+   * Приложить файл инструкции из браузера.
+   *
+   * `docFileId` при этом обнуляется: он кэш ТОГО файла, и оставленный означал бы,
+   * что дежурным продолжает уходить прежний документ — под новым именем.
+   */
+  app.post("/api/admin/checklists/:id/doc", requireAdmin(db, config.jwtSecret), async (c) => {
+    const id = Number(c.req.param("id"));
+    const list = getChecklist(db, id);
+    if (!list) return c.json({ error: "not_found" }, 404);
+
+    const body = await c.req.parseBody();
+    const file = body.file;
+    if (!(file instanceof File)) return c.json({ error: "Пришли файл полем «file»" }, 400);
+    if (file.size > MAX_DOC_BYTES) {
+      return c.json({ error: `Файл больше ${Math.round(MAX_DOC_BYTES / 1024 / 1024)} МБ — его будут качать полчаса` }, 413);
+    }
+
+    const name = safeDocName(file.name);
+    const path = writeChecklistDoc(config.docsDir, id, name, new Uint8Array(await file.arrayBuffer()));
+    // Прежний файл — с диска: иначе каталог копит все версии инструкции, а вслед
+    // за ним их копит и бэкап.
+    if (list.docPath && list.docPath !== path) removeChecklistDoc(list.docPath);
+    updateChecklist(db, id, { docPath: path, docName: name, docFileId: null });
+    recordAudit(db, "checklist_doc_changed", c.get("auth").employeeId, {
+      fileName: name, attached: true, checklistName: list.name,
+    });
+    return c.json({ checklist: checklistView(db, id) });
+  });
+
+  /** Снять приложенный файл — и с диска тоже, иначе каталог копит ничьи файлы. */
   app.delete("/api/admin/checklists/:id/doc", requireAdmin(db, config.jwtSecret), (c) => {
     const id = Number(c.req.param("id"));
-    if (!getChecklist(db, id)) return c.json({ error: "not_found" }, 404);
-    updateChecklist(db, id, { docFileId: null, docName: null });
+    const list = getChecklist(db, id);
+    if (!list) return c.json({ error: "not_found" }, 404);
+    removeChecklistDoc(list.docPath);
+    updateChecklist(db, id, { docFileId: null, docName: null, docPath: null });
     return c.json({ checklist: checklistView(db, id) });
   });
 

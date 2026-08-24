@@ -26,7 +26,14 @@ export function createChecklist(db: Db, name: string): Checklist {
 export function updateChecklist(
   db: Db,
   id: number,
-  patch: { name?: string; note?: string | null; docUrl?: string | null; docFileId?: string | null; docName?: string | null },
+  patch: {
+    name?: string;
+    note?: string | null;
+    docUrl?: string | null;
+    docFileId?: string | null;
+    docName?: string | null;
+    docPath?: string | null;
+  },
 ): Checklist | undefined {
   const set: Record<string, string | null> = {};
   // Пустая строка стирает: «задано пустым» и «не задано» — одно и то же, а
@@ -37,6 +44,7 @@ export function updateChecklist(
   if (patch.docUrl !== undefined) set.docUrl = clean(patch.docUrl);
   if (patch.docFileId !== undefined) set.docFileId = clean(patch.docFileId);
   if (patch.docName !== undefined) set.docName = clean(patch.docName);
+  if (patch.docPath !== undefined) set.docPath = clean(patch.docPath);
   if (Object.keys(set).length === 0) return getChecklist(db, id);
   return db.update(checklists).set(set).where(eq(checklists.id, id)).returning().all()[0];
 }
