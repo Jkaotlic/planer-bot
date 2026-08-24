@@ -1,6 +1,6 @@
 import { Tabbar } from "@telegram-apps/telegram-ui";
 
-export type TabKey = "mine" | "team" | "swaps" | "weekend" | "admin" | "announce";
+export type TabKey = "mine" | "team" | "swaps" | "weekend" | "collections" | "admin" | "announce";
 
 export interface TabBarProps {
   active: TabKey;
@@ -17,8 +17,13 @@ export interface TabBarProps {
   canAnnounce: boolean;
 }
 
-/** Bottom navigation: "Смены", "Команда", и по роли — "Обмены"/"Выходные" для
- *  работника, "Анонс" для наблюдателя, "Админ" для админа. */
+/** Bottom navigation: "Смены", "Команда", "Сборы", и по роли — "Обмены"/"Выходные"
+ *  для работника, "Анонс" для наблюдателя, "Админ" для админа.
+ *
+ *  «Сборы» видны всем ролям, включая наблюдателя: сбор на подарок касается всей
+ *  команды. У админа получается шесть пунктов — тесно, но подписи ужаты в
+ *  `index.css` (`.tab-bar-fit`), и это дешевле, чем держать сборы в двух местах:
+ *  секцией у работника и разделом админки у админа. */
 export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce }: TabBarProps) {
   // Built as an array (rather than inline JSX with a `&&`) so every optional
   // item stays a bare element — `Tabbar` types its children as a plain
@@ -41,6 +46,11 @@ export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce }: T
       </Tabbar.Item>,
     );
   }
+  items.push(
+    <Tabbar.Item key="collections" selected={active === "collections"} text="Сборы" onClick={() => onChange("collections")}>
+      <CollectIcon />
+    </Tabbar.Item>,
+  );
   if (isAdmin) {
     items.push(
       <Tabbar.Item key="admin" selected={active === "admin"} text="Админ" onClick={() => onChange("admin")}>
@@ -113,6 +123,17 @@ function AnnounceIcon() {
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 10v4a1 1 0 0 0 1 1h2l4 4V5l-4 4H4a1 1 0 0 0-1 1z" />
       <path d="M15 8a4 4 0 0 1 0 8M18 5a8 8 0 0 1 0 14" />
+    </svg>
+  );
+}
+
+/** Конверт с монетой — вкладка «Сборы». */
+function CollectIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="7" width="18" height="13" rx="2.5" />
+      <path d="M3 9l9 6 9-6" />
+      <circle cx="12" cy="5" r="2.2" />
     </svg>
   );
 }

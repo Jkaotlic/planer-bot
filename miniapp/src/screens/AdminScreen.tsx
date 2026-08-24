@@ -2,7 +2,6 @@ import { useState } from "react";
 import { AdminScheduleScreen } from "./admin/AdminScheduleScreen";
 import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
-import { AdminCollections } from "./admin/AdminCollections";
 import { AdminAnnounce } from "./admin/AdminAnnounce";
 import { AdminBugs } from "./admin/AdminBugs";
 import { AdminJournal } from "./admin/AdminJournal";
@@ -17,7 +16,6 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "weekend", label: "Выходные" },
   { key: "employees", label: "Работники" },
   { key: "checklists", label: "Чек-листы" },
-  { key: "collections", label: "Сборы" },
   { key: "announce", label: "Анонсы" },
   { key: "bugs", label: "Баги" },
   { key: "journal", label: "Журнал" },
@@ -44,7 +42,6 @@ export function AdminScreen({ initialSection }: { initialSection?: AdminSection 
         {section === "weekend" && <AdminWeekendScreen />}
         {section === "employees" && <AdminEmployeesScreen />}
         {section === "checklists" && <AdminChecklists />}
-        {section === "collections" && <AdminCollections />}
         {section === "announce" && <AdminAnnounce />}
         {section === "bugs" && <AdminBugs />}
         {section === "journal" && <AdminJournal today={toISODate(new Date())} />}

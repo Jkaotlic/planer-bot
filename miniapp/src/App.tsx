@@ -8,6 +8,7 @@ import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
 import { SelfEntryScreen, screenFromSearch, type SelfEntryMode } from "./screens/SelfEntryScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
+import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
 import { adminSectionFromSearch } from "./screens/admin-section";
 
@@ -386,6 +387,7 @@ export function App() {
         />
       )}
       {tab === "team" && <TeamScreen templates={data.templates} />}
+      {tab === "collections" && <CollectionsTabScreen isAdmin={data.me.isAdmin} />}
       {tab === "swaps" && (
         <SwapsScreen
           swaps={data.swaps}

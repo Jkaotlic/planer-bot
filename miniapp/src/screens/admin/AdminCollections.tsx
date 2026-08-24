@@ -1281,3 +1281,6 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<CardProps, "open" 
     </div>
   );
 }
+
+// `lazy()` умеет только default-экспорт — тот же приём, что у `AdminAnnounce`.
+export default AdminCollections;
