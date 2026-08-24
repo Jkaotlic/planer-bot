@@ -63,10 +63,10 @@ describe("team schedule development mock", () => {
     );
     // «?» is in the set on purpose: the mock carries one cell a roster import could
     // not read, so the grey square and its legend line get exercised in dev too.
-    // «К» и «М» — командировка и мероприятие: у них свои точные цвета, поэтому
-    // они приходят палитрой, а не общей точкой.
+    // «К», «М», «РВ» — командировка, мероприятие и работа в выходной: у них свои
+    // точные цвета, поэтому они приходят палитрой, а не общей точкой.
     expect([...visibleCodes].sort()).toEqual(
-      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О", "?", "К", "М"].sort(),
+      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О", "?", "К", "М", "РВ"].sort(),
     );
 
     const detailCell = week.rows

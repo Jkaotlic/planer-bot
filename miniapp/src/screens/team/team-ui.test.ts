@@ -411,23 +411,21 @@ describe("team schedule UI", () => {
       }),
     );
 
-    for (const colour of ["#DEF5F0", "#E1F6E1", "#FCE4E4"]) {
-      expect(light).toContain(`background:${colour}`);
-    }
-    for (const colour of [
-      "rgba(48,191,171,0.22)",
-      "rgba(70,190,90,0.22)",
-      "rgba(230,80,60,0.24)",
-    ]) {
-      expect(dark).toContain(`background:${colour}`);
-    }
-    // Командировка и мероприятие в этот список больше не входят: у них свои
-    // точные цвета, одни на обе темы, и буквы вместо общей точки.
+    // На категорийной палитре осталось ровно то, что и правда «какая-то запись»:
+    // смена или дежурство своим временем, без вида.
+    expect(light).toContain("background:#DEF5F0");
+    expect(dark).toContain("background:rgba(48,191,171,0.22)");
+    // Точные цвета не зависят от темы и носят свою букву вместо общей точки —
+    // командировка, мероприятие, больничный и работа в выходной.
     for (const markup of [light, dark]) {
       expect(markup).toContain("background:#8E24AA");
       expect(markup).toContain("<b>К</b>");
       expect(markup).toContain("background:#3949AB");
       expect(markup).toContain("<b>М</b>");
+      expect(markup).toContain("background:#00897B");
+      expect(markup).toContain("<b>Б</b>");
+      expect(markup).toContain("background:#6D4C41");
+      expect(markup).toContain("<b>РВ</b>");
     }
     expect(light).toContain("background:#CBC04D;color:#292505");
     expect(dark).toContain("background:#CBC04D;color:#292505");
@@ -746,12 +744,13 @@ describe("TeamWeekLegend", () => {
   });
 
   it("colours a presetless entry by its category, per theme", () => {
-    // Работа в выходной, а не мероприятие: у мероприятия с 2026-08-24 своя точная
-    // палитра, одна на обе темы, и разницы между темами у него больше нет.
-    const item = { code: "•", label: "Ярмарка", palette: null, category: "weekend_work" as const };
+    // Дежурство своим временем: у мероприятия, командировки, больничного и
+    // работы в выходной с 2026-08-24 свои точные палитры, одни на обе темы, —
+    // разницы между темами у них больше нет, а у записи без вида она осталась.
+    const item = { code: "•", label: "Своя точка", palette: null, category: "duty" as const };
     const light = render([item], false);
     const dark = render([item], true);
-    expect(light).toContain("Ярмарка");
+    expect(light).toContain("Своя точка");
     expect(light).not.toBe(dark); // the category palette differs between themes
   });
 

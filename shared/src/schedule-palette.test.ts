@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   SCHEDULE_ACCENT_PALETTES,
+  SICK_LEAVE_SCHEDULE_PALETTE,
   VACATION_SCHEDULE_PALETTE,
+  WEEKEND_WORK_SCHEDULE_PALETTE,
   UNRECOGNISED_SCHEDULE_PALETTE,
   exactSchedulePalette,
   CATEGORY_PALETTES_DARK,
@@ -38,6 +40,8 @@ describe("working schedule palette", () => {
       ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code),
       VACATION_SCHEDULE_PALETTE.code,
       UNRECOGNISED_SCHEDULE_PALETTE.code,
+      SICK_LEAVE_SCHEDULE_PALETTE.code,
+      WEEKEND_WORK_SCHEDULE_PALETTE.code,
     ];
     expect(new Set(codes).size).toBe(codes.length);
   });
@@ -66,9 +70,26 @@ describe("working schedule palette", () => {
     expect(Object.keys(SCHEDULE_ACCENT_PALETTES).sort()).toEqual([...templateAccents].sort());
   });
 
-  it("leaves unspecified categories to the existing theme palette", () => {
-    expect(exactSchedulePalette(undefined, "sick_leave")).toBeNull();
-    expect(exactSchedulePalette(undefined, "weekend_work")).toBeNull();
+  /**
+   * Точка осталась ровно у того, что и правда «какая-то запись»: смена или
+   * дежурство своим временем, без вида. У состояний, которые команда читает в
+   * сетке каждый день, буква есть у каждого.
+   */
+  it("без своего цвета остаются только смена и дежурство без вида", () => {
+    expect(exactSchedulePalette(undefined, "shift")).toBeNull();
+    expect(exactSchedulePalette(undefined, "duty")).toBeNull();
+  });
+
+  it("больничный носит своё «Б», а не общую точку", () => {
+    expect(exactSchedulePalette(undefined, "sick_leave")).toEqual(SICK_LEAVE_SCHEDULE_PALETTE);
+    expect(SICK_LEAVE_SCHEDULE_PALETTE.code).toBe("Б");
+  });
+
+  it("работа в выходной носит своё «РВ», а не общую точку", () => {
+    // Две буквы — не выдумка: «ВА» и «07» стоят в сетке с самого начала, а все
+    // однобуквенные варианты («В», «Р») уже заняты видами смен.
+    expect(exactSchedulePalette(undefined, "weekend_work")).toEqual(WEEKEND_WORK_SCHEDULE_PALETTE);
+    expect(WEEKEND_WORK_SCHEDULE_PALETTE.code).toBe("РВ");
   });
 
   it("мероприятие носит своё «М», а не общую точку", () => {
@@ -91,6 +112,8 @@ describe("working schedule palette", () => {
       UNRECOGNISED_SCHEDULE_PALETTE,
       exactSchedulePalette(undefined, "business_trip")!,
       exactSchedulePalette(undefined, "offsite")!,
+      SICK_LEAVE_SCHEDULE_PALETTE,
+      WEEKEND_WORK_SCHEDULE_PALETTE,
     ];
     expect(new Set(exact.map((p) => p.bg)).size).toBe(exact.length);
     expect(new Set(exact.map((p) => p.code)).size).toBe(exact.length);
@@ -107,6 +130,8 @@ describe("working schedule palette", () => {
     ];
     expect(faded).not.toContain(exactSchedulePalette(undefined, "business_trip")!.bg);
     expect(faded).not.toContain(exactSchedulePalette(undefined, "offsite")!.bg);
+    expect(faded).not.toContain(SICK_LEAVE_SCHEDULE_PALETTE.bg);
+    expect(faded).not.toContain(WEEKEND_WORK_SCHEDULE_PALETTE.bg);
   });
 });
 
@@ -130,6 +155,18 @@ describe("палитра категорий", () => {
     const trip = exactSchedulePalette(undefined, "business_trip")!;
     expect(categoryPalette("business_trip", false).bg).toBe(trip.bg);
     expect(categoryPalette("business_trip", true).bg).toBe(trip.bg);
+  });
+
+  it("больничный и работа в выходной берут свой точный цвет в обеих темах", () => {
+    // Ровно то, зачем правка: цвет один и тот же на картинке бота, в консоли и
+    // в мини-аппе, где тема телефона раньше меняла эти две клетки.
+    for (const [category, palette] of [
+      ["sick_leave", SICK_LEAVE_SCHEDULE_PALETTE],
+      ["weekend_work", WEEKEND_WORK_SCHEDULE_PALETTE],
+    ] as const) {
+      expect(categoryPalette(category, false).bg, category).toBe(palette.bg);
+      expect(categoryPalette(category, true).bg, category).toBe(palette.bg);
+    }
   });
 
   it("отпуск берёт свой точный цвет, а не категорийный", () => {

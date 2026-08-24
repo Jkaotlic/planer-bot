@@ -67,6 +67,43 @@ export const OFFSITE_SCHEDULE_PALETTE: SchedulePalette = {
 };
 
 /**
+ * Больничный.
+ *
+ * Своя палитра по той же причине, что у командировки и мероприятия: это не
+ * «какая-то запись без вида», а состояние, которое команда читает в сетке
+ * каждый день. Точка о нём не говорила ничего.
+ *
+ * Бирюза — единственная свободная ниша рядом: красный занят отпуском, розовый
+ * и фиолетовый — «П» и командировкой. Оттенок медицинский, что здесь скорее
+ * помогает вспомнить, чем мешает.
+ *
+ * «Б» — первая буква и единственная свободная: «В» и «Р» разобраны видами смен.
+ */
+export const SICK_LEAVE_SCHEDULE_PALETTE: SchedulePalette = {
+  bg: "#00897B",
+  fg: "#FFFFFF",
+  code: "Б",
+};
+
+/**
+ * Работа в выходной.
+ *
+ * Код из двух букв — не выдумка: «ВА» и «07» стоят в сетке с самого начала, а
+ * все однобуквенные варианты заняты («В» — вечер, «Р» — резерв), и делить букву
+ * с видом смены нельзя: легенда ключуется по коду, и одна строка молча стояла
+ * бы за два разных квадрата.
+ *
+ * Коричневый — тоже вопрос свободных ниш: зелёный уже у резерва, оранжевый и
+ * жёлтый — у «ВА» и «У», а два одинаковых по семье цвета в одной строке сетки
+ * и есть та путаница, ради которой всё это затевалось.
+ */
+export const WEEKEND_WORK_SCHEDULE_PALETTE: SchedulePalette = {
+  bg: "#6D4C41",
+  fg: "#FFFFFF",
+  code: "РВ",
+};
+
+/**
  * A cell the import could not read — the file said something like «Ко» and we
  * refused to guess what it meant.
  *
@@ -88,6 +125,8 @@ export function exactSchedulePalette(
   if (category === "vacation") return VACATION_SCHEDULE_PALETTE;
   if (category === "business_trip") return BUSINESS_TRIP_SCHEDULE_PALETTE;
   if (category === "offsite") return OFFSITE_SCHEDULE_PALETTE;
+  if (category === "sick_leave") return SICK_LEAVE_SCHEDULE_PALETTE;
+  if (category === "weekend_work") return WEEKEND_WORK_SCHEDULE_PALETTE;
   return null;
 }
 
