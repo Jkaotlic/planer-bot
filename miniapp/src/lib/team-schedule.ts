@@ -227,11 +227,11 @@ export function teamVisibilityRefreshTarget(
     : { mode: state.displayMode, date: state.displayDate };
 }
 
-export function createTeamScreenState(date: string): TeamScreenState {
+export function createTeamScreenState(date: string, mode: TeamMode = "today"): TeamScreenState {
   return {
-    displayMode: "today",
+    displayMode: mode,
     displayDate: date,
-    targetMode: "today",
+    targetMode: mode,
     targetDate: date,
     schedule: null,
     loading: false,

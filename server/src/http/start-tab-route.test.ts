@@ -42,6 +42,24 @@ describe("PATCH /api/me/settings — стартовая вкладка", () => {
     expect((await (await app.request("/api/me", auth(token))).json()).startTab).toBe("team");
   });
 
+  /**
+   * «Команда — неделя» — законное значение настройки, хотя такой вкладки в меню
+   * нет: сервер и мини-апп читают один и тот же список из shared, и расхождение
+   * между ними обернулось бы 400 на выбор, который пикер сам же и предложил.
+   */
+  it("принимает «Команда — неделя», хотя такой вкладки в меню нет", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const igor = worker(db, 333);
+    const token = await tokenFor(app, 333);
+
+    const res = await app.request("/api/me/settings", patch(token, { startTab: "team_week" }));
+
+    expect(res.status).toBe(200);
+    expect(getEmployeeById(db, igor.id)!.startTab).toBe("team_week");
+    expect((await (await app.request("/api/me", auth(token))).json()).startTab).toBe("team_week");
+  });
+
   it("по умолчанию настройки нет вовсе", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

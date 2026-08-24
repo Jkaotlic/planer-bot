@@ -34,8 +34,11 @@ import { TeamWeekGrid } from "./team/TeamWeekGrid";
 import { TeamWeekLegend } from "./team/TeamWeekLegend";
 import "./team/team-schedule.css";
 
-export function TeamScreen({ templates }: { templates: readonly Template[] }) {
-  const [view, setView] = useState(() => createTeamScreenState(toISODate(new Date())));
+/** `initialMode` — личная настройка «открывать сразу»: тому, кто ведёт график,
+ *  нужна неделя, и до сих пор её приходилось выбирать руками при каждом входе.
+ *  Внутри экрана вид по-прежнему переключается свободно. */
+export function TeamScreen({ templates, initialMode = "today" }: { templates: readonly Template[]; initialMode?: TeamMode }) {
+  const [view, setView] = useState(() => createTeamScreenState(toISODate(new Date()), initialMode));
   const [tabFocusMode, setTabFocusMode] = useState<TeamMode>(view.displayMode);
   const viewRef = useRef(view);
   const gate = useRef(createLatestRequestGate());
