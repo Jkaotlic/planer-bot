@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isStartTab, START_TABS, startTabFor } from "./start-tab";
+import { isStartTab, START_TABS, startTabFor, startTabScreen, startTabTeamWeek } from "./start-tab";
 
 const worker = { isAdmin: false, isObserver: false };
 const admin = { isAdmin: true, isObserver: false };
@@ -13,7 +13,35 @@ describe("isStartTab", () => {
   });
 
   it("перечисляет ровно те вкладки, что есть в меню", () => {
-    expect([...START_TABS]).toEqual(["mine", "team", "swaps", "weekend", "collections", "admin"]);
+    expect([...START_TABS]).toEqual(["mine", "team", "team_week", "swaps", "weekend", "collections", "admin"]);
+  });
+});
+
+/**
+ * «Команда — неделя» — не седьмая вкладка меню, а вкладка «Команда», открытая
+ * сразу недельной сеткой: в меню внизу её нет и быть не должно. Поэтому выбор
+ * хранится одним значением, а разбирается на две части здесь.
+ */
+describe("«Команда — неделя»", () => {
+  it("ведёт на вкладку «Команда»", () => {
+    expect(startTabScreen("team_week")).toBe("team");
+    expect(startTabTeamWeek("team_week")).toBe(true);
+  });
+
+  it("обычная «Команда» открывается днём, как была", () => {
+    expect(startTabScreen("team")).toBe("team");
+    expect(startTabTeamWeek("team")).toBe(false);
+  });
+
+  it("остальные вкладки к неделе отношения не имеют", () => {
+    expect(startTabScreen("mine")).toBe("mine");
+    expect(startTabTeamWeek("mine")).toBe(false);
+    expect(startTabTeamWeek(null)).toBe(false);
+  });
+
+  it("видна всем, кому видна «Команда», — включая наблюдателя", () => {
+    expect(startTabFor({ saved: "team_week", deeplink: null, viewer: observer })).toBe("team_week");
+    expect(startTabFor({ saved: "team_week", deeplink: null, viewer: worker })).toBe("team_week");
   });
 });
 

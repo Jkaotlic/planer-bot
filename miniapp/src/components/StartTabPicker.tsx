@@ -6,7 +6,8 @@ import { apiClient, type Me } from "../api/client";
 /** Подписи вкладок — те же слова, что стоят в нижнем меню. */
 const TAB_LABELS: Record<StartTab, string> = {
   mine: "Смены",
-  team: "Команда",
+  team: "Команда — день",
+  team_week: "Команда — неделя",
   swaps: "Обмены",
   weekend: "Выходные",
   collections: "Сборы",

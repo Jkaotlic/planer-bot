@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { canAddOwnShifts, startTabFor, type StartTab } from "@planer/shared";
+import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -160,7 +160,7 @@ export function App() {
     // «📌 Мероприятие») — `selfEntryMode`. Настройка, перебивающая их, сделала бы
     // кнопку в боте враньём.
     if (adminSectionFromSearch(search) || screenFromSearch(search)) return;
-    setTab(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me }));
+    setTab(startTabScreen(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me })));
   }, [data]);
 
   useEffect(() => {
@@ -416,7 +416,12 @@ export function App() {
           }
         />
       )}
-      {tab === "team" && <TeamScreen templates={data.templates} />}
+      {/* «Команда — неделя» открывает эту вкладку недельной сеткой — и в первый
+          раз, и когда на неё возвращаются: выбор человека про то, каким видом
+          он смотрит график, а не только про первый экран за сеанс. */}
+      {tab === "team" && (
+        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} />
+      )}
       {tab === "collections" && <CollectionsTabScreen isAdmin={data.me.isAdmin} />}
       {tab === "swaps" && (
         <SwapsScreen

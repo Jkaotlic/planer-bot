@@ -50,6 +50,8 @@ async function settle(times = 30) {
 async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
   window.history.replaceState(null, "", `/${search}`);
   vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith(me) as never);
+  // Экран «Команда» тянет расписание сам, отдельно от `bootstrap`.
+  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [] } as never);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -72,6 +74,12 @@ function screenText(el: HTMLElement): string {
   return clone.textContent ?? "";
 }
 
+/** Подпись выбранного вида на экране «Команда» — «Сегодня» или «Неделя». */
+function selectedTeamView(el: HTMLElement): string | null {
+  const tab = el.querySelector('[role="tab"][aria-selected="true"]');
+  return tab ? (tab.textContent ?? "").trim() : null;
+}
+
 describe("экран при открытии", () => {
   it("без настройки открывает «Смены», как было всегда", async () => {
     const el = await mount({ startTab: null });
@@ -82,6 +90,22 @@ describe("экран при открытии", () => {
     const el = await mount({ startTab: "team" });
     expect(screenText(el)).toContain("Команда");
     expect(screenText(el)).not.toContain("Привет");
+  });
+
+  /**
+   * «Команда — неделя» — тот же экран, что «Команда», но открытый сразу
+   * недельной сеткой. Проверяем по `aria-selected` переключателя вида: он
+   * говорит, какой вид ВЫБРАН, а не какие слова оказались на экране.
+   */
+  it("«Команда — неделя» открывает командный экран сразу неделей", async () => {
+    const el = await mount({ startTab: "team_week" });
+    expect(screenText(el)).toContain("Команда");
+    expect(selectedTeamView(el)).toBe("Неделя");
+  });
+
+  it("обычная «Команда» открывается днём, как открывалась", async () => {
+    const el = await mount({ startTab: "team" });
+    expect(selectedTeamView(el)).toBe("Сегодня");
   });
 
   it("работнику не открывает «Админ», даже если он записан", async () => {
