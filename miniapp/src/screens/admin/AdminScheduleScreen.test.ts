@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { showsWeekSwitcher } from "./AdminScheduleScreen";
 
-const CLOSED = { csvOpen: false, kindsOpen: false, fillOpen: false, editing: null };
+const CLOSED = { csvOpen: false, kindsOpen: false, settingsOpen: false, fillOpen: false, editing: null };
 
 describe("showsWeekSwitcher", () => {
   it("shows the switcher when every sub-flow is closed", () => {
@@ -16,6 +16,10 @@ describe("showsWeekSwitcher", () => {
     expect(showsWeekSwitcher({ ...CLOSED, kindsOpen: true })).toBe(false);
   });
 
+  it("прячет переключатель недели, пока открыты «Виды смен»", () => {
+    expect(showsWeekSwitcher({ ...CLOSED, settingsOpen: true })).toBe(false);
+  });
+
   it("hides it while «Заполнить неделю» is open — its per-day choices are keyed off the visible week", () => {
     expect(showsWeekSwitcher({ ...CLOSED, fillOpen: true })).toBe(false);
   });
@@ -26,8 +30,8 @@ describe("showsWeekSwitcher", () => {
   });
 
   it("shows it again once every sub-flow has closed", () => {
-    const allOpen = { csvOpen: true, kindsOpen: true, fillOpen: true, editing: "new" as const };
+    const allOpen = { csvOpen: true, kindsOpen: true, settingsOpen: true, fillOpen: true, editing: "new" as const };
     expect(showsWeekSwitcher(allOpen)).toBe(false);
-    expect(showsWeekSwitcher({ ...allOpen, csvOpen: false, kindsOpen: false, fillOpen: false, editing: null })).toBe(true);
+    expect(showsWeekSwitcher({ ...allOpen, csvOpen: false, kindsOpen: false, settingsOpen: false, fillOpen: false, editing: null })).toBe(true);
   });
 });

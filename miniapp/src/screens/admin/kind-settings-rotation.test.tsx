@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import type { Employee } from "../../api/client";
-import { AdminShiftKinds } from "./AdminShiftKinds";
+import { apiClient } from "../../api/client";
+import { AdminKindSettings } from "./AdminKindSettings";
 
 /**
  * «Очередь идёт по дням / по неделям» — переключатель, который врал.
@@ -21,15 +21,13 @@ import { AdminShiftKinds } from "./AdminShiftKinds";
  *
  * Проверяется через DEV-мок — тот самый клиент, на котором работает `npm run dev`:
  * он честно запоминает единицу и отдаёт её следующим запросом.
+ *
+ * Экран переехал: очередь — свойство ВИДА смены, и с тех пор, как «Кто что
+ * может» стал списком людей, живёт на «Видах смен».
  */
 
 // React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: false, isActive: true, telegramUserId: 10, birthDate: null, address: "Аня", preferredName: null, excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, address: "Игорь", preferredName: null, excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
-];
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -48,7 +46,7 @@ async function mount() {
   await act(async () => {
     // telegram-ui требует свой провайдер; проверяем мы то, что внутри.
     root!.render(
-      createElement(AppRoot, null, createElement(AdminShiftKinds, { employees: EMPLOYEES, onClose: () => {} })),
+      createElement(AppRoot, null, createElement(AdminKindSettings, { onClose: () => {} })),
     );
   });
   await settle();
@@ -109,5 +107,34 @@ describe("«Очередь идёт» — выбранная единица ос
     await settle();
 
     expect(rotationSelect(el).value).toBe("week");
+  });
+});
+
+describe("отказ на «Видах смен» остаётся в своей карточке", () => {
+  it("не сохранившаяся очередь пишет причину в той карточке, где её меняли", async () => {
+    const el = await mount();
+    const heads = [...el.querySelectorAll("button[aria-expanded]")] as HTMLButtonElement[];
+    expect(heads.length).toBeGreaterThan(1);
+
+    // Нижняя карточка — та, до которой пришлось прокрутить: отказ, нарисованный
+    // сверху экрана, для нажавшего здесь невидим.
+    const head = heads[heads.length - 1]!;
+    await act(async () => head.click());
+    await settle();
+
+    vi.spyOn(apiClient, "setRotationUnit").mockRejectedValue(new Error("Failed to fetch"));
+    const select = el.querySelector("select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "week";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+
+    const error = [...el.querySelectorAll("div")].find(
+      (d) => d.children.length === 0 && (d.textContent ?? "").includes("Failed to fetch"),
+    );
+    expect(error).toBeTruthy();
+    expect((head.compareDocumentPosition(error!) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+    vi.restoreAllMocks();
   });
 });

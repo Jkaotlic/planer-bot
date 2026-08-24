@@ -57,40 +57,17 @@ async function mount() {
   return host;
 }
 
-function follows(node: Node, after: Node): boolean {
+function _follows(node: Node, after: Node): boolean {
   return (after.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
 
-function errorNode(el: HTMLElement, text: string): HTMLElement | undefined {
+function _errorNode(el: HTMLElement, text: string): HTMLElement | undefined {
   return [...el.querySelectorAll("div")].find(
     (d) => d.children.length === 0 && (d.textContent ?? "").includes(text),
   ) as HTMLElement | undefined;
 }
 
 describe("отказ в «Кто что может» остаётся в своей карточке", () => {
-  it("не сохранившаяся очередь пишет причину в той карточке, где её меняли", async () => {
-    const el = await mount();
-    const heads = [...el.querySelectorAll("button[aria-expanded]")] as HTMLButtonElement[];
-    expect(heads.length).toBeGreaterThan(1);
-
-    // Нижняя карточка — та, до которой пришлось прокрутить.
-    const head = heads[heads.length - 1]!;
-    await act(async () => head.click());
-    await settle();
-
-    vi.spyOn(apiClient, "setRotationUnit").mockRejectedValue(new Error("Failed to fetch"));
-    const select = el.querySelector("select") as HTMLSelectElement;
-    await act(async () => {
-      select.value = "week";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await settle();
-
-    const error = errorNode(el, "Failed to fetch");
-    expect(error).toBeTruthy();
-    expect(follows(error!, head)).toBe(true);
-  });
-
   it("упавшая загрузка экрана даёт «Повторить», а не вечный спиннер", async () => {
     const failing = vi.spyOn(apiClient, "getTemplateRoles").mockRejectedValue(new Error("Failed to fetch"));
     const el = await mount();

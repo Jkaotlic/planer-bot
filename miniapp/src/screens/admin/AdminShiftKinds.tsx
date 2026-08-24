@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { exactSchedulePalette, filterPeople } from "@planer/shared";
 import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../../api/client";
+import { apiClient, type Employee, type TemplateRolesView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { PersonSearch } from "../../components/PersonSearch";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -45,7 +45,6 @@ export function AdminShiftKinds({
   onClose: () => void;
 }) {
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
-  const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   /**
@@ -73,9 +72,6 @@ export function AdminShiftKinds({
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
-    // Чек-листы рядом с ролями: без их имён выпадающий список показывать нечем.
-    // Молча при отказе — экран про «кто что может», и его беда важнее.
-    apiClient.getChecklists().then((next) => { if (!cancelled) setChecklists(next); }).catch(() => {});
     apiClient
       .getTemplateRoles()
       .then((next) => {
@@ -100,36 +96,6 @@ export function AdminShiftKinds({
       // Put the server's version back rather than leaving a lie on screen.
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить"));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
-    // Оптимистично, как и допуск: галочка обязана отзываться сразу, иначе на
-    // медленной сети её жмут второй раз.
-    setKinds((current) =>
-      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistId } : item)) ?? current,
-    );
-    setBusyId(kind.templateId);
-    setErrors((prev) => withoutError(prev, kind.templateId));
-    try {
-      await apiClient.setTemplateChecklist(kind.templateId, checklistId);
-    } catch (err) {
-      setKinds(await apiClient.getTemplateRoles().catch(() => null));
-      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить чек-лист"));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
-    setBusyId(kind.templateId);
-    setErrors((prev) => withoutError(prev, kind.templateId));
-    try {
-      await apiClient.setRotationUnit(kind.templateId, unit);
-    } catch (err) {
-      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить очередь"));
     } finally {
       setBusyId(null);
     }
@@ -182,9 +148,6 @@ export function AdminShiftKinds({
             error={errors.get(kind.templateId)}
             onToggleOpen={() => toggleOpen(kind.templateId)}
             onChange={(patch) => void save(kind, patch)}
-            onRotationUnit={(unit) => saveRotation(kind, unit)}
-            checklists={checklists}
-            onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
           />
         ))}
 
@@ -210,9 +173,6 @@ function KindCard({
   error,
   onToggleOpen,
   onChange,
-  onRotationUnit,
-  checklists,
-  onChecklist,
 }: {
   kind: TemplateRolesView;
   employees: Employee[];
@@ -224,9 +184,6 @@ function KindCard({
   error?: string;
   onToggleOpen: () => void;
   onChange: (patch: Partial<TemplateRolesView>) => void;
-  onRotationUnit: (unit: "day" | "week") => Promise<void>;
-  checklists: readonly Checklist[];
-  onChecklist: (checklistId: number | null) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -235,42 +192,6 @@ function KindCard({
   // name — otherwise all four duties read «Д» here and «Т»/«П»/«ВА»/«07» there.
   const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
   const preferred = Object.keys(kind.preference).length;
-  const [queue, setQueue] = useState<TemplateQueue | null>(null);
-
-  // History, not settings — fetched when the card opens and whenever the pool
-  // changes, since the pool decides who is in the queue at all.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    apiClient
-      .getTemplateQueue(kind.templateId)
-      .then((next) => {
-        if (!cancelled) setQueue(next);
-      })
-      .catch(() => {
-        if (!cancelled) setQueue(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, kind.templateId, kind.pool.length]);
-
-  /**
-   * The select is controlled off `queue`, and `queue` is only re-read when the
-   * card opens — so saving alone left React putting the old value straight back:
-   * the admin picked «по неделям», the control snapped to «по дням», and the
-   * setting looked like it hadn't taken even though the server had already
-   * written it. Show the choice at once, then re-read the queue: the «Следующие:
-   * …» labels are folded into words server-side by this very unit, so they are
-   * stale until the whole queue comes back.
-   */
-  async function changeUnit(unit: "day" | "week") {
-    setQueue((prev) => (prev ? { ...prev, rotationUnit: unit } : prev));
-    await onRotationUnit(unit);
-    const fresh = await apiClient.getTemplateQueue(kind.templateId).catch(() => null);
-    if (fresh) setQueue(fresh);
-  }
-
   const visiblePeople = filterPeople(employees, query);
 
   return (
@@ -305,61 +226,7 @@ function KindCard({
       </button>
 
       {open && (
-        <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)" }}>
-          <div style={{ padding: "10px 0 2px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tgui--hint_color)" }}>
-              Очередь идёт
-              <select
-                value={queue?.rotationUnit ?? "day"}
-                disabled={busy || !queue}
-                onChange={(e) => void changeUnit(e.target.value as "day" | "week")}
-                style={{
-                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
-                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
-                }}
-              >
-                <option value="day">по дням</option>
-                <option value="week">по неделям</option>
-              </select>
-            </label>
-            {/* Галочка живёт здесь, а не на экране чек-листа: «кому он положен» —
-                свойство вида смены, как допуск и очередь рядом. Зеркало
-                консольного `ShiftKindsScreen`. */}
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 10 }}>
-              Чек-лист
-              <select
-                value={kind.checklistId ?? ""}
-                disabled={busy || checklists.length === 0}
-                onChange={(e) => void onChecklist(e.target.value ? Number(e.target.value) : null)}
-                style={{
-                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
-                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
-                }}
-              >
-                <option value="">— не нужен —</option>
-                {checklists.map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {queue && queue.queue.length > 0 ? (
-              <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.45 }}>
-                Следующие: {queue.queue.slice(0, 3).map((turn) => turn.label).join(" → ")}
-                <br />
-                <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>
-                  Бот только подсказывает — ставишь смену ты сам.
-                </span>
-              </p>
-            ) : (
-              <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--tgui--hint_color)" }}>
-                Очередь появится, когда в допущенных кто-нибудь будет.
-              </p>
-            )}
-          </div>
-
+        <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)", paddingTop: 6 }}>
           <PersonSearch value={query} onChange={onQueryChange} count={employees.length} disabled={busy} />
 
           <div

@@ -24,6 +24,7 @@ import { BackToTodayButton } from "../../components/BackToTodayButton";
 import { CardShell, CardStack } from "../../components/Card";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
+import { AdminKindSettings } from "./AdminKindSettings";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { formatTimeRange, notifyPendingNotice, withNotifyNotice } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -67,10 +68,11 @@ function needsTime(category: Category): boolean {
 export function showsWeekSwitcher(state: {
   csvOpen: boolean;
   kindsOpen: boolean;
+  settingsOpen: boolean;
   fillOpen: boolean;
   editing: unknown;
 }): boolean {
-  return !state.csvOpen && !state.kindsOpen && !state.fillOpen && state.editing === null;
+  return !state.csvOpen && !state.kindsOpen && !state.settingsOpen && !state.fillOpen && state.editing === null;
 }
 
 /**
@@ -104,6 +106,8 @@ export function AdminScheduleScreen() {
   const [csvOpen, setCsvOpen] = useState(false);
   /** When true, the day view is replaced by the «кто что может» editor. */
   const [kindsOpen, setKindsOpen] = useState(false);
+  /** When true, the day view is replaced by the «виды смен» editor. */
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
@@ -233,7 +237,7 @@ export function AdminScheduleScreen() {
           their own state from the visible week once and never re-sync, so letting
           the admin navigate under them would leave that state pointing at a day
           that quietly isn't an option on screen anymore. */}
-      {showsWeekSwitcher({ csvOpen, kindsOpen, fillOpen, editing }) && (
+      {showsWeekSwitcher({ csvOpen, kindsOpen, settingsOpen, fillOpen, editing }) && (
         <div style={{ padding: "12px 4px 0" }}>
           <WeekBar
             label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))}
@@ -264,6 +268,8 @@ export function AdminScheduleScreen() {
           </Section>
         ) : kindsOpen ? (
           <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
+        ) : settingsOpen ? (
+          <AdminKindSettings onClose={() => setSettingsOpen(false)} />
         ) : csvOpen ? (
           <AdminRosterCsv
             employees={employees}
@@ -319,6 +325,9 @@ export function AdminScheduleScreen() {
               </Button>
               <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setKindsOpen(true); }}>
                 ⚙ Кто что может
+              </Button>
+              <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setSettingsOpen(true); }}>
+                🗂 Виды смен
               </Button>
             </div>
           </Section>
