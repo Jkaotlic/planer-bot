@@ -14,6 +14,7 @@
 #
 # Environment overrides (all optional):
 #   PLANER_DB          path to the live database   (default: <repo>/data/planer.db)
+#   PLANER_DOCS_DIR    файлы инструкций            (default: <repo>/data/checklist-docs)
 #   PLANER_BACKUP_DIR  where snapshots go          (default: ~/planer-bot-backups)
 #   PLANER_BACKUP_KEEP how many to keep            (default: 30)
 
@@ -66,6 +67,19 @@ EMPLOYEES="$("${SQLITE}" "file:${OUT}?immutable=1" 'select count(*) from employe
 SHIFTS="$("${SQLITE}" "file:${OUT}?immutable=1" 'select count(*) from shifts;')"
 log "ок: $(du -h "${OUT}" | cut -f1), сотрудников ${EMPLOYEES}, записей ${SHIFTS}"
 
+# Файлы инструкций к чек-листам лежат НЕ в базе, и снимок .backup про них ничего
+# не знает: восстановление из одной базы дало бы чек-листы с именами файлов,
+# которых нет на диске. Архив кладётся рядом со снимком и с тем же штампом,
+# чтобы пара «база + файлы» читалась одним взглядом.
+DOCS="${PLANER_DOCS_DIR:-${REPO_ROOT}/data/checklist-docs}"
+if [ -d "${DOCS}" ]; then
+  DOCS_OUT="${DEST}/planer-docs-${STAMP}.tar.gz"
+  tar -czf "${DOCS_OUT}" -C "$(dirname "${DOCS}")" "$(basename "${DOCS}")" || fail "не удалось упаковать ${DOCS}"
+  log "файлы инструкций: $(du -h "${DOCS_OUT}" | cut -f1) -> ${DOCS_OUT}"
+else
+  log "каталог файлов инструкций пуст или не создан (${DOCS}) — архивировать нечего"
+fi
+
 # Rotation. Sorted newest-first by name, which is the same as by time because the
 # stamp is fixed-width — no dependence on mtime, which a restore would rewrite.
 REMOVED=0
@@ -79,3 +93,17 @@ EOF
 
 KEPT="$(ls -1 "${DEST}" | grep -cE '^planer-[0-9]{8}-[0-9]{6}\.db$' || true)"
 log "хранится снимков: ${KEPT} (лимит ${KEEP}), удалено в этот раз: ${REMOVED}"
+
+# Та же ротация для архивов файлов — своим проходом, а не общим: имена разные, и
+# один список смешал бы базы с архивами, отчего лимит считался бы вдвое.
+DOCS_REMOVED=0
+while IFS= read -r old; do
+  [ -n "$old" ] || continue
+  rm -f "${DEST}/$old"
+  DOCS_REMOVED=$((DOCS_REMOVED + 1))
+done <<EOF
+$(ls -1 "${DEST}" | grep -E '^planer-docs-[0-9]{8}-[0-9]{6}\.tar\.gz$' | sort -r | tail -n +$((KEEP + 1)))
+EOF
+
+DOCS_KEPT="$(ls -1 "${DEST}" | grep -cE '^planer-docs-[0-9]{8}-[0-9]{6}\.tar\.gz$' || true)"
+log "хранится архивов файлов: ${DOCS_KEPT} (лимит ${KEEP}), удалено в этот раз: ${DOCS_REMOVED}"

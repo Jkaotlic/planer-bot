@@ -84,6 +84,25 @@ describe("setTemplateRoles", () => {
 });
 
 describe("rotationCandidatesFor", () => {
+  it("сужает очередь до пула, когда пул задан", () => {
+    // После снятия честной раздачи пул влияет только на эту очередь: если правило
+    // отсюда пропадёт, «кому следующему дежурить» начнёт называть людей, которых
+    // админ к дежурству не допускал, и заметить это будет некому.
+    const db = makeTestDb();
+    const night = presetId(db, "Ночь");
+    const inPool = createEmployee(db, { displayName: "Игорь" }).id;
+    const outside = createEmployee(db, { displayName: "Марк" }).id;
+
+    expect(rotationCandidatesFor(db, night, "2026-08-03").map((c) => c.employeeId)).toEqual(
+      expect.arrayContaining([inPool, outside]),
+    );
+
+    setTemplateRoles(db, night, { pool: [inPool], preference: {} });
+    const ids = rotationCandidatesFor(db, night, "2026-08-03").map((c) => c.employeeId);
+    expect(ids).toContain(inPool);
+    expect(ids).not.toContain(outside);
+  });
+
   it("ignores shifts dated after asOf when picking lastHeld — a schedule built weeks ahead", () => {
     const db = makeTestDb();
     const night = presetId(db, "Ночь");

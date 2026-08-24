@@ -466,6 +466,8 @@ export async function mockGetRosterCsv(_from: string, _to: string): Promise<stri
 
 /** DEV store for who may take each preset and who asked for it. Empty = everyone. */
 const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<number, number> }>();
+/** DEV-хранилище нормы дня. Пусто — «не считаем», как и в базе по умолчанию. */
+const TEMPLATE_COVERAGE = new Map<number, number[]>();
 
 export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
   await delay(180);
@@ -477,7 +479,13 @@ export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
     pool: [...(TEMPLATE_ROLES.get(template.id)?.pool ?? [])],
     preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
     checklistId: CHECKLISTS.find((l) => l.templateIds.includes(template.id))?.id ?? null,
+    coverage: [...(TEMPLATE_COVERAGE.get(template.id) ?? [0, 0, 0, 0, 0, 0, 0])],
   }));
+}
+
+export async function mockSetTemplateCoverage(templateId: number, coverage: number[]): Promise<void> {
+  await delay(150);
+  TEMPLATE_COVERAGE.set(templateId, [...coverage]);
 }
 
 export async function mockSetTemplateChecklist(templateId: number, checklistId: number | null): Promise<void> {
@@ -1327,6 +1335,15 @@ export async function mockRemoveChecklistDoc(id: number): Promise<Checklist> {
   const list = findList(id);
   list.docName = null;
   list.hasDoc = false;
+  return { ...list };
+}
+
+/** DEV: файл никуда не пишется, но имя и признак «приложен» ведут себя как на сервере. */
+export async function mockUploadChecklistDoc(id: number, file: File): Promise<Checklist> {
+  await delay(220);
+  const list = findList(id);
+  list.docName = file.name;
+  list.hasDoc = true;
   return { ...list };
 }
 

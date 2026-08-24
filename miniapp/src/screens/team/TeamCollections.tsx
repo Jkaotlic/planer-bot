@@ -19,7 +19,7 @@ import { CardShell, CardStack } from "../../components/Card";
  * Отказ сервера — тоже ничего: график команды не должен пропадать из-за того,
  * что не загрузился сбор.
  */
-export function TeamCollections() {
+export function TeamCollections({ emptyLabel }: { emptyLabel?: string } = {}) {
   const [rows, setRows] = useState<WorkerCollection[]>([]);
 
   useEffect(() => {
@@ -31,7 +31,16 @@ export function TeamCollections() {
     return () => { alive = false; };
   }, []);
 
-  if (rows.length === 0) return null;
+  // Пустой список: во вкладке «Команда» секции нет вовсе (`emptyLabel` не
+  // передан), а на своей вкладке молчать нельзя — пустой экран читался бы как
+  // «не загрузилось».
+  if (rows.length === 0) {
+    return emptyLabel ? (
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5, padding: "12px 4px", lineHeight: 1.45 }}>
+        {emptyLabel}
+      </div>
+    ) : null;
+  }
 
   return (
     <CardStack>

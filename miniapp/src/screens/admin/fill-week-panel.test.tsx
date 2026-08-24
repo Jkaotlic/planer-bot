@@ -34,7 +34,7 @@ async function mount(employees: Employee[]) {
   document.body.appendChild(host);
   root = createRoot(host);
   const panel = createElement(FillWeekPanel, {
-    employees, templates: [], weekDates: [], shifts: [], roles: [],
+    employees, templates: [], weekDates: [],
     onCancel: () => {}, onFilled: async () => {},
   });
   await act(async () => root!.render(createElement(AppRoot, null, panel)));

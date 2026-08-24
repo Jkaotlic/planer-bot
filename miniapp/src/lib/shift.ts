@@ -60,8 +60,8 @@ export function notifyNotice(reach: { delivered: number; intended: number }): st
  * фраза произносится ровно в том же случае, что и раньше, — часть команды не
  * подключила телеграм, и об этом админ должен узнать сразу.
  *
- * `notifyNotice` рядом остаётся: импорт файла, «Распределить честно» и
- * «Заполнить неделю» отправляют внутри запроса и отчитываются о факте.
+ * `notifyNotice` рядом остаётся: импорт файла и «Заполнить неделю» отправляют
+ * внутри запроса и отчитываются о факте.
  */
 export function notifyPendingNotice(reach: { delivered: number; intended: number }): string | null {
   if (reach.intended === 0 || reach.delivered >= reach.intended) return null;

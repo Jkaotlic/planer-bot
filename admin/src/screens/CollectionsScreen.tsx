@@ -648,6 +648,24 @@ function CollectionCard({
 }) {
   const status = statusOf(row);
   const subtitle = [moneyLine(row.collection), edgeLine(row.collection)].filter(Boolean).join(" · ");
+  const [closing, setClosing] = useState(false);
+  /** Отказ рисуется на самой строке — так же, как в мини-аппе: список длинный,
+   *  и сообщение над ним для нажавшего внизу невидимо. */
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  async function close() {
+    setClosing(true);
+    setCloseError(null);
+    try {
+      await apiClient.setCollectionClosed(row.collection.id, true);
+      await onChanged();
+    } catch (err) {
+      console.error("Close collection failed:", err);
+      setCloseError("Не получилось закрыть сбор. Попробуй ещё раз.");
+    } finally {
+      setClosing(false);
+    }
+  }
 
   return (
     <div className={`birthday-card${open ? " open" : ""}`} data-testid="collection-card">
@@ -655,10 +673,19 @@ function CollectionCard({
         <span className="birthday-name">{cardSubject(row)}</span>
         {subtitle && <span className="birthday-when">{subtitle}</span>}
         <span className={`birthday-status ${status.tone}`}>{status.label}</span>
+        {/* «Собрали» прямо в строке: закрыть сбор — самое частое, что с ним
+            делают, и раскрывать ради этого карточку незачем. Внутри карточки
+            кнопка остаётся — там она про пару «закрыть / открыть заново». */}
+        {row.collection.closedAt == null && (
+          <button type="button" className="btn btn-primary" disabled={closing} onClick={() => void close()}>
+            {closing ? "…" : "Собрали"}
+          </button>
+        )}
         <button type="button" className="btn btn-secondary" onClick={onToggle}>
           {open ? "Свернуть" : "Открыть"}
         </button>
       </div>
+      {closeError && <div className="employees-error">{closeError}</div>}
 
       {open && (
         <CollectionEditor

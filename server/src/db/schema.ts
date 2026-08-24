@@ -29,9 +29,9 @@ export const employees = sqliteTable("employees", {
   isAdmin: integer({ mode: "boolean" }).notNull().default(false),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
   remindersEnabled: integer({ mode: "boolean" }).notNull().default(true),
-  /** An admin took this person out of AUTOMATIC placement: «Распределить честно»,
-   *  the ★ queue, the weekend call for volunteers, and weekend assignment. An admin
-   *  can still place them by hand — this is not archiving. */
+  /** An admin took this person out of AUTOMATIC placement: очередь дежурств
+   *  («кому следующему»), the weekend call for volunteers, and weekend assignment.
+   *  An admin can still place them by hand — this is not archiving. */
   excludedFromAssignment: integer({ mode: "boolean" }).notNull().default(false),
   /** An admin took this person out of swaps, both ways: neither propose nor accept. */
   excludedFromSwaps: integer({ mode: "boolean" }).notNull().default(false),
@@ -125,8 +125,7 @@ export const shifts = sqliteTable("shifts", {
    *
    * `(date)` — расписание за неделю и за месяц: обе сетки, командный ответ,
    * отчёты, выгрузка ростера. `(employee_id, date)` — история одного человека:
-   * баланс, честное распределение (28 чтений за одно «Распределить честно»),
-   * «мои смены». До индексов оба шли полным сканом.
+   * баланс, очередь дежурств, «мои смены». До индексов оба шли полным сканом.
    */
   (t) => [index("shift_date").on(t.date), index("shift_employee_date").on(t.employeeId, t.date)],
 );
@@ -489,8 +488,13 @@ export const collections = sqliteTable(
  * Инструкция лежит здесь же, тремя полями, потому что закрывает три разных
  * случая: короткий текст читается прямо в чате, ссылка ведёт в живой документ,
  * который правят без нас, а файл доходит туда, где интернета может не быть.
- * `docFileId` — идентификатор файла в Telegram: бот пересылает документ по нему,
- * и своё хранилище ради одного PDF не заводится.
+ * Файл живёт двумя полями. `docPath` — путь на диске рядом с базой: это
+ * источник истины с тех пор, как файл можно загрузить из браузера (браузер не
+ * умеет положить документ в Telegram так, чтобы бот потом мог его переслать).
+ * `docFileId` — КЭШ: первую отправку бот делает с диска, а возвращённый Telegram
+ * идентификатор запоминает, и следующие уходят даром. Поэтому замена файла
+ * обязана обнулять `docFileId`, иначе дежурным уходил бы прежний документ под
+ * новым именем.
  */
 export const checklists = sqliteTable("checklists", {
   id: integer().primaryKey({ autoIncrement: true }),
@@ -499,6 +503,7 @@ export const checklists = sqliteTable("checklists", {
   docUrl: text(),
   docFileId: text(),
   docName: text(),
+  docPath: text(),
   createdAt: createdAt(),
 });
 

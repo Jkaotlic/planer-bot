@@ -1048,6 +1048,67 @@ button {
   font-weight: 700;
 }
 
+/* Тот же значок вида смены, но в строке внутри карточки человека — там он стоит
+   рядом с чекбоксами, и полноразмерный отжимал бы имя вида. */
+.kind-swatch-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+/* Нехватка по норме — под датой в шапке колонки дня. Мелким и приглушённым:
+   это подсказка на полях, а не заголовок. */
+.day-shortfall {
+  display: block;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--hint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.kind-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.kind-coverage-title {
+  font-size: 12.5px;
+  color: var(--hint);
+}
+
+.kind-coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  max-width: 420px;
+}
+
+.kind-coverage-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--hint);
+}
+
+.kind-coverage-day input {
+  width: 100%;
+  padding: 4px 0;
+  text-align: center;
+  border-radius: 6px;
+  border: 1px solid var(--separator);
+  background: var(--surface-secondary);
+  color: var(--text);
+  font: inherit;
+}
+
 .kind-name {
   font-size: 14.5px;
   font-weight: 600;
@@ -2333,6 +2394,13 @@ input[type="search"] {
   border-top: 1px solid var(--separator);
   font-size: 13px;
   color: var(--hint);
+}
+
+/* Подсказка про второй путь — с новой строки: она длиннее кнопок и в один ряд
+   с ними ломала бы их порядок. */
+.checklist-doc-note {
+  flex-basis: 100%;
+  font-size: 12px;
 }
 
 .checklist-item-note {

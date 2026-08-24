@@ -6,11 +6,12 @@ import type { Employee } from "../api/client";
 import { ShiftKindsScreen } from "./ShiftKindsScreen";
 
 /**
- * Поиск в «Видах смен» не должен подменять счётчик допусков в заголовке
- * карточки: `poolSummary` в `.kind-meta` считается от полного списка
- * работников, не от найденного — иначе «допущены: все (6)» тихо превратится
- * в «все (1)», стоило кому-то что-нибудь набрать в поиске, и ни один сигнал
- * в интерфейсе об этом не скажет.
+ * Поиск на экране «Виды смен» ищет ЛЮДЕЙ и ничего больше.
+ *
+ * Сводка допусков у найденного человека считается по всем видам смен, а не по
+ * тому, что набрано в поиске: иначе «допущен ко всем (9)» тихо превращалось бы
+ * в «допущен ко всем (1)», и ни один сигнал в интерфейсе об этом не сказал бы.
+ * Карточек видов смен сверху поиск не касается вовсе.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -74,38 +75,28 @@ async function typeSearch(field: HTMLInputElement, value: string) {
   });
 }
 
-describe("поиск в «Видах смен» не подменяет счётчик допусков", () => {
-  it("список сужается, а «допущены: …» в заголовке карточки остаётся как было", async () => {
+describe("поиск в «Кто что может» (консоль)", () => {
+  it("сужает список людей, не трогая их сводку допусков", async () => {
     const el = await mount();
-
-    const head = el.querySelector<HTMLButtonElement>(".kind-card-head");
-    if (!head) throw new Error("карточки вида смены нет на экране");
-    await act(async () => head.click());
-    await settle();
-
-    const meta = el.querySelector(".kind-meta");
-    if (!meta) throw new Error("нет .kind-meta у раскрытой карточки");
-    const metaBefore = (meta.textContent ?? "").trim();
 
     await typeSearch(searchField(el), "семён");
-
-    const rows = [...el.querySelectorAll(".kind-person-name")];
-    expect(rows).toHaveLength(1);
-    expect((rows[0]!.textContent ?? "")).toContain("Семёнов Марк");
-
-    // Суть теста: счётчик в заголовке не зависит от того, что набрано в поиске.
-    expect((meta.textContent ?? "").trim()).toBe(metaBefore);
-  });
-
-  it("поиск без совпадений говорит «Никого с таким именем нет.», а не рисует пустую матрицу молча", async () => {
-    const el = await mount();
-    const head = el.querySelector<HTMLButtonElement>(".kind-card-head")!;
-    await act(async () => head.click());
     await settle();
 
-    await typeSearch(searchField(el), "нет такого человека");
+    // Карточки видов смен сверху поиском не задеты — он про людей.
+    const people = [...el.querySelectorAll(".kind-card-head")].filter((head) =>
+      (head.textContent ?? "").includes("Семёнов Марк"),
+    );
+    expect(people).toHaveLength(1);
+    // Сводка считается по всем видам смен, а не по тому, что набрано в поиске.
+    expect(people[0]!.textContent ?? "").toContain("допущен");
+  });
 
-    expect(el.querySelectorAll(".kind-person-name")).toHaveLength(0);
+  it("поиск без совпадений говорит «Никого с таким именем нет.», а не рисует пустой список молча", async () => {
+    const el = await mount();
+
+    await typeSearch(searchField(el), "нет такого человека");
+    await settle();
+
     expect(el.textContent ?? "").toContain("Никого с таким именем нет.");
   });
 });

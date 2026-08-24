@@ -1,49 +1,56 @@
 import { useEffect, useState } from "react";
 import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
-import { exactSchedulePalette, filterPeople } from "@planer/shared";
+import {
+  coverageSummary,
+  exactSchedulePalette,
+  filterPeople,
+  rolesOfPerson,
+  toggleAllowed,
+  togglePreference,
+  type PersonKindRole,
+} from "@planer/shared";
 import { useEntryPalette } from "../categories";
 import { PersonSearch } from "../components/PersonSearch";
 import { initialsOf, personPalette } from "../lib/people";
 
 /**
- * "Кто допущен: все" or "Кто допущен: 5 из 26". An empty pool is not "nobody" —
- * it is an unconfigured preset, and it means everyone. Saying so on the card is
- * the whole difference between the screen reading as a whitelist and reading as
- * a blacklist.
+ * «допущен к 1 из 9 · любит: 2» — строка под именем человека.
+ *
+ * Пустой список допущенных считается ДОПУСКОМ: у большинства видов смен он не
+ * настроен, и «допущен к 0 из 9» было бы прямой ложью. Зеркало
+ * `personSummary` в мини-аппе — фраза на двух фронтах одна.
  */
-export function poolSummary(poolSize: number, total: number): string {
-  return poolSize === 0 ? `все (${total})` : `${poolSize} из ${total}`;
+export function personSummary(roles: readonly PersonKindRole[]): string {
+  if (roles.length === 0) return "видов смен пока нет";
+  const allowed = roles.filter((role) => role.allowed).length;
+  const preferred = roles.filter((role) => role.preferred).length;
+  const head = allowed === roles.length ? `допущен ко всем (${roles.length})` : `допущен к ${allowed} из ${roles.length}`;
+  return preferred > 0 ? `${head} · любит: ${preferred}` : head;
 }
 
-/** Adds or removes an id, returning a new array — the editor never mutates state. */
-export function toggleId(ids: readonly number[], id: number): number[] {
-  return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
-}
-
-/** A preference is stored as a weight; the screen only offers on (1) and off. */
-export function togglePreference(
-  preference: Readonly<Record<number, number>>,
-  id: number,
-): Record<number, number> {
-  const next = { ...preference };
-  if (next[id]) delete next[id];
-  else next[id] = 1;
-  return next;
-}
-
-/** «Кто что может» — the pool and the preferences for every kind of shift. */
+/**
+ * Экран «Виды смен»: сверху свойства самих видов (чек-лист, очередь), снизу
+ * «Кто что может» — список ЛЮДЕЙ с галочками по видам.
+ *
+ * Раньше обе половины были одной: карточка вида смены, внутри — двадцать восемь
+ * человек. Вопрос, который задают на самом деле, звучит «что может Игорь», и
+ * ответ на него собирался обходом девяти карточек.
+ */
 export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
-  const [openId, setOpenId] = useState<number | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [openKindId, setOpenKindId] = useState<number | null>(null);
+  const [openPersonId, setOpenPersonId] = useState<number | null>(null);
+  const [busyKindId, setBusyKindId] = useState<number | null>(null);
+  const [busyPersonId, setBusyPersonId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const active = employees.filter((employee) => employee.isActive);
+  const activeIds = active.map((employee) => employee.id);
 
   useEffect(() => {
-    // Чек-листы — рядом с ролями: без их имён выпадающий список показывать нечем.
-    // Молча при отказе: экран про «кто что может», и его беда важнее.
+    // Чек-листы — рядом с видами: без их имён выпадающий список показывать нечем.
+    // Молча при отказе: экран про виды смен, и его беда важнее.
     apiClient.getChecklists().then(setChecklists).catch(() => setChecklists([]));
     apiClient
       .getTemplateRoles()
@@ -55,10 +62,14 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
       });
   }, []);
 
-  async function save(kind: TemplateRolesView, patch: Partial<TemplateRolesView>) {
+  /**
+   * Сохранение идёт ВИДОМ смены и после переворота экрана: галочка «Игорь ·
+   * Утро» шлёт роли пресета «Утро» целиком. Экран перевернули, модель — нет.
+   */
+  async function save(kind: TemplateRolesView, patch: Partial<TemplateRolesView>, employeeId: number) {
     const next = { ...kind, ...patch };
     setKinds((current) => current?.map((item) => (item.templateId === kind.templateId ? next : item)) ?? current);
-    setBusyId(kind.templateId);
+    setBusyPersonId(employeeId);
     setError(null);
     try {
       await apiClient.saveTemplateRoles(next.templateId, next.pool, next.preference);
@@ -67,38 +78,54 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
-      setBusyId(null);
+      setBusyPersonId(null);
     }
   }
 
-  // Запрос принадлежит открытой карточке, а не экрану: без сброса здесь
-  // закрыть карточку A с непустым поиском и открыть B значило бы, что B
-  // открывается уже отфильтрованной — под запрос, который в контексте B
-  // никто не вводил.
-  function toggleOpen(templateId: number) {
-    setOpenId((current) => (current === templateId ? null : templateId));
-    setQuery("");
+  async function toggleAllowedFor(kind: TemplateRolesView, employeeId: number) {
+    const pool = toggleAllowed(kind.pool, employeeId, activeIds);
+    if (pool === null) {
+      setError(`«${kind.name}»: последнего допущенного снять нельзя — пустой список значит «могут все».`);
+      return;
+    }
+    await save(kind, { pool }, employeeId);
   }
 
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
-    setBusyId(kind.templateId);
+    setBusyKindId(kind.templateId);
     setError(null);
     try {
       await apiClient.setRotationUnit(kind.templateId, unit);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить очередь");
     } finally {
-      setBusyId(null);
+      setBusyKindId(null);
+    }
+  }
+
+  async function saveCoverage(kind: TemplateRolesView, coverage: number[]) {
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, coverage } : item)) ?? current,
+    );
+    setBusyKindId(kind.templateId);
+    setError(null);
+    try {
+      await apiClient.setTemplateCoverage(kind.templateId, coverage);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setError(err instanceof Error ? err.message : "Не удалось сохранить норму");
+    } finally {
+      setBusyKindId(null);
     }
   }
 
   async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
-    // Оптимистично, как и допуск рядом: выбор обязан отзываться сразу, иначе на
-    // медленной сети его меняют второй раз.
+    // Оптимистично: выбор обязан отзываться сразу, иначе на медленной сети его
+    // меняют второй раз.
     setKinds((current) =>
       current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistId } : item)) ?? current,
     );
-    setBusyId(kind.templateId);
+    setBusyKindId(kind.templateId);
     setError(null);
     try {
       await apiClient.setTemplateChecklist(kind.templateId, checklistId);
@@ -106,42 +133,65 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить чек-лист");
     } finally {
-      setBusyId(null);
+      setBusyKindId(null);
     }
   }
 
   if (error && !kinds) return <div className="centered-fill">{error}</div>;
   if (!kinds) return <div className="centered-fill">Загрузка…</div>;
 
+  const visiblePeople = filterPeople(active, query);
+
   return (
     <div className="employees-screen">
       <div className="employees-header">
         <h2 className="employees-title">Виды смен</h2>
       </div>
-      <p className="kinds-intro">
-        Кто допущен к виду смены и кто её любит. Пустой список допущенных значит «все» — никого не нужно
-        исключать, просто не вписывай. «Любит» не перебивает справедливость: оно решает только ничью,
-        когда у двоих поровну смен этого вида.
-      </p>
       {error && <div className="employees-error">{error}</div>}
 
+      <p className="kinds-intro">
+        Сверху — свойства самого вида смены: какой чек-лист получает дежурный и как идёт очередь.
+      </p>
       <div className="employees-list">
         {kinds.map((kind) => (
           <KindCard
             key={kind.templateId}
             kind={kind}
-            employees={active}
-            query={query}
-            onQueryChange={setQuery}
-            open={openId === kind.templateId}
-            busy={busyId === kind.templateId}
-            onToggleOpen={() => toggleOpen(kind.templateId)}
-            onChange={(patch) => void save(kind, patch)}
+            open={openKindId === kind.templateId}
+            busy={busyKindId === kind.templateId}
+            onToggleOpen={() => setOpenKindId((current) => (current === kind.templateId ? null : kind.templateId))}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
             checklists={checklists}
             onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
+            onCoverage={(coverage) => saveCoverage(kind, coverage)}
           />
         ))}
+      </div>
+
+      <div className="employees-header">
+        <h2 className="employees-title">Кто что может</h2>
+      </div>
+      <p className="kinds-intro">
+        Галочка «допущен» стоит у всех, пока у вида смены никого не отметили: пустой список значит «могут все».
+        Снимешь первую — список зафиксируется по остальным. «Любит» не перебивает очередь, а решает ничью.
+      </p>
+      <PersonSearch value={query} onChange={setQuery} count={active.length} disabled={busyPersonId !== null} />
+      <div className="employees-list">
+        {visiblePeople.map((employee) => (
+          <PersonCard
+            key={employee.id}
+            employee={employee}
+            kinds={kinds}
+            open={openPersonId === employee.id}
+            busy={busyPersonId === employee.id}
+            onToggleOpen={() => setOpenPersonId((current) => (current === employee.id ? null : employee.id))}
+            onToggleAllowed={(kind) => void toggleAllowedFor(kind, employee.id)}
+            onTogglePreferred={(kind) => void save(kind, { preference: togglePreference(kind.preference, employee.id) }, employee.id)}
+          />
+        ))}
+        {visiblePeople.length === 0 && active.length > 0 && (
+          <div className="employees-empty">Никого с таким именем нет.</div>
+        )}
       </div>
     </div>
   );
@@ -149,28 +199,22 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
 
 function KindCard({
   kind,
-  employees,
-  query,
-  onQueryChange,
   open,
   busy,
   onToggleOpen,
-  onChange,
   onRotationUnit,
   checklists,
   onChecklist,
+  onCoverage,
 }: {
   kind: TemplateRolesView;
-  employees: Employee[];
-  query: string;
-  onQueryChange: (value: string) => void;
   open: boolean;
   busy: boolean;
   onToggleOpen: () => void;
-  onChange: (patch: Partial<TemplateRolesView>) => void;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
   checklists: readonly Checklist[];
   onChecklist: (checklistId: number | null) => Promise<void>;
+  onCoverage: (coverage: number[]) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -178,11 +222,10 @@ function KindCard({
   // The very letter the week grid draws for this kind, not the first letter of its
   // name — otherwise all four duties read «Д» here and «Т»/«П»/«ВА»/«07» there.
   const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
-  const preferred = Object.keys(kind.preference).length;
   const [queue, setQueue] = useState<TemplateQueue | null>(null);
+  const checklistName = checklists.find((list) => list.id === kind.checklistId)?.name;
 
-  // The queue is history, not settings — fetched only when the card is opened,
-  // and re-fetched whenever the pool changes, since the pool decides who is in it.
+  // The queue is history, not settings — fetched only when the card is opened.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -197,7 +240,7 @@ function KindCard({
     return () => {
       cancelled = true;
     };
-  }, [open, kind.templateId, kind.pool.length]);
+  }, [open, kind.templateId]);
 
   /**
    * The select is controlled off `queue`, and `queue` is only re-read when the
@@ -207,7 +250,7 @@ function KindCard({
    * written it. Show the choice at once, then re-read the queue: the «Следующие:
    * …» labels are folded into words server-side by this very unit, so they are
    * stale until the whole queue comes back.
-   * MIRRORS `changeUnit` in the Mini App's AdminShiftKinds.
+   * MIRRORS `changeUnit` in the Mini App's AdminKindSettings.
    */
   async function changeUnit(unit: "day" | "week") {
     setQueue((prev) => (prev ? { ...prev, rotationUnit: unit } : prev));
@@ -215,8 +258,6 @@ function KindCard({
     const fresh = await apiClient.getTemplateQueue(kind.templateId).catch(() => null);
     if (fresh) setQueue(fresh);
   }
-
-  const visiblePeople = filterPeople(employees, query);
 
   return (
     <section className="kind-card">
@@ -226,14 +267,15 @@ function KindCard({
         </span>
         <span className="kind-name">{kind.name}</span>
         <span className="kind-meta">
-          допущены: <b>{poolSummary(kind.pool.length, employees.length)}</b>
-          {preferred > 0 && <> · любят: <b>{preferred}</b></>}
+          {coverageSummary(kind.coverage)}
+          {checklistName ? <> · чек-лист: <b>{checklistName}</b></> : ""}
         </span>
         <span className="kind-chevron">{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (
         <div className="kind-people">
+          <CoverageRow kind={kind} busy={busy} onCoverage={onCoverage} />
           <div className="kind-rotation">
             <label className="kind-rotation-unit">
               Очередь идёт
@@ -258,9 +300,9 @@ function KindCard({
           </div>
 
           {/* Выбор стоит здесь, а не только на «Чек-листах»: «какой чек-лист у
-              этого вида смены» — свойство самого вида, ровно как допуск и
-              очередь рядом. Ту же привязку можно править и со стороны списка —
-              там отвечают на обратный вопрос, «кто его проходит». */}
+              этого вида смены» — свойство самого вида, ровно как очередь рядом.
+              Ту же привязку можно править и со стороны списка — там отвечают на
+              обратный вопрос, «кто его проходит». */}
           <label className="kind-checklist">
             Чек-лист
             <select
@@ -281,62 +323,165 @@ function KindCard({
                 : "— дежурному придёт список проверок с началом смены"}
             </span>
           </label>
-
-          <PersonSearch value={query} onChange={onQueryChange} count={employees.length} disabled={busy} />
-
-          <div className="kind-people-head">
-            <span>Работник</span>
-            <span title="Может брать этот вид смены">Допущен</span>
-            <span title="Мягкий приоритет при равном числе таких смен">Любит</span>
-          </div>
-          {/* Фильтруется только отрисовка строк. `kind.pool` и `kind.preference`
-              (кнопка «Сбросить на «все»» и счётчики выше) считаются и
-              сохраняются из полного `employees` — они не должны зависеть от
-              того, что набрано в поиске. */}
-          {visiblePeople.length === 0 && employees.length > 0 && (
-            <div className="employees-empty">Никого с таким именем нет.</div>
-          )}
-          {visiblePeople.map((employee) => {
-            const inPool = kind.pool.includes(employee.id);
-            const likes = Boolean(kind.preference[employee.id]);
-            const colours = personPalette(employee.id);
-            return (
-              <label className="kind-person" key={employee.id}>
-                <span className="kind-person-name">
-                  <span className="avatar avatar-sm" style={{ background: colours.bg, color: colours.fg }}>
-                    {initialsOf(employee.displayName)}
-                  </span>
-                  {employee.displayName}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={inPool}
-                  disabled={busy}
-                  aria-label={`${employee.displayName}: допущен к «${kind.name}»`}
-                  onChange={() => onChange({ pool: toggleId(kind.pool, employee.id) })}
-                />
-                <input
-                  type="checkbox"
-                  checked={likes}
-                  disabled={busy}
-                  aria-label={`${employee.displayName}: любит «${kind.name}»`}
-                  onChange={() => onChange({ preference: togglePreference(kind.preference, employee.id) })}
-                />
-              </label>
-            );
-          })}
-          {kind.pool.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-secondary kind-clear"
-              disabled={busy}
-              onClick={() => onChange({ pool: [] })}
-            >
-              Сбросить на «все»
-            </button>
-          )}
         </div>
       )}
     </section>
+  );
+}
+
+function PersonCard({
+  employee,
+  kinds,
+  open,
+  busy,
+  onToggleOpen,
+  onToggleAllowed,
+  onTogglePreferred,
+}: {
+  employee: Employee;
+  kinds: readonly TemplateRolesView[];
+  open: boolean;
+  busy: boolean;
+  onToggleOpen: () => void;
+  onToggleAllowed: (kind: TemplateRolesView) => void;
+  onTogglePreferred: (kind: TemplateRolesView) => void;
+}) {
+  const colours = personPalette(employee.id);
+  const roles = rolesOfPerson(kinds, employee.id);
+
+  return (
+    <section className="kind-card">
+      <button type="button" className="kind-card-head" onClick={onToggleOpen} aria-expanded={open}>
+        <span className="avatar avatar-sm" style={{ background: colours.bg, color: colours.fg }} aria-hidden="true">
+          {initialsOf(employee.displayName)}
+        </span>
+        <span className="kind-name">{employee.displayName}</span>
+        <span className="kind-meta">{personSummary(roles)}</span>
+        <span className="kind-chevron">{open ? "▴" : "▾"}</span>
+      </button>
+
+      {open && (
+        <div className="kind-people">
+          <div className="kind-people-head">
+            <span>Вид смены</span>
+            <span title="Может брать этот вид смены">Допущен</span>
+            <span title="Мягкий приоритет при равном числе таких смен">Любит</span>
+          </div>
+          {kinds.map((kind, index) => (
+            <KindRow
+              key={kind.templateId}
+              kind={kind}
+              role={roles[index]!}
+              employeeName={employee.displayName}
+              busy={busy}
+              onToggleAllowed={() => onToggleAllowed(kind)}
+              onTogglePreferred={() => onTogglePreferred(kind)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function KindRow({
+  kind,
+  role,
+  employeeName,
+  busy,
+  onToggleAllowed,
+  onTogglePreferred,
+}: {
+  kind: TemplateRolesView;
+  role: PersonKindRole;
+  employeeName: string;
+  busy: boolean;
+  onToggleAllowed: () => void;
+  onTogglePreferred: () => void;
+}) {
+  const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
+    { id: kind.templateId, accent: kind.accent },
+  ]);
+  const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
+
+  return (
+    <label className="kind-person">
+      <span className="kind-person-name">
+        <span className="kind-swatch kind-swatch-sm" style={{ background: palette.bg, color: palette.fg }} aria-hidden="true">
+          {code}
+        </span>
+        {kind.name}
+      </span>
+      <input
+        type="checkbox"
+        checked={role.allowed}
+        disabled={busy}
+        aria-label={`${employeeName}: допущен к «${kind.name}»`}
+        onChange={onToggleAllowed}
+      />
+      <input
+        type="checkbox"
+        checked={role.preferred}
+        disabled={busy}
+        aria-label={`${employeeName}: любит «${kind.name}»`}
+        onChange={onTogglePreferred}
+      />
+    </label>
+  );
+}
+
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
+
+/**
+ * Норма дня: сколько людей нужно на этом виде смены в каждый день недели.
+ *
+ * Сохраняется целиком по кнопке, а не по каждому нажатию: семь полей правят
+ * подряд, и запрос на каждую цифру означал бы семь запросов и семь строк в
+ * журнале на одну правку. Зеркало `CoverageRow` в мини-аппе.
+ */
+function CoverageRow({
+  kind,
+  busy,
+  onCoverage,
+}: {
+  kind: TemplateRolesView;
+  busy: boolean;
+  onCoverage: (coverage: number[]) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<string[]>(() => kind.coverage.map(String));
+  const dirty = draft.join(",") !== kind.coverage.join(",");
+
+  return (
+    <div className="kind-coverage">
+      <span className="kind-coverage-title">Норма дня — сколько людей нужно</span>
+      <div className="kind-coverage-grid">
+        {WEEKDAYS.map((day, index) => (
+          <label key={day} className="kind-coverage-day">
+            <span>{day}</span>
+            <input
+              type="number"
+              min={0}
+              value={draft[index] ?? "0"}
+              disabled={busy}
+              aria-label={`${kind.name}: норма на ${day}`}
+              onChange={(e) => setDraft((prev) => prev.map((value, i) => (i === index ? e.target.value : value)))}
+            />
+          </label>
+        ))}
+      </div>
+      <span className="kind-rotation-note">
+        Ноль значит «не считаем» — про такой день подсказка в расписании молчит.
+      </span>
+      {dirty && (
+        <button
+          type="button"
+          className="btn btn-primary kind-clear"
+          disabled={busy}
+          onClick={() => void onCoverage(draft.map((value) => Number(value.trim()) || 0))}
+        >
+          Сохранить норму
+        </button>
+      )}
+    </div>
   );
 }

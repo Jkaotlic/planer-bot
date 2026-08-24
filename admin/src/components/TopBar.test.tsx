@@ -22,9 +22,8 @@ describe("TopBar roster controls", () => {
   });
 
   it("carries no permanently disabled control", () => {
-    // «Распределить честно» used to live here with no client method behind it,
-    // so it rendered greyed out forever and read as broken software.
+    // Здесь когда-то стояла кнопка без клиентского метода за ней: она рисовалась
+    // серой навсегда и читалась как сломанное приложение.
     expect(render()).not.toContain("disabled");
-    expect(render()).not.toContain("Распределить честно");
   });
 });

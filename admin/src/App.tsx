@@ -13,7 +13,6 @@ import {
   type Viewer,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
-import { BalanceRail } from "./components/BalanceRail";
 import { EventsFeed } from "./components/EventsFeed";
 import { PersonSearch } from "./components/PersonSearch";
 import { ScheduleGrid } from "./components/ScheduleGrid";
@@ -85,8 +84,7 @@ export function App() {
   const [weekMonday, setWeekMonday] = useState(() => mondayOf(new Date()));
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
-  /** Pools and preferences, for the ★ in the balance rail — it ranks by the same rule
-   *  the server does, and cannot do that without them. */
+  /** Нормы дня по видам смен — из них сетка рисует «чего в дне не хватает». */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
@@ -445,12 +443,9 @@ export function App() {
                   onAddClick={openAddPanel}
                   onEntryClick={setEditingEntry}
                   query={scheduleQuery}
+                  coverage={templateRoles}
                 />
                 <aside className="right-rail">
-                  {/* BalanceRail НЕ фильтруется: она про справедливость раздачи по ВСЕЙ
-                      команде, и половина команды в ней — это не «отфильтровано», а
-                      неверное число. */}
-                  <BalanceRail employees={activeEmployees} shifts={shifts} templates={templates} roles={templateRoles} />
                   <EventsFeed events={events} onOpenJournal={() => setNav("log")} />
                 </aside>
               </div>

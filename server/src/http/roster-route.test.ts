@@ -464,63 +464,6 @@ describe("уведомление о правке из импорта", () => {
   });
 });
 
-describe("уведомление о «Распределить честно»", () => {
-  it("пишет тем, кому достались смены", async () => {
-    const db = makeTestDb();
-    worker(db, "Аня Иванова", 501);
-    const { bot, sent } = fakeBot();
-    const app = createApp({ db, config, bot });
-    const token = await tokenFor(app, 111);
-    // Allowlisted-админ сам заводится активным сотрудником при первом входе и
-    // тоже участвует в честном распределении — без отпуска он забрал бы вторую
-    // смену себе (счётчик по виду смены у него ниже после первого назначения
-    // Ане), и письмо ушло бы Ане на одну запись, а не на две.
-    const adminId = (await (await app.request("/api/me", { headers: { Authorization: `Bearer ${token}` } })).json()).id as number;
-    createShift(db, { date: "2099-09-01", start: null, end: null, endDate: "2099-09-10", category: "vacation", employeeId: adminId });
-
-    // Две вакантные смены разных дней — единственный СВОБОДНЫЙ кандидат получает
-    // обе, и scheduleSummaryText показывает сводку с причиной, а не одиночный
-    // текст («одна запись — не сводка», задача 6): при одном назначении текст
-    // был бы «поставил(а) тебе смену» без слов «распределение смен».
-    createShift(db, { date: "2099-09-05", start: "08:00", end: "17:00" });
-    createShift(db, { date: "2099-09-06", start: "08:00", end: "17:00" });
-
-    const res = await app.request("/api/admin/distribute", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: "2099-09-01", to: "2099-09-10", apply: true }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.assignments).toHaveLength(2);
-    expect(body.notified).toEqual({ delivered: 1, intended: 1 });
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.to).toBe(501);
-    expect(sent[0]!.text).toContain("распределение смен");
-  });
-
-  it("превью (apply не передан) не пишет никому", async () => {
-    const db = makeTestDb();
-    worker(db, "Аня Иванова", 501);
-    createShift(db, { date: "2099-09-05", start: "08:00", end: "17:00" });
-    const { bot, sent } = fakeBot();
-    const app = createApp({ db, config, bot });
-    const token = await tokenFor(app, 111);
-
-    const res = await app.request("/api/admin/distribute", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: "2099-09-01", to: "2099-09-10" }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.notified).toEqual({ delivered: 0, intended: 0 });
-    expect(sent).toEqual([]);
-  });
-});
-
 describe("the «?» entry is the import's alone", () => {
   it("cannot be created through the entries API", async () => {
     // The one work entry with no clock times exists only because a file said

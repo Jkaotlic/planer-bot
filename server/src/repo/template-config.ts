@@ -1,21 +1,21 @@
+import { CoverageError, parseCoverage, serializeCoverage, COVERAGE_DAYS } from "@planer/shared";
 import type { ShiftTemplate } from "../db/schema";
 
 /**
+ * Разбор нормы покрытия переехал в `@planer/shared` (`coverage.ts`) — её читают
+ * и фронты, чтобы считать нехватку дня. Здесь остаются проверки колонок, которые
+ * нужны только серверу, и реэкспорт разбора для тех, кто уже импортирует его
+ * отсюда.
+ *
  * `coverage`, `fill_mode` and `rotation_unit` are plain TEXT columns — drizzle's
  * `$type<>` is erased at compile time and SQLite has no CHECK on them, so nothing
- * stops a bad value from reaching the row. Today there are no writers; the Stage 3
- * role editor will be the first, and it must run every value through here before
- * the write, not after.
+ * stops a bad value from reaching the row. Первый писатель появился 2026-08-24 —
+ * редактор нормы дня, — и он гонит значение через разбор ДО записи, а не после.
  */
 
-export const FILL_MODES = ["count", "remainder"] as const;
-export const ROTATION_UNITS = ["day", "week"] as const;
-export type FillMode = (typeof FILL_MODES)[number];
-export type RotationUnit = (typeof ROTATION_UNITS)[number];
+export { CoverageError, parseCoverage, serializeCoverage, COVERAGE_DAYS };
 
-/** Mon..Sun head-count, one entry per weekday. */
-export const COVERAGE_DAYS = 7;
-
+/** Ошибка проверки колонок, которые остались серверными. */
 export class TemplateConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -23,39 +23,10 @@ export class TemplateConfigError extends Error {
   }
 }
 
-/**
- * "3,2,2,2,2,0,0" -> [3,2,2,2,2,0,0]. Exactly seven non-negative integers, Mon..Sun.
- * Throws with a Russian message naming what was wrong — this surfaces in the editor.
- */
-export function parseCoverage(raw: string): number[] {
-  const parts = raw.split(",").map((p) => p.trim());
-  if (parts.length !== COVERAGE_DAYS) {
-    throw new TemplateConfigError(`«Покрытие» должно содержать ровно ${COVERAGE_DAYS} чисел (Пн..Вс), а не ${parts.length}`);
-  }
-  return parts.map((part, index) => {
-    // Number() would happily accept "", " ", "1e3", "0x2" and Infinity.
-    if (!/^\d+$/.test(part)) {
-      throw new TemplateConfigError(`«Покрытие», день ${index + 1}: «${part}» — нужно целое число не меньше нуля`);
-    }
-    const value = Number(part);
-    if (!Number.isSafeInteger(value)) {
-      throw new TemplateConfigError(`«Покрытие», день ${index + 1}: «${part}» — слишком большое число`);
-    }
-    return value;
-  });
-}
-
-export function serializeCoverage(values: readonly number[]): string {
-  if (values.length !== COVERAGE_DAYS) {
-    throw new TemplateConfigError(`«Покрытие» должно содержать ровно ${COVERAGE_DAYS} чисел (Пн..Вс), а не ${values.length}`);
-  }
-  for (const [index, value] of values.entries()) {
-    if (!Number.isSafeInteger(value) || value < 0) {
-      throw new TemplateConfigError(`«Покрытие», день ${index + 1}: ${value} — нужно целое число не меньше нуля`);
-    }
-  }
-  return values.join(",");
-}
+export const FILL_MODES = ["count", "remainder"] as const;
+export const ROTATION_UNITS = ["day", "week"] as const;
+export type FillMode = (typeof FILL_MODES)[number];
+export type RotationUnit = (typeof ROTATION_UNITS)[number];
 
 export function assertFillMode(value: string): asserts value is FillMode {
   if (!(FILL_MODES as readonly string[]).includes(value)) {

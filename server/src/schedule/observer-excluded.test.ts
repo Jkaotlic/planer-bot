@@ -5,7 +5,6 @@ import { makeTestDb } from "../db/testdb";
 import type { Db } from "../db/client";
 import { createEmployee, setEmployeeObserver, listActive, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
-import { buildDistribution } from "./distribute-service";
 import { handoverCandidates } from "../handover/candidates";
 import { teamNow } from "../util/team-time";
 import { testConfig } from "../test-config";
@@ -39,25 +38,6 @@ function observer(db: Db, displayName: string) {
 }
 
 describe("наблюдатель вне командной механики", () => {
-  it("не попадает в честную раздачу", () => {
-    const db = makeTestDb();
-    // Наблюдатель заводится ПЕРВЫМ, то есть получает меньший employeeId. Это не
-    // случайность: последний критерий тай-брейка в distributeFairly (shared/src/
-    // distribute.ts) — возрастание employeeId, и при равной нагрузке смена уходит
-    // младшему id. Заведи наблюдателя вторым — и смена досталась бы Ане просто по
-    // тай-брейку, тест зеленел бы и без правила «наблюдатель вне раздачи». Порядок
-    // здесь — то, что делает красный прогон (см. отчёт задачи) настоящим красным.
-    const watcher = observer(db, "Игорь");
-    createEmployee(db, { displayName: "Аня" });
-    // Пустая смена, которую раздача обязана кому-то отдать.
-    createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", employeeId: null });
-
-    const { assignments } = buildDistribution(db, day(1), day(7));
-
-    expect(assignments).not.toHaveLength(0);
-    expect(assignments.map((a) => a.employeeId)).not.toContain(watcher.id);
-  });
-
   it("не предлагается как кандидат на чужую смену", () => {
     const db = makeTestDb();
     const owner = createEmployee(db, { displayName: "Аня" });

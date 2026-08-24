@@ -10,7 +10,7 @@ import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middlew
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { redactSecrets } from "../util/safe-error";
-import { listActiveTemplates, getTemplate } from "../repo/templates";
+import { listActiveTemplates, getTemplate, setCoverage } from "../repo/templates";
 import { getChecklist, setTemplateChecklist } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
@@ -70,6 +70,8 @@ import { createMyEntryRoutes } from "./routes/my-entries";
 import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
 import {
+  parseCoverage,
+  serializeCoverage,
   isWeekend,
   isAbsence,
   countsForBalance,
@@ -92,7 +94,6 @@ import {
   canAnnounce,
   type EntryCategory,
 } from "@planer/shared";
-import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
   expressInterest,
@@ -1358,6 +1359,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
         category: template.category,
         accent: template.accent,
         checklistId: template.checklistId,
+        // Числами, а не строкой: по норме считают нехватку дня оба фронта, и
+        // разбор строки на каждом экране был бы третьей копией правила.
+        coverage: parseCoverage(template.coverage),
         ...(roles.get(template.id) ?? { pool: [], preference: {} }),
       })),
     });
@@ -1404,6 +1408,31 @@ export function createApp(deps: AppDeps): Hono<Env> {
       checklistName: parsed.data.checklistId != null ? (getChecklist(db, parsed.data.checklistId)?.name ?? null) : null,
     });
     return c.json({ templateId, checklistId: parsed.data.checklistId });
+  });
+
+  /**
+   * Норма дня: сколько людей нужно на этом виде смены в каждый день недели.
+   *
+   * Первый писатель этой колонки. Значение гоняется через `serializeCoverage` ДО
+   * записи — колонка обычный TEXT, и плохая строка доехала бы до строки, а
+   * прочитать её потом было бы некому.
+   */
+  app.put("/api/admin/templates/:id/coverage", requireAdmin(db, config.jwtSecret), async (c) => {
+    const templateId = Number(c.req.param("id"));
+    if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { coverage?: unknown };
+    if (!Array.isArray(body.coverage)) return c.json({ error: "coverage должен быть массивом из 7 чисел (Пн..Вс)" }, 400);
+    let coverage: string;
+    try {
+      coverage = serializeCoverage(body.coverage as number[]);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Неверная норма" }, 400);
+    }
+    setCoverage(db, templateId, coverage);
+    recordAudit(db, "template_coverage_changed", c.get("auth").employeeId, {
+      templateId, templateName: getTemplate(db, templateId)?.name ?? null, coverage,
+    });
+    return c.json({ templateId, coverage: parseCoverage(coverage) });
   });
 
   app.put("/api/admin/templates/:id/rotation", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -1456,34 +1485,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
       if (err instanceof UnknownEmployeesError) return c.json({ error: err.message }, 400);
       throw err;
     }
-  });
-
-  app.post("/api/admin/distribute", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { from?: unknown; to?: unknown; apply?: unknown };
-    // A quarter is already far beyond how far ahead this team plans.
-    const err = rangeError(body.from, body.to, 92);
-    if (err) return c.json({ error: err }, 400);
-    const { assignments, unfilled } = buildDistribution(db, body.from as string, body.to as string);
-    let notified: { delivered: number; intended: number } = { delivered: 0, intended: 0 };
-    if (body.apply === true) {
-      const { diffs } = withScheduleDiff(db, { from: body.from as string, to: body.to as string }, () =>
-        applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId }))),
-      );
-      // One press moves a whole week of shifts, so it belongs in «кто когда что
-      // менял» like every other schedule change. A preview writes nothing and is
-      // recorded as nothing — the log is for what happened, not what was looked at.
-      recordAudit(db, "distribution_applied", c.get("auth").employeeId, {
-        from: body.from as string,
-        to: body.to as string,
-        count: assignments.length,
-      });
-      notified = await notifyScheduleChange(db, bot, {
-        actorEmployeeId: c.get("auth").employeeId, diffs, cause: "distribute", now: teamNow(config.teamTz),
-      });
-    }
-    // `unfilled` rides along on a preview too: an empty cell nobody can take is worth
-    // knowing about before applying anything, not after.
-    return c.json({ applied: body.apply === true, assignments, unfilled, notified });
   });
 
   app.get("/api/swaps", requireAuth(db, config.jwtSecret), (c) => {

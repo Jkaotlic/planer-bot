@@ -125,16 +125,6 @@ describe("admin ranged reports validate their span", () => {
     expect((await app.request("/api/admin/weekend/payroll?from=2026-07-01&to=2026-07-31", auth)).status).toBe(200);
   });
 
-  it("rejects a distribute call with a bad or unbounded range", async () => {
-    const db = makeTestDb();
-    const app = createApp({ db, config });
-    const admin = await tokenFor(app, 111);
-
-    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "07/01/2026", to: "2026-07-31" }))).status).toBe(400);
-    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-31", to: "2026-07-01" }))).status).toBe(400);
-    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "2020-01-01", to: "2026-12-31" }))).status).toBe(400);
-    expect((await app.request("/api/admin/distribute", authedJson(admin, { from: "2026-07-01", to: "2026-07-31" }))).status).toBe(200);
-  });
 });
 
 describe("admin entry endpoints", () => {

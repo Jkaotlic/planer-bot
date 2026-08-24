@@ -36,6 +36,7 @@ import {
   mockPatchChecklist,
   mockDeleteChecklist,
   mockRemoveChecklistDoc,
+  mockUploadChecklistDoc,
   mockSetChecklistTemplates,
   mockAddChecklistItem,
   mockUpdateChecklistItem,
@@ -48,7 +49,6 @@ import {
   mockDeleteSelfEntry,
   mockOfferHandover,
   mockSkipHandover,
-  mockDistribute,
   mockGetAdminWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -73,6 +73,7 @@ import {
   mockSetRotationUnit,
   mockSaveTemplateRoles,
   mockSetTemplateChecklist,
+  mockSetTemplateCoverage,
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
@@ -482,31 +483,6 @@ export interface PayrollRow {
   hours: number;
 }
 
-/** One shift the fair-distribution pass would (or did) hand to a worker. */
-export interface DistributionAssignment {
-  shiftId: number;
-  employeeId: number;
-}
-
-/** A slot the pass walked past: nobody in its pool is still on the roster
- *  (`empty_pool` — a setting to fix), or everyone eligible was busy or away
- *  (`nobody_free` — just the week). */
-export interface UnfilledSlot {
-  shiftId: number;
-  date: string;
-  kind: string;
-  reason: "empty_pool" | "nobody_free";
-}
-
-/** Result of `POST /api/admin/distribute`: whether it was applied, the chosen
- *  assignments, and the slots it could not fill. */
-export interface DistributeResult {
-  applied: boolean;
-  assignments: DistributionAssignment[];
-  unfilled: UnfilledSlot[];
-  notified: NotifyReach;
-}
-
 /** A preset plus who may take it and who asked for it. An empty pool means everyone. */
 export interface TemplateRolesView {
   templateId: number;
@@ -519,6 +495,8 @@ export interface TemplateRolesView {
   preference: Record<number, number>;
   /** Чек-лист, который проходит дежурный этого вида смены. `null` — никакого. */
   checklistId: number | null;
+  /** Норма дня, Пн..Вс: сколько людей нужно. Ноль значит «не считаем». */
+  coverage: number[];
 }
 
 /** One person's place in the queue for a kind of shift, already worded for display. */
@@ -749,6 +727,8 @@ export interface ApiClient {
   patchChecklist(id: number, patch: { name?: string; note?: string | null; docUrl?: string | null }): Promise<Checklist>;
   deleteChecklist(id: number): Promise<Checklist[]>;
   removeChecklistDoc(id: number): Promise<Checklist>;
+  /** Приложить файл инструкции. Второй путь — прислать его боту командой /instruction. */
+  uploadChecklistDoc(id: number, file: File): Promise<Checklist>;
   setChecklistTemplates(id: number, templateIds: number[]): Promise<Checklist>;
   addChecklistItem(checklistId: number, title: string): Promise<Checklist>;
   updateChecklistItem(itemId: number, patch: { title?: string; note?: string | null }): Promise<Checklist>;
@@ -758,7 +738,6 @@ export interface ApiClient {
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
   updateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   deleteEntry(id: number): Promise<{ notified: NotifyReach }>;
-  distribute(from: string, to: string, apply: boolean): Promise<DistributeResult>;
   getAdminWeekendSlots(): Promise<AdminSlotView[]>;
   /** The slot, plus how many of the team the «нужен человек» broadcast reached —
    *  only people who linked Telegram can be told at all. */
@@ -788,6 +767,7 @@ export interface ApiClient {
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   setTemplateChecklist(templateId: number, checklistId: number | null): Promise<void>;
+  setTemplateCoverage(templateId: number, coverage: number[]): Promise<void>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
@@ -1180,6 +1160,22 @@ export const realClient: ApiClient = {
     authorizedDelete<{ checklists: Checklist[] }>(`/api/admin/checklists/${id}`).then((r) => r.checklists),
   removeChecklistDoc: (id) =>
     authorizedDelete<{ checklist: Checklist }>(`/api/admin/checklists/${id}/doc`).then((r) => r.checklist),
+  uploadChecklistDoc: async (id, file) => {
+    const token = await authToken();
+    const form = new FormData();
+    form.append("file", file);
+    // Без заголовка Content-Type: его ставит браузер вместе с boundary, и
+    // заданный руками ломает разбор multipart на сервере.
+    const res = await apiFetch(`${API_BASE}/api/admin/checklists/${id}/doc`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      throw new Error(res.status === 413 ? "Файл больше 5 МБ — выбери поменьше" : "Не удалось приложить файл");
+    }
+    return (await res.json()).checklist as Checklist;
+  },
   setChecklistTemplates: (id, templateIds) =>
     authorizedPutJson<{ checklist: Checklist }>(`/api/admin/checklists/${id}/templates`, { templateIds }).then((r) => r.checklist),
   addChecklistItem: (checklistId, title) =>
@@ -1194,8 +1190,6 @@ export const realClient: ApiClient = {
     authorizedPatchJson<{ entry: Shift; notified: NotifyReach }>(`/api/admin/entries/${id}`, input),
   deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
-  distribute: (from, to, apply) =>
-    authorizedPostJson<DistributeResult>("/api/admin/distribute", { from, to, apply }),
 
   async getAdminWeekendSlots() {
     const { slots } = await authorizedGet<{ slots: AdminSlotView[] }>("/api/admin/weekend/slots");
@@ -1336,6 +1330,10 @@ export const realClient: ApiClient = {
     await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { checklistId });
   },
 
+  async setTemplateCoverage(templateId, coverage) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/coverage`, { coverage });
+  },
+
   async getRosterCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -1422,6 +1420,7 @@ const devClient: ApiClient = {
   patchChecklist: (id, patch) => mockPatchChecklist(id, patch),
   deleteChecklist: (id) => mockDeleteChecklist(id),
   removeChecklistDoc: (id) => mockRemoveChecklistDoc(id),
+  uploadChecklistDoc: (id, file) => mockUploadChecklistDoc(id, file),
   setChecklistTemplates: (id, templateIds) => mockSetChecklistTemplates(id, templateIds),
   addChecklistItem: (checklistId, title) => mockAddChecklistItem(checklistId, title),
   updateChecklistItem: (itemId, patch) => mockUpdateChecklistItem(itemId, patch),
@@ -1429,7 +1428,6 @@ const devClient: ApiClient = {
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
-  distribute: (from, to, apply) => mockDistribute(from, to, apply),
   getAdminWeekendSlots: () => mockGetAdminWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
   assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
@@ -1454,6 +1452,7 @@ const devClient: ApiClient = {
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   setTemplateChecklist: (templateId, requiresChecklist) => mockSetTemplateChecklist(templateId, requiresChecklist),
+  setTemplateCoverage: (templateId, coverage) => mockSetTemplateCoverage(templateId, coverage),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),

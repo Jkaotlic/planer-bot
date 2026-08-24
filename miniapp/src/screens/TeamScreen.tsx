@@ -27,7 +27,6 @@ import {
   parseISODate,
   toISODate,
 } from "../lib/week";
-import { TeamCollections } from "./team/TeamCollections";
 import { TeamRangeNav } from "./team/TeamRangeNav";
 import { TeamTodayView } from "./team/TeamTodayView";
 import { TeamViewPanel, TeamViewSwitcher } from "./team/TeamViewSwitcher";
@@ -123,10 +122,6 @@ export function TeamScreen({ templates }: { templates: readonly Template[] }) {
         <Title level="2" weight="2">
           Команда
         </Title>
-        {/* Выше переключателя вида и выше графика: сбор идёт неделю, а ссылка
-            на него в личке тонет за два дня. Активных сборов нет — секции нет
-            вовсе, и экран выглядит ровно как раньше. */}
-        <TeamCollections />
         <TeamViewSwitcher
           value={view.displayMode}
           focusValue={teamTabFocusMode(view, tabFocusMode)}

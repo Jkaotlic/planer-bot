@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
-import { exactSchedulePalette, filterPeople } from "@planer/shared";
+import {
+  exactSchedulePalette,
+  filterPeople,
+  rolesOfPerson,
+  toggleAllowed,
+  togglePreference,
+  type PersonKindRole,
+} from "@planer/shared";
 import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
-import { apiClient, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../../api/client";
+import { apiClient, type Employee, type TemplateRolesView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { PersonSearch } from "../../components/PersonSearch";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -9,32 +16,31 @@ import { useEntryPalette } from "../../categories";
 import { withError, withoutError } from "../../lib/error-map";
 
 /**
- * "все (26)" or "5 из 26". An empty pool is not "nobody" — it is an unconfigured
- * preset, and it means everyone. Saying so is the whole difference between the
- * screen reading as a whitelist and reading as a blacklist.
+ * «допущен к 1 из 2 · любит: 1» — строка под именем человека.
+ *
+ * Пустой список допущенных считается ДОПУСКОМ, а не пустотой: у большинства
+ * видов смен он не настроен, и сводка «допущен к 0 из 9» была бы прямой ложью.
  */
-export function poolSummary(poolSize: number, total: number): string {
-  return poolSize === 0 ? `все (${total})` : `${poolSize} из ${total}`;
-}
-
-export function toggleId(ids: readonly number[], id: number): number[] {
-  return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
-}
-
-export function togglePreference(
-  preference: Readonly<Record<number, number>>,
-  id: number,
-): Record<number, number> {
-  const next = { ...preference };
-  if (next[id]) delete next[id];
-  else next[id] = 1;
-  return next;
+export function personSummary(roles: readonly PersonKindRole[]): string {
+  if (roles.length === 0) return "видов смен пока нет";
+  const allowed = roles.filter((role) => role.allowed).length;
+  const preferred = roles.filter((role) => role.preferred).length;
+  const head = allowed === roles.length ? `допущен ко всем (${roles.length})` : `допущен к ${allowed} из ${roles.length}`;
+  return preferred > 0 ? `${head} · любит: ${preferred}` : head;
 }
 
 /**
- * «Кто что может» (admin, mobile): the pool and the preferences for each kind of
- * shift. One kind open at a time — twenty-six rows of two toggles is already the
- * whole screen, and two kinds open at once would just be scrolling.
+ * «Кто что может» (admin, mobile): список ЛЮДЕЙ, у каждого — виды смен с двумя
+ * галочками.
+ *
+ * Раньше экран был перевёрнут: карточка вида смены, внутри — двадцать восемь
+ * человек. Вопрос, который задают на самом деле, звучит «что может Игорь», а не
+ * «кто может Утро», и на прежнем экране ответ на него собирался обходом всех
+ * девяти карточек.
+ *
+ * Один человек открыт за раз — девять строк по две галочки это уже экран.
+ * Свойства самого вида смены (чек-лист, очередь) живут на «Видах смен»: в
+ * карточке каждого человека они повторялись бы двадцать восемь раз.
  */
 export function AdminShiftKinds({
   employees,
@@ -45,13 +51,12 @@ export function AdminShiftKinds({
   onClose: () => void;
 }) {
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
-  const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   /**
-   * Отказ по id вида смены, а не один на экран. Экран выше окна даже свёрнутым
+   * Отказ по id ЧЕЛОВЕКА, а не один на экран. Экран выше окна даже свёрнутым
    * (замер на 390×844: высота 970, последняя карточка на y=747), а развёрнутая
-   * карточка добавляет по строке на каждого активного — отказ, нарисованный
+   * карточка добавляет по строке на каждый вид смены — отказ, нарисованный
    * родителем над `ScreenScroll`, для нажавшего в такой карточке невидим.
    */
   const [errors, setErrors] = useState<ReadonlyMap<number, string>>(new Map());
@@ -60,22 +65,11 @@ export function AdminShiftKinds({
   const [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
   const active = employees.filter((employee) => employee.isActive);
-
-  // Запрос принадлежит открытой карточке, а не экрану: без сброса здесь
-  // закрыть карточку A с непустым поиском и открыть B значило бы, что B
-  // открывается уже отфильтрованной — под запрос, который в контексте B
-  // никто не вводил. Mirrors console's `toggleOpen`.
-  function toggleOpen(templateId: number) {
-    setOpenId((current) => (current === templateId ? null : templateId));
-    setQuery("");
-  }
+  const activeIds = active.map((employee) => employee.id);
 
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
-    // Чек-листы рядом с ролями: без их имён выпадающий список показывать нечем.
-    // Молча при отказе — экран про «кто что может», и его беда важнее.
-    apiClient.getChecklists().then((next) => { if (!cancelled) setChecklists(next); }).catch(() => {});
     apiClient
       .getTemplateRoles()
       .then((next) => {
@@ -89,50 +83,41 @@ export function AdminShiftKinds({
     };
   }, [attempt]);
 
-  async function save(kind: TemplateRolesView, patch: Partial<TemplateRolesView>) {
+  /**
+   * Сохранение по-прежнему идёт ВИДОМ смены: галочка «Игорь · Утро» шлёт роли
+   * пресета «Утро» целиком. Экран перевернули, модель — нет, и это намеренно:
+   * `PUT /api/admin/templates/:id/roles` остаётся единственным способом их
+   * записать.
+   */
+  async function save(kind: TemplateRolesView, patch: Partial<TemplateRolesView>, employeeId: number) {
     const next = { ...kind, ...patch };
     setKinds((current) => current?.map((item) => (item.templateId === kind.templateId ? next : item)) ?? current);
-    setBusyId(kind.templateId);
-    setErrors((prev) => withoutError(prev, kind.templateId));
+    setBusyId(employeeId);
+    setErrors((prev) => withoutError(prev, employeeId));
     try {
       await apiClient.saveTemplateRoles(next.templateId, next.pool, next.preference);
     } catch (err) {
       // Put the server's version back rather than leaving a lie on screen.
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
-      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить"));
+      setErrors((prev) => withError(prev, employeeId, err instanceof Error ? err.message : "Не удалось сохранить"));
     } finally {
       setBusyId(null);
     }
   }
 
-  async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
-    // Оптимистично, как и допуск: галочка обязана отзываться сразу, иначе на
-    // медленной сети её жмут второй раз.
-    setKinds((current) =>
-      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistId } : item)) ?? current,
-    );
-    setBusyId(kind.templateId);
-    setErrors((prev) => withoutError(prev, kind.templateId));
-    try {
-      await apiClient.setTemplateChecklist(kind.templateId, checklistId);
-    } catch (err) {
-      setKinds(await apiClient.getTemplateRoles().catch(() => null));
-      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить чек-лист"));
-    } finally {
-      setBusyId(null);
+  async function toggleAllowedFor(kind: TemplateRolesView, employeeId: number) {
+    const pool = toggleAllowed(kind.pool, employeeId, activeIds);
+    if (pool === null) {
+      setErrors((prev) =>
+        withError(prev, employeeId, `«${kind.name}»: последнего допущенного снять нельзя — пустой список значит «могут все».`),
+      );
+      return;
     }
+    await save(kind, { pool }, employeeId);
   }
 
-  async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
-    setBusyId(kind.templateId);
-    setErrors((prev) => withoutError(prev, kind.templateId));
-    try {
-      await apiClient.setRotationUnit(kind.templateId, unit);
-    } catch (err) {
-      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить очередь"));
-    } finally {
-      setBusyId(null);
-    }
+  async function togglePreferredFor(kind: TemplateRolesView, employeeId: number) {
+    await save(kind, { preference: togglePreference(kind.preference, employeeId) }, employeeId);
   }
 
   if (loadError) {
@@ -160,34 +145,41 @@ export function AdminShiftKinds({
     );
   }
 
+  const visiblePeople = filterPeople(active, query);
+
   return (
     <Section header="Кто что может">
       <CardStack>
         <CardShell>
           <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-            Пустой список допущенных значит «все» — никого не нужно исключать, просто не отмечай.
-            «Любит» не перебивает справедливость: решает только ничью, когда смен этого вида поровну.
+            Галочка «допущен» стоит у всех, пока у вида смены никого не отметили: пустой список значит «могут все».
+            Снимешь первую — список зафиксируется по остальным. «Любит» не перебивает очередь, а решает ничью.
           </div>
         </CardShell>
 
-        {kinds.map((kind) => (
-          <KindCard
-            key={kind.templateId}
-            kind={kind}
-            employees={active}
-            query={query}
-            onQueryChange={setQuery}
-            open={openId === kind.templateId}
-            busy={busyId === kind.templateId}
-            error={errors.get(kind.templateId)}
-            onToggleOpen={() => toggleOpen(kind.templateId)}
-            onChange={(patch) => void save(kind, patch)}
-            onRotationUnit={(unit) => saveRotation(kind, unit)}
-            checklists={checklists}
-            onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
+        <CardShell>
+          <PersonSearch value={query} onChange={setQuery} count={active.length} disabled={busyId !== null} />
+        </CardShell>
+
+        {visiblePeople.map((employee) => (
+          <PersonCard
+            key={employee.id}
+            employee={employee}
+            kinds={kinds}
+            open={openId === employee.id}
+            busy={busyId === employee.id}
+            error={errors.get(employee.id)}
+            onToggleOpen={() => setOpenId((current) => (current === employee.id ? null : employee.id))}
+            onToggleAllowed={(kind) => void toggleAllowedFor(kind, employee.id)}
+            onTogglePreferred={(kind) => void togglePreferredFor(kind, employee.id)}
           />
         ))}
 
+        {visiblePeople.length === 0 && active.length > 0 && (
+          <CardShell>
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Никого с таким именем нет.</div>
+          </CardShell>
+        )}
         {active.length === 0 && <Placeholder description="Сначала добавь работников." />}
 
         <CardShell>
@@ -200,78 +192,28 @@ export function AdminShiftKinds({
   );
 }
 
-function KindCard({
-  kind,
-  employees,
-  query,
-  onQueryChange,
+function PersonCard({
+  employee,
+  kinds,
   open,
   busy,
   error,
   onToggleOpen,
-  onChange,
-  onRotationUnit,
-  checklists,
-  onChecklist,
+  onToggleAllowed,
+  onTogglePreferred,
 }: {
-  kind: TemplateRolesView;
-  employees: Employee[];
-  query: string;
-  onQueryChange: (value: string) => void;
+  employee: Employee;
+  kinds: readonly TemplateRolesView[];
   open: boolean;
   busy: boolean;
   /** Отказ на последнее действие именно в этой карточке. */
   error?: string;
   onToggleOpen: () => void;
-  onChange: (patch: Partial<TemplateRolesView>) => void;
-  onRotationUnit: (unit: "day" | "week") => Promise<void>;
-  checklists: readonly Checklist[];
-  onChecklist: (checklistId: number | null) => Promise<void>;
+  onToggleAllowed: (kind: TemplateRolesView) => void;
+  onTogglePreferred: (kind: TemplateRolesView) => void;
 }) {
-  const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
-    { id: kind.templateId, accent: kind.accent },
-  ]);
-  // The very letter the week grid draws for this kind, not the first letter of its
-  // name — otherwise all four duties read «Д» here and «Т»/«П»/«ВА»/«07» there.
-  const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
-  const preferred = Object.keys(kind.preference).length;
-  const [queue, setQueue] = useState<TemplateQueue | null>(null);
-
-  // History, not settings — fetched when the card opens and whenever the pool
-  // changes, since the pool decides who is in the queue at all.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    apiClient
-      .getTemplateQueue(kind.templateId)
-      .then((next) => {
-        if (!cancelled) setQueue(next);
-      })
-      .catch(() => {
-        if (!cancelled) setQueue(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, kind.templateId, kind.pool.length]);
-
-  /**
-   * The select is controlled off `queue`, and `queue` is only re-read when the
-   * card opens — so saving alone left React putting the old value straight back:
-   * the admin picked «по неделям», the control snapped to «по дням», and the
-   * setting looked like it hadn't taken even though the server had already
-   * written it. Show the choice at once, then re-read the queue: the «Следующие:
-   * …» labels are folded into words server-side by this very unit, so they are
-   * stale until the whole queue comes back.
-   */
-  async function changeUnit(unit: "day" | "week") {
-    setQueue((prev) => (prev ? { ...prev, rotationUnit: unit } : prev));
-    await onRotationUnit(unit);
-    const fresh = await apiClient.getTemplateQueue(kind.templateId).catch(() => null);
-    if (fresh) setQueue(fresh);
-  }
-
-  const visiblePeople = filterPeople(employees, query);
+  const colours = personPalette(employee.id);
+  const roles = rolesOfPerson(kinds, employee.id);
 
   return (
     <CardShell>
@@ -289,16 +231,15 @@ function KindCard({
           aria-hidden="true"
           style={{
             flex: "none", display: "grid", placeContent: "center", width: 30, height: 30,
-            borderRadius: 8, fontSize: 13, fontWeight: 700, background: palette.bg, color: palette.fg,
+            borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: colours.bg, color: colours.fg,
           }}
         >
-          {code}
+          {initialsOf(employee.displayName)}
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{kind.name}</span>
+          <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{employee.displayName}</span>
           <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
-            допущены: {poolSummary(kind.pool.length, employees.length)}
-            {preferred > 0 && ` · любят: ${preferred}`}
+            {personSummary(roles)}
           </span>
         </span>
         <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
@@ -306,129 +247,27 @@ function KindCard({
 
       {open && (
         <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)" }}>
-          <div style={{ padding: "10px 0 2px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tgui--hint_color)" }}>
-              Очередь идёт
-              <select
-                value={queue?.rotationUnit ?? "day"}
-                disabled={busy || !queue}
-                onChange={(e) => void changeUnit(e.target.value as "day" | "week")}
-                style={{
-                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
-                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
-                }}
-              >
-                <option value="day">по дням</option>
-                <option value="week">по неделям</option>
-              </select>
-            </label>
-            {/* Галочка живёт здесь, а не на экране чек-листа: «кому он положен» —
-                свойство вида смены, как допуск и очередь рядом. Зеркало
-                консольного `ShiftKindsScreen`. */}
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 10 }}>
-              Чек-лист
-              <select
-                value={kind.checklistId ?? ""}
-                disabled={busy || checklists.length === 0}
-                onChange={(e) => void onChecklist(e.target.value ? Number(e.target.value) : null)}
-                style={{
-                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
-                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
-                }}
-              >
-                <option value="">— не нужен —</option>
-                {checklists.map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {queue && queue.queue.length > 0 ? (
-              <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.45 }}>
-                Следующие: {queue.queue.slice(0, 3).map((turn) => turn.label).join(" → ")}
-                <br />
-                <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>
-                  Бот только подсказывает — ставишь смену ты сам.
-                </span>
-              </p>
-            ) : (
-              <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--tgui--hint_color)" }}>
-                Очередь появится, когда в допущенных кто-нибудь будет.
-              </p>
-            )}
-          </div>
-
-          <PersonSearch value={query} onChange={onQueryChange} count={employees.length} disabled={busy} />
-
           <div
             style={{
               display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, padding: "10px 0 6px",
               color: "var(--tgui--hint_color)", fontSize: 11.5, fontWeight: 600, textTransform: "uppercase",
             }}
           >
-            <span>Работник</span>
+            <span>Вид смены</span>
             <span style={{ justifySelf: "center" }}>Допущен</span>
             <span style={{ justifySelf: "center" }}>Любит</span>
           </div>
-          {/* Фильтруется только отрисовка строк. `kind.pool` и `kind.preference`
-              (кнопка «Сбросить на «все»» и счётчики выше) считаются и
-              сохраняются из полного `employees` — они не должны зависеть от
-              того, что набрано в поиске. */}
-          {visiblePeople.length === 0 && employees.length > 0 && (
-            <div style={{ padding: "10px 0", color: "var(--tgui--hint_color)", fontSize: 13.5 }}>
-              Никого с таким именем нет.
-            </div>
-          )}
-          {visiblePeople.map((employee) => {
-            const colours = personPalette(employee.id);
-            return (
-              <label
-                key={employee.id}
-                style={{
-                  display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, alignItems: "center",
-                  padding: "7px 0", borderTop: "1px solid var(--tgui--outline)",
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: 14 }}>
-                  <span
-                    style={{
-                      flex: "none", display: "grid", placeContent: "center", width: 26, height: 26,
-                      borderRadius: 999, fontSize: 10.5, fontWeight: 700,
-                      background: colours.bg, color: colours.fg,
-                    }}
-                  >
-                    {initialsOf(employee.displayName)}
-                  </span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {employee.displayName}
-                  </span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={kind.pool.includes(employee.id)}
-                  disabled={busy}
-                  style={{ justifySelf: "center", width: 20, height: 20 }}
-                  aria-label={`${employee.displayName}: допущен к «${kind.name}»`}
-                  onChange={() => onChange({ pool: toggleId(kind.pool, employee.id) })}
-                />
-                <input
-                  type="checkbox"
-                  checked={Boolean(kind.preference[employee.id])}
-                  disabled={busy}
-                  style={{ justifySelf: "center", width: 20, height: 20 }}
-                  aria-label={`${employee.displayName}: любит «${kind.name}»`}
-                  onChange={() => onChange({ preference: togglePreference(kind.preference, employee.id) })}
-                />
-              </label>
-            );
-          })}
-          {kind.pool.length > 0 && (
-            <Button size="s" mode="gray" stretched disabled={busy} style={{ marginTop: 12 }} onClick={() => onChange({ pool: [] })}>
-              Сбросить на «все»
-            </Button>
-          )}
+          {kinds.map((kind, index) => (
+            <KindRow
+              key={kind.templateId}
+              kind={kind}
+              role={roles[index]!}
+              employeeName={employee.displayName}
+              busy={busy}
+              onToggleAllowed={() => onToggleAllowed(kind)}
+              onTogglePreferred={() => onTogglePreferred(kind)}
+            />
+          ))}
         </div>
       )}
       {/* Свёрнутую карточку отказ тоже касается: сохранение могло не дойти уже
@@ -439,5 +278,66 @@ function KindCard({
         </div>
       )}
     </CardShell>
+  );
+}
+
+function KindRow({
+  kind,
+  role,
+  employeeName,
+  busy,
+  onToggleAllowed,
+  onTogglePreferred,
+}: {
+  kind: TemplateRolesView;
+  role: PersonKindRole;
+  employeeName: string;
+  busy: boolean;
+  onToggleAllowed: () => void;
+  onTogglePreferred: () => void;
+}) {
+  const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
+    { id: kind.templateId, accent: kind.accent },
+  ]);
+  // Та самая буква, которой вид смены нарисован в сетке недели, а не первая буква
+  // имени — иначе все дежурства читаются здесь «Д», а там «Т»/«П»/«ВА»/«07».
+  const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
+
+  return (
+    <label
+      style={{
+        display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, alignItems: "center",
+        padding: "7px 0", borderTop: "1px solid var(--tgui--outline)",
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: 14 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            flex: "none", display: "grid", placeContent: "center", width: 26, height: 26,
+            borderRadius: 8, fontSize: 10.5, fontWeight: 700, background: palette.bg, color: palette.fg,
+          }}
+        >
+          {code}
+        </span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{kind.name}</span>
+      </span>
+      <input
+        type="checkbox"
+        checked={role.allowed}
+        disabled={busy}
+        style={{ justifySelf: "center", width: 20, height: 20 }}
+        aria-label={`${employeeName}: допущен к «${kind.name}»`}
+        onChange={onToggleAllowed}
+      />
+      <input
+        type="checkbox"
+        checked={role.preferred}
+        disabled={busy}
+        style={{ justifySelf: "center", width: 20, height: 20 }}
+        aria-label={`${employeeName}: любит «${kind.name}»`}
+        onChange={onTogglePreferred}
+      />
+    </label>
   );
 }

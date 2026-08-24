@@ -21,6 +21,14 @@ const schema = z.object({
       }
     }, "invalid IANA timezone"),
   DATABASE_URL: z.string().min(1).default("./data/planer.db"),
+  /**
+   * Куда ложатся файлы инструкций к чек-листам.
+   *
+   * Рядом с базой и с дефолтом: выкладка не должна требовать правки боевого
+   * `.env` ради каталога, который почти не меняется, — тот же довод, что у
+   * порогов передачи смены ниже.
+   */
+  DOCS_DIR: z.string().min(1).default("./data/checklist-docs"),
   JWT_SECRET: z.string().min(32),
   PUBLIC_URL: z.string().url(),
   BOT_USERNAME: z.string().optional(),
@@ -41,6 +49,8 @@ export interface Config {
   adminTelegramIds: number[];
   teamTz: string;
   databaseUrl: string;
+  /** Каталог файлов инструкций — см. `DOCS_DIR`. */
+  docsDir: string;
   jwtSecret: string;
   publicUrl: string;
   botUsername?: string;
@@ -60,6 +70,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     adminTelegramIds: e.ADMIN_TELEGRAM_IDS,
     teamTz: e.TEAM_TZ,
     databaseUrl: e.DATABASE_URL,
+    docsDir: e.DOCS_DIR,
     jwtSecret: e.JWT_SECRET,
     publicUrl: e.PUBLIC_URL,
     botUsername: e.BOT_USERNAME,

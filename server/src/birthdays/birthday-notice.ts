@@ -79,8 +79,14 @@ export async function runBirthdayNoticeTick(db: Db, bot: Bot, today: string): Pr
     let delivered = 0;
     // See the same button above — a general collection round is `celebrations`
     // too, so the same switch covers it.
+    //
+    // Рядом с ним — «Собрали, закрыть»: это письмо и есть просьба дожать сбор, и
+    // ответ на неё должен быть здесь же, а не в мини-аппе, куда за ним надо идти.
+    // Клавиатура собирается заново на каждого адресата: `InlineKeyboard`
+    // мутабелен, и общий экземпляр копил бы по кнопке на админа.
     for (const admin of admins) {
-      if (await notifyUser(bot, admin.telegramUserId!, text, noticeMuteKeyboard("celebrations"))) delivered += 1;
+      const keyboard = noticeMuteKeyboard("celebrations").row().text("✅ Собрали, закрыть", `collection:close:${round.id}`);
+      if (await notifyUser(bot, admin.telegramUserId!, text, keyboard)) delivered += 1;
     }
 
     // Marked either way: a Telegram outage must not become a nag loop. The date
