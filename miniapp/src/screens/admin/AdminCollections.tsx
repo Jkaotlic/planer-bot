@@ -738,8 +738,16 @@ function CollectionCard({
 
       {row.collection.collectUrl && <CopyableLink url={row.collection.collectUrl} />}
 
+      {/* Равные доли, а не «одна растянута, вторая как получится»: `stretched`
+          у первой кнопки забирал всю строку, и «Собрали» ужималось до «Соб…». */}
       <div style={{ display: "flex", gap: 8 }}>
-        <Button size="s" mode={open ? "gray" : "bezeled"} stretched onClick={onToggle}>
+        <Button
+          size="s"
+          mode={open ? "gray" : "bezeled"}
+          stretched
+          style={{ flex: "1 1 0", minWidth: 0 }}
+          onClick={onToggle}
+        >
           {open ? "Свернуть" : "Открыть"}
         </Button>
         {/* «Собрали» прямо в строке: закрыть сбор — самое частое, что с ним
@@ -748,7 +756,15 @@ function CollectionCard({
             заново». Закрытый сбор её здесь не показывает: открывать заново —
             редкое действие, и место в строке оно не заслуживает. */}
         {row.collection.closedAt == null && (
-          <Button size="s" mode="filled" loading={closing} disabled={closing} onClick={() => void close()}>
+          <Button
+            size="s"
+            mode="filled"
+            stretched
+            style={{ flex: "1 1 0", minWidth: 0 }}
+            loading={closing}
+            disabled={closing}
+            onClick={() => void close()}
+          >
             Собрали
           </Button>
         )}

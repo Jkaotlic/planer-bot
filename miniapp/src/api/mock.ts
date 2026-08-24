@@ -1006,6 +1006,27 @@ export async function mockGetJournal(params: { types?: string[]; actor?: number;
 const COLLECTIONS: Collection[] = [];
 let nextCollectionId = 1;
 
+/**
+ * Один живой сбор в DEV — иначе экран «Сборы» открывается пустым и посмотреть на
+ * него глазами (карточку, кнопки, «Разослано · N») нельзя вовсе.
+ *
+ * Разосланный и открытый: именно в таком состоянии на карточке видно и «Открыть»,
+ * и «Собрали», то есть ровно то, что чаще всего и правят.
+ */
+function seedCollection(patch: Partial<Collection>): void {
+  COLLECTIONS.push({
+    id: nextCollectionId++, kind: "custom", employeeId: null, year: null, celebratedOn: null,
+    title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
+    collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
+    scheduleNotifiedAt: null, sentAt: null, sentCount: 0, sendCount: 0,
+    createdAt: new Date().toISOString(), ...patch,
+  });
+}
+seedCollection({
+  title: "Кофемашина в переговорку", collectUrl: "https://messenger.sberbank.ru/sl/xxxx",
+  amountPerPerson: 500, sentCount: 27, sendCount: 1, sentAt: new Date().toISOString(),
+});
+
 function blankCollection(patch: Partial<Collection>): Collection {
   return {
     id: nextCollectionId++, kind: "custom", employeeId: null, year: null, celebratedOn: null,
