@@ -840,10 +840,14 @@ button {
   white-space: nowrap;
 }
 
+/* `min-height`, а не `height`: фиксированная высота ячейки не растёт под
+   содержимым, и запись из трёх строк («09–21 Дежурство · Вавилова 19»)
+   выталкивала кнопку «＋» за нижнюю кромку — прямо на линию, отделяющую
+   строку от следующей. */
 .day-cell {
   vertical-align: top;
   min-width: 112px;
-  height: 68px;
+  min-height: 68px;
   padding: 6px !important;
 }
 
@@ -877,11 +881,13 @@ button {
   color: var(--button-text);
 }
 
+/* `min-height`, а не `height`: см. `.day-cell` выше — высота ячейки задаёт
+   низ, ниже которого «＋» опускаться не должен, но не потолок. */
 .day-cell-inner {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  height: 100%;
+  min-height: 100%;
   border-radius: 8px;
   padding: 2px;
 }
@@ -1787,10 +1793,14 @@ input[type="search"] {
   font-weight: 600;
 }
 
-/* Small "＋" under existing entries — add another record to an occupied day. */
+/* Small "＋" under existing entries — add another record to an occupied day.
+   `margin-bottom` — не косметика: без него кнопка упирается в самый низ ячейки,
+   а низ ячейки и есть линия, отделяющая работника от следующего. На дробном
+   масштабе окна «＋» ложился прямо на неё. */
 .cell-add-more {
   align-self: stretch;
   min-height: 18px;
+  margin-bottom: 3px;
   border: none;
   border-radius: 6px;
   background: transparent;
