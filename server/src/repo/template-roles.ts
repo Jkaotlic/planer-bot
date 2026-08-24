@@ -64,8 +64,12 @@ export function getAllTemplateRoles(db: Db): Map<number, TemplateRoles> {
 /**
  * Whose turn it is for a preset: everyone eligible, with the last day they held
  * it. Eligible means the pool, or the whole active roster when the pool is empty
- * — the same rule the distributor uses, so the hint and the assignment agree —
- * minus anyone excluded from assignment, who this queue never offers.
+ * — правило «пустой пул значит все», общее с экраном «Кто что может», — minus
+ * anyone excluded from assignment, who this queue never offers.
+ *
+ * Эта очередь — единственный читатель пула на сервере с тех пор, как честная
+ * раздача снята. Уберёшь фильтр — и «кому следующему дежурить» начнёт называть
+ * тех, кого к дежурству не допускали.
  *
  * Reads history from the schedule itself rather than a separate counter, so it
  * stays right however entries got there — imported, distributed or typed in.

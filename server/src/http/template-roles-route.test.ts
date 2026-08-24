@@ -90,44 +90,6 @@ describe("PUT /api/admin/templates/:id/roles", () => {
   });
 });
 
-describe("the pool actually changes who «Распределить честно» picks", () => {
-  it("keeps a duty inside its pool, and leaves it empty when the pool is away", async () => {
-    const db = makeTestDb();
-    const app = createApp({ db, config });
-    const night = presetId(db, "Ночь");
-    // Created before the first auth call, so these hold the low ids and the
-    // "whoever is freest, lowest id wins" tiebreak lands on a real worker rather
-    // than on the admin the allowlist auto-registers.
-    const inPool = createEmployee(db, { displayName: "Дежурный" }).id;
-    const outside = createEmployee(db, { displayName: "Посторонний" }).id;
-    const token = await tokenFor(app, 111);
-
-    // An open night slot with nobody on it.
-    createShift(db, {
-      date: "2026-08-03", start: "15:00", end: "23:00", endDate: null,
-      category: "shift", templateId: night, title: "Ночь", employeeId: null,
-    });
-
-    // Unconfigured: whoever is freest gets it — here the lower id.
-    const before = await (await app.request("/api/admin/distribute", send(token, { from: "2026-08-01", to: "2026-08-31" }, "POST"))).json();
-    expect(before.assignments[0].employeeId).toBe(inPool);
-
-    // Now restrict the preset to the *other* person and re-run.
-    await app.request(`/api/admin/templates/${night}/roles`, send(token, { pool: [outside] }));
-    const after = await (await app.request("/api/admin/distribute", send(token, { from: "2026-08-01", to: "2026-08-31" }, "POST"))).json();
-    expect(after.assignments[0].employeeId).toBe(outside);
-
-    // And with the pool member on holiday, the slot stays open rather than
-    // falling to somebody who doesn't do nights.
-    createShift(db, {
-      date: "2026-08-01", endDate: "2026-08-31", start: null, end: null,
-      category: "vacation", templateId: null, title: null, employeeId: outside,
-    });
-    const away = await (await app.request("/api/admin/distribute", send(token, { from: "2026-08-01", to: "2026-08-31" }, "POST"))).json();
-    expect(away.assignments).toEqual([]);
-  });
-});
-
 describe("whose turn it is", () => {
   const duty = (db: Db, employeeId: number, templateId: number, date: string) =>
     createShift(db, {

@@ -92,7 +92,6 @@ import {
   canAnnounce,
   type EntryCategory,
 } from "@planer/shared";
-import { buildDistribution, applyDistribution } from "../schedule/distribute-service";
 import {
   postSlot,
   expressInterest,
@@ -1456,34 +1455,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
       if (err instanceof UnknownEmployeesError) return c.json({ error: err.message }, 400);
       throw err;
     }
-  });
-
-  app.post("/api/admin/distribute", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { from?: unknown; to?: unknown; apply?: unknown };
-    // A quarter is already far beyond how far ahead this team plans.
-    const err = rangeError(body.from, body.to, 92);
-    if (err) return c.json({ error: err }, 400);
-    const { assignments, unfilled } = buildDistribution(db, body.from as string, body.to as string);
-    let notified: { delivered: number; intended: number } = { delivered: 0, intended: 0 };
-    if (body.apply === true) {
-      const { diffs } = withScheduleDiff(db, { from: body.from as string, to: body.to as string }, () =>
-        applyDistribution(db, assignments.map((a) => ({ shiftId: a.shiftId, employeeId: a.employeeId }))),
-      );
-      // One press moves a whole week of shifts, so it belongs in «кто когда что
-      // менял» like every other schedule change. A preview writes nothing and is
-      // recorded as nothing — the log is for what happened, not what was looked at.
-      recordAudit(db, "distribution_applied", c.get("auth").employeeId, {
-        from: body.from as string,
-        to: body.to as string,
-        count: assignments.length,
-      });
-      notified = await notifyScheduleChange(db, bot, {
-        actorEmployeeId: c.get("auth").employeeId, diffs, cause: "distribute", now: teamNow(config.teamTz),
-      });
-    }
-    // `unfilled` rides along on a preview too: an empty cell nobody can take is worth
-    // knowing about before applying anything, not after.
-    return c.json({ applied: body.apply === true, assignments, unfilled, notified });
   });
 
   app.get("/api/swaps", requireAuth(db, config.jwtSecret), (c) => {
