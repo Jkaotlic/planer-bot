@@ -83,8 +83,12 @@ function sendButton(el: HTMLElement): HTMLButtonElement {
 }
 
 async function openCard(el: HTMLElement) {
-  const head = el.querySelector<HTMLElement>('[data-testid="collection-card"] .collection-card-head, [data-testid="collection-card"] button');
-  await act(async () => (head ?? el.querySelector<HTMLElement>('[data-testid="collection-card"]')!).click());
+  // Именно по «Открыть»: в строке рядом стоит ещё и «Собрали», и «первая кнопка
+  // карточки» с некоторых пор — не та, что раскрывает.
+  const open = [...el.querySelectorAll<HTMLButtonElement>('[data-testid="collection-card"] button')]
+    .find((b) => (b.textContent ?? "").trim() === "Открыть");
+  if (!open) throw new Error("кнопки «Открыть» на карточке нет");
+  await act(async () => open.click());
   await settle();
 }
 

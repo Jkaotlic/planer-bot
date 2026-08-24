@@ -705,6 +705,24 @@ function CollectionCard({
 }) {
   const status = statusOf(row);
   const subtitle = [moneyLine(row.collection), edgeLine(row.collection)].filter(Boolean).join(" · ");
+  const [closing, setClosing] = useState(false);
+  /** Отказ рисуется на самой строке: экран — один длинный скролл, и сообщение
+   *  над списком для нажавшего в нижней карточке невидимо. */
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  async function close() {
+    setClosing(true);
+    setCloseError(null);
+    try {
+      await apiClient.setCollectionClosed(row.collection.id, true);
+      await onChanged();
+    } catch (err) {
+      console.error("Close collection failed:", err);
+      setCloseError("Не получилось закрыть сбор. Попробуй ещё раз.");
+    } finally {
+      setClosing(false);
+    }
+  }
 
   return (
     <CardShell>
@@ -720,9 +738,24 @@ function CollectionCard({
 
       {row.collection.collectUrl && <CopyableLink url={row.collection.collectUrl} />}
 
-      <Button size="s" mode={open ? "gray" : "bezeled"} stretched onClick={onToggle}>
-        {open ? "Свернуть" : "Открыть"}
-      </Button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button size="s" mode={open ? "gray" : "bezeled"} stretched onClick={onToggle}>
+          {open ? "Свернуть" : "Открыть"}
+        </Button>
+        {/* «Собрали» прямо в строке: закрыть сбор — самое частое, что с ним
+            делают, и ради одного нажатия карточку раскрывать незачем. Внутри
+            карточки кнопка остаётся — там она про пару «закрыть / открыть
+            заново». Закрытый сбор её здесь не показывает: открывать заново —
+            редкое действие, и место в строке оно не заслуживает. */}
+        {row.collection.closedAt == null && (
+          <Button size="s" mode="filled" loading={closing} disabled={closing} onClick={() => void close()}>
+            Собрали
+          </Button>
+        )}
+      </div>
+      {closeError && (
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{closeError}</div>
+      )}
 
       {open && (
         <CollectionEditor
