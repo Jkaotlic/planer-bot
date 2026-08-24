@@ -411,22 +411,23 @@ describe("team schedule UI", () => {
       }),
     );
 
-    for (const colour of ["#DEF5F0", "#EEE6FB", "#E1F6E1", "#FCE4E4"]) {
+    for (const colour of ["#DEF5F0", "#E1F6E1", "#FCE4E4"]) {
       expect(light).toContain(`background:${colour}`);
     }
     for (const colour of [
       "rgba(48,191,171,0.22)",
-      "rgba(160,110,235,0.24)",
       "rgba(70,190,90,0.22)",
       "rgba(230,80,60,0.24)",
     ]) {
       expect(dark).toContain(`background:${colour}`);
     }
-    // Командировка в этот список больше не входит: у неё свой точный цвет, один
-    // на обе темы, и «К» вместо общей точки.
+    // Командировка и мероприятие в этот список больше не входят: у них свои
+    // точные цвета, одни на обе темы, и буквы вместо общей точки.
     for (const markup of [light, dark]) {
       expect(markup).toContain("background:#8E24AA");
       expect(markup).toContain("<b>К</b>");
+      expect(markup).toContain("background:#00897B");
+      expect(markup).toContain("<b>М</b>");
     }
     expect(light).toContain("background:#CBC04D;color:#292505");
     expect(dark).toContain("background:#CBC04D;color:#292505");
@@ -745,7 +746,9 @@ describe("TeamWeekLegend", () => {
   });
 
   it("colours a presetless entry by its category, per theme", () => {
-    const item = { code: "•", label: "Ярмарка", palette: null, category: "offsite" as const };
+    // Работа в выходной, а не мероприятие: у мероприятия с 2026-08-24 своя точная
+    // палитра, одна на обе темы, и разницы между темами у него больше нет.
+    const item = { code: "•", label: "Ярмарка", palette: null, category: "weekend_work" as const };
     const light = render([item], false);
     const dark = render([item], true);
     expect(light).toContain("Ярмарка");

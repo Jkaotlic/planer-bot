@@ -48,6 +48,24 @@ export const BUSINESS_TRIP_SCHEDULE_PALETTE: SchedulePalette = {
 };
 
 /**
+ * Мероприятие — «конференция», «выезд», «планёрка на стороне».
+ *
+ * Как и командировка, это не «запись без пресета», а состояние, которое команда
+ * читает в сетке каждый день. Буква «М», потому что «К» уже стоит на
+ * командировке, а два состояния с одной буквой хуже, чем буква не от первого
+ * слова.
+ *
+ * Бирюза выбрана как единственный незанятый тон: она темнее и зеленее «Вечера»
+ * (#08AFF3) и холоднее «Резерва» (#2F7D4F) — тест ниже стережёт только точные
+ * совпадения, различимость на глаз проверялась отрисовкой картинки недели.
+ */
+export const OFFSITE_SCHEDULE_PALETTE: SchedulePalette = {
+  bg: "#00897B",
+  fg: "#FFFFFF",
+  code: "М",
+};
+
+/**
  * A cell the import could not read — the file said something like «Ко» and we
  * refused to guess what it meant.
  *
@@ -68,6 +86,7 @@ export function exactSchedulePalette(
   if (accent) return SCHEDULE_ACCENT_PALETTES[accent];
   if (category === "vacation") return VACATION_SCHEDULE_PALETTE;
   if (category === "business_trip") return BUSINESS_TRIP_SCHEDULE_PALETTE;
+  if (category === "offsite") return OFFSITE_SCHEDULE_PALETTE;
   return null;
 }
 

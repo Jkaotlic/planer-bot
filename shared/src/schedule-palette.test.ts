@@ -68,8 +68,11 @@ describe("working schedule palette", () => {
 
   it("leaves unspecified categories to the existing theme palette", () => {
     expect(exactSchedulePalette(undefined, "sick_leave")).toBeNull();
-    expect(exactSchedulePalette(undefined, "offsite")).toBeNull();
     expect(exactSchedulePalette(undefined, "weekend_work")).toBeNull();
+  });
+
+  it("мероприятие носит своё «М», а не общую точку", () => {
+    expect(exactSchedulePalette(undefined, "offsite")?.code).toBe("М");
   });
 
   it("командировка носит своё «К», а не общую точку", () => {
@@ -79,27 +82,31 @@ describe("working schedule palette", () => {
     expect(trip?.code).toBe("К");
   });
 
-  it("цвет командировки не спутать ни с одним другим", () => {
-    const trip = exactSchedulePalette(undefined, "business_trip")!;
-    const others = [
-      ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.bg),
-      VACATION_SCHEDULE_PALETTE.bg,
-      UNRECOGNISED_SCHEDULE_PALETTE.bg,
-      // Категорийные цвета соседних «безпресетных» состояний — мероприятия и
-      // работы в выходной: именно с ними командировка стоит рядом в сетке.
-      CATEGORY_PALETTES_LIGHT.offsite.bg,
-      CATEGORY_PALETTES_LIGHT.weekend_work.bg,
+  it("у каждого точного цвета он свой: ни одна пара не совпадает", () => {
+    // Клетка в сетке — это 34×28 пикселей с одной буквой: два одинаковых фона
+    // означают два состояния, которые на картинке не различить вовсе.
+    const exact = [
+      ...Object.values(SCHEDULE_ACCENT_PALETTES),
+      VACATION_SCHEDULE_PALETTE,
+      UNRECOGNISED_SCHEDULE_PALETTE,
+      exactSchedulePalette(undefined, "business_trip")!,
+      exactSchedulePalette(undefined, "offsite")!,
     ];
-    expect(others).not.toContain(trip.bg);
+    expect(new Set(exact.map((p) => p.bg)).size).toBe(exact.length);
+    expect(new Set(exact.map((p) => p.code)).size).toBe(exact.length);
   });
 
-  it("буква командировки не занята ничем другим", () => {
-    const codes = [
-      ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code),
-      VACATION_SCHEDULE_PALETTE.code,
-      UNRECOGNISED_SCHEDULE_PALETTE.code,
+  it("новые цвета не повторяют блёклые категорийные", () => {
+    // Смысл правки был в том, чтобы командировку и мероприятие перестали путать
+    // с соседними блёклыми состояниями, а не в том, чтобы перекрасить их в те же.
+    const faded = [
+      CATEGORY_PALETTES_LIGHT.offsite.bg,
+      CATEGORY_PALETTES_LIGHT.business_trip.bg,
+      CATEGORY_PALETTES_LIGHT.weekend_work.bg,
+      CATEGORY_PALETTES_LIGHT.sick_leave.bg,
     ];
-    expect(codes).not.toContain("К");
+    expect(faded).not.toContain(exactSchedulePalette(undefined, "business_trip")!.bg);
+    expect(faded).not.toContain(exactSchedulePalette(undefined, "offsite")!.bg);
   });
 });
 
@@ -109,6 +116,12 @@ describe("палитра категорий", () => {
       expect(CATEGORY_PALETTES_LIGHT[category], category).toBeDefined();
       expect(CATEGORY_PALETTES_DARK[category], category).toBeDefined();
     }
+  });
+
+  it("мероприятие берёт свой точный цвет в обеих темах", () => {
+    const event = exactSchedulePalette(undefined, "offsite")!;
+    expect(categoryPalette("offsite", false).bg).toBe(event.bg);
+    expect(categoryPalette("offsite", true).bg).toBe(event.bg);
   });
 
   it("командировка берёт свой точный цвет в обеих темах", () => {
