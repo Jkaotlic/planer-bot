@@ -59,6 +59,16 @@ export function rememberTelegramProfile(
   db.update(employees).set({ tgUsername, tgFirstName }).where(eq(employees.id, employeeId)).run();
 }
 
+/** Стартовая вкладка мини-аппа. `null` — «Смены». */
+export function setStartTab(db: Db, employeeId: number, tab: string | null): Employee | undefined {
+  return db
+    .update(employees)
+    .set({ startTab: tab })
+    .where(eq(employees.id, employeeId))
+    .returning()
+    .all()[0];
+}
+
 /** Расшифровка букв под картинкой недели — вторая личная настройка человека. */
 export function setWeekLegend(db: Db, employeeId: number, enabled: boolean): Employee | undefined {
   return db

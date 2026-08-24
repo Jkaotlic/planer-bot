@@ -1,5 +1,5 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
-import type { TeamScheduleResponse } from "@planer/shared";
+import type { StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
@@ -91,9 +91,16 @@ export const MOCK_ME: Me = {
   // Дев-мок всегда админ (см. комментарий выше) — наблюдателя тут не пощупать
   // руками, зато экран, скрытый и от админа, и от наблюдателя, виден сразу.
   isObserver: false,
-  selfScheduleEnabled: false,
+  selfScheduleEnabled: false, startTab: null,
   canAnnounce: true,
 };
+
+/** DEV: стартовая вкладка живёт в том же `MOCK_ME`, что и остальные настройки. */
+export async function mockSetStartTab(tab: StartTab | null): Promise<StartTab | null> {
+  await delay(150);
+  MOCK_ME.startTab = tab;
+  return tab;
+}
 
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {
   await delay(200);

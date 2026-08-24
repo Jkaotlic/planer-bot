@@ -48,7 +48,7 @@ const PREVIEW: CollectionPreview = {
 const ME: Me = {
   id: 9, displayName: "Админ Админов", address: "Админ", preferredName: null,
   isAdmin: true, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
-  isObserver: false, selfScheduleEnabled: false, canAnnounce: true,
+  isObserver: false, selfScheduleEnabled: false, startTab: null, canAnnounce: true,
 };
 
 let root: Root | null = null;

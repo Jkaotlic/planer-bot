@@ -52,7 +52,7 @@ function meWith(overrides: Partial<Me>): Me {
     swapsLocked: false,
     excludedFromSwaps: false,
     isObserver: false,
-    selfScheduleEnabled: false,
+    selfScheduleEnabled: false, startTab: null,
     canAnnounce: false,
     ...overrides,
   };

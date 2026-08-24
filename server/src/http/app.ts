@@ -23,6 +23,7 @@ import {
   restoreEmployee,
   setEmployeeAdmin,
   setRemindersEnabled,
+  setStartTab,
   setPreferredName,
   rememberTelegramProfile,
   setSelfScheduleEnabled,
@@ -70,6 +71,9 @@ import { createMyEntryRoutes } from "./routes/my-entries";
 import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
 import {
+  isStartTab,
+  startTabVisible,
+  type StartTab,
   parseCoverage,
   serializeCoverage,
   isWeekend,
@@ -377,6 +381,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
       excludedFromSwaps: !canSwap(me),
       isObserver: me.isObserver,
       selfScheduleEnabled: me.selfScheduleEnabled,
+      /** С какой вкладки открывать приложение. `null` — «Смены», как было всегда. */
+      startTab: me.startTab,
       canAnnounce: canAnnounce(me),
     });
   });
@@ -390,11 +396,19 @@ export function createApp(deps: AppDeps): Hono<Env> {
       remindersEnabled?: unknown;
       preferredName?: unknown;
       selfScheduleEnabled?: unknown;
+      startTab?: unknown;
     };
     const hasReminders = body.remindersEnabled !== undefined;
     const hasPreferred = body.preferredName !== undefined;
     const hasSelfSchedule = body.selfScheduleEnabled !== undefined;
-    if (!hasReminders && !hasPreferred && !hasSelfSchedule) return c.json({ error: "нечего сохранять" }, 400);
+    const hasStartTab = body.startTab !== undefined;
+    if (!hasReminders && !hasPreferred && !hasSelfSchedule && !hasStartTab) {
+      return c.json({ error: "нечего сохранять" }, 400);
+    }
+    // `null` — законное значение: это «вернуть к «Сменам»», а не «не трогать».
+    if (hasStartTab && body.startTab !== null && !isStartTab(body.startTab)) {
+      return c.json({ error: "startTab — неизвестная вкладка" }, 400);
+    }
     if (hasReminders && typeof body.remindersEnabled !== "boolean") {
       return c.json({ error: "remindersEnabled должен быть true или false" }, 400);
     }
@@ -414,6 +428,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Иначе тумблер стал бы способом обойти роль.
       if (!employee.isObserver) return c.json({ error: "forbidden" }, 403);
       employee = setSelfScheduleEnabled(db, id, body.selfScheduleEnabled as boolean) ?? employee;
+    }
+    if (hasStartTab) {
+      // Не 400: вкладка существует и понята — её просто некому показать. Иначе
+      // настройка стала бы способом обойти роль, как и тумблер самозаписи выше.
+      if (body.startTab !== null && !startTabVisible(body.startTab as StartTab, {
+        isAdmin: c.get("auth").isAdmin,
+        isObserver: employee.isObserver,
+      })) {
+        return c.json({ error: "forbidden" }, 403);
+      }
+      employee = setStartTab(db, id, body.startTab as string | null) ?? employee;
     }
     if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
     if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;

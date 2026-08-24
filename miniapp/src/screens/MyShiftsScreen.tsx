@@ -1,5 +1,6 @@
 import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, swapBlockReason } from "@planer/shared";
+import type { StartTab } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
 import { AddressField } from "../components/AddressField";
@@ -8,6 +9,7 @@ import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
 import { RemindersSwitch } from "../components/RemindersSwitch";
+import { StartTabPicker } from "../components/StartTabPicker";
 import { SelfScheduleSwitch } from "../components/SelfScheduleSwitch";
 import { groupUpcomingByWeek, remainingThisWeek } from "../lib/upcoming";
 import { pluralizeRu } from "../lib/shift";
@@ -38,6 +40,8 @@ export interface MyShiftsScreenProps {
   onSelfEntry: (mode: SelfEntryMode) => void;
   /** Keeps `me` in step when the reminders switch is flipped. */
   onRemindersChanged: (enabled: boolean) => void;
+  /** Стартовая вкладка — личная настройка, живёт рядом с напоминаниями. */
+  onStartTabChanged: (tab: StartTab | null) => void;
   /** Keeps `me` in step when the self-schedule switch is flipped — наблюдатель. */
   onSelfScheduleChanged: (enabled: boolean) => void;
   /** Keeps `me` in step when the greeting name is saved. */
@@ -54,6 +58,7 @@ export function MyShiftsScreen({
   onProposeSwap,
   onSelfEntry,
   onRemindersChanged,
+  onStartTabChanged,
   onSelfScheduleChanged,
   onAddressChanged,
 }: MyShiftsScreenProps) {
@@ -140,6 +145,9 @@ export function MyShiftsScreen({
       <List>
         <Section header="Уведомления">
           <RemindersSwitch enabled={me.remindersEnabled} onChanged={onRemindersChanged} />
+          {/* Здесь же, а не отдельным экраном настроек: это личная настройка, а
+              «Мои смены» — экран, который открывают все. */}
+          <StartTabPicker me={me} onChanged={onStartTabChanged} />
           {/* Рядом с напоминаниями, не отдельной секцией: это тоже личная
               настройка, а не общий раздел — и видна только наблюдателю. */}
           {me.isObserver && (

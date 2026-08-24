@@ -204,6 +204,13 @@
       "when": 1787577771987,
       "tag": "0028_week_legend",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1787581371987,
+      "tag": "0029_start_tab",
+      "breakpoints": true
     }
   ]
 }

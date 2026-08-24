@@ -13,6 +13,7 @@ export * from "./audit";
 export * from "./schedule-palette";
 export * from "./kind-roles";
 export * from "./coverage";
+export * from "./start-tab";
 export * from "./reminder";
 export * from "./csv-encoding";
 export * from "./roster-summary";

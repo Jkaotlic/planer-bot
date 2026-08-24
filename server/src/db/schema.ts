@@ -37,6 +37,15 @@ export const employees = sqliteTable("employees", {
    * По умолчанию включена — так было до того, как настройка появилась.
    */
   weekLegend: integer({ mode: "boolean" }).notNull().default(true),
+  /**
+   * С какой вкладки открывать мини-апп. `null` — «Смены», как было всегда.
+   *
+   * Строка, а не enum: SQLite всё равно хранит текст, а список вкладок живёт в
+   * `shared/start-tab.ts` — единственном месте, где он и должен быть. Значение
+   * проверяется на входе и ещё раз на старте приложения: роль могли сменить уже
+   * после того, как выбор сохранился.
+   */
+  startTab: text(),
   /** An admin took this person out of AUTOMATIC placement: очередь дежурств
    *  («кому следующему»), the weekend call for volunteers, and weekend assignment.
    *  An admin can still place them by hand — this is not archiving. */

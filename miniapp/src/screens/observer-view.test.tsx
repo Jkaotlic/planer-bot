@@ -16,7 +16,7 @@ function bootstrapAs(
     me: {
       id: 1, displayName: "Аня", address: "Аня", preferredName: null,
       isAdmin: false, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
-      isObserver: false, selfScheduleEnabled: false, canAnnounce: false, ...me,
+      isObserver: false, selfScheduleEnabled: false, startTab: null, canAnnounce: false, ...me,
     },
     myShifts: { shifts: [], today: "2026-08-20" },
     teamSchedule: { shifts: [], employees: [] },

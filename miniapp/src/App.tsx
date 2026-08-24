@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { canAddOwnShifts } from "@planer/shared";
+import { canAddOwnShifts, startTabFor, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -55,9 +55,16 @@ interface AppData {
  * affordance, with its own back action instead of the tab bar. */
 export function App() {
   // Кнопка «📣 Анонс» в боте открывает мини-апп сразу на нужной вкладке.
+  //
+  // Личная настройка «открывать сразу» применяется ниже, когда приедет `me`:
+  // здесь её ещё неоткуда взять, а ждать первого запроса ради выбора вкладки
+  // значило бы держать человека на пустом экране.
   const [tab, setTab] = useState<TabKey>(() =>
     adminSectionFromSearch(window.location.search) ? "admin" : "mine",
   );
+  /** Настройку применяем один раз за открытие: иначе возврат на «Смены» руками
+   *  отменялся бы следующим же перечитыванием данных. */
+  const startTabApplied = useRef(false);
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
   // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
@@ -135,6 +142,26 @@ export function App() {
     if (!data || tab !== "admin" || data.me.isAdmin) return;
     setTab(data.me.isObserver ? "announce" : "mine");
   }, [data, tab]);
+
+  /**
+   * Личная настройка «открывать сразу» — применяется, когда приехал `me`.
+   *
+   * Ссылка из бота побеждает настройку: правило целиком живёт в `startTabFor`,
+   * потому что то же самое решает сервер, когда пускает или не пускает вкладку
+   * в настройку. Один раз за открытие — иначе уход на другую вкладку руками
+   * отменялся бы ближайшим перечитыванием данных.
+   */
+  useEffect(() => {
+    if (!data || startTabApplied.current) return;
+    startTabApplied.current = true;
+    const search = window.location.search;
+    // Ссылка из бота побеждает настройку и обслуживается своим кодом: адресную
+    // вкладку («📣 Анонс») ставит эффект выше, форму-оверлей («🤒 Больничный»,
+    // «📌 Мероприятие») — `selfEntryMode`. Настройка, перебивающая их, сделала бы
+    // кнопку в боте враньём.
+    if (adminSectionFromSearch(search) || screenFromSearch(search)) return;
+    setTab(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me }));
+  }, [data]);
 
   useEffect(() => {
     if (!proposingFor) {
@@ -380,6 +407,9 @@ export function App() {
           }
           onSelfScheduleChanged={(selfScheduleEnabled) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, selfScheduleEnabled } } : prev))
+          }
+          onStartTabChanged={(startTab: StartTab | null) =>
+            setData((prev) => (prev ? { ...prev, me: { ...prev.me, startTab } } : prev))
           }
           onAddressChanged={({ preferredName, address }) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))

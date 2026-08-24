@@ -7,6 +7,7 @@ import type {
   ScheduleEntryDto,
   TeamScheduleResponse,
   TemplateDto,
+  StartTab,
 } from "@planer/shared";
 import type { Category, TemplateAccent } from "../categories";
 import {
@@ -15,6 +16,7 @@ import {
   mockDeclineSwap,
   mockGetMe,
   mockSetRemindersEnabled,
+  mockSetStartTab,
   mockSetSelfScheduleEnabled,
   mockSetPreferredName,
   mockGetMyShifts,
@@ -134,6 +136,8 @@ export interface Me {
   isAdmin: boolean;
   /** Their own shift-reminder switch. */
   remindersEnabled: boolean;
+  /** С какой вкладки открывать приложение. `null` — «Смены», как было всегда. */
+  startTab: StartTab | null;
   /** Admin's global «Обменять» switch — the screen must grey the button out
    *  rather than show it live and get refused on tap. */
   swapsLocked: boolean;
@@ -661,6 +665,8 @@ export interface ApiClient {
   getMe(): Promise<Me>;
   /** Turns this person's own shift reminders on or off. */
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
+  /** Стартовая вкладка. `null` — вернуть к «Сменам». */
+  setStartTab(tab: StartTab | null): Promise<StartTab | null>;
   /** Тумблер наблюдателя «Веду свой график сам» — 403 у обычного работника,
    *  сервер проверяет `isObserver` сам, экран сюда его и не подпускает. */
   setSelfScheduleEnabled(enabled: boolean): Promise<boolean>;
@@ -1072,6 +1078,13 @@ export const realClient: ApiClient = {
     return res.remindersEnabled;
   },
 
+  async setStartTab(tab) {
+    // Ответ маршрута — общий для всех личных настроек, и вкладки в нём нет: 200
+    // и есть подтверждение, а отказ (вкладка не по роли) прилетел бы `Error`'ом.
+    await authorizedPatchJson("/api/me/settings", { startTab: tab });
+    return tab;
+  },
+
   async setSelfScheduleEnabled(enabled) {
     // `/api/me/settings` эхает обратно `remindersEnabled`/`preferredName`/`address`
     // — общий ответ на три разных поля, и `selfScheduleEnabled` среди них нет.
@@ -1389,6 +1402,7 @@ const devClient: ApiClient = {
 
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
+  setStartTab: (tab) => mockSetStartTab(tab),
   setSelfScheduleEnabled: (enabled) => mockSetSelfScheduleEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getMyShifts: () => mockGetMyShifts(),

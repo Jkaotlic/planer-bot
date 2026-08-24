@@ -28,7 +28,7 @@ const ROW: CollectionRow = { collection: COLLECTION, personName: null, title: "�
 const ME: Me = {
   id: 9, displayName: "Аня Смирнова", address: "Аня", preferredName: null,
   isAdmin: true, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
-  isObserver: false, selfScheduleEnabled: false, canAnnounce: true,
+  isObserver: false, selfScheduleEnabled: false, startTab: null, canAnnounce: true,
 };
 
 let root: Root | null = null;
