@@ -426,7 +426,7 @@ describe("team schedule UI", () => {
     for (const markup of [light, dark]) {
       expect(markup).toContain("background:#8E24AA");
       expect(markup).toContain("<b>К</b>");
-      expect(markup).toContain("background:#00897B");
+      expect(markup).toContain("background:#3949AB");
       expect(markup).toContain("<b>М</b>");
     }
     expect(light).toContain("background:#CBC04D;color:#292505");

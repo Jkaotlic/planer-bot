@@ -206,19 +206,30 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
       const entry = cell.primary;
       if (!entry) continue;
       const key = entry.palette ? entry.palette.code : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}`;
+      // Квадрат категории (отпуск, командировка, мероприятие) стоит за СОСТОЯНИЕ,
+      // а не за заголовок конкретной записи: у разных людей заголовки разные, и
+      // легенда склеивала их через « · » — строка росла, а объясняла хуже.
+      // Заголовок записи никуда не девается, он виден в самой ячейке.
+      // Сравнение по коду, а не по ссылке на объект: палитру по дороге могли
+      // скопировать (тема, предпросмотр), и ссылочное равенство молча вернуло бы
+      // заголовок записи вместо названия состояния.
+      const categoryExact = exactSchedulePalette(undefined, entry.shift.category);
+      const title = entry.palette && categoryExact && entry.palette.code === categoryExact.code
+        ? categoryLabel(entry.shift.category)
+        : entry.title;
       const existing = seen.get(key);
       if (existing) {
-        existing.titles.add(entry.title);
+        existing.titles.add(title);
         continue;
       }
       seen.set(key, {
         item: {
           code: entry.palette?.code ?? FALLBACK_LEGEND_CODE,
-          label: entry.title,
+          label: title,
           palette: entry.palette,
           category: entry.palette ? null : entry.shift.category,
         },
-        titles: new Set([entry.title]),
+        titles: new Set([title]),
       });
     }
   }

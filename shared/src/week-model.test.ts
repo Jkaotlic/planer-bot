@@ -126,7 +126,28 @@ describe("модель недели", () => {
     ];
     const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
     expect(legend.map((item) => item.code).sort()).toEqual(["К", "М"]);
-    expect(legend.map((item) => item.label).sort()).toEqual(["Командировка", "Конференция"]);
+  });
+
+  it("расшифровка называет состояние, а не заголовок конкретной записи", () => {
+    // Квадрат «М» стоит за МЕРОПРИЯТИЕ, а не за «Конференцию»: у разных людей
+    // заголовки разные, и легенда склеивала их через « · » — строка росла, а
+    // объясняла всё хуже. Заголовок записи по-прежнему виден в самой ячейке.
+    const shifts = [
+      entry({ date: MONDAY, templateId: null, category: "offsite", title: "Конференция" }),
+      entry({ date: "2026-08-04", employeeId: 2, templateId: null, category: "offsite", title: "Выезд" }),
+    ];
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS));
+    expect(legend).toHaveLength(1);
+    expect(legend[0]!.label).toBe("Мероприятие");
+  });
+
+  it("у пресета в расшифровке остаётся его собственное имя", () => {
+    // Правило про категории не должно съесть имена видов смен: «Д» — это
+    // «День», а не «Смена».
+    const legend = buildWeekLegend(
+      buildWeekModel(MONDAY, { employees: TEAM, shifts: [entry({ date: MONDAY })] }, PRESETS),
+    );
+    expect(legend[0]!.label).toBe("День");
   });
 
   it("легенда идёт по алфавиту, а записи без пресета — последними", () => {
