@@ -17,6 +17,7 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
+import { getCollection, previewCollection, setCollectionClosed } from "../collections/collection-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
@@ -696,6 +697,42 @@ export function createBot(deps: BotDeps): Bot {
         ? { reply_markup: { inline_keyboard: [[{ text: "🗑 Убрать файл", callback_data: `checklist:docclear:${list.id}` }]] } }
         : undefined,
     );
+  });
+
+  /**
+   * «Собрали, закрыть» прямо из напоминания.
+   *
+   * Кнопка живёт в том же сообщении, которым бот попросил дожать сбор: ответ на
+   * просьбу — одно движение, а не «открой мини-апп, найди сбор, раскрой карточку».
+   * Поля журнала — те же, что пишет закрытие из вебки: журнал не должен читаться
+   * по-разному в зависимости от того, откуда нажали.
+   */
+  bot.callbackQuery(/^collection:close:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Закрывают сборы админы" });
+      return;
+    }
+    const id = Number(ctx.match[1]);
+    const collection = getCollection(db, id);
+    if (!collection) {
+      await ctx.answerCallbackQuery({ text: "Сбор удалён" });
+      return;
+    }
+    if (collection.closedAt != null) {
+      await ctx.answerCallbackQuery({ text: "Сбор уже закрыт" });
+      return;
+    }
+    const updated = setCollectionClosed(db, id, true, new Date());
+    const title = previewCollection(db, updated ?? collection).title;
+    recordAudit(db, "collection_closed", who.me.id, {
+      collectionId: collection.id,
+      employeeId: collection.employeeId,
+      title,
+      closed: true,
+    });
+    await ctx.answerCallbackQuery({ text: "Закрыл" });
+    await ctx.reply(`Сбор «${title}» закрыт.`);
   });
 
   bot.callbackQuery(/^checklist:docclear:(\d+)$/, async (ctx) => {

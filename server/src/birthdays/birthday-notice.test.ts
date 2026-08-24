@@ -11,8 +11,17 @@ import type { Db } from "../db/client";
 const TODAY = "2026-08-01";
 
 function fakeBot() {
-  const sent: { to: number; text: string }[] = [];
-  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  const sent: { to: number; text: string; buttons: string[] }[] = [];
+  const bot = {
+    api: {
+      sendMessage: vi.fn(async (to: number, text: string, extra?: { reply_markup?: unknown }) => {
+        // Кнопки — часть письма, а не оформление: в напоминании про сбор одна из
+        // них его закрывает, и тест обязан их видеть.
+        const markup = extra?.reply_markup as { inline_keyboard?: { text: string }[][] } | undefined;
+        sent.push({ to, text, buttons: (markup?.inline_keyboard ?? []).flat().map((b) => b.text) });
+      }),
+    },
+  };
   return { bot: bot as unknown as Bot, sent };
 }
 
@@ -180,6 +189,39 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     expect(sent.map((m) => m.to)).toEqual([2]);
     expect(sent[0]!.text).toContain("Именинник");
     expect(sent[0]!.text).toContain("https://sber.ru/x");
+  });
+
+  it("даёт закрыть сбор прямо из напоминания", async () => {
+    // Письмо и есть просьба дожать сбор — ответ на неё должен быть здесь же.
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+
+    expect(sent[0]!.buttons).toContain("✅ Собрали, закрыть");
+  });
+
+  it("не копит кнопки при нескольких админах", async () => {
+    // `InlineKeyboard` мутабелен: один экземпляр на цикл добавлял бы по кнопке
+    // на каждого следующего адресата.
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    person(db, "Второй админ", 3, null, true);
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, TODAY);
+
+    expect(sent).toHaveLength(2);
+    for (const message of sent) expect(message.buttons).toHaveLength(2);
   });
 
   it("reminds once, not every tick", async () => {
