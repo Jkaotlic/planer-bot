@@ -30,6 +30,7 @@ const EMPLOYEES: Employee[] = [person(1, "Аня Смирнова"), person(IGOR
 
 const NIGHT: TemplateRolesView = {
   templateId: 7, name: "Ночь", category: "shift", accent: "blue", checklistId: null,
+  coverage: [0, 0, 0, 0, 0, 0, 0],
   pool: [IGOR], preference: {},
 };
 

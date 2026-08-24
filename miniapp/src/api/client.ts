@@ -72,6 +72,7 @@ import {
   mockSetRotationUnit,
   mockSaveTemplateRoles,
   mockSetTemplateChecklist,
+  mockSetTemplateCoverage,
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
@@ -493,6 +494,8 @@ export interface TemplateRolesView {
   preference: Record<number, number>;
   /** Чек-лист, который проходит дежурный этого вида смены. `null` — никакого. */
   checklistId: number | null;
+  /** Норма дня, Пн..Вс: сколько людей нужно. Ноль значит «не считаем». */
+  coverage: number[];
 }
 
 /** One person's place in the queue for a kind of shift, already worded for display. */
@@ -761,6 +764,7 @@ export interface ApiClient {
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   setTemplateChecklist(templateId: number, checklistId: number | null): Promise<void>;
+  setTemplateCoverage(templateId: number, coverage: number[]): Promise<void>;
   getRosterCsv(from: string, to: string): Promise<string>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
@@ -1307,6 +1311,10 @@ export const realClient: ApiClient = {
     await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { checklistId });
   },
 
+  async setTemplateCoverage(templateId, coverage) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/coverage`, { coverage });
+  },
+
   async getRosterCsv(from, to) {
     const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -1424,6 +1432,7 @@ const devClient: ApiClient = {
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   setTemplateChecklist: (templateId, requiresChecklist) => mockSetTemplateChecklist(templateId, requiresChecklist),
+  setTemplateCoverage: (templateId, coverage) => mockSetTemplateCoverage(templateId, coverage),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),

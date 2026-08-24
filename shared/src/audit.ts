@@ -35,6 +35,7 @@ export const AUDIT_TYPES = [
   "employee_restrictions_changed", "employee_observer_changed",
   "employee_invite_issued", "settings_changed", "notice_prefs_changed",
   "template_roles_changed", "template_rotation_changed", "template_checklist_changed",
+  "template_coverage_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
   "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
@@ -409,6 +410,11 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     icon: "🎚",
     title: "Изменена очередь",
     lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, `шаг: ${rotationLabel(p.rotationUnit)}`],
+  }),
+  template_coverage_changed: (p) => ({
+    icon: "📊",
+    title: "Изменена норма дня",
+    lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, `Пн..Вс: ${str(p.coverage) ?? "?"}`],
   }),
 
   weekend_slot_created: (p) => ({

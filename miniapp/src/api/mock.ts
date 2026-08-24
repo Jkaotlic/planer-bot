@@ -878,6 +878,8 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
 
 /** DEV store for who may take each preset and who asked for it. Empty = everyone. */
 const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<number, number> }>();
+/** DEV-хранилище нормы дня. Пусто — «не считаем», как и в базе по умолчанию. */
+const TEMPLATE_COVERAGE = new Map<number, number[]>();
 
 export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
   await delay(180);
@@ -889,7 +891,13 @@ export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
     pool: [...(TEMPLATE_ROLES.get(template.id)?.pool ?? [])],
     preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
     checklistId: CHECKLISTS.find((l) => l.templateIds.includes(template.id))?.id ?? null,
+    coverage: [...(TEMPLATE_COVERAGE.get(template.id) ?? [0, 0, 0, 0, 0, 0, 0])],
   }));
+}
+
+export async function mockSetTemplateCoverage(templateId: number, coverage: number[]): Promise<void> {
+  await delay(150);
+  TEMPLATE_COVERAGE.set(templateId, [...coverage]);
 }
 
 export async function mockSaveTemplateRoles(
