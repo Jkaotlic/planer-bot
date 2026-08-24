@@ -9,6 +9,7 @@ import {
   type RosterPersonResolution,
   type Shift,
   type Template,
+  type TemplateRolesView,
   type Viewer,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
@@ -83,6 +84,8 @@ export function App() {
   const [weekMonday, setWeekMonday] = useState(() => mondayOf(new Date()));
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
+  /** Нормы дня по видам смен — из них сетка рисует «чего в дне не хватает». */
+  const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [events, setEvents] = useState<FeedEvent[]>([]);
   // Две разные беды, и раньше они лежали в одном поле, которое рисовалось вместо
@@ -121,15 +124,17 @@ export function App() {
   async function loadBootstrap(cancelled: () => boolean = () => false) {
     setBootError(null);
     try {
-      const [e, t, ev] = await Promise.all([
+      const [e, t, ev, roles] = await Promise.all([
         apiClient.getEmployees(),
         apiClient.getTemplates(),
         apiClient.getEvents(),
+        apiClient.getTemplateRoles(),
       ]);
       if (cancelled()) return;
       setEmployees(e);
       setTemplates(t);
       setEvents(ev);
+      setTemplateRoles(roles);
       // Своим запросом и отдельным catch: «кто я» — это подпись в футере, и её
       // отказ не повод показать экран «Повторить» вместо всей консоли. Не сумев
       // спросить, консоль остаётся безымянной — это честнее чужого имени.
@@ -438,6 +443,7 @@ export function App() {
                   onAddClick={openAddPanel}
                   onEntryClick={setEditingEntry}
                   query={scheduleQuery}
+                  coverage={templateRoles}
                 />
                 <aside className="right-rail">
                   <EventsFeed events={events} onOpenJournal={() => setNav("log")} />

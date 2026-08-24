@@ -3,6 +3,8 @@ import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinne
 import { PersonPicker } from "../../components/PersonPicker";
 import {
   ABSENCE_CATEGORIES,
+  coverageHint,
+  missingCoverage,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   describeEntryRangeResult,
@@ -18,6 +20,7 @@ import {
   type NewEntryInput,
   type Shift,
   type Template,
+  type TemplateRolesView,
 } from "../../api/client";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
@@ -88,6 +91,8 @@ export function AdminScheduleScreen() {
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  /** Нормы дня по видам смен — из них считается подсказка «чего не хватает». */
+  const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [error, setError] = useState<string | null>(null);
   /**
    * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
@@ -150,11 +155,12 @@ export function AdminScheduleScreen() {
   // Roster + templates load once; they don't change with the visible week.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates()])
-      .then(([emps, tmpls]) => {
+    Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates(), apiClient.getTemplateRoles()])
+      .then(([emps, tmpls, roles]) => {
         if (cancelled) return;
         setEmployees(emps.filter((e) => e.isActive));
         setTemplates(tmpls);
+        setTemplateRoles(roles);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -206,6 +212,9 @@ export function AdminScheduleScreen() {
     setSelectedDate(todayIso);
     setNotice(null);
   }
+
+  // Считается по видимой неделе: `shifts` — её расписание, `selectedDate` — день.
+  const dayHint = coverageHint(missingCoverage(shifts ?? [], templateRoles, selectedDate));
 
   const dayEntries = (shifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
@@ -308,10 +317,25 @@ export function AdminScheduleScreen() {
               <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
                 <Spinner size="m" />
               </div>
-            ) : dayEntries.length === 0 ? (
-              <Placeholder description="В этот день пока ничего не запланировано." />
             ) : (
-              dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)
+              <>
+                {/* Подсказка стоит НАД записями: она про то, чего в дне нет, и
+                    под списком её пришлось бы искать глазами. Молчит, пока
+                    норма не задана — см. `missingCoverage`. */}
+                {dayHint && (
+                  <div
+                    role="status"
+                    style={{ padding: "2px 20px 8px", color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 }}
+                  >
+                    {dayHint}
+                  </div>
+                )}
+                {dayEntries.length === 0 ? (
+                  <Placeholder description="В этот день пока ничего не запланировано." />
+                ) : (
+                  dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)
+                )}
+              </>
             )}
             <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
               <Button size="m" mode="filled" stretched onClick={() => setEditing("new")}>

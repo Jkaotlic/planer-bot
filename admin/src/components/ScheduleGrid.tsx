@@ -1,4 +1,4 @@
-import { filterPeople } from "@planer/shared";
+import { coverageHint, filterPeople, missingCoverage, type CoverageTemplate } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -17,10 +17,27 @@ export interface ScheduleGridProps {
   /** From `PersonSearch` in `App.tsx` — filters which rows render. Absent/empty shows everyone. */
   query?: string;
   /**
+   * Нормы дня по видам смен — из них считается подсказка «чего в дне не хватает».
+   * Пусто (или норма нулевая) — подсказки нет вовсе.
+   */
+  coverage?: readonly CoverageTemplate[];
+  /**
    * Сегодняшняя дата. Параметром, а не `new Date()` внутри: неделю рисуют и
    * тесты, и им нужен свой «сегодня». По умолчанию — день браузера.
    */
   today?: string;
+}
+
+/** «−2 Утро» под датой: чего в этом дне не хватает против нормы. */
+function DayShortfall({ date, shifts, coverage }: { date: string; shifts: Shift[]; coverage: readonly CoverageTemplate[] }) {
+  const missing = missingCoverage(shifts, coverage, date);
+  const hint = coverageHint(missing);
+  if (!hint) return null;
+  return (
+    <span className="day-shortfall" title={hint}>
+      {missing.map((kind) => `−${kind.need - kind.have} ${kind.name}`).join(" · ")}
+    </span>
+  );
 }
 
 function endOf(s: Shift): string {
@@ -37,7 +54,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick, query, today = toISODate(new Date()) }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()) }: ScheduleGridProps) {
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
   const visibleEmployees = filterPeople(employees, query ?? "");
@@ -59,6 +76,10 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
                 <span className="day-col-header">
                   <span className="dow">{weekdayShort(date)}</span>
                   <span className="dom">{dayOfMonth(date)}</span>
+                  {/* Подсказка под датой, а не отдельной строкой над сеткой:
+                      она про конкретный день, и в семи колонках её место —
+                      в своей. Молчит, пока норма не задана. */}
+                  <DayShortfall date={date} shifts={shifts} coverage={coverage} />
                 </span>
               </th>
             ))}

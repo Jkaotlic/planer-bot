@@ -1057,6 +1057,19 @@ button {
   font-size: 11px;
 }
 
+/* Нехватка по норме — под датой в шапке колонки дня. Мелким и приглушённым:
+   это подсказка на полях, а не заголовок. */
+.day-shortfall {
+  display: block;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--hint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .kind-coverage {
   display: flex;
   flex-direction: column;
