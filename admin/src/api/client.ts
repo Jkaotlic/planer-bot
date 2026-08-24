@@ -21,6 +21,7 @@ import {
   mockAddChecklistItem,
   mockUpdateChecklistItem,
   mockRemoveChecklistDoc,
+  mockUploadChecklistDoc,
   mockRemoveChecklistItem,
   mockReorderChecklistItem,
   mockGetChecklistDay,
@@ -539,6 +540,8 @@ export interface ApiClient {
   patchChecklist(id: number, patch: { name?: string; note?: string | null; docUrl?: string | null }): Promise<Checklist>;
   deleteChecklist(id: number): Promise<Checklist[]>;
   removeChecklistDoc(id: number): Promise<Checklist>;
+  /** Приложить файл инструкции. Второй путь — прислать его боту командой /instruction. */
+  uploadChecklistDoc(id: number, file: File): Promise<Checklist>;
   setChecklistTemplates(id: number, templateIds: number[]): Promise<Checklist>;
   addChecklistItem(checklistId: number, title: string): Promise<Checklist>;
   updateChecklistItem(itemId: number, patch: { title?: string; note?: string | null }): Promise<Checklist>;
@@ -870,6 +873,22 @@ export const realClient: ApiClient = {
     authorizedDelete<{ checklists: Checklist[] }>(`/api/admin/checklists/${id}`).then((r) => r.checklists),
   removeChecklistDoc: (id) =>
     authorizedDelete<{ checklist: Checklist }>(`/api/admin/checklists/${id}/doc`).then((r) => r.checklist),
+  uploadChecklistDoc: async (id, file) => {
+    const token = await authToken();
+    const form = new FormData();
+    form.append("file", file);
+    // Без заголовка Content-Type: его ставит браузер вместе с boundary, и
+    // заданный руками ломает разбор multipart на сервере.
+    const res = await apiFetch(`${API_BASE}/api/admin/checklists/${id}/doc`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      throw new Error(res.status === 413 ? "Файл больше 5 МБ — выбери поменьше" : "Не удалось приложить файл");
+    }
+    return (await res.json()).checklist as Checklist;
+  },
   setChecklistTemplates: (id, templateIds) =>
     authorizedPutJson<{ checklist: Checklist }>(`/api/admin/checklists/${id}/templates`, { templateIds }).then((r) => r.checklist),
   addChecklistItem: (checklistId, title) =>
@@ -1100,6 +1119,7 @@ const devClient: ApiClient = {
   patchChecklist: (id, patch) => mockPatchChecklist(id, patch),
   deleteChecklist: (id) => mockDeleteChecklist(id),
   removeChecklistDoc: (id) => mockRemoveChecklistDoc(id),
+  uploadChecklistDoc: (id, file) => mockUploadChecklistDoc(id, file),
   setChecklistTemplates: (id, templateIds) => mockSetChecklistTemplates(id, templateIds),
   addChecklistItem: (checklistId, title) => mockAddChecklistItem(checklistId, title),
   updateChecklistItem: (itemId, patch) => mockUpdateChecklistItem(itemId, patch),

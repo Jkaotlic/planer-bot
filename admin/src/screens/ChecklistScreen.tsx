@@ -245,6 +245,7 @@ function ChecklistCard({
             busy={busy}
             onSave={(patch) => void run(() => apiClient.patchChecklist(list.id, patch))}
             onRemoveDoc={() => void run(() => apiClient.removeChecklistDoc(list.id))}
+            onUploadDoc={(file) => void run(() => apiClient.uploadChecklistDoc(list.id, file))}
           />
 
           <div className="panel-actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
@@ -274,11 +275,13 @@ function InstructionEditor({
   busy,
   onSave,
   onRemoveDoc,
+  onUploadDoc,
 }: {
   list: Checklist;
   busy: boolean;
   onSave: (patch: { note: string | null; docUrl: string | null }) => void;
   onRemoveDoc: () => void;
+  onUploadDoc: (file: File) => void;
 }) {
   const [note, setNote] = useState(list.note ?? "");
   const [docUrl, setDocUrl] = useState(list.docUrl ?? "");
@@ -321,22 +324,40 @@ function InstructionEditor({
         </button>
       </div>
 
-      {/* Файл кладётся только через бота: браузер не умеет положить документ в
-          Telegram так, чтобы бот потом мог его переслать. Поэтому здесь — что
-          приложено и как это заменить, а не форма загрузки. */}
+      {/* Файл ложится на диск сервера: браузер не умеет положить документ в
+          Telegram так, чтобы бот потом мог его переслать, — пересылку берёт на
+          себя бот при первой рассылке. Путь через `/instruction` остаётся
+          вторым: он короче, когда файл уже в телефоне. */}
       <div className="checklist-doc">
         {list.hasDoc ? (
-          <>
-            <span>📄 Приложен файл: <b>{list.docName}</b> — уходит дежурному вместе с чек-листом.</span>
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={onRemoveDoc}>
-              Убрать файл
-            </button>
-          </>
+          <span>📄 Приложен файл: <b>{list.docName}</b> — уходит дежурному вместе с чек-листом.</span>
         ) : (
-          <span>
-            Файл не приложен. Чтобы приложить — напиши боту <b>/instruction</b> и выбери «{list.name}».
-          </span>
+          <span>Файл не приложен.</span>
         )}
+        <label className="btn btn-secondary">
+          {list.hasDoc ? "📎 Заменить файл" : "📎 Приложить файл"}
+          <input
+            type="file"
+            style={{ display: "none" }}
+            disabled={busy}
+            aria-label={`Приложить файл к «${list.name}»`}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              // Значение сбрасывается: иначе повторный выбор ТОГО ЖЕ файла
+              // (после неудачи) не даёт события change вовсе.
+              e.target.value = "";
+              if (file) onUploadDoc(file);
+            }}
+          />
+        </label>
+        {list.hasDoc && (
+          <button type="button" className="btn btn-danger" disabled={busy} onClick={onRemoveDoc}>
+            Убрать файл
+          </button>
+        )}
+        <span className="checklist-doc-note">
+          До 5 МБ. Можно и прислать боту: <b>/instruction</b>, потом выбрать «{list.name}».
+        </span>
       </div>
     </div>
   );

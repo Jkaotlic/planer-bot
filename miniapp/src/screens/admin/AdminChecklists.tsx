@@ -12,9 +12,10 @@ import { ScreenScroll } from "../../components/ScreenScroll";
  * привязку можно поставить и со стороны «Видов смен» — там на неё смотрят как на
  * свойство пресета, здесь как на ответ «кто это проходит».
  *
- * Файл прикладывается только через бота (`/instruction`): ни браузер, ни
- * мини-апп не умеют положить документ в Telegram так, чтобы бот потом мог его
- * переслать. Экран называет этот путь, а не показывает поле загрузки.
+ * Файл прикладывается здесь же и уходит на диск сервера: браузер не умеет
+ * положить документ в Telegram так, чтобы бот потом мог его переслать, поэтому
+ * пересылку берёт на себя бот при первой рассылке. Второй путь — прислать файл
+ * боту командой `/instruction`; он короче, когда файл уже в телефоне.
  */
 export function AdminChecklists() {
   const [checklists, setChecklists] = useState<Checklist[] | null>(null);
@@ -249,12 +250,33 @@ function ChecklistCard({
             Сохранить инструкцию
           </Button>
 
-          {/* Файл кладётся только через бота — ни браузер, ни мини-апп не умеют
-              положить документ в Telegram так, чтобы бот мог его переслать. */}
           <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.45 }}>
             {list.hasDoc
               ? `📄 Приложен файл: ${list.docName} — уходит дежурному вместе с чек-листом.`
-              : `Файл не приложен. Чтобы приложить — напиши боту /instruction и выбери «${list.name}».`}
+              : "Файл не приложен."}
+          </span>
+          {/* Файл выбирается прямо здесь; путь через бота остаётся вторым — он
+              короче, когда файл уже лежит в телефоне. */}
+          <label style={{ display: "inline-flex" }}>
+            <input
+              type="file"
+              style={{ display: "none" }}
+              disabled={busy}
+              aria-label={`Приложить файл к «${list.name}»`}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Значение поля сбрасывается: иначе повторный выбор ТОГО ЖЕ файла
+                // (после неудачи) не даёт события change вовсе.
+                e.target.value = "";
+                if (file) void run(() => apiClient.uploadChecklistDoc(list.id, file));
+              }}
+            />
+            <Button size="s" mode="bezeled" disabled={busy} Component="span">
+              {list.hasDoc ? "📎 Заменить файл" : "📎 Приложить файл"}
+            </Button>
+          </label>
+          <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+            До 5 МБ. Можно и прислать боту: /instruction, потом выбрать «{list.name}».
           </span>
           {list.hasDoc && (
             <Button size="s" mode="plain" disabled={busy} onClick={() => void run(() => apiClient.removeChecklistDoc(list.id))}>

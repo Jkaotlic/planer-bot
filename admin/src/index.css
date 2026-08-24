@@ -2396,6 +2396,13 @@ input[type="search"] {
   color: var(--hint);
 }
 
+/* Подсказка про второй путь — с новой строки: она длиннее кнопок и в один ряд
+   с ними ломала бы их порядок. */
+.checklist-doc-note {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+
 .checklist-item-note {
   flex: 1 1 100%;
   display: flex;

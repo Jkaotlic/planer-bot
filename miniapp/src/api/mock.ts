@@ -1791,6 +1791,15 @@ export async function mockRemoveChecklistDoc(id: number): Promise<Checklist> {
   return { ...list };
 }
 
+/** DEV: файл никуда не пишется, но имя и признак «приложен» ведут себя как на сервере. */
+export async function mockUploadChecklistDoc(id: number, file: File): Promise<Checklist> {
+  await delay(220);
+  const list = findChecklist(id);
+  list.docName = file.name;
+  list.hasDoc = true;
+  return { ...list };
+}
+
 export async function mockSetChecklistTemplates(id: number, templateIds: number[]): Promise<Checklist> {
   await delay(140);
   const list = findChecklist(id);

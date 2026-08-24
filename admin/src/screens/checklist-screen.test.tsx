@@ -145,16 +145,35 @@ describe("экран «Чек-листы»", () => {
   });
 
   /**
-   * Файл кладётся только через бота: браузер не умеет положить документ в
-   * Telegram так, чтобы бот потом мог его переслать. Экран обязан назвать
-   * единственный путь, а не молчать про него.
+   * Файл ложится на диск сервера: браузер не умеет положить документ в Telegram
+   * так, чтобы бот потом мог его переслать, — пересылку берёт на себя бот при
+   * первой рассылке. Путь через `/instruction` остался вторым, и экран обязан
+   * его назвать.
    */
-  it("объясняет, что файл прикладывают через бота, и называет чек-лист", async () => {
+  it("даёт выбрать файл и называет второй путь — через бота", async () => {
     const el = await mount([checklist({ id: 1, name: "С 07:00" })]);
     await openCard(el, "С 07:00");
+    // Поле файла есть с тех пор, как у сервера появилось своё хранилище.
+    expect(el.querySelector('input[type="file"]')).not.toBeNull();
+    // Путь через бота остался написан рядом: он короче, когда файл уже в телефоне.
     expect(el.textContent).toContain("/instruction");
-    expect(el.textContent).toContain("выбери «С 07:00»");
-    expect(el.querySelector('input[type="file"]')).toBeNull();
+    expect(el.textContent).toContain("выбрать «С 07:00»");
+  });
+
+  it("отправляет выбранный файл на сервер", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00" })]);
+    const upload = vi.spyOn(apiClient, "uploadChecklistDoc").mockResolvedValue(checklist({ id: 1, hasDoc: true, docName: "Проверка 47.pdf" }));
+    await openCard(el, "С 07:00");
+
+    const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(["x"], "Проверка 47.pdf", { type: "application/pdf" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    await settle();
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(upload.mock.calls[0]![0]).toBe(1);
+    expect((upload.mock.calls[0]![1] as File).name).toBe("Проверка 47.pdf");
   });
 
   it("называет приложенный файл и даёт его убрать", async () => {
