@@ -68,9 +68,38 @@ describe("working schedule palette", () => {
 
   it("leaves unspecified categories to the existing theme palette", () => {
     expect(exactSchedulePalette(undefined, "sick_leave")).toBeNull();
-    expect(exactSchedulePalette(undefined, "business_trip")).toBeNull();
     expect(exactSchedulePalette(undefined, "offsite")).toBeNull();
     expect(exactSchedulePalette(undefined, "weekend_work")).toBeNull();
+  });
+
+  it("командировка носит своё «К», а не общую точку", () => {
+    // Точка в сетке ничего не говорит: командировка — не «какая-то запись без
+    // пресета», а понятное всей команде состояние, и у него есть буква.
+    const trip = exactSchedulePalette(undefined, "business_trip");
+    expect(trip?.code).toBe("К");
+  });
+
+  it("цвет командировки не спутать ни с одним другим", () => {
+    const trip = exactSchedulePalette(undefined, "business_trip")!;
+    const others = [
+      ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.bg),
+      VACATION_SCHEDULE_PALETTE.bg,
+      UNRECOGNISED_SCHEDULE_PALETTE.bg,
+      // Категорийные цвета соседних «безпресетных» состояний — мероприятия и
+      // работы в выходной: именно с ними командировка стоит рядом в сетке.
+      CATEGORY_PALETTES_LIGHT.offsite.bg,
+      CATEGORY_PALETTES_LIGHT.weekend_work.bg,
+    ];
+    expect(others).not.toContain(trip.bg);
+  });
+
+  it("буква командировки не занята ничем другим", () => {
+    const codes = [
+      ...Object.values(SCHEDULE_ACCENT_PALETTES).map((p) => p.code),
+      VACATION_SCHEDULE_PALETTE.code,
+      UNRECOGNISED_SCHEDULE_PALETTE.code,
+    ];
+    expect(codes).not.toContain("К");
   });
 });
 
@@ -80,6 +109,14 @@ describe("палитра категорий", () => {
       expect(CATEGORY_PALETTES_LIGHT[category], category).toBeDefined();
       expect(CATEGORY_PALETTES_DARK[category], category).toBeDefined();
     }
+  });
+
+  it("командировка берёт свой точный цвет в обеих темах", () => {
+    // Как и отпуск: у состояния, которое видно всей команде, цвет один и тот же
+    // на картинке бота, в консоли и в мини-аппе.
+    const trip = exactSchedulePalette(undefined, "business_trip")!;
+    expect(categoryPalette("business_trip", false).bg).toBe(trip.bg);
+    expect(categoryPalette("business_trip", true).bg).toBe(trip.bg);
   });
 
   it("отпуск берёт свой точный цвет, а не категорийный", () => {

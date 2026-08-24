@@ -31,6 +31,23 @@ export const VACATION_SCHEDULE_PALETTE: SchedulePalette = {
 };
 
 /**
+ * Командировка.
+ *
+ * Своя палитра, а не «запись без пресета»: командировка — понятное всей команде
+ * состояние, которое стоит в сетке рядом с отпуском, а не рядом с одноразовой
+ * записью «своё время». Точка ничего о ней не говорила, буква говорит.
+ *
+ * Цвет насыщенный и свой: рядом бледно-сиреневое мероприятие и бледно-зелёная
+ * работа в выходной, и командировку с ними путали именно потому, что все трое
+ * были одинаково блёклыми.
+ */
+export const BUSINESS_TRIP_SCHEDULE_PALETTE: SchedulePalette = {
+  bg: "#8E24AA",
+  fg: "#FFFFFF",
+  code: "К",
+};
+
+/**
  * A cell the import could not read — the file said something like «Ко» and we
  * refused to guess what it meant.
  *
@@ -49,7 +66,9 @@ export function exactSchedulePalette(
   category: EntryCategory,
 ): SchedulePalette | null {
   if (accent) return SCHEDULE_ACCENT_PALETTES[accent];
-  return category === "vacation" ? VACATION_SCHEDULE_PALETTE : null;
+  if (category === "vacation") return VACATION_SCHEDULE_PALETTE;
+  if (category === "business_trip") return BUSINESS_TRIP_SCHEDULE_PALETTE;
+  return null;
 }
 
 export interface CategoryPalette {

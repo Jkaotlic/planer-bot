@@ -411,7 +411,7 @@ describe("team schedule UI", () => {
       }),
     );
 
-    for (const colour of ["#DEF5F0", "#EEE6FB", "#E1F6E1", "#FCE4E4", "#E4E6FA"]) {
+    for (const colour of ["#DEF5F0", "#EEE6FB", "#E1F6E1", "#FCE4E4"]) {
       expect(light).toContain(`background:${colour}`);
     }
     for (const colour of [
@@ -419,9 +419,14 @@ describe("team schedule UI", () => {
       "rgba(160,110,235,0.24)",
       "rgba(70,190,90,0.22)",
       "rgba(230,80,60,0.24)",
-      "rgba(102,112,225,0.24)",
     ]) {
       expect(dark).toContain(`background:${colour}`);
+    }
+    // Командировка в этот список больше не входит: у неё свой точный цвет, один
+    // на обе темы, и «К» вместо общей точки.
+    for (const markup of [light, dark]) {
+      expect(markup).toContain("background:#8E24AA");
+      expect(markup).toContain("<b>К</b>");
     }
     expect(light).toContain("background:#CBC04D;color:#292505");
     expect(dark).toContain("background:#CBC04D;color:#292505");
