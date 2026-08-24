@@ -8,8 +8,12 @@ import type { CSSProperties, ReactNode } from "react";
  * the desktop-mocked dev environment does. Exported so any one-off layout
  * that isn't using `ScreenScroll` (e.g. a screen with its own fixed footer
  * button) can still reuse the same number.
+ *
+ * Инсет берётся из `--app-inset-bottom` (`index.css`), а не из голого `env()`:
+ * в полноэкранном режиме webview занимает весь экран, `env()` возвращает ноль,
+ * и последняя строка списка пряталась бы за полоской-индикатором.
  */
-export const TAB_BAR_CLEARANCE = "calc(96px + env(safe-area-inset-bottom))";
+export const TAB_BAR_CLEARANCE = "calc(96px + var(--app-inset-bottom, env(safe-area-inset-bottom)))";
 
 export interface ScreenScrollProps {
   children: ReactNode;

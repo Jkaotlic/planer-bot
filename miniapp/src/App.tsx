@@ -393,7 +393,10 @@ export function App() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", boxSizing: "border-box" }}>
+    // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
+    // под шапку клиента, и 100vh поверх этого дало бы лишний скролл ровно на её
+    // высоту — страница «пружинила» бы, не имея что показать.
+    <div style={{ minHeight: "100%", boxSizing: "border-box" }}>
       {tab === "mine" && (
         <MyShiftsScreen
           me={data.me}
@@ -503,7 +506,7 @@ export function App() {
 }
 
 const centeredStyle = {
-  minHeight: "100vh",
+  minHeight: "100%",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
