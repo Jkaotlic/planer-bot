@@ -199,3 +199,44 @@ describe("renderWeekSvg", () => {
     expect(Number(third[2]) - Number(first[2])).toBe(40); // ...and exactly one legend row below it
   });
 });
+
+/**
+ * Расшифровка букв — личная настройка человека, и её выключение не должно
+ * оставлять на картинке пустую полосу: блок легенды уносится вместе со своей
+ * высотой.
+ */
+describe("renderWeekSvg — расшифровка по желанию", () => {
+  const shifts = [entry({ date: MONDAY }), entry({ date: "2026-08-04", templateId: 2 })];
+
+  function svgWithLegend(showLegend: boolean): string {
+    const model = buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS);
+    return renderWeekSvg({
+      model, legend: buildWeekLegend(model), weekLabel: "Команда · 3–9 августа",
+      today: "2026-08-05", showLegend,
+    });
+  }
+
+  function heightOf(svg: string): number {
+    return Number(/height="(\d+)"/.exec(svg)![1]);
+  }
+
+  it("по умолчанию расшифровка на месте", () => {
+    expect(svgFor(TEAM, shifts)).toContain("Что значат буквы");
+  });
+
+  it("выключенная расшифровка не рисуется", () => {
+    expect(svgWithLegend(false)).not.toContain("Что значат буквы");
+  });
+
+  it("выключенная расшифровка не оставляет пустой полосы", () => {
+    // Иначе картинка стала бы прежней высоты с пустым низом — это читается как
+    // «что-то не нарисовалось», а не как «расшифровка выключена».
+    expect(heightOf(svgWithLegend(false))).toBeLessThan(heightOf(svgWithLegend(true)));
+  });
+
+  it("сами смены на месте и без расшифровки", () => {
+    const svg = svgWithLegend(false);
+    expect(svg).toContain("Иванов");
+    expect(svg).toContain("Петров");
+  });
+});

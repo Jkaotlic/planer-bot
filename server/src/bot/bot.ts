@@ -9,6 +9,7 @@ import {
   createAdminEmployee,
   rememberTelegramProfile,
   setRemindersEnabled,
+  setWeekLegend,
   restoreEmployee,
   setEmployeeAdmin,
 } from "../repo/employees";
@@ -69,12 +70,20 @@ export const WEEK_OFFSET_LIMIT = 26;
  * though — past that window a tap can't redraw anything, and a fresh /week is
  * the only way back in.
  */
-function weekKeyboard(offset: number): InlineKeyboard {
+/**
+ * Кнопки под картинкой недели: листание и переключатель расшифровки букв.
+ *
+ * Расшифровка переключается здесь, а не в настройках: результат виден в том же
+ * сообщении, и «попробовать без неё» — одно нажатие, а не поход в другое меню.
+ * Подпись говорит, что случится по нажатию, а не что включено сейчас.
+ */
+function weekKeyboard(offset: number, legendOn: boolean): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   if (offset > -WEEK_OFFSET_LIMIT) keyboard.text("‹ Пред.", `week:${offset - 1}`);
   // One tap back home: from week 26, walking back on foot is 26 taps.
   if (offset !== 0) keyboard.text("⌂ Текущая", "week:0");
   if (offset < WEEK_OFFSET_LIMIT) keyboard.text("След. ›", `week:${offset + 1}`);
+  keyboard.row().text(legendOn ? "🔤 Скрыть расшифровку" : "🔤 Показать расшифровку", `week:legend:${offset}`);
   return keyboard;
 }
 
@@ -500,14 +509,14 @@ export function createBot(deps: BotDeps): Bot {
     }
     const { monday, today } = mondayForOffset(0);
     try {
-      const image: WeekImage = buildWeekImage(db, monday, today);
+      const image: WeekImage = buildWeekImage(db, monday, today, who.me.weekLegend);
       if (image.kind === "text") {
         await ctx.reply(image.text);
         return;
       }
       await ctx.replyWithPhoto(new InputFile(image.png, "week.png"), {
         caption: image.caption,
-        reply_markup: weekKeyboard(0),
+        reply_markup: weekKeyboard(0, who.me.weekLegend),
       });
     } catch (err) {
       // Covers a failed render and a failed send alike — either way the
@@ -801,6 +810,50 @@ export function createBot(deps: BotDeps): Bot {
    * redrawing the picture is the useful action itself, so its failure is
    * reported to the person as a toast, not just to the log.
    */
+  /**
+   * «🔤 Скрыть/Показать расшифровку» — личная настройка, переключаемая там, где
+   * виден результат. Картинка перерисовывается на месте, как при листании.
+   */
+  bot.callbackQuery(/^week:legend:(-?\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    // Тот же довод, что у листания ниже: сообщение живёт вечно, а чат мог быть
+    // групповым — команду нельзя опубликовать туда одним нажатием.
+    if (ctx.chat?.type !== "private") {
+      await ctx.answerCallbackQuery({ text: "Только в личном чате" });
+      return;
+    }
+    const offset = Number(ctx.match[1]);
+    if (Math.abs(offset) > WEEK_OFFSET_LIMIT) {
+      await ctx.answerCallbackQuery({ text: "Дальше не листаю" });
+      return;
+    }
+    const showLegend = !who.me.weekLegend;
+    setWeekLegend(db, who.me.id, showLegend);
+    const { monday, today } = mondayForOffset(offset);
+    let answered = false;
+    try {
+      const image: WeekImage = buildWeekImage(db, monday, today, showLegend);
+      if (image.kind === "text") {
+        answered = true;
+        await ctx.answerCallbackQuery({ text: image.text });
+        return;
+      }
+      await ctx.editMessageMedia(
+        { type: "photo", media: new InputFile(image.png, "week.png"), caption: image.caption },
+        { reply_markup: weekKeyboard(offset, showLegend) },
+      );
+      answered = true;
+      await ctx.answerCallbackQuery({ text: showLegend ? "Показываю расшифровку" : "Убрал расшифровку" });
+    } catch (err) {
+      console.error("week: legend redraw failed:", safeErrorMessage(err));
+      if (!answered) await ctx.answerCallbackQuery({ text: "Не получилось — пришли /week заново" });
+    }
+  });
+
   bot.callbackQuery(/^week:(-?\d+)$/, async (ctx) => {
     const offset = Number(ctx.match[1]);
     const who = acting(ctx.from.id);
@@ -838,7 +891,7 @@ export function createBot(deps: BotDeps): Bot {
     // failing to also clear the button's spinner isn't worth either risk.
     let answered = false;
     try {
-      const image: WeekImage = buildWeekImage(db, monday, today);
+      const image: WeekImage = buildWeekImage(db, monday, today, who.me.weekLegend);
       if (image.kind === "text") {
         // Set before the call, not after: here the answer *is* the useful
         // action, so retrying it in the catch would be a second live answer for
@@ -849,7 +902,7 @@ export function createBot(deps: BotDeps): Bot {
       }
       await ctx.editMessageMedia(
         { type: "photo", media: new InputFile(image.png, "week.png"), caption: image.caption },
-        { reply_markup: weekKeyboard(offset) },
+        { reply_markup: weekKeyboard(offset, who.me.weekLegend) },
       );
       answered = true;
       await ctx.answerCallbackQuery();

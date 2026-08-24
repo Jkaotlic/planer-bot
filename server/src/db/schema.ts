@@ -29,6 +29,14 @@ export const employees = sqliteTable("employees", {
   isAdmin: integer({ mode: "boolean" }).notNull().default(false),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
   remindersEnabled: integer({ mode: "boolean" }).notNull().default(true),
+  /**
+   * Рисовать ли расшифровку букв под картинкой недели.
+   *
+   * Личная настройка: тому, кто коды уже помнит, плашка занимает четверть
+   * экрана телефона, а тому, кто их только учит, без неё картинка бесполезна.
+   * По умолчанию включена — так было до того, как настройка появилась.
+   */
+  weekLegend: integer({ mode: "boolean" }).notNull().default(true),
   /** An admin took this person out of AUTOMATIC placement: очередь дежурств
    *  («кому следующему»), the weekend call for volunteers, and weekend assignment.
    *  An admin can still place them by hand — this is not archiving. */

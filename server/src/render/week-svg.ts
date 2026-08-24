@@ -66,6 +66,14 @@ const INK = {
 export interface WeekSvgInput {
   model: WeekModel<ScheduleEntryLike>;
   legend: readonly WeekLegendItem[];
+  /**
+   * Рисовать ли внизу расшифровку букв. Личная настройка человека: тому, кто
+   * коды уже помнит, она занимает четверть картинки на телефоне.
+   *
+   * Не `legend: []`: пустой список означает «на этой неделе записей нет» и
+   * рисует об этом строку — совсем другое сообщение.
+   */
+  showLegend?: boolean;
   /** Title drawn inside the image, e.g. «Команда · 3–9 августа». */
   weekLabel: string;
   /** Today in TEAM_TZ; if that day falls inside the week, its column is outlined. */
@@ -145,12 +153,15 @@ function rowLabelSpans(row: WeekRow<ScheduleEntryLike>): string {
     : head;
 }
 
-export function renderWeekSvg({ model, legend, weekLabel, today }: WeekSvgInput): string {
+export function renderWeekSvg({ model, legend, weekLabel, today, showLegend = true }: WeekSvgInput): string {
   const gridTop = PAD + TITLE_H;
   const bodyTop = gridTop + HEADER_H;
   const bodyHeight = model.rows.length * ROW_H;
-  const legendBlock = LEGEND_TITLE_H
-    + (legend.length > 0 ? Math.ceil(legend.length / 2) * LEGEND_ROW_H : LEGEND_ROW_H);
+  // Выключенная расшифровка уносит и свою высоту: картинка прежнего размера с
+  // пустым низом читалась бы как «что-то не нарисовалось».
+  const legendBlock = showLegend
+    ? LEGEND_TITLE_H + (legend.length > 0 ? Math.ceil(legend.length / 2) * LEGEND_ROW_H : LEGEND_ROW_H)
+    : 0;
   const height = bodyTop + bodyHeight + legendBlock + PAD;
   const dayX = (index: number) => PAD + NAME_COL + index * DAY_COL;
 
@@ -237,7 +248,10 @@ export function renderWeekSvg({ model, legend, weekLabel, today }: WeekSvgInput)
   }
 
   const legendTop = bodyTop + bodyHeight + LEGEND_TITLE_H;
-  if (legend.length === 0) {
+  if (!showLegend) {
+    // Ничего внизу: ни заголовка, ни строки «записей нет» — человек попросил
+    // картинку без расшифровки, а не картинку с другой надписью.
+  } else if (legend.length === 0) {
     out.push(
       `<text x="${PAD}" y="${legendTop + 8}" font-size="18" fill="${INK.muted}">`
         + `На этой неделе записей нет</text>`,

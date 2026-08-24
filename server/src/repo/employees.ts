@@ -59,6 +59,16 @@ export function rememberTelegramProfile(
   db.update(employees).set({ tgUsername, tgFirstName }).where(eq(employees.id, employeeId)).run();
 }
 
+/** Расшифровка букв под картинкой недели — вторая личная настройка человека. */
+export function setWeekLegend(db: Db, employeeId: number, enabled: boolean): Employee | undefined {
+  return db
+    .update(employees)
+    .set({ weekLegend: enabled })
+    .where(eq(employees.id, employeeId))
+    .returning()
+    .all()[0];
+}
+
 /** The one setting a worker owns about themselves: shift reminders on or off. */
 export function setRemindersEnabled(db: Db, employeeId: number, enabled: boolean): Employee | undefined {
   return db

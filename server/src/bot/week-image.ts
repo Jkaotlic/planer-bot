@@ -16,13 +16,13 @@ export type WeekImage =
   | { kind: "photo"; png: Buffer; caption: string }
   | { kind: "text"; text: string };
 
-export function buildWeekImage(db: Db, mondayIso: string, today: string): WeekImage {
+export function buildWeekImage(db: Db, mondayIso: string, today: string, showLegend = true): WeekImage {
   const sunday = addDaysIso(mondayIso, 6);
   const schedule = readTeamSchedule(db, mondayIso, sunday);
   if (schedule.employees.length === 0) return { kind: "text", text: "В расписании пока никого." };
 
   const model = buildWeekModel(mondayIso, schedule, listActiveTemplates(db));
   const label = `Команда · ${formatWeekRangeLabelIso(mondayIso, sunday)}`;
-  const svg = renderWeekSvg({ model, legend: buildWeekLegend(model), weekLabel: label, today });
+  const svg = renderWeekSvg({ model, legend: buildWeekLegend(model), weekLabel: label, today, showLegend });
   return { kind: "photo", png: svgToPng(svg), caption: label };
 }

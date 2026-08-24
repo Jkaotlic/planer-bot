@@ -154,7 +154,10 @@ describe("/week", () => {
     const photo = calls.find((call) => call.method === "sendPhoto");
     expect(photo).toBeDefined();
     const buttons = photo!.payload.reply_markup.inline_keyboard.flat();
-    expect(buttons.map((b: { callback_data: string }) => b.callback_data)).toEqual(["week:-1", "week:1"]);
+    // Третьей кнопкой — переключатель расшифровки букв: он живёт под картинкой,
+    // потому что там виден его результат.
+    expect(buttons.map((b: { callback_data: string }) => b.callback_data))
+      .toEqual(["week:-1", "week:1", "week:legend:0"]);
   });
 
   it("на текущей неделе кнопки «Текущая» нет, а на соседней есть", async () => {
