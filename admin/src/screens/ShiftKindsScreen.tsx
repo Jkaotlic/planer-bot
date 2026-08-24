@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import {
+  coverageSummary,
   exactSchedulePalette,
   filterPeople,
   rolesOfPerson,
@@ -102,6 +103,22 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     }
   }
 
+  async function saveCoverage(kind: TemplateRolesView, coverage: number[]) {
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, coverage } : item)) ?? current,
+    );
+    setBusyKindId(kind.templateId);
+    setError(null);
+    try {
+      await apiClient.setTemplateCoverage(kind.templateId, coverage);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setError(err instanceof Error ? err.message : "Не удалось сохранить норму");
+    } finally {
+      setBusyKindId(null);
+    }
+  }
+
   async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
     // Оптимистично: выбор обязан отзываться сразу, иначе на медленной сети его
     // меняют второй раз.
@@ -146,6 +163,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             onRotationUnit={(unit) => saveRotation(kind, unit)}
             checklists={checklists}
             onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
+            onCoverage={(coverage) => saveCoverage(kind, coverage)}
           />
         ))}
       </div>
@@ -187,6 +205,7 @@ function KindCard({
   onRotationUnit,
   checklists,
   onChecklist,
+  onCoverage,
 }: {
   kind: TemplateRolesView;
   open: boolean;
@@ -195,6 +214,7 @@ function KindCard({
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
   checklists: readonly Checklist[];
   onChecklist: (checklistId: number | null) => Promise<void>;
+  onCoverage: (coverage: number[]) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -246,12 +266,16 @@ function KindCard({
           {code}
         </span>
         <span className="kind-name">{kind.name}</span>
-        <span className="kind-meta">{checklistName ? <>чек-лист: <b>{checklistName}</b></> : "чек-лист не нужен"}</span>
+        <span className="kind-meta">
+          {coverageSummary(kind.coverage)}
+          {checklistName ? <> · чек-лист: <b>{checklistName}</b></> : ""}
+        </span>
         <span className="kind-chevron">{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (
         <div className="kind-people">
+          <CoverageRow kind={kind} busy={busy} onCoverage={onCoverage} />
           <div className="kind-rotation">
             <label className="kind-rotation-unit">
               Очередь идёт
@@ -403,5 +427,61 @@ function KindRow({
         onChange={onTogglePreferred}
       />
     </label>
+  );
+}
+
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
+
+/**
+ * Норма дня: сколько людей нужно на этом виде смены в каждый день недели.
+ *
+ * Сохраняется целиком по кнопке, а не по каждому нажатию: семь полей правят
+ * подряд, и запрос на каждую цифру означал бы семь запросов и семь строк в
+ * журнале на одну правку. Зеркало `CoverageRow` в мини-аппе.
+ */
+function CoverageRow({
+  kind,
+  busy,
+  onCoverage,
+}: {
+  kind: TemplateRolesView;
+  busy: boolean;
+  onCoverage: (coverage: number[]) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<string[]>(() => kind.coverage.map(String));
+  const dirty = draft.join(",") !== kind.coverage.join(",");
+
+  return (
+    <div className="kind-coverage">
+      <span className="kind-coverage-title">Норма дня — сколько людей нужно</span>
+      <div className="kind-coverage-grid">
+        {WEEKDAYS.map((day, index) => (
+          <label key={day} className="kind-coverage-day">
+            <span>{day}</span>
+            <input
+              type="number"
+              min={0}
+              value={draft[index] ?? "0"}
+              disabled={busy}
+              aria-label={`${kind.name}: норма на ${day}`}
+              onChange={(e) => setDraft((prev) => prev.map((value, i) => (i === index ? e.target.value : value)))}
+            />
+          </label>
+        ))}
+      </div>
+      <span className="kind-rotation-note">
+        Ноль значит «не считаем» — про такой день подсказка в расписании молчит.
+      </span>
+      {dirty && (
+        <button
+          type="button"
+          className="btn btn-primary kind-clear"
+          disabled={busy}
+          onClick={() => void onCoverage(draft.map((value) => Number(value.trim()) || 0))}
+        >
+          Сохранить норму
+        </button>
+      )}
+    </div>
   );
 }

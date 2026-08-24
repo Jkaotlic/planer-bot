@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { exactSchedulePalette } from "@planer/shared";
+import { coverageSummary, exactSchedulePalette } from "@planer/shared";
 import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Checklist, type TemplateQueue, type TemplateRolesView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
@@ -62,6 +62,22 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function saveCoverage(kind: TemplateRolesView, coverage: number[]) {
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, coverage } : item)) ?? current,
+    );
+    setBusyId(kind.templateId);
+    setErrors((prev) => withoutError(prev, kind.templateId));
+    try {
+      await apiClient.setTemplateCoverage(kind.templateId, coverage);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setErrors((prev) => withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить норму"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
     setBusyId(kind.templateId);
     setErrors((prev) => withoutError(prev, kind.templateId));
@@ -119,6 +135,7 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
             checklists={checklists}
             onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
+            onCoverage={(coverage) => saveCoverage(kind, coverage)}
           />
         ))}
 
@@ -143,6 +160,7 @@ function KindCard({
   checklists,
   onChecklist,
   onRotationUnit,
+  onCoverage,
 }: {
   kind: TemplateRolesView;
   open: boolean;
@@ -153,6 +171,7 @@ function KindCard({
   checklists: readonly Checklist[];
   onChecklist: (checklistId: number | null) => Promise<void>;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
+  onCoverage: (coverage: number[]) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -219,7 +238,8 @@ function KindCard({
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{kind.name}</span>
           <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
-            {checklistName ? `чек-лист: ${checklistName}` : "чек-лист не нужен"}
+            {coverageSummary(kind.coverage)}
+            {checklistName ? ` · чек-лист: ${checklistName}` : ""}
           </span>
         </span>
         <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
@@ -228,7 +248,8 @@ function KindCard({
       {open && (
         <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)" }}>
           <div style={{ padding: "10px 0 2px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tgui--hint_color)" }}>
+            <CoverageRow kind={kind} busy={busy} onCoverage={onCoverage} />
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tgui--hint_color)", marginTop: 12 }}>
               Очередь идёт
               <select
                 value={queue?.rotationUnit ?? "day"}
@@ -290,5 +311,70 @@ function KindCard({
         </div>
       )}
     </CardShell>
+  );
+}
+
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
+
+/**
+ * Норма дня: сколько людей нужно на этом виде смены в каждый день недели.
+ *
+ * Сохраняется целиком по «Сохранить», а не по каждому нажатию: семь полей
+ * правят подряд, и запрос на каждую цифру означал бы семь запросов и семь
+ * записей в журнал на одну правку.
+ */
+function CoverageRow({
+  kind,
+  busy,
+  onCoverage,
+}: {
+  kind: TemplateRolesView;
+  busy: boolean;
+  onCoverage: (coverage: number[]) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<string[]>(() => kind.coverage.map(String));
+  const dirty = draft.join(",") !== kind.coverage.join(",");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>Норма дня — сколько людей нужно</span>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {WEEKDAYS.map((day, index) => (
+          <label key={day} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+            <span style={{ fontSize: 11, color: "var(--tgui--hint_color)" }}>{day}</span>
+            <input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              value={draft[index] ?? "0"}
+              disabled={busy}
+              aria-label={`${kind.name}: норма на ${day}`}
+              onChange={(e) =>
+                setDraft((prev) => prev.map((value, i) => (i === index ? e.target.value : value)))
+              }
+              style={{
+                width: "100%", padding: "5px 0", textAlign: "center", borderRadius: 8,
+                border: "1px solid var(--tgui--outline)", background: "var(--tgui--secondary_bg_color)",
+                color: "var(--tgui--text_color)", font: "inherit", fontSize: 14,
+              }}
+            />
+          </label>
+        ))}
+      </div>
+      <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+        Ноль значит «не считаем» — про такой день подсказка в расписании молчит.
+      </span>
+      {dirty && (
+        <Button
+          size="s"
+          mode="filled"
+          stretched
+          disabled={busy}
+          onClick={() => void onCoverage(draft.map((value) => Number(value.trim()) || 0))}
+        >
+          Сохранить норму
+        </Button>
+      )}
+    </div>
   );
 }
