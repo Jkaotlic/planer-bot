@@ -15,9 +15,17 @@ import {
 } from "./reminder";
 
 describe("reminderKind", () => {
-  it("morning: starts before 09:00 (not night)", () => {
+  it("morning: starts between 08:00 and 09:00 (not night)", () => {
     expect(reminderKind({ start: "08:00", end: "17:00" })).toBe("morning");
-    expect(reminderKind({ start: "07:00", end: "16:00" })).toBe("morning");
+    expect(reminderKind({ start: "08:30", end: "17:30" })).toBe("morning");
+  });
+
+  it("early: раньше восьми — это уже не «утренняя», а ранняя", () => {
+    // Его решение от 2026-08-26: подъём к семи стоит другого письма, чем к восьми.
+    expect(reminderKind({ start: "07:00", end: "16:00" })).toBe("early");
+    expect(reminderKind({ start: "06:30", end: "15:30" })).toBe("early");
+    // Граница ровно на восьми: 08:00 — уже обычная утренняя.
+    expect(reminderKind({ start: "07:59", end: "17:00" })).toBe("early");
   });
 
   it("the standard 09:00–18:00 is a day shift, not a morning one", () => {
@@ -41,7 +49,8 @@ describe("reminderKind", () => {
 });
 
 describe("isReminderWorthy", () => {
-  it("reminds about the three shifts that change your evening", () => {
+  it("reminds about the shifts that change your evening", () => {
+    expect(isReminderWorthy({ start: "07:00", end: "16:00" }), "ранняя").toBe(true);
     expect(isReminderWorthy({ start: "08:00", end: "17:00" }), "утро").toBe(true);
     expect(isReminderWorthy({ start: "11:00", end: "20:00" }), "вечер").toBe(true);
     expect(isReminderWorthy({ start: "15:00", end: "23:00" }), "ночь").toBe(true);
@@ -66,14 +75,39 @@ describe("wakeTime", () => {
 });
 
 describe("buildReminderText", () => {
-  it("morning message contains the wake time and mentions the alarm", () => {
-    const text = buildReminderText({ name: "Аня", kind: "morning", timeRange: "08:00–17:00", wake: "07:00" });
-    expect(text).toContain("07:00");
-    expect(text).toContain("будильник");
+  it("утренняя названа сменой, а не просто «утренняя»", () => {
+    const text = buildReminderText({ name: "Аня", kind: "morning", timeRange: "08:00–17:00" });
+    expect(text).toContain("утренняя смена");
   });
+
+  it("во времени подъёма письмо не распоряжается", () => {
+    // «Поставь будильник на 07:00» — сугубо личное дело, и в стандартном тексте
+    // его нет ни у одного вида смены. Подстановка `{подъём}` осталась: захочет —
+    // напишет сам. Его решение от 2026-08-26.
+    for (const kind of ["early", "morning", "day", "evening", "night"] as const) {
+      const text = buildReminderText({ name: "Аня", kind, timeRange: "08:00–17:00" });
+      expect(text, kind).not.toContain("будильник");
+    }
+  });
+
+  it("ранняя смена отличается от утренней словами, а не только временем", () => {
+    const early = buildReminderText({ name: "Аня", kind: "early", timeRange: "07:00–16:00" });
+    const morning = buildReminderText({ name: "Аня", kind: "morning", timeRange: "08:00–17:00" });
+    expect(early).toContain("ранняя смена");
+    expect(early).not.toBe(morning);
+  });
+
   it("night message mentions resting during the day", () => {
     const text = buildReminderText({ name: "Игорь", kind: "night", timeRange: "23:00–07:00" });
     expect(text).toContain("Отдохни днём");
+  });
+
+  it("каждый вид смены здоровается по имени и называет часы", () => {
+    for (const kind of ["early", "morning", "day", "evening", "night"] as const) {
+      const text = buildReminderText({ name: "Аня", kind, timeRange: "08:00–17:00" });
+      expect(text, kind).toContain("Аня");
+      expect(text, kind).toContain("08:00–17:00");
+    }
   });
 });
 
@@ -207,9 +241,10 @@ describe("buildReminderText: чем это будет завтра", () => {
     expect(text).toContain("Дежурство · Поклонка");
   });
 
-  it("без названия говорит «смена», как и раньше", () => {
+  it("без названия говорит просто «смена»", () => {
     const text = buildReminderText({ name: "Аня", kind: "day", timeRange: "09:00–18:00" });
-    expect(text).toBe("👋 Привет, Аня! Напоминаем: завтра смена — 09:00–18:00. Хорошего дня!");
+    expect(text).toContain("завтра смена");
+    expect(text).not.toContain("«");
   });
 });
 
@@ -259,6 +294,9 @@ describe("buildReminderText: отрезок дежурства", () => {
 
   it("про одиночный день говорит «завтра», без диапазона", () => {
     const text = buildReminderText({ name: "Аня", kind: "day", timeRange: "09:00–18:00", what: "Дежурство · Телефон" });
-    expect(text).toBe("👋 Привет, Аня! Напоминаем: завтра «Дежурство · Телефон» — 09:00–18:00. Хорошего дня!");
+    expect(text).toContain("Завтра");
+    expect(text).toContain("«Дежурство · Телефон»");
+    // Диапазона нет: день одиночный, и «по 5 июня» было бы шумом.
+    expect(text).not.toContain("по ");
   });
 });
