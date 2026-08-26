@@ -33,13 +33,30 @@ export function signInitData(fields: Record<string, string>, botToken: string): 
   return params.toString();
 }
 
+/**
+ * Сколько живёт `initData` как пропуск.
+ *
+ * Было пять минут, и это ломало мини-апп наглухо. Клиент переспрашивает токен
+ * ТЕМ ЖЕ `initData`, с которым открылся вебвью: SDK достаёт launch-параметры из
+ * хеша URL, а если их там нет — из sessionStorage той же сессии, и `auth_date`
+ * при этом не обновляется никогда. JWT живёт шесть часов, вебвью Telegram —
+ * дольше пяти минут почти всегда. Значит любая переавторизация позже пятой
+ * минуты не могла пройти в принципе: токен сброшен, взять новый неоткуда,
+ * каждый следующий запрос — 401 и пустой экран.
+ *
+ * Сутки — столько же держат референсные реализации Telegram. Подлинность
+ * доказывает подпись, а окно ограничивает лишь то, как долго можно переиграть
+ * перехваченный `initData`; верхняя граница поэтому остаётся.
+ */
+export const INIT_DATA_MAX_AGE_SEC = 24 * 3600;
+
 /** Validate Telegram Mini App initData. Throws Error on any failure. */
 export function validateInitData(
   initData: string,
   botToken: string,
   opts: { maxAgeSec?: number; nowSec?: number } = {},
 ): ValidatedInitData {
-  const maxAge = opts.maxAgeSec ?? 300;
+  const maxAge = opts.maxAgeSec ?? INIT_DATA_MAX_AGE_SEC;
   const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
 
   const params = new URLSearchParams(initData);

@@ -899,6 +899,17 @@ let tokenPromise: Promise<string> | null = null;
  */
 export const OFFLINE_MESSAGE = "Нет связи с сервером — проверь интернет и попробуй ещё раз.";
 
+/**
+ * Что сказать, когда сервер не принял пропуск.
+ *
+ * Починить его на месте клиент не может: `initData` приезжает с запуском вебвью
+ * и больше не обновляется — SDK достаёт launch-параметры из хеша URL, а если их
+ * там нет, то из sessionStorage той же сессии. Значит единственный выход —
+ * открыть мини-апп заново, чтобы Telegram подписал новый пропуск. Раньше здесь
+ * стояло «Auth failed with status 401»: ни причины, ни выхода, ни по-русски.
+ */
+export const AUTH_EXPIRED_MESSAGE = "Вход устарел. Закрой мини-апп и открой заново кнопкой «Меню» в чате с ботом.";
+
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
@@ -921,7 +932,11 @@ async function requestToken(): Promise<string> {
     body: JSON.stringify({ initData: initDataRaw() ?? "" }),
   });
   if (!res.ok) {
-    throw new Error(`Auth failed with status ${res.status}`);
+    // 401 — пропуск не принят: переоткрыть. Всё остальное — беда на сервере,
+    // и «переоткрой» там было бы советом, который не помогает.
+    throw new Error(
+      res.status === 401 ? AUTH_EXPIRED_MESSAGE : `Не удалось войти: сервер ответил ${res.status}. Попробуй ещё раз.`,
+    );
   }
   const body = (await res.json()) as { token: string };
   return body.token;

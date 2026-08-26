@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { URLSearchParams } from "node:url";
-import { signInitData, validateInitData } from "./telegram";
+import { signInitData, validateInitData, INIT_DATA_MAX_AGE_SEC } from "./telegram";
 
 const BOT = "12345:test-token";
 const NOW = 1_800_000_000;
@@ -26,5 +26,29 @@ describe("validateInitData", () => {
 
   it("rejects expired initData", () => {
     expect(() => validateInitData(initDataFor(), BOT, { nowSec: NOW + 3600, maxAgeSec: 300 })).toThrow();
+  });
+
+  /**
+   * Окно свежести — не косметика, а то, из-за чего мини-апп «не открывался».
+   *
+   * Клиент переспрашивает токен ТЕМ ЖЕ `initData`, с которым открылся вебвью:
+   * его `auth_date` не обновляется никогда. При окне в пять минут это значило,
+   * что любая переавторизация позже пятой минуты жизни вебвью не может пройти
+   * в принципе — и мини-апп вставал намертво. Сутки — столько же, сколько
+   * держат референсные реализации Telegram.
+   */
+  it("держит вход открытым сутки — столько живёт вебвью, а не пять минут", () => {
+    expect(INIT_DATA_MAX_AGE_SEC).toBe(24 * 3600);
+    const sixMinutes = NOW + 6 * 60;
+    expect(() => validateInitData(initDataFor(), BOT, { nowSec: sixMinutes })).not.toThrow();
+    const almostDay = NOW + INIT_DATA_MAX_AGE_SEC;
+    expect(() => validateInitData(initDataFor(), BOT, { nowSec: almostDay })).not.toThrow();
+  });
+
+  it("но не бесконечно: сутки с секундой — уже отказ", () => {
+    // Подпись доказывает подлинность, окно ограничивает переигрывание
+    // перехваченного `initData`. Без верхней границы его не было бы вовсе.
+    const pastDay = NOW + INIT_DATA_MAX_AGE_SEC + 1;
+    expect(() => validateInitData(initDataFor(), BOT, { nowSec: pastDay })).toThrow(/expired/);
   });
 });
