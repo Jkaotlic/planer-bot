@@ -53,7 +53,7 @@ const TODAY = "2026-07-14";
 const TOMORROW = "2026-07-15";
 
 describe("runReminderTick", () => {
-  it("sends an evening-before reminder for a morning shift tomorrow, with the wake time", async () => {
+  it("sends an evening-before reminder for a morning shift tomorrow", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 111);
     const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
@@ -64,7 +64,9 @@ describe("runReminderTick", () => {
     expect(count).toBe(1);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.chat_id).toBe(111);
-    expect(sent[0]?.text).toContain("07:00"); // wake = 08:00 - 60min default prepBuffer
+    // Часы смены — да, время подъёма — нет: им письмо не распоряжается.
+    expect(sent[0]?.text).toContain("08:00–17:00");
+    expect(sent[0]?.text).not.toContain("будильник");
     expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
   });
 
@@ -555,7 +557,7 @@ describe("дежурство — не рутина", () => {
     expect(sent[0]!.text).toContain("Дежурство · Поклонка");
   });
 
-  it("у обычной смены формулировка прежняя — про вид смены в ней ни слова", async () => {
+  it("у обычной смены про вид смены в письме ни слова", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 923);
     const kind = db
@@ -569,7 +571,8 @@ describe("дежурство — не рутина", () => {
     const { bot, sent } = testBot();
 
     await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
-    expect(sent[0]!.text).toBe("👋 Привет, Аня! Напоминаем: завтра смена — 09:00–18:00. Хорошего дня!");
+    expect(sent[0]!.text).toContain("завтра смена");
+    expect(sent[0]!.text).not.toContain("«День»");
   });
 });
 
@@ -629,7 +632,7 @@ describe("дежурство напоминает один раз на отре�
 
     expect(await runReminderTick(db, bot, { date: SUNDAY, time: "20:05" })).toBe(1);
     // Диапазона нет: день одиночный, и «по 1 июня» было бы шумом.
-    expect(sent[0]!.text).toContain("завтра");
+    expect(sent[0]!.text).toContain("Завтра");
     expect(sent[0]!.text).not.toContain("по 1 июня");
   });
 

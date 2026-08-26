@@ -143,9 +143,12 @@ async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
     // иначе слово в слово совпало бы с письмом про обычную смену.
     const what = template && template.category !== "shift" ? template.name : undefined;
     const until = run && run.lastDate !== shift.date ? run.lastDate : undefined;
+    // Время подъёма живёт только в СВОЁМ тексте, через `{подъём}`: в стандартных
+    // формулировках его нет ни у одного вида смены — распоряжаться чужим
+    // будильником письмо не должно.
     const text = custom
       ? renderReminderText(custom, { name, timeRange, wake })
-      : buildReminderText({ name, kind, timeRange, wake: kind === "morning" ? wake : undefined, what, until });
+      : buildReminderText({ name, kind, timeRange, what, until });
 
     const outcome = await notifyReminder(bot, owner.telegramUserId, text);
     if (outcome.ok) {

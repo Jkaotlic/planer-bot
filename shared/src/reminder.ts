@@ -2,29 +2,34 @@ import { toMinutes, isNightShift, nextDate, prevDate } from "./time";
 import { formatDayMonth } from "./collection";
 import { isAbsence, type EntryCategory } from "./category";
 
-export type ReminderKind = "morning" | "day" | "evening" | "night";
+export type ReminderKind = "early" | "morning" | "day" | "evening" | "night";
 
 /**
- * morning: starts *before* 09:00 (not night); night: isNightShift; evening: ends
- * ≥20:00 (not night); else day.
+ * early: starts before 08:00; morning: 08:00–08:59; night: isNightShift;
+ * evening: ends ≥20:00 (not night); else day.
  *
  * The 09:00 boundary is exclusive on purpose. The team's standard shift is
  * «День», 09:00–18:00 — with `<=` it was classified as morning, so every one of
  * them produced a nightly «Завтра у тебя утренняя — 09:00–18:00»: a reminder
  * about the default day, and one that called it by the wrong name. «Утро» starts
  * at 08:00 and is still caught.
+ *
+ * Восьмичасовая граница отделяет «Утро» (08:00) от «Дежурства с 07:00»: подъём
+ * к семи — не то же самое, что к восьми, и письмо у них разное (его решение от
+ * 2026-08-26).
  */
 export function reminderKind(shift: { start: string; end: string }): ReminderKind {
   if (isNightShift(shift)) return "night";
   const start = toMinutes(shift.start);
   const end = toMinutes(shift.end);
+  if (start < 8 * 60) return "early";
   if (start < 9 * 60) return "morning";
   if (end >= 20 * 60) return "evening";
   return "day";
 }
 
 /**
- * Which shifts are worth a «завтра у тебя смена» the evening before: the three
+ * Which shifts are worth a «завтра у тебя смена» the evening before: the ones
  * that change your evening — an early start, a late finish, a night.
  *
  * The plain day shift (09:00–18:00) is deliberately silent. It is the default
@@ -95,35 +100,44 @@ export function wakeTime(start: string, prepBufferMin: number): string {
 /**
  * warm Russian message per kind.
  *
+ * Времени подъёма здесь нет ни у одного вида смены: «поставь будильник на 06:00»
+ * — это распоряжение чужим вечером, и оно сугубо личное дело (его решение от
+ * 2026-08-26). Подстановка `{подъём}` осталась — кто захочет, впишет её в свой
+ * текст сам.
+ *
  * `what` — название вида смены, и оно нужно только дневной формулировке. У
- * утренней, вечерней и ночной слово о смене уже есть в тексте, а вот дневное
- * письмо про дежурство без него слово в слово совпадало бы с письмом про
- * обычную смену — и человек не понял бы, что завтра он дежурный.
+ * ранней, утренней, вечерней и ночной слово о смене уже есть в тексте, а вот
+ * дневное письмо про дежурство без него слово в слово совпадало бы с письмом
+ * про обычную смену — и человек не понял бы, что завтра он дежурный.
  */
 export function buildReminderText(p: {
   name: string;
   kind: ReminderKind;
   timeRange: string;
-  wake?: string;
   what?: string;
   until?: string;
 }): string {
-  const { name, kind, timeRange, wake, what, until } = p;
+  const { name, kind, timeRange, what, until } = p;
   switch (kind) {
+    case "early":
+      return `🌄 Привет, ${name}! Завтра ранняя смена — ${timeRange}. Вставать совсем рано, так что ложись сегодня пораньше. Тёплого утра и лёгкой смены ☕`;
     case "morning":
-      return `🌅 Привет, ${name}! Завтра у тебя утренняя — ${timeRange}. Ложись пораньше и поставь будильник на ~${wake}. Хорошей смены ☕`;
+      return `🌅 Привет, ${name}! Завтра у тебя утренняя смена — ${timeRange}. Ложись сегодня пораньше, и пусть утро будет добрым ☕`;
     case "night":
-      return `🌙 Привет, ${name}! Завтра ночная — ${timeRange}. Отдохни днём и продумай дорогу домой. Ты справишься 💪`;
+      return `🌙 Привет, ${name}! Завтра ночная смена — ${timeRange}. Отдохни днём, продумай дорогу домой и возьми с собой что-нибудь вкусное. Ты справишься 💪`;
     case "evening":
-      return `👋 Привет, ${name}! Завтра вечерняя смена — ${timeRange}. Хорошего дня и до встречи вечером!`;
+      return `🌇 Привет, ${name}! Завтра вечерняя смена — ${timeRange}. Утро в твоём распоряжении, высыпайся вволю. До встречи вечером 💛`;
     case "day":
     default:
       if (what && until) {
         // «Завтра дежурство» про пятидневный отрезок — неправда, по которой
         // человек спланирует только понедельник.
-        return `👋 Привет, ${name}! Напоминаем: с завтрашнего дня по ${formatDayMonth(until)} у тебя «${what}» — ${timeRange}. Хорошей недели!`;
+        return `👋 Привет, ${name}! С завтрашнего дня и по ${formatDayMonth(until)} у тебя «${what}» — ${timeRange}. Хорошей недели, ты справишься 🍀`;
       }
-      return `👋 Привет, ${name}! Напоминаем: завтра ${what ? `«${what}»` : "смена"} — ${timeRange}. Хорошего дня!`;
+      if (what) {
+        return `👋 Привет, ${name}! Завтра у тебя «${what}» — ${timeRange}. Хорошего дня и лёгкой смены 🍀`;
+      }
+      return `👋 Привет, ${name}! Напоминаем: завтра смена — ${timeRange}. Хорошего дня и лёгкой смены 🍀`;
   }
 }
 
