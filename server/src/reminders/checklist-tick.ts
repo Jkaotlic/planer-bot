@@ -25,8 +25,12 @@ const CHECKLIST_KIND = "duty_checklist";
  * либо через два часа после. Тик крутится каждые пять минут, поэтому
  * дедупликация обязательна — без неё это два десятка сообщений за смену.
  *
- * Молчит, когда в чек-листе ноль пунктов: рассылать пустую процедуру некому и
- * незачем, а список приезжает пустым по умолчанию (его наполняет админ).
+ * Пунктов может не быть вовсе, и это не повод молчать: пояснение и приложенная
+ * инструкция — уже полноценное сообщение дежурному, а список пунктов админ
+ * заводит не всегда. Раньше условием была непустота списка, и у «Дежурств 47»,
+ * где были и пояснение, и docx, не ушло ничего и никогда (2026-08-26).
+ * Молчание осталось ровно для пустоты: ни пунктов, ни пояснения, ни файла —
+ * рассылать нечего.
  */
 export async function runChecklistTick(
   db: Db,
@@ -51,8 +55,10 @@ export async function runChecklistTick(
     const [checklistId] = checklistsDueToday([shift], byTemplate, now.date, employeeId);
     if (checklistId == null) continue;
     const list = getChecklist(db, checklistId);
+    if (!list) continue;
     const items = activeChecklistItems(db, checklistId);
-    if (!list || items.length === 0) continue;
+    const hasDoc = Boolean(list.docUrl || list.docFileId || list.docPath);
+    if (items.length === 0 && !list.note && !hasDoc) continue;
 
     // Смена ещё не началась — человек не на этаже, и проверять нечего.
     if (shift.start != null && now.time < shift.start) continue;
@@ -66,19 +72,29 @@ export async function runChecklistTick(
       note: list.note, docUrl: list.docUrl, docFileId: list.docFileId,
       docName: list.docName, docPath: list.docPath,
     };
+    // Без пунктов заголовок «— на сегодня:» и «Сделано 0 из 0» обещали бы список,
+    // которого в сообщении нет: на экране это читается как поломка, а не как
+    // инструкция. Поэтому в таком сообщении остаются имя, пояснение и файл.
     const text = [
-      `${list.name} — на сегодня:`,
+      items.length > 0 ? `${list.name} — на сегодня:` : list.name,
       "",
       ...(settings.note ? [settings.note, ""] : []),
-      checklistText(items, marked),
-    ].join("\n");
+      ...(items.length > 0 ? [checklistText(items, marked)] : []),
+    ]
+      .join("\n")
+      .trimEnd();
+    const kb = new InlineKeyboard();
+    // «Отметить» — только когда есть что отмечать: карточка без пунктов пуста, и
+    // кнопка обещала бы маршрут, которого нет — тот же довод, что и у `?screen=…`
+    // ниже.
+    //
     // `web_app`-кнопка в inline-клавиатуре, а не в обычной: из кнопки клавиатуры
     // Telegram не передаёт мини-аппу подпись, и вход падает с 401 — это уже
     // проходили 2026-08-12 (`keyboard.ts` носит тот же комментарий).
     // Без `?screen=…`: карточка чек-листа стоит первой на вкладке, которая
     // открывается по умолчанию, а параметр, которого `screenFromSearch` не
     // знает, обещал бы маршрут, которого нет.
-    const kb = new InlineKeyboard().webApp("☑️ Отметить", `${config.publicUrl}/app/`);
+    if (items.length > 0) kb.webApp("☑️ Отметить", `${config.publicUrl}/app/`);
     // Ссылка кнопкой, а не строкой в теле: в тексте она разворачивается превью и
     // отжимает сам список вниз, а нажать её всё равно надо отдельным касанием.
     if (settings.docUrl) kb.url("📄 Инструкция", settings.docUrl);
@@ -104,7 +120,10 @@ export async function runChecklistTick(
         const fileId = posted?.document?.file_id;
         if (fileId) updateChecklist(db, list.id, { docFileId: fileId });
       }
-      await bot.api.sendMessage(owner.telegramUserId, text, { reply_markup: kb });
+      // Клавиатура прикладывается, только если в ней есть кнопки: пустой
+      // `inline_keyboard` — это разметка ради разметки.
+      const markup = kb.inline_keyboard.flat().length > 0 ? { reply_markup: kb } : undefined;
+      await bot.api.sendMessage(owner.telegramUserId, text, markup);
       addReminder(db, shift.id, CHECKLIST_KIND);
       sent += 1;
     } catch (err) {

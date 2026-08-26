@@ -74,7 +74,7 @@ describe("runChecklistTick", () => {
     expect(sent).toHaveLength(1);
   });
 
-  it("молчит, пока в чек-листе нет ни одного пункта", async () => {
+  it("молчит, когда в чек-листе нет ни пунктов, ни пояснения, ни файла", async () => {
     const { db } = stage({ items: [] });
     const { bot, sent } = fakeBot();
     expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);
@@ -172,5 +172,56 @@ describe("runChecklistTick", () => {
     expect(text).not.toContain("https://disk.example/47.pdf");
     const urls = extra.reply_markup!.inline_keyboard.flat().filter((b) => b.url);
     expect(urls.map((b) => b.url)).toContain("https://disk.example/47.pdf");
+  });
+
+  // Пояснение и приложенная инструкция — уже полноценное сообщение. Список
+  // пунктов админ может не завести вовсе: 2026-08-26 у «Дежурств 47» были и
+  // пояснение, и docx, и ни одного пункта, — и молчание «пока не появится
+  // первый пункт» означало, что не ушло вообще ничего и никогда.
+  it("шлёт пояснение и инструкцию, когда пунктов в списке нет", async () => {
+    const { db, list } = stage({ items: [] });
+    updateChecklist(db, list.id, { note: "Обход по инструкции", docFileId: "BQACAgIAAx", docName: "Инструкция.docx" });
+    const { bot, sent, docs } = fakeBot();
+
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+    expect(sent[0]!.text).toContain("Обход по инструкции");
+    expect(docs).toHaveLength(1);
+  });
+
+  it("шлёт одно пояснение, когда нет ни пунктов, ни файла", async () => {
+    const { db, list } = stage({ items: [] });
+    updateChecklist(db, list.id, { note: "Обход по инструкции" });
+    const { bot, sent } = fakeBot();
+
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+    expect(sent[0]!.text).toContain("Обход по инструкции");
+  });
+
+  // «Сделано 0 из 0» и заголовок «— на сегодня:» обещают список, которого в
+  // сообщении нет: на экране это читается как поломка, а не как инструкция.
+  it("без пунктов не пишет ни счётчика, ни обещания списка", async () => {
+    const { db, list } = stage({ items: [] });
+    updateChecklist(db, list.id, { note: "Обход по инструкции" });
+    const { bot, sent } = fakeBot();
+
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+    expect(sent[0]!.text).not.toContain("Сделано");
+    expect(sent[0]!.text).not.toContain("на сегодня");
+  });
+
+  // Кнопка ведёт на карточку, в которой нечего отмечать, — то же обещание
+  // маршрута, которого нет, что и у `?screen=…`.
+  it("без пунктов не предлагает «Отметить»", async () => {
+    const { db, list } = stage({ items: [] });
+    updateChecklist(db, list.id, { note: "Обход по инструкции" });
+    const bot = fakeBot();
+    const calls: unknown[] = [];
+    (bot.bot as unknown as { api: { sendMessage: (...a: unknown[]) => Promise<void> } }).api.sendMessage =
+      async (...args: unknown[]) => { calls.push(args); };
+
+    await runChecklistTick(db, bot.bot, config, { date: TODAY, time: "07:05" });
+    const [, , extra] = calls[0] as [number, string, { reply_markup?: { inline_keyboard: { text: string }[][] } }];
+    const buttons = (extra?.reply_markup?.inline_keyboard ?? []).flat();
+    expect(buttons.map((b) => b.text)).not.toContain("☑️ Отметить");
   });
 });
