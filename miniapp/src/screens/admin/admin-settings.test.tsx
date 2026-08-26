@@ -20,7 +20,13 @@ import { AdminSettings } from "./AdminSettings";
 // React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const OPEN = { swapsLocked: false, swapsLockUpdatedAt: "2026-08-07T11:30:00.000Z", swapsLockUpdatedBy: "Игорь Петров" };
+const OPEN: AdminSettingsData = {
+  swapsLocked: false,
+  swapsLockUpdatedAt: "2026-08-07T11:30:00.000Z",
+  swapsLockUpdatedBy: "Игорь Петров",
+  reminderHour: "20:00",
+  reminderHourUpdatedBy: null,
+};
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -172,7 +178,7 @@ describe("AdminSettings", () => {
 
   it("если тумблер ни разу не трогали, так и написано", async () => {
     vi.spyOn(apiClient, "getSettings")
-      .mockResolvedValue({ swapsLocked: false, swapsLockUpdatedAt: null, swapsLockUpdatedBy: null });
+      .mockResolvedValue({ ...OPEN, swapsLockUpdatedAt: null, swapsLockUpdatedBy: null });
     const el = await mount();
     expect(el.textContent ?? "").toContain("Ни разу не меняли");
   });
@@ -183,7 +189,7 @@ describe("AdminSettings", () => {
   // имени, а не по времени, он врёт о том, что тумблер вообще не трогали.
   it("время есть, а имя не резолвится — экран не говорит «ни разу не меняли»", async () => {
     vi.spyOn(apiClient, "getSettings")
-      .mockResolvedValue({ swapsLocked: true, swapsLockUpdatedAt: "2026-08-07T11:30:00.000Z", swapsLockUpdatedBy: null });
+      .mockResolvedValue({ ...OPEN, swapsLocked: true, swapsLockUpdatedBy: null });
     const el = await mount();
     const text = el.textContent ?? "";
     expect(text).not.toContain("Ни разу не меняли");

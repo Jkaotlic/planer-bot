@@ -2425,3 +2425,60 @@ input[type="search"] {
   flex: 1 1 auto;
   resize: vertical;
 }
+
+/* Напоминание вида смены: галочка, свой текст и предпросмотр письма. */
+.kind-reminder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--separator);
+  font-size: 13.5px;
+}
+
+.kind-reminder-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.kind-reminder-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Предпросмотр набран как сообщение, а не как поле: он и есть то, что придёт. */
+.kind-reminder-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-secondary);
+  white-space: pre-wrap;
+}
+
+.kind-reminder .btn {
+  align-self: flex-start;
+}
+
+/* Час рассылки напоминаний на «Настройках». */
+.settings-reminder-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 4px;
+  font-size: 13.5px;
+}
+
+.settings-reminder-note {
+  display: block;
+  color: var(--hint);
+  font-size: 12.5px;
+}

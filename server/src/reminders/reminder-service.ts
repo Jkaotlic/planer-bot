@@ -1,24 +1,62 @@
 import type { Bot } from "grammy";
-import { nextDate, isReminderWorthy, reminderKind, wakeTime, buildReminderText, addressOf } from "@planer/shared";
+import {
+  nextDate,
+  isReminderWorthy,
+  reminderKind,
+  wakeTime,
+  buildReminderText,
+  renderReminderText,
+  addressOf,
+} from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsInRange } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
+import { getTemplate } from "../repo/templates";
+import { reminderHour } from "../repo/settings";
 import { hasReminder, addReminder } from "../repo/reminders";
 import { recordAudit } from "../repo/audit";
 import { notifyReminder } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
-import type { Shift } from "../db/schema";
+import type { Shift, ShiftTemplate } from "../db/schema";
 
 const REMINDER_KIND = "evening_before";
-const QUIET_HOUR_CUTOFF = "20:00";
+
+/**
+ * Вид смены записи, если он у неё есть.
+ *
+ * Записи без вида смены — не редкость: их приносит импорт ростера и ручное
+ * добавление в графике. Для них решать нечему, и правило остаётся прежним.
+ */
+function templateOf(db: Db, shift: Shift): ShiftTemplate | undefined {
+  return shift.templateId == null ? undefined : getTemplate(db, shift.templateId);
+}
+
+/**
+ * Напоминать ли про эту смену: галочка вида смены, а если вида нет — эвристика.
+ *
+ * Раньше решала только эвристика, и админ не мог ни включить напоминание про
+ * дежурство с девяти, ни выключить его про вечернюю.
+ */
+function wantsReminder(
+  shift: { start: string; end: string; templateId: number | null },
+  template: ShiftTemplate | undefined,
+): boolean {
+  if (shift.templateId != null && template) return template.sendReminder;
+  return isReminderWorthy({ start: shift.start, end: shift.end });
+}
 
 /** Sends soft evening-before reminders for tomorrow's morning/night shifts. Returns the number sent. */
 export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }): Promise<number> {
-  if (now.time < QUIET_HOUR_CUTOFF) return 0;
+  // Час — настройка админа, а не константа. Строки нет — те же 20:00, что и до неё.
+  if (now.time < reminderHour(db)) return 0;
 
   const tomorrow = nextDate(now.date);
   const shifts = listShiftsInRange(db, tomorrow, tomorrow).filter(
-    (s) => s.employeeId != null && s.start != null && s.end != null && isReminderWorthy({ start: s.start, end: s.end }),
+    (s) =>
+      s.employeeId != null &&
+      s.start != null &&
+      s.end != null &&
+      wantsReminder({ start: s.start, end: s.end, templateId: s.templateId }, templateOf(db, s)),
   );
 
   let count = 0;
@@ -55,14 +93,17 @@ async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
     const start = shift.start!;
     const end = shift.end!;
     const kind = reminderKind({ start, end });
-    const text = buildReminderText({
-      // The name they gave Telegram, not the roster's «Фамилия Имя» — a reminder
-      // that opens «Привет, Петров» reads as a roll-call. See `addressOf`.
-      name: addressOf(owner),
-      kind,
-      timeRange: `${start}–${end}`,
-      wake: kind === "morning" ? wakeTime(start, owner.prepBufferMin) : undefined,
-    });
+    // The name they gave Telegram, not the roster's «Фамилия Имя» — a reminder
+    // that opens «Привет, Петров» reads as a roll-call. See `addressOf`.
+    const name = addressOf(owner);
+    const timeRange = `${start}–${end}`;
+    const wake = wakeTime(start, owner.prepBufferMin);
+    // Свой текст вида смены, если админ его написал. Пустого текста в колонке
+    // не бывает — эндпоинт пишет туда `null`, — но `trim` дешевле веры в это.
+    const custom = templateOf(db, shift)?.reminderText?.trim();
+    const text = custom
+      ? renderReminderText(custom, { name, timeRange, wake })
+      : buildReminderText({ name, kind, timeRange, wake: kind === "morning" ? wake : undefined });
 
     const outcome = await notifyReminder(bot, owner.telegramUserId, text);
     if (outcome.ok) {

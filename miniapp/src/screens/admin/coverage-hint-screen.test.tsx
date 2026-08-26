@@ -17,7 +17,7 @@ import { AdminScheduleScreen } from "./AdminScheduleScreen";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const kind = (coverage: number[]): TemplateRolesView => ({
-  templateId: 10, name: "Утро", category: "shift", accent: "gold", checklistId: null,
+  templateId: 10, name: "Утро", category: "shift", accent: "gold", checklistId: null, sendReminder: false, reminderText: null,
   coverage, pool: [], preference: {},
 });
 

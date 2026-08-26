@@ -211,6 +211,13 @@
       "when": 1787581371987,
       "tag": "0029_start_tab",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1787584971987,
+      "tag": "0030_reminder_text_and_hour",
+      "breakpoints": true
     }
   ]
 }

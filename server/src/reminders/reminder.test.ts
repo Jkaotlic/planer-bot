@@ -3,11 +3,12 @@ import { recordApi, stubBotInfo } from "../bot/testbot";
 import { eq } from "drizzle-orm";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { employees } from "../db/schema";
+import { employees, shiftTemplates } from "../db/schema";
 import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
 import { createShift, updateShift, deleteShift } from "../repo/shifts";
 import { hasReminder } from "../repo/reminders";
 import { listRecentAudit } from "../repo/audit";
+import { setReminderHour } from "../repo/settings";
 import { runReminderTick } from "./reminder-service";
 import type { Db } from "../db/client";
 
@@ -398,5 +399,118 @@ describe("one bad shift does not end the evening", () => {
     } finally {
       errorLog.mockRestore();
     }
+  });
+});
+
+describe("во сколько уходят напоминания", () => {
+  it("по умолчанию — после 20:00, как было до настройки", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 901);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "19:59" })).toBe(0);
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:05" })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("уходит в час, который поставил админ", async () => {
+    const db = makeTestDb();
+    const admin = linkedEmployee(db, "Марк", 902);
+    const anya = linkedEmployee(db, "Аня", 903);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    setReminderHour(db, "18:00", admin.id);
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "17:55" })).toBe(0);
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "18:05" })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("новый час позже старого — в 20:00 уже не уходит", async () => {
+    // Иначе «перенёс на 22:00» означало бы «шлём и в 20:00, и в 22:00».
+    const db = makeTestDb();
+    const admin = linkedEmployee(db, "Марк", 904);
+    const anya = linkedEmployee(db, "Аня", 905);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    setReminderHour(db, "22:00", admin.id);
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(0);
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "22:00" })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+});
+
+describe("галочка вида смены решает, кому напоминать", () => {
+  function template(db: Db, fields: { name: string; start: string; end: string; sendReminder: boolean; reminderText?: string }) {
+    return db
+      .insert(shiftTemplates)
+      .values({ ...fields, fridayStart: null, fridayEnd: null, reminderText: fields.reminderText ?? null })
+      .returning()
+      .all()[0]!;
+  }
+
+  it("молчит про утреннюю, если у её вида смены галочка снята", async () => {
+    // По эвристике утренняя напоминания заслуживает — но админ сказал «не надо».
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 910);
+    const kind = template(db, { name: "Утро", start: "08:00", end: "17:00", sendReminder: false });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, templateId: kind.id });
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  it("напоминает про обычную дневную, если админ поставил галочку", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 911);
+    const kind = template(db, { name: "Дежурство · Телефон", start: "09:00", end: "18:00", sendReminder: true });
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: anya.id, templateId: kind.id });
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("запись без вида смены по-прежнему решается эвристикой", async () => {
+    // Импорт ростера и ручные записи шаблона не имеют, и выключить им нечего.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 912);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, templateId: null });
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("свой текст вида смены уходит вместо стандартного, с подставленными значениями", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 913);
+    const kind = template(db, {
+      name: "Утро",
+      start: "08:00",
+      end: "17:00",
+      sendReminder: true,
+      reminderText: "{имя}, завтра {время}. Подъём в {подъём}.",
+    });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, templateId: kind.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+    expect(sent[0]!.text).toBe("Аня, завтра 08:00–17:00. Подъём в 07:00.");
+  });
+
+  it("пустой текст вида смены значит «как было» — стандартная формулировка", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 914);
+    const kind = template(db, { name: "Вечер", start: "11:00", end: "20:00", sendReminder: true });
+    createShift(db, { date: TOMORROW, start: "11:00", end: "20:00", employeeId: anya.id, templateId: kind.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+    expect(sent[0]!.text).toContain("вечерняя");
+    expect(sent[0]!.text).toContain("11:00–20:00");
   });
 });

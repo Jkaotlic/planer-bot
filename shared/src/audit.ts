@@ -35,7 +35,10 @@ export const AUDIT_TYPES = [
   "employee_restrictions_changed", "employee_observer_changed",
   "employee_invite_issued", "settings_changed", "notice_prefs_changed",
   "template_roles_changed", "template_rotation_changed", "template_checklist_changed",
-  "template_coverage_changed",
+  "template_coverage_changed", "template_reminder_changed",
+  // Час рассылки — не `settings_changed`: тот тип про замок обменов, и одна
+  // строка на две разные ручки не отвечала бы, что именно поменяли.
+  "reminder_hour_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
   "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
@@ -415,6 +418,20 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     icon: "📊",
     title: "Изменена норма дня",
     lines: [str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`, `Пн..Вс: ${str(p.coverage) ?? "?"}`],
+  }),
+  template_reminder_changed: (p) => ({
+    icon: "🔔",
+    title: "Изменено напоминание о смене",
+    lines: [
+      str(p.templateName) ?? `пресет #${num(p.templateId) ?? "?"}`,
+      p.sendReminder === true ? "напоминаем накануне" : "не напоминаем",
+      p.hasText === true ? "свой текст" : "текст по умолчанию",
+    ],
+  }),
+  reminder_hour_changed: (p) => ({
+    icon: "⏰",
+    title: "Изменён час напоминаний",
+    lines: [`напоминания уходят в ${str(p.hour) ?? "?"}`],
   }),
 
   weekend_slot_created: (p) => ({

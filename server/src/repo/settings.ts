@@ -1,15 +1,17 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
+import { REMINDER_HOUR_DEFAULT } from "@planer/shared";
 import { appSettings, type AppSetting } from "../db/schema";
 
 /**
- * Team-wide toggles. The only key today is `swaps_locked`.
+ * Team-wide toggles: `swaps_locked` and `reminder_hour`.
  *
  * A missing row means «default», never «broken»: the migration seeds nothing, so
  * a database that predates this feature reads as «swaps are open» — which is how
  * it behaved before the feature existed.
  */
 const SWAPS_LOCKED = "swaps_locked";
+const REMINDER_HOUR = "reminder_hour";
 
 /**
  * The database, or a transaction opened on it.
@@ -44,4 +46,29 @@ export function setSwapsLocked(db: DbOrTx, locked: boolean, actorEmployeeId: num
 
 export function swapsLockSetting(db: Db): AppSetting | undefined {
   return readSetting(db, SWAPS_LOCKED);
+}
+
+/**
+ * Во сколько накануне уходят напоминания о завтрашней смене.
+ *
+ * Строки нет — 20:00, тот час, что был захардкожен до этой настройки: база, не
+ * знавшая настройки, ведёт себя ровно как вчера. Значение проверено на записи
+ * (`validateReminderHour`), поэтому читатель ему верит.
+ */
+export function reminderHour(db: Db): string {
+  return readSetting(db, REMINDER_HOUR)?.value ?? REMINDER_HOUR_DEFAULT;
+}
+
+export function setReminderHour(db: Db, value: string, actorEmployeeId: number): void {
+  db.insert(appSettings)
+    .values({ key: REMINDER_HOUR, value, updatedByEmployeeId: actorEmployeeId, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value, updatedByEmployeeId: actorEmployeeId, updatedAt: new Date() },
+    })
+    .run();
+}
+
+export function reminderHourSetting(db: Db): AppSetting | undefined {
+  return readSetting(db, REMINDER_HOUR);
 }

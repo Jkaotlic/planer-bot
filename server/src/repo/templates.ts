@@ -25,3 +25,18 @@ export function getTemplate(db: Db, id: number): ShiftTemplate | undefined {
 export function setCoverage(db: Db, templateId: number, coverage: string): void {
   db.update(shiftTemplates).set({ coverage }).where(eq(shiftTemplates.id, templateId)).run();
 }
+
+/**
+ * Напоминание вида смены: слать ли и каким текстом.
+ *
+ * Пустой текст сюда не доходит — маршрут превращает его в `null`. Разница
+ * существенная: `null` значит «стандартная формулировка по типу смены», а
+ * пустая строка означала бы письмо без слов.
+ */
+export function setReminder(
+  db: Db,
+  templateId: number,
+  reminder: { sendReminder: boolean; reminderText: string | null },
+): void {
+  db.update(shiftTemplates).set(reminder).where(eq(shiftTemplates.id, templateId)).run();
+}

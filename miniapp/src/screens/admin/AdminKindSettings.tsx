@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { coverageSummary, exactSchedulePalette } from "@planer/shared";
+import { coverageSummary, exactSchedulePalette, previewReminderText, REMINDER_PLACEHOLDERS } from "@planer/shared";
 import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Checklist, type TemplateQueue, type TemplateRolesView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
@@ -78,6 +78,26 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
     }
   }
 
+  /** Напоминание вида смены: галочка и свой текст сохраняются одним запросом. */
+  async function saveReminder(kind: TemplateRolesView, sendReminder: boolean, reminderText: string | null) {
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, sendReminder, reminderText } : item)) ??
+      current,
+    );
+    setBusyId(kind.templateId);
+    setErrors((prev) => withoutError(prev, kind.templateId));
+    try {
+      await apiClient.setTemplateReminder(kind.templateId, sendReminder, reminderText);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setErrors((prev) =>
+        withError(prev, kind.templateId, err instanceof Error ? err.message : "Не удалось сохранить напоминание"),
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function saveRotation(kind: TemplateRolesView, unit: "day" | "week") {
     setBusyId(kind.templateId);
     setErrors((prev) => withoutError(prev, kind.templateId));
@@ -136,6 +156,7 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
             onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
             onCoverage={(coverage) => saveCoverage(kind, coverage)}
+            onReminder={(sendReminder, reminderText) => saveReminder(kind, sendReminder, reminderText)}
           />
         ))}
 
@@ -151,6 +172,76 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * Напоминание накануне: слать ли про этот вид смены и каким текстом.
+ *
+ * Текст сохраняется кнопкой, а не на каждый символ: иначе на середине фразы
+ * ушёл бы отказ про подстановку, которую человек ещё дописывает. Галочка —
+ * сразу: у неё нет незаконченного состояния.
+ *
+ * Предпросмотр не украшение: текст уходит всей команде, и увидеть его до
+ * отправки больше негде. ЗЕРКАЛО `ReminderRow` в консоли (`ShiftKindsScreen`).
+ */
+function ReminderRow({
+  kind,
+  busy,
+  onReminder,
+}: {
+  kind: TemplateRolesView;
+  busy: boolean;
+  onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
+}) {
+  const [text, setText] = useState(kind.reminderText ?? "");
+  const trimmed = text.trim();
+  const preview = trimmed ? previewReminderText(trimmed) : null;
+
+  return (
+    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={kind.sendReminder}
+          disabled={busy}
+          onChange={(e) => void onReminder(e.target.checked, trimmed || null)}
+        />
+        Напоминать накануне
+      </label>
+      <textarea
+        rows={3}
+        value={text}
+        disabled={busy}
+        placeholder="Стандартный текст по типу смены"
+        onChange={(e) => setText(e.target.value)}
+        style={{
+          width: "100%", boxSizing: "border-box", resize: "vertical", font: "inherit", padding: "8px 10px",
+          borderRadius: 8, border: "1px solid var(--tgui--outline)",
+          background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)",
+        }}
+      />
+      <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>
+        Подстановки: {REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст.
+      </span>
+      {preview?.ok && (
+        <p style={{ margin: 0, padding: "8px 10px", borderRadius: 8, background: "var(--tgui--secondary_bg_color)", fontSize: 13, whiteSpace: "pre-wrap" }}>
+          Уйдёт так: {preview.text}
+        </p>
+      )}
+      {preview && !preview.ok && (
+        <p style={{ margin: 0, color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{preview.error}</p>
+      )}
+      <Button
+        size="s"
+        mode="gray"
+        stretched
+        disabled={busy || (preview !== null && !preview.ok)}
+        onClick={() => void onReminder(kind.sendReminder, trimmed || null)}
+      >
+        Сохранить текст
+      </Button>
+    </div>
+  );
+}
+
 function KindCard({
   kind,
   open,
@@ -161,6 +252,7 @@ function KindCard({
   onChecklist,
   onRotationUnit,
   onCoverage,
+  onReminder,
 }: {
   kind: TemplateRolesView;
   open: boolean;
@@ -172,6 +264,7 @@ function KindCard({
   onChecklist: (checklistId: number | null) => Promise<void>;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
   onCoverage: (coverage: number[]) => Promise<void>;
+  onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -286,6 +379,8 @@ function KindCard({
                 ))}
               </select>
             </label>
+
+            <ReminderRow kind={kind} busy={busy} onReminder={onReminder} />
 
             {queue && queue.queue.length > 0 ? (
               <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.45 }}>

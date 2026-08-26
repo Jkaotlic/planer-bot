@@ -64,6 +64,8 @@ import {
   planEntryRange,
   eachDayIso,
   isAbsence,
+  REMINDER_HOUR_DEFAULT,
+  validateReminderHour,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -899,12 +901,30 @@ export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
     preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
     checklistId: CHECKLISTS.find((l) => l.templateIds.includes(template.id))?.id ?? null,
     coverage: [...(TEMPLATE_COVERAGE.get(template.id) ?? [0, 0, 0, 0, 0, 0, 0])],
+    sendReminder: template.sendReminder,
+    reminderText: TEMPLATE_REMINDER_TEXT.get(template.id) ?? null,
   }));
 }
 
 export async function mockSetTemplateCoverage(templateId: number, coverage: number[]): Promise<void> {
   await delay(150);
   TEMPLATE_COVERAGE.set(templateId, [...coverage]);
+}
+
+/** DEV-хранилище своих текстов напоминания. Нет записи — стандартный текст. */
+const TEMPLATE_REMINDER_TEXT = new Map<number, string>();
+
+export async function mockSetTemplateReminder(
+  templateId: number,
+  sendReminder: boolean,
+  reminderText: string | null,
+): Promise<void> {
+  await delay(150);
+  const template = TEMPLATES.find((t) => t.id === templateId);
+  if (template) template.sendReminder = sendReminder;
+  // Пустой текст — это «вернуть стандартный», ровно как на сервере.
+  if (reminderText?.trim()) TEMPLATE_REMINDER_TEXT.set(templateId, reminderText.trim());
+  else TEMPLATE_REMINDER_TEXT.delete(templateId);
 }
 
 export async function mockSaveTemplateRoles(
@@ -1565,7 +1585,18 @@ export async function mockGetSettings(): Promise<AdminSettings> {
     swapsLocked: mockSwapsLocked,
     swapsLockUpdatedAt: mockSwapsLocked ? new Date().toISOString() : null,
     swapsLockUpdatedBy: mockSwapsLocked ? "Игорь Петров" : null,
+    reminderHour: mockReminderHour,
+    reminderHourUpdatedBy: mockReminderHour === REMINDER_HOUR_DEFAULT ? null : "Игорь Петров",
   };
+}
+
+/** DEV-час рассылки: тот же, что был захардкожен до настройки. */
+let mockReminderHour = REMINDER_HOUR_DEFAULT;
+
+export async function mockSetReminderHour(hour: string): Promise<void> {
+  await delay(150);
+  validateReminderHour(hour);
+  mockReminderHour = hour;
 }
 
 export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult> {

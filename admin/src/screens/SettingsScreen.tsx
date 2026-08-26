@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { formatAuditMoment } from "@planer/shared";
+import { formatAuditMoment, validateReminderHour } from "@planer/shared";
 import { apiClient, AuthRequiredError, type AdminSettings, type SwapLockResult } from "../api/client";
 import { withNotifyNotice } from "../lib/notify-text";
 
 /**
- * «Настройки»: пока один тумблер — общий замок обменов сменами. Он пишет сразу
+ * «Настройки»: тумблер замка обменов и час, в который уходят напоминания.
+ *
+ * Раньше — только тумблер — общий замок обменов сменами. Он пишет сразу
  * всей команде и отменяет чужие незакрытые заявки, поэтому первое нажатие
  * только «взводит» подтверждение (`confirming`), а отправляет — второе. Тот же
  * узор, что у кнопки рассылки на «Сборах» (`CollectionsScreen.tsx`).
@@ -18,10 +20,18 @@ export function SettingsScreen() {
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<SwapLockResult | null>(null);
+  const [hour, setHour] = useState<string | null>(null);
+  const [hourError, setHourError] = useState<string | null>(null);
+  const [hourSaved, setHourSaved] = useState(false);
+  const [savingHour, setSavingHour] = useState(false);
 
   async function reload() {
     try {
-      setSettings(await apiClient.getSettings());
+      const next = await apiClient.getSettings();
+      setSettings(next);
+      // Поле берёт серверное значение только пока его не начали править: иначе
+      // перечитывание после соседнего тумблера стёрло бы набранное.
+      setHour((current) => current ?? next.reminderHour);
     } catch (err) {
       if (err instanceof AuthRequiredError) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить настройки");
@@ -59,6 +69,27 @@ export function SettingsScreen() {
       setConfirming(false);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleHour() {
+    const value = hour ?? settings!.reminderHour;
+    try {
+      validateReminderHour(value);
+    } catch (err) {
+      setHourError(err instanceof Error ? err.message : "Неверный час");
+      return;
+    }
+    setSavingHour(true);
+    setHourError(null);
+    try {
+      await apiClient.setReminderHour(value);
+      setHourSaved(true);
+      await reload();
+    } catch (err) {
+      setHourError(err instanceof Error ? err.message : "Не удалось сохранить час");
+    } finally {
+      setSavingHour(false);
     }
   }
 
@@ -116,6 +147,41 @@ export function SettingsScreen() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Час рассылки. Проверка та же, что на сервере (`validateReminderHour`):
+          админ должен узнать про запрет до отправки, а не по отказу. */}
+      <div className="settings-card">
+        <div className="settings-state">Напоминания о завтрашней смене</div>
+        <div className="settings-who">
+          {settings.reminderHourUpdatedBy === null
+            ? "Час ни разу не меняли"
+            : `Поставил ${settings.reminderHourUpdatedBy}`}
+        </div>
+        <label className="settings-reminder-row">
+          Уходят накануне в
+          <input
+            type="time"
+            className="settings-reminder-hour"
+            value={hour ?? settings.reminderHour}
+            disabled={savingHour}
+            onChange={(e) => {
+              setHour(e.target.value);
+              setHourError(null);
+              setHourSaved(false);
+            }}
+          />
+        </label>
+        <span className="settings-reminder-note">
+          Проверяется раз в пять минут, поэтому уходит первым тиком после этого времени.
+        </span>
+        {hourError && <div className="employees-error">{hourError}</div>}
+        {hourSaved && <div className="settings-result">Час сохранён.</div>}
+        <div className="settings-actions">
+          <button type="button" className="btn btn-primary" disabled={savingHour} onClick={() => void handleHour()}>
+            {savingHour ? "Сохраняю…" : "Сохранить час"}
+          </button>
+        </div>
       </div>
     </div>
   );
