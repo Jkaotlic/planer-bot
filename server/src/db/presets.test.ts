@@ -1,12 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "./testdb";
+import { remindsByDefault } from "@planer/shared";
 import { shiftTemplates } from "./schema";
 
-/** The authoritative preset table — mirrors the spec's §8.3. Migration 0006 must produce exactly this. */
+/**
+ * The authoritative preset table — mirrors the spec's §8.3. Migration 0006 must
+ * produce exactly this.
+ *
+ * `sendReminder` — уже не то, что записала 0006: колонка лежала мёртвой, пока
+ * напоминания раздавала эвристика по часам смены. 0030 сделала её главной и
+ * засеяла правилом «всё, кроме обычного дня»: молчит здесь один «День».
+ */
 const EXPECTED = [
   { id: 1, name: "Утро",                    category: "shift", accent: "gold",   location: null,        start: "08:00", end: "17:00", fridayStart: "08:00", fridayEnd: "15:45", isLate: false, sendReminder: true },
   { id: 2, name: "День",                    category: "shift", accent: "blue",   location: null,        start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: false },
-  { id: 3, name: "Вечер",                   category: "shift", accent: "violet", location: null,        start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: false },
+  { id: 3, name: "Вечер",                   category: "shift", accent: "violet", location: null,        start: "11:00", end: "20:00", fridayStart: "12:00", fridayEnd: "20:00", isLate: true, sendReminder: true },
   { id: 4, name: "Ночь",                    category: "shift", accent: "indigo", location: null,        start: "15:00", end: "23:00", fridayStart: "16:00", fridayEnd: "23:00", isLate: true, sendReminder: true },
   { id: 5, name: "Дежурство · Поклонка",    category: "duty",  accent: "teal",   location: "Поклонка",  start: "09:00", end: "18:00", fridayStart: "09:00", fridayEnd: "16:45", isLate: false, sendReminder: true },
   { id: 6, name: "Дежурство с 07:00",       category: "duty",  accent: "amber",  location: null,        start: "07:00", end: "16:00", fridayStart: "07:00", fridayEnd: "14:45", isLate: false, sendReminder: true },
@@ -29,6 +37,27 @@ describe("presets created by migration 0006", () => {
         isLate: row.isLate, sendReminder: row.sendReminder,
       }).toEqual(want);
     }
+  });
+
+  it("напоминает про всё, кроме обычного дня", () => {
+    // Постусловие миграции, а не список из девяти строк выше: засев обязан
+    // совпасть с правилом на КАЖДОМ пресете, иначе чья-то рассылка включилась
+    // или погасла молча.
+    const rows = makeTestDb().select().from(shiftTemplates).all();
+    for (const row of rows) {
+      expect(row.sendReminder, row.name).toBe(
+        remindsByDefault({ start: row.start, end: row.end, category: row.category }),
+      );
+    }
+    // И, чтобы правило не выродилось в «всем подряд»: молчит ровно один «День».
+    expect(rows.filter((r) => !r.sendReminder).map((r) => r.name)).toEqual(["День"]);
+  });
+
+  it("не выдумывает своего текста напоминания ни одному виду смены", () => {
+    // `null` значит «стандартная формулировка». Пустая строка значила бы письмо
+    // без слов, и отличить одно от другого потом было бы нечем.
+    const rows = makeTestDb().select().from(shiftTemplates).all();
+    expect(rows.every((r) => r.reminderText === null)).toBe(true);
   });
 
   it("fixes the Поклонка hours — the bug was 09:00-21:00", () => {

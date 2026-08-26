@@ -56,6 +56,8 @@ import {
   mockSaveTemplateRoles,
   mockSetTemplateChecklist,
   mockSetTemplateCoverage,
+  mockSetTemplateReminder,
+  mockSetReminderHour,
   mockPreviewRosterImport,
   mockApplyRosterImport,
   mockGetSettings,
@@ -333,6 +335,10 @@ export interface TemplateRolesView {
   preference: Record<number, number>;
   /** Чек-лист, который проходит дежурный этого вида смены. `null` — никакого. */
   checklistId: number | null;
+  /** Слать ли напоминание накануне тому, у кого завтра смена этого вида. */
+  sendReminder: boolean;
+  /** Свой текст напоминания. `null` — стандартная формулировка по типу смены. */
+  reminderText: string | null;
   /** Норма дня, Пн..Вс: сколько людей нужно. Ноль значит «не считаем». */
   coverage: number[];
 }
@@ -475,6 +481,9 @@ export interface NotifyReach {
 /** Состояние общего замка обменов сменами — экран «Настройки». */
 export interface AdminSettings {
   swapsLocked: boolean;
+  /** Во сколько накануне уходят напоминания о завтрашней смене, «ЧЧ:ММ». */
+  reminderHour: string;
+  reminderHourUpdatedBy: string | null;
   /** ISO-строка или null, если тумблер ни разу не трогали. */
   swapsLockUpdatedAt: string | null;
   swapsLockUpdatedBy: string | null;
@@ -599,10 +608,13 @@ export interface ApiClient {
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
   setTemplateChecklist(templateId: number, checklistId: number | null): Promise<void>;
   setTemplateCoverage(templateId: number, coverage: number[]): Promise<void>;
+  /** Напоминание вида смены: слать ли и каким текстом. `null` — стандартный. */
+  setTemplateReminder(templateId: number, sendReminder: boolean, reminderText: string | null): Promise<void>;
   previewRosterImport(csv: string): Promise<RosterImportPreview>;
   applyRosterImport(csv: string, resolutions: RosterPersonResolution[], overwrite?: boolean): Promise<RosterImportSummary & { notified: NotifyReach }>;
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
+  setReminderHour(hour: string): Promise<void>;
   /** Кому уйдёт анонс, глазами того, кто его пишет — сервер уже исключил
    *  самого отправителя и архивных. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
@@ -1069,6 +1081,14 @@ export const realClient: ApiClient = {
     await authorizedPutJson(`/api/admin/templates/${templateId}/coverage`, { coverage });
   },
 
+  async setTemplateReminder(templateId, sendReminder, reminderText) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/reminder`, { sendReminder, reminderText });
+  },
+
+  async setReminderHour(hour) {
+    await authorizedPutJson("/api/admin/settings/reminder-hour", { hour });
+  },
+
   previewRosterImport(csv) {
     return authorizedPostJson<RosterImportPreview>("/api/admin/roster/import/preview", { csv });
   },
@@ -1164,6 +1184,8 @@ const devClient: ApiClient = {
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
   setTemplateChecklist: (templateId, requiresChecklist) => mockSetTemplateChecklist(templateId, requiresChecklist),
   setTemplateCoverage: (templateId, coverage) => mockSetTemplateCoverage(templateId, coverage),
+  setTemplateReminder: (templateId, sendReminder, reminderText) => mockSetTemplateReminder(templateId, sendReminder, reminderText),
+  setReminderHour: (hour) => mockSetReminderHour(hour),
   previewRosterImport: (csv) => mockPreviewRosterImport(csv),
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),

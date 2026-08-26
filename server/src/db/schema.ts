@@ -87,7 +87,23 @@ export const shiftTemplates = sqliteTable("shift_templates", {
   /** Colour slot so each preset is distinguishable in the schedule (see `TemplateAccent`). */
   accent: text().$type<TemplateAccent>().notNull().default("blue"),
   isLate: integer({ mode: "boolean" }).notNull().default(false),
+  /**
+   * Слать ли напоминание накануне тому, у кого завтра смена этого вида.
+   *
+   * До 0030 колонка лежала мёртвой: кому напоминать, решала эвристика по часам
+   * смены. Теперь решает она, а `remindsByDefault` («всё, кроме обычного дня»)
+   * осталась запасным правилом для записей без вида смены — импортированных и
+   * проставленных руками — и тем, чем 0030 колонку засеяла.
+   */
   sendReminder: integer({ mode: "boolean" }).notNull().default(false),
+  /**
+   * Свой текст напоминания. `null` — стандартная формулировка по типу смены.
+   *
+   * Пустая строка сюда не пишется: «нет своего текста» и «свой текст пустой» —
+   * это одно и то же состояние, и два способа его записать означали бы, что
+   * половина команды получает письмо без слов.
+   */
+  reminderText: text(),
   sortOrder: integer().notNull().default(0),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
   /**

@@ -49,6 +49,8 @@ import {
   planEntryRange,
   eachDayIso,
   isAbsence,
+  REMINDER_HOUR_DEFAULT,
+  validateReminderHour,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -468,6 +470,8 @@ export async function mockGetRosterCsv(_from: string, _to: string): Promise<stri
 const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<number, number> }>();
 /** DEV-хранилище нормы дня. Пусто — «не считаем», как и в базе по умолчанию. */
 const TEMPLATE_COVERAGE = new Map<number, number[]>();
+/** DEV-хранилище своих текстов напоминания. Нет записи — стандартный текст. */
+const TEMPLATE_REMINDER_TEXT = new Map<number, string>();
 
 export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
   await delay(180);
@@ -480,12 +484,27 @@ export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
     preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
     checklistId: CHECKLISTS.find((l) => l.templateIds.includes(template.id))?.id ?? null,
     coverage: [...(TEMPLATE_COVERAGE.get(template.id) ?? [0, 0, 0, 0, 0, 0, 0])],
+    sendReminder: template.sendReminder,
+    reminderText: TEMPLATE_REMINDER_TEXT.get(template.id) ?? null,
   }));
 }
 
 export async function mockSetTemplateCoverage(templateId: number, coverage: number[]): Promise<void> {
   await delay(150);
   TEMPLATE_COVERAGE.set(templateId, [...coverage]);
+}
+
+export async function mockSetTemplateReminder(
+  templateId: number,
+  sendReminder: boolean,
+  reminderText: string | null,
+): Promise<void> {
+  await delay(150);
+  const template = TEMPLATES.find((t) => t.id === templateId);
+  if (template) template.sendReminder = sendReminder;
+  // Пустой текст — это «вернуть стандартный», ровно как на сервере.
+  if (reminderText?.trim()) TEMPLATE_REMINDER_TEXT.set(templateId, reminderText.trim());
+  else TEMPLATE_REMINDER_TEXT.delete(templateId);
 }
 
 export async function mockSetTemplateChecklist(templateId: number, checklistId: number | null): Promise<void> {
@@ -1128,7 +1147,20 @@ export async function mockGetSettings(): Promise<AdminSettings> {
     swapsLocked: swapsLock.locked,
     swapsLockUpdatedAt: swapsLock.updatedAt,
     swapsLockUpdatedBy: swapsLock.updatedByEmployeeId != null ? nameOf(swapsLock.updatedByEmployeeId) : null,
+    reminderHour,
+    reminderHourUpdatedBy: reminderHourUpdatedBy,
   };
+}
+
+/** DEV-час рассылки: тот же, что был захардкожен до настройки. */
+let reminderHour = REMINDER_HOUR_DEFAULT;
+let reminderHourUpdatedBy: string | null = null;
+
+export async function mockSetReminderHour(hour: string): Promise<void> {
+  await delay(150);
+  validateReminderHour(hour);
+  reminderHour = hour;
+  reminderHourUpdatedBy = EMPLOYEES.find((e) => e.isAdmin && e.isActive)?.displayName ?? null;
 }
 
 export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult> {

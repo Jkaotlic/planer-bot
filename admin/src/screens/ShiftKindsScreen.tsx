@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import {
   coverageSummary,
+  previewReminderText,
+  REMINDER_PLACEHOLDERS,
   exactSchedulePalette,
   filterPeople,
   rolesOfPerson,
@@ -119,6 +121,24 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     }
   }
 
+  /** Напоминание вида смены: галочка и свой текст сохраняются одним запросом. */
+  async function saveReminder(kind: TemplateRolesView, sendReminder: boolean, reminderText: string | null) {
+    setKinds((current) =>
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, sendReminder, reminderText } : item)) ??
+      current,
+    );
+    setBusyKindId(kind.templateId);
+    setError(null);
+    try {
+      await apiClient.setTemplateReminder(kind.templateId, sendReminder, reminderText);
+    } catch (err) {
+      setKinds(await apiClient.getTemplateRoles().catch(() => null));
+      setError(err instanceof Error ? err.message : "Не удалось сохранить напоминание");
+    } finally {
+      setBusyKindId(null);
+    }
+  }
+
   async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
     // Оптимистично: выбор обязан отзываться сразу, иначе на медленной сети его
     // меняют второй раз.
@@ -164,6 +184,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             checklists={checklists}
             onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
             onCoverage={(coverage) => saveCoverage(kind, coverage)}
+            onReminder={(sendReminder, reminderText) => saveReminder(kind, sendReminder, reminderText)}
           />
         ))}
       </div>
@@ -197,6 +218,67 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
   );
 }
 
+/**
+ * Напоминание накануне: слать ли про этот вид смены и каким текстом.
+ *
+ * Текст сохраняется кнопкой, а не на каждый символ: иначе на середине фразы
+ * ушёл бы отказ про несуществующую подстановку, которую человек ещё дописывает.
+ * Галочка — сразу: у неё нет незаконченного состояния.
+ *
+ * Предпросмотр не украшение. Текст уходит двадцати шести людям и увидеть его до
+ * отправки больше негде; та же проверка, что откажет на сервере, показывает
+ * причину прямо под полем.
+ * ЗЕРКАЛО `ReminderRow` в мини-аппе (`AdminKindSettings.tsx`).
+ */
+function ReminderRow({
+  kind,
+  busy,
+  onReminder,
+}: {
+  kind: TemplateRolesView;
+  busy: boolean;
+  onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
+}) {
+  const [text, setText] = useState(kind.reminderText ?? "");
+  const trimmed = text.trim();
+  const preview = trimmed ? previewReminderText(trimmed) : null;
+  const hint = `Подстановки: ${REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст.`;
+
+  return (
+    <div className="kind-reminder">
+      <label className="kind-reminder-switch">
+        <input
+          type="checkbox"
+          className="kind-reminder-toggle"
+          checked={kind.sendReminder}
+          disabled={busy}
+          onChange={(e) => void onReminder(e.target.checked, trimmed || null)}
+        />
+        Напоминать накануне
+      </label>
+      <textarea
+        className="kind-reminder-text"
+        rows={3}
+        value={text}
+        disabled={busy}
+        placeholder="Стандартный текст по типу смены"
+        onChange={(e) => setText(e.target.value)}
+      />
+      <span className="kind-rotation-note">{hint}</span>
+      {preview?.ok && <p className="kind-reminder-preview">Уйдёт так: {preview.text}</p>}
+      {preview && !preview.ok && <p className="employees-error">{preview.error}</p>}
+      <button
+        type="button"
+        className="btn btn-secondary"
+        disabled={busy || (preview !== null && !preview.ok)}
+        onClick={() => void onReminder(kind.sendReminder, trimmed || null)}
+      >
+        Сохранить текст
+      </button>
+    </div>
+  );
+}
+
 function KindCard({
   kind,
   open,
@@ -206,6 +288,7 @@ function KindCard({
   checklists,
   onChecklist,
   onCoverage,
+  onReminder,
 }: {
   kind: TemplateRolesView;
   open: boolean;
@@ -215,6 +298,7 @@ function KindCard({
   checklists: readonly Checklist[];
   onChecklist: (checklistId: number | null) => Promise<void>;
   onCoverage: (coverage: number[]) => Promise<void>;
+  onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
 }) {
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
@@ -298,6 +382,8 @@ function KindCard({
               <p className="kind-rotation-hint">Очередь появится, когда в допущенных кто-нибудь будет.</p>
             )}
           </div>
+
+          <ReminderRow kind={kind} busy={busy} onReminder={onReminder} />
 
           {/* Выбор стоит здесь, а не только на «Чек-листах»: «какой чек-лист у
               этого вида смены» — свойство самого вида, ровно как очередь рядом.

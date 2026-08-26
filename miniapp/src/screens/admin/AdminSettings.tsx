@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatAuditMoment } from "@planer/shared";
+import { formatAuditMoment, validateReminderHour } from "@planer/shared";
 import { Button, Cell, List, Section, Spinner, Switch } from "@telegram-apps/telegram-ui";
 import { apiClient, type AdminSettings as AdminSettingsData, type NoticePref, type SwapLockResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
@@ -27,6 +27,10 @@ export function AdminSettings() {
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<SwapLockResult | null>(null);
+  const [hour, setHour] = useState<string | null>(null);
+  const [hourError, setHourError] = useState<string | null>(null);
+  const [hourSaved, setHourSaved] = useState(false);
+  const [savingHour, setSavingHour] = useState(false);
 
   const [noticePrefs, setNoticePrefs] = useState<NoticePref[] | null>(null);
   const [noticeLoadError, setNoticeLoadError] = useState<string | null>(null);
@@ -36,7 +40,11 @@ export function AdminSettings() {
 
   async function reload() {
     try {
-      setSettings(await apiClient.getSettings());
+      const next = await apiClient.getSettings();
+      setSettings(next);
+      // Поле берёт серверное значение только пока его не начали править: иначе
+      // перечитывание после соседнего тумблера стёрло бы набранное.
+      setHour((current) => current ?? next.reminderHour);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить настройки");
     }
@@ -96,6 +104,71 @@ export function AdminSettings() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleHour() {
+    const value = hour ?? settings?.reminderHour ?? "";
+    try {
+      validateReminderHour(value);
+    } catch (err) {
+      setHourError(err instanceof Error ? err.message : "Неверный час");
+      return;
+    }
+    setSavingHour(true);
+    setHourError(null);
+    try {
+      await apiClient.setReminderHour(value);
+      setHourSaved(true);
+      await reload();
+    } catch (err) {
+      setHourError(err instanceof Error ? err.message : "Не удалось сохранить час");
+    } finally {
+      setSavingHour(false);
+    }
+  }
+
+  /**
+   * Час рассылки напоминаний — своя секция, своя ошибка.
+   *
+   * Проверка та же, что на сервере (`validateReminderHour`): про запрет «позже
+   * 23:30» админ должен узнать до отправки, а не по отказу.
+   */
+  function renderReminderSection() {
+    if (!settings) return null;
+    return (
+      <CardStack>
+        <CardShell>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+            Уходят накануне в
+            <input
+              type="time"
+              value={hour ?? settings.reminderHour}
+              disabled={savingHour}
+              onChange={(e) => {
+                setHour(e.target.value);
+                setHourError(null);
+                setHourSaved(false);
+              }}
+              style={{
+                padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
+                background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
+              }}
+            />
+          </label>
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, lineHeight: 1.45, marginTop: 6 }}>
+            Проверяется раз в пять минут, поэтому уходит первым тиком после этого времени.
+            {settings.reminderHourUpdatedBy === null ? " Час ни разу не меняли." : ` Поставил ${settings.reminderHourUpdatedBy}.`}
+          </div>
+          {hourError && (
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5, marginTop: 6 }}>{hourError}</div>
+          )}
+          {hourSaved && <div style={{ fontSize: 13.5, marginTop: 6 }}>Час сохранён.</div>}
+          <Button size="s" mode="bezeled" stretched disabled={savingHour} style={{ marginTop: 8 }} onClick={() => void handleHour()}>
+            {savingHour ? "Сохраняю…" : "Сохранить час"}
+          </Button>
+        </CardShell>
+      </CardStack>
+    );
   }
 
   /**
@@ -207,6 +280,8 @@ export function AdminSettings() {
     <ScreenScroll>
       <List>
         <Section header="Настройки">{renderSwapsSection()}</Section>
+
+        <Section header="Напоминания о смене">{renderReminderSection()}</Section>
 
         <Section header="Что мне писать">
           {noticePrefs === null ? (

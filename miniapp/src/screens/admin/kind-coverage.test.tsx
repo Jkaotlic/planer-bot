@@ -17,7 +17,7 @@ import { AdminKindSettings } from "./AdminKindSettings";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const MORNING: TemplateRolesView = {
-  templateId: 10, name: "Утро", category: "shift", accent: "gold", checklistId: null,
+  templateId: 10, name: "Утро", category: "shift", accent: "gold", checklistId: null, sendReminder: false, reminderText: null,
   coverage: [0, 0, 0, 0, 0, 0, 0], pool: [], preference: {},
 };
 

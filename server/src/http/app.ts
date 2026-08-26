@@ -10,7 +10,7 @@ import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middlew
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { redactSecrets } from "../util/safe-error";
-import { listActiveTemplates, getTemplate, setCoverage } from "../repo/templates";
+import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../repo/templates";
 import { getChecklist, setTemplateChecklist } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
@@ -28,7 +28,7 @@ import {
   rememberTelegramProfile,
   setSelfScheduleEnabled,
 } from "../repo/employees";
-import { swapsLockSetting, isSwapsLocked } from "../repo/settings";
+import { swapsLockSetting, isSwapsLocked, reminderHour, reminderHourSetting, setReminderHour } from "../repo/settings";
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
@@ -97,6 +97,8 @@ import {
   canSwap,
   canAnnounce,
   type EntryCategory,
+  validateReminderHour,
+  validateReminderTemplate,
 } from "@planer/shared";
 import {
   postSlot,
@@ -587,11 +589,36 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/admin/settings", requireAdmin(db, config.jwtSecret), (c) => {
     const setting = swapsLockSetting(db);
     const actor = setting?.updatedByEmployeeId == null ? undefined : getEmployeeById(db, setting.updatedByEmployeeId);
+    const hourSetting = reminderHourSetting(db);
+    const hourActor = hourSetting?.updatedByEmployeeId == null ? undefined : getEmployeeById(db, hourSetting.updatedByEmployeeId);
     return c.json({
       swapsLocked: isSwapsLocked(db),
       swapsLockUpdatedAt: setting?.updatedAt?.toISOString() ?? null,
       swapsLockUpdatedBy: actor?.displayName ?? null,
+      reminderHour: reminderHour(db),
+      reminderHourUpdatedBy: hourActor?.displayName ?? null,
     });
+  });
+
+  /**
+   * Во сколько накануне уходят напоминания о завтрашней смене.
+   *
+   * Проверка живёт в `validateReminderHour`, а не здесь: тот же час показывают и
+   * подсказывают оба фронта, и правило «позже 23:30 нельзя» должно быть одним на
+   * всех, иначе консоль разрешит то, что сервер отвергнет.
+   */
+  app.put("/api/admin/settings/reminder-hour", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { hour?: unknown };
+    if (typeof body.hour !== "string") return c.json({ error: "Час нужен строкой вида ЧЧ:ММ" }, 400);
+    try {
+      validateReminderHour(body.hour);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Неверный час" }, 400);
+    }
+    const actorId = c.get("auth").employeeId;
+    setReminderHour(db, body.hour, actorId);
+    recordAudit(db, "reminder_hour_changed", actorId, { hour: body.hour });
+    return c.json({ hour: body.hour });
   });
 
   /**
@@ -1384,6 +1411,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
         category: template.category,
         accent: template.accent,
         checklistId: template.checklistId,
+        sendReminder: template.sendReminder,
+        reminderText: template.reminderText,
         // Числами, а не строкой: по норме считают нехватку дня оба фронта, и
         // разбор строки на каждом экране был бы третьей копией правила.
         coverage: parseCoverage(template.coverage),
@@ -1458,6 +1487,39 @@ export function createApp(deps: AppDeps): Hono<Env> {
       templateId, templateName: getTemplate(db, templateId)?.name ?? null, coverage,
     });
     return c.json({ templateId, coverage: parseCoverage(coverage) });
+  });
+
+  /**
+   * Напоминание накануне: слать ли про этот вид смены и каким текстом.
+   *
+   * До этого маршрута колонка `send_reminder` лежала без писателя, а кому
+   * напоминать, решала эвристика по часам смены — «Вечер» выключить было нельзя,
+   * дежурство с девяти включить тоже.
+   */
+  app.put("/api/admin/templates/:id/reminder", requireAdmin(db, config.jwtSecret), async (c) => {
+    const templateId = Number(c.req.param("id"));
+    if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
+    const parsed = z
+      .object({ sendReminder: z.boolean(), reminderText: z.string().nullable() })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    // Пустое поле — это «вернуть стандартный текст», а не текст из пробелов.
+    const reminderText = parsed.data.reminderText?.trim() ? parsed.data.reminderText.trim() : null;
+    if (reminderText) {
+      try {
+        validateReminderTemplate(reminderText);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Неверный текст напоминания" }, 400);
+      }
+    }
+    setReminder(db, templateId, { sendReminder: parsed.data.sendReminder, reminderText });
+    recordAudit(db, "template_reminder_changed", c.get("auth").employeeId, {
+      templateId,
+      templateName: getTemplate(db, templateId)?.name ?? null,
+      sendReminder: parsed.data.sendReminder,
+      hasText: reminderText !== null,
+    });
+    return c.json({ templateId, sendReminder: parsed.data.sendReminder, reminderText });
   });
 
   app.put("/api/admin/templates/:id/rotation", requireAdmin(db, config.jwtSecret), async (c) => {
