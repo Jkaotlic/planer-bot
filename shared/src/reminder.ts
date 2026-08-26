@@ -1,4 +1,5 @@
-import { toMinutes, isNightShift } from "./time";
+import { toMinutes, isNightShift, nextDate, prevDate } from "./time";
+import { formatDayMonth } from "./collection";
 import { isAbsence, type EntryCategory } from "./category";
 
 export type ReminderKind = "morning" | "day" | "evening" | "night";
@@ -57,6 +58,32 @@ export function remindsByDefault(entry: { start: string; end: string; category: 
   return isReminderWorthy(entry);
 }
 
+export interface DutyRun {
+  /** Дежурство уже идёт: вчера его держал тот же человек. */
+  continuing: boolean;
+  /** Последний день отрезка. Равен `start`, если день одиночный. */
+  lastDate: string;
+}
+
+/**
+ * Отрезок подряд идущих дней одного дежурства у одного человека.
+ *
+ * Недельность вычитается из графика, а не из `rotationUnit`: очередь можно было
+ * не выставить, а «кто держит Поклонку с понедельника по пятницу» видно по самим
+ * записям. Пятидневный отрезок кончается пятницей сам собой — субботы и
+ * воскресенья в наборе просто нет.
+ *
+ * Это правило существует, чтобы про недельное дежурство написали ОДИН раз,
+ * накануне первого дня (для рабочей недели — в воскресенье вечером), а не пять
+ * вечеров подряд. Одиночный день — отрезок длиной в день, и предупреждение
+ * приходит вечером перед ним.
+ */
+export function dutyRun(held: ReadonlySet<string>, start: string): DutyRun {
+  let lastDate = start;
+  while (held.has(nextDate(lastDate))) lastDate = nextDate(lastDate);
+  return { continuing: held.has(prevDate(start)), lastDate };
+}
+
 /** wake time = start − prepBufferMin, "HH:MM", clamped ≥ 00:00. */
 export function wakeTime(start: string, prepBufferMin: number): string {
   const mins = Math.max(0, toMinutes(start) - prepBufferMin);
@@ -79,8 +106,9 @@ export function buildReminderText(p: {
   timeRange: string;
   wake?: string;
   what?: string;
+  until?: string;
 }): string {
-  const { name, kind, timeRange, wake, what } = p;
+  const { name, kind, timeRange, wake, what, until } = p;
   switch (kind) {
     case "morning":
       return `🌅 Привет, ${name}! Завтра у тебя утренняя — ${timeRange}. Ложись пораньше и поставь будильник на ~${wake}. Хорошей смены ☕`;
@@ -90,6 +118,11 @@ export function buildReminderText(p: {
       return `👋 Привет, ${name}! Завтра вечерняя смена — ${timeRange}. Хорошего дня и до встречи вечером!`;
     case "day":
     default:
+      if (what && until) {
+        // «Завтра дежурство» про пятидневный отрезок — неправда, по которой
+        // человек спланирует только понедельник.
+        return `👋 Привет, ${name}! Напоминаем: с завтрашнего дня по ${formatDayMonth(until)} у тебя «${what}» — ${timeRange}. Хорошей недели!`;
+      }
       return `👋 Привет, ${name}! Напоминаем: завтра ${what ? `«${what}»` : "смена"} — ${timeRange}. Хорошего дня!`;
   }
 }

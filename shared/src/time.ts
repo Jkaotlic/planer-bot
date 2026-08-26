@@ -19,6 +19,13 @@ export function nextDate(date: string): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/** The calendar day before the given YYYY-MM-DD date. */
+export function prevDate(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const ms = Date.UTC(y, m - 1, d) - 86_400_000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 /** Absolute minutes since the Unix epoch for a wall-clock (date, time). */
 export function absMinutes(date: string, time: string): number {
   return dayNumber(date) * MINUTES_PER_DAY + toMinutes(time);

@@ -1,6 +1,9 @@
 import type { Bot } from "grammy";
 import {
   nextDate,
+  prevDate,
+  addDaysIso,
+  dutyRun,
   remindsByDefault,
   reminderKind,
   wakeTime,
@@ -9,7 +12,7 @@ import {
   addressOf,
 } from "@planer/shared";
 import type { Db } from "../db/client";
-import { listShiftsInRange } from "../repo/shifts";
+import { listShiftsInRange, listDatesHolding } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 import { getTemplate } from "../repo/templates";
 import { reminderHour } from "../repo/settings";
@@ -21,6 +24,15 @@ import type { EntryCategory } from "@planer/shared";
 import type { Shift, ShiftTemplate } from "../db/schema";
 
 const REMINDER_KIND = "evening_before";
+
+/**
+ * Насколько далеко вперёд ищется конец отрезка дежурства.
+ *
+ * Дежурство длиннее месяца — не отрезок, а ошибка в графике, и уводить письмо
+ * на такую дату не за чем. Окно заодно ограничивает запрос: без него он читал бы
+ * всю историю человека по этому виду смены.
+ */
+const MAX_DUTY_RUN_DAYS = 31;
 
 /**
  * Вид смены записи, если он у неё есть.
@@ -89,6 +101,21 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
   return count;
 }
 
+/**
+ * Отрезок дежурства, в который попадает эта запись, — или `undefined`, если
+ * запись не дежурство и отрезка у неё нет.
+ *
+ * Без `templateId` отрезок не считается: связать «то же самое дежурство» между
+ * двумя днями больше нечем, а угадывать по названию значило бы склеить два
+ * разных дежурства в одном месте.
+ */
+function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
+  if (!template || template.category === "shift" || shift.employeeId == null || shift.templateId == null) return undefined;
+  const until = addDaysIso(shift.date, MAX_DUTY_RUN_DAYS);
+  const held = listDatesHolding(db, shift.employeeId, shift.templateId, prevDate(shift.date), until);
+  return dutyRun(new Set(held), shift.date);
+}
+
 /** One shift's reminder. Returns 1 if it went out, 0 otherwise. */
 async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
     if (hasReminder(db, shift.id, REMINDER_KIND)) return 0;
@@ -106,13 +133,19 @@ async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
     // Свой текст вида смены, если админ его написал. Пустого текста в колонке
     // не бывает — эндпоинт пишет туда `null`, — но `trim` дешевле веры в это.
     const template = templateOf(db, shift);
+    const run = runOf(db, shift, template);
+    // Про недельное дежурство пишут ОДИН раз, накануне первого дня — для рабочей
+    // недели это воскресенье вечером. Дальше человек уже знает, и пять писем
+    // подряд научили бы его их не читать.
+    if (run?.continuing) return 0;
     const custom = template?.reminderText?.trim();
     // Название — только у дежурств и прочей не-рутины: письмо про дежурство
     // иначе слово в слово совпало бы с письмом про обычную смену.
     const what = template && template.category !== "shift" ? template.name : undefined;
+    const until = run && run.lastDate !== shift.date ? run.lastDate : undefined;
     const text = custom
       ? renderReminderText(custom, { name, timeRange, wake })
-      : buildReminderText({ name, kind, timeRange, wake: kind === "morning" ? wake : undefined, what });
+      : buildReminderText({ name, kind, timeRange, wake: kind === "morning" ? wake : undefined, what, until });
 
     const outcome = await notifyReminder(bot, owner.telegramUserId, text);
     if (outcome.ok) {

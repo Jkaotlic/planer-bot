@@ -37,6 +37,35 @@ export function listShiftsOverlapping(db: Db, from: string, to: string): Shift[]
  * сейчас, если смотреть седьмого, и человек должен видеть его во «Ближайших
  * сменах». Тот же `coalesce`, что и в `listShiftsOverlapping` двумя функциями выше.
  */
+/**
+ * Даты, в которые этот человек держит этот же вид смены, в окне [from, to].
+ *
+ * По `templateId`, а не по категории: «Поклонка в понедельник, Вавилова во
+ * вторник» — две разные обязанности, и склеить их в один отрезок значило бы не
+ * предупредить про вторую.
+ */
+export function listDatesHolding(
+  db: Db,
+  employeeId: number,
+  templateId: number,
+  from: string,
+  to: string,
+): string[] {
+  return db
+    .select({ date: shifts.date })
+    .from(shifts)
+    .where(
+      and(
+        eq(shifts.employeeId, employeeId),
+        eq(shifts.templateId, templateId),
+        gte(shifts.date, from),
+        lte(shifts.date, to),
+      ),
+    )
+    .all()
+    .map((row) => row.date);
+}
+
 export function listUpcomingForEmployee(db: Db, employeeId: number, fromDate: string): Shift[] {
   return db
     .select()

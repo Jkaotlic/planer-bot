@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, nextDate,
+  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, nextDate, prevDate,
 } from "./time";
 import type { ShiftTemplate } from "./types";
 
@@ -47,5 +47,17 @@ describe("time", () => {
     expect(nextDate("2026-07-31")).toBe("2026-08-01"); // month rollover
     expect(nextDate("2026-12-31")).toBe("2027-01-01"); // year rollover
     expect(nextDate("2026-07-14")).toBe("2026-07-15");
+  });
+});
+
+describe("prevDate", () => {
+  it("день назад, через границу месяца и года", () => {
+    expect(prevDate("2026-06-03")).toBe("2026-06-02");
+    expect(prevDate("2026-06-01")).toBe("2026-05-31");
+    expect(prevDate("2026-01-01")).toBe("2025-12-31");
+  });
+
+  it("зеркалит nextDate", () => {
+    expect(prevDate(nextDate("2026-02-28"))).toBe("2026-02-28");
   });
 });
