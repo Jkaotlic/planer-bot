@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import {
   nextDate,
-  isReminderWorthy,
+  remindsByDefault,
   reminderKind,
   wakeTime,
   buildReminderText,
@@ -17,6 +17,7 @@ import { hasReminder, addReminder } from "../repo/reminders";
 import { recordAudit } from "../repo/audit";
 import { notifyReminder } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
+import type { EntryCategory } from "@planer/shared";
 import type { Shift, ShiftTemplate } from "../db/schema";
 
 const REMINDER_KIND = "evening_before";
@@ -32,17 +33,18 @@ function templateOf(db: Db, shift: Shift): ShiftTemplate | undefined {
 }
 
 /**
- * Напоминать ли про эту смену: галочка вида смены, а если вида нет — эвристика.
+ * Напоминать ли про эту смену: галочка вида смены, а если вида нет — правило
+ * «всё, кроме обычного дня» (`remindsByDefault`).
  *
- * Раньше решала только эвристика, и админ не мог ни включить напоминание про
- * дежурство с девяти, ни выключить его про вечернюю.
+ * Раньше решала только эвристика по часам, и админ не мог ни включить
+ * напоминание про дежурство с девяти, ни выключить его про вечернюю.
  */
 function wantsReminder(
-  shift: { start: string; end: string; templateId: number | null },
+  shift: { start: string; end: string; category: EntryCategory; templateId: number | null },
   template: ShiftTemplate | undefined,
 ): boolean {
   if (shift.templateId != null && template) return template.sendReminder;
-  return isReminderWorthy({ start: shift.start, end: shift.end });
+  return remindsByDefault({ start: shift.start, end: shift.end, category: shift.category });
 }
 
 /** Sends soft evening-before reminders for tomorrow's morning/night shifts. Returns the number sent. */
@@ -56,7 +58,10 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
       s.employeeId != null &&
       s.start != null &&
       s.end != null &&
-      wantsReminder({ start: s.start, end: s.end, templateId: s.templateId }, templateOf(db, s)),
+      wantsReminder(
+        { start: s.start, end: s.end, category: s.category, templateId: s.templateId },
+        templateOf(db, s),
+      ),
   );
 
   let count = 0;
@@ -100,10 +105,14 @@ async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
     const wake = wakeTime(start, owner.prepBufferMin);
     // Свой текст вида смены, если админ его написал. Пустого текста в колонке
     // не бывает — эндпоинт пишет туда `null`, — но `trim` дешевле веры в это.
-    const custom = templateOf(db, shift)?.reminderText?.trim();
+    const template = templateOf(db, shift);
+    const custom = template?.reminderText?.trim();
+    // Название — только у дежурств и прочей не-рутины: письмо про дежурство
+    // иначе слово в слово совпало бы с письмом про обычную смену.
+    const what = template && template.category !== "shift" ? template.name : undefined;
     const text = custom
       ? renderReminderText(custom, { name, timeRange, wake })
-      : buildReminderText({ name, kind, timeRange, wake: kind === "morning" ? wake : undefined });
+      : buildReminderText({ name, kind, timeRange, wake: kind === "morning" ? wake : undefined, what });
 
     const outcome = await notifyReminder(bot, owner.telegramUserId, text);
     if (outcome.ok) {

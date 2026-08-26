@@ -1,4 +1,5 @@
 import { toMinutes, isNightShift } from "./time";
+import { isAbsence, type EntryCategory } from "./category";
 
 export type ReminderKind = "morning" | "day" | "evening" | "night";
 
@@ -29,14 +30,31 @@ export function reminderKind(shift: { start: string; end: string }): ReminderKin
  * everybody already expects, and a nightly message about it is the fastest way
  * to teach people to ignore the ones that matter.
  *
- * С 0030 это ЗАПАСНОЕ правило, а не главное: у записи с видом смены решает его
- * галочка `sendReminder`, которую правит админ. Эвристика осталась для записей
- * без вида смены — импортированных из ростера и проставленных руками, — у
- * которых выключать нечего. Ею же 0030 пересеяла саму колонку, чтобы день
- * выкатки ничего не изменил.
+ * С 0030 это часть запасного правила, а не главное: у записи с видом смены
+ * решает его галочка `sendReminder`, которую правит админ. Само правило —
+ * `remindsByDefault` ниже: часы здесь лишь один из двух его доводов.
  */
 export function isReminderWorthy(shift: { start: string; end: string }): boolean {
   return reminderKind(shift) !== "day";
+}
+
+/**
+ * Напоминаем ли про запись, когда за неё некому решить: у неё нет вида смены.
+ *
+ * «Всё, кроме обычного дня» — его правило от 2026-08-26. Дежурства идут те же
+ * 09:00–18:00, что и «День», и по одним часам их не отличить: отличает
+ * категория. Дежурство, выезд и работа в выходной рутиной не бывают — про них
+ * напоминают всегда, а про обычную дневную смену молчат.
+ *
+ * Отсутствие исключено явно: у отпуска и больничного времени нет вовсе, но
+ * «завтра у тебя смена» им не адресовано ни при каких часах.
+ *
+ * Этим же правилом 0030 засеяла колонку `send_reminder` у видов смен.
+ */
+export function remindsByDefault(entry: { start: string; end: string; category: EntryCategory }): boolean {
+  if (isAbsence(entry.category)) return false;
+  if (entry.category !== "shift") return true;
+  return isReminderWorthy(entry);
 }
 
 /** wake time = start − prepBufferMin, "HH:MM", clamped ≥ 00:00. */
@@ -47,9 +65,22 @@ export function wakeTime(start: string, prepBufferMin: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-/** warm Russian message per kind. */
-export function buildReminderText(p: { name: string; kind: ReminderKind; timeRange: string; wake?: string }): string {
-  const { name, kind, timeRange, wake } = p;
+/**
+ * warm Russian message per kind.
+ *
+ * `what` — название вида смены, и оно нужно только дневной формулировке. У
+ * утренней, вечерней и ночной слово о смене уже есть в тексте, а вот дневное
+ * письмо про дежурство без него слово в слово совпадало бы с письмом про
+ * обычную смену — и человек не понял бы, что завтра он дежурный.
+ */
+export function buildReminderText(p: {
+  name: string;
+  kind: ReminderKind;
+  timeRange: string;
+  wake?: string;
+  what?: string;
+}): string {
+  const { name, kind, timeRange, wake, what } = p;
   switch (kind) {
     case "morning":
       return `🌅 Привет, ${name}! Завтра у тебя утренняя — ${timeRange}. Ложись пораньше и поставь будильник на ~${wake}. Хорошей смены ☕`;
@@ -59,7 +90,7 @@ export function buildReminderText(p: { name: string; kind: ReminderKind; timeRan
       return `👋 Привет, ${name}! Завтра вечерняя смена — ${timeRange}. Хорошего дня и до встречи вечером!`;
     case "day":
     default:
-      return `👋 Привет, ${name}! Напоминаем: завтра смена — ${timeRange}. Хорошего дня!`;
+      return `👋 Привет, ${name}! Напоминаем: завтра ${what ? `«${what}»` : "смена"} — ${timeRange}. Хорошего дня!`;
   }
 }
 

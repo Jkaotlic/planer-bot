@@ -10,6 +10,7 @@ import {
   REMINDER_TEXT_MAX,
   REMINDER_HOUR_LATEST,
   previewReminderText,
+  remindsByDefault,
 } from "./reminder";
 
 describe("reminderKind", () => {
@@ -162,5 +163,51 @@ describe("previewReminderText", () => {
     const preview = previewReminderText("Завтра {погода}");
     expect(preview.ok).toBe(false);
     expect(!preview.ok && preview.error).toMatch(/погода/);
+  });
+});
+
+describe("remindsByDefault", () => {
+  it("про дежурство напоминает, даже если часы у него обычные дневные", () => {
+    // Дежурства идут 09:00–18:00, ровно как «День», и по одним часам их не
+    // отличить. Отличает категория: дежурство — не рутина.
+    expect(remindsByDefault({ start: "09:00", end: "18:00", category: "duty" })).toBe(true);
+  });
+
+  it("про обычную дневную смену молчит — она и есть то, чего все ждут", () => {
+    expect(remindsByDefault({ start: "09:00", end: "18:00", category: "shift" })).toBe(false);
+  });
+
+  it("про смену с необычными часами напоминает и внутри обычных смен", () => {
+    expect(remindsByDefault({ start: "08:00", end: "17:00", category: "shift" })).toBe(true);
+    expect(remindsByDefault({ start: "11:00", end: "20:00", category: "shift" })).toBe(true);
+  });
+
+  it("про отсутствие не напоминает: «завтра у тебя смена» отпуску не адресовано", () => {
+    expect(remindsByDefault({ start: "09:00", end: "18:00", category: "vacation" })).toBe(false);
+    expect(remindsByDefault({ start: "09:00", end: "18:00", category: "sick_leave" })).toBe(false);
+  });
+
+  it("выезд и работа в выходной — тоже не рутина", () => {
+    expect(remindsByDefault({ start: "09:00", end: "18:00", category: "offsite" })).toBe(true);
+    expect(remindsByDefault({ start: "09:00", end: "18:00", category: "weekend_work" })).toBe(true);
+  });
+});
+
+describe("buildReminderText: чем это будет завтра", () => {
+  it("называет вид смены, если он не обычная смена", () => {
+    // Иначе письмо про дежурство слово в слово совпадает с письмом про смену,
+    // и человек не поймёт, что завтра он дежурный.
+    const text = buildReminderText({
+      name: "Аня",
+      kind: "day",
+      timeRange: "09:00–18:00",
+      what: "Дежурство · Поклонка",
+    });
+    expect(text).toContain("Дежурство · Поклонка");
+  });
+
+  it("без названия говорит «смена», как и раньше", () => {
+    const text = buildReminderText({ name: "Аня", kind: "day", timeRange: "09:00–18:00" });
+    expect(text).toBe("👋 Привет, Аня! Напоминаем: завтра смена — 09:00–18:00. Хорошего дня!");
   });
 });

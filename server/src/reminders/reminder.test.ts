@@ -514,3 +514,60 @@ describe("галочка вида смены решает, кому напоми
     expect(sent[0]!.text).toContain("11:00–20:00");
   });
 });
+
+describe("дежурство — не рутина", () => {
+  it("напоминает про дежурство без вида смены: часы дневные, но это дежурство", async () => {
+    // Запасное правило, когда шаблона нет: решает категория записи, а не часы.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 920);
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", category: "duty", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("по-прежнему молчит про обычную дневную смену без вида смены", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 921);
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", category: "shift", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  it("письмо про дежурство называет его, а не говорит «завтра смена»", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 922);
+    const kind = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "09:00", end: "18:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    createShift(db, {
+      date: TOMORROW, start: "09:00", end: "18:00", category: "duty", employeeId: anya.id, templateId: kind.id,
+    });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+    expect(sent[0]!.text).toContain("Дежурство · Поклонка");
+  });
+
+  it("у обычной смены формулировка прежняя — про вид смены в ней ни слова", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 923);
+    const kind = db
+      .insert(shiftTemplates)
+      .values({ name: "День", category: "shift", start: "09:00", end: "18:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    createShift(db, {
+      date: TOMORROW, start: "09:00", end: "18:00", category: "shift", employeeId: anya.id, templateId: kind.id,
+    });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+    expect(sent[0]!.text).toBe("👋 Привет, Аня! Напоминаем: завтра смена — 09:00–18:00. Хорошего дня!");
+  });
+});
