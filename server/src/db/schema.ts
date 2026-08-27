@@ -587,6 +587,41 @@ export const checklistMarks = sqliteTable(
   (t) => [uniqueIndex("checklist_mark_unique").on(t.date, t.employeeId, t.itemId)],
 );
 
+/**
+ * Отметка: такой-то человек сказал, что скинулся на такой-то сбор.
+ *
+ * Устроено как `checklist_marks`, и по той же причине: строка есть — отметился,
+ * строки нет — не отметился. Колонки `paid` нет: булев флаг, который всегда
+ * `true`, это не данные, а способ забыть удалить строку. Снятие галочки строку
+ * удаляет.
+ *
+ * Знаменатель («из скольких») здесь не хранится: он считается из `recipientsOf`,
+ * то есть из тех же людей, кому ушла рассылка. Зафиксированный в момент отправки
+ * состав пришлось бы чинить при досылке, при выходе нового человека и при
+ * деактивации старого — три ветки кода ради того, чтобы старая цифра не дрогнула.
+ * Ушёл из команды — денег с него не ждут, и знаменатель обязан упасть.
+ *
+ * `markedBy` — чья это рука. Обычно своя, но наличкой в руки сдают регулярно, и
+ * тогда галочку ставит админ. Экран показывает эту разницу, потому что «я
+ * отметился» и «за меня отметили» — разные утверждения.
+ */
+export const collectionPayments = sqliteTable(
+  "collection_payments",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    collectionId: integer().notNull().references(() => collections.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    markedBy: integer().notNull().references(() => employees.id),
+    markedAt: createdAt(),
+  },
+  // Отметка идемпотентна: двойной тап по медленной сети не должен оставлять
+  // две записи и «сдали 8 из 7».
+  (t) => [uniqueIndex("collection_payment_unique").on(t.collectionId, t.employeeId)],
+);
+
+export type CollectionPayment = typeof collectionPayments.$inferSelect;
+export type NewCollectionPayment = typeof collectionPayments.$inferInsert;
+
 export type Checklist = typeof checklists.$inferSelect;
 export type NewChecklist = typeof checklists.$inferInsert;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
