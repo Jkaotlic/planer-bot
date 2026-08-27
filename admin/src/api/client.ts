@@ -10,6 +10,9 @@ import type {
   TemplateAccent,
   TemplateDto,
 } from "@planer/shared";
+// Реэкспорт, а не копия: строка списка отметок описана в shared, потому что её
+// одинаково читают сервер и оба админских экрана.
+export type { PaymentRow };
 import {
   employeesMock,
   mockCreateEntry,
