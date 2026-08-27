@@ -5,6 +5,7 @@ import type {
   CreateEmployeeResponse,
   EntryCategory,
   EntryRangeSkip,
+  PaymentRow,
   ScheduleEntryDto,
   TemplateAccent,
   TemplateDto,
@@ -49,6 +50,10 @@ import {
   mockSaveCollection,
   mockSendCollection,
   mockSetCollectionClosed,
+  mockSetCollectionPaid,
+  mockGetCollectionPayments,
+  mockSetCollectionPaymentFor,
+  mockRemindUnpaid,
   mockDeleteCollection,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
@@ -601,6 +606,14 @@ export interface ApiClient {
   /** Рассылает команде. Подтверждение — на вызывающем. */
   sendCollection(id: number): Promise<{ delivered: number; intended: number; round: number }>;
   setCollectionClosed(id: number, closed: boolean): Promise<Collection>;
+  /** Своя галочка «я перевёл» — вкладка «Команда». */
+  setCollectionPaid(id: number, paid: boolean): Promise<{ paid: boolean; paidCount: number; recipientCount: number }>;
+  /** Кто отметился, кого ждём — поимённо, только для админа. */
+  getCollectionPayments(id: number): Promise<{ rows: PaymentRow[]; paidCount: number; total: number }>;
+  /** Галочка за другого: сдавал наличкой в руки. */
+  setCollectionPaymentFor(id: number, employeeId: number, paid: boolean): Promise<{ rows: PaymentRow[]; paidCount: number; total: number }>;
+  /** Дожим по неотметившимся — письмо уходит только им. */
+  remindUnpaid(id: number): Promise<{ delivered: number; intended: number }>;
   deleteCollection(id: number): Promise<void>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
@@ -1039,6 +1052,28 @@ export const realClient: ApiClient = {
       `/api/admin/collections/${id}/send`, { confirm: true });
   },
 
+  setCollectionPaid(id, paid) {
+    return authorizedPostJson<{ paid: boolean; paidCount: number; recipientCount: number }>(
+      `/api/collections/${id}/paid`, { paid });
+  },
+
+  getCollectionPayments(id) {
+    return authorizedGet<{ rows: PaymentRow[]; paidCount: number; total: number }>(
+      `/api/admin/collections/${id}/payments`);
+  },
+
+  setCollectionPaymentFor(id, employeeId, paid) {
+    return authorizedPostJson<{ rows: PaymentRow[]; paidCount: number; total: number }>(
+      `/api/admin/collections/${id}/payments/${employeeId}`, { paid });
+  },
+
+  remindUnpaid(id) {
+    // `confirm: true` — как у `sendCollection`: сервер без него не примет, и это
+    // осознанно, вызов пишет живым людям.
+    return authorizedPostJson<{ delivered: number; intended: number }>(
+      `/api/admin/collections/${id}/remind-unpaid`, { confirm: true });
+  },
+
   async setCollectionClosed(id, closed) {
     const { collection } = await authorizedPostJson<{ collection: Collection }>(
       `/api/admin/collections/${id}/close`, { closed });
@@ -1177,6 +1212,10 @@ const devClient: ApiClient = {
   saveCollection: (id, patch) => mockSaveCollection(id, patch),
   sendCollection: (id) => mockSendCollection(id),
   setCollectionClosed: (id, closed) => mockSetCollectionClosed(id, closed),
+  setCollectionPaid: (id, paid) => mockSetCollectionPaid(id, paid),
+  getCollectionPayments: (id) => mockGetCollectionPayments(id),
+  setCollectionPaymentFor: (id, employeeId, paid) => mockSetCollectionPaymentFor(id, employeeId, paid),
+  remindUnpaid: (id) => mockRemindUnpaid(id),
   deleteCollection: (id) => mockDeleteCollection(id),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),

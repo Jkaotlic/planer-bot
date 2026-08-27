@@ -35,6 +35,7 @@ const COFFEE: WorkerCollection = {
   collectUrl: "https://example.test/c/1",
   amountPerPerson: 1000, totalGoal: 25000,
   deadline: "2026-08-15", eventDate: null,
+  paid: false, paidCount: 2, recipientCount: 5,
 };
 
 let root: Root | null = null;

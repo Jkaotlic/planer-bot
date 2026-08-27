@@ -3,6 +3,9 @@ import {
   employeesMock,
   TEMPLATES,
   mockCreateCollection,
+  mockGetCollectionPayments,
+  mockSetCollectionPaymentFor,
+  mockRemindUnpaid,
   mockGetCollections,
   mockGetCollectionPreview,
   mockSendCollection,
@@ -83,5 +86,25 @@ describe("мок сборов", () => {
     } finally {
       await employeesMock.setEmployeeAdmin(1, true);
     }
+  });
+});
+
+describe("мок отметок о сдаче", () => {
+  it("ведёт себя как сервер: галочка ставится, счёт растёт, дожим уходит ждущим", async () => {
+    const round = await mockCreateCollection({
+      title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
+      amountPerPerson: 500, totalGoal: null, collectUrl: "https://example.test/c/1",
+      messageText: null, scheduledSendOn: null,
+    });
+
+    const before = await mockGetCollectionPayments(round.id);
+    const waiting = before.rows.filter((r) => !r.paid).length;
+    expect(waiting).toBeGreaterThan(0);
+
+    const after = await mockSetCollectionPaymentFor(round.id, before.rows.find((r) => !r.paid)!.employeeId, true);
+    expect(after.paidCount).toBe(before.paidCount + 1);
+
+    const remind = await mockRemindUnpaid(round.id);
+    expect(remind.intended).toBe(waiting - 1);
   });
 });

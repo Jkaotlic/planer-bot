@@ -19,6 +19,7 @@ import { CollectionsTabScreen } from "./CollectionsTabScreen";
 const COLLECTION: WorkerCollection = {
   id: 3, title: "Кофемашина", personName: null, collectUrl: null,
   amountPerPerson: null, totalGoal: null, deadline: null, eventDate: null,
+  paid: false, paidCount: 0, recipientCount: 3,
 };
 
 let root: Root | null = null;

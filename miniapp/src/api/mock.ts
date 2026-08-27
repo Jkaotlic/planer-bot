@@ -53,6 +53,7 @@ import {
   daysUntilBirthday,
   formatBirthDate,
   outgoingCollectionMessage,
+  paymentProgress,
   collectionTitle,
   collectionStatus,
   isCollectionActive,
@@ -1092,6 +1093,51 @@ function mockRecipients(employeeId: number | null): { employeeId: number; displa
     .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
 }
 
+/**
+ * Отметки о сдаче: ключ `${collectionId}:${employeeId}` → чья рука поставила.
+ *
+ * Счёт считается через `paymentProgress` из `@planer/shared`, а не руками: мок,
+ * который считает по-своему, показывает на дев-экране не то, что покажет прод.
+ */
+const PAYMENTS = new Map<string, number>();
+
+function progressOf(collectionId: number) {
+  const collection = findCollection(collectionId);
+  const marks = [...PAYMENTS.entries()]
+    .filter(([key]) => key.startsWith(`${collectionId}:`))
+    .map(([key, markedBy]) => ({ employeeId: Number(key.split(":")[1]), markedBy }));
+  return paymentProgress(mockRecipients(collection?.employeeId ?? null), marks);
+}
+
+export async function mockGetCollectionPayments(id: number) {
+  await delay(200);
+  const progress = progressOf(id);
+  return { rows: progress.rows, paidCount: progress.paidCount, total: progress.total };
+}
+
+export async function mockSetCollectionPaymentFor(id: number, employeeId: number, paid: boolean) {
+  await delay(200);
+  if (paid) PAYMENTS.set(`${id}:${employeeId}`, MOCK_ME.id);
+  else PAYMENTS.delete(`${id}:${employeeId}`);
+  const progress = progressOf(id);
+  return { rows: progress.rows, paidCount: progress.paidCount, total: progress.total };
+}
+
+export async function mockSetCollectionPaid(id: number, paid: boolean) {
+  await delay(200);
+  if (paid) PAYMENTS.set(`${id}:${MOCK_ME.id}`, MOCK_ME.id);
+  else PAYMENTS.delete(`${id}:${MOCK_ME.id}`);
+  const progress = progressOf(id);
+  return { paid, paidCount: progress.paidCount, recipientCount: progress.total };
+}
+
+export async function mockRemindUnpaid(id: number) {
+  await delay(400);
+  const waiting = progressOf(id).unpaid.length;
+  if (waiting === 0) throw new Error("Все уже отметились.");
+  return { delivered: waiting, intended: waiting };
+}
+
 /** То, что реально уйдёт команде, и кому — теми же правилами, что у сервера. */
 function previewOf(collection: Collection): CollectionPreview {
   const personName = personNameOf(collection.employeeId);
@@ -1382,7 +1428,11 @@ export async function mockGetMyCollections(): Promise<WorkerCollection[]> {
     .filter((c) => c.employeeId !== MOCK_ME.id && c.sendCount > 0 && isCollectionActive(c, today))
     .map((c) => {
       const personName = personNameOf(c.employeeId);
+      const progress = progressOf(c.id);
       return {
+        paid: progress.rows.some((r) => r.employeeId === MOCK_ME.id && r.paid),
+        paidCount: progress.paidCount,
+        recipientCount: progress.total,
         id: c.id,
         title: collectionTitle(c, personName),
         personName,
