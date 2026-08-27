@@ -108,3 +108,112 @@ export function checklistText(
   ]);
   return [...lines, "", `Сделано ${done} из ${total}.`].join("\n");
 }
+
+/**
+ * Есть ли что рассылать по этому списку.
+ *
+ * Пунктов может не быть вовсе: пояснение и приложенная инструкция — уже
+ * полноценное сообщение дежурному. Раньше условием была непустота списка, и у
+ * «Дежурств 47», где были и пояснение, и файл, не уходило ничего и никогда
+ * (2026-08-26). Молчание осталось ровно для пустоты.
+ *
+ * Правило считает и утренний тик, и админский экран: до этой функции экран о нём
+ * не знал вовсе и обещал администратору не то, что делает бот.
+ */
+export function checklistHasContent(list: {
+  items: readonly ChecklistItemLike[];
+  note?: string | null;
+  hasDoc: boolean;
+}): boolean {
+  return list.items.length > 0 || Boolean(list.note?.trim()) || list.hasDoc;
+}
+
+/** Уходит ли список кому-нибудь вообще — и если нет, то из-за чего. */
+export type ChecklistDispatchState = "sends" | "no-templates" | "empty";
+
+/**
+ * Состояние списка глазами админа: «уходит» или «не уходит, потому что…».
+ *
+ * Пустота называется раньше отсутствия привязки: наполнить список придётся в
+ * любом случае, а назначить его на виды смен можно и после.
+ */
+export function checklistDispatchState(list: {
+  hasContent: boolean;
+  linkedTemplateCount: number;
+}): ChecklistDispatchState {
+  if (!list.hasContent) return "empty";
+  return list.linkedTemplateCount > 0 ? "sends" : "no-templates";
+}
+
+/**
+ * Что сегодня будет с сообщением конкретному человеку.
+ *
+ * `muted` и `no-telegram` — те самые пропуски, которые тик делает молча: админ
+ * видел «чек-лист назначен» и не мог узнать, что до половины команды он не
+ * доходит.
+ */
+export type ChecklistDelivery = "sent" | "scheduled" | "muted" | "no-telegram" | "nothing-to-send";
+
+export function checklistDelivery(person: {
+  /** Есть ли у списка что рассылать — `checklistHasContent`. */
+  sends: boolean;
+  /** Пометка в `reminder_log`: за эту смену сообщение уже ушло. */
+  alreadySent: boolean;
+  remindersEnabled: boolean;
+  hasTelegram: boolean;
+}): ChecklistDelivery {
+  if (!person.sends) return "nothing-to-send";
+  // Факт отправки правдив и после того, как напоминания выключили: человек
+  // сообщение получил, и «не уйдёт» здесь было бы враньём про прошлое.
+  if (person.alreadySent) return "sent";
+  // Без Telegram включать нечего — эта причина точнее выключенных напоминаний.
+  if (!person.hasTelegram) return "no-telegram";
+  if (!person.remindersEnabled) return "muted";
+  return "scheduled";
+}
+
+/**
+ * Правило рассылки словами — для админского экрана.
+ *
+ * Текст живёт рядом с правилом, а не в экранах: экранов два (мини-апп и
+ * консоль), и порознь они разъезжаются — а неверная подпись здесь хуже её
+ * отсутствия, потому что по ней принимают решение.
+ */
+export const CHECKLIST_RULE_TEXT =
+  "Уходит в чат тому, у кого в этот день стоит смена выбранного вида, — в момент её начала " +
+  "и один раз за смену. Не уйдёт тем, у кого выключены напоминания или не привязан Telegram.";
+
+/**
+ * Шапка карточки: уходит список или нет — и если нет, то почему.
+ *
+ * Назначение называется и у пустого списка: «кому положен» и «уйдёт ли» — два
+ * разных вопроса, и ответ на первый не должен пропадать из-за ответа на второй.
+ */
+export function checklistDispatchLabel(state: ChecklistDispatchState, templateNames: readonly string[]): string {
+  if (state === "sends") return `Уходит: ${templateNames.join(", ")}`;
+  if (state === "no-templates") return "Не уходит: не выбран вид смены";
+  const empty = "Не уходит: ни пунктов, ни пояснения, ни файла";
+  return templateNames.length > 0 ? `${empty}. Назначен: ${templateNames.join(", ")}` : `${empty}, и не выбран вид смены`;
+}
+
+/**
+ * Что будет с сообщением конкретному человеку — словами.
+ *
+ * `start` — начало его смены: час называется прямо, потому что «утром» админ и
+ * дежурный понимают по-разному. Смену ставят и «своим временем», без начала, —
+ * такому тик пишет первым же проходом, и обещать час нельзя.
+ */
+export function checklistDeliveryLabel(delivery: ChecklistDelivery, start: string | null): string {
+  switch (delivery) {
+    case "sent":
+      return "уже отправлено";
+    case "scheduled":
+      return start ? `уйдёт в ${start}` : "уйдёт с началом смены";
+    case "muted":
+      return "не уйдёт: напоминания выключены";
+    case "no-telegram":
+      return "не уйдёт: нет Telegram";
+    case "nothing-to-send":
+      return "не уйдёт: в списке пусто";
+  }
+}

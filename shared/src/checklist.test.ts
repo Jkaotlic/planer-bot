@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { checklistProgress, checklistText, checklistsDueToday, isChecklistComplete } from "./checklist";
+import {
+  CHECKLIST_RULE_TEXT,
+  checklistDelivery,
+  checklistDeliveryLabel,
+  checklistDispatchLabel,
+  checklistDispatchState,
+  checklistHasContent,
+  checklistProgress,
+  checklistText,
+  checklistsDueToday,
+  isChecklistComplete,
+} from "./checklist";
 
 const item = (id: number, title: string) => ({ id, title });
 
@@ -89,5 +100,138 @@ describe("checklistText", () => {
 
   it("говорит, сколько уже сделано", () => {
     expect(checklistText([item(1, "Свет"), item(2, "Окна")], [1])).toContain("1 из 2");
+  });
+});
+
+describe("checklistHasContent", () => {
+  const items = [item(1, "Свет")];
+
+  it("список с пунктами есть чем рассылать", () => {
+    expect(checklistHasContent({ items, note: null, hasDoc: false })).toBe(true);
+  });
+
+  // Ровно случай «Дежурств 47» (2026-08-26): пунктов нет, а пояснение и файл
+  // есть — и это полноценное сообщение дежурному.
+  it("одного пояснения хватает, даже без пунктов", () => {
+    expect(checklistHasContent({ items: [], note: "обход от лифтов", hasDoc: false })).toBe(true);
+  });
+
+  it("одного файла хватает, даже без пунктов и пояснения", () => {
+    expect(checklistHasContent({ items: [], note: null, hasDoc: true })).toBe(true);
+  });
+
+  it("пустое пояснение содержимым не считается", () => {
+    expect(checklistHasContent({ items: [], note: "   ", hasDoc: false })).toBe(false);
+  });
+
+  it("ни пунктов, ни пояснения, ни файла — рассылать нечего", () => {
+    expect(checklistHasContent({ items: [], note: null, hasDoc: false })).toBe(false);
+  });
+});
+
+describe("checklistDispatchState", () => {
+  it("есть содержимое и хотя бы один вид смены — список уходит", () => {
+    expect(checklistDispatchState({ hasContent: true, linkedTemplateCount: 1 })).toBe("sends");
+  });
+
+  // Самая частая непонятность админа: список заполнен, но не назначен никому, и
+  // молчание бота выглядит поломкой.
+  it("без видов смен список не уходит никому", () => {
+    expect(checklistDispatchState({ hasContent: true, linkedTemplateCount: 0 })).toBe("no-templates");
+  });
+
+  it("назначенный, но пустой список не уходит", () => {
+    expect(checklistDispatchState({ hasContent: false, linkedTemplateCount: 2 })).toBe("empty");
+  });
+
+  // Пустота называется первой: наполнить список придётся в любом случае, а
+  // назначить его можно и потом.
+  it("пустой и никому не назначенный — сначала про пустоту", () => {
+    expect(checklistDispatchState({ hasContent: false, linkedTemplateCount: 0 })).toBe("empty");
+  });
+});
+
+describe("checklistDelivery", () => {
+  const person = (over: Record<string, unknown> = {}) => ({
+    sends: true, alreadySent: false, remindersEnabled: true, hasTelegram: true, ...over,
+  });
+
+  it("ещё не ушло, но уйдёт", () => {
+    expect(checklistDelivery(person())).toBe("scheduled");
+  });
+
+  it("уже ушло сегодня", () => {
+    expect(checklistDelivery(person({ alreadySent: true }))).toBe("sent");
+  });
+
+  // Факт отправки — правда, даже если напоминания выключили после неё: человек
+  // сообщение получил, и сказать «не уйдёт» значило бы соврать.
+  it("отметка отправки перевешивает выключенные напоминания", () => {
+    expect(checklistDelivery(person({ alreadySent: true, remindersEnabled: false }))).toBe("sent");
+  });
+
+  // Оба молчаливых пропуска тика: админ не видел их вовсе.
+  it("без Telegram не уйдёт", () => {
+    expect(checklistDelivery(person({ hasTelegram: false }))).toBe("no-telegram");
+  });
+
+  it("с выключенными напоминаниями не уйдёт", () => {
+    expect(checklistDelivery(person({ remindersEnabled: false }))).toBe("muted");
+  });
+
+  it("нет Telegram важнее выключенных напоминаний: включать нечего", () => {
+    expect(checklistDelivery(person({ hasTelegram: false, remindersEnabled: false }))).toBe("no-telegram");
+  });
+
+  it("пустой список не уйдёт никому, даже готовому его получить", () => {
+    expect(checklistDelivery(person({ sends: false }))).toBe("nothing-to-send");
+  });
+});
+
+describe("подписи для экрана", () => {
+  it("уходящий список называет виды смен, которым он положен", () => {
+    expect(checklistDispatchLabel("sends", ["Дежурство 07:00", "Утро"])).toBe("Уходит: Дежурство 07:00, Утро");
+  });
+
+  it("не уходящий называет причину, а не молчит", () => {
+    expect(checklistDispatchLabel("no-templates", [])).toBe("Не уходит: не выбран вид смены");
+    expect(checklistDispatchLabel("empty", [])).toBe("Не уходит: ни пунктов, ни пояснения, ни файла, и не выбран вид смены");
+  });
+
+  // «Кому положен» и «уйдёт ли» — разные вопросы: пустота списка не повод
+  // забыть, каким видам смен он назначен.
+  it("пустой список всё равно называет, кому он назначен", () => {
+    expect(checklistDispatchLabel("empty", ["Утро"])).toBe(
+      "Не уходит: ни пунктов, ни пояснения, ни файла. Назначен: Утро",
+    );
+  });
+
+  it("время отправки — это начало смены, и оно названо", () => {
+    expect(checklistDeliveryLabel("scheduled", "07:00")).toBe("уйдёт в 07:00");
+  });
+
+  // Смена «своим временем» без начала: тик шлёт такому первым же проходом.
+  it("без начала смены обещается не час, а событие", () => {
+    expect(checklistDeliveryLabel("scheduled", null)).toBe("уйдёт с началом смены");
+  });
+
+  it("уже отправленное не обещает будущего", () => {
+    expect(checklistDeliveryLabel("sent", "07:00")).toBe("уже отправлено");
+  });
+
+  it("каждый молчаливый пропуск назван причиной", () => {
+    expect(checklistDeliveryLabel("muted", "07:00")).toBe("не уйдёт: напоминания выключены");
+    expect(checklistDeliveryLabel("no-telegram", "07:00")).toBe("не уйдёт: нет Telegram");
+    expect(checklistDeliveryLabel("nothing-to-send", "07:00")).toBe("не уйдёт: в списке пусто");
+  });
+
+  // Правило — то самое, чего на экране не было вовсе; проверяем, что оно
+  // отвечает на оба вопроса админа: кому и когда.
+  it("правило словами называет и адресата, и момент, и оба исключения", () => {
+    expect(CHECKLIST_RULE_TEXT).toContain("вида");
+    expect(CHECKLIST_RULE_TEXT).toContain("начал");
+    expect(CHECKLIST_RULE_TEXT).toContain("один раз");
+    expect(CHECKLIST_RULE_TEXT).toContain("напоминания");
+    expect(CHECKLIST_RULE_TEXT).toContain("Telegram");
   });
 });

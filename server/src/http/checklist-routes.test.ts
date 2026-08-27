@@ -2,12 +2,13 @@ import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem, listMarksFor, updateChecklistItem } from "../repo/checklist";
 import { createChecklist, getChecklist, setTemplateChecklist, updateChecklist } from "../repo/checklists";
 import { listRecentAudit } from "../repo/audit";
+import { addReminder } from "../repo/reminders";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import { shiftTemplates } from "../db/schema";
@@ -164,11 +165,11 @@ describe("чек-лист: свой (работник)", () => {
     const morning = preset(db, "Утро");
     setTemplateChecklist(db, earlyPreset.id, early.id);
     setTemplateChecklist(db, morning.id, late.id);
-    createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: earlyPreset.id });
+    const igorShift = createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: earlyPreset.id });
     createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id, category: "shift", templateId: morning.id });
 
     const app = createApp({ db, config });
-    return { db, app, igor, anya, early, late, earlyPreset, morning };
+    return { db, app, igor, anya, early, late, earlyPreset, morning, igorShift };
   }
 
   it("каждому приезжает чек-лист его вида смены, и только он", async () => {
@@ -270,6 +271,68 @@ describe("чек-лист: свой (работник)", () => {
     const byName = new Map(body.people.map((p: { displayName: string; checklistName: string }) => [p.displayName, p.checklistName]));
     expect(byName.get("Игорь")).toBe("С 07:00");
     expect(byName.get("Аня")).toBe("С 08:00");
+  });
+
+  /**
+   * Ровно та непонятность, ради которой правка: «придёт ли дежурному сообщение
+   * и когда» админ не мог узнать нигде — ни на экране, ни в сводке.
+   */
+  it("сводка дня говорит, во сколько уйдёт сообщение и уйдёт ли", async () => {
+    const { app } = await stage();
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    const byName = new Map(body.people.map((p: { displayName: string }) => [p.displayName, p]));
+    expect(byName.get("Игорь")).toMatchObject({ start: "07:00", delivery: "scheduled" });
+    expect(byName.get("Аня")).toMatchObject({ start: "08:00", delivery: "scheduled" });
+  });
+
+  it("отправленное сегодня помечено отправленным", async () => {
+    const { db, app, igorShift } = await stage();
+    addReminder(db, igorShift.id, "duty_checklist");
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    const igorRow = body.people.find((p: { displayName: string }) => p.displayName === "Игорь");
+    expect(igorRow.delivery).toBe("sent");
+  });
+
+  // Оба тихих пропуска тика. До этой правки админ видел «чек-лист назначен» и
+  // не мог узнать, что до человека он не доходит вовсе.
+  it("выключенные напоминания видны в сводке", async () => {
+    const { db, app, igor } = await stage();
+    setRemindersEnabled(db, igor.id, false);
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("muted");
+  });
+
+  it("непривязанный к Telegram виден в сводке", async () => {
+    const { db, app, earlyPreset } = await stage();
+    const mark = createEmployee(db, { displayName: "Марк", inviteToken: "inv-mark" });
+    createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: mark.id, category: "duty", templateId: earlyPreset.id });
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    expect(body.people.find((p: { displayName: string }) => p.displayName === "Марк").delivery).toBe("no-telegram");
+  });
+
+  it("список без пунктов, пояснения и файла не уйдёт никому", async () => {
+    const { db, app, earlyPreset } = await stage();
+    const empty = createChecklist(db, "Пустой");
+    setTemplateChecklist(db, earlyPreset.id, empty.id);
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("nothing-to-send");
+  });
+
+  // Пунктов нет, а пояснение есть — сообщение уходит: это и есть случай
+  // «Дежурств 47» (2026-08-26), из-за которого условие непустоты сняли.
+  it("список с одним пояснением уйдёт", async () => {
+    const { db, app, earlyPreset } = await stage();
+    const noted = createChecklist(db, "Только пояснение");
+    updateChecklist(db, noted.id, { note: "Обход от лифтов, по часовой" });
+    setTemplateChecklist(db, earlyPreset.id, noted.id);
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("scheduled");
   });
 });
 

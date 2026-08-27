@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
-import { apiClient, type Checklist, type Template } from "../../api/client";
+import {
+  CHECKLIST_RULE_TEXT,
+  checklistDeliveryLabel,
+  checklistDispatchLabel,
+  checklistDispatchState,
+  checklistHasContent,
+} from "@planer/shared";
+import { apiClient, type Checklist, type ChecklistDay, type Template } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 
@@ -20,6 +27,7 @@ import { ScreenScroll } from "../../components/ScreenScroll";
 export function AdminChecklists() {
   const [checklists, setChecklists] = useState<Checklist[] | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [day, setDay] = useState<ChecklistDay | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,6 +40,14 @@ export function AdminChecklists() {
       setTemplates(presets);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить чек-листы");
+    }
+    // Сводка дня — отдельно и молча: она отвечает на «кому уйдёт сегодня», но её
+    // отказ не должен выглядеть поломкой настройки, ради которой сюда пришли.
+    // Без даты: «сегодня» считает сервер по поясу команды, а не браузер.
+    try {
+      setDay(await apiClient.getChecklistDay());
+    } catch {
+      setDay(null);
     }
   }
 
@@ -88,6 +104,7 @@ export function AdminChecklists() {
               key={list.id}
               list={list}
               templates={templates}
+              day={day}
               open={openId === list.id}
               busy={busy}
               onToggle={() => setOpenId(openId === list.id ? null : list.id)}
@@ -122,6 +139,7 @@ export function AdminChecklists() {
 function ChecklistCard({
   list,
   templates,
+  day,
   open,
   busy,
   onToggle,
@@ -129,6 +147,7 @@ function ChecklistCard({
 }: {
   list: Checklist;
   templates: readonly Template[];
+  day: ChecklistDay | null;
   open: boolean;
   busy: boolean;
   onToggle: () => void;
@@ -139,6 +158,16 @@ function ChecklistCard({
   const [docUrl, setDocUrl] = useState(list.docUrl ?? "");
   const linked = templates.filter((t) => list.templateIds.includes(t.id));
   const dirty = note !== (list.note ?? "") || docUrl !== (list.docUrl ?? "");
+  // Пояснение и ссылка — единственное здесь, что не сохраняется по тапу, и уйти
+  // с экрана, потеряв набранный текст, можно было молча.
+  const [saved, setSaved] = useState(false);
+  // «Уходит или нет» — тем же правилом, которым живёт рассылка. Ссылка на
+  // документ считается содержимым наравне с файлом: бот вешает её кнопкой.
+  const dispatch = checklistDispatchState({
+    hasContent: checklistHasContent({ items: list.items, note: list.note, hasDoc: list.hasDoc || Boolean(list.docUrl) }),
+    linkedTemplateCount: linked.length,
+  });
+  const todayPeople = day?.people.filter((p) => p.checklistId === list.id) ?? [];
 
   return (
     <CardShell>
@@ -155,7 +184,7 @@ function ChecklistCard({
         <span style={{ flex: 1, fontSize: 12.5, color: "var(--tgui--hint_color)" }}>
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
-          {linked.length === 0 ? "никому не назначен" : linked.map((t) => t.name).join(", ")}
+          {checklistDispatchLabel(dispatch, linked.map((t) => t.name))}
         </span>
         <span style={{ color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
       </button>
@@ -188,6 +217,29 @@ function ChecklistCard({
               );
             })}
           </div>
+
+          <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.45, color: "var(--tgui--hint_color)" }}>
+            {CHECKLIST_RULE_TEXT} Виды смен и пункты сохраняются сразу.
+          </p>
+
+          {/* Сегодняшний расклад рядом с настройкой: «уйдёт ли» проверяют
+              ровно в тот момент, когда виды смен только что переключили. */}
+          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Сегодня</span>
+          {todayPeople.length === 0 ? (
+            <span style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Сегодня этот чек-лист никому не положен.</span>
+          ) : (
+            todayPeople.map((p) => (
+              <div key={p.employeeId} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13.5 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>{p.displayName}</span>
+                {/* Судьба сообщения рядом с прогрессом: «0 из 5» у того, кому
+                    ничего не ушло, читается как лень человека, а не как
+                    выключенные напоминания. */}
+                <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>
+                  {checklistDeliveryLabel(p.delivery, p.start)} · {p.done} из {p.total}
+                </span>
+              </div>
+            ))
+          )}
 
           <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Пункты</span>
           {list.items.length === 0 ? (
@@ -245,10 +297,21 @@ function ChecklistCard({
             mode="filled"
             stretched
             disabled={busy || !dirty}
-            onClick={() => void run(() => apiClient.patchChecklist(list.id, { note: note.trim() || null, docUrl: docUrl.trim() || null }))}
+            onClick={() => {
+              setSaved(false);
+              void run(() => apiClient.patchChecklist(list.id, { note: note.trim() || null, docUrl: docUrl.trim() || null }))
+                .then(() => setSaved(true));
+            }}
           >
             Сохранить инструкцию
           </Button>
+          {dirty ? (
+            <span style={{ fontSize: 12.5, color: "var(--tgui--destructive_text_color)" }}>
+              Не сохранено — нажми «Сохранить инструкцию».
+            </span>
+          ) : (
+            saved && <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Сохранено.</span>
+          )}
 
           <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.45 }}>
             {list.hasDoc

@@ -2,6 +2,7 @@ import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 import type {
   AdminEmployeeDto,
+  ChecklistDelivery,
   CreateEmployeeResponse,
   EntryRangeSkip,
   PaymentRow,
@@ -38,6 +39,7 @@ import {
   mockGetMyChecklists,
   mockMarkChecklistItem,
   mockGetChecklists,
+  mockGetChecklistDay,
   mockCreateChecklist,
   mockPatchChecklist,
   mockDeleteChecklist,
@@ -335,6 +337,27 @@ export interface MyChecklistView {
 export interface MyChecklists {
   date: string;
   checklists: MyChecklistView[];
+}
+
+/**
+ * Сводка «кто сегодня проходит этот чек-лист и дойдёт ли до него сообщение».
+ *
+ * Зеркало консольной: вопрос «придёт ли дежурному» задают в том же экране, где
+ * список настраивают, и гонять за ответом в браузер незачем.
+ */
+export interface ChecklistDay {
+  date: string;
+  people: {
+    employeeId: number;
+    displayName: string;
+    checklistId: number;
+    checklistName: string;
+    done: number;
+    total: number;
+    /** Начало смены — момент, в который уходит сообщение. `null` у смены «своим временем». */
+    start: string | null;
+    delivery: ChecklistDelivery;
+  }[];
 }
 
 /** Чек-лист целиком — для админского экрана. */
@@ -751,6 +774,12 @@ export interface ApiClient {
   getMyChecklists(date: string): Promise<MyChecklists>;
   markChecklistItem(date: string, itemId: number, done: boolean): Promise<{ checklistId: number; markedItemIds: number[] }>;
   getChecklists(): Promise<Checklist[]>;
+  /**
+   * Без даты — намеренно: «сегодня» считает сервер по часовому поясу команды.
+   * Дата браузера сдвинула бы границу дня у того, кто открыл мини-апп в другом
+   * поясе, — и сводка показала бы вчерашних дежурных.
+   */
+  getChecklistDay(date?: string): Promise<ChecklistDay>;
   createChecklist(name: string): Promise<Checklist>;
   patchChecklist(id: number, patch: { name?: string; note?: string | null; docUrl?: string | null }): Promise<Checklist>;
   deleteChecklist(id: number): Promise<Checklist[]>;
@@ -1213,6 +1242,7 @@ export const realClient: ApiClient = {
   markChecklistItem: (date, itemId, done) =>
     authorizedPostJson<{ checklistId: number; markedItemIds: number[] }>("/api/my/checklist/mark", { date, itemId, done }),
   getChecklists: () => authorizedGet<{ checklists: Checklist[] }>("/api/admin/checklists").then((r) => r.checklists),
+  getChecklistDay: (date) => authorizedGet<ChecklistDay>(`/api/admin/checklist/day${date ? `?date=${date}` : ""}`),
   createChecklist: (name) =>
     authorizedPostJson<{ checklist: Checklist }>("/api/admin/checklists", { name }).then((r) => r.checklist),
   patchChecklist: (id, patch) =>
@@ -1507,6 +1537,7 @@ const devClient: ApiClient = {
   getMyChecklists: (date) => mockGetMyChecklists(date),
   markChecklistItem: (date, itemId, done) => mockMarkChecklistItem(date, itemId, done),
   getChecklists: () => mockGetChecklists(),
+  getChecklistDay: (date) => mockGetChecklistDay(date),
   createChecklist: (name) => mockCreateChecklist(name),
   patchChecklist: (id, patch) => mockPatchChecklist(id, patch),
   deleteChecklist: (id) => mockDeleteChecklist(id),
