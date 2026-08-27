@@ -849,6 +849,42 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ collection: updated });
   });
 
+  app.get("/api/admin/collections/:id/payments", requireAdmin(db, config.jwtSecret), (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    const progress = listPayments(db, collection);
+    return c.json({ rows: progress.rows, paidCount: progress.paidCount, total: progress.total });
+  });
+
+  /** Галочка за другого: наличкой в руки сдают регулярно. */
+  app.post("/api/admin/collections/:id/payments/:employeeId", requireAdmin(db, config.jwtSecret), async (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+
+    const payerId = Number(c.req.param("employeeId"));
+    const me = c.get("auth").employeeId;
+    const result = setPaid(db, collection, payerId, me, body.paid);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+
+    // В журнал идёт только чужая галочка: «я отметился» — шум, «за меня
+    // отметили» — событие, у которого должен быть след.
+    if (payerId !== me) {
+      recordAudit(db, "collection_payment_marked", me, {
+        collectionId: collection.id,
+        employeeId: collection.employeeId,
+        title: previewCollection(db, collection).title,
+        payerId,
+        payerName: getEmployeeById(db, payerId)?.displayName ?? null,
+        paid: body.paid,
+      });
+    }
+
+    const progress = listPayments(db, collection);
+    return c.json({ rows: progress.rows, paidCount: progress.paidCount, total: progress.total });
+  });
+
   app.delete("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);

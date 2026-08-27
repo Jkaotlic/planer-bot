@@ -114,3 +114,45 @@ describe("GET /api/collections", () => {
     expect(anyas.collections[0]).toMatchObject({ paid: false, paidCount: 1, recipientCount: 2 });
   });
 });
+
+describe("админский список отметок", () => {
+  it("отдаёт всех получателей с галочками", async () => {
+    const { app, adminToken, igorToken, id } = await twoPeople();
+    await app.request(new Request(`http://x/api/admin/collections/${id}/send`, send(adminToken, { confirm: true }, "POST")));
+    await app.request(new Request(`http://x/api/collections/${id}/paid`, send(igorToken, { paid: true }, "POST")));
+
+    const body = await (await app.request(new Request(`http://x/api/admin/collections/${id}/payments`, auth(adminToken)))).json();
+    expect(body.paidCount).toBe(1);
+    expect(body.total).toBe(2);
+    expect(body.rows.find((r: { displayName: string }) => r.displayName === "Игорь")).toMatchObject({ paid: true, markedByAdmin: false });
+    expect(body.rows.find((r: { displayName: string }) => r.displayName === "Аня")).toMatchObject({ paid: false });
+  });
+
+  it("админ отмечает за другого — галочка помечена как поставленная чужой рукой", async () => {
+    const { app, adminToken, igor, id } = await twoPeople();
+
+    const res = await app.request(new Request(`http://x/api/admin/collections/${id}/payments/${igor}`,
+      send(adminToken, { paid: true }, "POST")));
+    expect(res.status).toBe(200);
+
+    const body = await (await app.request(new Request(`http://x/api/admin/collections/${id}/payments`, auth(adminToken)))).json();
+    expect(body.rows.find((r: { displayName: string }) => r.displayName === "Игорь")).toMatchObject({ paid: true, markedByAdmin: true });
+  });
+
+  it("отметка за другого пишется в журнал, своя — нет", async () => {
+    const { db, app, adminToken, admin, igor, id } = await twoPeople();
+
+    await app.request(new Request(`http://x/api/admin/collections/${id}/payments/${igor}`, send(adminToken, { paid: true }, "POST")));
+    await app.request(new Request(`http://x/api/admin/collections/${id}/payments/${admin}`, send(adminToken, { paid: true }, "POST")));
+
+    const marked = listRecentAudit(db, 50).filter((row) => row.type === "collection_payment_marked");
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.payload).toMatchObject({ payerId: igor, paid: true });
+  });
+
+  it("не-админа к списку не пускают", async () => {
+    const { app, igorToken, id } = await twoPeople();
+    const res = await app.request(new Request(`http://x/api/admin/collections/${id}/payments`, auth(igorToken)));
+    expect(res.status).toBe(403);
+  });
+});

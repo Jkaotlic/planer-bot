@@ -44,7 +44,7 @@ export const AUDIT_TYPES = [
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
   "birthday_campaign_updated",
   "collection_created", "collection_updated", "collection_sent",
-  "collection_closed", "collection_deleted",
+  "collection_closed", "collection_deleted", "collection_payment_marked",
   "reminder_undeliverable", "reminders_dispatched",
   "announcement_sent",
   "checklist_completed", "checklist_doc_changed", "checklist_changed",
@@ -66,7 +66,7 @@ export const HONOUREE_AUDIT_TYPES: readonly AuditType[] = [
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
   "birthday_campaign_updated",
   "collection_created", "collection_updated", "collection_sent",
-  "collection_closed", "collection_deleted",
+  "collection_closed", "collection_deleted", "collection_payment_marked",
 ];
 
 export interface AuditView {
@@ -497,6 +497,14 @@ const DESCRIBERS: Record<AuditType, Describer> = {
       ],
     };
   },
+  collection_payment_marked: (p) => ({
+    icon: "💰",
+    title: "Отметка о сдаче",
+    lines: [
+      str(p.title) ?? "сбор",
+      `${str(p.payerName) ?? "человек"} — ${p.paid === false ? "отметка снята" : "сдал"}`,
+    ],
+  }),
   collection_closed: (p) => ({
     icon: "💰",
     title: p.closed === false ? "Сбор открыт заново" : "Сбор закрыт",
