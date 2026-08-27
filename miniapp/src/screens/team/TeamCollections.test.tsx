@@ -147,4 +147,50 @@ describe("TeamCollections", () => {
     }
     expect(escaped).toEqual([]);
   });
+
+  it("тап по «Я перевёл» отмечает и меняет счёт", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([COFFEE]);
+    const mark = vi.spyOn(apiClient, "setCollectionPaid")
+      .mockResolvedValue({ paid: true, paidCount: 3, recipientCount: 5 });
+
+    const el = await mount();
+    expect(el.textContent ?? "").toContain("отметились 2 из 5");
+
+    const button = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Я перевёл"));
+    await act(async () => { button!.click(); });
+    await settle();
+
+    expect(mark).toHaveBeenCalledWith(1, true);
+    expect(el.textContent ?? "").toContain("Вы отметились");
+    expect(el.textContent ?? "").toContain("отметились 3 из 5");
+  });
+
+  it("снятая галочка возвращает кнопку «Я перевёл»", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([{ ...COFFEE, paid: true, paidCount: 3 }]);
+    vi.spyOn(apiClient, "setCollectionPaid").mockResolvedValue({ paid: false, paidCount: 2, recipientCount: 5 });
+
+    const el = await mount();
+    const button = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Вы отметились"));
+    await act(async () => { button!.click(); });
+    await settle();
+
+    expect(el.textContent ?? "").toContain("Я перевёл");
+    expect(el.textContent ?? "").toContain("отметились 2 из 5");
+  });
+
+  // Галочка — утверждение человека о деньгах. Показать её, не записав, значит
+  // показать неправду: он уйдёт с экрана уверенным, что отметился.
+  it("отказ сервера не оставляет галочку на экране", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([COFFEE]);
+    vi.spyOn(apiClient, "setCollectionPaid").mockRejectedValue(new Error("Сбор закрыт"));
+
+    const el = await mount();
+    const button = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Я перевёл"));
+    await act(async () => { button!.click(); });
+    await settle();
+
+    expect(el.textContent ?? "").toContain("Я перевёл");
+    expect(el.textContent ?? "").not.toContain("Вы отметились");
+    expect(el.textContent ?? "").toContain("отметились 2 из 5");
+  });
 });
