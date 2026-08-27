@@ -20,6 +20,7 @@ export * from "./roster-summary";
 export * from "./rotation";
 export * from "./birthday";
 export * from "./collection";
+export * from "./collection-payment";
 export * from "./self-entry";
 export * from "./handover";
 export * from "./address";

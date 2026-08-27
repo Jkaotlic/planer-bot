@@ -15,6 +15,7 @@ import {
   type CollectionPreview,
   type CollectionRow,
   type Employee,
+  type PaymentRow,
   type UpcomingBirthday,
 } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
@@ -970,6 +971,8 @@ function CollectionEditor({
         />
       )}
 
+      <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} />
+
       <Button
         size="s"
         mode="bezeled"
@@ -999,6 +1002,136 @@ function CollectionEditor({
         </Button>
       )}
     </div>
+  );
+}
+
+
+/**
+ * Кто сдал, а кто нет — поимённо, и кнопка дожима по тем, кто ещё нет.
+ *
+ * Поимённый список живёт только здесь: команде во вкладке «Команда» видна одна
+ * цифра. У человека может просто не быть денег до зарплаты, и превращать это в
+ * общее знание — не та цена, которую платят за подарок коллеге.
+ *
+ * Грузится при раскрытии карточки, а не вместе со списком: сборов бывает
+ * десяток, а раскрыт один.
+ */
+function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canRemind: boolean }) {
+  const [rows, setRows] = useState<PaymentRow[]>([]);
+  const [paidCount, setPaidCount] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiClient
+      .getCollectionPayments(collectionId)
+      .then((loaded) => {
+        if (!alive) return;
+        setRows(loaded.rows);
+        setPaidCount(loaded.paidCount);
+        setTotal(loaded.total);
+      })
+      .catch(() => { if (alive) setError("Не удалось загрузить отметки"); });
+    return () => { alive = false; };
+  }, [collectionId]);
+
+  const unpaidCount = total - paidCount;
+
+  function toggle(row: PaymentRow) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    apiClient
+      .setCollectionPaymentFor(collectionId, row.employeeId, !row.paid)
+      .then((loaded) => {
+        setRows(loaded.rows);
+        setPaidCount(loaded.paidCount);
+        setTotal(loaded.total);
+      })
+      // Экран не перекрашивается, пока сервер не подтвердил: галочка — это
+      // утверждение о деньгах, и показать её, не записав, значит соврать.
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отметить"))
+      .finally(() => setBusy(false));
+  }
+
+  function remind() {
+    setBusy(true);
+    setError(null);
+    apiClient
+      .remindUnpaid(collectionId)
+      .then((result) => {
+        setConfirming(false);
+        setNotice(`Напомнил: дошло до ${result.delivered} из ${result.intended}.`);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось напомнить"))
+      .finally(() => setBusy(false));
+  }
+
+  return (
+    <>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
+        Отметились {paidCount} из {total}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {rows.map((row) => (
+          <button
+            key={row.employeeId}
+            type="button"
+            data-testid={`payment-toggle-${row.employeeId}`}
+            disabled={busy}
+            onClick={() => toggle(row)}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
+              borderRadius: 8, border: "none", background: "var(--tgui--secondary_bg_color)",
+              fontSize: 13.5, textAlign: "left", color: "var(--tgui--text_color)", cursor: "pointer",
+            }}
+          >
+            <span style={{ width: 16 }}>{row.paid ? "✓" : "·"}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>{row.displayName}</span>
+            {/* «Я отметился» и «за меня отметили» — разные утверждения, и на
+                экране это должно быть видно. */}
+            {row.markedByAdmin && (
+              <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>отметил админ</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {confirming ? (
+        <>
+          <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+            Напомнить {unpaidCount === 1 ? "одному человеку" : `${unpaidCount} коллегам`}? Сообщения уйдут сразу.
+          </div>
+          <Button size="s" mode="filled" stretched loading={busy} disabled={busy} onClick={remind}>
+            Да, напомнить
+          </Button>
+          <Button size="s" mode="gray" stretched disabled={busy} onClick={() => setConfirming(false)}>
+            Отмена
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="s"
+          mode="bezeled"
+          stretched
+          disabled={busy || unpaidCount === 0 || !canRemind}
+          onClick={() => setConfirming(true)}
+        >
+          Напомнить не сдавшим ({unpaidCount})
+        </Button>
+      )}
+      {!canRemind && (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+          Сбор ещё не рассылали — дожимать нечего.
+        </div>
+      )}
+      {notice && <div style={{ fontSize: 13, lineHeight: 1.45 }}>{notice}</div>}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
+    </>
   );
 }
 
@@ -1326,6 +1459,12 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<CardProps, "open" 
             onSend={() => void handleSend()}
           />
         )
+      )}
+
+      {/* Отметки и у раунда ДР: скидываются на подарок ровно так же, а виновник
+          в получатели не входит никогда — сюрприз этим не выдаётся. */}
+      {birthday.campaign && (
+        <PaymentsBlock collectionId={birthday.campaign.id} canRemind={birthday.campaign.sendCount > 0} />
       )}
     </div>
   );

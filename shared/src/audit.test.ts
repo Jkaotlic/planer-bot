@@ -547,3 +547,22 @@ describe("describeAuditEvent — расстановка диапазоном", (
     expect(view.lines.join(" ")).not.toContain("пропущено");
   });
 });
+
+describe("отметки о сдаче в журнале", () => {
+  it("отметку за другого журнал читает по-русски", () => {
+    const view = describeAuditEvent({
+      type: "collection_payment_marked",
+      payload: { title: "Кофемашина", payerName: "Игорь", paid: true },
+    });
+    expect(view.title).toBe("Отметка о сдаче");
+    expect(view.lines).toContain("Игорь — сдал");
+  });
+
+  it("снятую отметку журнал отличает от поставленной", () => {
+    const view = describeAuditEvent({
+      type: "collection_payment_marked",
+      payload: { title: "Кофемашина", payerName: "Игорь", paid: false },
+    });
+    expect(view.lines).toContain("Игорь — отметка снята");
+  });
+});

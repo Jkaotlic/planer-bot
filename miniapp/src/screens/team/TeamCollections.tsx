@@ -67,6 +67,24 @@ function subjectOf(row: WorkerCollection): string {
 
 function CollectionCard({ row }: { row: WorkerCollection }) {
   const [copied, setCopied] = useState(false);
+  const [paid, setPaid] = useState(row.paid);
+  const [paidCount, setPaidCount] = useState(row.paidCount);
+  const [busy, setBusy] = useState(false);
+
+  const togglePaid = () => {
+    if (busy) return;
+    setBusy(true);
+    apiClient
+      .setCollectionPaid(row.id, !paid)
+      .then((result) => {
+        setPaid(result.paid);
+        setPaidCount(result.paidCount);
+      })
+      // Отказ оставляет кнопку как была: галочка — это утверждение человека о
+      // деньгах, и показать её, не записав, значит показать неправду.
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
   const meta = [
     row.amountPerPerson != null ? `по ${formatMoney(row.amountPerPerson)}` : null,
     row.totalGoal != null ? `нужно ${formatMoney(row.totalGoal)}` : null,
@@ -115,6 +133,16 @@ function CollectionCard({ row }: { row: WorkerCollection }) {
           </Button>
         </div>
       )}
+      {/* «Отметились», а не «сдали»: бот знает только то, что человек нажал
+          кнопку, и подпись не должна утверждать больше, чем он проверял. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Button size="s" mode={paid ? "gray" : "bezeled"} disabled={busy} onClick={togglePaid}>
+          {paid ? "Вы отметились ✓" : "Я перевёл"}
+        </Button>
+        <span style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+          отметились {paidCount} из {row.recipientCount}
+        </span>
+      </div>
     </CardShell>
   );
 }

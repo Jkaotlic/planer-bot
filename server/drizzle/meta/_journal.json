@@ -218,6 +218,13 @@
       "when": 1787584971987,
       "tag": "0030_reminder_text_and_hour",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787588571987,
+      "tag": "0031_collection_payments",
+      "breakpoints": true
     }
   ]
 }

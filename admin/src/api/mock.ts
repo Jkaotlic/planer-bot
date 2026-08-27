@@ -42,6 +42,7 @@ import {
   daysUntilBirthday,
   formatBirthDate,
   outgoingCollectionMessage,
+  paymentProgress,
   collectionTitle,
   collectionStatus,
   isCollectionActive,
@@ -675,6 +676,51 @@ function personNameOf(employeeId: number | null): string | null {
 function mockRecipients(employeeId: number | null): { employeeId: number; displayName: string }[] {
   return EMPLOYEES.filter((e) => e.isActive && e.id !== employeeId && e.telegramUserId != null)
     .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
+}
+
+/**
+ * Отметки о сдаче: ключ `${collectionId}:${employeeId}` → чья рука поставила.
+ *
+ * Счёт считается через `paymentProgress` из `@planer/shared`, а не руками: мок,
+ * который считает по-своему, показывает на дев-экране не то, что покажет прод.
+ */
+const PAYMENTS = new Map<string, number>();
+
+function progressOf(collectionId: number) {
+  const collection = findCollection(collectionId);
+  const marks = [...PAYMENTS.entries()]
+    .filter(([key]) => key.startsWith(`${collectionId}:`))
+    .map(([key, markedBy]) => ({ employeeId: Number(key.split(":")[1]), markedBy }));
+  return paymentProgress(mockRecipients(collection?.employeeId ?? null), marks);
+}
+
+export async function mockGetCollectionPayments(id: number) {
+  await delay(200);
+  const progress = progressOf(id);
+  return { rows: progress.rows, paidCount: progress.paidCount, total: progress.total };
+}
+
+export async function mockSetCollectionPaymentFor(id: number, employeeId: number, paid: boolean) {
+  await delay(200);
+  if (paid) PAYMENTS.set(`${id}:${employeeId}`, viewerEmployeeId());
+  else PAYMENTS.delete(`${id}:${employeeId}`);
+  const progress = progressOf(id);
+  return { rows: progress.rows, paidCount: progress.paidCount, total: progress.total };
+}
+
+export async function mockSetCollectionPaid(id: number, paid: boolean) {
+  await delay(200);
+  if (paid) PAYMENTS.set(`${id}:${viewerEmployeeId()}`, viewerEmployeeId());
+  else PAYMENTS.delete(`${id}:${viewerEmployeeId()}`);
+  const progress = progressOf(id);
+  return { paid, paidCount: progress.paidCount, recipientCount: progress.total };
+}
+
+export async function mockRemindUnpaid(id: number) {
+  await delay(400);
+  const waiting = progressOf(id).unpaid.length;
+  if (waiting === 0) throw new Error("Все уже отметились.");
+  return { delivered: waiting, intended: waiting };
 }
 
 /** То, что реально уйдёт команде, и кому — теми же правилами, что у сервера. */

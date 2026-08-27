@@ -14,6 +14,7 @@ import {
   type CollectionPreview,
   type CollectionRow,
   type Employee,
+  type PaymentRow,
   type UpcomingBirthday,
 } from "../api/client";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
@@ -904,7 +905,130 @@ function CollectionEditor({
           onSend={() => void handleSend()}
         />
       )}
+
+      <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} />
     </div>
+  );
+}
+
+
+/**
+ * Кто сдал, а кто нет — поимённо, и дожим по тем, кто ещё нет.
+ *
+ * Тот же блок, что во вкладке админа в мини-аппе. Счёт приходит с сервера, а
+ * не считается здесь: два независимых счёта разъезжаются на третьем месяце,
+ * чему в этом репозитории уже есть примеры.
+ *
+ * Грузится при раскрытии карточки, а не вместе со списком: сборов бывает
+ * десяток, а раскрыт один.
+ */
+function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canRemind: boolean }) {
+  const [rows, setRows] = useState<PaymentRow[]>([]);
+  const [paidCount, setPaidCount] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiClient
+      .getCollectionPayments(collectionId)
+      .then((loaded) => {
+        if (!alive) return;
+        setRows(loaded.rows);
+        setPaidCount(loaded.paidCount);
+        setTotal(loaded.total);
+      })
+      .catch(() => { if (alive) setError("Не удалось загрузить отметки"); });
+    return () => { alive = false; };
+  }, [collectionId]);
+
+  const unpaidCount = total - paidCount;
+
+  function toggle(row: PaymentRow) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    apiClient
+      .setCollectionPaymentFor(collectionId, row.employeeId, !row.paid)
+      .then((loaded) => {
+        setRows(loaded.rows);
+        setPaidCount(loaded.paidCount);
+        setTotal(loaded.total);
+      })
+      // Пока сервер не подтвердил, экран не перекрашивается: галочка — это
+      // утверждение о деньгах, и показать её, не записав, значит соврать.
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отметить"))
+      .finally(() => setBusy(false));
+  }
+
+  function remind() {
+    setBusy(true);
+    setError(null);
+    apiClient
+      .remindUnpaid(collectionId)
+      .then((result) => {
+        setConfirming(false);
+        setNotice(`Напомнил: дошло до ${result.delivered} из ${result.intended}.`);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось напомнить"))
+      .finally(() => setBusy(false));
+  }
+
+  return (
+    <>
+      <div className="birthday-preview-title">
+        Отметились {paidCount} из {total}
+      </div>
+      <div className="birthday-recipients">
+        {rows.map((row) => (
+          <button
+            key={row.employeeId}
+            type="button"
+            className="btn btn-secondary"
+            data-testid={`payment-toggle-${row.employeeId}`}
+            disabled={busy}
+            onClick={() => toggle(row)}
+          >
+            {row.paid ? "✓ " : "· "}
+            {row.displayName}
+            {/* «Я отметился» и «за меня отметили» — разные утверждения, и на
+                экране это должно быть видно. */}
+            {row.markedByAdmin ? " (отметил админ)" : ""}
+          </button>
+        ))}
+      </div>
+
+      {confirming ? (
+        <div className="birthday-confirm">
+          <span>
+            Напомнить {unpaidCount === 1 ? "одному человеку" : `${unpaidCount} коллегам`}? Сообщения уйдут сразу.
+          </span>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={remind}>
+            Да, напомнить
+          </button>
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setConfirming(false)}>
+            Отмена
+          </button>
+        </div>
+      ) : (
+        <div className="journal-controls">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={busy || unpaidCount === 0 || !canRemind}
+            onClick={() => setConfirming(true)}
+          >
+            Напомнить не сдавшим ({unpaidCount})
+          </button>
+        </div>
+      )}
+      {!canRemind && <div className="birthday-blocker">Сбор ещё не рассылали — дожимать нечего.</div>}
+      {notice && <div className="birthday-preview-title">{notice}</div>}
+      {error && <div className="employees-error">{error}</div>}
+    </>
   );
 }
 
@@ -1152,6 +1276,12 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
             onSend={() => void handleSend()}
           />
         )
+      )}
+
+      {/* Отметки и у раунда ДР: на подарок скидываются так же, а виновник в
+          получатели не входит никогда — сюрприз дожимом не выдаётся. */}
+      {birthday.campaign && (
+        <PaymentsBlock collectionId={birthday.campaign.id} canRemind={birthday.campaign.sendCount > 0} />
       )}
     </div>
   );

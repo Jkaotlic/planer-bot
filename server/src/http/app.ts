@@ -131,6 +131,7 @@ import {
   recipientsOf,
   collectionsForWorker,
 } from "../collections/collection-service";
+import { listPayments, setPaid, unpaidRecipients } from "../collections/payment-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 import {
   ANNOUNCEMENT_TEXT_MAX,
@@ -831,6 +832,58 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
   });
 
+  /**
+   * Дожим по неотметившимся.
+   *
+   * Отдельная ручка, а не флаг у `/send`: обычная рассылка уходит всем, и у неё
+   * есть свой случай — поменялась ссылка, и знать об этом должны все, включая
+   * сдавших. Здесь получателей ровно столько, сколько человек ещё не нажали
+   * «я перевёл».
+   *
+   * Блокер «уже разослано» с рассылки сюда НЕ переносится, включая сбор на день
+   * рождения: тот блокер защищает команду от второго одинакового письма всем, а
+   * это письмо уходит забывшим, и виновник в получатели не входит никогда.
+   */
+  app.post("/api/admin/collections/:id/remind-unpaid", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
+    if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+
+    if (collection.sendCount === 0) return c.json({ error: "Сбор ещё не рассылали — дожимать нечего." }, 409);
+    if (collection.closedAt != null) return c.json({ error: "Сбор закрыт — рассылать нечего." }, 409);
+    const waiting = unpaidRecipients(db, collection);
+    if (waiting.length === 0) return c.json({ error: "Все уже отметились." }, 409);
+    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+
+    // Тот же замок, что у обычной рассылки: два нажатия подряд не должны
+    // отправить людям два письма.
+    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
+    collectionSending.add(collection.id);
+    try {
+      // Текст берём из превью: `collectionMessage` на втором раунде уже звучит
+      // как «⏰ Напоминаю про сбор», и второй текст был бы вторым источником
+      // одной формулировки.
+      const preview = previewCollection(db, collection);
+      let delivered = 0;
+      for (const recipient of waiting) {
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+      }
+      // `sentAt` и `sendCount` не трогаем: они отвечают на вопрос «когда и
+      // сколько раз письмо ушло команде», а это письмо ушло не команде.
+      recordAudit(db, "collection_reminded", c.get("auth").employeeId, {
+        collectionId: collection.id,
+        employeeId: collection.employeeId,
+        title: preview.title,
+        delivered,
+        intended: waiting.length,
+      });
+      return c.json({ delivered, intended: waiting.length });
+    } finally {
+      collectionSending.delete(collection.id);
+    }
+  });
+
   app.post("/api/admin/collections/:id/close", requireAdmin(db, config.jwtSecret), async (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
@@ -846,6 +899,42 @@ export function createApp(deps: AppDeps): Hono<Env> {
       closed: body.closed,
     });
     return c.json({ collection: updated });
+  });
+
+  app.get("/api/admin/collections/:id/payments", requireAdmin(db, config.jwtSecret), (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    const progress = listPayments(db, collection);
+    return c.json({ rows: progress.rows, paidCount: progress.paidCount, total: progress.total });
+  });
+
+  /** Галочка за другого: наличкой в руки сдают регулярно. */
+  app.post("/api/admin/collections/:id/payments/:employeeId", requireAdmin(db, config.jwtSecret), async (c) => {
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+
+    const payerId = Number(c.req.param("employeeId"));
+    const me = c.get("auth").employeeId;
+    const result = setPaid(db, collection, payerId, me, body.paid);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+
+    // В журнал идёт только чужая галочка: «я отметился» — шум, «за меня
+    // отметили» — событие, у которого должен быть след.
+    if (payerId !== me) {
+      recordAudit(db, "collection_payment_marked", me, {
+        collectionId: collection.id,
+        employeeId: collection.employeeId,
+        title: previewCollection(db, collection).title,
+        payerId,
+        payerName: getEmployeeById(db, payerId)?.displayName ?? null,
+        paid: body.paid,
+      });
+    }
+
+    const progress = listPayments(db, collection);
+    return c.json({ rows: progress.rows, paidCount: progress.paidCount, total: progress.total });
   });
 
   app.delete("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), (c) => {
@@ -1660,6 +1749,34 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
     return c.json({ collections: collectionsForWorker(db, asOf, c.get("auth").employeeId) });
+  });
+
+  /**
+   * «Я перевёл» — своя галочка и ничья больше.
+   *
+   * Отметиться можно только по тому сбору, который человек и так видит: свой
+   * (где он виновник) он не видит нигде, и отметка в нём выдала бы сюрприз.
+   */
+  app.post("/api/collections/:id/paid", requireAuth(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+
+    const me = c.get("auth").employeeId;
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+
+    const id = Number(c.req.param("id"));
+    const visible = collectionsForWorker(db, asOf, me).some((row) => row.id === id);
+    if (!visible) return c.json({ error: "not_found" }, 404);
+
+    const collection = getCollection(db, id);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+
+    const result = setPaid(db, collection, me, me, body.paid);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+
+    const progress = listPayments(db, collection);
+    return c.json({ paid: body.paid, paidCount: progress.paidCount, recipientCount: progress.total });
   });
 
   // Admin: post a new vacant slot
