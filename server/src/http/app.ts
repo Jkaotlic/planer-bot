@@ -832,6 +832,58 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
   });
 
+  /**
+   * Дожим по неотметившимся.
+   *
+   * Отдельная ручка, а не флаг у `/send`: обычная рассылка уходит всем, и у неё
+   * есть свой случай — поменялась ссылка, и знать об этом должны все, включая
+   * сдавших. Здесь получателей ровно столько, сколько человек ещё не нажали
+   * «я перевёл».
+   *
+   * Блокер «уже разослано» с рассылки сюда НЕ переносится, включая сбор на день
+   * рождения: тот блокер защищает команду от второго одинакового письма всем, а
+   * это письмо уходит забывшим, и виновник в получатели не входит никогда.
+   */
+  app.post("/api/admin/collections/:id/remind-unpaid", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
+    if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
+    const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+
+    if (collection.sendCount === 0) return c.json({ error: "Сбор ещё не рассылали — дожимать нечего." }, 409);
+    if (collection.closedAt != null) return c.json({ error: "Сбор закрыт — рассылать нечего." }, 409);
+    const waiting = unpaidRecipients(db, collection);
+    if (waiting.length === 0) return c.json({ error: "Все уже отметились." }, 409);
+    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+
+    // Тот же замок, что у обычной рассылки: два нажатия подряд не должны
+    // отправить людям два письма.
+    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
+    collectionSending.add(collection.id);
+    try {
+      // Текст берём из превью: `collectionMessage` на втором раунде уже звучит
+      // как «⏰ Напоминаю про сбор», и второй текст был бы вторым источником
+      // одной формулировки.
+      const preview = previewCollection(db, collection);
+      let delivered = 0;
+      for (const recipient of waiting) {
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+      }
+      // `sentAt` и `sendCount` не трогаем: они отвечают на вопрос «когда и
+      // сколько раз письмо ушло команде», а это письмо ушло не команде.
+      recordAudit(db, "collection_reminded", c.get("auth").employeeId, {
+        collectionId: collection.id,
+        employeeId: collection.employeeId,
+        title: preview.title,
+        delivered,
+        intended: waiting.length,
+      });
+      return c.json({ delivered, intended: waiting.length });
+    } finally {
+      collectionSending.delete(collection.id);
+    }
+  });
+
   app.post("/api/admin/collections/:id/close", requireAdmin(db, config.jwtSecret), async (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
