@@ -2,6 +2,7 @@ import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 import type {
   AdminEmployeeDto,
+  ChecklistDelivery,
   CreateEmployeeResponse,
   EntryCategory,
   EntryRangeSkip,
@@ -204,7 +205,7 @@ export interface Checklist {
   templateIds: number[];
 }
 
-/** Сводка «кто сегодня какой чек-лист проходит и сколько отметил». */
+/** Сводка «кто сегодня какой чек-лист проходит, дойдёт ли до него сообщение и сколько отмечено». */
 export interface ChecklistDay {
   date: string;
   people: {
@@ -214,6 +215,9 @@ export interface ChecklistDay {
     checklistName: string;
     done: number;
     total: number;
+    /** Начало смены — момент, в который уходит сообщение. `null` у смены «своим временем». */
+    start: string | null;
+    delivery: ChecklistDelivery;
   }[];
 }
 

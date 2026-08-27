@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { InlineKeyboard, InputFile, type Bot } from "grammy";
-import { checklistText, checklistsDueToday } from "@planer/shared";
+import { checklistHasContent, checklistText, checklistsDueToday } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
@@ -8,14 +8,8 @@ import { getChecklist, updateChecklist } from "../repo/checklists";
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { addReminder, hasReminder } from "../repo/reminders";
+import { addReminder, CHECKLIST_KIND, hasReminder } from "../repo/reminders";
 import { safeErrorMessage } from "../util/safe-error";
-
-/**
- * Своё имя вида в `reminder_log`, рядом с `evening_before`: дедупликация та же
- * (одно письмо на смену на вид), а таблица уже есть и уже переживает рестарты.
- */
-const CHECKLIST_KIND = "duty_checklist";
 
 /**
  * Утреннее сообщение дежурному с чек-листом.
@@ -58,7 +52,7 @@ export async function runChecklistTick(
     if (!list) continue;
     const items = activeChecklistItems(db, checklistId);
     const hasDoc = Boolean(list.docUrl || list.docFileId || list.docPath);
-    if (items.length === 0 && !list.note && !hasDoc) continue;
+    if (!checklistHasContent({ items, note: list.note, hasDoc })) continue;
 
     // Смена ещё не началась — человек не на этаже, и проверять нечего.
     if (shift.start != null && now.time < shift.start) continue;

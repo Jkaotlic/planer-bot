@@ -3,7 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChecklistScreen } from "./ChecklistScreen";
-import { apiClient, type Checklist, type ChecklistDay, type Template } from "../api/client";
+import { CHECKLIST_RULE_TEXT } from "@planer/shared";
+import { apiClient, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../api/client";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -38,6 +39,13 @@ const TEMPLATES: Template[] = [
 const checklist = (over: Partial<Checklist>): Checklist => ({
   id: 1, name: "Дежурство с 07:00", note: null, docUrl: null, docName: null, hasDoc: false,
   items: [], templateIds: [], ...over,
+});
+
+const item = (over: Partial<ChecklistItem> = {}): ChecklistItem => ({ id: 1, title: "Открыть 47-й", note: null, ...over });
+
+const person = (over: Partial<ChecklistDay["people"][number]>): ChecklistDay["people"][number] => ({
+  employeeId: 3, displayName: "Марк", checklistId: 1, checklistName: "С 07:00",
+  done: 0, total: 2, start: "07:00", delivery: "scheduled", ...over,
 });
 
 const EMPTY_DAY: ChecklistDay = { date: "2026-08-24", people: [] };
@@ -90,7 +98,7 @@ describe("экран «Чек-листы»", () => {
 
   it("говорит, когда чек-лист никому не назначен", async () => {
     const el = await mount([checklist({ name: "Ничей" })]);
-    expect(el.querySelector(".kind-card-head")!.textContent).toContain("никому не назначен");
+    expect(el.querySelector(".kind-card-head")!.textContent).toContain("не выбран вид смены");
   });
 
   it("заводит новый чек-лист по имени", async () => {
@@ -203,9 +211,91 @@ describe("экран «Чек-листы»", () => {
   it("сводка дня называет каждому его чек-лист", async () => {
     const el = await mount([checklist({ id: 1, name: "С 07:00" })], {
       date: "2026-08-24",
-      people: [{ employeeId: 3, displayName: "Волков Марк", checklistId: 1, checklistName: "С 07:00", done: 1, total: 2 }],
+      people: [person({ displayName: "Волков Марк", done: 1 })],
     });
     expect(el.textContent).toContain("Волков Марк");
     expect(el.textContent).toContain("1 из 2");
+  });
+
+  /**
+   * Ровно та непонятность, ради которой правка: заполнил админ список или нет и
+   * уйдёт ли он кому-нибудь — по экрану было не понять.
+   */
+  it("шапка карточки говорит, уходит список и кому", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00", items: [item()], templateIds: [6] })]);
+    expect(el.textContent).toContain("Уходит: Дежурство с 07:00");
+  });
+
+  it("заполненный, но никому не назначенный список назван неуходящим", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00", items: [item()], templateIds: [] })]);
+    expect(el.textContent).toContain("Не уходит: не выбран вид смены");
+  });
+
+  it("назначенный, но пустой список назван неуходящим — и всё равно называет, кому назначен", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00", items: [], templateIds: [6] })]);
+    expect(el.textContent).toContain("Не уходит: ни пунктов, ни пояснения, ни файла");
+    expect(el.textContent).toContain("Назначен: Дежурство с 07:00");
+  });
+
+  // Пунктов нет, а пояснение есть — бот такое шлёт с 2026-08-26, и экран обязан
+  // говорить то же самое.
+  it("список с одним пояснением показан уходящим", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00", note: "Обход от лифтов", templateIds: [6] })]);
+    expect(el.textContent).toContain("Уходит: Дежурство с 07:00");
+  });
+
+  it("внутри карточки написано правило: кому и когда уходит", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00", items: [item()], templateIds: [6] })]);
+    await openCard(el, "С 07:00");
+    expect(el.textContent).toContain(CHECKLIST_RULE_TEXT);
+  });
+
+  it("в сводке дня видно время отправки и её исход", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00" })], {
+      date: "2026-08-24",
+      people: [
+        person({ employeeId: 3, displayName: "Марк", start: "07:00", delivery: "sent" }),
+        person({ employeeId: 4, displayName: "Аня", start: "08:00", delivery: "scheduled" }),
+        person({ employeeId: 5, displayName: "Игорь", start: "07:00", delivery: "muted" }),
+      ],
+    });
+    expect(el.textContent).toContain("уже отправлено");
+    expect(el.textContent).toContain("уйдёт в 08:00");
+    expect(el.textContent).toContain("не уйдёт: напоминания выключены");
+  });
+
+  /**
+   * Пояснение и ссылка сохраняются кнопкой, а виды смен и пункты — сразу по
+   * клику. Разница ничем не показывалась, и уйти с экрана, потеряв текст, можно
+   * было молча.
+   */
+  it("говорит, что правка ещё не сохранена, и подтверждает сохранение", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00" })]);
+    const saved = checklist({ id: 1, name: "С 07:00", note: "Обходим по часовой" });
+    vi.spyOn(apiClient, "patchChecklist").mockResolvedValue(saved);
+    // Перечитывание после правки отдаёт уже сохранённый текст — так ведёт себя
+    // сервер, и именно на этом держится признак «сохранено».
+    vi.spyOn(apiClient, "getChecklists").mockResolvedValue([saved]);
+    await openCard(el, "С 07:00");
+    expect(el.textContent).not.toContain("Не сохранено");
+
+    const note = el.querySelector<HTMLTextAreaElement>("#checklist-note-1")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(note, "Обходим по часовой");
+      note.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(el.textContent).toContain("Не сохранено");
+
+    await act(async () => buttonByText(el, "Сохранить инструкцию").click());
+    await settle();
+    expect(el.textContent).toContain("Сохранено");
+    expect(el.textContent).not.toContain("Не сохранено");
+  });
+
+  // Экран годами обещал обратное: «пока в списке нет пунктов, бот по нему ничего
+  // не присылает» перестало быть правдой 2026-08-26.
+  it("не обещает молчания по спискам без пунктов", async () => {
+    const el = await mount([checklist({ id: 1, name: "С 07:00" })]);
+    expect(el.textContent).not.toContain("Пока в списке нет пунктов, бот по нему ничего не присылает");
   });
 });

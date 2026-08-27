@@ -1,4 +1,11 @@
 import { useEffect, useState } from "react";
+import {
+  CHECKLIST_RULE_TEXT,
+  checklistDeliveryLabel,
+  checklistDispatchLabel,
+  checklistDispatchState,
+  checklistHasContent,
+} from "@planer/shared";
 import { apiClient, AuthRequiredError, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../api/client";
 import { toISODate } from "../lib/week";
 
@@ -66,7 +73,7 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
       <p className="birthday-intro">
         Проверки, которые дежурный проходит в свою смену. Списков может быть несколько — у выходящих
         в 07:00 и в 08:00 они разные. Кому какой положен, задаётся строкой «Кому положен» внутри
-        списка. Пока в списке нет пунктов, бот по нему ничего не присылает.
+        списка. {CHECKLIST_RULE_TEXT}
       </p>
 
       {error && <div className="employees-error">{error}</div>}
@@ -126,6 +133,10 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
               <span className="employee-row-name" title={person.displayName}>{person.displayName}</span>
               <span className="status-chip">{person.checklistName}</span>
               <span className="employee-row-spacer" />
+              {/* Судьба сообщения рядом с прогрессом: «0 из 5» у того, кому
+                  ничего не ушло, читается как лень человека, а не как выключенные
+                  напоминания. */}
+              <span className="status-chip">{checklistDeliveryLabel(person.delivery, person.start)}</span>
               <span className={`status-chip${person.done >= person.total ? " status-chip-done" : ""}`}>
                 {person.done} из {person.total}
               </span>
@@ -154,6 +165,12 @@ function ChecklistCard({
 }) {
   const [itemDraft, setItemDraft] = useState("");
   const linked = templates.filter((t) => list.templateIds.includes(t.id));
+  // «Уходит или нет» — тем же правилом, которым живёт рассылка. Ссылка на
+  // документ считается содержимым наравне с файлом: бот вешает её кнопкой.
+  const dispatch = checklistDispatchState({
+    hasContent: checklistHasContent({ items: list.items, note: list.note, hasDoc: list.hasDoc || Boolean(list.docUrl) }),
+    linkedTemplateCount: linked.length,
+  });
 
   return (
     <section className="kind-card">
@@ -162,7 +179,7 @@ function ChecklistCard({
         <span className="kind-meta">
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
-          {linked.length === 0 ? "никому не назначен" : linked.map((t) => t.name).join(", ")}
+          {checklistDispatchLabel(dispatch, linked.map((t) => t.name))}
         </span>
         <span className="kind-chevron">{open ? "▴" : "▾"}</span>
       </button>
@@ -195,6 +212,13 @@ function ChecklistCard({
               );
             })}
           </div>
+          {/* Правило стоит там, где вопрос и возникает: выбрал вид смены — тут же
+              читаешь, что из этого следует. Выбор сохраняется по клику, и это
+              сказано прямо: рядом есть кнопка «Сохранить инструкцию», и разницу
+              между ними приходилось угадывать. */}
+          <p className="birthday-intro" style={{ marginTop: 4 }}>
+            {CHECKLIST_RULE_TEXT} Виды смен и пункты сохраняются сразу.
+          </p>
 
           <span className="field-label" style={{ marginTop: 12 }}>Пункты</span>
           {list.items.length === 0 ? (
@@ -243,7 +267,7 @@ function ChecklistCard({
           <InstructionEditor
             list={list}
             busy={busy}
-            onSave={(patch) => void run(() => apiClient.patchChecklist(list.id, patch))}
+            onSave={(patch) => run(() => apiClient.patchChecklist(list.id, patch))}
             onRemoveDoc={() => void run(() => apiClient.removeChecklistDoc(list.id))}
             onUploadDoc={(file) => void run(() => apiClient.uploadChecklistDoc(list.id, file))}
           />
@@ -279,13 +303,16 @@ function InstructionEditor({
 }: {
   list: Checklist;
   busy: boolean;
-  onSave: (patch: { note: string | null; docUrl: string | null }) => void;
+  onSave: (patch: { note: string | null; docUrl: string | null }) => void | Promise<void>;
   onRemoveDoc: () => void;
   onUploadDoc: (file: File) => void;
 }) {
   const [note, setNote] = useState(list.note ?? "");
   const [docUrl, setDocUrl] = useState(list.docUrl ?? "");
   const dirty = note !== (list.note ?? "") || docUrl !== (list.docUrl ?? "");
+  // Пояснение и ссылка — единственное здесь, что не сохраняется по клику, и уйти
+  // с экрана, потеряв набранный текст, можно было молча.
+  const [saved, setSaved] = useState(false);
 
   return (
     <div className="checklist-instruction">
@@ -313,15 +340,19 @@ function InstructionEditor({
         onChange={(e) => setDocUrl(e.target.value)}
       />
 
-      <div className="panel-actions" style={{ justifyContent: "flex-start" }}>
+      <div className="panel-actions" style={{ justifyContent: "flex-start", alignItems: "center", gap: 8 }}>
         <button
           type="button"
           className="btn btn-primary"
           disabled={busy || !dirty}
-          onClick={() => onSave({ note: note.trim() || null, docUrl: docUrl.trim() || null })}
+          onClick={() => {
+            setSaved(false);
+            void Promise.resolve(onSave({ note: note.trim() || null, docUrl: docUrl.trim() || null })).then(() => setSaved(true));
+          }}
         >
           Сохранить инструкцию
         </button>
+        {dirty ? <span className="status-chip">Не сохранено</span> : saved && <span className="status-chip status-chip-done">Сохранено</span>}
       </div>
 
       {/* Файл ложится на диск сервера: браузер не умеет положить документ в

@@ -10,6 +10,7 @@ import type {
   NewEntryRangeInput,
   EntryRangeResult,
   Checklist,
+  ChecklistDay,
   MyChecklists,
   NewSlotInput,
   PayrollRow,
@@ -1858,6 +1859,29 @@ export async function mockMarkChecklistItem(
   return {
     checklistId: list.id,
     markedItemIds: list.items.filter((i) => CHECKLIST_MARKS.has(`${date}:${i.id}`)).map((i) => i.id),
+  };
+}
+
+/**
+ * DEV-сводка дня: три исхода рядом — отправлено, ждёт своего часа и не уйдёт
+ * вовсе. На демо-данных именно это и надо увидеть: сводка отвечает не только
+ * «сколько отмечено».
+ */
+export async function mockGetChecklistDay(date?: string): Promise<ChecklistDay> {
+  const day = date ?? new Date().toISOString().slice(0, 10);
+  await delay(140);
+  const list = CHECKLISTS[0];
+  if (!list) return { date: day, people: [] };
+  const row = (employeeId: number, displayName: string, start: string, delivery: ChecklistDay["people"][number]["delivery"], done: number) => ({
+    employeeId, displayName, checklistId: list.id, checklistName: list.name, done, total: list.items.length, start, delivery,
+  });
+  return {
+    date: day,
+    people: [
+      row(3, "Марк", "07:00", "sent", 1),
+      row(4, "Аня", "08:00", "scheduled", 0),
+      row(5, "Игорь", "07:00", "muted", 0),
+    ],
   };
 }
 
