@@ -131,6 +131,7 @@ import {
   recipientsOf,
   collectionsForWorker,
 } from "../collections/collection-service";
+import { listPayments, setPaid, unpaidRecipients } from "../collections/payment-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 import {
   ANNOUNCEMENT_TEXT_MAX,
@@ -1660,6 +1661,34 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
     return c.json({ collections: collectionsForWorker(db, asOf, c.get("auth").employeeId) });
+  });
+
+  /**
+   * «Я перевёл» — своя галочка и ничья больше.
+   *
+   * Отметиться можно только по тому сбору, который человек и так видит: свой
+   * (где он виновник) он не видит нигде, и отметка в нём выдала бы сюрприз.
+   */
+  app.post("/api/collections/:id/paid", requireAuth(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+
+    const me = c.get("auth").employeeId;
+    const asOf = birthdayAsOf(c);
+    if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+
+    const id = Number(c.req.param("id"));
+    const visible = collectionsForWorker(db, asOf, me).some((row) => row.id === id);
+    if (!visible) return c.json({ error: "not_found" }, 404);
+
+    const collection = getCollection(db, id);
+    if (!collection) return c.json({ error: "not_found" }, 404);
+
+    const result = setPaid(db, collection, me, me, body.paid);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+
+    const progress = listPayments(db, collection);
+    return c.json({ paid: body.paid, paidCount: progress.paidCount, recipientCount: progress.total });
   });
 
   // Admin: post a new vacant slot

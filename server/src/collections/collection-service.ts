@@ -5,6 +5,7 @@ import {
   collectionTitle,
   compareCollections,
   isCollectionActive,
+  paymentProgress,
   type CollectionKind,
   type CollectionStatus,
 } from "@planer/shared";
@@ -12,7 +13,7 @@ import type { Db } from "../db/client";
 import { collections, type Collection, type Employee } from "../db/schema";
 import { getEmployeeById, listActive } from "../repo/employees";
 import { isNoticeMuted } from "../repo/notice-prefs";
-import { removeMarksOf } from "./payment-repo";
+import { marksOfMany, removeMarksOf } from "./payment-repo";
 
 /**
  * A collection of money — the birthday kind and the hand-made kind, on one code
@@ -279,6 +280,11 @@ export interface WorkerCollection {
   totalGoal: number | null;
   deadline: string | null;
   eventDate: string | null;
+  /** Своя галочка: «я перевёл». */
+  paid: boolean;
+  /** Сколько человек уже отметилось и сколько всего просили — «7 из 12». */
+  paidCount: number;
+  recipientCount: number;
 }
 
 /**
@@ -294,9 +300,22 @@ export interface WorkerCollection {
  * whole feature: the honouree never sees their own collection).
  */
 export function collectionsForWorker(db: Db, today: string, employeeId: number): WorkerCollection[] {
-  return listCollections(db, today, employeeId)
-    .filter((row) => row.collection.sendCount > 0 && row.active)
-    .map((row) => ({
+  const rows = listCollections(db, today, employeeId).filter(
+    (row) => row.collection.sendCount > 0 && row.active,
+  );
+  // Отметки всех показанных сборов — одним запросом, а не по запросу на карточку.
+  const marks = marksOfMany(db, rows.map((row) => row.collection.id));
+
+  return rows.map((row) => {
+    const mine = marks.filter((mark) => mark.collectionId === row.collection.id);
+    const progress = paymentProgress(
+      recipientsOf(db, row.collection.employeeId).map((e) => ({
+        employeeId: e.id,
+        displayName: e.displayName,
+      })),
+      mine,
+    );
+    return {
       id: row.collection.id,
       title: row.title,
       personName: row.personName,
@@ -305,5 +324,9 @@ export function collectionsForWorker(db: Db, today: string, employeeId: number):
       totalGoal: row.collection.totalGoal,
       deadline: row.collection.deadline,
       eventDate: row.collection.eventDate,
-    }));
+      paid: mine.some((mark) => mark.employeeId === employeeId),
+      paidCount: progress.paidCount,
+      recipientCount: progress.total,
+    };
+  });
 }
