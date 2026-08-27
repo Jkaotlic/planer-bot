@@ -12,6 +12,7 @@ import type { Db } from "../db/client";
 import { collections, type Collection, type Employee } from "../db/schema";
 import { getEmployeeById, listActive } from "../repo/employees";
 import { isNoticeMuted } from "../repo/notice-prefs";
+import { removeMarksOf } from "./payment-repo";
 
 /**
  * A collection of money — the birthday kind and the hand-made kind, on one code
@@ -182,6 +183,10 @@ export function deleteCollection(db: Db, id: number): { ok: true } | { ok: false
   if (!current) return { ok: false, error: "not_found" };
   if (current.kind === "birthday") return { ok: false, error: "Сбор на день рождения не удаляется." };
   if (current.sendCount > 0) return { ok: false, error: "Сбор уже разослан — удалить нельзя." };
+  // Осиротевшая отметка — это строка со ссылкой в пустоту, то есть сломанный
+  // внешний ключ. Через `payment-repo`, а не через `payment-service`: сервис
+  // импортирует отсюда `recipientsOf`, и обратный импорт замкнул бы круг.
+  removeMarksOf(db, id);
   db.delete(collections).where(eq(collections.id, id)).run();
   return { ok: true };
 }
