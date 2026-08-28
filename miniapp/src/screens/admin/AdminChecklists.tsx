@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Button, Input, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import {
   CHECKLIST_RULE_TEXT,
+  checklistDayTotals,
   checklistDeliveryLabel,
-  checklistDispatchLabel,
+  checklistDispatchBadge,
+  checklistDispatchReason,
   checklistDispatchState,
   checklistHasContent,
 } from "@planer/shared";
@@ -95,6 +97,8 @@ export function AdminChecklists() {
             </CardShell>
           )}
 
+          <DaySummary day={day} />
+
           {checklists.length === 0 && (
             <Placeholder description="Чек-листов пока нет — заведи первый, и он начнёт приходить дежурным тех видов смен, которые ты ему укажешь." />
           )}
@@ -133,6 +137,75 @@ export function AdminChecklists() {
         </CardStack>
       </Section>
     </ScreenScroll>
+  );
+}
+
+/**
+ * Что случилось сегодня — первым блоком экрана.
+ *
+ * До 2026-08-28 этот расклад лежал ВНУТРИ раскрытой карточки, и человек,
+ * открывший экран, не видел его вовсе: вопрос «уходило сегодня хоть что-нибудь»
+ * оставался без ответа, пока не тапнешь по нужному списку.
+ */
+function DaySummary({ day }: { day: ChecklistDay | null }) {
+  const people = day?.people ?? [];
+  const totals = checklistDayTotals(people);
+  const chip = (text: string, tone: "ok" | "wait" | "alert") => (
+    <span
+      key={text}
+      style={{
+        padding: "3px 9px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
+        color: tone === "ok" ? "var(--tgui--link_color)" : tone === "alert" ? "var(--tgui--destructive_text_color)" : "var(--tgui--hint_color)",
+        background: tone === "ok"
+          ? "color-mix(in srgb, var(--tgui--link_color) 14%, transparent)"
+          : tone === "alert"
+            ? "color-mix(in srgb, var(--tgui--destructive_text_color) 12%, transparent)"
+            : "var(--tgui--secondary_bg_color)",
+      }}
+    >
+      {text}
+    </span>
+  );
+
+  return (
+    <CardShell>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: people.length > 0 ? 10 : 0 }}>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>Сегодня</span>
+        {people.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {chip(`Ушло ${totals.sent}`, "ok")}
+            {chip(`Ждёт ${totals.waiting}`, "wait")}
+            {/* Застрявшие выделены отдельно: это единственная строка, по которой
+                надо что-то делать руками. */}
+            {chip(`Не уйдёт ${totals.blocked}`, totals.blocked > 0 ? "alert" : "wait")}
+          </div>
+        )}
+      </div>
+
+      {people.length === 0 ? (
+        <span style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Сегодня чек-лист никому не положен.</span>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {people.map((p) => (
+            <div key={`${p.employeeId}:${p.checklistId}`} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13.5 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>{p.displayName}</span>
+              <span
+                style={{
+                  fontSize: 12.5,
+                  color: p.delivery === "sent"
+                    ? "var(--tgui--link_color)"
+                    : p.delivery === "scheduled"
+                      ? "var(--tgui--hint_color)"
+                      : "var(--tgui--destructive_text_color)",
+                }}
+              >
+                {checklistDeliveryLabel(p.delivery, p.start, p.sentAt)} · {p.done} из {p.total}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </CardShell>
   );
 }
 
@@ -181,10 +254,24 @@ function ChecklistCard({
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 15 }}>{list.name}</span>
+        {/* Цветом, а не серым текстом в общей строке: до 2026-08-28 статус был
+            написан правильно, но глаз проходил мимо. */}
+        <span
+          className="checklist-badge"
+          style={{
+            padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+            color: dispatch === "sends" ? "var(--tgui--link_color)" : "var(--tgui--destructive_text_color)",
+            background: dispatch === "sends"
+              ? "color-mix(in srgb, var(--tgui--link_color) 14%, transparent)"
+              : "color-mix(in srgb, var(--tgui--destructive_text_color) 12%, transparent)",
+          }}
+        >
+          {checklistDispatchBadge(dispatch)}
+        </span>
         <span style={{ flex: 1, fontSize: 12.5, color: "var(--tgui--hint_color)" }}>
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
-          {checklistDispatchLabel(dispatch, linked.map((t) => t.name))}
+          {checklistDispatchReason(dispatch, linked.map((t) => t.name))}
         </span>
         <span style={{ color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
       </button>
@@ -235,7 +322,7 @@ function ChecklistCard({
                     ничего не ушло, читается как лень человека, а не как
                     выключенные напоминания. */}
                 <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>
-                  {checklistDeliveryLabel(p.delivery, p.start)} · {p.done} из {p.total}
+                  {checklistDeliveryLabel(p.delivery, p.start, p.sentAt)} · {p.done} из {p.total}
                 </span>
               </div>
             ))

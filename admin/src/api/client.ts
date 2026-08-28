@@ -218,6 +218,8 @@ export interface ChecklistDay {
     /** Начало смены — момент, в который уходит сообщение. `null` у смены «своим временем». */
     start: string | null;
     delivery: ChecklistDelivery;
+    /** Час, в который сообщение ушло, по часам команды. `null` — ещё не уходило. */
+    sentAt: string | null;
   }[];
 }
 

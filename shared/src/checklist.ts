@@ -184,15 +184,25 @@ export const CHECKLIST_RULE_TEXT =
   "и один раз за смену. Не уйдёт тем, у кого выключены напоминания или не привязан Telegram.";
 
 /**
- * Шапка карточки: уходит список или нет — и если нет, то почему.
+ * Ответ одним словом — он же надпись на бейдже.
+ *
+ * Отдельно от причины, потому что на экране это две разные вещи: цветной ярлык,
+ * который видно, не читая, и строка под ним для того, кто уже спросил «почему».
+ */
+export function checklistDispatchBadge(state: ChecklistDispatchState): string {
+  return state === "sends" ? "Уходит" : "Не уходит";
+}
+
+/**
+ * Строка под бейджем: кому уходит — или почему не уходит.
  *
  * Назначение называется и у пустого списка: «кому положен» и «уйдёт ли» — два
  * разных вопроса, и ответ на первый не должен пропадать из-за ответа на второй.
  */
-export function checklistDispatchLabel(state: ChecklistDispatchState, templateNames: readonly string[]): string {
-  if (state === "sends") return `Уходит: ${templateNames.join(", ")}`;
-  if (state === "no-templates") return "Не уходит: не выбран вид смены";
-  const empty = "Не уходит: ни пунктов, ни пояснения, ни файла";
+export function checklistDispatchReason(state: ChecklistDispatchState, templateNames: readonly string[]): string {
+  if (state === "sends") return templateNames.join(", ");
+  if (state === "no-templates") return "не выбран вид смены";
+  const empty = "ни пунктов, ни пояснения, ни файла";
   return templateNames.length > 0 ? `${empty}. Назначен: ${templateNames.join(", ")}` : `${empty}, и не выбран вид смены`;
 }
 
@@ -203,10 +213,17 @@ export function checklistDispatchLabel(state: ChecklistDispatchState, templateNa
  * дежурный понимают по-разному. Смену ставят и «своим временем», без начала, —
  * такому тик пишет первым же проходом, и обещать час нельзя.
  */
-export function checklistDeliveryLabel(delivery: ChecklistDelivery, start: string | null): string {
+export function checklistDeliveryLabel(
+  delivery: ChecklistDelivery,
+  start: string | null,
+  /** Час, в который сообщение ушло, — по часам команды. */
+  sentAt?: string | null,
+): string {
   switch (delivery) {
     case "sent":
-      return "уже отправлено";
+      // Названный час — единственный ответ на «уходило сегодня или нет», для
+      // которого не нужно верить экрану на слово.
+      return sentAt ? `ушло в ${sentAt}` : "уже отправлено";
     case "scheduled":
       return start ? `уйдёт в ${start}` : "уйдёт с началом смены";
     case "muted":
@@ -216,4 +233,30 @@ export function checklistDeliveryLabel(delivery: ChecklistDelivery, start: strin
     case "nothing-to-send":
       return "не уйдёт: в списке пусто";
   }
+}
+
+/** Сколько сегодня ушло, сколько ещё уйдёт и сколько не уйдёт вовсе. */
+export interface ChecklistDayTotals {
+  sent: number;
+  waiting: number;
+  blocked: number;
+}
+
+/**
+ * Итог дня одной строкой — то, ради чего экран открывают.
+ *
+ * `blocked` считает вместе выключенные напоминания, отсутствие Telegram и пустой
+ * список: причины разные, а следствие одно — человек сегодня ничего не получит,
+ * и именно это надо увидеть, не вчитываясь в строки.
+ */
+export function checklistDayTotals(people: readonly { delivery: ChecklistDelivery }[]): ChecklistDayTotals {
+  let sent = 0;
+  let waiting = 0;
+  let blocked = 0;
+  for (const person of people) {
+    if (person.delivery === "sent") sent += 1;
+    else if (person.delivery === "scheduled") waiting += 1;
+    else blocked += 1;
+  }
+  return { sent, waiting, blocked };
 }

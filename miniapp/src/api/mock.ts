@@ -1872,13 +1872,16 @@ export async function mockGetChecklistDay(date?: string): Promise<ChecklistDay> 
   await delay(140);
   const list = CHECKLISTS[0];
   if (!list) return { date: day, people: [] };
-  const row = (employeeId: number, displayName: string, start: string, delivery: ChecklistDay["people"][number]["delivery"], done: number) => ({
-    employeeId, displayName, checklistId: list.id, checklistName: list.name, done, total: list.items.length, start, delivery,
+  const row = (
+    employeeId: number, displayName: string, start: string,
+    delivery: ChecklistDay["people"][number]["delivery"], done: number, sentAt: string | null = null,
+  ) => ({
+    employeeId, displayName, checklistId: list.id, checklistName: list.name, done, total: list.items.length, start, delivery, sentAt,
   });
   return {
     date: day,
     people: [
-      row(3, "Марк", "07:00", "sent", 1),
+      row(3, "Марк", "07:00", "sent", 1, "07:02"),
       row(4, "Аня", "08:00", "scheduled", 0),
       row(5, "Игорь", "07:00", "muted", 0),
     ],

@@ -11,11 +11,17 @@ import { reminderLog } from "../db/schema";
 export const CHECKLIST_KIND = "duty_checklist";
 
 export function hasReminder(db: Db, shiftId: number, kind: string): boolean {
-  return db
-    .select({ id: reminderLog.id })
+  return reminderSentAt(db, shiftId, kind) !== null;
+}
+
+/** Когда напоминание ушло, или `null` — если не уходило. */
+export function reminderSentAt(db: Db, shiftId: number, kind: string): Date | null {
+  const row = db
+    .select({ sentAt: reminderLog.sentAt })
     .from(reminderLog)
     .where(and(eq(reminderLog.shiftId, shiftId), eq(reminderLog.kind, kind)))
-    .get() !== undefined;
+    .get();
+  return row?.sentAt ?? null;
 }
 
 export function addReminder(db: Db, shiftId: number, kind: string): void {

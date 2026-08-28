@@ -26,8 +26,8 @@ import { listShiftsOverlapping } from "../../repo/shifts";
 import { listActiveTemplates } from "../../repo/templates";
 import { getEmployeeById } from "../../repo/employees";
 import { recordAudit } from "../../repo/audit";
-import { CHECKLIST_KIND, hasReminder } from "../../repo/reminders";
-import { teamNow } from "../../util/team-time";
+import { CHECKLIST_KIND, reminderSentAt } from "../../repo/reminders";
+import { teamNow, teamTimeAt } from "../../util/team-time";
 import { requireAdmin, requireAuth, type Env } from "../middleware";
 import { MAX_DOC_BYTES, removeChecklistDoc, safeDocName, writeChecklistDoc } from "../checklist-doc";
 
@@ -248,6 +248,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
       const done = marks.filter((m) => m.employeeId === employeeId && itemIds.has(m.itemId)).length;
       const list = getChecklist(db, checklistId);
       const owner = getEmployeeById(db, employeeId);
+      const sentAt = reminderSentAt(db, shift.id, CHECKLIST_KIND);
       return [{
         employeeId,
         displayName: owner?.displayName ?? `работник #${employeeId}`,
@@ -258,6 +259,9 @@ export function createChecklistRoutes(db: Db, config: Config) {
         // Во сколько уйдёт — начало смены, а не «утро»: сообщение привязано к
         // выходу человека, и у дежурства с восьми это восемь.
         start: shift.start ?? null,
+        // Час, в который сообщение действительно ушло, — по часам команды.
+        // Ровно этим и отвечают на «уходило сегодня или нет».
+        sentAt: sentAt == null ? null : teamTimeAt(sentAt, config.teamTz),
         // Считается теми же правилами, что и рассылка, — иначе экран обещал бы
         // администратору не то, что делает бот.
         delivery: checklistDelivery({
@@ -266,7 +270,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
             note: list?.note,
             hasDoc: Boolean(list?.docUrl || list?.docFileId || list?.docPath),
           }),
-          alreadySent: hasReminder(db, shift.id, CHECKLIST_KIND),
+          alreadySent: sentAt != null,
           remindersEnabled: owner?.remindersEnabled ?? false,
           hasTelegram: owner?.telegramUserId != null,
         }),
