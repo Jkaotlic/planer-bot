@@ -72,6 +72,7 @@ function toAdminEmployee(employee: EmployeeRow): AdminEmployeeDto {
     excludedFromSwaps: employee.excludedFromSwaps,
     isObserver: employee.isObserver,
     selfScheduleEnabled: employee.selfScheduleEnabled,
+    remindersEnabled: employee.remindersEnabled,
   };
 }
 

@@ -11,7 +11,7 @@ const employee: Employee = {
   id: 1, displayName: "Иванов Иван", isAdmin: false, isActive: true,
   telegramUserId: null, birthDate: null, preferredName: null, address: "Иван",
   excludedFromAssignment: false, excludedFromSwaps: false,
-  isObserver: false, selfScheduleEnabled: false,
+  isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
 };
 
 const template = (over: Partial<Template>): Template => ({

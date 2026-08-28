@@ -28,7 +28,7 @@ const unlinked: Employee = {
   excludedFromAssignment: false,
   excludedFromSwaps: false,
   isObserver: false,
-  selfScheduleEnabled: false,
+  selfScheduleEnabled: false, remindersEnabled: true,
 };
 
 const INVITE = { inviteToken: "abc123", inviteLink: "https://t.me/planer_bot?start=abc123" };

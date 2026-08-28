@@ -306,14 +306,16 @@ describe("чек-лист: свой (работник)", () => {
     expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").sentAt).toBeNull();
   });
 
-  // Оба тихих пропуска тика. До этой правки админ видел «чек-лист назначен» и
-  // не мог узнать, что до человека он не доходит вовсе.
-  it("выключенные напоминания видны в сводке", async () => {
+  /**
+   * Личная галочка «не пиши мне про смены» чек-лист не глушит: это рабочая
+   * инструкция. До 2026-08-28 глушила, и трое остались без неё на месяц.
+   */
+  it("выключенные напоминания чек-лист не отменяют", async () => {
     const { db, app, igor } = await stage();
     setRemindersEnabled(db, igor.id, false);
     const admin = await tokenFor(app, 111);
     const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
-    expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("muted");
+    expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("scheduled");
   });
 
   it("непривязанный к Telegram виден в сводке", async () => {

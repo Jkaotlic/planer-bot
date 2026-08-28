@@ -20,7 +20,7 @@ const person = (id: number, displayName: string): Employee => ({
   id, displayName, isAdmin: false, isActive: true, telegramUserId: 10 + id,
   birthDate: null, preferredName: null, address: displayName.split(" ").at(-1)!,
   excludedFromAssignment: false, excludedFromSwaps: false,
-  isObserver: false, selfScheduleEnabled: false,
+  isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
 });
 
 const SIX_PEOPLE: Employee[] = [

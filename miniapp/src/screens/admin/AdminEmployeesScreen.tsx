@@ -442,6 +442,13 @@ export function EmployeeRow({
             <span style={{ color: linked ? "var(--tgui--hint_color)" : "var(--tgui--destructive_text_color)" }}>
               {linked ? "привязан" : "не привязан"}
             </span>
+            {/* Метка только у отписавшихся: она про исключение, а не про норму.
+                Непривязанному не доходит вообще ничего, и об этом уже сказано
+                слева. Зеркало консольной карточки — 2026-08-28, когда трое
+                месяцами не получали напоминаний незаметно для админа. */}
+            {linked && !employee.remindersEnabled && (
+              <span style={{ color: "var(--tgui--destructive_text_color)" }}>· напоминания выключены</span>
+            )}
             {employee.isAdmin && <CategoryChip category="shift">админ</CategoryChip>}
           </div>
         </div>

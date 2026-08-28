@@ -271,7 +271,6 @@ export function createChecklistRoutes(db: Db, config: Config) {
             hasDoc: Boolean(list?.docUrl || list?.docFileId || list?.docPath),
           }),
           alreadySent: sentAt != null,
-          remindersEnabled: owner?.remindersEnabled ?? false,
           hasTelegram: owner?.telegramUserId != null,
         }),
       }];

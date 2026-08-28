@@ -26,7 +26,7 @@ const person = (id: number, displayName: string, isActive = true): Employee => (
   id, displayName, isAdmin: false, isActive, telegramUserId: 10 + id,
   birthDate: null, preferredName: null, address: displayName.split(" ").at(-1)!,
   excludedFromAssignment: false, excludedFromSwaps: false,
-  isObserver: false, selfScheduleEnabled: false,
+  isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
 });
 
 // Четверо активных (порог — «больше пяти») плюс двое в архиве: порознь ни

@@ -33,6 +33,7 @@ const toDto = (employee: AdminEmployeeDto): AdminEmployeeDto => ({
   address: employee.address,
   isAdmin: employee.isAdmin,
   isActive: employee.isActive,
+  remindersEnabled: employee.remindersEnabled,
   telegramUserId: employee.telegramUserId,
   birthDate: employee.birthDate,
   excludedFromAssignment: employee.excludedFromAssignment,
@@ -69,7 +70,7 @@ export function createEmployeesMock(opts: EmployeesMockOptions) {
         excludedFromAssignment: false,
         excludedFromSwaps: false,
         isObserver: false,
-        selfScheduleEnabled: false,
+        selfScheduleEnabled: false, remindersEnabled: true,
       };
       state.employees.push(employee);
       const inviteToken = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
@@ -176,19 +177,19 @@ export function seedEmployeesMockState(): EmployeesMockState {
         id: 1, displayName: "Аня", preferredName: "Аня", address: "Аня", isAdmin: true,
         isActive: true, telegramUserId: 555, birthDate: "03-14",
         excludedFromAssignment: false, excludedFromSwaps: false,
-        isObserver: false, selfScheduleEnabled: false,
+        isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
       },
       {
         id: 2, displayName: "Игорь", preferredName: null, address: "Игорь", isAdmin: false,
         isActive: true, telegramUserId: null, birthDate: null,
         excludedFromAssignment: false, excludedFromSwaps: false,
-        isObserver: false, selfScheduleEnabled: false,
+        isObserver: false, selfScheduleEnabled: false, remindersEnabled: false,
       },
       {
         id: 3, displayName: "Марк", preferredName: null, address: "Марк", isAdmin: false,
         isActive: false, telegramUserId: null, birthDate: null,
         excludedFromAssignment: true, excludedFromSwaps: true,
-        isObserver: false, selfScheduleEnabled: false,
+        isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
       },
     ],
   };

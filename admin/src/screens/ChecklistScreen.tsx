@@ -172,7 +172,7 @@ function DaySummary({ day }: { day: ChecklistDay | null }) {
               {/* Судьба сообщения рядом с прогрессом: «0 из 5» у того, кому
                   ничего не ушло, читается как лень человека, а не как выключенные
                   напоминания. */}
-              <span className={`status-chip${person.delivery === "sent" ? " status-chip-done" : ""}${person.delivery === "muted" || person.delivery === "no-telegram" || person.delivery === "nothing-to-send" ? " status-chip-alert" : ""}`}>
+              <span className={`status-chip${person.delivery === "sent" ? " status-chip-done" : ""}${person.delivery === "no-telegram" || person.delivery === "nothing-to-send" ? " status-chip-alert" : ""}`}>
                 {checklistDeliveryLabel(person.delivery, person.start, person.sentAt)}
               </span>
               <span className={`status-chip${person.done >= person.total ? " status-chip-done" : ""}`}>

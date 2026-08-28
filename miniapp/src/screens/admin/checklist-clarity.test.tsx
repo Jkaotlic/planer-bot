@@ -137,14 +137,14 @@ describe("«Чек-листы» в мини-аппе: кому уйдёт сег
       people: [
         person({ employeeId: 3, displayName: "Марк", delivery: "sent", sentAt: "07:02", done: 1 }),
         person({ employeeId: 4, displayName: "Аня", start: "08:00" }),
-        person({ employeeId: 5, displayName: "Игорь", delivery: "muted" }),
+        person({ employeeId: 5, displayName: "Игорь", delivery: "no-telegram" }),
       ],
     });
     expect(el.textContent).toContain("Ушло 1");
     expect(el.textContent).toContain("Ждёт 1");
     expect(el.textContent).toContain("Не уйдёт 1");
     expect(el.textContent).toContain("ушло в 07:02");
-    expect(el.textContent).toContain("не уйдёт: напоминания выключены");
+    expect(el.textContent).toContain("не уйдёт: нет Telegram");
   });
 
   it("расклад стоит выше карточек", async () => {
@@ -164,13 +164,13 @@ describe("«Чек-листы» в мини-аппе: кому уйдёт сег
       people: [
         person({ employeeId: 3, displayName: "Марк", start: "07:00", delivery: "sent", done: 1 }),
         person({ employeeId: 4, displayName: "Аня", start: "08:00", delivery: "scheduled" }),
-        person({ employeeId: 5, displayName: "Игорь", delivery: "muted" }),
+        person({ employeeId: 5, displayName: "Игорь", delivery: "no-telegram" }),
       ],
     });
     await openCard(el);
     expect(el.textContent).toContain("уже отправлено");
     expect(el.textContent).toContain("уйдёт в 08:00");
-    expect(el.textContent).toContain("не уйдёт: напоминания выключены");
+    expect(el.textContent).toContain("не уйдёт: нет Telegram");
   });
 
   // У человека в день бывает два чек-листа; чужие строки в карточке отвечали бы

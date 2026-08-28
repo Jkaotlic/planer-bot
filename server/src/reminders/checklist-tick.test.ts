@@ -81,11 +81,19 @@ describe("runChecklistTick", () => {
     expect(sent).toEqual([]);
   });
 
-  it("молчит тому, кто выключил себе напоминания", async () => {
+  /**
+   * Чек-лист — рабочая инструкция, а не напоминание об удобстве, и личная
+   * галочка «не пиши мне про смены» его не глушит.
+   *
+   * До 2026-08-28 глушила, и это стоило троим людям месяца без инструкций:
+   * человек выключал 🔕 под вечерним напоминанием, бот отвечал «Напоминания о
+   * сменах выключены», а вместе с ними тихо пропадали и чек-листы дежурного.
+   */
+  it("пишет и тому, кто выключил себе напоминания о сменах", async () => {
     const { db } = stage({ remindersEnabled: false });
     const { bot, sent } = fakeBot();
-    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);
-    expect(sent).toEqual([]);
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+    expect(sent).toHaveLength(1);
   });
 
   it("молчит тому, кто не привязал телеграм", async () => {

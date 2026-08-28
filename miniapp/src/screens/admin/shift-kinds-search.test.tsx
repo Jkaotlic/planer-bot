@@ -18,7 +18,7 @@ const person = (id: number, displayName: string): Employee => ({
   id, displayName, isAdmin: false, isActive: true, telegramUserId: 10 + id,
   birthDate: null, preferredName: null, address: displayName.split(" ")[0]!,
   excludedFromAssignment: false, excludedFromSwaps: false,
-  isObserver: false, selfScheduleEnabled: false,
+  isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
 });
 
 // Шестеро — больше порога показа поля поиска (5), как в консольном зеркале.
