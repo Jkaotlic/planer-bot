@@ -1479,9 +1479,9 @@ export async function mockGetChecklistDay(date: string): Promise<ChecklistDay> {
     // Три исхода рядом: так на демо-данных видно, что сводка отвечает не только
     // «сколько отмечено», но и «дойдёт ли сообщение вообще».
     people: [
-      { employeeId: 3, displayName: "Волков Марк", checklistId: 1, checklistName: "Дежурство с 07:00", done: 1, total: 2, start: "07:00", delivery: "sent" },
-      { employeeId: 4, displayName: "Егорова Аня", checklistId: 1, checklistName: "Дежурство с 07:00", done: 0, total: 2, start: "08:00", delivery: "scheduled" },
-      { employeeId: 5, displayName: "Седов Игорь", checklistId: 1, checklistName: "Дежурство с 07:00", done: 0, total: 2, start: "07:00", delivery: "muted" },
+      { employeeId: 3, displayName: "Волков Марк", checklistId: 1, checklistName: "Дежурство с 07:00", done: 1, total: 2, start: "07:00", delivery: "sent", sentAt: "07:02" },
+      { employeeId: 4, displayName: "Егорова Аня", checklistId: 1, checklistName: "Дежурство с 07:00", done: 0, total: 2, start: "08:00", delivery: "scheduled", sentAt: null },
+      { employeeId: 5, displayName: "Седов Игорь", checklistId: 1, checklistName: "Дежурство с 07:00", done: 0, total: 2, start: "07:00", delivery: "muted", sentAt: null },
     ],
   };
 }

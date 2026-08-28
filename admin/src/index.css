@@ -2482,3 +2482,55 @@ input[type="search"] {
   color: var(--hint);
   font-size: 12.5px;
 }
+
+/* Ярлык чек-листа: «Уходит» или «Не уходит».
+   Цветом, а не серым текстом в общей строке, — до 2026-08-28 статус был написан
+   правильно, но не читался: глаз проходил мимо, и вопрос «уходит ли оно вообще»
+   оставался без ответа. */
+.checklist-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.checklist-badge-on {
+  background: color-mix(in srgb, var(--button) 18%, transparent);
+  color: var(--button);
+}
+
+.checklist-badge-off {
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+
+/* Тот же красный для строк, по которым надо что-то делать руками: выключенные
+   напоминания и непривязанный Telegram — не «ещё не время», а «не дойдёт». */
+.status-chip-alert {
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
+  color: var(--destructive);
+}
+
+/* Сводка дня стоит первой на экране — вопрос «ушло ли сегодня» задают раньше,
+   чем правят настройки. */
+.checklist-day {
+  margin: 4px 0 18px;
+}
+
+.checklist-day-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.checklist-day-totals {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}

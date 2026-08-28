@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   CHECKLIST_RULE_TEXT,
+  checklistDayTotals,
   checklistDeliveryLabel,
-  checklistDispatchLabel,
+  checklistDispatchBadge,
+  checklistDispatchReason,
   checklistDispatchState,
   checklistHasContent,
 } from "@planer/shared";
@@ -78,6 +80,8 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
 
       {error && <div className="employees-error">{error}</div>}
 
+      <DaySummary day={day} />
+
       {checklists.length === 0 ? (
         <div className="employees-empty">
           Чек-листов пока нет — заведите первый, и он начнёт приходить дежурным тех видов смен, которые вы ему укажете.
@@ -121,14 +125,46 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
         </button>
       </div>
 
-      <h3 className="birthday-group">Сегодня</h3>
-      {/* Кто должен пройти и сколько уже отметил. Никаких напоминаний отсюда не
-          уходит: во сколько считать день провалившимся — его решение, а не наше. */}
-      {!day || day.people.length === 0 ? (
+    </div>
+  );
+}
+
+/**
+ * Что случилось сегодня — первым блоком экрана.
+ *
+ * До 2026-08-28 эта сводка лежала ПОД карточками, и вопрос «уходило сегодня хоть
+ * что-нибудь» требовал сначала пролистать настройки. Вопрос задают раньше, чем
+ * правки, — значит и ответ стоит раньше.
+ *
+ * Никаких напоминаний отсюда не уходит: во сколько считать день провалившимся —
+ * его решение, а не наше.
+ */
+function DaySummary({ day }: { day: ChecklistDay | null }) {
+  const people = day?.people ?? [];
+  const totals = checklistDayTotals(people);
+
+  return (
+    <section className="checklist-day">
+      <div className="checklist-day-head">
+        <h3 className="birthday-group" style={{ margin: 0 }}>Сегодня</h3>
+        {people.length > 0 && (
+          <div className="checklist-day-totals">
+            <span className="status-chip status-chip-done">Ушло {totals.sent}</span>
+            <span className="status-chip">Ждёт {totals.waiting}</span>
+            {/* Застрявшие выделены отдельно: это единственная строка, по которой
+                надо что-то делать руками. */}
+            <span className={`status-chip${totals.blocked > 0 ? " status-chip-alert" : ""}`}>
+              Не уйдёт {totals.blocked}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {people.length === 0 ? (
         <div className="employees-empty">Сегодня чек-лист никому не положен.</div>
       ) : (
         <div className="employees-list">
-          {day.people.map((person) => (
+          {people.map((person) => (
             <div className="employee-row-card" key={`${person.employeeId}:${person.checklistId}`}>
               <span className="employee-row-name" title={person.displayName}>{person.displayName}</span>
               <span className="status-chip">{person.checklistName}</span>
@@ -136,7 +172,9 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
               {/* Судьба сообщения рядом с прогрессом: «0 из 5» у того, кому
                   ничего не ушло, читается как лень человека, а не как выключенные
                   напоминания. */}
-              <span className="status-chip">{checklistDeliveryLabel(person.delivery, person.start)}</span>
+              <span className={`status-chip${person.delivery === "sent" ? " status-chip-done" : ""}${person.delivery === "muted" || person.delivery === "no-telegram" || person.delivery === "nothing-to-send" ? " status-chip-alert" : ""}`}>
+                {checklistDeliveryLabel(person.delivery, person.start, person.sentAt)}
+              </span>
               <span className={`status-chip${person.done >= person.total ? " status-chip-done" : ""}`}>
                 {person.done} из {person.total}
               </span>
@@ -144,7 +182,7 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -176,10 +214,13 @@ function ChecklistCard({
     <section className="kind-card">
       <button type="button" className="kind-card-head" onClick={onToggle} aria-expanded={open}>
         <span className="kind-name">{list.name}</span>
+        <span className={`checklist-badge${dispatch === "sends" ? " checklist-badge-on" : " checklist-badge-off"}`}>
+          {checklistDispatchBadge(dispatch)}
+        </span>
         <span className="kind-meta">
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
-          {checklistDispatchLabel(dispatch, linked.map((t) => t.name))}
+          {checklistDispatchReason(dispatch, linked.map((t) => t.name))}
         </span>
         <span className="kind-chevron">{open ? "▴" : "▾"}</span>
       </button>

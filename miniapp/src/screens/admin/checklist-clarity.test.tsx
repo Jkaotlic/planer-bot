@@ -35,8 +35,15 @@ const checklist = (over: Partial<Checklist>): Checklist => ({
 
 const person = (over: Partial<ChecklistDay["people"][number]>): ChecklistDay["people"][number] => ({
   employeeId: 3, displayName: "Марк", checklistId: 5, checklistName: "Обход 47-го",
-  done: 0, total: 1, start: "07:00", delivery: "scheduled", ...over,
+  done: 0, total: 1, start: "07:00", delivery: "scheduled", sentAt: null, ...over,
 });
+
+/** Надпись на бейдже карточки — то, что видно, не вчитываясь. */
+function badgeOf(el: HTMLElement): string {
+  const badge = el.querySelector(".checklist-badge");
+  if (!badge) throw new Error("у карточки нет бейджа");
+  return (badge.textContent ?? "").trim();
+}
 
 const EMPTY_DAY: ChecklistDay = { date: "2026-08-24", people: [] };
 
@@ -89,24 +96,27 @@ function buttonByText(el: HTMLElement, text: string): HTMLButtonElement {
 describe("«Чек-листы» в мини-аппе: уходит или нет", () => {
   it("шапка карточки говорит, что список уходит и кому", async () => {
     const el = await mount(checklist({}));
-    expect(el.textContent).toContain("Уходит: Дежурство с 07:00");
+    expect(badgeOf(el)).toBe("Уходит");
+    expect(el.textContent).toContain("Дежурство с 07:00");
   });
 
   it("заполненный, но никому не назначенный назван неуходящим", async () => {
     const el = await mount(checklist({ templateIds: [] }));
-    expect(el.textContent).toContain("Не уходит: не выбран вид смены");
+    expect(badgeOf(el)).toBe("Не уходит");
+    expect(el.textContent).toContain("не выбран вид смены");
   });
 
   it("пустой список назван неуходящим — и всё равно называет, кому назначен", async () => {
     const el = await mount(checklist({ items: [] }));
-    expect(el.textContent).toContain("Не уходит: ни пунктов, ни пояснения, ни файла");
+    expect(badgeOf(el)).toBe("Не уходит");
+    expect(el.textContent).toContain("ни пунктов, ни пояснения, ни файла");
     expect(el.textContent).toContain("Назначен: Дежурство с 07:00");
   });
 
   // Пунктов нет, а пояснение есть — бот такое шлёт с 2026-08-26.
   it("список с одним пояснением показан уходящим", async () => {
     const el = await mount(checklist({ items: [], note: "Обход от лифтов" }));
-    expect(el.textContent).toContain("Уходит: Дежурство с 07:00");
+    expect(badgeOf(el)).toBe("Уходит");
   });
 
   it("внутри карточки написано правило: кому и когда уходит", async () => {
@@ -117,6 +127,37 @@ describe("«Чек-листы» в мини-аппе: уходит или нет
 });
 
 describe("«Чек-листы» в мини-аппе: кому уйдёт сегодня", () => {
+  /**
+   * Главное, чего не хватало 2026-08-28: расклад дня лежал ВНУТРИ раскрытой
+   * карточки, и человек, открывший экран, не видел его вовсе.
+   */
+  it("расклад дня виден сразу, без раскрытия карточки", async () => {
+    const el = await mount(checklist({}), {
+      date: "2026-08-28",
+      people: [
+        person({ employeeId: 3, displayName: "Марк", delivery: "sent", sentAt: "07:02", done: 1 }),
+        person({ employeeId: 4, displayName: "Аня", start: "08:00" }),
+        person({ employeeId: 5, displayName: "Игорь", delivery: "muted" }),
+      ],
+    });
+    expect(el.textContent).toContain("Ушло 1");
+    expect(el.textContent).toContain("Ждёт 1");
+    expect(el.textContent).toContain("Не уйдёт 1");
+    expect(el.textContent).toContain("ушло в 07:02");
+    expect(el.textContent).toContain("не уйдёт: напоминания выключены");
+  });
+
+  it("расклад стоит выше карточек", async () => {
+    const el = await mount(checklist({}), { date: "2026-08-28", people: [person({ displayName: "Марк" })] });
+    const text = el.textContent ?? "";
+    expect(text.indexOf("Сегодня")).toBeLessThan(text.indexOf("Обход 47-го"));
+  });
+
+  it("сегодня никому не положен — так и сказано без раскрытия", async () => {
+    const el = await mount(checklist({}));
+    expect(el.textContent).toContain("Сегодня чек-лист никому не положен");
+  });
+
   it("называет время отправки и её исход по каждому", async () => {
     const el = await mount(checklist({}), {
       date: "2026-08-24",
@@ -134,7 +175,7 @@ describe("«Чек-листы» в мини-аппе: кому уйдёт сег
 
   // У человека в день бывает два чек-листа; чужие строки в карточке отвечали бы
   // не на тот вопрос, который здесь задают.
-  it("показывает только тех, кто проходит ЭТОТ список", async () => {
+  it("в карточке — только те, кто проходит ЭТОТ список", async () => {
     const el = await mount(checklist({}), {
       date: "2026-08-24",
       people: [
@@ -143,14 +184,11 @@ describe("«Чек-листы» в мини-аппе: кому уйдёт сег
       ],
     });
     await openCard(el);
-    expect(el.textContent).toContain("Марк");
-    expect(el.textContent).not.toContain("Аня");
-  });
-
-  it("сегодня список никому не положен — так и сказано", async () => {
-    const el = await mount(checklist({}));
-    await openCard(el);
-    expect(el.textContent).toContain("Сегодня этот чек-лист никому не положен");
+    // Верхняя сводка показывает весь день — фильтр живёт в карточке, и спрашивать
+    // о нём надо у неё.
+    const card = (el.querySelector("button[aria-expanded]") as HTMLElement).parentElement!;
+    expect(card.textContent).toContain("Марк");
+    expect(card.textContent).not.toContain("Аня");
   });
 
   // Сводка — не главное на экране: её отказ не должен выглядеть поломкой
@@ -158,7 +196,8 @@ describe("«Чек-листы» в мини-аппе: кому уйдёт сег
   it("недоступная сводка не роняет экран", async () => {
     const el = await mount(checklist({}), new Error("нет сети"));
     await openCard(el);
-    expect(el.textContent).toContain("Уходит: Дежурство с 07:00");
+    expect(badgeOf(el)).toBe("Уходит");
+    expect(el.textContent).toContain("Сегодня чек-лист никому не положен");
   });
 });
 

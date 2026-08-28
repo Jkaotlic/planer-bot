@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   CHECKLIST_RULE_TEXT,
+  checklistDayTotals,
   checklistDelivery,
   checklistDeliveryLabel,
-  checklistDispatchLabel,
+  checklistDispatchBadge,
+  checklistDispatchReason,
   checklistDispatchState,
   checklistHasContent,
   checklistProgress,
   checklistText,
   checklistsDueToday,
   isChecklistComplete,
+  type ChecklistDelivery,
 } from "./checklist";
 
 const item = (id: number, title: string) => ({ id, title });
@@ -189,21 +192,25 @@ describe("checklistDelivery", () => {
 });
 
 describe("подписи для экрана", () => {
+  it("бейдж отвечает одним словом, а причина — отдельной строкой", () => {
+    expect(checklistDispatchBadge("sends")).toBe("Уходит");
+    expect(checklistDispatchBadge("no-templates")).toBe("Не уходит");
+    expect(checklistDispatchBadge("empty")).toBe("Не уходит");
+  });
+
   it("уходящий список называет виды смен, которым он положен", () => {
-    expect(checklistDispatchLabel("sends", ["Дежурство 07:00", "Утро"])).toBe("Уходит: Дежурство 07:00, Утро");
+    expect(checklistDispatchReason("sends", ["Дежурство 07:00", "Утро"])).toBe("Дежурство 07:00, Утро");
   });
 
   it("не уходящий называет причину, а не молчит", () => {
-    expect(checklistDispatchLabel("no-templates", [])).toBe("Не уходит: не выбран вид смены");
-    expect(checklistDispatchLabel("empty", [])).toBe("Не уходит: ни пунктов, ни пояснения, ни файла, и не выбран вид смены");
+    expect(checklistDispatchReason("no-templates", [])).toBe("не выбран вид смены");
+    expect(checklistDispatchReason("empty", [])).toBe("ни пунктов, ни пояснения, ни файла, и не выбран вид смены");
   });
 
   // «Кому положен» и «уйдёт ли» — разные вопросы: пустота списка не повод
   // забыть, каким видам смен он назначен.
   it("пустой список всё равно называет, кому он назначен", () => {
-    expect(checklistDispatchLabel("empty", ["Утро"])).toBe(
-      "Не уходит: ни пунктов, ни пояснения, ни файла. Назначен: Утро",
-    );
+    expect(checklistDispatchReason("empty", ["Утро"])).toBe("ни пунктов, ни пояснения, ни файла. Назначен: Утро");
   });
 
   it("время отправки — это начало смены, и оно названо", () => {
@@ -215,7 +222,13 @@ describe("подписи для экрана", () => {
     expect(checklistDeliveryLabel("scheduled", null)).toBe("уйдёт с началом смены");
   });
 
-  it("уже отправленное не обещает будущего", () => {
+  // «Ушло в 07:02» — единственный ответ на вопрос «уходило сегодня или нет»,
+  // который не требует верить экрану на слово.
+  it("отправленное называет час, когда это случилось", () => {
+    expect(checklistDeliveryLabel("sent", "07:00", "07:02")).toBe("ушло в 07:02");
+  });
+
+  it("отправленное без часа не обещает будущего", () => {
     expect(checklistDeliveryLabel("sent", "07:00")).toBe("уже отправлено");
   });
 
@@ -233,5 +246,26 @@ describe("подписи для экрана", () => {
     expect(CHECKLIST_RULE_TEXT).toContain("один раз");
     expect(CHECKLIST_RULE_TEXT).toContain("напоминания");
     expect(CHECKLIST_RULE_TEXT).toContain("Telegram");
+  });
+});
+
+describe("checklistDayTotals", () => {
+  const row = (delivery: ChecklistDelivery) => ({ delivery });
+
+  it("считает ушедшее, ожидаемое и застрявшее по отдельности", () => {
+    const totals = checklistDayTotals([
+      row("sent"), row("sent"), row("scheduled"), row("muted"), row("no-telegram"), row("nothing-to-send"),
+    ]);
+    expect(totals).toEqual({ sent: 2, waiting: 1, blocked: 3 });
+  });
+
+  // Пустой день — не «всё хорошо» и не «всё плохо»: сегодня чек-лист просто
+  // никому не положен, и три нуля читаются именно так.
+  it("пустой день — три нуля", () => {
+    expect(checklistDayTotals([])).toEqual({ sent: 0, waiting: 0, blocked: 0 });
+  });
+
+  it("выключенные напоминания и отсутствие Telegram считаются вместе — оба не дойдут", () => {
+    expect(checklistDayTotals([row("muted"), row("no-telegram")]).blocked).toBe(2);
   });
 });

@@ -11,7 +11,7 @@ import { listRecentAudit } from "../repo/audit";
 import { addReminder } from "../repo/reminders";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
-import { shiftTemplates } from "../db/schema";
+import { reminderLog, shiftTemplates } from "../db/schema";
 import type { Db } from "../db/client";
 
 const config = testConfig();
@@ -286,13 +286,24 @@ describe("чек-лист: свой (работник)", () => {
     expect(byName.get("Аня")).toMatchObject({ start: "08:00", delivery: "scheduled" });
   });
 
-  it("отправленное сегодня помечено отправленным", async () => {
+  it("отправленное сегодня помечено отправленным и называет час", async () => {
     const { db, app, igorShift } = await stage();
     addReminder(db, igorShift.id, "duty_checklist");
+    // 2026-08-28 07:02 по Москве — час, в который тик и шлёт утренним дежурным.
+    db.update(reminderLog).set({ sentAt: new Date(1787889727 * 1000) }).where(eq(reminderLog.shiftId, igorShift.id)).run();
     const admin = await tokenFor(app, 111);
     const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
     const igorRow = body.people.find((p: { displayName: string }) => p.displayName === "Игорь");
     expect(igorRow.delivery).toBe("sent");
+    // Час — по поясу команды, а не по поясу машины: `TEAM_TZ` тестов — Москва.
+    expect(igorRow.sentAt).toBe("07:02");
+  });
+
+  it("у неотправленного часа нет", async () => {
+    const { app } = await stage();
+    const admin = await tokenFor(app, 111);
+    const body = await (await app.request(`/api/admin/checklist/day?date=${TODAY}`, bearer(admin))).json();
+    expect(body.people.find((p: { displayName: string }) => p.displayName === "Игорь").sentAt).toBeNull();
   });
 
   // Оба тихих пропуска тика. До этой правки админ видел «чек-лист назначен» и
