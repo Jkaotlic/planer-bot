@@ -24,7 +24,7 @@ function employee(overrides: Partial<Employee>): Employee {
     id: 1, displayName: "Аня", isAdmin: false, isActive: true, telegramUserId: null,
     birthDate: null, address: "Аня", preferredName: null,
     excludedFromAssignment: false, excludedFromSwaps: false,
-    isObserver: false, selfScheduleEnabled: false,
+    isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
     ...overrides,
   };
 }

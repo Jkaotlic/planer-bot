@@ -17,7 +17,7 @@ const WEEK = ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-2
 const EMPLOYEES: Employee[] = [{
   id: 1, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11,
   birthDate: null, preferredName: null, address: "Игорь",
-  excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false,
+  excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
 }];
 
 const TEMPLATES: Template[] = [

@@ -150,11 +150,18 @@ export async function publishBotCommands(bot: Bot): Promise<void> {
   }
 }
 
-/** The «напоминания включены/выключены» line, and the one button that flips it. */
+/**
+ * The «напоминания включены/выключены» line, and the one button that flips it.
+ *
+ * Выключенное состояние называет и то, что НЕ выключается: чек-лист дежурного —
+ * рабочая инструкция на смену, и он приходит всё равно. Пока это молчало, трое
+ * отписались от вечерних напоминаний и на месяц потеряли инструкцию, ни разу об
+ * этом не узнав (2026-08-28).
+ */
 export function remindersStateText(enabled: boolean): string {
   return enabled
     ? "🔔 Напоминания о сменах включены — пишу вечером накануне утренней, вечерней и ночной."
-    : "🔕 Напоминания о сменах выключены — про смены не пишу.";
+    : "🔕 Напоминания о сменах выключены — про смены не пишу. Чек-лист дежурного приходит всё равно: это рабочая инструкция на смену.";
 }
 
 export function remindersKeyboard(enabled: boolean): InlineKeyboard {
@@ -933,7 +940,10 @@ export function createBot(deps: BotDeps): Bot {
       // Essential: tell them where to turn these back on again. Sent before the
       // cosmetic button-swap below so a transient Telegram failure on that edit
       // can never cost them this.
-      await ctx.reply("Напоминания о сменах выключены. Вернуть — командой /notifications или в мини-аппе, «Мои смены».");
+      await ctx.reply(
+        "Напоминания о сменах выключены. Чек-лист дежурного будет приходить всё равно — это рабочая инструкция на смену. " +
+          "Вернуть напоминания — командой /notifications или в мини-аппе, «Мои смены».",
+      );
     }
     // Only the buttons are rewritten: the reminder itself is still the useful part
     // of the message, and replacing it would delete tomorrow's shift time.

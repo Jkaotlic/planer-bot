@@ -282,7 +282,7 @@ describe("экран «Чек-листы»", () => {
         person({ employeeId: 3, delivery: "sent", sentAt: "07:02" }),
         person({ employeeId: 4, delivery: "sent", sentAt: "08:02" }),
         person({ employeeId: 5, delivery: "scheduled" }),
-        person({ employeeId: 6, delivery: "muted" }),
+        person({ employeeId: 6, delivery: "no-telegram" }),
       ],
     });
     expect(el.textContent).toContain("Ушло 2");
@@ -310,12 +310,12 @@ describe("экран «Чек-листы»", () => {
       people: [
         person({ employeeId: 3, displayName: "Марк", start: "07:00", delivery: "sent" }),
         person({ employeeId: 4, displayName: "Аня", start: "08:00", delivery: "scheduled" }),
-        person({ employeeId: 5, displayName: "Игорь", start: "07:00", delivery: "muted" }),
+        person({ employeeId: 5, displayName: "Игорь", start: "07:00", delivery: "no-telegram" }),
       ],
     });
     expect(el.textContent).toContain("уже отправлено");
     expect(el.textContent).toContain("уйдёт в 08:00");
-    expect(el.textContent).toContain("не уйдёт: напоминания выключены");
+    expect(el.textContent).toContain("не уйдёт: нет Telegram");
   });
 
   /**

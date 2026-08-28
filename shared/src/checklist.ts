@@ -148,27 +148,26 @@ export function checklistDispatchState(list: {
 /**
  * Что сегодня будет с сообщением конкретному человеку.
  *
- * `muted` и `no-telegram` — те самые пропуски, которые тик делает молча: админ
- * видел «чек-лист назначен» и не мог узнать, что до половины команды он не
- * доходит.
+ * Личной галочки напоминаний здесь нет намеренно: чек-лист — рабочая инструкция
+ * на смену, и с 2026-08-28 она уходит независимо от того, отписался ли человек
+ * от вечерних напоминаний. Пока флаг был общим, трое выключили 🔕 под
+ * напоминанием и на месяц остались без инструкций.
+ *
+ * `no-telegram` — единственный оставшийся молчаливый пропуск тика: админ видел
+ * «чек-лист назначен» и не мог узнать, что писать этому человеку просто некуда.
  */
-export type ChecklistDelivery = "sent" | "scheduled" | "muted" | "no-telegram" | "nothing-to-send";
+export type ChecklistDelivery = "sent" | "scheduled" | "no-telegram" | "nothing-to-send";
 
 export function checklistDelivery(person: {
   /** Есть ли у списка что рассылать — `checklistHasContent`. */
   sends: boolean;
   /** Пометка в `reminder_log`: за эту смену сообщение уже ушло. */
   alreadySent: boolean;
-  remindersEnabled: boolean;
   hasTelegram: boolean;
 }): ChecklistDelivery {
   if (!person.sends) return "nothing-to-send";
-  // Факт отправки правдив и после того, как напоминания выключили: человек
-  // сообщение получил, и «не уйдёт» здесь было бы враньём про прошлое.
   if (person.alreadySent) return "sent";
-  // Без Telegram включать нечего — эта причина точнее выключенных напоминаний.
   if (!person.hasTelegram) return "no-telegram";
-  if (!person.remindersEnabled) return "muted";
   return "scheduled";
 }
 
@@ -226,8 +225,6 @@ export function checklistDeliveryLabel(
       return sentAt ? `ушло в ${sentAt}` : "уже отправлено";
     case "scheduled":
       return start ? `уйдёт в ${start}` : "уйдёт с началом смены";
-    case "muted":
-      return "не уйдёт: напоминания выключены";
     case "no-telegram":
       return "не уйдёт: нет Telegram";
     case "nothing-to-send":

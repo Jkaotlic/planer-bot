@@ -156,7 +156,7 @@ describe("checklistDispatchState", () => {
 
 describe("checklistDelivery", () => {
   const person = (over: Record<string, unknown> = {}) => ({
-    sends: true, alreadySent: false, remindersEnabled: true, hasTelegram: true, ...over,
+    sends: true, alreadySent: false, hasTelegram: true, ...over,
   });
 
   it("ещё не ушло, но уйдёт", () => {
@@ -167,23 +167,9 @@ describe("checklistDelivery", () => {
     expect(checklistDelivery(person({ alreadySent: true }))).toBe("sent");
   });
 
-  // Факт отправки — правда, даже если напоминания выключили после неё: человек
-  // сообщение получил, и сказать «не уйдёт» значило бы соврать.
-  it("отметка отправки перевешивает выключенные напоминания", () => {
-    expect(checklistDelivery(person({ alreadySent: true, remindersEnabled: false }))).toBe("sent");
-  });
-
-  // Оба молчаливых пропуска тика: админ не видел их вовсе.
+  // Единственный молчаливый пропуск, который остался у тика: писать некуда.
   it("без Telegram не уйдёт", () => {
     expect(checklistDelivery(person({ hasTelegram: false }))).toBe("no-telegram");
-  });
-
-  it("с выключенными напоминаниями не уйдёт", () => {
-    expect(checklistDelivery(person({ remindersEnabled: false }))).toBe("muted");
-  });
-
-  it("нет Telegram важнее выключенных напоминаний: включать нечего", () => {
-    expect(checklistDelivery(person({ hasTelegram: false, remindersEnabled: false }))).toBe("no-telegram");
   });
 
   it("пустой список не уйдёт никому, даже готовому его получить", () => {
@@ -233,7 +219,6 @@ describe("подписи для экрана", () => {
   });
 
   it("каждый молчаливый пропуск назван причиной", () => {
-    expect(checklistDeliveryLabel("muted", "07:00")).toBe("не уйдёт: напоминания выключены");
     expect(checklistDeliveryLabel("no-telegram", "07:00")).toBe("не уйдёт: нет Telegram");
     expect(checklistDeliveryLabel("nothing-to-send", "07:00")).toBe("не уйдёт: в списке пусто");
   });
@@ -254,9 +239,9 @@ describe("checklistDayTotals", () => {
 
   it("считает ушедшее, ожидаемое и застрявшее по отдельности", () => {
     const totals = checklistDayTotals([
-      row("sent"), row("sent"), row("scheduled"), row("muted"), row("no-telegram"), row("nothing-to-send"),
+      row("sent"), row("sent"), row("scheduled"), row("no-telegram"), row("nothing-to-send"),
     ]);
-    expect(totals).toEqual({ sent: 2, waiting: 1, blocked: 3 });
+    expect(totals).toEqual({ sent: 2, waiting: 1, blocked: 2 });
   });
 
   // Пустой день — не «всё хорошо» и не «всё плохо»: сегодня чек-лист просто
@@ -265,7 +250,7 @@ describe("checklistDayTotals", () => {
     expect(checklistDayTotals([])).toEqual({ sent: 0, waiting: 0, blocked: 0 });
   });
 
-  it("выключенные напоминания и отсутствие Telegram считаются вместе — оба не дойдут", () => {
-    expect(checklistDayTotals([row("muted"), row("no-telegram")]).blocked).toBe(2);
+  it("непривязанный Telegram и пустой список считаются вместе — оба не дойдут", () => {
+    expect(checklistDayTotals([row("nothing-to-send"), row("no-telegram")]).blocked).toBe(2);
   });
 });

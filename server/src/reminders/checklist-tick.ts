@@ -19,6 +19,9 @@ import { safeErrorMessage } from "../util/safe-error";
  * либо через два часа после. Тик крутится каждые пять минут, поэтому
  * дедупликация обязательна — без неё это два десятка сообщений за смену.
  *
+ * Уходит независимо от личной галочки напоминаний — см. довод у проверки
+ * `owner` ниже.
+ *
  * Пунктов может не быть вовсе, и это не повод молчать: пояснение и приложенная
  * инструкция — уже полноценное сообщение дежурному, а список пунктов админ
  * заводит не всегда. Раньше условием была непустота списка, и у «Дежурств 47»,
@@ -58,8 +61,13 @@ export async function runChecklistTick(
     if (shift.start != null && now.time < shift.start) continue;
     if (hasReminder(db, shift.id, CHECKLIST_KIND)) continue;
 
+    // Личная галочка «не пиши мне про смены» здесь НЕ проверяется, в отличие от
+    // `runReminderTick`: вечернее напоминание — удобство, от которого человек
+    // вправе отказаться, а чек-лист дежурного — рабочая инструкция на его смену.
+    // Пока флаг был общим, трое выключили 🔕 под напоминанием и на месяц остались
+    // без инструкций, ни разу об этом не узнав (2026-08-28).
     const owner = getEmployeeById(db, employeeId);
-    if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) continue;
+    if (!owner || owner.telegramUserId == null) continue;
 
     const marked = listMarksFor(db, now.date, employeeId).map((m) => m.itemId);
     const settings = {

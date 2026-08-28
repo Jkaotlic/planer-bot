@@ -21,8 +21,8 @@ import { AdminEmployeesScreen } from "./AdminEmployeesScreen";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const EMPLOYEES: Employee[] = [
-  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, preferredName: null, address: "Аня", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
-  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, preferredName: null, address: "Игорь", excludedFromAssignment: true, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false },
+  { id: 1, displayName: "Аня Смирнова", isAdmin: true, isActive: true, telegramUserId: 10, birthDate: null, preferredName: null, address: "Аня", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
+  { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 11, birthDate: null, preferredName: null, address: "Игорь", excludedFromAssignment: true, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
 ];
 
 let root: Root | null = null;
@@ -145,7 +145,7 @@ describe("тумблер «Наблюдатель» на карточке раб
         // остаться исключённым, поэтому галка обязана показывать `true`, а не
         // «участвует», хоть распределение и так его сейчас пропускает.
         excludedFromAssignment: true, excludedFromSwaps: false,
-        isObserver: true, selfScheduleEnabled: false,
+        isObserver: true, selfScheduleEnabled: false, remindersEnabled: true,
       },
     ]);
     host = document.createElement("div");

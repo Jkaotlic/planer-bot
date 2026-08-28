@@ -23,12 +23,15 @@ export type EmployeeBriefDto = z.infer<typeof employeeBriefSchema>;
  * `address` вычисляется, а не хранится: карточка показывает, как бот к человеку
  * обратится на самом деле, — так видно, кому обращение ещё не задано.
  *
- * Ряд таблицы шире этого списка на девять колонок, и все девять сюда уезжали:
- * `tgUsername`, `tgFirstName`, `phone`, `remindersEnabled`, `prepBufferMin`,
- * `inviteToken`, `archivedAt`, `rosterOrder`, `createdAt`. Ни одну из них не
- * объявляет тип `Employee` ни одного из двух фронтов, то есть не читает ни один
- * экран. `inviteToken` среди них — не просто лишнее поле, а ключ привязки
- * чужого телеграма к работнику.
+ * Ряд таблицы шире этого списка, и лишние колонки сюда уезжали целиком:
+ * `tgUsername`, `tgFirstName`, `phone`, `prepBufferMin`, `inviteToken`,
+ * `archivedAt`, `rosterOrder`, `createdAt`. `inviteToken` среди них — не просто
+ * лишнее поле, а ключ привязки чужого телеграма к работнику.
+ *
+ * `remindersEnabled` в этом списке был до 2026-08-28 и вернулся осознанно: без
+ * него админ не мог увидеть, доходят ли до человека сообщения бота вообще. Трое
+ * месяцами не получали напоминаний, а в консоли выглядели обычными работниками —
+ * и понять это удалось только запросом к живой базе.
  */
 export const adminEmployeeSchema = z
   .object({
@@ -50,6 +53,9 @@ export const adminEmployeeSchema = z
      *  и отдаётся всегда — снятая роль его не обнуляет, чтобы значение не
      *  терялось при повторном включении. */
     selfScheduleEnabled: z.boolean(),
+    /** Личная галочка «пиши мне вечером про завтрашнюю смену». Чек-лист
+     *  дежурного она не глушит — это рабочая инструкция, см. `checklist-tick`. */
+    remindersEnabled: z.boolean(),
   })
   .strict();
 export type AdminEmployeeDto = z.infer<typeof adminEmployeeSchema>;

@@ -3,7 +3,7 @@ import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, listForAdmin, reorderEmployee, archiveEmployee, setEmployeeAdmin, setEmployeeObserver } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, getByTelegramId, listForAdmin, reorderEmployee, archiveEmployee, setEmployeeAdmin, setEmployeeObserver, setRemindersEnabled } from "../repo/employees";
 import { createShift, getShift } from "../repo/shifts";
 import { createSwapRequest, getSwapRequest } from "../repo/swaps";
 import { listRecentAudit, recordAudit } from "../repo/audit";
@@ -69,6 +69,37 @@ describe("GET /api/employees", () => {
     const app = createApp({ db, config });
     const res = await app.request("/api/employees");
     expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * Админ должен видеть, доходят ли до человека сообщения бота.
+ *
+ * Поле сознательно не отдавалось наружу, и 2026-08-28 это стоило расследования
+ * по живой базе: трое месяцами не получали ни напоминаний, ни (пока флаг был
+ * общим) чек-листов, а в консоли они выглядели обычными работниками.
+ */
+describe("состояние напоминаний в карточке", () => {
+  it("админ видит, что человек отписался от напоминаний", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = worker(db, "Марк", 777);
+    setRemindersEnabled(db, mark.id, false);
+
+    const body = await (await app.request("/api/admin/employees", bearer(admin))).json();
+    const row = body.employees.find((e: { id: number }) => e.id === mark.id);
+    expect(row.remindersEnabled).toBe(false);
+  });
+
+  it("у остальных оно включено", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня", 778);
+
+    const body = await (await app.request("/api/admin/employees", bearer(admin))).json();
+    expect(body.employees.find((e: { id: number }) => e.id === anya.id).remindersEnabled).toBe(true);
   });
 });
 

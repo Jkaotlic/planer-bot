@@ -25,7 +25,7 @@ Telegram-бот и Mini App для командного графика: смен
 ## Гейт
 
 ```bash
-npm test          # 2358 тестов, ~25 с
+npm test          # 2361 тест, ~25 с
 npm run typecheck # все воркспейсы
 npm run lint      # biome, только правила корректности
 ```

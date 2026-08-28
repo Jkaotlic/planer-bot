@@ -20,6 +20,9 @@ const adminRow = {
   excludedFromSwaps: false,
   isObserver: false,
   selfScheduleEnabled: false,
+  // Админ видит, отписался ли человек от вечерних напоминаний: без этого поля
+  // «до него не доходят сообщения» диагностировалось только запросом к базе.
+  remindersEnabled: true,
 };
 
 describe("схемы домена employees", () => {

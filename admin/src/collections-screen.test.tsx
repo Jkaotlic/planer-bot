@@ -42,7 +42,7 @@ function employee(patch: Partial<Employee> = {}): Employee {
     id: 5, displayName: "Иванова Анна", isAdmin: false, isActive: true, telegramUserId: null,
     birthDate: null, preferredName: null, address: "Иванова",
     excludedFromAssignment: false, excludedFromSwaps: false,
-    isObserver: false, selfScheduleEnabled: false,
+    isObserver: false, selfScheduleEnabled: false, remindersEnabled: true,
     ...patch,
   };
 }
