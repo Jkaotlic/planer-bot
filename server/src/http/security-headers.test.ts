@@ -41,6 +41,15 @@ describe("security headers", () => {
     expect(csp).toContain("frame-ancestors 'self' https://web.telegram.org");
   });
 
+  // Отдельные сборки веб-клиента живут на своих доменах, и рамка оттуда —
+  // не web.telegram.org. Кто пользуется ими, получал пустой прямоугольник:
+  // браузер отказывает во встраивании молча, без единого слова на экране.
+  it("веб-клиент на отдельных доменах тоже должен уметь встроить мини-апп", async () => {
+    const csp = (await app().request("/app/")).headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toContain("https://webk.telegram.org");
+    expect(csp).toContain("https://weba.telegram.org");
+  });
+
   it("/app/<anything> (sub-paths) get the same app-friendly framing policy", async () => {
     const res = await app().request("/app/some/deep/route");
     expect(res.headers.get("X-Frame-Options")).toBeNull();

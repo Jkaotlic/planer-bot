@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Смены · Админка</title>
+    <!--
+      Тот же полифил, что в мини-аппе, и по той же причине: `Object.hasOwn`
+      зовёт valibot внутри @telegram-apps/sdk при старте, а появился он только
+      в Safari 15.4 — понизить вызов сборкой нельзя. Здесь только он: консоль
+      открывают с компьютера, спасательный экран мини-аппа ей не нужен.
+      Синтаксис ES5 обязателен — этот скрипт выполняется раньше модуля.
+    -->
+    <script>
+      if (!Object.hasOwn) {
+        Object.hasOwn = function (target, key) {
+          return Object.prototype.hasOwnProperty.call(target, key);
+        };
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
