@@ -4,6 +4,100 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <title>Смены</title>
+    <!--
+      Спасательный круг загрузки. Живёт прямо здесь и только на ES5 — это не
+      небрежность, а условие работы.
+
+      Когда бандл собран под систему новее той, что стоит у человека, браузер не
+      выполняет из него НИ ОДНОЙ строки: модуль не парсится целиком. Значит ни
+      React, ни ErrorBoundary, ни импортированный обработчик ошибок до дела не
+      доходят — экран остаётся белым и молчит. Единственный код, который в этот
+      момент уже выполнился, — вот этот, встроенный в разметку и написанный
+      синтаксисом, который понимает даже очень старый движок. Одна стрелочная
+      функция здесь — и спасательный круг тонет вместе с приложением; сторож
+      `miniapp/src/boot-fallback.test.ts` это проверяет.
+
+      Полифил Object.hasOwn нужен по той же причине: его зовёт valibot внутри
+      @telegram-apps/sdk при старте, а появился он только в Safari 15.4 —
+      понизить вызов сборкой нельзя, лечится только подменой.
+    -->
+    <script>
+      if (!Object.hasOwn) {
+        Object.hasOwn = function (target, key) {
+          return Object.prototype.hasOwnProperty.call(target, key);
+        };
+      }
+
+      (function () {
+        var WAIT_MS = 8000;
+        var reason = "";
+
+        function remember(text) {
+          if (!reason && text) reason = String(text).slice(0, 400);
+        }
+
+        window.addEventListener("error", function (event) {
+          remember(event && event.message ? event.message : "script error");
+        });
+        window.addEventListener("unhandledrejection", function (event) {
+          remember(event && event.reason ? event.reason : "unhandled rejection");
+        });
+
+        function started() {
+          var root = document.getElementById("root");
+          return !!root && root.children.length > 0;
+        }
+
+        /* Отчёт уходит на сервер — иначе про поломку у конкретного человека
+           никто не узнает: он видит белый экран и просто закрывает приложение. */
+        function report() {
+          try {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "/api/client-error", true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.send(
+              JSON.stringify({
+                reason: reason || "экран остался пустым",
+                userAgent: navigator.userAgent,
+                url: location.href.slice(0, 200)
+              })
+            );
+          } catch (ignored) {}
+        }
+
+        function rescue() {
+          if (started() || document.getElementById("boot-fallback")) return;
+          report();
+
+          var box = document.createElement("div");
+          box.id = "boot-fallback";
+          box.setAttribute(
+            "style",
+            "font:16px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
+              "padding:24px 20px;max-width:520px;margin:0 auto;color:#222;background:#fff"
+          );
+          box.innerHTML =
+            '<h1 style="font-size:19px;margin:0 0 12px">Приложение не открылось</h1>' +
+            "<p style=\"margin:0 0 12px\">Чаще всего дело в системе телефона: приложению нужен iOS 14 или новее, либо Android со свежим Chrome. На более старой системе экран остаётся пустым всегда.</p>" +
+            '<p style="margin:0 0 12px">Напиши об этом в чат с ботом — я уже отправил отчёт, но без твоего слова никто его не заметит. График можно посмотреть кнопкой «📅 График» в боте, она работает на любом телефоне.</p>' +
+            '<p style="margin:16px 0 0;font-size:12px;color:#888;word-break:break-word">Что случилось: ' +
+            String(reason || "экран остался пустым").replace(/</g, "&lt;") +
+            "</p>";
+
+          document.body.appendChild(box);
+        }
+
+        /* Не по одному таймеру: приложение может подняться и на двенадцатой
+           секунде на плохой связи, и тогда сообщение об ошибке надо убрать. */
+        function watch() {
+          var box = document.getElementById("boot-fallback");
+          if (started() && box && box.parentNode) box.parentNode.removeChild(box);
+        }
+
+        window.setTimeout(rescue, WAIT_MS);
+        window.setInterval(watch, 1000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

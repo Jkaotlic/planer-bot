@@ -1,5 +1,5 @@
-import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
+import { readInitData } from "./init-data";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -962,6 +962,45 @@ export const OFFLINE_MESSAGE = "Нет связи с сервером — про
  */
 export const AUTH_EXPIRED_MESSAGE = "Вход устарел. Закрой мини-апп и открой заново кнопкой «Меню» в чате с ботом.";
 
+/**
+ * Человека не привязали к сотруднику — переоткрытие этого не исправит.
+ *
+ * Сервер отвечает 403 `not_registered`, когда telegram id открывшего не найден
+ * ни у одного сотрудника (или у архивного). Раньше на этом месте стояло
+ * «сервер ответил 403. Попробуй ещё раз.» — совет, который не помогает никогда,
+ * а человек в ответ жмёт кнопку по десять раз и решает, что бот сломан.
+ */
+export const NOT_REGISTERED_MESSAGE =
+  "Твой Telegram ещё не привязан к сотруднику. Напиши админу — он пришлёт ссылку-приглашение.";
+
+/** 429: счётчик сбрасывается временем, а не повторным нажатием. */
+export const TOO_MANY_MESSAGE = "Слишком много запросов подряд. Подожди минуту и открой заново.";
+
+/**
+ * Запуск, в котором пропуска нет вовсе, — это не «пропуск устарел».
+ *
+ * Telegram документированно не кладёт `initData`, если мини-апп открыт из
+ * кнопки ОБЫЧНОЙ клавиатуры. У части команды в чате до сих пор висит старая
+ * раскладка, где «📋 Мои смены» была именно такой кнопкой: Telegram держит
+ * reply-клавиатуру, пока бот не пришлёт новую, а тап по web_app-кнопке боту
+ * ничего не шлёт — значит повода прислать новую у бота не возникает никогда.
+ * Человек жмёт ту же на вид кнопку, что и коллега, и у него не работает.
+ *
+ * «Переоткрой» ему бесполезно: сколько ни жми ту же кнопку, подписи не
+ * появится. Работают ровно два выхода, оба здесь и названы.
+ */
+export const NO_LAUNCH_DATA_MESSAGE =
+  "Эта кнопка не передаёт вход в приложение. Открой мини-апп кнопкой «Меню» слева от поля ввода — " +
+  "или отправь боту /start, он обновит кнопки.";
+
+/** Что сказать на неуспешный ответ `/api/auth`. Разные беды — разные слова. */
+export function refusalText(status: number, hadInitData = true): string {
+  if (status === 401) return hadInitData ? AUTH_EXPIRED_MESSAGE : NO_LAUNCH_DATA_MESSAGE;
+  if (status === 403) return NOT_REGISTERED_MESSAGE;
+  if (status === 429) return TOO_MANY_MESSAGE;
+  return `Не удалось войти: сервер ответил ${status}. Попробуй ещё раз.`;
+}
+
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
@@ -971,33 +1010,61 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
 }
 
 async function requestToken(): Promise<string> {
-  try {
-    restoreInitData();
-  } catch {
-    // No launch params available (e.g. opened outside Telegram). Fall
-    // through and let the /api/auth call below fail with a clear 401
-    // rather than hanging on a signal that will never populate.
-  }
+  // Пропуск берётся `readInitData`, а не напрямую у SDK: на клиентах старше
+  // Bot API 7.10 строгий разбор SDK падает целиком и не отдаёт ничего — см.
+  // `init-data.ts`. Сервер проверяет подпись сам и в тех же полях не нуждается.
+  // Пустая строка всё равно отправляется: сервер запишет отказ в лог вместе с
+  // устройством, и станет видно, что человек упирается в мёртвую кнопку.
+  const initData = readInitData();
   const res = await apiFetch(`${API_BASE}/api/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ initData: initDataRaw() ?? "" }),
+    body: JSON.stringify({ initData }),
   });
   if (!res.ok) {
-    // 401 — пропуск не принят: переоткрыть. Всё остальное — беда на сервере,
-    // и «переоткрой» там было бы советом, который не помогает.
-    throw new Error(
-      res.status === 401 ? AUTH_EXPIRED_MESSAGE : `Не удалось войти: сервер ответил ${res.status}. Попробуй ещё раз.`,
-    );
+    throw new Error(refusalText(res.status, initData.length > 0));
   }
   const body = (await res.json()) as { token: string };
   return body.token;
 }
 
-/** Fetches (and caches) the session JWT, authenticating exactly once. */
+/**
+ * Кеширует пропуск — но только удачный.
+ *
+ * `??=` запоминал и отклонённую обещалку тоже: один споткнувшийся запрос на
+ * входе (лифт, рестарт сервера при выкладке) — и каждый следующий вызов
+ * получал ту же ошибку, ни разу не попробовав заново. Человеку это выглядело
+ * как «приложение сломалось насовсем».
+ */
 function authToken(): Promise<string> {
-  tokenPromise ??= requestToken();
+  tokenPromise ??= requestToken().catch((error: unknown) => {
+    tokenPromise = null;
+    throw error;
+  });
   return tokenPromise;
+}
+
+/**
+ * Запрос с пропуском, с одной повторной попыткой на 401.
+ *
+ * JWT живёт шесть часов, вебвью Telegram — дольше. Без этой повторной попытки
+ * мини-апп после шести часов отвечал английским «Request to /api/me failed with
+ * status 401» на каждое действие и не оживал уже никогда: токен сброшен не был,
+ * новый никто не просил. Ради этой самой переавторизации окно `initData` и
+ * растянули до суток — осталось её позвать.
+ */
+async function authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = async (token: string) =>
+    apiFetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${token}` },
+    });
+
+  const res = await send(await authToken());
+  if (res.status !== 401) return res;
+
+  tokenPromise = null;
+  return send(await authToken());
 }
 
 /**
@@ -1039,82 +1106,58 @@ function withEmployeeNames(schedule: TeamScheduleResponse): TeamSchedule {
 }
 
 async function authorizedGet<T>(path: string): Promise<T> {
-  const token = await authToken();
-  const res = await apiFetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    throw new Error(`Request to ${path} failed with status ${res.status}`);
-  }
+  const res = await authorizedFetch(path);
+  if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as T;
 }
 
 /** Reads `{error}` off a non-2xx JSON response, falling back to a generic message. */
-async function errorMessage(path: string, res: Response): Promise<string> {
+async function errorMessage(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string };
-  return body.error ?? `Request to ${path} failed with status ${res.status}`;
+  // Запасной текст по-русски: английская машинная строка доезжала до человека
+  // как есть — экраны показывают `Error.message` без перевода.
+  return body.error ?? `Не удалось выполнить запрос: сервер ответил ${res.status}.`;
 }
 
 async function authorizedPostJson<T>(path: string, payload: unknown): Promise<T> {
-  const token = await authToken();
-  const res = await apiFetch(`${API_BASE}${path}`, {
+  const res = await authorizedFetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
-  }
+  if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as T;
 }
 
 /** A `{ok: true}`-shaped POST with no body (accept/decline/cancel). */
 async function authorizedPostAction(path: string): Promise<void> {
-  const token = await authToken();
-  const res = await apiFetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
-  }
+  const res = await authorizedFetch(path, { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
 }
 
 async function authorizedPatchJson<T>(path: string, payload: unknown): Promise<T> {
-  const token = await authToken();
-  const res = await apiFetch(`${API_BASE}${path}`, {
+  const res = await authorizedFetch(path, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
-  }
+  if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as T;
 }
 
 async function authorizedPutJson<T>(path: string, payload: unknown): Promise<T> {
-  const token = await authToken();
-  const res = await apiFetch(`${API_BASE}${path}`, {
+  const res = await authorizedFetch(path, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
-  }
+  if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as T;
 }
 
 async function authorizedDelete<T>(path: string): Promise<T> {
-  const token = await authToken();
-  const res = await apiFetch(`${API_BASE}${path}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    throw new Error(await errorMessage(path, res));
-  }
+  const res = await authorizedFetch(path, { method: "DELETE" });
+  if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as T;
 }
 
@@ -1310,12 +1353,9 @@ export const realClient: ApiClient = {
   async getPayrollCsv(from, to) {
     // Unlike every other admin call this returns raw CSV text, not JSON — the
     // screen wraps it in a Blob + download link (see `AdminWeekendScreen`).
-    const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const res = await apiFetch(`${API_BASE}/api/admin/weekend/payroll.csv?${q}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(await errorMessage("/api/admin/weekend/payroll.csv", res));
+    const res = await authorizedFetch(`/api/admin/weekend/payroll.csv?${q}`);
+    if (!res.ok) throw new Error(await errorMessage(res));
     return res.text();
   },
 
@@ -1427,7 +1467,7 @@ export const realClient: ApiClient = {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ rotationUnit }),
     });
-    if (!res.ok) throw new Error(await errorMessage(path, res));
+    if (!res.ok) throw new Error(await errorMessage(res));
   },
 
   async saveTemplateRoles(templateId, pool, preference) {
@@ -1438,7 +1478,7 @@ export const realClient: ApiClient = {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ pool, preference }),
     });
-    if (!res.ok) throw new Error(await errorMessage(path, res));
+    if (!res.ok) throw new Error(await errorMessage(res));
   },
 
   async setTemplateChecklist(templateId, checklistId) {
@@ -1454,12 +1494,9 @@ export const realClient: ApiClient = {
   },
 
   async getRosterCsv(from, to) {
-    const token = await authToken();
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    const res = await apiFetch(`${API_BASE}/api/admin/roster.csv?${q}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(await errorMessage("/api/admin/roster.csv", res));
+    const res = await authorizedFetch(`/api/admin/roster.csv?${q}`);
+    if (!res.ok) throw new Error(await errorMessage(res));
     return res.text();
   },
 

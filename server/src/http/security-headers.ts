@@ -1,14 +1,24 @@
 import type { MiddlewareHandler } from "hono";
 import type { Env } from "./middleware";
 
-// The origin Telegram Web actually uses to embed a Mini App in an iframe (the
+// The origins Telegram Web actually uses to embed a Mini App in an iframe (the
 // page at web.telegram.org loads the app at /app/ inside an <iframe> and talks
-// to it over postMessage with this as targetOrigin). Verified against
+// to it over postMessage with one of these as targetOrigin). Verified against
 // Telegram's own Mini Apps docs/SDK rather than assumed — Telegram Desktop and
 // mobile clients open the app in a native webview (a top-level load, not a
 // framed one), so they aren't affected by frame-ancestors either way; only the
 // web client actually frames the page.
-const TELEGRAM_WEB_ORIGIN = "https://web.telegram.org";
+const TELEGRAM_WEB_ORIGINS = [
+  "https://web.telegram.org",
+  // Отдельные сборки того же веб-клиента, K и A, живут на своих доменах и
+  // рамку создают от своего имени. Пока их тут не было, у того, кто открывает
+  // Telegram оттуда, мини-апп не открывался вовсе: браузер отказывает во
+  // встраивании молча, и человек видел пустой прямоугольник — тот же белый
+  // экран, что и во всех остальных поломках, только без единой ошибки в консоли
+  // приложения, потому что приложение и не запускалось.
+  "https://webk.telegram.org",
+  "https://weba.telegram.org",
+].join(" ");
 
 function isUnderPrefix(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
@@ -18,7 +28,7 @@ function isUnderPrefix(path: string, prefix: string): boolean {
  * Security headers for every response this process serves.
  *
  * Framing policy is the one thing that has to differ by path — see the note
- * on TELEGRAM_WEB_ORIGIN above:
+ * on TELEGRAM_WEB_ORIGINS above:
  *   - /admin/*  — a desktop console nobody legitimately frames: denied outright.
  *   - /app/*    — the Telegram Mini App, which *must* stay framable by Telegram
  *                 Web or it breaks there. X-Frame-Options has no "allow this
@@ -57,7 +67,7 @@ export function securityHeaders(): MiddlewareHandler<Env> {
     if (isUnderPrefix(path, "/app")) {
       c.header(
         "Content-Security-Policy",
-        `frame-ancestors 'self' ${TELEGRAM_WEB_ORIGIN}; object-src 'none'; base-uri 'self'`,
+        `frame-ancestors 'self' ${TELEGRAM_WEB_ORIGINS}; object-src 'none'; base-uri 'self'`,
       );
     } else {
       c.header("X-Frame-Options", "DENY");

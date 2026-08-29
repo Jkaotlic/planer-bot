@@ -11,6 +11,7 @@ import "@telegram-apps/telegram-ui/dist/styles.css";
 import "./index.css";
 
 import { App } from "./App";
+import { CrashBoundary } from "./components/CrashBoundary";
 import { init } from "./init";
 
 init();
@@ -32,8 +33,17 @@ if (!container) {
   throw new Error("#root element not found");
 }
 
+/**
+ * Граница снаружи `Root`, а не внутри `App`.
+ *
+ * `Root` читает сигнал темы из SDK, и если SDK не поднялся, падение случится
+ * ещё до `App` — граница внутри `App` его не поймала бы, и человек увидел бы
+ * белый экран. Снаружи ловится всё дерево целиком.
+ */
 createRoot(container).render(
   <StrictMode>
-    <Root />
+    <CrashBoundary>
+      <Root />
+    </CrashBoundary>
   </StrictMode>,
 );

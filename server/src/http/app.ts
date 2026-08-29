@@ -9,6 +9,7 @@ import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
+import { describeClientError, CLIENT_ERROR_BODY_MAX, type ClientErrorReport } from "./client-error";
 import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../repo/templates";
 import { getChecklist, setTemplateChecklist } from "../repo/checklists";
@@ -254,6 +255,26 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/health", (c) => c.json({ ok: true }));
 
   /**
+   * Куда мини-апп жалуется, что не открылся. Без токена — по устройству и
+   * причине, см. `client-error.ts`. Своё окно в лимитере, потому что ручка
+   * публичная: 120 отчётов в минуту — это вся команда, дважды переоткрывшая
+   * приложение, и на два порядка меньше общего потолка.
+   */
+  app.post("/api/client-error", rateLimiter({ windowMs: 60_000, max: 120 }), async (c) => {
+    const raw = (await c.req.text().catch(() => "")).slice(0, CLIENT_ERROR_BODY_MAX);
+    let report: ClientErrorReport = {};
+    try {
+      report = JSON.parse(raw) as ClientErrorReport;
+    } catch {
+      // Мусор вместо JSON — всё равно сигнал: значит клиент сломан настолько,
+      // что не собрал даже тело. Пишем, что есть.
+      report = { reason: raw };
+    }
+    console.warn(redactSecrets(describeClientError(report)));
+    return c.body(null, 204);
+  });
+
+  /**
    * Всё, что мини-апп читает при открытии, — одним запросом.
    *
    * Старт делал две волны: `/api/me`, а следом шесть запросов параллельно. Байты
@@ -304,11 +325,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/auth", rateLimiter({ windowMs: 60_000, max: 1_200 }), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { initData?: unknown };
     const initData = typeof body.initData === "string" ? body.initData : (c.req.header("X-Init-Data") ?? "");
+    /**
+     * Отказ входа пишется в лог, удачный вход — нет.
+     *
+     * Полтора месяца мини-апп не открывался у части команды, и понять почему
+     * было нечем: в `~/planer-bot.log` лежали только строки о старте процесса.
+     * Здесь пишется ровно то, чем один человек отличается от другого, — его
+     * telegram id, причина отказа и устройство. `initData` целиком НЕ пишется
+     * никогда: в нём имя и фамилия человека, а лог читают через плечо.
+     */
+    function refuse(reason: "invalid_init_data" | "not_registered", telegramUserId?: number) {
+      console.warn(
+        `вход отклонён: ${reason} | tg id: ${telegramUserId ?? "—"} | устройство: ${(c.req.header("User-Agent") ?? "—").slice(0, 200)}`,
+      );
+      return c.json({ error: reason }, reason === "invalid_init_data" ? 401 : 403);
+    }
+
     let user: TelegramUser;
     try {
       user = validateInitData(initData, config.botToken).user;
     } catch {
-      return c.json({ error: "invalid_init_data" }, 401);
+      return refuse("invalid_init_data");
     }
 
     const allowlisted = config.adminTelegramIds.includes(user.id);
@@ -322,7 +359,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // dead end for someone on that list the way it rightly is for everyone else.
       // Re-authenticating undoes the archive rather than re-issuing a token for a row
       // marked inactive.
-      if (!allowlisted) return c.json({ error: "not_registered" }, 403);
+      if (!allowlisted) return refuse("not_registered", user.id);
       employee = restoreEmployee(db, employee.id)!;
       if (!employee.isAdmin) employee = setEmployeeAdmin(db, employee.id, true) ?? employee;
       recordAudit(db, "employee_restored", employee.id, {
@@ -332,7 +369,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       });
     }
     if (!employee) {
-      if (!allowlisted) return c.json({ error: "not_registered" }, 403);
+      if (!allowlisted) return refuse("not_registered", user.id);
       employee = createAdminEmployee(db, {
         telegramUserId: user.id,
         tgUsername: user.username,
