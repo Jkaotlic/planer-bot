@@ -4,33 +4,52 @@ import type { Db } from "../db/client";
 import { notifyUser, noticeMuteKeyboard } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
-import { adminRecipients } from "../collections/collection-service";
+import {
+  adminRecipients,
+  claimCollectionSend,
+  markCollectionSent,
+  previewCollection,
+  recipientsOf,
+  releaseCollectionSend,
+} from "../collections/collection-service";
 import {
   ADMIN_NOTICE_DAYS,
   COLLECTION_SEND_HOUR,
   adminNoticeMessage,
   adminNoticeReadyMessage,
+  autoSendFailedMessage,
+  autoSentMessage,
   ensureBirthdayRound,
   markAdminNotified,
+  markAutoSent,
   markScheduleNotified,
   roundsScheduledFor,
+  roundsToAutoSend,
   scheduleNoticeMessage,
   upcomingBirthdays,
 } from "./birthday-service";
 
 /**
- * The two things the bot does about collections on its own, and both talk to
- * the ADMINS only. Never the team — a collection is the admin's to send, after
- * they have made the link and seen what will go out.
+ * Три вещи, которые бот делает про сборы сам.
  *
  *   1. A week ahead of a birthday: «у Х день рождения через 7 дней».
  *   2. On the day an admin asked to be reminded — a birthday round or a custom
  *      collection alike: «пора разослать сбор по Х» / «пора дожать сбор».
+ *   3. За три дня до дня рождения — сама рассылка сбора КОМАНДЕ.
  *
- * Each nudges once (`adminNotifiedAt` / `scheduleNotifiedAt`), so a tick that
- * runs every five minutes doesn't turn into a five-minute alarm.
+ * Первые две уходят только админам, как было с самого начала. Третья появилась
+ * 31.08.2026 и нарушает правило «бот не пишет команде сам» ровно в одном месте:
+ * подарок нужен к дате, а напоминание, заставшее админа в отпуске, не рассылает
+ * ничего. Цена автономии — предохранитель, и он стоит не здесь, а раньше:
+ * рассылается только вооружённый раунд, а вооружается он тогда, когда админ
+ * вставляет ссылку и видит и текст письма, и день. Молчащего отказа тоже быть
+ * не может — про любой блокер админам уходит письмо.
  *
- * Returns how many admin messages went out.
+ * Each of the three fires once (`adminNotifiedAt` / `scheduleNotifiedAt` /
+ * `autoSentAt`), so a tick that runs every five minutes doesn't turn into a
+ * five-minute alarm.
+ *
+ * Returns how many messages went out.
  */
 export async function runBirthdayNoticeTick(
   db: Db,
@@ -115,5 +134,66 @@ export async function runBirthdayNoticeTick(
     sent += delivered;
   }
 
+  /**
+   * Третий цикл — единственное место, где бот пишет КОМАНДЕ без человека.
+   *
+   * Предохранитель стоит не здесь, а раньше: раунд вооружается только вместе со
+   * ссылкой, и в момент вставки админ видел и текст письма, и день, и кнопку
+   * «не рассылать сам». Здесь остаётся исполнение и громкий отказ — молчащая
+   * автоотправка выглядит как «всё под контролем», а подарка не будет.
+   */
+  for (const round of roundsToAutoSend(db, today)) {
+    // Помечаем ДО отправки: падение посреди цикла не должно обернуться вторым
+    // письмом всей команде на следующем тике. Тот же довод, что у `markAdminNotified`.
+    markAutoSent(db, round.id, new Date());
+
+    // Админ успел разослать руками — это не провал, а сделанная работа.
+    if (round.sendCount > 0) continue;
+
+    const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
+    const admins = adminRecipients(db, round.employeeId);
+    const preview = previewCollection(db, round);
+    const daysUntil = round.celebratedOn ? Math.max(0, daysBetween(today, round.celebratedOn)) : 0;
+
+    if (preview.blocker) {
+      const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
+      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, text);
+      recordAudit(db, "collection_auto_send_failed", null, {
+        collectionId: round.id, employeeId: round.employeeId, title: preview.title, reason: preview.blocker,
+      });
+      continue;
+    }
+
+    if (!claimCollectionSend(round.id)) continue;
+    try {
+      let delivered = 0;
+      for (const recipient of recipientsOf(db, round.employeeId)) {
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+      }
+      if (delivered > 0) markCollectionSent(db, round.id, delivered, new Date());
+      // `actorEmployeeId = null` — обе консоли уже рисуют такое как «система».
+      // Отдельное событие завело бы второй способ прочитать одно и то же.
+      recordAudit(db, "collection_sent", null, {
+        collectionId: round.id, employeeId: round.employeeId, title: preview.title,
+        round: 1, delivered, intended: preview.recipients.length, auto: true,
+      });
+
+      const report = delivered > 0
+        ? autoSentMessage(personName ?? "именинника", delivered, preview.recipients.length)
+        : autoSendFailedMessage(personName ?? "именинника", "Telegram не принял ни одного письма.", daysUntil);
+      // Ноль доставленных — это провал, а не тихий успех: `markCollectionSent`
+      // выше его не засчитал, и админ обязан узнать об этом словами.
+      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, report);
+      sent += delivered;
+    } finally {
+      releaseCollectionSend(round.id);
+    }
+  }
+
   return sent;
+}
+
+/** Сколько дней от `from` до `to`, обе — YYYY-MM-DD. */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }

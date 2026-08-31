@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import type { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
 import { runBirthdayNoticeTick } from "./birthday-notice";
 import { ensureBirthdayRound, markAdminNotified } from "./birthday-service";
-import { createCustomCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
+import { createCustomCollection, getCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
+import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
 const TODAY = "2026-08-01";
@@ -33,6 +35,18 @@ function person(db: Db, name: string, tg: number | null, birthDate: string | nul
   if (birthDate) setBirthDate(db, employee.id, birthDate);
   if (isAdmin) setEmployeeAdmin(db, employee.id, true);
   return employee.id;
+}
+
+/**
+ * Гасит автоотправку — то же, что делает админ кнопкой «не рассылать сам».
+ *
+ * Нужно тестам про ВТОРОЙ цикл: раунд вооружается при создании, и тик,
+ * запущенный в день автоотправки, подмешал бы в `sent` ещё и письма команде —
+ * счётчик перестал бы говорить про напоминание. Колонкой напрямую, потому что
+ * полем патча `autoSendOn` становится только в задаче 7.
+ */
+function disarmAutoSend(db: Db, roundId: number): void {
+  db.update(collections).set({ autoSendOn: null }).where(eq(collections.id, roundId)).run();
 }
 
 describe("runBirthdayNoticeTick", () => {
@@ -338,6 +352,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       const round = ensureBirthdayRound(db, who, TODAY)!;
       updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
       markAdminNotified(db, round.id, new Date());
+      // Здесь проверяется НАПОМИНАНИЕ, а не автоотправка: 5 августа — как раз
+      // день, в который бот разослал бы этот сбор сам.
+      disarmAutoSend(db, round.id);
 
       await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
       expect(sent.map((m) => m.to)).toEqual([2]);
@@ -370,6 +387,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       const round = ensureBirthdayRound(db, who, TODAY)!;
       updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
       markAdminNotified(db, round.id, new Date());
+      // Здесь проверяется НАПОМИНАНИЕ, а не автоотправка: 5 августа — как раз
+      // день, в который бот разослал бы этот сбор сам.
+      disarmAutoSend(db, round.id);
 
       await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
       await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
@@ -386,9 +406,150 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       const round = ensureBirthdayRound(db, who, TODAY)!;
       updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
       markAdminNotified(db, round.id, new Date());
+      // Здесь проверяется НАПОМИНАНИЕ, а не автоотправка: 5 августа — как раз
+      // день, в который бот разослал бы этот сбор сам.
+      disarmAutoSend(db, round.id);
 
       await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
       expect(sent.map((m) => m.to)).toEqual([2]);
     });
+  });
+});
+
+describe("автоотправка сбора", () => {
+  it("рассылает команде сама, кроме именинника, и отчитывается админам", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    const toTeam = sent.filter((m) => m.text.includes("Сбор на подарок"));
+    expect(toTeam.map((m) => m.to).sort()).toEqual([2, 3]);
+    expect(toTeam.some((m) => m.to === 1)).toBe(false);
+
+    const report = sent.find((m) => m.text.startsWith("💰 Разослал"));
+    expect(report?.to).toBe(3);
+    expect(report?.text).toContain("Марк");
+    expect(report?.text).toContain("2 из 2");
+  });
+
+  it("второй тик того же дня не рассылает второй раз", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+    const after = sent.length;
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:05" });
+
+    // Первый тик обязан был что-то разослать: без этой строки тест зелен и на
+    // реализации, где третьего цикла нет вовсе.
+    expect(after).toBeGreaterThan(0);
+    expect(sent).toHaveLength(after);
+  });
+
+  it("без ссылки не рассылает, а говорит админам, что подарка не будет", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    ensureBirthdayRound(db, mark, "2026-09-01");
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    expect(sent.some((m) => m.text.includes("Сбор на подарок"))).toBe(false);
+    const warning = sent.find((m) => m.text.startsWith("⚠️"));
+    expect(warning?.to).toBe(3);
+    expect(warning?.text).toContain("Нет ссылки");
+    expect(warning?.text).toContain("через 3 дня");
+  });
+
+  it("молчит, если админ уже разослал руками — это не провал, а сделанная работа", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+    markCollectionSent(db, round.id, 2, new Date());
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    expect(sent.filter((m) => m.text.startsWith("⚠️"))).toHaveLength(0);
+    expect(sent.filter((m) => m.text.includes("Сбор на подарок"))).toHaveLength(0);
+    // Молчание должно быть осознанным пропуском, а не тем, что раунд никто не
+    // смотрел: отметку о попытке цикл ставит до проверки на ручную рассылку,
+    // иначе он разбирал бы этот раунд каждые пять минут до самого праздника.
+    expect(getCollection(db, round.id)!.autoSentAt).not.toBeNull();
+  });
+
+  it("про отсутствующую ссылку предупреждает один раз, а не каждые пять минут", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    ensureBirthdayRound(db, mark, "2026-09-01");
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:05" });
+
+    expect(sent.filter((m) => m.text.startsWith("⚠️"))).toHaveLength(1);
+  });
+
+  it("ноль доставленных — громкий провал, а не тихий успех", async () => {
+    const db = makeTestDb();
+    const sent: { to: number; text: string }[] = [];
+    // Telegram отверг оба письма команде и отпустил к моменту отчёта — так и
+    // выглядит короткий сбой, ради которого `notifyUser` вообще возвращает false.
+    let refuse = 2;
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          if (refuse-- > 0) throw new Error("Too Many Requests");
+          sent.push({ to, text });
+        }),
+      },
+    } as unknown as Bot;
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+    // Нудж за неделю уже был — чтобы в счёт отказов попали только письма команде.
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    const warning = sent.find((m) => m.text.startsWith("⚠️"));
+    expect(warning?.to).toBe(3);
+    expect(warning?.text).toContain("Telegram не принял ни одного письма");
+    // И раунд не засчитан: «разослано» о письме, которого никто не получил, —
+    // это ровно та тишина, из-за которой подарка не будет.
+    expect(getCollection(db, round.id)!.sendCount).toBe(0);
+  });
+
+  it("пишет в журнал от имени системы, а не от имени админа", async () => {
+    const db = makeTestDb();
+    const { bot } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    const row = listRecentAudit(db, 20).find((e) => e.type === "collection_sent");
+    expect(row?.actorEmployeeId).toBeNull();
   });
 });

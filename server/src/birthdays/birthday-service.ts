@@ -1,5 +1,5 @@
 import { and, eq, isNull, lte } from "drizzle-orm";
-import { autoSendDateFor, daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate, type CollectionKind } from "@planer/shared";
+import { autoSendDateFor, daysUntilBirthday, describeDaysUntil, formatBirthDate, isCollectionActive, parseBirthDate, type CollectionKind } from "@planer/shared";
 import type { Db } from "../db/client";
 import { collections, employees, type Collection } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -7,10 +7,14 @@ import { listActive } from "../repo/employees";
 /**
  * Birthdays, and the collection round that goes with one.
  *
- * The rule that shapes everything here: **the bot never mails the team on its
+ * The rule that shaped everything here: **the bot never mails the team on its
  * own.** It nudges admins a week ahead, and after that every message is an admin
- * pressing a button. So this module computes and records; the only thing it
- * decides by itself is who is eligible to receive what.
+ * pressing a button.
+ *
+ * С 31.08.2026 у правила ровно одно исключение — `roundsToAutoSend`: сбор на
+ * день рождения уходит команде за три дня до праздника без человека, потому что
+ * подарок нужен к дате. Сам модуль от этого не изменился: он по-прежнему только
+ * считает и записывает, а рассылает `birthday-notice.ts`.
  *
  * The round itself — reading, editing, sending, previewing — is owned by
  * `../collections/collection-service`, on the same `collections` table a custom
@@ -262,4 +266,54 @@ export function scheduleNoticeMessage(title: string, collectUrl: string | null, 
   if (collectUrl) lines.push("", `Ссылка: ${collectUrl}`);
   lines.push("", `Открой «Сборы» в мини-приложении и нажми «${kind === "birthday" ? "Разослать" : "Напомнить"}».`);
   return lines.join("\n");
+}
+
+/**
+ * Раунды, которые бот обязан разослать сам прямо сейчас.
+ *
+ * `lte`, а не `eq`: сервер, лежавший в назначенный день, разошлёт на следующий,
+ * — тот же довод, что записан у `roundsScheduledFor`. Праздник, который уже
+ * прошёл, отсекается `isCollectionActive`: сбор на вчерашний день рождения —
+ * это не сбор, а недоразумение.
+ *
+ * Только дни рождения. У кастомного сбора нет даты, от которой считать «за три
+ * дня», и есть своя «дата напоминания» — правило «бот не пишет команде сам» для
+ * них продолжает действовать без изменений.
+ */
+export function roundsToAutoSend(db: Db, date: string): Collection[] {
+  return db
+    .select()
+    .from(collections)
+    .where(and(lte(collections.autoSendOn, date), isNull(collections.autoSentAt)))
+    .all()
+    .filter((round) => round.kind === "birthday")
+    .filter((round) => isCollectionActive(round, date));
+}
+
+/** Отмечает, что попытка автоотправки была — удачная или нет. */
+export function markAutoSent(db: Db, roundId: number, when: Date): void {
+  db.update(collections).set({ autoSentAt: when }).where(eq(collections.id, roundId)).run();
+}
+
+/** Отчёт админам после автоотправки. */
+export function autoSentMessage(name: string, delivered: number, intended: number): string {
+  return `💰 Разослал сбор на ${name} — ${delivered} из ${intended}.`;
+}
+
+/**
+ * Автоотправка не состоялась. Молчать нельзя: тишина читается как «всё под
+ * контролем», а подарка не будет.
+ *
+ * Причина ставится отдельной строкой и дословно: это текст блокера, который
+ * админ уже видел в мини-аппе, и переписывать его здесь значило бы завести
+ * второй способ сказать одно и то же.
+ */
+export function autoSendFailedMessage(name: string, reason: string, daysUntil: number): string {
+  return [
+    `⚠️ Сбор на ${name} не ушёл. День рождения ${describeDaysUntil(daysUntil)}.`,
+    "",
+    reason,
+    "",
+    "Пришли ссылку сюда — разошлю сразу.",
+  ].join("\n");
 }
