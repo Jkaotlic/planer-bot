@@ -151,6 +151,8 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
     adminNotifiedAt: null,
     scheduledSendOn: null,
     scheduleNotifiedAt: null,
+    autoSendOn: null,
+    autoSentAt: null,
     sentAt: null,
     sentCount: 0,
     sendCount: 0,
