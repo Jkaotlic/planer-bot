@@ -1,7 +1,8 @@
 import type { Bot } from "grammy";
-import { autoSendDateFor, autoSendLabel, isCollectionActive } from "@planer/shared";
+import { autoSendDateFor, autoSendLabel, formatDayMonth, isCollectionActive } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Collection } from "../db/schema";
+import { COLLECTION_SEND_HOUR } from "../birthdays/birthday-service";
 import { notifyUser } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
@@ -136,4 +137,34 @@ export async function notifyLinkReady(
     if (await notifyUser(bot, admin.telegramUserId!, text)) delivered += 1;
   }
   return delivered;
+}
+
+/**
+ * Что видит админ, приславший ссылку.
+ *
+ * Письмо показано целиком и ДО отправки — это и есть предохранитель, заменивший
+ * ручное нажатие «Разослать». Кнопка «не рассылать сам» рядом: остановить надо
+ * там же, где узнал, а не в мини-аппе, куда за этим надо идти.
+ */
+export function linkAcceptedMessage(
+  personName: string,
+  autoSendOn: string | null,
+  today: string,
+  recipientCount: number,
+  letter: string,
+): string {
+  const when = !autoSendOn
+    ? "Сам рассылать не буду"
+    : autoSendOn > today
+      ? `Разошлю команде ${formatDayMonth(autoSendOn)} в ${COLLECTION_SEND_HOUR}`
+      : "Разошлю команде сегодня";
+  return [
+    `Принял ссылку для сбора на ${personName}.`,
+    `${when} — ${recipientCount} чел., кроме именинника.`,
+    "",
+    "Уйдёт вот это:",
+    "———",
+    letter,
+    "———",
+  ].join("\n");
 }

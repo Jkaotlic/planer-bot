@@ -317,3 +317,44 @@ export function autoSendFailedMessage(name: string, reason: string, daysUntil: n
     "Пришли ссылку сюда — разошлю сразу.",
   ].join("\n");
 }
+
+/**
+ * Горизонт, в котором присланная ссылка ищет свой сбор.
+ *
+ * Шире, чем нудж за неделю: сбор делают и заранее, а «прислал ссылку — бот
+ * промолчал» — худший исход для главного жеста этой фичи.
+ */
+export const LINK_WINDOW_DAYS = 14;
+
+export interface LinkCandidate {
+  employeeId: number;
+  displayName: string;
+  celebratedOn: string;
+  daysUntil: number;
+  /** `null`, если раунда ещё нет: он заведётся при привязке. */
+  collectionId: number | null;
+  hasUrl: boolean;
+}
+
+/**
+ * Сборы, к которым админ может привязать присланную ссылку.
+ *
+ * Читает, но не пишет: раунда может не быть, и заводит его привязка, а не
+ * просмотр — то же правило, по которому `birthdayRoundDraft` отдаёт черновик с
+ * `id: 0`, ничего не сохраняя.
+ *
+ * Отправитель передаётся в `upcomingBirthdays` как «зритель», и это единственная
+ * причина, по которой именинник не может привязать ссылку к сбору на себя.
+ */
+export function linkCandidates(db: Db, asOf: string, senderEmployeeId: number): LinkCandidate[] {
+  return upcomingBirthdays(db, asOf, LINK_WINDOW_DAYS, senderEmployeeId)
+    .filter((b) => !b.campaign || (b.campaign.sendCount === 0 && b.campaign.closedAt == null))
+    .map((b) => ({
+      employeeId: b.employeeId,
+      displayName: b.displayName,
+      celebratedOn: b.celebratedOn,
+      daysUntil: b.daysUntil,
+      collectionId: b.campaign?.id ?? null,
+      hasUrl: Boolean(b.campaign?.collectUrl),
+    }));
+}
