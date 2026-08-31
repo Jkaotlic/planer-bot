@@ -19,7 +19,7 @@ const COLLECTION: Collection = {
   id: 3, kind: "custom", employeeId: null, year: null, celebratedOn: null,
   title: "Кофемашина", eventDate: null, deadline: null, amountPerPerson: 500, totalGoal: null,
   collectUrl: "https://example.test/c/1", messageText: null, closedAt: null,
-  scheduledSendOn: null, scheduleNotifiedAt: null, sentAt: "2026-08-20T10:00:00Z", sentCount: 3, sendCount: 1,
+  scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: "2026-08-20T10:00:00Z", sentCount: 3, sendCount: 1,
   createdAt: "2026-08-01T10:00:00Z",
 };
 

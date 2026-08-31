@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import {
+  autoSendDateFor,
+  autoSendLabel,
   collectionStatus,
   describeDaysUntil,
   formatDayMonth,
   formatMoney,
   isCollectionActive,
 } from "@planer/shared";
-import { Button, Input, List, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { Button, Cell, Input, List, Placeholder, Section, Spinner, Switch, Textarea } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
 import {
   apiClient,
@@ -308,8 +310,9 @@ export function AdminCollections() {
           <CardStack>
             <CardShell>
               <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
-                «Разослать» — и не увидишь перед этим точный текст и поимённый список.
+                За неделю до дня рождения бот напишет админам. Пришли ему ссылку на сбор — он привяжет её сам
+                и за три дня разошлёт команде, кроме именинника. Не хочешь автоматом — выключи тумблер на карточке
+                или нажми «Разослать» раньше.
               </div>
             </CardShell>
 
@@ -1268,6 +1271,14 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
   const palette = personPalette(birthday.employeeId);
   const status = roundStatus(birthday.campaign, today);
 
+  async function toggleAutoSend(birthday: UpcomingBirthday) {
+    // Дату считает `shared`, а не экран: та же арифметика на сервере, и две
+    // копии означали бы две разные даты.
+    const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
+    await apiClient.updateBirthday(birthday.employeeId, { autoSendOn: next });
+    await onChanged();
+  }
+
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1287,6 +1298,24 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
           {status.label}
         </span>
       </div>
+
+      {birthday.campaign?.collectUrl && (
+        <Cell
+          after={
+            <Switch
+              checked={Boolean(birthday.campaign.autoSendOn)}
+              aria-label="Бот рассылает сам"
+              onChange={() => void toggleAutoSend(birthday)}
+            />
+          }
+          subtitle={
+            autoSendLabel(birthday.campaign.autoSendOn, today) ??
+            "Разошлёшь сам — бот ждёт твоей кнопки"
+          }
+        >
+          Бот рассылает сам
+        </Cell>
+      )}
 
       <Button size="s" mode={open ? "gray" : "bezeled"} stretched onClick={onToggle}>
         {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}

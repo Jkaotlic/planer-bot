@@ -23,7 +23,7 @@ const ROUND: Collection = {
   id: 7, kind: "birthday", employeeId: 1, year: 2026, celebratedOn: "2026-08-05",
   title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
   collectUrl: "https://sber.ru/x", messageText: null, closedAt: null,
-  scheduledSendOn: null, scheduleNotifiedAt: null, sentAt: null, sentCount: 0, sendCount: 0,
+  scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: null, sentCount: 0, sendCount: 0,
   createdAt: "2026-08-01T10:00:00Z",
 };
 
