@@ -99,6 +99,24 @@ describe("автоотправка на карточке дня рождения
     expect(update).toHaveBeenCalledWith(1, { autoSendOn: "2099-09-04" });
   });
 
+  /**
+   * Нормальный исход каждой удавшейся автоотправки, а не край: `autoSendOn`
+   * после рассылки никто не гасит, и строка «разошлёт сегодня» висела бы рядом
+   * с «Разослано · 14» все три дня, пока люди скидываются. Второй админ читает
+   * «бот ещё разошлёт» и не идёт дожимать тех, кто не перевёл.
+   */
+  it("у разосланного сбора строки про будущую рассылку нет вовсе", async () => {
+    const el = await mount({
+      ...BIRTHDAY,
+      campaign: { ...ROUND, sendCount: 1, sentCount: 14, sentAt: "2099-09-04T10:00:00Z", autoSentAt: "2099-09-04T10:00:00Z" },
+    });
+
+    expect(el.textContent).toContain("Разослано · 14");
+    expect(el.textContent).not.toContain("Бот разошлёт");
+    expect(el.textContent).not.toContain("Разошлёшь сам");
+    expect(el.querySelector('input[aria-label="Бот рассылает сам"]')).toBeNull();
+  });
+
   it("вводный текст секции больше не обещает, что команде ничего не уйдёт", async () => {
     const el = await mount(BIRTHDAY);
 

@@ -68,6 +68,7 @@ describe("автоотправка на карточке дня рождения
     const el = await mount({ ...BIRTHDAY, campaign: { ...ROUND, autoSendOn: null } });
 
     expect(el.textContent).toContain("Разошлёшь сам");
+    expect(el.textContent).not.toContain("Бот разошлёт");
   });
 
   it("чекбокс выключает автоотправку — на сервер уходит null", async () => {
@@ -90,6 +91,23 @@ describe("автоотправка на карточке дня рождения
     await settle();
 
     expect(update).toHaveBeenCalledWith(1, { autoSendOn: "2099-09-04" });
+  });
+
+  /**
+   * Зеркало мини-апповского случая, и по той же причине: `autoSendOn` после
+   * рассылки никто не гасит, поэтому строка «разошлёт сегодня» жила бы рядом с
+   * «Разослано · 14» до самого праздника.
+   */
+  it("у разосланного сбора строки про будущую рассылку нет вовсе", async () => {
+    const el = await mount({
+      ...BIRTHDAY,
+      campaign: { ...ROUND, sendCount: 1, sentCount: 14, sentAt: "2099-09-04T10:00:00Z", autoSentAt: "2099-09-04T10:00:00Z" },
+    });
+
+    expect(el.textContent).toContain("Разослано · 14");
+    expect(el.textContent).not.toContain("Бот разошлёт");
+    expect(el.textContent).not.toContain("Разошлёшь сам");
+    expect(el.querySelector('input[aria-label="Бот рассылает сам"]')).toBeNull();
   });
 
   it("вводный абзац больше не обещает, что команде ничего не уйдёт", async () => {

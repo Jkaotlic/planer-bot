@@ -28,12 +28,18 @@ import { withNotifyNotice } from "../lib/notify-text";
  * «Сборы»: деньги, которые команда скидывает — на день рождения или по любому
  * другому поводу.
  *
- * The rule the screen is built around — **the bot never mails the team on its
- * own.** A week ahead it nudges the admins; everything after that happens here,
- * by hand: paste the Сбербанк link, edit the wording if you like, look at the
- * exact text and the exact list of names, and only then send. The send button
- * asks once more before it fires, because it is the one action in this console
- * that writes to every colleague at once.
+ * Правило, вокруг которого экран строился, — «бот никогда не пишет команде
+ * сам» — с 31.08.2026 отменено для одного случая: сбор на день рождения со
+ * ссылкой уходит команде сам за три дня до праздника. Предохранителем вместо
+ * нажатой кнопки стала видимость, и стоит она здесь: строка «Бот разошлёт
+ * команде …» с галочкой на карточке, которой любой админ останавливает
+ * рассылку одним тапом.
+ *
+ * Всё остальное по-прежнему руками: вставить ссылку, поправить текст,
+ * прочитать точный текст и точный поимённый список — и только потом отправить.
+ * Кнопка отправки переспрашивает: это единственное действие консоли, которое
+ * пишет сразу всем коллегам. Кастомный сбор (свадьба, проводы) исключения не
+ * получил — у него нет даты, от которой считать «за три дня».
  *
  * Второе правило — **сюрприз**: сбор, где смотрящий виновник, сервер не
  * отдаёт вообще. Экран его не прячет — прятать уже нечего.
@@ -1146,7 +1152,11 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
         </button>
       </div>
 
-      {birthday.campaign?.collectUrl && (
+      {/* Только пока сбор не ушёл. После рассылки `autoSendOn` в базе остаётся
+          (гасить его нечем и незачем), и строка обещала бы вторую рассылку рядом
+          с чипом «Разослано · 14» — все три дня, пока команда скидывается.
+          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам. */}
+      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && (
         <label className="birthday-autosend">
           <input
             type="checkbox"
