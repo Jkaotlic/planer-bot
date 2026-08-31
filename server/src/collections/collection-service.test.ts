@@ -279,19 +279,27 @@ describe("collectionsForWorker", () => {
 });
 
 describe("замок рассылки", () => {
+  // Уборка — в `finally`, а не последней строкой: она обязана пережить падение
+  // ассерта, иначе пропускается ровно в тот момент, когда нужна, — при регрессе замка.
   it("второй захват того же сбора не проходит, пока первый не отпустил", () => {
-    expect(claimCollectionSend(42)).toBe(true);
-    expect(claimCollectionSend(42)).toBe(false);
-    releaseCollectionSend(42);
-    expect(claimCollectionSend(42)).toBe(true);
-    releaseCollectionSend(42);
+    try {
+      expect(claimCollectionSend(42)).toBe(true);
+      expect(claimCollectionSend(42)).toBe(false);
+      releaseCollectionSend(42);
+      expect(claimCollectionSend(42)).toBe(true);
+    } finally {
+      releaseCollectionSend(42);
+    }
   });
 
   it("разные сборы друг друга не блокируют", () => {
-    expect(claimCollectionSend(1)).toBe(true);
-    expect(claimCollectionSend(2)).toBe(true);
-    releaseCollectionSend(1);
-    releaseCollectionSend(2);
+    try {
+      expect(claimCollectionSend(1)).toBe(true);
+      expect(claimCollectionSend(2)).toBe(true);
+    } finally {
+      releaseCollectionSend(1);
+      releaseCollectionSend(2);
+    }
   });
 });
 
