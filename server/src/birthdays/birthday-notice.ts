@@ -7,6 +7,7 @@ import { getEmployeeById } from "../repo/employees";
 import { adminRecipients } from "../collections/collection-service";
 import {
   ADMIN_NOTICE_DAYS,
+  COLLECTION_SEND_HOUR,
   adminNoticeMessage,
   adminNoticeReadyMessage,
   ensureBirthdayRound,
@@ -31,7 +32,17 @@ import {
  *
  * Returns how many admin messages went out.
  */
-export async function runBirthdayNoticeTick(db: Db, bot: Bot, today: string): Promise<number> {
+export async function runBirthdayNoticeTick(
+  db: Db,
+  bot: Bot,
+  now: { date: string; time: string },
+): Promise<number> {
+  // Один выход на все циклы: и нудж админам, и рассылка команде — это письма
+  // про сборы, и оба не должны будить людей ночью. Тот же приём, что у
+  // `reminder-service.ts` с его `reminderHour`.
+  if (now.time < COLLECTION_SEND_HOUR) return 0;
+
+  const today = now.date;
   let sent = 0;
 
   for (const birthday of upcomingBirthdays(db, today, ADMIN_NOTICE_DAYS)) {

@@ -9,6 +9,8 @@ import { createCustomCollection, markCollectionSent, updateCollection } from "..
 import type { Db } from "../db/client";
 
 const TODAY = "2026-08-01";
+/** Момент после часа рассылки — «обычный» вход в тик. */
+const NOW = { date: TODAY, time: "10:00" };
 
 function fakeBot() {
   const sent: { to: number; text: string; buttons: string[] }[] = [];
@@ -34,13 +36,27 @@ function person(db: Db, name: string, tg: number | null, birthDate: string | nul
 }
 
 describe("runBirthdayNoticeTick", () => {
+  it("до часа рассылки молчит целиком: нудж админам не должен приходить в 00:03", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    person(db, "Марк", 1, "08-08");
+    person(db, "Игорь", 2, null, true);
+
+    expect(await runBirthdayNoticeTick(db, bot, { date: TODAY, time: "00:03" })).toBe(0);
+    expect(sent).toHaveLength(0);
+
+    // Тот же день, но после десяти — письмо уходит. Значит молчание было про час,
+    // а не про то, что писать нечего.
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(1);
+  });
+
   it("tells admins a week ahead, and tells them what to do next", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
     person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
 
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(1);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(2);
     expect(sent[0]!.text).toContain("через 7 дней");
@@ -53,7 +69,7 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
 
     const sendMessage = bot.api.sendMessage as unknown as { mock: { calls: unknown[][] } };
     const options = sendMessage.mock.calls[0]?.[2] as
@@ -71,7 +87,7 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Админ", 2, null, true);
     person(db, "Обычный коллега", 3, null);
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent.map((m) => m.to)).toEqual([2]);
   });
 
@@ -81,7 +97,7 @@ describe("runBirthdayNoticeTick", () => {
     const birthdayAdmin = person(db, "Админ-именинник", 1, "08-08", true);
     person(db, "Другой админ", 2, null, true);
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent.map((m) => m.to)).toEqual([2]);
     expect(birthdayAdmin).toBeGreaterThan(0);
   });
@@ -92,9 +108,9 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
-    await runBirthdayNoticeTick(db, bot, TODAY);
-    await runBirthdayNoticeTick(db, bot, "2026-08-02");
+    await runBirthdayNoticeTick(db, bot, NOW);
+    await runBirthdayNoticeTick(db, bot, NOW);
+    await runBirthdayNoticeTick(db, bot, { date: "2026-08-02", time: "10:00" });
     expect(sent).toHaveLength(1);
   });
 
@@ -104,7 +120,7 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Нескоро", 1, "09-01");
     person(db, "Админ", 2, null, true);
 
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(sent).toEqual([]);
   });
 
@@ -117,7 +133,7 @@ describe("runBirthdayNoticeTick", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x" });
     markCollectionSent(db, round.id, 1, new Date());
 
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(sent).toEqual([]);
   });
 
@@ -127,9 +143,9 @@ describe("runBirthdayNoticeTick", () => {
     const id = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
 
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(ensureBirthdayRound(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
   });
 
   it("records the nudge in the journal", async () => {
@@ -137,7 +153,7 @@ describe("runBirthdayNoticeTick", () => {
     const { bot } = fakeBot();
     person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
 
     const logged = listRecentAudit(db, 5).find((row) => row.type === "birthday_admin_notice")!;
     expect(logged.payload).toMatchObject({ displayName: "Именинник", daysUntil: 7, delivered: 1 });
@@ -147,7 +163,7 @@ describe("runBirthdayNoticeTick", () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
     person(db, "Именинник", 1, "08-08");
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(sent).toEqual([]);
   });
 
@@ -161,14 +177,14 @@ describe("runBirthdayNoticeTick", () => {
     const round = ensureBirthdayRound(db, id, TODAY)!;
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x" });
 
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(1);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(1);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("Именинник");
     expect(sent[0]!.text).not.toContain("Создай сбор");
     expect(sent[0]!.text).not.toContain("Сбербанк Онлайн");
     // Still nudges exactly once — the flag semantics are unchanged.
     expect(ensureBirthdayRound(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
-    expect(await runBirthdayNoticeTick(db, bot, TODAY)).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(sent).toHaveLength(1);
   });
 });
@@ -185,7 +201,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent.map((m) => m.to)).toEqual([2]);
     expect(sent[0]!.text).toContain("Именинник");
     expect(sent[0]!.text).toContain("https://sber.ru/x");
@@ -201,7 +217,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
 
     expect(sent[0]!.buttons).toContain("✅ Собрали, закрыть");
   });
@@ -218,7 +234,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
 
     expect(sent).toHaveLength(2);
     for (const message of sent) expect(message.buttons).toHaveLength(2);
@@ -233,8 +249,8 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent).toHaveLength(1);
   });
 
@@ -247,7 +263,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-04" });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent).toHaveLength(0);
   });
 
@@ -261,7 +277,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     markAdminNotified(db, round.id, new Date());
     markCollectionSent(db, round.id, 4, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent).toHaveLength(0);
   });
 
@@ -275,7 +291,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent.map((m) => m.to)).toEqual([2]);
   });
 
@@ -288,7 +304,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
 
-    await runBirthdayNoticeTick(db, bot, TODAY);
+    await runBirthdayNoticeTick(db, bot, NOW);
     expect(listRecentAudit(db, 10).some((row) => row.type === "birthday_schedule_notice")).toBe(true);
   });
 
@@ -303,10 +319,10 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       messageText: null, scheduledSendOn: "2026-08-10",
     });
 
-    expect(await runBirthdayNoticeTick(db, bot, "2026-08-10")).toBe(1);
+    expect(await runBirthdayNoticeTick(db, bot, { date: "2026-08-10", time: "10:00" })).toBe(1);
     expect(sent[0]!.text).toContain("Кофемашина");
     // Second tick must stay silent — `scheduleNotifiedAt` fires once.
-    expect(await runBirthdayNoticeTick(db, bot, "2026-08-10")).toBe(0);
+    expect(await runBirthdayNoticeTick(db, bot, { date: "2026-08-10", time: "10:00" })).toBe(0);
   });
 
   describe("healing a missed reminder day (defect 1)", () => {
@@ -323,7 +339,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
       markAdminNotified(db, round.id, new Date());
 
-      await runBirthdayNoticeTick(db, bot, "2026-08-05");
+      await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
       expect(sent.map((m) => m.to)).toEqual([2]);
       expect(sent[0]!.text).toContain("Именинник");
     });
@@ -342,7 +358,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       // "2026-06-01" is far enough out that the week-ahead pass sees only next
       // year's occurrence (2027-01-05), well outside its 7-day window — so any
       // message here can only have come from the scheduled-reminder pass.
-      expect(await runBirthdayNoticeTick(db, bot, "2026-06-01")).toBe(0);
+      expect(await runBirthdayNoticeTick(db, bot, { date: "2026-06-01", time: "10:00" })).toBe(0);
       expect(sent).toEqual([]);
     });
 
@@ -355,9 +371,9 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
       markAdminNotified(db, round.id, new Date());
 
-      await runBirthdayNoticeTick(db, bot, "2026-08-05");
-      await runBirthdayNoticeTick(db, bot, "2026-08-05");
-      await runBirthdayNoticeTick(db, bot, "2026-08-06");
+      await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
+      await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
+      await runBirthdayNoticeTick(db, bot, { date: "2026-08-06", time: "10:00" });
       expect(sent).toHaveLength(1);
     });
 
@@ -371,7 +387,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
       updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: "2026-08-03" });
       markAdminNotified(db, round.id, new Date());
 
-      await runBirthdayNoticeTick(db, bot, "2026-08-05");
+      await runBirthdayNoticeTick(db, bot, { date: "2026-08-05", time: "10:00" });
       expect(sent.map((m) => m.to)).toEqual([2]);
     });
   });
