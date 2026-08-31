@@ -4,7 +4,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { ensureBirthdayRound, roundsToAutoSend } from "../birthdays/birthday-service";
 import { runBirthdayNoticeTick } from "../birthdays/birthday-notice";
-import { getCollection, markCollectionSent, updateCollection } from "./collection-service";
+import { getCollection, markCollectionSent, setCollectionClosed, updateCollection } from "./collection-service";
 import { attachLink, extractUrl, linkReadyMessage, notifyLinkReady } from "./link-capture";
 import type { Db } from "../db/client";
 
@@ -46,6 +46,13 @@ describe("extractUrl", () => {
   it("отрезает хвостовую пунктуацию, которой ссылка кончиться не может", () => {
     expect(extractUrl("держи https://example.com/s.")).toBe("https://example.com/s");
     expect(extractUrl("(https://example.com/s)")).toBe("https://example.com/s");
+  });
+
+  it("не отдаёт голую схему, которая осталась после отрезания скобки", () => {
+    // «(https://)» после среза хвоста — это `https://`, и оно уехало бы в
+    // письмо двадцати людям: консольный путь такое отвергает регуляркой.
+    expect(extractUrl("(https://)")).toBeNull();
+    expect(extractUrl("http://.")).toBeNull();
   });
 });
 
@@ -100,6 +107,60 @@ describe("attachLink", () => {
     // Ссылку менять можно и нужно: мини-приложение показывает именно её, а на
     // руках у команды может остаться протухшая.
     expect(updated.collectUrl).toBe("https://example.com/svezhaya");
+    expect(updated.autoSendOn).toBeNull();
+  });
+
+  it("та же самая ссылка автоотправку не возвращает", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    attachLink(db, { round, url: "https://example.com/sbor", asOf: "2026-09-01", actorEmployeeId: igor });
+    // Админ выключил автоотправку руками — присланная повторно ТА ЖЕ ссылка не
+    // повод её вернуть. Обе ручки давно так и делают, бот обязан так же.
+    updateCollection(db, round.id, { autoSendOn: null });
+
+    const again = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/sbor",
+      asOf: "2026-09-01", actorEmployeeId: igor,
+    });
+
+    expect(again.autoSendOn).toBeNull();
+  });
+
+  it("закрытый сбор не вооружает: тик его не увидит никогда", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+    setCollectionClosed(db, round.id, true, new Date("2026-09-01T07:00:00Z"));
+
+    const updated = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/svezhaya",
+      asOf: "2026-09-01", actorEmployeeId: igor,
+    });
+
+    expect(updated.collectUrl).toBe("https://example.com/svezhaya");
+    // `roundsToAutoSend` фильтрует через `isCollectionActive` — вооружённый
+    // закрытый раунд не уйдёт никогда, а день на карточке обещал бы обратное.
+    expect(updated.autoSendOn).toBeNull();
+  });
+
+  it("прошедший день рождения не вооружает", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+
+    // Ссылку принесли после праздника — сбор на вчерашний день рождения это
+    // уже не сбор, и `isCollectionActive` отсекает его так же, как закрытый.
+    const updated = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/sbor",
+      asOf: "2026-09-10", actorEmployeeId: igor,
+    });
+
     expect(updated.autoSendOn).toBeNull();
   });
 
@@ -182,6 +243,25 @@ describe("notifyLinkReady про разосланный раунд", () => {
     expect(sent.map((m) => m.to)).toEqual([3]);
     expect(sent[0]!.text).not.toContain("разошлёт");
     expect(sent[0]!.text).not.toContain("делать ничего не надо");
+  });
+});
+
+describe("notifyLinkReady про сбор, который уже никуда не пойдёт", () => {
+  it("про закрытый сбор молчит: обещать нечего, а сообщать не о чем", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    person(db, "Аня", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    setCollectionClosed(db, round.id, true, new Date("2026-09-01T07:00:00Z"));
+    const updated = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/svezhaya",
+      asOf: "2026-09-01", actorEmployeeId: igor,
+    });
+
+    expect(await notifyLinkReady(db, bot, updated, igor, "2026-09-01")).toBe(0);
+    expect(sent).toHaveLength(0);
   });
 });
 

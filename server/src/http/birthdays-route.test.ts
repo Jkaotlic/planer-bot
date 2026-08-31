@@ -5,7 +5,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
 import { ensureBirthdayRound } from "../birthdays/birthday-service";
-import { markCollectionSent, updateCollection } from "../collections/collection-service";
+import { markCollectionSent, setCollectionClosed, updateCollection } from "../collections/collection-service";
 import { signInitData } from "../auth/telegram";
 import { collections } from "../db/schema";
 import { testConfig } from "../test-config";
@@ -193,6 +193,29 @@ describe("PUT /api/admin/birthdays/:id — ссылка вооружает ав�
     expect(sent.map((m) => m.to)).toEqual([2]);
     expect(sent[0]!.text).not.toContain("разошлёт");
     expect(sent[0]!.text).not.toContain("делать ничего не надо");
+  });
+
+  it("закрытый сбор ссылка не вооружает и никого не будит", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Игорь", 2, null, true);
+    const token = await tokenFor(app, 111);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+    setCollectionClosed(db, round.id, true, new Date("2026-09-01T07:00:00Z"));
+
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(token, { collectUrl: "https://example.com/svezhaya" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    const { collection } = await res.json();
+    expect(collection.collectUrl).toBe("https://example.com/svezhaya");
+    // Закрытый сбор не увидит ни тик, ни мини-приложение: вооружать нечего и
+    // сообщать остальным не о чем.
+    expect(collection.autoSendOn).toBeNull();
+    expect(sent).toHaveLength(0);
   });
 
   it("правка без ссылки никого не будит", async () => {

@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { autoSendDateFor, autoSendLabel } from "@planer/shared";
+import { autoSendDateFor, autoSendLabel, isCollectionActive } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Collection } from "../db/schema";
 import { notifyUser } from "../bot/notify";
@@ -29,7 +29,11 @@ import { adminRecipients, updateCollection } from "./collection-service";
 export function extractUrl(text: string): string | null {
   const match = /https?:\/\/[^\s<>]+/i.exec(text);
   if (!match) return null;
-  return match[0].replace(/[.,;:!?)\]}»"']+$/, "") || null;
+  const url = match[0].replace(/[.,;:!?)\]}»"']+$/, "");
+  // Тот же порог, что на входе консоли, и по той же причине: «(https://)»
+  // после отрезания скобки — это голая схема, и она уехала бы в письмо всей
+  // команде ссылкой в никуда.
+  return /^https?:\/\/\S+$/i.test(url) ? url : null;
 }
 
 /** Ставит ссылку раунду, вооружает автоотправку и пишет об этом в журнал. */
@@ -38,15 +42,25 @@ export function attachLink(
   opts: { round: Collection; url: string; asOf: string; actorEmployeeId: number },
 ): Collection {
   const { round, url, asOf, actorEmployeeId } = opts;
+  // Ровно то же условие, что у обеих PUT-ручек, и слово в слово тот же смысл:
+  // правило «есть ссылка → бот разошлёт за три дня» одно на три входа, и
+  // «похоже» здесь не годится — расхождение и есть два разных поведения.
+  //
+  // Вооружает только НОВАЯ ссылка: присланная повторно та же самая не повод
+  // возвращать автоотправку, которую админ выключил руками.
+  //
   // Разосланный раунд вооружать нечем: повторной рассылки дня рождения не
-  // бывает, и тик его всё равно пропустит по `sendCount > 0`. Ссылку при этом
-  // менять можно и нужно — мини-приложение показывает именно её, а на руках у
-  // команды может остаться протухшая.
+  // бывает, и тик его всё равно пропустит по `sendCount > 0`. Закрытый и
+  // прошедший — тем более: `roundsToAutoSend` фильтрует через
+  // `isCollectionActive`, и поставленный им день обещал бы рассылку, которой
+  // не будет никогда. Ссылку при этом менять можно и нужно — мини-приложение
+  // показывает именно её, а на руках у команды может остаться протухшая.
   //
   // День считает `shared`, а не этот модуль: ту же арифметику повторяют обе
   // консоли, когда переключатель включают обратно.
-  const autoSendOn =
-    round.sendCount === 0 && round.celebratedOn ? autoSendDateFor(round.celebratedOn, asOf) : null;
+  const arming =
+    url !== round.collectUrl && round.sendCount === 0 && isCollectionActive(round, asOf);
+  const autoSendOn = arming && round.celebratedOn ? autoSendDateFor(round.celebratedOn, asOf) : null;
   const result = updateCollection(db, round.id, { collectUrl: url, ...(autoSendOn ? { autoSendOn } : {}) });
   if (!result.ok) throw new Error(result.error);
 
@@ -93,6 +107,14 @@ export function linkReadyMessage(
  *
  * Тому, кто вставил, не пишем: он это и сделал. Имениннику — тем более:
  * `adminRecipients` вычитает его, как и везде в этой фиче.
+ *
+ * Про закрытый и прошедший сбор молчим совсем. Письмо это существует, чтобы
+ * остальные не делали работу, которая уже сделана; у сбора, который не уйдёт
+ * ни сам, ни руками и которого нет даже в мини-приложении (`collectionsForWorker`
+ * отбирает по тому же `isCollectionActive`), никакой работы ни для кого нет.
+ * Любой текст про него был бы либо обещанием, либо шумом про пустую операцию.
+ * Проверка здесь, а не у трёх вызывающих: так вход из бота (Задача 8) получает
+ * то же поведение, не зная о нём.
  */
 export async function notifyLinkReady(
   db: Db,
@@ -101,6 +123,8 @@ export async function notifyLinkReady(
   actorEmployeeId: number,
   today: string,
 ): Promise<number> {
+  if (!isCollectionActive(round, today)) return 0;
+
   const actorName = getEmployeeById(db, actorEmployeeId)?.displayName ?? "Админ";
   const personName =
     round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? "именинника") : "сбора";

@@ -101,6 +101,7 @@ import {
   validateReminderHour,
   validateReminderTemplate,
   autoSendDateFor,
+  isCollectionActive,
 } from "@planer/shared";
 import {
   postSlot,
@@ -744,11 +745,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // можно и нужно (мини-приложение показывает именно её), а вооружать нечем —
     // повторной рассылки дня рождения не бывает, и тик пропустит его по
     // `sendCount > 0`. Письмо про такую правку уходит с другим текстом.
+    //
+    // Закрытый и прошедший сбор не вооружаем по той же причине, что и в
+    // `link-capture.ts`: `roundsToAutoSend` отбирает через `isCollectionActive`,
+    // и поставленный день обещал бы рассылку, которой не будет никогда. Ручка
+    // по `closedAt` и по дате не фильтрует, а список отдаёт такие сборы наравне
+    // с активными — то есть карточка закрытого сбора открывается и правится.
     const linkChanged =
       parsed.value.collectUrl !== undefined &&
       parsed.value.collectUrl !== null &&
       parsed.value.collectUrl !== round.collectUrl;
-    const arming = linkChanged && round.sendCount === 0;
+    const arming = linkChanged && round.sendCount === 0 && isCollectionActive(round, asOf);
     const patch =
       arming && parsed.value.autoSendOn === undefined && round.celebratedOn
         ? { ...parsed.value, autoSendOn: autoSendDateFor(round.celebratedOn, asOf) }
@@ -848,7 +855,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       parsed.value.collectUrl !== undefined &&
       parsed.value.collectUrl !== null &&
       parsed.value.collectUrl !== collection.collectUrl;
-    const arming = linkChanged && collection.sendCount === 0;
+    const arming = linkChanged && collection.sendCount === 0 && isCollectionActive(collection, asOf);
     const patch =
       arming && parsed.value.autoSendOn === undefined && collection.celebratedOn
         ? { ...parsed.value, autoSendOn: autoSendDateFor(collection.celebratedOn, asOf) }

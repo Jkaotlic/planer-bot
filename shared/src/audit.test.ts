@@ -349,6 +349,24 @@ describe("события сборов", () => {
       .toBe("Сбор открыт заново");
   });
 
+  it("вставленная ссылка: сама ссылка и день, когда бот разошлёт", () => {
+    const view = describeAuditEvent({
+      type: "collection_link_set",
+      payload: { collectUrl: "https://example.com/sbor", autoSendOn: "2026-09-04" },
+    });
+    expect(view.title).toBe("Ссылка на сбор вставлена");
+    expect(view.lines).toContain("https://example.com/sbor");
+    expect(view.lines.some((line) => line.includes("бот разошлёт") && line.includes("4 сентября"))).toBe(true);
+
+    // Выключенная автоотправка — не «нет данных», а другое состояние, и лента
+    // обязана называть его словами, а не молчать про строку.
+    const off = describeAuditEvent({
+      type: "collection_link_set",
+      payload: { collectUrl: "https://example.com/sbor", autoSendOn: null },
+    });
+    expect(off.lines).toContain("автоотправка выключена");
+  });
+
   it("список типов виновника не пуст и состоит из существующих типов", () => {
     expect(HONOUREE_AUDIT_TYPES.length).toBeGreaterThan(0);
     for (const type of HONOUREE_AUDIT_TYPES) expect(AUDIT_TYPES).toContain(type);
