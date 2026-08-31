@@ -4,7 +4,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { ensureBirthdayRound, roundsToAutoSend } from "../birthdays/birthday-service";
 import { runBirthdayNoticeTick } from "../birthdays/birthday-notice";
-import { getCollection, updateCollection } from "./collection-service";
+import { getCollection, markCollectionSent, updateCollection } from "./collection-service";
 import { attachLink, extractUrl, linkReadyMessage, notifyLinkReady } from "./link-capture";
 import type { Db } from "../db/client";
 
@@ -83,6 +83,26 @@ describe("attachLink", () => {
     expect(updated.autoSendOn).toBe("2026-09-04");
   });
 
+  it("разосланному раунду ссылку меняет, но автоотправку не вооружает", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+    // Админ разослал руками — повторной рассылки у дня рождения не бывает.
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"));
+
+    const updated = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/svezhaya",
+      asOf: "2026-09-01", actorEmployeeId: igor,
+    });
+
+    // Ссылку менять можно и нужно: мини-приложение показывает именно её, а на
+    // руках у команды может остаться протухшая.
+    expect(updated.collectUrl).toBe("https://example.com/svezhaya");
+    expect(updated.autoSendOn).toBeNull();
+  });
+
   it("ссылка, принесённая позже дня −3, рассылается сегодня", () => {
     const db = makeTestDb();
     const mark = person(db, "Марк", 1, "09-07");
@@ -104,6 +124,19 @@ describe("linkReadyMessage", () => {
     expect(text).toContain("Марк");
     expect(text).toContain("4 сентября");
     expect(text).toContain("делать ничего не надо");
+  });
+
+  it("про разосланный раунд не обещает ни автоотправки, ни рассылки руками", () => {
+    const text = linkReadyMessage("Игорь", "Марк", "2026-09-04", "2026-09-01", true);
+
+    expect(text).toContain("Игорь");
+    expect(text).toContain("Марк");
+    // Обе прежние ветки здесь врали бы: сам он не уйдёт (тик пропускает раунд
+    // по `sendCount > 0`), а руками повторная рассылка ДР заблокирована.
+    expect(text).not.toContain("разошлёт");
+    expect(text).not.toContain("делать ничего не надо");
+    expect(text).not.toContain("руками");
+    expect(text).toContain("уже ушёл");
   });
 });
 
@@ -127,6 +160,28 @@ describe("notifyLinkReady", () => {
     expect(sent.map((m) => m.to)).toEqual([3]);
     expect(sent[0]!.text).toContain("Игорь");
     expect(sent[0]!.text).toContain("Марк");
+  });
+});
+
+describe("notifyLinkReady про разосланный раунд", () => {
+  it("шлёт админам текст без обещания рассылки", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    person(db, "Аня", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"));
+    const updated = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/svezhaya",
+      asOf: "2026-09-01", actorEmployeeId: igor,
+    });
+
+    await notifyLinkReady(db, bot, updated, igor, "2026-09-01");
+
+    expect(sent.map((m) => m.to)).toEqual([3]);
+    expect(sent[0]!.text).not.toContain("разошлёт");
+    expect(sent[0]!.text).not.toContain("делать ничего не надо");
   });
 });
 

@@ -5,7 +5,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
 import { ensureBirthdayRound } from "../birthdays/birthday-service";
-import { updateCollection } from "../collections/collection-service";
+import { markCollectionSent, updateCollection } from "../collections/collection-service";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
@@ -119,6 +119,26 @@ describe("PUT /api/admin/collections/:id", () => {
     expect((await res.json()).collection.autoSendOn).toBe("2026-09-04");
     expect(sent.map((m) => m.to)).toEqual([2]);
     expect(sent[0]!.text).toContain("Марк");
+  });
+
+  it("разосланный сбор на ДР и отсюда не вооружается", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const mark = person(db, "Марк", 1, "09-07");
+    setEmployeeAdmin(db, person(db, "Игорь", 2, null), true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"));
+
+    const res = await app.request(`/api/admin/collections/${round.id}?asOf=2026-09-01`,
+      send(token, { collectUrl: "https://example.com/svezhaya" }, "PUT"));
+
+    // Тот же ответ, что у ручки дней рождения: правило одно на два входа.
+    expect((await res.json()).collection.autoSendOn).toBeNull();
+    expect(sent.map((m) => m.to)).toEqual([2]);
+    expect(sent[0]!.text).not.toContain("разошлёт");
   });
 
   it("кастомный сбор ссылка не вооружает и никого не будит", async () => {

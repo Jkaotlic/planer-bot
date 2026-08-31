@@ -38,9 +38,15 @@ export function attachLink(
   opts: { round: Collection; url: string; asOf: string; actorEmployeeId: number },
 ): Collection {
   const { round, url, asOf, actorEmployeeId } = opts;
+  // Разосланный раунд вооружать нечем: повторной рассылки дня рождения не
+  // бывает, и тик его всё равно пропустит по `sendCount > 0`. Ссылку при этом
+  // менять можно и нужно — мини-приложение показывает именно её, а на руках у
+  // команды может остаться протухшая.
+  //
   // День считает `shared`, а не этот модуль: ту же арифметику повторяют обе
   // консоли, когда переключатель включают обратно.
-  const autoSendOn = round.celebratedOn ? autoSendDateFor(round.celebratedOn, asOf) : null;
+  const autoSendOn =
+    round.sendCount === 0 && round.celebratedOn ? autoSendDateFor(round.celebratedOn, asOf) : null;
   const result = updateCollection(db, round.id, { collectUrl: url, ...(autoSendOn ? { autoSendOn } : {}) });
   if (!result.ok) throw new Error(result.error);
 
@@ -53,13 +59,28 @@ export function attachLink(
   return result.collection;
 }
 
-/** Что видят ОСТАЛЬНЫЕ админы: сбор готов, второй заводить не надо. */
+/**
+ * Что видят ОСТАЛЬНЫЕ админы: сбор готов, второй заводить не надо.
+ *
+ * `alreadySent` — отдельная ветка, а не частный случай двух других, потому что
+ * обе они пообещали бы работу, которой не будет: сам разосланный раунд не
+ * уйдёт (тик пропускает его по `sendCount > 0`), а «разошлёт кто-то руками»
+ * упрётся в тот же запрет повторной рассылки дня рождения. Смысл у правки
+ * остаётся, и о нём и надо сказать: ссылка в мини-приложении стала свежей.
+ */
 export function linkReadyMessage(
   actorName: string,
   personName: string,
   autoSendOn: string | null,
   today: string,
+  alreadySent = false,
 ): string {
+  if (alreadySent) {
+    return [
+      `💰 ${actorName} обновил ссылку на сбор для ${personName}.`,
+      "Сбор команде уже ушёл — свежую ссылку все увидят в мини-приложении.",
+    ].join("\n");
+  }
   const when = autoSendLabel(autoSendOn, today);
   return [
     `💰 ${actorName} вставил ссылку на сбор для ${personName}.`,
@@ -83,7 +104,7 @@ export async function notifyLinkReady(
   const actorName = getEmployeeById(db, actorEmployeeId)?.displayName ?? "Админ";
   const personName =
     round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? "именинника") : "сбора";
-  const text = linkReadyMessage(actorName, personName, round.autoSendOn, today);
+  const text = linkReadyMessage(actorName, personName, round.autoSendOn, today, round.sendCount > 0);
 
   let delivered = 0;
   for (const admin of adminRecipients(db, round.employeeId)) {

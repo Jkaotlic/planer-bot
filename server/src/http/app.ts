@@ -739,12 +739,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // Ссылку ставят впервые или меняют — вооружаем автоотправку, если админ не
     // задал день сам в этом же запросе (тумблер на карточке шлёт `autoSendOn`
     // явно, и перебивать его вычисленным значением нельзя).
-    const armingUrl =
+    //
+    // Оповещение и вооружение разведены: у разосланного раунда ссылку менять
+    // можно и нужно (мини-приложение показывает именно её), а вооружать нечем —
+    // повторной рассылки дня рождения не бывает, и тик пропустит его по
+    // `sendCount > 0`. Письмо про такую правку уходит с другим текстом.
+    const linkChanged =
       parsed.value.collectUrl !== undefined &&
       parsed.value.collectUrl !== null &&
       parsed.value.collectUrl !== round.collectUrl;
+    const arming = linkChanged && round.sendCount === 0;
     const patch =
-      armingUrl && parsed.value.autoSendOn === undefined && round.celebratedOn
+      arming && parsed.value.autoSendOn === undefined && round.celebratedOn
         ? { ...parsed.value, autoSendOn: autoSendDateFor(round.celebratedOn, asOf) }
         : parsed.value;
 
@@ -758,7 +764,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
     });
     // Остальные админы узнают о ссылке одинаково, откуда бы её ни вставили.
-    if (armingUrl && bot) {
+    if (linkChanged && bot) {
       await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);
     }
     return c.json({ collection: result.collection });
@@ -837,13 +843,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // разошлёт за три дня» одно на все входы. Только для дня рождения: у
     // кастомного сбора нет даты, от которой считать «за три дня», он сам не
     // уйдёт, и письмо «делать ничего не надо» про него было бы неправдой.
-    const armingUrl =
+    const linkChanged =
       collection.kind === "birthday" &&
       parsed.value.collectUrl !== undefined &&
       parsed.value.collectUrl !== null &&
       parsed.value.collectUrl !== collection.collectUrl;
+    const arming = linkChanged && collection.sendCount === 0;
     const patch =
-      armingUrl && parsed.value.autoSendOn === undefined && collection.celebratedOn
+      arming && parsed.value.autoSendOn === undefined && collection.celebratedOn
         ? { ...parsed.value, autoSendOn: autoSendDateFor(collection.celebratedOn, asOf) }
         : parsed.value;
 
@@ -858,7 +865,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
     });
-    if (armingUrl && bot) {
+    if (linkChanged && bot) {
       await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);
     }
     return c.json({ collection: result.collection });
