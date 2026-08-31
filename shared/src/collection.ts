@@ -111,10 +111,18 @@ export function autoSendDateFor(
   today: string,
   leadDays: number = AUTO_SEND_LEAD_DAYS,
 ): string {
-  const stamp = Date.parse(`${celebratedOn}T00:00:00Z`);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(celebratedOn);
   // Непонятная дата не должна превращаться в `NaN` и уехать строкой в базу:
   // «сегодня» — единственный безопасный ответ, он рассылает, а не теряет сбор.
-  if (Number.isNaN(stamp)) return today;
+  if (!match) return today;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  // `Date.parse` ниже не отвергает «30 февраля» — молча переносит его на
+  // 2 марта, и опережение посчиталось бы от дня, которого не существует. Та
+  // же ловушка и та же защита, что в `formatDayMonth` пятью строками выше.
+  if (month < 1 || month > 12) return today;
+  if (day < 1 || day > MONTH_LENGTHS[month - 1]!) return today;
+  const stamp = Date.parse(`${celebratedOn}T00:00:00Z`);
   const lead = new Date(stamp - leadDays * 86_400_000).toISOString().slice(0, 10);
   return lead > today ? lead : today;
 }
