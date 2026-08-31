@@ -5,6 +5,7 @@ import type { Collection } from "../db/schema";
 import { notifyUser } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
+import { clearAutoSent } from "../birthdays/birthday-service";
 import { adminRecipients, updateCollection } from "./collection-service";
 
 /**
@@ -64,13 +65,28 @@ export function attachLink(
   const result = updateCollection(db, round.id, { collectUrl: url, ...(autoSendOn ? { autoSendOn } : {}) });
   if (!result.ok) throw new Error(result.error);
 
+  // Помечен, но не разослан — тик уже пытался и не смог. `updateCollection`
+  // сам отметку не снимет: ни ссылка, ни день не изменились, менять ему нечего,
+  // — а без снятия `roundsToAutoSend` не вернёт раунд никогда. Письмо про
+  // провал при этом кончается словами «Пришли ссылку сюда — разошлю сразу»,
+  // и админ шлёт ТУ ЖЕ ссылку: другой у него нет. Обещание должно исполняться.
+  //
+  // Только при включённой автоотправке: выключенная — это «не рассылай», а не
+  // «попробуй ещё раз», и воскрешать её присланной ссылкой было бы тем же
+  // самым, что запрещает `arming` выше.
+  const marked = result.collection;
+  const retry =
+    marked.autoSendOn != null && marked.autoSentAt != null && marked.sendCount === 0
+      ? clearAutoSent(db, round.id)
+      : null;
+
   recordAudit(db, "collection_link_set", actorEmployeeId, {
     collectionId: round.id,
     employeeId: round.employeeId,
     collectUrl: url,
     autoSendOn,
   });
-  return result.collection;
+  return retry ?? marked;
 }
 
 /**

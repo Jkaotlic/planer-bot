@@ -636,12 +636,77 @@ describe("автоотправка сбора", () => {
       await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
 
       expect(sent.filter((m) => m.text.includes("Сбор на подарок"))).toHaveLength(0);
-      // Отметка при этом стоит: попытка была, и на следующем тике её не повторят.
-      expect(getCollection(db, round.id)!.autoSentAt).not.toBeNull();
+      // И отметка НЕ стоит: попытки не было — мы даже не дошли до Telegram.
+      // С ней раунд выпал бы из `roundsToAutoSend` навсегда, молча: ни письма
+      // админам, ни рассылки команде, ни следующего тика. Второго письма это не
+      // открывает — удавшаяся чужая рассылка ставит `sendCount`, и проверка
+      // выше отсекает раунд сама.
+      expect(getCollection(db, round.id)!.autoSentAt).toBeNull();
     } finally {
       // Тот же довод, что в задаче 5: замок живёт в модуле и переживает тест.
       releaseCollectionSend(round.id);
     }
+
+    // Замок отпущен — следующий тик доводит дело до конца.
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:05" });
+    expect(sent.filter((m) => m.text.includes("Сбор на подарок")).map((m) => m.to).sort()).toEqual([2, 3]);
+  });
+
+  /**
+   * Замок ловит рассылку, которая идёт ПРЯМО СЕЙЧАС, а `roundsToAutoSend`
+   * делает снимок один раз — и дальше цикл живёт секундами: десятки `await`
+   * к Telegram на первом раунде, и событийный цикл всё это время свободен.
+   * За это окно ручка `/send` успевает разослать ВТОРОЙ раунд целиком: взять
+   * замок, отправить, поставить `sendCount`, отпустить. Тик доходит до второй
+   * итерации со старым объектом — `sendCount === 0`, замок свободен — и
+   * команда получает второе письмо.
+   *
+   * Два дня рождения на одну дату бывают, а 10:00 — как раз время, когда
+   * админы получают нудж и лезут в консоль.
+   */
+  it("не рассылает раунд, который успели разослать руками, пока шла рассылка предыдущего", async () => {
+    const db = makeTestDb();
+    const sent: { to: number; text: string }[] = [];
+    const mark = person(db, "Марк", 1, "09-07");
+    const anya = person(db, "Аня", 2, "09-07");
+    person(db, "Даша", 4, null);
+    person(db, "Игорь", 3, null, true);
+    // Порядок создания = порядок в выборке: раунд Марка разбирается первым,
+    // раунд Ани — вторым, и снимок для него уже несвежий.
+    const markRound = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    const anyaRound = ensureBirthdayRound(db, anya, "2026-09-01")!;
+    updateCollection(db, markRound.id, { collectUrl: "https://example.com/mark" });
+    updateCollection(db, anyaRound.id, { collectUrl: "https://example.com/anya" });
+    // Нудж за неделю уже был: иначе он тоже пишет письма, и первое из них
+    // сработало бы триггером раньше, чем снимок вообще сделан.
+    markAdminNotified(db, markRound.id, new Date());
+    markAdminNotified(db, anyaRound.id, new Date());
+
+    let handSent = false;
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          sent.push({ to, text });
+          // Ровно посреди рассылки Марка админ дожал «Разослать» по сбору Ани:
+          // ручка взяла замок, разослала, засчитала раунд и отпустила замок.
+          if (!handSent && text.includes("Марк празднует")) {
+            handSent = true;
+            expect(claimCollectionSend(anyaRound.id)).toBe(true);
+            markCollectionSent(db, anyaRound.id, 3, new Date());
+            releaseCollectionSend(anyaRound.id);
+          }
+        }),
+      },
+    } as unknown as Bot;
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    // Первый раунд ушёл — без этого тест зелен и на реализации без третьего цикла.
+    expect(sent.filter((m) => m.text.includes("Марк празднует")).length).toBeGreaterThan(0);
+    expect(handSent).toBe(true);
+    // А второй — нет: команда не должна получить два письма про один сбор.
+    expect(sent.filter((m) => m.text.includes("Аня празднует"))).toHaveLength(0);
+    expect(getCollection(db, anyaRound.id)!.sendCount).toBe(1);
   });
 
   it("отпускает замок после рассылки", async () => {

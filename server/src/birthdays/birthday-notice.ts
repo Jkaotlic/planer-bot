@@ -7,6 +7,7 @@ import { getEmployeeById } from "../repo/employees";
 import {
   adminRecipients,
   claimCollectionSend,
+  getCollection,
   markCollectionSent,
   previewCollection,
   recipientsOf,
@@ -18,6 +19,7 @@ import {
   adminNoticeReadyMessage,
   autoSendFailedMessage,
   autoSentMessage,
+  clearAutoSent,
   ensureBirthdayRound,
   markAdminNotified,
   markAutoSent,
@@ -112,10 +114,20 @@ export async function runBirthdayNoticeTick(
    * рассылку дня рождения. А если не ушло ни одного письма, `sendCount` остался
    * нулём — и напоминание уйдёт, потому что разослать руками снова осмысленно.
    */
-  for (const round of roundsToAutoSend(db, today)) {
+  for (const stale of roundsToAutoSend(db, today)) {
     // Помечаем ДО отправки: падение посреди цикла не должно обернуться вторым
     // письмом всей команде на следующем тике. Тот же довод, что у `markAdminNotified`.
-    markAutoSent(db, round.id, new Date());
+    markAutoSent(db, stale.id, new Date());
+
+    // Перечитываем, а не работаем со снимком выборки. Замок ловит рассылку,
+    // которая идёт ПРЯМО СЕЙЧАС, — но не ту, что успела закончиться между
+    // выборкой и этой строкой. Рассылка первого раунда — это десятки `await` к
+    // Telegram и секунды реального времени, и всё это время событийный цикл
+    // свободен: ручка `/send` успевает разослать второй раунд целиком и
+    // отпустить замок. По несвежему `sendCount === 0` команда получила бы про
+    // него второе письмо.
+    const round = getCollection(db, stale.id);
+    if (!round) continue;
 
     // Админ успел разослать руками — это не провал, а сделанная работа.
     if (round.sendCount > 0) continue;
@@ -134,7 +146,16 @@ export async function runBirthdayNoticeTick(
       continue;
     }
 
-    if (!claimCollectionSend(round.id)) continue;
+    if (!claimCollectionSend(round.id)) {
+      // Замок занят — рассылает кто-то прямо сейчас, а мы даже не пробовали, и
+      // отметку о попытке надо снять. С ней `roundsToAutoSend` не вернёт раунд
+      // никогда: ни письма команде, ни письма админам — молчащий тупик, ровно
+      // тот, что «всё под контролем, а подарка не будет». Второго письма это не
+      // открывает: удавшаяся чужая рассылка ставит `sendCount`, и проверка выше
+      // отсечёт раунд на следующем тике сама.
+      clearAutoSent(db, round.id);
+      continue;
+    }
     try {
       let delivered = 0;
       for (const recipient of recipientsOf(db, round.employeeId)) {

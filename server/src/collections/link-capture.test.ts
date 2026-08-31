@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
-import { ensureBirthdayRound, roundsToAutoSend } from "../birthdays/birthday-service";
+import { ensureBirthdayRound, markAutoSent, roundsToAutoSend } from "../birthdays/birthday-service";
 import { runBirthdayNoticeTick } from "../birthdays/birthday-notice";
 import { getCollection, markCollectionSent, setCollectionClosed, updateCollection } from "./collection-service";
 import { attachLink, extractUrl, linkAcceptedMessage, linkReadyMessage, notifyLinkReady } from "./link-capture";
@@ -299,6 +299,83 @@ describe("сквозной случай: не ушёл без ссылки — �
     // Письмо ушло всей команде, кроме именинника: Аня и Игорь — да, Марк — нет.
     expect(sent.filter((m) => m.text.includes("Сбор на подарок")).map((m) => m.to).sort()).toEqual([2, 3]);
     expect(getCollection(db, round.id)!.sendCount).toBe(1);
+  });
+});
+
+/**
+ * Провал доставки, а не отсутствие ссылки: `autoSentAt` уже проставлен, а
+ * `sendCount` остался нулём. Письмо админам кончается словами «Пришли ссылку
+ * сюда — разошлю сразу», и админ шлёт ТУ ЖЕ ссылку — другой у него нет.
+ * `updateCollection` при этом менять нечего: ни ссылка, ни день не изменились,
+ * и отметка о попытке осталась бы стоять навсегда.
+ */
+describe("сквозной случай: ссылка та же, а обещание «разошлю сразу» дано", () => {
+  it("повторно присланная ссылка снимает отметку о провалившейся попытке", async () => {
+    const db = makeTestDb();
+    const sentOk: { to: number; text: string }[] = [];
+    let telegramDown = true;
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          // Лежит только доставка команде: письмо админам про провал должно
+          // дойти — это оно и даёт обещание, которое проверяет тест.
+          if (telegramDown && text.includes("Сбор на подарок")) throw new Error("Bad Gateway");
+          sentOk.push({ to, text });
+        }),
+      },
+    } as unknown as Bot;
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    const igor = person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    // Попытка была и провалилась: раунд помечен, но команде ничего не ушло.
+    expect(getCollection(db, round.id)!.autoSentAt).not.toBeNull();
+    expect(getCollection(db, round.id)!.sendCount).toBe(0);
+    const promise = sentOk.find((m) => m.to === 3 && m.text.startsWith("⚠️"))!;
+    expect(promise.text).toContain("разошлю сразу");
+
+    telegramDown = false;
+    attachLink(db, {
+      round: getCollection(db, round.id)!,
+      url: "https://example.com/sbor",
+      asOf: "2026-09-04",
+      actorEmployeeId: igor,
+    });
+
+    // Обещание исполнимо только так: раунд снова в очереди на автоотправку.
+    expect(roundsToAutoSend(db, "2026-09-04").map((r) => r.id)).toEqual([round.id]);
+
+    sentOk.length = 0;
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:05" });
+
+    expect(sentOk.filter((m) => m.text.includes("Сбор на подарок")).map((m) => m.to).sort()).toEqual([2, 3]);
+    expect(getCollection(db, round.id)!.sendCount).toBe(1);
+  });
+
+  it("выключенную руками автоотправку та же ссылка не воскрешает", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const igor = person(db, "Игорь", 2, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    attachLink(db, { round, url: "https://example.com/sbor", asOf: "2026-09-01", actorEmployeeId: igor });
+    // «🚫 Не рассылать сам» — и отметка о попытке, оставшаяся от прошлого тика.
+    updateCollection(db, round.id, { autoSendOn: null });
+    markAutoSent(db, round.id, new Date("2026-09-04T07:00:00Z"));
+
+    const again = attachLink(db, {
+      round: getCollection(db, round.id)!, url: "https://example.com/sbor",
+      asOf: "2026-09-04", actorEmployeeId: igor,
+    });
+
+    // Снятая отметка без вооружённого дня ничего не меняет, но и снимать её
+    // здесь не за что: человек сказал «не рассылай», а не «попробуй ещё раз».
+    expect(again.autoSendOn).toBeNull();
+    expect(again.autoSentAt).not.toBeNull();
+    expect(roundsToAutoSend(db, "2026-09-04")).toHaveLength(0);
   });
 });
 
