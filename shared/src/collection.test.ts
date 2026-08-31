@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  autoSendDateFor,
+  autoSendLabel,
   collectionMessage,
   outgoingCollectionMessage,
   collectionStatus,
@@ -324,5 +326,42 @@ describe("outgoingCollectionMessage — что реально уйдёт ком�
   it("без ссылки в карточке свой текст уходит как есть", () => {
     const out = outgoingCollectionMessage({ ...input, collectUrl: null }, "first", "Скидываемся налом у Ани");
     expect(out).toBe("Скидываемся налом у Ани");
+  });
+});
+
+describe("autoSendDateFor", () => {
+  it("считает день за три дня до праздника", () => {
+    expect(autoSendDateFor("2026-09-07", "2026-09-01")).toBe("2026-09-04");
+  });
+
+  it("не уезжает в прошлое: ссылку принесли накануне — рассылаем сегодня", () => {
+    expect(autoSendDateFor("2026-09-07", "2026-09-06")).toBe("2026-09-06");
+  });
+
+  it("переходит через границу месяца", () => {
+    expect(autoSendDateFor("2026-03-01", "2026-02-20")).toBe("2026-02-26");
+  });
+
+  it("принимает своё опережение — кнопка «в день ДР» в боте", () => {
+    expect(autoSendDateFor("2026-09-07", "2026-09-01", 0)).toBe("2026-09-07");
+  });
+
+  it("на непонятной дате отдаёт сегодня, а не NaN в базу", () => {
+    expect(autoSendDateFor("не дата", "2026-09-01")).toBe("2026-09-01");
+  });
+});
+
+describe("autoSendLabel", () => {
+  it("молчит, когда автоотправка выключена", () => {
+    expect(autoSendLabel(null, "2026-09-01")).toBeNull();
+  });
+
+  it("называет день", () => {
+    expect(autoSendLabel("2026-09-04", "2026-09-01")).toBe("Бот разошлёт команде 4 сентября");
+  });
+
+  it("говорит «сегодня», когда день уже настал или прошёл", () => {
+    expect(autoSendLabel("2026-09-04", "2026-09-04")).toBe("Бот разошлёт команде сегодня");
+    expect(autoSendLabel("2026-09-03", "2026-09-04")).toBe("Бот разошлёт команде сегодня");
   });
 });

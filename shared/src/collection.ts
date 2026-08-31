@@ -95,6 +95,37 @@ export function formatDayMonth(iso: string): string {
   return `${day} ${MONTH_NAMES[month - 1]}`;
 }
 
+/** За сколько дней до праздника сбор уходит команде. */
+export const AUTO_SEND_LEAD_DAYS = 3;
+
+/**
+ * День, в который бот разошлёт сбор сам.
+ *
+ * `max(праздник − опережение, сегодня)`, а не просто «минус три»: ссылку
+ * приносят и накануне, и в этом случае ждать до прошедшей даты значит не
+ * разослать никогда. Живёт здесь, а не на сервере, потому что ту же дату
+ * считают обе консоли, когда переключатель включают обратно.
+ */
+export function autoSendDateFor(
+  celebratedOn: string,
+  today: string,
+  leadDays: number = AUTO_SEND_LEAD_DAYS,
+): string {
+  const stamp = Date.parse(`${celebratedOn}T00:00:00Z`);
+  // Непонятная дата не должна превращаться в `NaN` и уехать строкой в базу:
+  // «сегодня» — единственный безопасный ответ, он рассылает, а не теряет сбор.
+  if (Number.isNaN(stamp)) return today;
+  const lead = new Date(stamp - leadDays * 86_400_000).toISOString().slice(0, 10);
+  return lead > today ? lead : today;
+}
+
+/** «Бот разошлёт команде 4 сентября» — одна подпись на обе консоли. */
+export function autoSendLabel(autoSendOn: string | null, today: string): string | null {
+  if (!autoSendOn) return null;
+  if (autoSendOn <= today) return "Бот разошлёт команде сегодня";
+  return `Бот разошлёт команде ${formatDayMonth(autoSendOn)}`;
+}
+
 /** «Свадьба» или «День рождения — Пётр Иванов» — как сбор зовут на экране. */
 export function collectionTitle(c: Pick<CollectionShape, "kind" | "title">, personName: string | null): string {
   if (c.kind === "birthday") return personName ? `День рождения — ${personName}` : "День рождения";
