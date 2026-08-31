@@ -1,5 +1,5 @@
 import { and, eq, isNull, lte } from "drizzle-orm";
-import { autoSendDateFor, daysUntilBirthday, describeDaysUntil, formatBirthDate, isCollectionActive, parseBirthDate, type CollectionKind } from "@planer/shared";
+import { autoSendDateFor, autoSendLabel, daysUntilBirthday, describeDaysUntil, formatBirthDate, formatDayMonth, isCollectionActive, parseBirthDate, type CollectionKind } from "@planer/shared";
 import type { Db } from "../db/client";
 import { collections, employees, type Collection } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -7,14 +7,16 @@ import { listActive } from "../repo/employees";
 /**
  * Birthdays, and the collection round that goes with one.
  *
- * The rule that shaped everything here: **the bot never mails the team on its
- * own.** It nudges admins a week ahead, and after that every message is an admin
- * pressing a button.
+ * До 31.08.2026 здесь действовало правило без исключений: бот не пишет команде
+ * сам, только нудж админам за неделю, а дальше каждое письмо — это админ,
+ * нажавший кнопку. Теперь исключение одно, и оно размером ровно с то, что
+ * человек уже одобрил: бот рассылает сам ТОЛЬКО сбор на день рождения, и
+ * ТОЛЬКО когда у него есть ссылка — а ссылка появляется лишь тогда, когда её
+ * вставил человек, в этот момент видевший и текст письма, и кнопку
+ * «🚫 Не рассылать сам».
  *
- * С 31.08.2026 у правила ровно одно исключение — `roundsToAutoSend`: сбор на
- * день рождения уходит команде за три дня до праздника без человека, потому что
- * подарок нужен к дате. Сам модуль от этого не изменился: он по-прежнему только
- * считает и записывает, а рассылает `birthday-notice.ts`.
+ * `roundsToAutoSend` — вот это исключение; сам модуль от этого не изменился:
+ * он по-прежнему только считает и записывает, а рассылает `birthday-notice.ts`.
  *
  * The round itself — reading, editing, sending, previewing — is owned by
  * `../collections/collection-service`, on the same `collections` table a custom
@@ -173,14 +175,35 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
   };
 }
 
-/** The nudge admins get a week ahead. Same nominative rule as everywhere else. */
-export function adminNoticeMessage(name: string, birthDateLabel: string, daysUntil: number): string {
+/**
+ * Нудж админам за неделю.
+ *
+ * Зовёт прислать ссылку прямо сюда: с 31.08.2026 бот привязывает её сам и сам
+ * рассылает за три дня. Это единственное место, откуда админ узнаёт про новый
+ * путь, поэтому старый (раздел «Дни рождения») оставлен строкой ниже, а не
+ * убран — переключатель на карточке всё ещё умеет разослать вручную.
+ *
+ * `autoSendOn` может быть пустым: тумблер уже выключен, а ссылки ещё нет.
+ * Молчать об этом или обещать рассылку было бы неправдой — ветка ниже говорит,
+ * что разошлёт человек, а не бот.
+ */
+export function adminNoticeMessage(
+  name: string,
+  birthDateLabel: string,
+  daysUntil: number,
+  autoSendOn: string | null,
+  today: string,
+): string {
   return [
     // «через 7 дней» / «завтра» / «сегодня» — the same wording both screens show.
     `🎂 ${name} празднует день рождения ${describeDaysUntil(daysUntil)} — ${birthDateLabel}.`,
     "",
-    "Создай сбор в Сбербанк Онлайн и вставь ссылку в разделе «Дни рождения»,",
-    "а потом сам решишь, когда разослать команде.",
+    "Создай сбор в Сбербанк Онлайн и пришли ссылку сюда — я привяжу её сам.",
+    autoSendOn
+      ? `Разошлю команде ${autoSendOn <= today ? "сегодня" : formatDayMonth(autoSendOn)}, кроме именинника.`
+      : "Автоотправка выключена — как сделаешь сбор, разошли его сам из «Дней рождения».",
+    "",
+    "Можно и по-старому: раздел «Дни рождения» в мини-приложении.",
   ].join("\n");
 }
 
@@ -190,12 +213,25 @@ export function adminNoticeMessage(name: string, birthDateLabel: string, daysUnt
  * feature landed. Telling them to create a collection they already made would
  * be exactly the noise this message exists to avoid, so it only carries the
  * heads-up and drops the instructions to create the link.
+ *
+ * `autoSendOn` пустой значит тумблер уже выключен вручную: тогда письмо не
+ * обещает рассылку, а прямо говорит, что разошлёт админ — так же, как ручка
+ * `collection:autooff` уже отвечает в чат в момент выключения.
  */
-export function adminNoticeReadyMessage(name: string, birthDateLabel: string, daysUntil: number): string {
+export function adminNoticeReadyMessage(
+  name: string,
+  birthDateLabel: string,
+  daysUntil: number,
+  autoSendOn: string | null,
+  today: string,
+): string {
+  const when = autoSendLabel(autoSendOn, today);
   return [
     `🎂 ${name} празднует день рождения ${describeDaysUntil(daysUntil)} — ${birthDateLabel}.`,
     "",
-    "Сбор уже готов — открой «Дни рождения» и разошли его команде, когда будет время.",
+    when
+      ? `Сбор готов. ${when} — делать ничего не надо.`
+      : "Сбор готов — разошли его из «Дней рождения», когда будет время.",
   ].join("\n");
 }
 

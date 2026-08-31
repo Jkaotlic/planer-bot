@@ -73,8 +73,8 @@ export async function runBirthdayNoticeTick(
     // An admin who already pasted the link doesn't need to be told to create
     // one — that instruction is exactly the defect this branch guards against.
     const text = round.collectUrl
-      ? adminNoticeReadyMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil)
-      : adminNoticeMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil);
+      ? adminNoticeReadyMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil, round.autoSendOn, today)
+      : adminNoticeMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil, round.autoSendOn, today);
     let delivered = 0;
     // The mute button rides along even though this loop bypasses `notifyAdmins`
     // (it has its own recipient list — `adminRecipients` — not every admin).

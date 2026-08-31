@@ -20,14 +20,17 @@ import { marksOfMany, removeMarksOf } from "./payment-repo";
  * path. What differs between them is data, not behaviour: a birthday round has
  * a person and a year, a custom one has a subject and an optional honouree.
  *
- * The rule that shaped this module, same as it shaped the birthday feature:
- * **the bot never mails the team on its own.** Everything here computes and
- * records; sending is an admin pressing a button after seeing the preview.
+ * Правило, которое сформировало этот модуль: бот не пишет команде сам, пока
+ * админ не нажмёт кнопку, увидев предпросмотр письма. Для кастомного сбора это
+ * по-прежнему верно без исключений. Для дня рождения с 31.08.2026 правило
+ * заменено предохранителем: рассылает и бот, но только вооружённый раунд, а
+ * вооружает его не код — человек, вставивший ссылку и в этот момент видевший
+ * и текст письма, и кнопку «🚫 Не рассылать сам».
  *
- * Исключение с 31.08.2026 одно — автоотправка сбора на день рождения из тика.
- * Она ходит теми же `previewCollection`, `recipientsOf`, `claimCollectionSend` и
- * `markCollectionSent`, что и кнопка админа, а не мимо них: иначе у «разослано»
- * стало бы два разных смысла в зависимости от того, кто нажал.
+ * Автоотправка ходит теми же `previewCollection`, `recipientsOf`,
+ * `claimCollectionSend` и `markCollectionSent`, что и кнопка админа, а не мимо
+ * них: иначе у «разослано» стало бы два разных смысла в зависимости от того,
+ * кто нажал.
  */
 
 /** A collection with everything a screen needs spelled out. */

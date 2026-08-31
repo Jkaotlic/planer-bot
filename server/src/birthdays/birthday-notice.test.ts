@@ -84,6 +84,20 @@ describe("runBirthdayNoticeTick", () => {
     expect(sent[0]!.text).toContain("Именинник");
   });
 
+  it("нудж за неделю зовёт прислать ссылку боту, а не идти в раздел", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    person(db, "Марк", 1, "08-08");
+    person(db, "Игорь", 2, null, true);
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-08-01", time: "10:00" });
+
+    const text = sent[0]!.text;
+    expect(text).toContain("пришли ссылку сюда");
+    expect(text).toContain("5 августа");            // день, в который бот разошлёт
+    expect(text).toContain("кроме именинника");
+  });
+
   it("carries the mute button for the `celebrations` kind — these letters bypass `notifyAdmins`, so nothing else attaches it", async () => {
     const db = makeTestDb();
     const { bot } = fakeBot();

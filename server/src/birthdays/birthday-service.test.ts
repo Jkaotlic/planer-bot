@@ -165,25 +165,42 @@ describe("wording", () => {
     // One display name is stored and nothing that would let us inflect it, so
     // every phrase has to be built around the name as given. «день рождения у
     // Мишин Илья» is the failure this guards, and it would land in 25 chats.
-    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7);
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7, "2026-08-05", "2026-08-01");
     expect(notice).toContain("Мишин Илья");
     expect(notice).not.toMatch(/у Мишин Илья/);
   });
 
   it("tells admins what to do next, not just that a birthday exists", () => {
-    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7);
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7, "2026-08-05", "2026-08-01");
     expect(notice).toContain("через 7 дней");
     expect(notice).toContain("Сбербанк Онлайн");
-    expect(notice).toMatch(/сам решишь, когда разослать/i);
+    // Больше не «сам решишь, когда разослать»: с 31.08.2026 бот привязывает
+    // присланную ссылку и рассылает сам — это и есть путь, о котором нудж
+    // обязан сказать, единственное место, откуда админ о нём узнаёт.
+    expect(notice).toMatch(/пришли ссылку сюда/i);
+    expect(notice).toContain("Разошлю команде 5 августа, кроме именинника.");
+  });
+
+  it("without auto-send armed, tells admins they'll have to send it themselves — no false promise", () => {
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7, null, "2026-08-01");
+    expect(notice).toContain("Автоотправка выключена");
+    expect(notice).not.toMatch(/разошлю/i);
   });
 
   it("tells admins the collection is already ready, not to create one they already made", () => {
-    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7);
+    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7, "2026-08-05", "2026-08-01");
     expect(notice).toContain("через 7 дней");
     expect(notice).toContain("Мишин Илья");
     expect(notice).not.toContain("Создай сбор");
     expect(notice).not.toContain("Сбербанк Онлайн");
     expect(notice).not.toMatch(/у Мишин Илья/);
+    expect(notice).toContain("делать ничего не надо");
+  });
+
+  it("ready message without auto-send tells admins to send it themselves, not that the bot will", () => {
+    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7, null, "2026-08-01");
+    expect(notice).toContain("разошли его из «Дней рождения»");
+    expect(notice).not.toMatch(/делать ничего не надо/);
   });
 });
 
