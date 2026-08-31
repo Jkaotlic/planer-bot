@@ -100,6 +100,7 @@ import {
   type EntryCategory,
   validateReminderHour,
   validateReminderTemplate,
+  autoSendDateFor,
 } from "@planer/shared";
 import {
   postSlot,
@@ -134,6 +135,7 @@ import {
   claimCollectionSend,
   releaseCollectionSend,
 } from "../collections/collection-service";
+import { notifyLinkReady } from "../collections/link-capture";
 import { listPayments, setPaid, unpaidRecipients } from "../collections/payment-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 import {
@@ -734,7 +736,19 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, round, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
 
-    const result = updateCollection(db, round.id, parsed.value);
+    // Ссылку ставят впервые или меняют — вооружаем автоотправку, если админ не
+    // задал день сам в этом же запросе (тумблер на карточке шлёт `autoSendOn`
+    // явно, и перебивать его вычисленным значением нельзя).
+    const armingUrl =
+      parsed.value.collectUrl !== undefined &&
+      parsed.value.collectUrl !== null &&
+      parsed.value.collectUrl !== round.collectUrl;
+    const patch =
+      armingUrl && parsed.value.autoSendOn === undefined && round.celebratedOn
+        ? { ...parsed.value, autoSendOn: autoSendDateFor(round.celebratedOn, asOf) }
+        : parsed.value;
+
+    const result = updateCollection(db, round.id, patch);
     if (!result.ok) return c.json({ error: result.error }, 409);
     recordAudit(db, "birthday_campaign_updated", c.get("auth").employeeId, {
       employeeId,
@@ -743,6 +757,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
     });
+    // Остальные админы узнают о ссылке одинаково, откуда бы её ни вставили.
+    if (armingUrl && bot) {
+      await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);
+    }
     return c.json({ collection: result.collection });
   });
 
@@ -815,7 +833,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, collection, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
 
-    const result = updateCollection(db, collection.id, parsed.value);
+    // Тот же довод, что у ручки дней рождения выше: правило «есть ссылка → бот
+    // разошлёт за три дня» одно на все входы. Только для дня рождения: у
+    // кастомного сбора нет даты, от которой считать «за три дня», он сам не
+    // уйдёт, и письмо «делать ничего не надо» про него было бы неправдой.
+    const armingUrl =
+      collection.kind === "birthday" &&
+      parsed.value.collectUrl !== undefined &&
+      parsed.value.collectUrl !== null &&
+      parsed.value.collectUrl !== collection.collectUrl;
+    const patch =
+      armingUrl && parsed.value.autoSendOn === undefined && collection.celebratedOn
+        ? { ...parsed.value, autoSendOn: autoSendDateFor(collection.celebratedOn, asOf) }
+        : parsed.value;
+
+    const result = updateCollection(db, collection.id, patch);
     if (!result.ok) return c.json({ error: result.error }, 409);
     recordAudit(db, "collection_updated", c.get("auth").employeeId, {
       collectionId: collection.id,
@@ -826,6 +858,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
     });
+    if (armingUrl && bot) {
+      await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);
+    }
     return c.json({ collection: result.collection });
   });
 

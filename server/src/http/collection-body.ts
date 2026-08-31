@@ -66,7 +66,7 @@ export function parseCollectionBody(raw: unknown, opts: { requireTitle: boolean 
     value[key] = amount as number;
   }
 
-  for (const key of ["eventDate", "deadline", "scheduledSendOn"] as const) {
+  for (const key of ["eventDate", "deadline", "scheduledSendOn", "autoSendOn"] as const) {
     if (body[key] === undefined) continue;
     if (body[key] === null) { value[key] = null; continue; }
     if (typeof body[key] !== "string" || !ISO_DATE.test(body[key] as string)) {

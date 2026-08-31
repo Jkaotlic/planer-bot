@@ -79,6 +79,7 @@ export interface CollectionPatch {
   collectUrl?: string | null;
   messageText?: string | null;
   scheduledSendOn?: string | null;
+  autoSendOn?: string | null;
 }
 
 export type UpdateResult = { ok: true; collection: Collection } | { ok: false; error: string };
@@ -155,9 +156,18 @@ export function updateCollection(db: Db, id: number, patch: CollectionPatch): Up
       ? null
       : current.scheduleNotifiedAt;
 
+  // Тот же довод, что у `scheduleNotifiedAt` строкой выше. Новая ссылка или
+  // новый день — это новая попытка: сбор, не ушедший из-за отсутствия ссылки,
+  // обязан уйти после её появления, а не остаться помеченным «уже пробовал».
+  const autoSentAt =
+    (patch.autoSendOn !== undefined && patch.autoSendOn !== current.autoSendOn) ||
+    (patch.collectUrl !== undefined && patch.collectUrl !== current.collectUrl)
+      ? null
+      : current.autoSentAt;
+
   const collection = db
     .update(collections)
-    .set({ ...patch, scheduleNotifiedAt })
+    .set({ ...patch, scheduleNotifiedAt, autoSentAt })
     .where(eq(collections.id, id))
     .returning()
     .all()[0]!;

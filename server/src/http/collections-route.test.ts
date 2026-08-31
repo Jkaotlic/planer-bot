@@ -4,6 +4,8 @@ import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
+import { ensureBirthdayRound } from "../birthdays/birthday-service";
+import { updateCollection } from "../collections/collection-service";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
@@ -93,6 +95,49 @@ describe("POST /api/admin/collections/:id/send", () => {
       send(token, { title: "Кофемашина", collectUrl: "https://example.test/c/1" }, "POST"))).json();
     const res = await app.request(`/api/admin/collections/${collection.id}/send?${ASOF}`, send(token, {}, "POST"));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("PUT /api/admin/collections/:id", () => {
+  it("сбор на день рождения вооружается и будит остальных админов и отсюда тоже", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    const mark = person(db, "Марк", 1, "09-07");
+    setEmployeeAdmin(db, person(db, "Игорь", 2, null), true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    // Раунд заводится вооружённым: без выключения тест прошёл бы и без единой
+    // строки вооружения в этой ручке.
+    updateCollection(db, round.id, { autoSendOn: null });
+
+    const res = await app.request(`/api/admin/collections/${round.id}?asOf=2026-09-01`,
+      send(token, { collectUrl: "https://example.com/sbor" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    // Ровно то же, что делает ручка дней рождения: одно правило на два входа.
+    expect((await res.json()).collection.autoSendOn).toBe("2026-09-04");
+    expect(sent.map((m) => m.to)).toEqual([2]);
+    expect(sent[0]!.text).toContain("Марк");
+  });
+
+  it("кастомный сбор ссылка не вооружает и никого не будит", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 111);
+    setEmployeeAdmin(db, person(db, "Игорь", 2, null), true);
+    const { collection } = await (await app.request(`/api/admin/collections?${ASOF}`,
+      send(token, { title: "Кофемашина" }, "POST"))).json();
+
+    const res = await app.request(`/api/admin/collections/${collection.id}?${ASOF}`,
+      send(token, { collectUrl: "https://example.com/sbor" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    // У кастомного сбора нет даты, от которой считать «за три дня», и он сам не
+    // уйдёт. Письмо «делать ничего не надо» про него было бы неправдой.
+    expect((await res.json()).collection.autoSendOn).toBeNull();
+    expect(sent).toHaveLength(0);
   });
 });
 
