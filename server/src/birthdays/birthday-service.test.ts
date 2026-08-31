@@ -96,6 +96,26 @@ describe("ensureBirthdayRound", () => {
     expect(next.id).not.toBe(first.id);
     expect(next.year).toBe(2027);
   });
+
+  it("новый раунд сразу знает, в какой день бот разошлёт его сам", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+
+    expect(round.celebratedOn).toBe("2026-09-07");
+    expect(round.autoSendOn).toBe("2026-09-04");
+    expect(round.autoSentAt).toBeNull();
+  });
+
+  it("раунд, заведённый впритык, рассылается сегодня, а не задним числом", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+
+    const round = ensureBirthdayRound(db, mark, "2026-09-06")!;
+
+    expect(round.autoSendOn).toBe("2026-09-06");
+  });
 });
 
 describe("birthdayRoundDraft", () => {
@@ -124,6 +144,16 @@ describe("birthdayRoundDraft", () => {
     const db = makeTestDb();
     const employee = person(db, "NoBirthday", 1, null);
     expect(birthdayRoundDraft(db, employee, "2026-08-01")).toBeNull();
+  });
+
+  it("предпросмотр показывает тот же день, что запишет сохранение", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+
+    const draft = birthdayRoundDraft(db, mark, "2026-09-01")!;
+
+    expect(draft.id).toBe(0);
+    expect(draft.autoSendOn).toBe("2026-09-04");
   });
 });
 

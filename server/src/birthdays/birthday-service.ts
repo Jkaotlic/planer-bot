@@ -1,5 +1,5 @@
 import { and, eq, isNull, lte } from "drizzle-orm";
-import { daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate, type CollectionKind } from "@planer/shared";
+import { autoSendDateFor, daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate, type CollectionKind } from "@planer/shared";
 import type { Db } from "../db/client";
 import { collections, employees, type Collection } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -113,7 +113,16 @@ export function ensureBirthdayRound(db: Db, employeeId: number, asOf: string): C
 
   return db
     .insert(collections)
-    .values({ kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn })
+    .values({
+      kind: "birthday",
+      employeeId,
+      year: occurrence.year,
+      celebratedOn: occurrence.celebratedOn,
+      // Вооружается сразу: «за три дня бот разошлёт» — правило дня рождения, а
+      // не отдельная настройка, которую надо не забыть включить. Выключается
+      // одной кнопкой в боте и переключателем на карточке.
+      autoSendOn: autoSendDateFor(occurrence.celebratedOn, asOf),
+    })
     .returning()
     .all()[0]!;
 }
@@ -163,7 +172,7 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
     adminNotifiedAt: null,
     scheduledSendOn: null,
     scheduleNotifiedAt: null,
-    autoSendOn: null,
+    autoSendOn: autoSendDateFor(occurrence.celebratedOn, asOf),
     autoSentAt: null,
     sentAt: null,
     sentCount: 0,
