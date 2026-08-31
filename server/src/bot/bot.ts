@@ -18,12 +18,12 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
-import { getCollection, previewCollection, setCollectionClosed } from "../collections/collection-service";
+import { getCollection, previewCollection, setCollectionClosed, updateCollection } from "../collections/collection-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, canAnnounce, canAddOwnShifts } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import {
@@ -868,6 +868,72 @@ export function createBot(deps: BotDeps): Bot {
     clearLinkPending(db, who.me.id);
     await ctx.answerCallbackQuery();
     await bindLink(ctx, who.me.id, Number(ctx.match[1]), url, teamNow(config.teamTz).date);
+  });
+
+  /**
+   * Готовые опережения для кнопки «другой день».
+   *
+   * Ввод даты текстом — ещё одно окно ожидания и ещё один парсер ради случая
+   * раз в год; кому нужно точнее, у того в мини-аппе календарь.
+   */
+  const AUTO_SEND_LEADS: { label: string; days: number }[] = [
+    { label: "за 5 дней", days: 5 },
+    { label: "за 3 дня", days: 3 },
+    { label: "за 1 день", days: 1 },
+    { label: "в день ДР", days: 0 },
+  ];
+
+  bot.callbackQuery(/^collection:autoday:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const id = Number(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    await ctx.reply("За сколько дней разослать?", {
+      reply_markup: {
+        inline_keyboard: AUTO_SEND_LEADS.map((lead) => [
+          { text: lead.label, callback_data: `collection:autoday:${id}:${lead.days}` },
+        ]),
+      },
+    });
+  });
+
+  bot.callbackQuery(/^collection:autoday:(\d+):(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const collection = getCollection(db, Number(ctx.match[1]));
+    if (!collection?.celebratedOn) {
+      await ctx.answerCallbackQuery({ text: "Сбор не найден" });
+      return;
+    }
+    const today = teamNow(config.teamTz).date;
+    const autoSendOn = autoSendDateFor(collection.celebratedOn, today, Number(ctx.match[2]));
+    updateCollection(db, collection.id, { autoSendOn });
+    await ctx.answerCallbackQuery({ text: "Переставил" });
+    await ctx.reply(autoSendLabel(autoSendOn, today) ?? "Автоотправка выключена.");
+  });
+
+  bot.callbackQuery(/^collection:autooff:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const collection = getCollection(db, Number(ctx.match[1]));
+    if (!collection) {
+      await ctx.answerCallbackQuery({ text: "Сбор не найден" });
+      return;
+    }
+    // Гасим только автоотправку. Ссылку не трогаем: отвязывать её заодно —
+    // значит наказывать за нажатие кнопки «подожди».
+    updateCollection(db, collection.id, { autoSendOn: null });
+    await ctx.answerCallbackQuery({ text: "Не разошлю" });
+    await ctx.reply("Не разошлю сам. Сбор остался в «Днях рождения» — разошлёшь, когда решишь.");
   });
 
   bot.callbackQuery(/^checklist:docclear:(\d+)$/, async (ctx) => {

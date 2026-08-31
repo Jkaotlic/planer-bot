@@ -7,6 +7,7 @@ import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } f
 import { ensureBirthdayRound, upcomingBirthdays } from "../birthdays/birthday-service";
 import { getCollection, updateCollection } from "../collections/collection-service";
 import { linkPendingFor } from "../repo/link-pending";
+import { runBirthdayNoticeTick } from "../birthdays/birthday-notice";
 import { listBugReports, openBugPrompt } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
 import { teamNow } from "../util/team-time";
@@ -289,5 +290,92 @@ describe("жалоба на бота, внутри которой есть сс�
     const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
     expect(birthday.campaign?.collectUrl).toBe("https://example.com/sbor");
     expect(listBugReports(db, "all")).toHaveLength(0);
+  });
+});
+
+describe("кнопки под подтверждением", () => {
+  /** Привязать ссылку и вернуть готовый раунд — общее начало трёх тестов. */
+  async function withLink(db: Db, bot: Bot) {
+    person(db, "Марк", 1, birthDateIn(7));
+    person(db, "Игорь", 222, null, true);
+    await say(bot, 222, "https://example.com/sbor");
+    return upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!.campaign!;
+  }
+
+  it("«не рассылать сам» гасит автоотправку, но ссылку и сбор оставляет", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+
+    const after = getCollection(db, round.id)!;
+    expect(after.autoSendOn).toBeNull();
+    expect(after.collectUrl).toBe("https://example.com/sbor");
+    expect(api.sent.at(-1)!.text).toContain("Не разошлю сам");
+  });
+
+  it("«другой день» показывает варианты", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+
+    await tap(bot, 222, `collection:autoday:${round.id}`);
+
+    expect(buttonsOf(api.sent.at(-1)!)).toEqual(
+      expect.arrayContaining(["за 5 дней", "за 3 дня", "за 1 день", "в день ДР"]),
+    );
+  });
+
+  it("выбранное опережение переставляет день", async () => {
+    const { db, bot } = stage();
+    const round = await withLink(db, bot);
+
+    await tap(bot, 222, `collection:autoday:${round.id}:5`);
+
+    // ДР через 7 дней, опережение 5 → через два дня от сегодня.
+    expect(getCollection(db, round.id)!.autoSendOn).toBe(plusDays(TODAY, 2));
+  });
+
+  it("«в день ДР» ставит сам праздник", async () => {
+    const { db, bot } = stage();
+    const round = await withLink(db, bot);
+
+    await tap(bot, 222, `collection:autoday:${round.id}:0`);
+
+    expect(getCollection(db, round.id)!.autoSendOn).toBe(plusDays(TODAY, 7));
+  });
+
+  it("не даёт работнику выключить чужую автоотправку", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 333, null);
+
+    await tap(bot, 333, `collection:autooff:${round.id}`);
+
+    expect(getCollection(db, round.id)!.autoSendOn).not.toBeNull();
+    expect(api.answers.join(" ")).toContain("админ");
+  });
+
+  /**
+   * Сквозной тест поверх брифа: «выключил, значит бот молчит» — единственный
+   * инвариант, ради которого правило «бот не пишет команде сам» вообще можно
+   * отменять. Проверка `autoSendOn === null` доказывает поле в базе, а не
+   * поведение — здесь доказывается письмами, которых не было.
+   *
+   * Аня — рядовой работник, а не админ: ей адресована сама автоотправка
+   * (`recipientsOf` минус именинник), и админский нудж про день рождения её
+   * не заденет, поэтому любое письмо, дошедшее ей после тика, однозначно
+   * говорит об одном — автоотправка всё-таки сработала.
+   */
+  it("«не рассылать сам» доказан тиком: в день автоотправки команде ничего не уходит", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 555, null);
+
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+
+    // ДР через 7 дней, автоотправка по умолчанию — за три дня до него.
+    await runBirthdayNoticeTick(db, bot, { date: plusDays(TODAY, 4), time: "10:00" });
+
+    expect(api.sent.some((m) => m.chat_id === 555)).toBe(false);
   });
 });
