@@ -2085,6 +2085,14 @@ input[type="search"] {
   font-weight: 600;
 }
 
+.birthday-autosend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--hint);
+}
+
 .birthday-when {
   color: var(--hint);
   font-size: 13px;

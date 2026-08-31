@@ -427,6 +427,8 @@ export interface Collection {
   closedAt: string | null;
   scheduledSendOn: string | null;
   scheduleNotifiedAt: string | null;
+  autoSendOn: string | null;
+  autoSentAt: string | null;
   sentAt: string | null;
   sentCount: number;
   sendCount: number;
@@ -472,7 +474,11 @@ export interface NewCollectionInput {
 }
 
 /** Правка сбора: отсутствующий ключ значит «оставить как есть». */
-export type CollectionPatch = Partial<NewCollectionInput>;
+/** Правка сбора: отсутствующий ключ значит «оставить как есть».
+ *
+ *  `autoSendOn` — не поле создания (`NewCollectionInput`): его не задают при
+ *  заведении кастомного сбора, только тумблером на уже существующем раунде ДР. */
+export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null };
 
 export interface UpcomingBirthday {
   employeeId: number;
@@ -608,6 +614,12 @@ export interface ApiClient {
   getBirthdayPreview(employeeId: number): Promise<CollectionPreview>;
   /** Сохраняет раунд ДР; на первом сохранении он и заводится. */
   saveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection>;
+  /**
+   * Та же ручка `PUT /api/admin/birthdays/:id`, что и `saveBirthdayRound`, но
+   * под своим именем: карточка дня рождения дёргает её отдельным чекбоксом
+   * автоотправки, не задевая состояние формы «ссылка + текст».
+   */
+  updateBirthday(employeeId: number, patch: CollectionPatch): Promise<Collection>;
   getCollections(): Promise<CollectionRow[]>;
   createCollection(input: NewCollectionInput): Promise<Collection>;
   getCollectionPreview(id: number): Promise<CollectionPreview>;
@@ -1035,6 +1047,10 @@ export const realClient: ApiClient = {
     return collection;
   },
 
+  updateBirthday(employeeId, patch) {
+    return this.saveBirthdayRound(employeeId, patch);
+  },
+
   async getCollections() {
     const { collections } = await authorizedGet<{ collections: CollectionRow[] }>("/api/admin/collections");
     return collections;
@@ -1215,6 +1231,7 @@ const devClient: ApiClient = {
   getBirthdays: () => mockGetBirthdays(),
   getBirthdayPreview: (employeeId) => mockGetBirthdayPreview(employeeId),
   saveBirthdayRound: (employeeId, patch) => mockSaveBirthdayRound(employeeId, patch),
+  updateBirthday: (employeeId, patch) => mockSaveBirthdayRound(employeeId, patch),
   getCollections: () => mockGetCollections(),
   createCollection: (input) => mockCreateCollection(input),
   getCollectionPreview: (id) => mockGetCollectionPreview(id),

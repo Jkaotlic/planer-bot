@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  autoSendDateFor,
+  autoSendLabel,
   collectionStatus,
   describeDaysUntil,
   formatDayMonth,
@@ -320,8 +322,9 @@ export function CollectionsScreen() {
       {/* Пояснение стоит над тем, что объясняет: оно про дни рождения, а не
           про экран целиком, и наверху читалось как вводная ко всей странице. */}
       <p className="birthday-intro">
-        За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
-        «Разослать» — и не увидишь перед этим точный текст и поимённый список.
+        За неделю до дня рождения бот напишет админам. Пришли ему ссылку на сбор — он привяжет её сам
+        и за три дня разошлёт команде, кроме именинника. Не хочешь автоматом — выключи галочку на карточке
+        или разошли раньше кнопкой.
       </p>
 
       <h3 className="birthday-group">Ближайшие дни рождения</h3>
@@ -1121,6 +1124,14 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
   const palette = personPalette(birthday.employeeId);
   const status = roundStatus(birthday.campaign, today);
 
+  async function toggleAutoSend(birthday: UpcomingBirthday) {
+    // Дату считает `shared`, а не экран: та же арифметика на сервере и в
+    // мини-аппе, и три копии означали бы три разные даты.
+    const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
+    await apiClient.updateBirthday(birthday.employeeId, { autoSendOn: next });
+    await onChanged();
+  }
+
   return (
     <div className={`birthday-card${open ? " open" : ""}`}>
       <div className="birthday-card-head">
@@ -1134,6 +1145,18 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
           {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}
         </button>
       </div>
+
+      {birthday.campaign?.collectUrl && (
+        <label className="birthday-autosend">
+          <input
+            type="checkbox"
+            checked={Boolean(birthday.campaign.autoSendOn)}
+            aria-label="Бот рассылает сам"
+            onChange={() => void toggleAutoSend(birthday)}
+          />
+          {autoSendLabel(birthday.campaign.autoSendOn, today) ?? "Разошлёшь сам — бот ждёт твоей кнопки"}
+        </label>
+      )}
 
       {open && <BirthdayEditor birthday={birthday} onChanged={onChanged} onSent={onSent} />}
     </div>
