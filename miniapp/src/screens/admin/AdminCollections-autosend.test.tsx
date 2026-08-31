@@ -78,7 +78,7 @@ describe("автоотправка на карточке дня рождения
   });
 
   it("тумблер выключает автоотправку — на сервер уходит null", async () => {
-    const update = vi.spyOn(apiClient, "updateBirthday").mockResolvedValue({} as never);
+    const update = vi.spyOn(apiClient, "saveBirthdayRound").mockResolvedValue({} as never);
     const el = await mount(BIRTHDAY);
 
     const toggle = el.querySelector<HTMLInputElement>('input[aria-label="Бот рассылает сам"]')!;
@@ -89,7 +89,7 @@ describe("автоотправка на карточке дня рождения
   });
 
   it("тумблер включает автоотправку обратно — на день за три до праздника", async () => {
-    const update = vi.spyOn(apiClient, "updateBirthday").mockResolvedValue({} as never);
+    const update = vi.spyOn(apiClient, "saveBirthdayRound").mockResolvedValue({} as never);
     const el = await mount({ ...BIRTHDAY, campaign: { ...ROUND, autoSendOn: null } });
 
     const toggle = el.querySelector<HTMLInputElement>('input[aria-label="Бот рассылает сам"]')!;

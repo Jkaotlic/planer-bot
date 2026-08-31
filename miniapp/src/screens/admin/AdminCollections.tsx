@@ -1275,7 +1275,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
     // Дату считает `shared`, а не экран: та же арифметика на сервере, и две
     // копии означали бы две разные даты.
     const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
-    await apiClient.updateBirthday(birthday.employeeId, { autoSendOn: next });
+    await apiClient.saveBirthdayRound(birthday.employeeId, { autoSendOn: next });
     await onChanged();
   }
 

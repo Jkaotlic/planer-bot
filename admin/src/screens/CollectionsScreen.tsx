@@ -1128,7 +1128,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
     // Дату считает `shared`, а не экран: та же арифметика на сервере и в
     // мини-аппе, и три копии означали бы три разные даты.
     const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
-    await apiClient.updateBirthday(birthday.employeeId, { autoSendOn: next });
+    await apiClient.saveBirthdayRound(birthday.employeeId, { autoSendOn: next });
     await onChanged();
   }
 
