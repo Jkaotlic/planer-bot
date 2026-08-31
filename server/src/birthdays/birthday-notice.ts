@@ -30,14 +30,14 @@ import {
 } from "./birthday-service";
 
 /**
- * Три вещи, которые бот делает про сборы сам.
+ * Три вещи, которые бот делает про сборы сам, — в порядке самих циклов.
  *
  *   1. A week ahead of a birthday: «у Х день рождения через 7 дней».
- *   2. On the day an admin asked to be reminded — a birthday round or a custom
+ *   2. За три дня до дня рождения — сама рассылка сбора КОМАНДЕ.
+ *   3. On the day an admin asked to be reminded — a birthday round or a custom
  *      collection alike: «пора разослать сбор по Х» / «пора дожать сбор».
- *   3. За три дня до дня рождения — сама рассылка сбора КОМАНДЕ.
  *
- * Первые две уходят только админам, как было с самого начала. Третья появилась
+ * Первая и третья уходят только админам, как было с самого начала. Вторая появилась
  * 31.08.2026 и нарушает правило «бот не пишет команде сам» ровно в одном месте:
  * подарок нужен к дате, а напоминание, заставшее админа в отпуске, не рассылает
  * ничего. Цена автономии — предохранитель, и он стоит не здесь, а раньше:
@@ -97,6 +97,73 @@ export async function runBirthdayNoticeTick(
     sent += delivered;
   }
 
+  /**
+   * Единственное место, где бот пишет КОМАНДЕ без человека.
+   *
+   * Предохранитель стоит не здесь, а раньше: раунд вооружается только вместе со
+   * ссылкой, и в момент вставки админ видел и текст письма, и день, и кнопку
+   * «не рассылать сам». Здесь остаётся исполнение и громкий отказ — молчащая
+   * автоотправка выглядит как «всё под контролем», а подарка не будет.
+   *
+   * Стоит ВЫШЕ напоминания админам намеренно. День напоминания админ выбирает
+   * руками и вправе выбрать «праздник минус три» — ровно день автоотправки.
+   * `roundsScheduledFor` ниже отсекает ДР-раунды по `sendCount > 0`, поэтому
+   * после удавшейся рассылки «пора разослать, нажми „Разослать“» уже не уйдёт:
+   * это указание упёрлось бы в 409, которым ручка отвечает на повторную
+   * рассылку дня рождения. А если не ушло ни одного письма, `sendCount` остался
+   * нулём — и напоминание уйдёт, потому что разослать руками снова осмысленно.
+   */
+  for (const round of roundsToAutoSend(db, today)) {
+    // Помечаем ДО отправки: падение посреди цикла не должно обернуться вторым
+    // письмом всей команде на следующем тике. Тот же довод, что у `markAdminNotified`.
+    markAutoSent(db, round.id, new Date());
+
+    // Админ успел разослать руками — это не провал, а сделанная работа.
+    if (round.sendCount > 0) continue;
+
+    const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
+    const admins = adminRecipients(db, round.employeeId);
+    const preview = previewCollection(db, round);
+    const daysUntil = round.celebratedOn ? Math.max(0, daysBetween(today, round.celebratedOn)) : 0;
+
+    if (preview.blocker) {
+      const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
+      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, text);
+      recordAudit(db, "collection_auto_send_failed", null, {
+        collectionId: round.id, employeeId: round.employeeId, title: preview.title, reason: preview.blocker,
+      });
+      continue;
+    }
+
+    if (!claimCollectionSend(round.id)) continue;
+    try {
+      let delivered = 0;
+      for (const recipient of recipientsOf(db, round.employeeId)) {
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+      }
+      if (delivered > 0) markCollectionSent(db, round.id, delivered, new Date());
+      // `actorEmployeeId = null` — обе консоли уже рисуют такое как «система».
+      // Отдельное событие завело бы второй способ прочитать одно и то же.
+      recordAudit(db, "collection_sent", null, {
+        collectionId: round.id, employeeId: round.employeeId, title: preview.title,
+        // `round: 0` при нуле доставленных — тот же счёт, что у ручки `/send`:
+        // `markCollectionSent` выше раунд не засчитал, и лента не должна писать
+        // «Разослан сбор» про письмо, которого никто не получил.
+        round: delivered > 0 ? 1 : 0, delivered, intended: preview.recipients.length, auto: true,
+      });
+
+      const report = delivered > 0
+        ? autoSentMessage(personName ?? "именинника", delivered, preview.recipients.length)
+        : autoSendFailedMessage(personName ?? "именинника", "Telegram не принял ни одного письма.", daysUntil);
+      // Ноль доставленных — это провал, а не тихий успех: `markCollectionSent`
+      // выше его не засчитал, и админ обязан узнать об этом словами.
+      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, report);
+      sent += delivered;
+    } finally {
+      releaseCollectionSend(round.id);
+    }
+  }
+
   for (const round of roundsScheduledFor(db, today)) {
     // A general fundraiser has no honouree at all — `employeeId` is null, and
     // `adminRecipients(db, null)` correctly reads as "all reachable admins".
@@ -132,62 +199,6 @@ export async function runBirthdayNoticeTick(
       delivered,
     });
     sent += delivered;
-  }
-
-  /**
-   * Третий цикл — единственное место, где бот пишет КОМАНДЕ без человека.
-   *
-   * Предохранитель стоит не здесь, а раньше: раунд вооружается только вместе со
-   * ссылкой, и в момент вставки админ видел и текст письма, и день, и кнопку
-   * «не рассылать сам». Здесь остаётся исполнение и громкий отказ — молчащая
-   * автоотправка выглядит как «всё под контролем», а подарка не будет.
-   */
-  for (const round of roundsToAutoSend(db, today)) {
-    // Помечаем ДО отправки: падение посреди цикла не должно обернуться вторым
-    // письмом всей команде на следующем тике. Тот же довод, что у `markAdminNotified`.
-    markAutoSent(db, round.id, new Date());
-
-    // Админ успел разослать руками — это не провал, а сделанная работа.
-    if (round.sendCount > 0) continue;
-
-    const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
-    const admins = adminRecipients(db, round.employeeId);
-    const preview = previewCollection(db, round);
-    const daysUntil = round.celebratedOn ? Math.max(0, daysBetween(today, round.celebratedOn)) : 0;
-
-    if (preview.blocker) {
-      const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
-      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, text);
-      recordAudit(db, "collection_auto_send_failed", null, {
-        collectionId: round.id, employeeId: round.employeeId, title: preview.title, reason: preview.blocker,
-      });
-      continue;
-    }
-
-    if (!claimCollectionSend(round.id)) continue;
-    try {
-      let delivered = 0;
-      for (const recipient of recipientsOf(db, round.employeeId)) {
-        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
-      }
-      if (delivered > 0) markCollectionSent(db, round.id, delivered, new Date());
-      // `actorEmployeeId = null` — обе консоли уже рисуют такое как «система».
-      // Отдельное событие завело бы второй способ прочитать одно и то же.
-      recordAudit(db, "collection_sent", null, {
-        collectionId: round.id, employeeId: round.employeeId, title: preview.title,
-        round: 1, delivered, intended: preview.recipients.length, auto: true,
-      });
-
-      const report = delivered > 0
-        ? autoSentMessage(personName ?? "именинника", delivered, preview.recipients.length)
-        : autoSendFailedMessage(personName ?? "именинника", "Telegram не принял ни одного письма.", daysUntil);
-      // Ноль доставленных — это провал, а не тихий успех: `markCollectionSent`
-      // выше его не засчитал, и админ обязан узнать об этом словами.
-      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, report);
-      sent += delivered;
-    } finally {
-      releaseCollectionSend(round.id);
-    }
   }
 
   return sent;

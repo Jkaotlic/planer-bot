@@ -6,7 +6,14 @@ import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } f
 import { listRecentAudit } from "../repo/audit";
 import { runBirthdayNoticeTick } from "./birthday-notice";
 import { ensureBirthdayRound, markAdminNotified } from "./birthday-service";
-import { createCustomCollection, getCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
+import {
+  claimCollectionSend,
+  createCustomCollection,
+  getCollection,
+  markCollectionSent,
+  releaseCollectionSend,
+  updateCollection,
+} from "../collections/collection-service";
 import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
@@ -537,6 +544,106 @@ describe("автоотправка сбора", () => {
     // И раунд не засчитан: «разослано» о письме, которого никто не получил, —
     // это ровно та тишина, из-за которой подарка не будет.
     expect(getCollection(db, round.id)!.sendCount).toBe(0);
+    // В журнале — `round: 0`, как у ручки `/send` в той же ситуации. Иначе лента
+    // рисует «Разослан сбор — доставлено 0 из 2» ровно в ту минуту, когда бот
+    // пишет админам «⚠️ не ушёл», и два чтения одного события расходятся.
+    const logged = listRecentAudit(db, 20).find((e) => e.type === "collection_sent");
+    expect(logged?.payload).toMatchObject({ round: 0, delivered: 0 });
+  });
+
+  it("в день, совпавший с днём напоминания, шлёт сбор, а не инструкцию его разослать", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    // Админ вправе попросить напомнить ему в тот же день, в который бот
+    // разошлёт сам: «праздник минус три» он выбирает руками, как любой другой.
+    updateCollection(db, round.id, {
+      collectUrl: "https://example.com/sbor",
+      scheduledSendOn: "2026-09-04",
+    });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    expect(sent.filter((m) => m.text.includes("Сбор на подарок"))).toHaveLength(2);
+    // «Пора разослать, нажми „Разослать“» после уже состоявшейся рассылки —
+    // указание, которое упрётся в 409: ручная рассылка ДР при `sendCount > 0`
+    // заблокирована. Поэтому автоотправка идёт раньше напоминания, а не позже.
+    expect(sent.some((m) => m.text.startsWith("⏰"))).toBe(false);
+  });
+
+  it("если разослать не вышло, напоминание админам всё равно уходит", async () => {
+    const db = makeTestDb();
+    const sent: { to: number; text: string }[] = [];
+    // Telegram отверг оба письма команде и отпустил дальше.
+    let refuse = 2;
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          if (refuse-- > 0) throw new Error("Too Many Requests");
+          sent.push({ to, text });
+        }),
+      },
+    } as unknown as Bot;
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, {
+      collectUrl: "https://example.com/sbor",
+      scheduledSendOn: "2026-09-04",
+    });
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    // Рассылки не было — `sendCount` остался нулём, и просьба разослать руками
+    // снова становится осмысленной. Молчание здесь и было бы тем самым «всё под
+    // контролем», из-за которого подарка не будет.
+    expect(sent.some((m) => m.text.startsWith("⚠️"))).toBe(true);
+    expect(sent.some((m) => m.text.startsWith("⏰"))).toBe(true);
+  });
+
+  it("не рассылает, пока по этому сбору идёт рассылка админа", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    // Замок уже держит ручка `/send`: тик и она живут в одном процессе, и
+    // второе письмо всей команде — ровно то, от чего замок и заведён.
+    expect(claimCollectionSend(round.id)).toBe(true);
+    try {
+      await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+      expect(sent.filter((m) => m.text.includes("Сбор на подарок"))).toHaveLength(0);
+      // Отметка при этом стоит: попытка была, и на следующем тике её не повторят.
+      expect(getCollection(db, round.id)!.autoSentAt).not.toBeNull();
+    } finally {
+      // Тот же довод, что в задаче 5: замок живёт в модуле и переживает тест.
+      releaseCollectionSend(round.id);
+    }
+  });
+
+  it("отпускает замок после рассылки", async () => {
+    const db = makeTestDb();
+    const { bot } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    // Без `releaseCollectionSend` в `finally` дожим по этому сбору («Напомнить»,
+    // тот же замок в `app.ts`) отвечал бы «Рассылка уже идёт» до перезапуска.
+    expect(claimCollectionSend(round.id)).toBe(true);
+    releaseCollectionSend(round.id);
   });
 
   it("пишет в журнал от имени системы, а не от имени админа", async () => {
