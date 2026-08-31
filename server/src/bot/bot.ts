@@ -47,7 +47,7 @@ import { getChecklist, listChecklists, updateChecklist } from "../repo/checklist
 import { clearDocPending, docPendingFor, startDocPending } from "../bugs/doc-pending";
 import { attachLink, extractUrl, linkAcceptedMessage, notifyLinkReady } from "../collections/link-capture";
 import { ensureBirthdayRound, linkCandidates, type LinkCandidate } from "../birthdays/birthday-service";
-import { setLinkPending } from "../repo/link-pending";
+import { clearLinkPending, linkPendingFor, setLinkPending } from "../repo/link-pending";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
 // plain Telegram chat text — Telegram syncs history to every signed-in device
@@ -845,6 +845,29 @@ export function createBot(deps: BotDeps): Bot {
     });
     await ctx.answerCallbackQuery({ text: "Закрыл" });
     await ctx.reply(`Сбор «${title}» закрыт.`);
+  });
+
+  /**
+   * Выбор сбора для присланной ссылки.
+   *
+   * Ссылка лежит в окне ожидания, а не в `callback_data`: там 64 байта, и
+   * ссылка на сбор в них не помещается.
+   */
+  bot.callbackQuery(/^collection:link:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const url = linkPendingFor(db, who.me.id);
+    if (!url) {
+      await ctx.answerCallbackQuery();
+      await ctx.reply("Не помню, какую ссылку ты присылал. Пришли ссылку ещё раз.");
+      return;
+    }
+    clearLinkPending(db, who.me.id);
+    await ctx.answerCallbackQuery();
+    await bindLink(ctx, who.me.id, Number(ctx.match[1]), url, teamNow(config.teamTz).date);
   });
 
   bot.callbackQuery(/^checklist:docclear:(\d+)$/, async (ctx) => {

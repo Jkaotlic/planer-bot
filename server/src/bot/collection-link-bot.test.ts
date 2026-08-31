@@ -5,7 +5,7 @@ import { recordApi, stubBotInfo, type SentMessage } from "./testbot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { ensureBirthdayRound, upcomingBirthdays } from "../birthdays/birthday-service";
-import { updateCollection } from "../collections/collection-service";
+import { getCollection, updateCollection } from "../collections/collection-service";
 import { linkPendingFor } from "../repo/link-pending";
 import { listBugReports, openBugPrompt } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
@@ -74,6 +74,26 @@ async function say(bot: Bot, from: number, text: string, replyTo?: number) {
       from: { id: from, is_bot: false, first_name: "T" },
       text,
       ...(replyTo === undefined ? {} : { reply_to_message: { message_id: replyTo } }),
+    },
+  } as never);
+}
+
+/** Нажатие inline-кнопки. */
+async function tap(bot: Bot, from: number, data: string) {
+  await bot.handleUpdate({
+    update_id: updateId++,
+    callback_query: {
+      id: String(updateId),
+      from: { id: from, is_bot: false, first_name: "T" },
+      chat_instance: "1",
+      data,
+      message: {
+        message_id: updateId,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: from, type: "private" },
+        from: { id: 1, is_bot: true, first_name: "P" },
+        text: "…",
+      },
     },
   } as never);
 }
@@ -154,9 +174,9 @@ describe("ссылка на сбор, присланная боту в личк�
     expect(api.sent.filter((m) => m.chat_id === 1)).toHaveLength(0);
   });
 
-  it("спрашивает, к какому сбору, когда ждущих несколько, и пока ничего не привязывает", async () => {
+  it("спрашивает, к какому сбору, когда ждущих несколько, и привязывает после тапа", async () => {
     const { db, bot, api } = stage();
-    person(db, "Марк", 1, birthDateIn(7));
+    const mark = person(db, "Марк", 1, birthDateIn(7));
     person(db, "Аня", 444, birthDateIn(10));
     const igor = person(db, "Игорь", 222, null, true);
 
@@ -169,9 +189,14 @@ describe("ссылка на сбор, присланная боту в личк�
     expect(linkPendingFor(db, igor)).toBe("https://example.com/sbor");
     // Просмотр кандидатов не пишет: раунда нет, пока привязки не было.
     expect(upcomingBirthdays(db, TODAY).every((b) => b.campaign === null)).toBe(true);
+
+    await tap(bot, 222, `collection:link:${mark}`);
+
+    const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
+    expect(birthday.campaign?.collectUrl).toBe("https://example.com/sbor");
   });
 
-  it("не подменяет молча готовую ссылку — спрашивает и помечает это заменой", async () => {
+  it("не подменяет молча готовую ссылку — спрашивает, помечает это заменой и подменяет после тапа", async () => {
     const { db, bot, api } = stage();
     const mark = person(db, "Марк", 1, birthDateIn(7));
     person(db, "Игорь", 222, null, true);
@@ -184,6 +209,33 @@ describe("ссылка на сбор, присланная боту в личк�
     expect(buttonsOf(ask)).toEqual(["Марк · заменить ссылку"]);
     const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
     expect(birthday.campaign?.collectUrl).toBe("https://example.com/staraya");
+
+    await tap(bot, 222, `collection:link:${mark}`);
+
+    expect(getCollection(db, round.id)?.collectUrl).toBe("https://example.com/novaya");
+  });
+});
+
+describe("несколько кандидатов — кнопка снаружи окна ожидания", () => {
+  it("окна ожидания нет — бот честно просит прислать ссылку заново", async () => {
+    const { db, bot, api } = stage();
+    const mark = person(db, "Марк", 1, birthDateIn(7));
+    person(db, "Игорь", 222, null, true);
+
+    await tap(bot, 222, `collection:link:${mark}`);
+
+    expect(api.sent.at(-1)!.text).toContain("Пришли ссылку ещё раз");
+  });
+
+  it("не даёт работнику выбрать сбор чужой кнопкой", async () => {
+    const { db, bot, api } = stage();
+    const mark = person(db, "Марк", 1, birthDateIn(7));
+    person(db, "Аня", 333, null);
+
+    await tap(bot, 333, `collection:link:${mark}`);
+
+    expect(api.answers.join(" ")).toContain("админ");
+    expect(getCollection(db, 1)).toBeNull();
   });
 });
 
