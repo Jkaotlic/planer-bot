@@ -356,6 +356,35 @@ describe("кнопки под подтверждением", () => {
   });
 
   /**
+   * У «другого дня» защита та же, что у «не рассылать сам», и цена ошибки та
+   * же: кнопка живёт в чате вечно, а день автоотправки — это день, когда бот
+   * напишет всей команде. Проверяются обе половины: и вопрос «за сколько
+   * дней», и выбранный ответ, — у них разные обработчики.
+   */
+  it("не даёт работнику открыть выбор дня автоотправки", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 333, null);
+
+    await tap(bot, 333, `collection:autoday:${round.id}`);
+
+    expect(api.sent.some((m) => m.text.includes("За сколько дней"))).toBe(false);
+    expect(api.answers.join(" ")).toContain("админ");
+  });
+
+  it("не даёт работнику переставить день автоотправки", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 333, null);
+    const before = getCollection(db, round.id)!.autoSendOn;
+
+    await tap(bot, 333, `collection:autoday:${round.id}:0`);
+
+    expect(getCollection(db, round.id)!.autoSendOn).toBe(before);
+    expect(api.answers.join(" ")).toContain("админ");
+  });
+
+  /**
    * Сквозной тест поверх брифа: «выключил, значит бот молчит» — единственный
    * инвариант, ради которого правило «бот не пишет команде сам» вообще можно
    * отменять. Проверка `autoSendOn === null` доказывает поле в базе, а не
