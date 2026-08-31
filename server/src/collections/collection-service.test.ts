@@ -5,6 +5,7 @@ import type { Db } from "../db/client";
 import { collections } from "../db/schema";
 import {
   adminRecipients,
+  claimCollectionSend,
   collectionsForWorker,
   createCustomCollection,
   deleteCollection,
@@ -13,6 +14,7 @@ import {
   markCollectionSent,
   previewCollection,
   recipientsOf,
+  releaseCollectionSend,
   setCollectionClosed,
   updateCollection,
 } from "./collection-service";
@@ -273,6 +275,23 @@ describe("collectionsForWorker", () => {
     // Exactly one of four survives, and the other three fail for three different
     // reasons — a filter that drops everything would not pass this.
     expect(collectionsForWorker(db, TODAY, me).map((c) => c.title)).toEqual(["Про другого"]);
+  });
+});
+
+describe("замок рассылки", () => {
+  it("второй захват того же сбора не проходит, пока первый не отпустил", () => {
+    expect(claimCollectionSend(42)).toBe(true);
+    expect(claimCollectionSend(42)).toBe(false);
+    releaseCollectionSend(42);
+    expect(claimCollectionSend(42)).toBe(true);
+    releaseCollectionSend(42);
+  });
+
+  it("разные сборы друг друга не блокируют", () => {
+    expect(claimCollectionSend(1)).toBe(true);
+    expect(claimCollectionSend(2)).toBe(true);
+    releaseCollectionSend(1);
+    releaseCollectionSend(2);
   });
 });
 

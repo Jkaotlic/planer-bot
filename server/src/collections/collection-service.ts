@@ -330,3 +330,24 @@ export function collectionsForWorker(db: Db, today: string, employeeId: number):
     };
   });
 }
+
+/**
+ * Замок «этот сбор прямо сейчас рассылается».
+ *
+ * Живёт в сервисе, а не в `app.ts`, потому что рассылок теперь две: ручная из
+ * ручки и автоматическая из тика. Оба живут в ОДНОМ процессе (бот и API — один
+ * `node`), поэтому общий `Set` в модуле их и разводит. Захват синхронный:
+ * между `has` и `add` ничего выполниться не может, и второй претендент всегда
+ * видит сбор занятым.
+ */
+const sending = new Set<number>();
+
+export function claimCollectionSend(id: number): boolean {
+  if (sending.has(id)) return false;
+  sending.add(id);
+  return true;
+}
+
+export function releaseCollectionSend(id: number): void {
+  sending.delete(id);
+}

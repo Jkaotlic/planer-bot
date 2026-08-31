@@ -131,6 +131,8 @@ import {
   markCollectionSent,
   recipientsOf,
   collectionsForWorker,
+  claimCollectionSend,
+  releaseCollectionSend,
 } from "../collections/collection-service";
 import { listPayments, setPaid, unpaidRecipients } from "../collections/payment-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
@@ -759,10 +761,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return collection;
   };
 
-  // Claimed synchronously by /send below (see the comment on that route) so a
-  // double-tap on the same collection can never produce two broadcasts.
-  const collectionSending = new Set<number>();
-
   app.get("/api/admin/collections", requireAdmin(db, config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
     if (!dateStr.safeParse(asOf).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
@@ -841,11 +839,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (preview.blocker) return c.json({ error: preview.blocker }, 409);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
 
-    // The claim is synchronous: between this line and the first `await` below
-    // nothing else can run (single-threaded Node), so a second simultaneous
-    // «Разослать» always finds the collection already taken.
-    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
-    collectionSending.add(collection.id);
+    if (!claimCollectionSend(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
     try {
       let delivered = 0;
       for (const recipient of recipientsOf(db, collection.employeeId)) {
@@ -865,7 +859,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       });
       return c.json({ delivered, intended: preview.recipients.length, round: collection.sendCount + (delivered > 0 ? 1 : 0) });
     } finally {
-      collectionSending.delete(collection.id);
+      releaseCollectionSend(collection.id);
     }
   });
 
@@ -895,8 +889,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     // Тот же замок, что у обычной рассылки: два нажатия подряд не должны
     // отправить людям два письма.
-    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
-    collectionSending.add(collection.id);
+    if (!claimCollectionSend(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
     try {
       // Текст берём из превью: `collectionMessage` на втором раунде уже звучит
       // как «⏰ Напоминаю про сбор», и второй текст был бы вторым источником
@@ -917,7 +910,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       });
       return c.json({ delivered, intended: waiting.length });
     } finally {
-      collectionSending.delete(collection.id);
+      releaseCollectionSend(collection.id);
     }
   });
 
