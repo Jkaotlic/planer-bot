@@ -5,7 +5,7 @@ import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } f
 import { ensureBirthdayRound, roundsToAutoSend } from "../birthdays/birthday-service";
 import { runBirthdayNoticeTick } from "../birthdays/birthday-notice";
 import { getCollection, markCollectionSent, setCollectionClosed, updateCollection } from "./collection-service";
-import { attachLink, extractUrl, linkReadyMessage, notifyLinkReady } from "./link-capture";
+import { attachLink, extractUrl, linkAcceptedMessage, linkReadyMessage, notifyLinkReady } from "./link-capture";
 import type { Db } from "../db/client";
 
 function person(db: Db, name: string, tg: number | null, birthDate: string | null, isAdmin = false): number {
@@ -299,5 +299,47 @@ describe("сквозной случай: не ушёл без ссылки — �
     // Письмо ушло всей команде, кроме именинника: Аня и Игорь — да, Марк — нет.
     expect(sent.filter((m) => m.text.includes("Сбор на подарок")).map((m) => m.to).sort()).toEqual([2, 3]);
     expect(getCollection(db, round.id)!.sendCount).toBe(1);
+  });
+});
+
+describe("linkAcceptedMessage", () => {
+  // Единственное сообщение фичи, которое даёт обещание: по нему админ решает,
+  // вмешиваться или нет. Проверяется отдельно от бота, потому что «Марк» и
+  // «Сбор на подарок» в ответе бота приходят из письма команде, а не отсюда.
+  const letter = "🎂 Марк празднует день рождения 7 сентября.\n\nСбор на подарок: https://example.com/sbor";
+
+  it("называет день и час, когда рассылка ещё впереди", () => {
+    const text = linkAcceptedMessage("Марка", "2026-09-04", "2026-09-01", 7, letter);
+
+    expect(text).toContain("Принял ссылку для сбора на Марка.");
+    expect(text).toContain("Разошлю команде 4 сентября в 10:00 — 7 чел., кроме именинника.");
+    // Письмо показано целиком и ДО отправки — это и есть предохранитель.
+    expect(text).toContain(letter);
+  });
+
+  it("про сегодняшний день говорит «сегодня», а не датой", () => {
+    const text = linkAcceptedMessage("Марка", "2026-09-01", "2026-09-01", 7, letter);
+
+    expect(text).toContain("Разошлю команде сегодня — 7 чел., кроме именинника.");
+    expect(text).not.toContain("1 сентября");
+  });
+
+  it("день в прошлом — это тоже «сегодня»: тик подберёт его ближайшим проходом", () => {
+    const text = linkAcceptedMessage("Марка", "2026-08-30", "2026-09-01", 7, letter);
+
+    expect(text).toContain("Разошлю команде сегодня");
+    expect(text).not.toContain("30 августа");
+  });
+
+  it("без вооружённой автоотправки не обещает рассылки", () => {
+    const text = linkAcceptedMessage("Марка", null, "2026-09-01", 7, letter);
+
+    expect(text).toContain("Сам рассылать не буду — 7 чел., кроме именинника.");
+    expect(text).not.toContain("Разошлю");
+  });
+
+  it("получателей столько, сколько передали, а не сколько людей в команде", () => {
+    expect(linkAcceptedMessage("Марка", null, "2026-09-01", 12, letter)).toContain("12 чел., кроме именинника");
+    expect(linkAcceptedMessage("Марка", null, "2026-09-01", 0, letter)).toContain("0 чел., кроме именинника");
   });
 });

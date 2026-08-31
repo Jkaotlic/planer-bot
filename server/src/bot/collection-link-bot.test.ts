@@ -7,6 +7,7 @@ import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } f
 import { ensureBirthdayRound, upcomingBirthdays } from "../birthdays/birthday-service";
 import { updateCollection } from "../collections/collection-service";
 import { linkPendingFor } from "../repo/link-pending";
+import { listBugReports, openBugPrompt } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
 import { teamNow } from "../util/team-time";
 import type { Db } from "../db/client";
@@ -26,11 +27,18 @@ function plusDays(iso: string, days: number): string {
   return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
-/** «MM-DD» дня рождения через `days` дней. 29 февраля обходим: в невисокосный
- *  год оно считается за 1 марта, и «через 7» превратилось бы в «через 8». */
+/**
+ * «MM-DD» дня рождения через `days` дней.
+ *
+ * 29 февраля не обходится, и это осознанно: сдвиг здесь как раз и ломал бы
+ * тест. Дата берётся арифметикой от «сегодня», поэтому «02-29» получается
+ * только в високосном году — а в нём `daysUntilBirthday("02-29", …)` честно
+ * отдаёт те же `days`, и ожидание в тесте сходится. Сдвинув её на «03-01», мы
+ * получили бы день рождения через `days + 1`, и 22 февраля 2028 года тест
+ * покраснел бы на верной реализации.
+ */
 function birthDateIn(days: number): string {
-  const iso = plusDays(TODAY, days);
-  return iso.slice(5) === "02-29" ? plusDays(TODAY, days + 1).slice(5) : iso.slice(5);
+  return plusDays(TODAY, days).slice(5);
 }
 
 /** `tg` — он же invite-токен: 333 намеренно НЕ в `ADMIN_TELEGRAM_IDS` (там 111). */
@@ -54,8 +62,9 @@ function buttonsOf(message: SentMessage): string[] {
 
 let updateId = 1;
 
-/** Обычное текстовое сообщение боту в личку. */
-async function say(bot: Bot, from: number, text: string) {
+/** Обычное текстовое сообщение боту в личку. `replyTo` — свайп-реплай на
+ *  конкретное сообщение бота: так Telegram помечает ответ на вопрос про баг. */
+async function say(bot: Bot, from: number, text: string, replyTo?: number) {
   await bot.handleUpdate({
     update_id: updateId++,
     message: {
@@ -64,6 +73,7 @@ async function say(bot: Bot, from: number, text: string) {
       chat: { id: from, type: "private" },
       from: { id: from, is_bot: false, first_name: "T" },
       text,
+      ...(replyTo === undefined ? {} : { reply_to_message: { message_id: replyTo } }),
     },
   } as never);
 }
@@ -71,8 +81,13 @@ async function say(bot: Bot, from: number, text: string) {
 describe("ссылка на сбор, присланная боту в личку", () => {
   it("привязывается к единственному ждущему дню рождения и подтверждается текстом письма", async () => {
     const { db, bot, api } = stage();
-    person(db, "Марк", 1, birthDateIn(7));
+    const mark = person(db, "Марк", 1, birthDateIn(7));
     person(db, "Игорь", 222, null, true);
+    // Автоотправку гасим заранее: раунд заводится уже вооружённым, и без этого
+    // «пришла ссылка — вооружилось» было бы зелено и на реализации, которая
+    // ничего не вооружает. Тот же приём, что в `link-capture.test.ts`.
+    const round = ensureBirthdayRound(db, mark, TODAY)!;
+    updateCollection(db, round.id, { autoSendOn: null });
 
     await say(bot, 222, "https://example.com/sbor");
 
@@ -169,5 +184,58 @@ describe("ссылка на сбор, присланная боту в личк�
     expect(buttonsOf(ask)).toEqual(["Марк · заменить ссылку"]);
     const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
     expect(birthday.campaign?.collectUrl).toBe("https://example.com/staraya");
+  });
+});
+
+describe("жалоба на бота, внутри которой есть ссылка", () => {
+  /**
+   * Регресс из ревью. Ссылка на сломанный экран — самое обычное содержимое
+   * жалобы, и до правки она уезжала в чужой сбор: ветка про сбор стояла выше
+   * багрепорта и забирала сообщение себе вместе с `return`. Жалоба исчезала
+   * без следа, а команде через три дня уходило письмо со ссылкой на мини-апп.
+   *
+   * Окно открывается напрямую, а не кнопкой «🐞 Баг»: `recordApi` отдаёт на
+   * `sendMessage` пустой результат, и `startBugReport` не получил бы
+   * `message_id` для `promptMessageId` (в базе он `NOT NULL`).
+   */
+  it("остаётся жалобой: у автора открыт вопрос про баг", async () => {
+    const { db, bot, api } = stage();
+    person(db, "Марк", 1, birthDateIn(7));
+    const igor = person(db, "Игорь", 222, null, true);
+    openBugPrompt(db, igor, 42, new Date());
+
+    await say(bot, 222, "не открывается https://example.com/app/?screen=sick");
+
+    expect(listBugReports(db, "all").map((r) => r.report.text))
+      .toEqual(["не открывается https://example.com/app/?screen=sick"]);
+    expect(upcomingBirthdays(db, TODAY).every((b) => b.campaign === null)).toBe(true);
+    expect(api.sent.some((m) => String(m.text).includes("Принял ссылку"))).toBe(false);
+  });
+
+  it("реплай на вопрос про баг сильнее возраста окна", async () => {
+    const { db, bot } = stage();
+    person(db, "Марк", 1, birthDateIn(7));
+    const igor = person(db, "Игорь", 222, null, true);
+    openBugPrompt(db, igor, 42, new Date(Date.now() - 16 * 60_000));
+
+    await say(bot, 222, "сломалось https://example.com/app/", 42);
+
+    expect(listBugReports(db, "all")).toHaveLength(1);
+    expect(upcomingBirthdays(db, TODAY).every((b) => b.campaign === null)).toBe(true);
+  });
+
+  it("протухшее окно ссылку не съедает — привязка работает как обычно", async () => {
+    // Обратная сторона правки: «есть окно — молчим» заперло бы ссылку навсегда
+    // у каждого, кто когда-то нажал «🐞 Баг» и не дописал.
+    const { db, bot } = stage();
+    person(db, "Марк", 1, birthDateIn(7));
+    const igor = person(db, "Игорь", 222, null, true);
+    openBugPrompt(db, igor, 42, new Date(Date.now() - 16 * 60_000));
+
+    await say(bot, 222, "https://example.com/sbor");
+
+    const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
+    expect(birthday.campaign?.collectUrl).toBe("https://example.com/sbor");
+    expect(listBugReports(db, "all")).toHaveLength(0);
   });
 });

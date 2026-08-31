@@ -1,8 +1,7 @@
 import type { Bot } from "grammy";
-import { autoSendDateFor, autoSendLabel, formatDayMonth, isCollectionActive } from "@planer/shared";
+import { COLLECTION_SEND_HOUR, autoSendDateFor, autoSendLabel, formatDayMonth, isCollectionActive } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Collection } from "../db/schema";
-import { COLLECTION_SEND_HOUR } from "../birthdays/birthday-service";
 import { notifyUser } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";

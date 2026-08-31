@@ -38,18 +38,6 @@ export interface UpcomingBirthday {
 /** How far ahead admins are nudged — a week, as he asked. */
 export const ADMIN_NOTICE_DAYS = 7;
 
-/**
- * Час, раньше которого бот про сборы молчит.
- *
- * Тик крутится каждые пять минут и до появления этой константы получал только
- * дату — значит первым тиком после полуночи и работал. Админам это давало нудж
- * в 00:03; команде, которой бот теперь пишет сам, так слать нельзя вовсе.
- *
- * Константой, а не строкой в `app_settings`: менять её никто не просил, а ряд
- * настройки с переключателем в консоли — работа вперёд.
- */
-export const COLLECTION_SEND_HOUR = "10:00";
-
 /** The year the next occurrence lands in, which is what a round is keyed by. */
 function occurrenceOf(birthDate: string, asOf: string): { celebratedOn: string; year: number } | null {
   const days = daysUntilBirthday(birthDate, asOf);

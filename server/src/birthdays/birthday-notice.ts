@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { collectionTitle } from "@planer/shared";
+import { COLLECTION_SEND_HOUR, collectionTitle } from "@planer/shared";
 import type { Db } from "../db/client";
 import { notifyUser, noticeMuteKeyboard } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
@@ -14,7 +14,6 @@ import {
 } from "../collections/collection-service";
 import {
   ADMIN_NOTICE_DAYS,
-  COLLECTION_SEND_HOUR,
   adminNoticeMessage,
   adminNoticeReadyMessage,
   autoSendFailedMessage,
