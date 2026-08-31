@@ -694,10 +694,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // --- Дни рождения ---------------------------------------------------------
-  // The bot never mails the team on its own. It nudges admins a week ahead; every
-  // message after that is an admin pressing a button, having seen exactly what
-  // will go out and to whom. A round is created when an admin first SAVES it —
-  // looking at the card writes nothing.
+  // До 31.08.2026 бот не писал команде сам: нудж админам за неделю, а дальше
+  // каждое письмо — нажатая кнопка. С этой даты исключение одно, и ручка
+  // сохранения ниже его как раз и вооружает: пришедшая ссылка ставит раунду
+  // `autoSendOn`, и сбор на день рождения уходит команде сам за три дня.
+  // Предохранителем стала не кнопка, а видимость: тот, кто сохранил ссылку,
+  // тут же видит день на карточке и снимает его тумблером. Кастомный сбор
+  // по-прежнему рассылает человек.
+  // Раунд заводится первым СОХРАНЕНИЕМ — просмотр карточки не пишет ничего.
 
   const birthdayAsOf = (c: { req: { query(name: string): string | undefined } }) =>
     c.req.query("asOf") ?? teamNow(config.teamTz).date;

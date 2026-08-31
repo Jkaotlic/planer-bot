@@ -472,8 +472,11 @@ export type NewAuditLog = typeof auditLog.$inferInsert;
  * be a second source of truth, and with reminders it would start lying outright
  * — a custom collection marked «sent» still has a live send button.
  *
- * The bot still never mails the team on its own: it nudges admins, and every
- * message after that is a button they pressed.
+ * Правило «бот не пишет команде сам» с 31.08.2026 действует не везде:
+ * `auto_send_on` ниже — заведённое тогда исключение, и оно ровно одно. Сбор на
+ * день рождения, у которого есть ссылка, уходит команде сам за три дня до
+ * праздника; вооружает его человек, вставивший ссылку и увидевший день.
+ * Кастомный сбор рассылает по-прежнему только нажатая кнопка.
  */
 export const collections = sqliteTable(
   "collections",
