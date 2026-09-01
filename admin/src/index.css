@@ -2731,6 +2731,52 @@ input[type="search"] {
     padding: 7px 12px;
     font-size: 13px;
   }
+
+  /* ---------- Панели ----------
+     Окно 460px по центру экрана отдаёт клавиатуре меньше места, чем ей нужно:
+     поля формы уезжают под неё. Лист, прижатый к низу, отдаёт клавиатуре весь
+     верх экрана — и это привычный на телефоне жест, а не всплывшее окно. */
+  .panel-overlay {
+    align-items: flex-end;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    padding: 18px 16px;
+    /* Иначе «Сохранить» и «Отмена» попадают под home-indicator, где тап
+       перехватывает система. */
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .roster-import-panel {
+    width: 100%;
+  }
+
+  .panel-actions {
+    gap: 8px;
+  }
+
+  .panel-actions .btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  /* «Работник · С · По» в один ряд: у `input[type="date"]` есть собственная
+     минимальная ширина, ужаться до трети от 390px он не может — поле «По»
+     уходило за правый край панели. `min-width` заставляет ряд переноситься;
+     задавать его через `flex` нельзя — доли `flex` проставлены в разметке
+     инлайном и перебиваются только `!important`. */
+  .field-row {
+    flex-wrap: wrap;
+  }
+
+  .field-row > .field-group {
+    min-width: 140px;
+  }
 }
 
 /* Анимация выключается для тех, кто просил систему не двигать интерфейс. */
