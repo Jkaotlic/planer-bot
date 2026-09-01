@@ -22,7 +22,7 @@ describe("checklistsDueToday", () => {
     date: "2026-08-24", employeeId: 3, endDate: null, templateId: 5, ...over,
   });
   // Пресет 5 («с 07:00») ведёт на чек-лист 1, пресет 6 («с 08:00») — на 2.
-  const byTemplate = new Map([[5, 1], [6, 2]]);
+  const byTemplate = new Map([[5, [1]], [6, [2]]]);
 
   it("отдаёт чек-лист того вида смены, что стоит сегодня", () => {
     expect(checklistsDueToday([entry()], byTemplate, "2026-08-24", 3)).toEqual([1]);
@@ -43,6 +43,24 @@ describe("checklistsDueToday", () => {
   it("один и тот же чек-лист не двоится", () => {
     const day = [entry(), entry({ templateId: 5 })];
     expect(checklistsDueToday(day, byTemplate, "2026-08-24", 3)).toEqual([1]);
+  });
+
+  /**
+   * Ровно то, ради чего правка 2026-09-01: у вида смены списков может быть
+   * несколько. Порядок — как в карте: он приходит из базы отсортированным, и
+   * дежурный должен получать сообщения в одном и том же порядке изо дня в день.
+   */
+  it("вид смены приносит все назначенные ему списки", () => {
+    const many = new Map([[5, [1, 2]]]);
+    expect(checklistsDueToday([entry()], many, "2026-08-24", 3)).toEqual([1, 2]);
+  });
+
+  // Общий список у двух видов смен дня — один список: человек не проходит одни
+  // и те же пункты дважды, с какой бы стороны они ни пришли.
+  it("общий список двух видов смен не двоится", () => {
+    const many = new Map([[5, [1]], [6, [1, 2]]]);
+    const day = [entry(), entry({ templateId: 6 })];
+    expect(checklistsDueToday(day, many, "2026-08-24", 3)).toEqual([1, 2]);
   });
 
   it("вид смены без привязки ничего не приносит", () => {
