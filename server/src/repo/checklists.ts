@@ -112,6 +112,30 @@ export function setChecklistTemplates(db: Db, checklistId: number, templateIds: 
 }
 
 /**
+ * Та же связь с другой стороны: какие списки положены ОДНОМУ виду смены.
+ *
+ * Отдельной функцией, а не через `setChecklistTemplates` по каждому списку:
+ * экран «Виды смен» правит одну строку и не должен для этого переписывать
+ * привязки всех чек-листов подряд.
+ */
+export function setTemplatesChecklists(db: Db, templateId: number, checklistIds: readonly number[]): void {
+  const wanted = [...new Set(checklistIds)];
+  db.transaction(() => {
+    const stale = wanted.length > 0
+      ? db.delete(checklistTemplates).where(
+          and(eq(checklistTemplates.templateId, templateId), notInArray(checklistTemplates.checklistId, wanted)),
+        )
+      : db.delete(checklistTemplates).where(eq(checklistTemplates.templateId, templateId));
+    stale.run();
+    if (wanted.length === 0) return;
+    db.insert(checklistTemplates)
+      .values(wanted.map((checklistId) => ({ checklistId, templateId })))
+      .onConflictDoNothing()
+      .run();
+  });
+}
+
+/**
  * Карта «вид смены → его чек-листы» — то, чем `checklistsDueToday` отвечает на
  * вопрос «кому что сегодня положено».
  *
