@@ -2385,7 +2385,36 @@ input[type="search"] {
   flex-wrap: wrap;
   padding: 10px 0 4px;
   font-size: 13.5px;
+}
+
+.kind-checklist-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Галочка-таблетка: нажатое состояние видно цветом, а не только рамкой —
+   «какие списки уже назначены» читают, не вчитываясь. */
+.kind-checklist-options .chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--surface-secondary);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
   cursor: pointer;
+}
+
+.kind-checklist-options .chip-on {
+  background: var(--button);
+  border-color: var(--button);
+  color: var(--button-text);
+}
+
+.kind-checklist-options .chip:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .checklist-instruction {

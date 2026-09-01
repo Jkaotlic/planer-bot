@@ -139,16 +139,16 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     }
   }
 
-  async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
+  async function saveChecklist(kind: TemplateRolesView, checklistIds: number[]) {
     // Оптимистично: выбор обязан отзываться сразу, иначе на медленной сети его
     // меняют второй раз.
     setKinds((current) =>
-      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistId } : item)) ?? current,
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistIds } : item)) ?? current,
     );
     setBusyKindId(kind.templateId);
     setError(null);
     try {
-      await apiClient.setTemplateChecklist(kind.templateId, checklistId);
+      await apiClient.setTemplateChecklists(kind.templateId, checklistIds);
     } catch (err) {
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить чек-лист");
@@ -182,7 +182,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
             onToggleOpen={() => setOpenKindId((current) => (current === kind.templateId ? null : kind.templateId))}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
             checklists={checklists}
-            onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
+            onChecklist={(checklistIds) => saveChecklist(kind, checklistIds)}
             onCoverage={(coverage) => saveCoverage(kind, coverage)}
             onReminder={(sendReminder, reminderText) => saveReminder(kind, sendReminder, reminderText)}
           />
@@ -296,7 +296,7 @@ function KindCard({
   onToggleOpen: () => void;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
   checklists: readonly Checklist[];
-  onChecklist: (checklistId: number | null) => Promise<void>;
+  onChecklist: (checklistIds: number[]) => Promise<void>;
   onCoverage: (coverage: number[]) => Promise<void>;
   onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
 }) {
@@ -307,7 +307,7 @@ function KindCard({
   // name — otherwise all four duties read «Д» here and «Т»/«П»/«ВА»/«07» there.
   const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
   const [queue, setQueue] = useState<TemplateQueue | null>(null);
-  const checklistName = checklists.find((list) => list.id === kind.checklistId)?.name;
+  const checklistNames = checklists.filter((list) => kind.checklistIds.includes(list.id)).map((list) => list.name);
 
   // The queue is history, not settings — fetched only when the card is opened.
   useEffect(() => {
@@ -352,7 +352,7 @@ function KindCard({
         <span className="kind-name">{kind.name}</span>
         <span className="kind-meta">
           {coverageSummary(kind.coverage)}
-          {checklistName ? <> · чек-лист: <b>{checklistName}</b></> : ""}
+          {checklistNames.length > 0 ? <> · чек-листы: <b>{checklistNames.join(", ")}</b></> : ""}
         </span>
         <span className="kind-chevron">{open ? "▴" : "▾"}</span>
       </button>
@@ -389,26 +389,39 @@ function KindCard({
               этого вида смены» — свойство самого вида, ровно как очередь рядом.
               Ту же привязку можно править и со стороны списка — там отвечают на
               обратный вопрос, «кто его проходит». */}
-          <label className="kind-checklist">
-            Чек-лист
-            <select
-              value={kind.checklistId ?? ""}
-              disabled={busy || checklists.length === 0}
-              onChange={(e) => void onChecklist(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">— не нужен —</option>
-              {checklists.map((list) => (
-                <option key={list.id} value={list.id}>
-                  {list.name}
-                </option>
-              ))}
-            </select>
+          {/* Галочками, а не выпадашкой: списков у смены бывает несколько —
+              общая инструкция этажа и отдельная задача на ту же смену. Пока
+              выбор был одиночным, назначение второго молча снимало первый, и
+              2026-09-01 дежурные остались без инструкции 47 этажа. */}
+          <div className="kind-checklist">
+            Чек-листы
+            <div className="kind-checklist-options">
+              {checklists.map((list) => {
+                const on = kind.checklistIds.includes(list.id);
+                return (
+                  <button
+                    key={list.id}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={busy}
+                    className={on ? "chip chip-on" : "chip"}
+                    onClick={() =>
+                      void onChecklist(
+                        on ? kind.checklistIds.filter((id) => id !== list.id) : [...kind.checklistIds, list.id],
+                      )
+                    }
+                  >
+                    {list.name}
+                  </button>
+                );
+              })}
+            </div>
             <span className="kind-rotation-note">
               {checklists.length === 0
                 ? "— сначала заведи чек-лист на экране «Чек-листы»"
-                : "— дежурному придёт список проверок с началом смены"}
+                : "— дежурному придут выбранные списки с началом смены"}
             </span>
-          </label>
+          </div>
         </div>
       )}
     </section>

@@ -43,16 +43,16 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
     };
   }, [attempt]);
 
-  async function saveChecklist(kind: TemplateRolesView, checklistId: number | null) {
+  async function saveChecklist(kind: TemplateRolesView, checklistIds: number[]) {
     // Оптимистично: выбор обязан отзываться сразу, иначе на медленной сети его
     // делают второй раз.
     setKinds((current) =>
-      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistId } : item)) ?? current,
+      current?.map((item) => (item.templateId === kind.templateId ? { ...item, checklistIds } : item)) ?? current,
     );
     setBusyId(kind.templateId);
     setErrors((prev) => withoutError(prev, kind.templateId));
     try {
-      await apiClient.setTemplateChecklist(kind.templateId, checklistId);
+      await apiClient.setTemplateChecklists(kind.templateId, checklistIds);
     } catch (err) {
       // Вернуть версию сервера, а не оставить на экране неправду.
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
@@ -153,7 +153,7 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
             error={errors.get(kind.templateId)}
             onToggleOpen={() => setOpenId((current) => (current === kind.templateId ? null : kind.templateId))}
             checklists={checklists}
-            onChecklist={(checklistId) => saveChecklist(kind, checklistId)}
+            onChecklist={(checklistIds) => saveChecklist(kind, checklistIds)}
             onRotationUnit={(unit) => saveRotation(kind, unit)}
             onCoverage={(coverage) => saveCoverage(kind, coverage)}
             onReminder={(sendReminder, reminderText) => saveReminder(kind, sendReminder, reminderText)}
@@ -261,7 +261,7 @@ function KindCard({
   error?: string;
   onToggleOpen: () => void;
   checklists: readonly Checklist[];
-  onChecklist: (checklistId: number | null) => Promise<void>;
+  onChecklist: (checklistIds: number[]) => Promise<void>;
   onRotationUnit: (unit: "day" | "week") => Promise<void>;
   onCoverage: (coverage: number[]) => Promise<void>;
   onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
@@ -305,7 +305,7 @@ function KindCard({
     if (fresh) setQueue(fresh);
   }
 
-  const checklistName = checklists.find((list) => list.id === kind.checklistId)?.name;
+  const checklistNames = checklists.filter((list) => kind.checklistIds.includes(list.id)).map((list) => list.name);
 
   return (
     <CardShell>
@@ -332,7 +332,7 @@ function KindCard({
           <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{kind.name}</span>
           <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
             {coverageSummary(kind.coverage)}
-            {checklistName ? ` · чек-лист: ${checklistName}` : ""}
+            {checklistNames.length > 0 ? ` · чек-листы: ${checklistNames.join(", ")}` : ""}
           </span>
         </span>
         <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
@@ -360,25 +360,45 @@ function KindCard({
             {/* Привязка живёт здесь, а не на экране чек-листа: «кому он положен» —
                 свойство вида смены, как очередь рядом. Зеркало консольного
                 `ShiftKindsScreen`. */}
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 10 }}>
-              Чек-лист
-              <select
-                value={kind.checklistId ?? ""}
-                disabled={busy || checklists.length === 0}
-                onChange={(e) => void onChecklist(e.target.value ? Number(e.target.value) : null)}
-                style={{
-                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
-                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
-                }}
-              >
-                <option value="">— не нужен —</option>
-                {checklists.map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+              <span style={{ fontSize: 13 }}>Чек-листы</span>
+              {/* Галочками, а не выпадашкой: списков у смены бывает несколько —
+                  общая инструкция этажа и отдельная задача на ту же смену. Пока
+                  выбор был одиночным, назначение второго молча снимало первый, и
+                  2026-09-01 дежурные остались без инструкции 47 этажа. */}
+              {checklists.length === 0 ? (
+                <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Чек-листов пока нет.</span>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {checklists.map((list) => {
+                    const on = kind.checklistIds.includes(list.id);
+                    return (
+                      <button
+                        key={list.id}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={busy}
+                        onClick={() =>
+                          void onChecklist(
+                            on
+                              ? kind.checklistIds.filter((id) => id !== list.id)
+                              : [...kind.checklistIds, list.id],
+                          )
+                        }
+                        style={{
+                          padding: "5px 10px", borderRadius: 999, font: "inherit", fontSize: 13, cursor: "pointer",
+                          border: "1px solid var(--tgui--outline)",
+                          background: on ? "var(--tgui--button_color)" : "var(--tgui--secondary_bg_color)",
+                          color: on ? "var(--tgui--button_text_color)" : "var(--tgui--text_color)",
+                        }}
+                      >
+                        {list.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             <ReminderRow kind={kind} busy={busy} onReminder={onReminder} />
 
