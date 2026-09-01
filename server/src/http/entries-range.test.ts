@@ -4,7 +4,7 @@ import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
-import { createShift, listShiftsInRange } from "../repo/shifts";
+import { createShift, listShiftsInRange, getShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { NOTICE_WINDOW_MS } from "../schedule/notice-buffer";
 import { signInitData } from "../auth/telegram";
@@ -224,5 +224,209 @@ describe("POST /api/admin/entries/range", () => {
     // 2026-08-28 — пятница.
     expect(rows.find((r) => r.date === "2026-08-28")).toMatchObject({ start: "09:00", end: "16:45" });
     expect(rows.find((r) => r.date === "2026-08-27")).toMatchObject({ start: "09:00", end: "18:00" });
+  });
+});
+
+/**
+ * `mode: "rewrite"` — «сделай так на всём отрезке».
+ *
+ * Отличается от расстановки ровно одним: занятый рабочий день не пропускается, а
+ * переписывается НА МЕСТЕ. Именно на месте, а не сносом и созданием заново: на
+ * `shifts.id` висят напоминания (уникальный индекс `reminder_shift_kind`) и
+ * заявки на обмен, и снос порвал бы обе связи ради результата, который выглядит
+ * так же.
+ */
+describe("POST /api/admin/entries/range · mode=rewrite", () => {
+  it("переписывает занятый день на месте, сохраняя запись и её id", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const was = createShift(db, { date: "2026-08-25", start: "09:00", end: "18:00", employeeId: anya.id, category: "shift" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: MON, to: "2026-08-26", category: "duty", start: "10:00", end: "19:00",
+      title: "Вавилова", mode: "rewrite",
+    }));
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.created.map((e: { date: string }) => e.date)).toEqual([MON, "2026-08-26"]);
+    expect(body.updated.map((e: { date: string }) => e.date)).toEqual(["2026-08-25"]);
+    expect(getShift(db, was.id)).toMatchObject({ category: "duty", start: "10:00", end: "19:00", title: "Вавилова" });
+  });
+
+  // Пресет — это цвет клетки и код в выгрузке. Смена «Утро», переписанная в
+  // дежурство, осталась бы цвета «Утро» и вернулась бы сменой через круг в Excel:
+  // тот же дефект, что уже чинили в правке одной записи.
+  it("не оставляет на переписанной записи пресет и подпись прежней", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const tpl = listActiveTemplates(db).find((t) => t.name === "День")!;
+    const was = createShift(db, {
+      date: "2026-08-25", start: "09:00", end: "18:00", employeeId: anya.id, category: "shift",
+      templateId: tpl.id, title: "День", location: "Поклонка",
+    });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-08-25", to: "2026-08-25", category: "duty",
+      start: "10:00", end: "19:00", title: "Вавилова", mode: "rewrite",
+    }));
+
+    expect(getShift(db, was.id)).toMatchObject({ templateId: null, title: "Вавилова", location: null });
+  });
+
+  // `unrecognisedCode` — «импорт не смог прочитать эту клетку», и каждый читатель
+  // ставит его выше всего: выгрузка пишет обратно исходный текст, отчёт кладёт
+  // запись в «не распознано», обе сетки рисуют «?». Перезапись НАЗЫВАЕТ запись
+  // целиком, то есть клетку прочитал человек — метка уходит вместе с прежними
+  // полями. Тот же довод, что у правки одной записи.
+  it("снимает с переписанной записи метку «импорт не прочитал»", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const was = createShift(db, {
+      date: "2026-08-25", start: "09:00", end: "18:00", employeeId: anya.id, category: "shift",
+      unrecognisedCode: "Ко",
+    });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-08-25", to: "2026-08-25", category: "duty",
+      start: "10:00", end: "19:00", mode: "rewrite",
+    }));
+
+    expect(getShift(db, was.id)).toMatchObject({ category: "duty", unrecognisedCode: null });
+  });
+
+  it("отпуск не трогает и называет причину", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const otpusk = createShift(db, { date: "2026-08-25", endDate: "2026-08-26", employeeId: anya.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const body = await (await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: MON, to: "2026-08-26", category: "duty", start: "10:00", end: "19:00", mode: "rewrite",
+    }))).json();
+
+    expect(body.skipped).toEqual([
+      { date: "2026-08-25", reason: "absence" },
+      { date: "2026-08-26", reason: "absence" },
+    ]);
+    expect(getShift(db, otpusk.id)).toMatchObject({ category: "vacation", endDate: "2026-08-26" });
+  });
+
+  // Уникального индекса на (работник, день) в таблице нет, и импорт ростера такие
+  // дни создаёт. Догадка «перепишем первую» стёрла бы вторую молча.
+  it("день с двумя записями пропускает, а не выбирает одну из них", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-08-25", start: "09:00", end: "13:00", employeeId: anya.id, category: "shift" });
+    createShift(db, { date: "2026-08-25", start: "14:00", end: "18:00", employeeId: anya.id, category: "duty" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const body = await (await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-08-25", to: "2026-08-25", category: "duty", start: "10:00", end: "19:00", mode: "rewrite",
+    }))).json();
+
+    expect(body.skipped).toEqual([{ date: "2026-08-25", reason: "ambiguous" }]);
+    expect(listShiftsInRange(db, "2026-08-25", "2026-08-25")).toHaveLength(2);
+  });
+
+  it("чужие записи в этих днях не трогает", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+    const his = createShift(db, { date: "2026-08-25", start: "09:00", end: "18:00", employeeId: igor.id, category: "shift" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-08-25", to: "2026-08-25", category: "duty", start: "10:00", end: "19:00", mode: "rewrite",
+    }));
+
+    expect(getShift(db, his.id)).toMatchObject({ employeeId: igor.id, category: "shift", start: "09:00" });
+  });
+
+  it("в пятницу берёт пятничные часы пресета и при перезаписи", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const tpl = listActiveTemplates(db).find((t) => t.name === "День")!;
+    createShift(db, { date: "2026-08-28", start: "12:00", end: "20:00", employeeId: anya.id, category: "duty" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-08-27", to: "2026-08-28", category: "shift",
+      templateId: tpl.id, start: "09:00", end: "18:00", title: "День", mode: "rewrite",
+    }));
+
+    const rows = listShiftsInRange(db, "2026-08-27", "2026-08-28");
+    expect(rows.find((r) => r.date === "2026-08-28")).toMatchObject({ start: "09:00", end: "16:45" });
+  });
+
+  // Перезапись и расстановка — разные события: «Расставлено диапазоном» про
+  // неделю, где четыре смены заменены, соврало бы ленте, которую команда читает
+  // как историю своего графика.
+  it("оставляет в журнале одну строку, и она про перезапись", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-08-25", start: "09:00", end: "18:00", employeeId: anya.id, category: "shift" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: MON, to: "2026-08-26", category: "duty", start: "10:00", end: "19:00", mode: "rewrite",
+    }));
+
+    const events = listRecentAudit(db, 20);
+    expect(events.map((e) => e.type)).toEqual(["entries_range_rewritten"]);
+    expect(events[0]!.payload).toMatchObject({ employeeName: "Аня", from: MON, to: "2026-08-26", created: 2, updated: 1, skipped: 0 });
+  });
+
+  it("шлёт работнику одно письмо на всю перезапись", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = makeTestDb();
+      const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-anya" });
+      linkTelegramAccount(db, "inv-anya", 555);
+      for (const date of ["2099-01-05", "2099-01-06", "2099-01-07"]) {
+        createShift(db, { date, start: "09:00", end: "18:00", employeeId: anya.id, category: "shift" });
+      }
+      const { bot, sent } = fakeBot();
+      const app = createApp({ db, config, bot });
+      const admin = await tokenFor(app, 111);
+
+      await app.request("/api/admin/entries/range", authedJson(admin, {
+        employeeId: anya.id, from: "2099-01-05", to: "2099-01-08", category: "duty",
+        start: "10:00", end: "19:00", mode: "rewrite",
+      }));
+
+      await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 100);
+      expect(sent.filter((m) => m.to === 555)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Старые клиенты тела без `mode` уже шлют, и молча получить перезапись вместо
+  // расстановки — худшее, чем может кончиться эта правка.
+  it("без mode ведёт себя как расстановка: занятый день пропущен", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-08-25", start: "09:00", end: "18:00", employeeId: anya.id, category: "shift" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const body = await (await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: MON, to: "2026-08-26", category: "duty", start: "10:00", end: "19:00",
+    }))).json();
+
+    expect(body.skipped).toEqual([{ date: "2026-08-25", reason: "busy" }]);
+    expect(listShiftsInRange(db, "2026-08-25", "2026-08-25")[0]).toMatchObject({ category: "shift" });
   });
 });

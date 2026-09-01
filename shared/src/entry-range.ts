@@ -18,16 +18,37 @@ export function categoryFitsDate(category: EntryCategory, date: string): boolean
 }
 
 /** Почему день диапазона остался без записи. */
-export type SkipReason = "weekend" | "busy" | "category";
+export type SkipReason = "weekend" | "busy" | "category" | "absence" | "ambiguous";
 
 export interface EntryRangeSkip {
   date: string;
   reason: SkipReason;
 }
 
+/**
+ * Что уже стоит у человека в этом дне.
+ *
+ * `ambiguous` — записей больше одной. Уникального индекса на (работник, день) в
+ * таблице нет, и импорт ростера такие дни создаёт; какую из двух переписывать —
+ * знать неоткуда, поэтому день честно пропускается вместо догадки.
+ */
+export type DayOccupancy = "work" | "absence" | "ambiguous";
+
+/**
+ * Что делать с днём, в котором уже что-то стоит.
+ *
+ * `fill` — расстановка: занятый день пропускается, вторая смена поверх первой
+ * читается только как ошибка. `rewrite` — правка отрезка: рабочая запись
+ * переписывается на месте. Отсутствие не трогает ни один из двух: снести
+ * человеку отпуск без отмены — не побочный эффект смены пресета.
+ */
+export type EntryRangeMode = "fill" | "rewrite";
+
 export interface EntryRangePlan {
   /** Дни, которые получат запись. У отсутствия — один: сам `from`. */
   days: string[];
+  /** Подмножество `days`, где запись не появится, а заменит существующую. */
+  rewritten: string[];
   skipped: EntryRangeSkip[];
 }
 
@@ -37,64 +58,94 @@ export interface EntryRangeInput {
   category: EntryCategory;
   /** Брать ли субботу и воскресенье. К «Работе в выходной» не относится — у неё своё правило. */
   includeWeekends: boolean;
-  /** Дни, в которые человек уже занят: вторая смена поверх первой — не расстановка, а ошибка. */
-  busyDates: readonly string[];
+  mode: EntryRangeMode;
+  /**
+   * Занятость по дням. Дня нет в карте — день свободен.
+   *
+   * Не список занятых дат: режиму перезаписи мало знать «занят», ему нужно
+   * знать чем — смену он заменит, отпуск оставит.
+   */
+  occupied?: Readonly<Record<string, DayOccupancy | undefined>>;
 }
 
-/**
- * Какие дни диапазона получат запись, а какие нет и почему.
- *
- * Чистая функция и единственное место, где это правило записано: её зовёт
- * сервер, чтобы создать записи, и обе консоли, чтобы показать «поставится 18
- * дней» до нажатия «Сохранить». Посчитанное на экране и на сервере разными
- * кодами — это два разных правила через полгода, чему в этом репозитории уже
- * есть три примера.
- *
- * Отсутствие (отпуск, больничный, командировка) диапазоном по дням НЕ
- * раскладывается: в базе оно живёт одной записью с `endDate`, и тридцать строк
- * вместо одной сломали бы и полосу в сетке, и журнал. Функция отдаёт один день,
- * а как его записать — знает вызывающий.
- */
 export function planEntryRange(input: EntryRangeInput): EntryRangePlan {
-  const { from, to, category, includeWeekends, busyDates } = input;
-  if (to < from) return { days: [], skipped: [] };
-  if (isAbsence(category)) return { days: [from], skipped: [] };
+  const { from, to, category, includeWeekends, mode, occupied } = input;
+  if (to < from) return { days: [], rewritten: [], skipped: [] };
+  if (isAbsence(category)) return { days: [from], rewritten: [], skipped: [] };
 
-  const busy = new Set(busyDates);
   const days: string[] = [];
+  const rewritten: string[] = [];
   const skipped: EntryRangeSkip[] = [];
 
   for (const date of eachDayIso(from, to)) {
     // Порядок причин — от самой сильной к самой слабой, и он виден человеку:
     // день, который категории не подходит вовсе, не «занят» и не «выходной»,
-    // сколько бы флагов ни стояло.
+    // сколько бы флагов ни стояло. Занятость идёт последней, потому что режим
+    // перезаписи ослабляет только её: выходной он не берёт так же, как и
+    // расстановка.
     if (!categoryFitsDate(category, date)) skipped.push({ date, reason: "category" });
     else if (!includeWeekends && isWeekend(date)) skipped.push({ date, reason: "weekend" });
-    else if (busy.has(date)) skipped.push({ date, reason: "busy" });
-    else days.push(date);
+    else {
+      const busy = occupied?.[date];
+      if (!busy) days.push(date);
+      else if (mode === "fill") skipped.push({ date, reason: "busy" });
+      else if (busy === "work") {
+        days.push(date);
+        rewritten.push(date);
+      } else skipped.push({ date, reason: busy });
+    }
   }
 
-  return { days, skipped };
-}
-
-/** «Поставлено 18 · пропущено 4: 2 выходных, 2 уже заняты» — итог одной строкой. */
-export function describeEntryRangePlan(plan: EntryRangePlan): string {
-  const head = `${plan.days.length} ${pluralDays(plan.days.length)}`;
-  if (plan.skipped.length === 0) return head;
-  const byReason = new Map<SkipReason, number>();
-  for (const skip of plan.skipped) byReason.set(skip.reason, (byReason.get(skip.reason) ?? 0) + 1);
-  const parts: string[] = [];
-  const weekend = byReason.get("weekend");
-  const busy = byReason.get("busy");
-  const wrongCategory = byReason.get("category");
-  if (weekend) parts.push(`${weekend} ${weekend === 1 ? "выходной" : "выходных"}`);
-  if (busy) parts.push(`${busy} ${busy === 1 ? "уже занят" : "уже заняты"}`);
-  if (wrongCategory) parts.push(`${wrongCategory} не по правилу вида`);
-  return `${head} · пропущено ${plan.skipped.length}: ${parts.join(", ")}`;
+  return { days, rewritten, skipped };
 }
 
 /**
- * Итог расстановки словами: «Поставлено 18 дней · пропущено 4: 2 выходных…».
+ * Чем режим обернётся для дней, про которые форма ничего не знает.
+ *
+ * Ни одна из консолей не знает занятость за пределами показанной недели, и
+ * догадка «наверное, свободно» врала бы ровно там, где ей поверят. Значит между
+ * админом и необратимой правкой стоит только эта фраза — и она одна на обе
+ * формы, иначе через полгода они скажут разное про одно и то же.
+ */
+export function entryRangeHint(mode: EntryRangeMode): string {
+  return mode === "rewrite"
+    ? "Смены и дежурства в этих днях перепишутся; отпуск, больничный и командировка останутся на месте."
+    : "Дни, где у человека уже что-то стоит, пропустятся.";
+}
+
+/** «Поставлено 18 · 4 перепишутся · пропущено 4: 2 выходных, 2 уже заняты» — итог одной строкой. */
+export function describeEntryRangePlan(plan: EntryRangePlan): string {
+  const parts = [`${plan.days.length} ${pluralDays(plan.days.length)}`];
+  // Число перезаписей стоит до пропусков и никогда не прячется: это
+  // единственная необратимая часть плана, и человек обязан увидеть её ДО
+  // нажатия, а не в итоге после.
+  if (plan.rewritten.length > 0) parts.push(`${plan.rewritten.length} ${pluralRewrite(plan.rewritten.length)}`);
+  if (plan.skipped.length > 0) parts.push(`пропущено ${plan.skipped.length}: ${describeSkips(plan.skipped)}`);
+  return parts.join(" · ");
+}
+
+/** «2 выходных, 1 уже занят» — по причине на каждую, в порядке их силы. */
+function describeSkips(skipped: readonly EntryRangeSkip[]): string {
+  const byReason = new Map<SkipReason, number>();
+  for (const skip of skipped) byReason.set(skip.reason, (byReason.get(skip.reason) ?? 0) + 1);
+  const say = (reason: SkipReason, text: (n: number) => string): string | null => {
+    const n = byReason.get(reason);
+    return n ? text(n) : null;
+  };
+  return [
+    say("weekend", (n) => `${n} ${n === 1 ? "выходной" : "выходных"}`),
+    say("busy", (n) => `${n} ${n === 1 ? "уже занят" : "уже заняты"}`),
+    // Отсутствие и двойной день названы по-разному не для красоты: первое
+    // значит «иди отмени отпуск», второе — «разбери день руками», и одно слово
+    // на двоих оставило бы админа без следующего шага.
+    say("absence", (n) => `${n} ${pluralDays(n)} отсутствия`),
+    say("ambiguous", (n) => `${n} ${pluralDays(n)} с двумя записями`),
+    say("category", (n) => `${n} не по правилу вида`),
+  ].filter(Boolean).join(", ");
+}
+
+/**
+ * Итог расстановки словами: «Поставлено 18 дней · 4 переписано · пропущено 4…».
  *
  * Дни считаются по СРОКУ созданных записей, а не по их числу: отсутствие
  * приезжает одной строкой на всю полосу, и «поставлено 1 день» про недельный
@@ -103,10 +154,25 @@ export function describeEntryRangePlan(plan: EntryRangePlan): string {
  */
 export function describeEntryRangeResult(result: {
   created: readonly { date: string; endDate?: string | null }[];
+  updated?: readonly { date: string; endDate?: string | null }[];
   skipped: readonly EntryRangeSkip[];
 }): string {
-  const days = result.created.flatMap((entry) => eachDayIso(entry.date, entry.endDate ?? entry.date));
-  return `Поставлено ${describeEntryRangePlan({ days, skipped: [...result.skipped] })}`;
+  const span = (entries: readonly { date: string; endDate?: string | null }[]) =>
+    entries.flatMap((entry) => eachDayIso(entry.date, entry.endDate ?? entry.date));
+  const rewritten = span(result.updated ?? []);
+  const text = describeEntryRangePlan({
+    days: [...span(result.created), ...rewritten],
+    rewritten,
+    skipped: [...result.skipped],
+  });
+  // Прошедшее время, а не будущее: тот же счёт, что в предпросмотре, но
+  // «перепишутся» после сохранения читалось бы как «ещё не сделано».
+  return `Поставлено ${text.replace(/ перепишутся| перепишется/, " переписано")}`;
+}
+
+/** «1 перепишется / 2 перепишутся» — глагол идёт за числом, как и всё остальное. */
+function pluralRewrite(n: number): string {
+  return n % 10 === 1 && n % 100 !== 11 ? "перепишется" : "перепишутся";
 }
 
 /** «1 день / 2 дня / 5 дней» — та же 1/2/5, что у остальных счётчиков. */

@@ -6,6 +6,7 @@ import type {
   CreateEmployeeResponse,
   EntryCategory,
   EntryRangeSkip,
+  EntryRangeMode,
   PaymentRow,
   ScheduleEntryDto,
   TemplateAccent,
@@ -169,10 +170,20 @@ export interface NewEntryRangeInput {
   title?: string | null;
   /** Брать ли субботу и воскресенье. К «Работе в выходной» не относится — у неё своё правило. */
   includeWeekends?: boolean;
+  /**
+   * Что делать с занятым днём: `fill` пропускает, `rewrite` переписывает.
+   *
+   * Необязательное, и умолчание на сервере — `fill`: тело без режима шлёт уже
+   * выкаченная консоль, а молча получить перезапись вместо расстановки — худшее,
+   * чем может кончиться эта ручка.
+   */
+  mode?: EntryRangeMode;
 }
 
 export interface EntryRangeResult {
   created: Shift[];
+  /** Записи, которые перезапись заменила на месте. У расстановки всегда пусто. */
+  updated: Shift[];
   skipped: EntryRangeSkip[];
   notified: NotifyReach;
 }

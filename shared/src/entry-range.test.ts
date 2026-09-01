@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeEntryRangePlan, describeEntryRangeResult, planEntryRange } from "./entry-range";
+import { describeEntryRangePlan, describeEntryRangeResult, entryRangeHint, planEntryRange } from "./entry-range";
 
 /**
  * Правило «какие дни диапазона получат запись».
@@ -14,7 +14,7 @@ describe("planEntryRange", () => {
   const SUN = "2026-08-30";
 
   it("будни берёт, выходные пропускает с причиной", () => {
-    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, busyDates: [] });
+    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, mode: "fill" });
     expect(plan.days).toEqual(["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"]);
     expect(plan.skipped).toEqual([
       { date: "2026-08-29", reason: "weekend" },
@@ -23,7 +23,7 @@ describe("planEntryRange", () => {
   });
 
   it("с поднятым флагом берёт и выходные", () => {
-    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: true, busyDates: [] });
+    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: true, mode: "fill" });
     expect(plan.days).toHaveLength(7);
     expect(plan.skipped).toEqual([]);
   });
@@ -32,7 +32,7 @@ describe("planEntryRange", () => {
   // «Работе в выходной» на будни, и день, который сервер всё равно не примет,
   // нельзя молча положить в список — он бы уронил всю транзакцию.
   it("«Работа в выходной» берёт только субботу и воскресенье, даже с флагом", () => {
-    const plan = planEntryRange({ from: MON, to: SUN, category: "weekend_work", includeWeekends: true, busyDates: [] });
+    const plan = planEntryRange({ from: MON, to: SUN, category: "weekend_work", includeWeekends: true, mode: "fill" });
     expect(plan.days).toEqual(["2026-08-29", "2026-08-30"]);
     expect(plan.skipped.map((s) => s.reason)).toEqual(["category", "category", "category", "category", "category"]);
   });
@@ -40,7 +40,7 @@ describe("planEntryRange", () => {
   it("занятый день пропускает, а не кладёт вторую смену поверх первой", () => {
     const plan = planEntryRange({
       from: MON, to: "2026-08-26", category: "shift", includeWeekends: false,
-      busyDates: ["2026-08-25"],
+      mode: "fill", occupied: { "2026-08-25": "work" },
     });
     expect(plan.days).toEqual(["2026-08-24", "2026-08-26"]);
     expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "busy" }]);
@@ -51,20 +51,20 @@ describe("planEntryRange", () => {
   it("отсутствие отдаёт одним днём — записывать его будут диапазоном", () => {
     const plan = planEntryRange({
       from: MON, to: SUN, category: "vacation", includeWeekends: false,
-      busyDates: ["2026-08-25"],
+      mode: "fill", occupied: { "2026-08-25": "work" },
     });
     expect(plan.days).toEqual([MON]);
     expect(plan.skipped).toEqual([]);
   });
 
   it("перевёрнутый диапазон пуст, а не бесконечен", () => {
-    const plan = planEntryRange({ from: SUN, to: MON, category: "shift", includeWeekends: true, busyDates: [] });
+    const plan = planEntryRange({ from: SUN, to: MON, category: "shift", includeWeekends: true, mode: "fill" });
     expect(plan.days).toEqual([]);
     expect(plan.skipped).toEqual([]);
   });
 
   it("один день — обычная запись, и никаких пропусков", () => {
-    const plan = planEntryRange({ from: MON, to: MON, category: "duty", includeWeekends: false, busyDates: [] });
+    const plan = planEntryRange({ from: MON, to: MON, category: "duty", includeWeekends: false, mode: "fill" });
     expect(plan.days).toEqual([MON]);
     expect(plan.skipped).toEqual([]);
   });
@@ -72,20 +72,21 @@ describe("planEntryRange", () => {
   // Отдельно от «дежурство тоже берётся»: смена и дежурство обязаны считаться
   // одним правилом — в этом весь пункт 5 его списка.
   it("дежурство считается тем же правилом, что смена", () => {
-    const shift = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, busyDates: [] });
-    const duty = planEntryRange({ from: MON, to: SUN, category: "duty", includeWeekends: false, busyDates: [] });
+    const shift = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, mode: "fill" });
+    const duty = planEntryRange({ from: MON, to: SUN, category: "duty", includeWeekends: false, mode: "fill" });
     expect(duty).toEqual(shift);
   });
 });
 
 describe("describeEntryRangePlan", () => {
   it("без пропусков — только сколько поставлено", () => {
-    expect(describeEntryRangePlan({ days: ["a", "b"], skipped: [] })).toBe("2 дня");
+    expect(describeEntryRangePlan({ days: ["a", "b"], rewritten: [], skipped: [] })).toBe("2 дня");
   });
 
   it("называет каждую причину своим числом", () => {
     const text = describeEntryRangePlan({
       days: ["a", "b", "c", "d", "e"],
+      rewritten: [],
       skipped: [
         { date: "x", reason: "weekend" }, { date: "y", reason: "weekend" },
         { date: "z", reason: "busy" },
@@ -94,10 +95,35 @@ describe("describeEntryRangePlan", () => {
     expect(text).toBe("5 дней · пропущено 3: 2 выходных, 1 уже занят");
   });
 
+  // Перезапись — необратимая операция, и её число человек обязан увидеть ДО
+  // нажатия: «поставится 5 дней» про неделю, где четыре смены будут стёрты, —
+  // правда, которая читается как неправда.
+  it("называет, сколько дней перепишется", () => {
+    const text = describeEntryRangePlan({
+      days: ["a", "b", "c"], rewritten: ["a", "b"], skipped: [],
+    });
+    expect(text).toBe("3 дня · 2 перепишутся");
+  });
+
+  it("один переписанный день — единственное число", () => {
+    expect(describeEntryRangePlan({ days: ["a"], rewritten: ["a"], skipped: [] })).toBe("1 день · 1 перепишется");
+  });
+
+  it("отсутствие и двойной день называет по-разному — иначе непонятно, что делать дальше", () => {
+    const text = describeEntryRangePlan({
+      days: ["a"], rewritten: [],
+      skipped: [
+        { date: "x", reason: "absence" }, { date: "y", reason: "absence" },
+        { date: "z", reason: "ambiguous" },
+      ],
+    });
+    expect(text).toBe("1 день · пропущено 3: 2 дня отсутствия, 1 день с двумя записями");
+  });
+
   // Ноль дней — не «поставится», а «не поставится ничего»: кнопка «Сохранить»
   // на таком плане не должна выглядеть безобидной.
   it("пустой план говорит «0 дней», а не молчит", () => {
-    expect(describeEntryRangePlan({ days: [], skipped: [{ date: "x", reason: "busy" }] }))
+    expect(describeEntryRangePlan({ days: [], rewritten: [], skipped: [{ date: "x", reason: "busy" }] }))
       .toBe("0 дней · пропущено 1: 1 уже занят");
   });
 });
@@ -111,6 +137,17 @@ describe("describeEntryRangeResult", () => {
     expect(text).toBe("Поставлено 2 дня · пропущено 1: 1 выходной");
   });
 
+  // Итог называет перезапись отдельно от появления: «поставлено 5» про неделю,
+  // где четыре смены заменены, скрывает ровно то, что админ пришёл проверить.
+  it("переписанные дни называет отдельно от новых", () => {
+    const text = describeEntryRangeResult({
+      created: [{ date: "2026-08-24" }],
+      updated: [{ date: "2026-08-25" }, { date: "2026-08-26" }],
+      skipped: [],
+    });
+    expect(text).toBe("Поставлено 3 дня · 2 переписано");
+  });
+
   // Недельный отпуск — одна строка в базе. «Поставлено 1 день» про него было бы
   // неправдой ровно там, где человек проверяет, что получилось.
   it("полосу отсутствия считает по сроку, а не по числу записей", () => {
@@ -119,5 +156,97 @@ describe("describeEntryRangeResult", () => {
       skipped: [],
     });
     expect(text).toBe("Поставлено 7 дней");
+  });
+});
+
+/**
+ * Режим перезаписи: «сделай так на всём отрезке».
+ *
+ * Отличается от расстановки ровно одним — занятый рабочий день не пропускается,
+ * а переписывается. Отсутствие остаётся неприкосновенным: снести человеку
+ * отпуск одним движением, без отмены, — не та операция, которую можно сделать
+ * побочным эффектом смены пресета.
+ */
+describe("planEntryRange в режиме перезаписи", () => {
+  const MON = "2026-08-24";
+  const WED = "2026-08-26";
+
+  it("занятый рабочий день переписывает, а не пропускает", () => {
+    const plan = planEntryRange({
+      from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite",
+      occupied: { "2026-08-25": "work" },
+    });
+    expect(plan.days).toEqual([MON, "2026-08-25", WED]);
+    expect(plan.rewritten).toEqual(["2026-08-25"]);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it("отпуск не трогает и называет причину", () => {
+    const plan = planEntryRange({
+      from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite",
+      occupied: { "2026-08-25": "absence" },
+    });
+    expect(plan.days).toEqual([MON, WED]);
+    expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "absence" }]);
+  });
+
+  // Уникального индекса на (работник, день) в таблице нет, и импорт ростера
+  // такие дни создаёт. Какую из двух записей переписывать — знать неоткуда,
+  // и догадка здесь дороже пропуска.
+  it("день с двумя записями пропускает: какую из них переписывать — неизвестно", () => {
+    const plan = planEntryRange({
+      from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite",
+      occupied: { "2026-08-25": "ambiguous" },
+    });
+    expect(plan.days).toEqual([MON, WED]);
+    expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "ambiguous" }]);
+  });
+
+  it("свободный день заполняет — перезапись не только про занятые", () => {
+    const plan = planEntryRange({
+      from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite", occupied: {},
+    });
+    expect(plan.days).toEqual([MON, "2026-08-25", WED]);
+    expect(plan.rewritten).toEqual([]);
+  });
+
+  // Выходные и правило вида сильнее режима: суббота без флага не берётся ни
+  // при расстановке, ни при перезаписи, даже если в ней что-то стоит.
+  it("выходной без флага не переписывает", () => {
+    const plan = planEntryRange({
+      from: "2026-08-29", to: "2026-08-29", category: "duty", includeWeekends: false, mode: "rewrite",
+      occupied: { "2026-08-29": "work" },
+    });
+    expect(plan.days).toEqual([]);
+    expect(plan.skipped).toEqual([{ date: "2026-08-29", reason: "weekend" }]);
+  });
+
+  it("расстановка при том же входе занятый день по-прежнему пропускает", () => {
+    const plan = planEntryRange({
+      from: MON, to: WED, category: "duty", includeWeekends: false, mode: "fill",
+      occupied: { "2026-08-25": "work" },
+    });
+    expect(plan.days).toEqual([MON, WED]);
+    expect(plan.rewritten).toEqual([]);
+    expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "busy" }]);
+  });
+});
+
+/**
+ * Одна фраза на обе консоли.
+ *
+ * Число занятых дней ни одна из форм не знает — расписания за пределами
+ * показанной недели у них нет. Значит единственное, что стоит между админом и
+ * необратимой правкой, — эта строка, и разъехаться в двух местах ей нельзя.
+ */
+describe("entryRangeHint", () => {
+  it("у расстановки обещает пропуск занятых дней", () => {
+    expect(entryRangeHint("fill")).toBe("Дни, где у человека уже что-то стоит, пропустятся.");
+  });
+
+  it("у перезаписи называет и что заменится, и что уцелеет", () => {
+    expect(entryRangeHint("rewrite")).toBe(
+      "Смены и дежурства в этих днях перепишутся; отпуск, больничный и командировка останутся на месте.",
+    );
   });
 });

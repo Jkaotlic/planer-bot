@@ -29,7 +29,7 @@ export const AUDIT_TYPES = [
   // вопрос, который к строке возникает.
   "handover_offered", "handover_declined", "handover_fanned",
   "handover_taken", "handover_escalated", "handover_cancelled",
-  "distribution_applied", "entries_range_created", "roster_import",
+  "distribution_applied", "entries_range_created", "entries_range_rewritten", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
   "employee_restrictions_changed", "employee_observer_changed",
@@ -125,6 +125,21 @@ function dayLabel(iso: unknown): string {
  */
 function personLabel(payload: Record<string, unknown>, nameKey = "employeeName", idKey = "employeeId"): string {
   return str(payload[nameKey]) ?? (num(payload[idKey]) != null ? `работник #${num(payload[idKey])}` : "неизвестно кто");
+}
+
+/** «Аня · пн 24 августа — ср 26 августа» и «Дежурство 10:00–19:00 · 2 поставлено · 1 заменена». */
+function rangeLines(p: Record<string, unknown>): string[] {
+  return [
+    `${personLabel(p)} · ${dayLabel(p.from)} — ${dayLabel(p.to)}`,
+    [
+      str(p.label) ?? "запись",
+      `${num(p.created) ?? 0} поставлено`,
+      // Ноль строкой не пишется ни у заменённых, ни у пропущенных: «пропущено 0» —
+      // это шум, который читается как «что-то всё-таки не встало».
+      num(p.updated) ? `${num(p.updated)} заменено` : null,
+      num(p.skipped) ? `пропущено ${num(p.skipped)}` : null,
+    ].filter(Boolean).join(" · "),
+  ];
 }
 
 /** «День 09:00–18:00» или «Весь день» — как запись выглядит человеку. */
@@ -290,16 +305,16 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   entries_range_created: (p) => ({
     icon: "📅",
     title: "Расставлено диапазоном",
-    lines: [
-      `${personLabel(p)} · ${dayLabel(p.from)} — ${dayLabel(p.to)}`,
-      [
-        str(p.label) ?? "запись",
-        `${num(p.created) ?? 0} поставлено`,
-        // Ноль пропущенных строкой не пишется: «пропущено 0» — это шум, который
-        // читается как «что-то всё-таки не встало».
-        num(p.skipped) ? `пропущено ${num(p.skipped)}` : null,
-      ].filter(Boolean).join(" · "),
-    ],
+    lines: rangeLines(p),
+  }),
+  // Отдельный тип, а не флаг внутри `entries_range_created`: заголовок «Расставлено
+  // диапазоном» про неделю, где четыре смены были заменены, соврал бы ленте, которую
+  // команда читает как историю своего графика. Число заменённых — главное в строке,
+  // потому что это единственная необратимая её часть.
+  entries_range_rewritten: (p) => ({
+    icon: "📅",
+    title: "Переписано диапазоном",
+    lines: rangeLines(p),
   }),
   roster_import: (p) => ({
     icon: "📥",

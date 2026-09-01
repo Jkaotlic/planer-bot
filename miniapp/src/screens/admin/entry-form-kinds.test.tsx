@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { AdminScheduleScreen } from "./AdminScheduleScreen";
-import { apiClient, type Employee, type NewEntryRangeInput, type Template } from "../../api/client";
+import { apiClient, type Employee, type NewEntryRangeInput, type Shift, type Template } from "../../api/client";
 
 /**
  * Зеркало `admin/src/components/add-entry-panel.test.tsx`.
@@ -113,7 +113,7 @@ describe("форма записи в мини-аппе — один список
     let saved: NewEntryRangeInput | null = null;
     const range = vi.spyOn(apiClient, "createEntryRange").mockImplementation(async (input) => {
       saved = input;
-      return { created: [], skipped: [], notified: { delivered: 0, intended: 0 } };
+      return { created: [], updated: [], skipped: [], notified: { delivered: 0, intended: 0 } };
     });
     const el = await openForm();
 
@@ -137,5 +137,85 @@ describe("форма записи в мини-аппе — один список
 
     expect(range).toHaveBeenCalled();
     expect(saved).toMatchObject({ from: "2026-06-08", to: "2026-06-14", includeWeekends: false, category: "shift" });
+  });
+});
+
+
+/**
+ * Правка отрезком — зеркало `admin/src/components/add-entry-panel.test.tsx`.
+ *
+ * Обе формы обязаны предлагать одно и то же: админ, открывший запись в мини-аппе,
+ * и админ, открывший её в консоли, ждут одинакового поведения от одинаковой на
+ * вид формы, и разъехаться здесь дороже всего.
+ */
+describe("форма записи в мини-аппе — правка отрезком", () => {
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const TOMORROW = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+  const EXISTING: Shift = {
+    id: 77, date: TODAY, start: "09:00", end: "18:00", endDate: null, category: "shift",
+    title: "Утро", location: null, unrecognisedCode: null, templateId: 1,
+    employeeId: EMPLOYEE.id, employeeName: EMPLOYEE.displayName,
+  };
+
+  async function openEdit() {
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([EMPLOYEE]);
+    vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
+      employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [EXISTING],
+    });
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen)));
+    });
+    await settle();
+
+    // Классы telegram-ui хешированы, поэтому строка ищется по тексту: самый
+    // глубокий узел с именем работника, а клик по нему всплывёт до `onTap`.
+    const named = [...host.querySelectorAll<HTMLElement>("*")]
+      .filter((el) => (el.textContent ?? "").includes("Иванов Иван") && !(el.textContent ?? "").includes("Добавить"));
+    const row = named.at(-1);
+    if (!row) throw new Error("не нашёл запись в списке дня");
+    await act(async () => row.click());
+    await settle(2);
+    return host;
+  }
+
+  it("предлагает «с» и «по», а не один день", async () => {
+    const el = await openEdit();
+    expect([...el.querySelectorAll<HTMLInputElement>('input[type="date"]')]).toHaveLength(2);
+  });
+
+  it("шлёт перезапись отрезка, а не расстановку", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    vi.spyOn(apiClient, "createEntryRange").mockImplementation(async (input) => {
+      saved = input;
+      return { created: [], updated: [], skipped: [], notified: { delivered: 0, intended: 0 } };
+    });
+    const el = await openEdit();
+
+    const dates = [...el.querySelectorAll<HTMLInputElement>('input[type="date"]')];
+    await setValue(dates[1]!, TOMORROW);
+    // Выходные включаются, чтобы тест не зависел от того, на какой день недели
+    // он сегодня запустился.
+    await act(async () => el.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    await act(async () => {
+      [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click();
+    });
+    await settle(2);
+
+    expect(saved).toMatchObject({ employeeId: EMPLOYEE.id, from: TODAY, to: TOMORROW, mode: "rewrite" });
+  });
+
+  it("предупреждает, что занятые дни перепишутся", async () => {
+    const el = await openEdit();
+    await setValue([...el.querySelectorAll<HTMLInputElement>('input[type="date"]')][1]!, TOMORROW);
+    const text = el.querySelector('[data-testid="range-preview"]')!.textContent ?? "";
+    expect(text).toContain("перепишутся");
+    expect(text).not.toContain("пропустятся");
   });
 });

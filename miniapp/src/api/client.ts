@@ -5,6 +5,7 @@ import type {
   ChecklistDelivery,
   CreateEmployeeResponse,
   EntryRangeSkip,
+  EntryRangeMode,
   PaymentRow,
   ScheduleEntryDto,
   TeamScheduleResponse,
@@ -306,6 +307,14 @@ export interface NewEntryRangeInput {
   location?: string;
   title?: string | null;
   includeWeekends?: boolean;
+  /**
+   * Что делать с занятым днём: `fill` пропускает, `rewrite` переписывает.
+   *
+   * Необязательное, и умолчание на сервере — `fill`: тело без режима шлёт уже
+   * выкаченный мини-апп, а молча получить перезапись вместо расстановки — худшее,
+   * чем может кончиться эта ручка.
+   */
+  mode?: EntryRangeMode;
 }
 
 /** Пункт чек-листа. */
@@ -376,6 +385,8 @@ export interface Checklist {
 
 export interface EntryRangeResult {
   created: Shift[];
+  /** Записи, которые перезапись заменила на месте. У расстановки всегда пусто. */
+  updated: Shift[];
   skipped: EntryRangeSkip[];
   notified: NotifyReach;
 }

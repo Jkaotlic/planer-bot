@@ -48,6 +48,7 @@ import {
   isCollectionActive,
   compareCollections,
   planEntryRange,
+  type DayOccupancy,
   eachDayIso,
   isAbsence,
   REMINDER_HOUR_DEFAULT,
@@ -253,30 +254,57 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
  */
 export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult> {
   await delay(300);
-  const busyDates = ENTRIES.filter((s) => s.employeeId === input.employeeId).flatMap((s) =>
-    eachDayIso(s.date, endOf(s)),
-  );
+  // Занятость с ВИДОМ, как на сервере: перезаписи мало знать «занят» — рабочую
+  // запись она заменит, отпуск оставит, а день с двумя записями пропустит.
+  const occupied: Record<string, DayOccupancy> = {};
+  const holder = new Map<string, Shift>();
+  for (const row of ENTRIES.filter((s) => s.employeeId === input.employeeId)) {
+    for (const day of eachDayIso(row.date, endOf(row))) {
+      if (occupied[day]) {
+        occupied[day] = "ambiguous";
+        holder.delete(day);
+        continue;
+      }
+      occupied[day] = isAbsence(row.category) ? "absence" : "work";
+      holder.set(day, row);
+    }
+  }
+  const mode = input.mode ?? "fill";
   const plan = planEntryRange({
     from: input.from,
     to: input.to,
     category: input.category,
     includeWeekends: input.includeWeekends ?? false,
-    busyDates,
+    mode,
+    occupied,
   });
-  const isRange = isAbsence(input.category) && input.to !== input.from;
-  const created = plan.days.map((date) =>
-    entry({
-      date,
-      endDate: isRange ? input.to : null,
-      start: input.start ?? null,
-      end: input.end ?? null,
-      category: input.category,
-      title: input.title ?? null,
-      employeeId: input.employeeId,
-    }),
-  );
+  const span = isAbsence(input.category) && input.to !== input.from;
+  const rewrites = new Set(plan.rewritten);
+  const fields = (date: string) => ({
+    date,
+    endDate: span ? input.to : null,
+    start: input.start ?? null,
+    end: input.end ?? null,
+    category: input.category,
+    title: input.title ?? null,
+    templateId: input.templateId ?? null,
+    employeeId: input.employeeId,
+  });
+
+  const created: Shift[] = [];
+  const updated: Shift[] = [];
+  for (const date of plan.days) {
+    const existing = rewrites.has(date) ? holder.get(date) : undefined;
+    if (!existing) {
+      created.push(entry(fields(date)));
+      continue;
+    }
+    Object.assign(existing, fields(date), { location: null, unrecognisedCode: null });
+    updated.push(existing);
+  }
   ENTRIES.push(...created);
-  return { created, skipped: plan.skipped, notified: mockReach(created.length > 0 ? [input.employeeId] : []) };
+  const touched = created.length + updated.length;
+  return { created, updated, skipped: plan.skipped, notified: mockReach(touched > 0 ? [input.employeeId] : []) };
 }
 
 export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {

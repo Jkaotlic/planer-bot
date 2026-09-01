@@ -179,9 +179,86 @@ describe("AddEntryPanel — диапазон дат", () => {
     expect([single, ranged]).toEqual([1, 0]);
   });
 
-  it("правке диапазон не предлагается", async () => {
-    const el = await mount({ existing: { ...longVacation, endDate: null, category: "shift", start: "09:00", end: "18:00" }, onSaveRange: async () => {} });
-    expect(el.querySelector("#entry-to")).toBeNull();
-    expect(el.querySelector(".range-weekends")).toBeNull();
+  it("добавление шлёт расстановку: занятые дни не трогает", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    const el = await mount({ onSaveRange: async (input) => { saved = input; } });
+
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+
+    expect(saved).toMatchObject({ mode: "fill" });
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("пропустятся");
+  });
+});
+
+/**
+ * Правка отрезком: «сделай так со вторника по пятницу».
+ *
+ * Отличается от добавления одним — занятые дни не пропускаются, а переписываются.
+ * Поэтому предпросмотр обязан сказать это словами: числа занятых панель не знает
+ * (расписания за пределами показанной недели у неё нет), а необратимая операция,
+ * ушедшая вслепую, — худшее, чем может кончиться эта форма.
+ */
+describe("AddEntryPanel — правка отрезком", () => {
+  const shift: Shift = {
+    ...longVacation, endDate: null, category: "shift", start: "09:00", end: "18:00", templateId: 1, title: "Утро",
+  };
+
+  it("у правки есть «по», а не только один день", async () => {
+    const el = await mount({ existing: shift, onSaveRange: async () => {} });
+    expect(el.querySelector<HTMLInputElement>("#entry-to")!.value).toBe("2026-06-08");
+  });
+
+  it("шлёт перезапись, а не расстановку", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    const el = await mount({ existing: shift, onSaveRange: async (input) => { saved = input; } });
+
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+
+    expect(saved).toMatchObject({
+      employeeId: 1, from: "2026-06-08", to: "2026-06-12", mode: "rewrite", category: "shift", templateId: 1,
+    });
+  });
+
+  it("предупреждает, что занятые дни будут переписаны, а не пропущены", async () => {
+    const el = await mount({ existing: shift, onSaveRange: async () => {} });
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+
+    const text = el.querySelector('[data-testid="range-preview"]')!.textContent ?? "";
+    expect(text).toContain("перепишутся");
+    expect(text).toContain("отпуск");
+    expect(text).not.toContain("пропустятся");
+  });
+
+  // Один день — прежняя правка слово в слово: та же запись, тот же id, обычная
+  // ручка. Иначе правка часов одной смены начала бы ходить через расстановку.
+  it("один день по-прежнему правит запись обычной ручкой", async () => {
+    let single = 0;
+    let ranged = 0;
+    const el = await mount({
+      existing: shift,
+      onSave: async () => { single += 1; },
+      onSaveRange: async () => { ranged += 1; },
+    });
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+    expect([single, ranged]).toEqual([1, 0]);
+  });
+
+  // Отпуск в базе — одна строка с `endDate`, и правка его срока обязана остаться
+  // правкой ТОЙ ЖЕ строки. Уйди она в расстановку — рядом со старым отпуском
+  // появился бы второй, а первый остался бы на месте.
+  it("правка срока отпуска остаётся правкой одной записи", async () => {
+    let saved: NewEntryInput | null = null;
+    let ranged = 0;
+    const el = await mount({
+      existing: longVacation,
+      onSave: async (input) => { saved = input; },
+      onSaveRange: async () => { ranged += 1; },
+    });
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+
+    expect(ranged).toBe(0);
+    expect(saved).toMatchObject({ category: "vacation", date: "2026-06-08", endDate: "2026-06-22" });
   });
 });
