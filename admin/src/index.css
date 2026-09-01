@@ -71,8 +71,11 @@ button {
 
 .app-shell {
   display: flex;
-  height: 100vh;
-  min-width: 960px;
+  /* `dvh`, а не `vh`: в мобильном Safari адресная строка входит в `100vh`, и
+     нижняя строка сетки уезжает под панель браузера. На десктопе это одно и
+     то же число. `min-width: 960px` здесь стоял до появления узкого режима и
+     был главным замком: на телефоне вбок ездила вся страница целиком. */
+  height: 100dvh;
 }
 
 .sidebar {
@@ -2541,4 +2544,290 @@ input[type="search"] {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* ---------- Узкий режим (телефон) ----------------------------------------
+   900px — та же граница, на которой уже складывается топбар. Отдельного числа
+   для телефона не заводим: два близких брейкпоинта расходятся при первой же
+   правке, и потом никто не помнит, какой из них главный. */
+
+.mobile-topbar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--separator);
+    background: var(--surface-section);
+  }
+
+  .mobile-topbar-title {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    /* 44px — минимальная цель для пальца по гайдлайну Apple; всё, что меньше,
+       промахивается мимо. */
+    width: 44px;
+    height: 44px;
+    padding: 0 10px;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+
+  .mobile-menu-btn span {
+    display: block;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--text);
+  }
+
+  /* Шторка едет поверх контента, а не раздвигает его: сайдбар в потоке не
+     оставил бы экрану в 390px вообще ничего. */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: 232px;
+    flex: none;
+    overflow-y: auto;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease-out;
+    padding-top: max(20px, env(safe-area-inset-top));
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    border: none;
+    padding: 0;
+    background: rgba(10, 12, 18, 0.45);
+  }
+
+  /* ---------- Сетка недели ----------
+     Залипшая колонка «Работник» есть и на десктопе (правило со `sticky; left: 0`
+     выше) — на телефоне именно она делает неделю проходимой: имя стоит на
+     месте, дни листаются под ним пальцем. Семь колонок с читаемым содержимым в
+     390px не помещаются ни при какой вёрстке, поэтому в кадре ~3,5 дня. */
+  /* `fixed`, а не умолчательное `auto`: при авторазметке ширина колонки берётся
+     от самого длинного имени, и «Аня Смирнова» растягивала колонку до 172px —
+     заданные 104 браузер считал лишь пожеланием. С фиксированной разметкой
+     колонка ровно 104, имя обрезается многоточием (`title` показывает целиком),
+     а оставшиеся 476px делятся на семь дней ровно по 68. */
+  .schedule-table {
+    table-layout: fixed;
+    min-width: 604px;
+  }
+
+  /* 104px оставляли имени 65px — список читался как «Аня …», «Игор…», «Мар…»,
+     то есть колонка переставала отвечать на вопрос, чья это строка. 128px плюс
+     аватар 22px дают имени ~100px: «Игорь Пет…» уже опознаётся. Цена — четверть
+     дня из кадра. */
+  .employee-col-header {
+    width: 128px;
+  }
+
+  /* Два вертикальных скролла на одном экране — сетка внутри страницы — на
+     телефоне неразличимы пальцем: человек тянет и не понимает, что поехало.
+     Ниже 900px вертикально скроллится только `.schedule-layout`, а сетка
+     оставляет себе горизонталь. Измерено: без этого сетка получала 328px при
+     418px содержимого и прятала последнего работника. */
+  .grid-scroll {
+    flex: 0 0 auto;
+    overflow-y: hidden;
+  }
+
+  .right-rail {
+    flex: 0 0 auto;
+    overflow-y: visible;
+  }
+
+  .day-cell {
+    min-width: 68px;
+    padding: 4px !important;
+  }
+
+  .avatar {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    font-size: 9.5px;
+  }
+
+  .employee-name {
+    font-size: 12.5px;
+  }
+
+  .grid-scroll {
+    padding: 0 14px 14px;
+  }
+
+  /* Подпись вида смены прячем только там, где время есть: у записи без времени
+     («Отпуск», «Выходной») подпись — единственное содержимое чипа, и убрать её
+     значит показать пустой цветной прямоугольник. Соседний селектор ровно это
+     и различает. */
+  .entry-chip .chip-time + .chip-title {
+    display: none;
+  }
+
+  .entry-chip {
+    padding: 4px 5px;
+    font-size: 12px;
+  }
+
+  /* Подпись без времени — одно длинное слово («Командировка»), перенести его
+     негде, и в ячейке 68px оно вываливалось за кромку прямо на соседний день.
+     Обрезаем многоточием: целиком текст всё равно показывает панель по тапу. */
+  .entry-chip .chip-title {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar {
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  /* Фиксированные 150px под подписью недели на 390px выталкивали стрелку «›»
+     на свою строку. */
+  .week-label {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .schedule-layout {
+    overflow-y: auto;
+  }
+
+  .right-rail {
+    padding: 16px 14px 20px;
+  }
+
+  /* Топбар в три ряда съедал 151px из 844 — до первой строки сетки оставалась
+     половина экрана. */
+  .btn {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+
+  /* ---------- Панели ----------
+     Окно 460px по центру экрана отдаёт клавиатуре меньше места, чем ей нужно:
+     поля формы уезжают под неё. Лист, прижатый к низу, отдаёт клавиатуре весь
+     верх экрана — и это привычный на телефоне жест, а не всплывшее окно. */
+  .panel-overlay {
+    align-items: flex-end;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    padding: 18px 16px;
+    /* Иначе «Сохранить» и «Отмена» попадают под home-indicator, где тап
+       перехватывает система. */
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .roster-import-panel {
+    width: 100%;
+  }
+
+  .panel-actions {
+    gap: 8px;
+  }
+
+  .panel-actions .btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  /* «Работник · С · По» в один ряд: у `input[type="date"]` есть собственная
+     минимальная ширина, ужаться до трети от 390px он не может — поле «По»
+     уходило за правый край панели. `min-width` заставляет ряд переноситься;
+     задавать его через `flex` нельзя — доли `flex` проставлены в разметке
+     инлайном и перебиваются только `!important`. */
+  .field-row {
+    flex-wrap: wrap;
+  }
+
+  .field-row > .field-group {
+    min-width: 140px;
+  }
+
+  /* ---------- Общее для остальных экранов ----------
+     24px полей от каждого края съедали 48 из 390 — восьмую часть ширины. */
+  .employees-screen {
+    padding: 14px;
+  }
+
+  .employees-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  /* Строка желающего — «аватар · имя · метка справедливости · сколько раз за
+     месяц · Назначить» — не переносилась, и кнопка «Назначить» уезжала за
+     правую кромку карточки: смену на выходной с телефона нельзя было отдать
+     человеку вовсе. Метки внутри намеренно `nowrap` («2 раза в этом месяце» в
+     две строки читается как две разные цифры), поэтому переносим саму строку. */
+  .weekend-interest-row {
+    flex-wrap: wrap;
+  }
+
+  .weekend-interest-row .btn {
+    margin-left: auto;
+  }
+
+  /* Ограничения работника. Пояснение лежит ВНУТРИ лейбла, рядом с подписью, и
+     в 332px подпись сжималась до «Не / участвует в / назначениях» — три строки
+     в колонке уже собственного пояснения. Пункты — в столбик, а внутри пункта
+     пояснение переносится под галочку и выравнивается по её подписи. */
+  .employee-restrictions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .employee-restriction-checkbox {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .employee-restriction-hint {
+    flex: 1 1 100%;
+    padding-left: 19px;
+    margin-bottom: 6px;
+  }
+}
+
+/* Анимация выключается для тех, кто просил систему не двигать интерфейс. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }
