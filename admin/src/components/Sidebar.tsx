@@ -5,9 +5,14 @@ export interface SidebarProps {
   onChange: (key: NavKey) => void;
   /** Short label for the footer, e.g. "Аня · админ". */
   adminLabel: string;
+  /**
+   * Открыта ли шторка. На десктопе не значит ничего: сайдбар там виден всегда,
+   * признак читает только медиазапрос `max-width: 900px`.
+   */
+  open: boolean;
 }
 
-const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
+export const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
   { key: "schedule", label: "Расписание", icon: <CalendarIcon /> },
   { key: "employees", label: "Работники", icon: <PeopleIcon /> },
   { key: "kinds", label: "Виды смен", icon: <KindsIcon /> },
@@ -20,10 +25,16 @@ const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }
   { key: "settings", label: "Настройки", icon: <GearIcon /> },
 ];
 
+/** Подпись экрана для мобильной шапки — та же, что у пункта меню: два разных
+ *  названия одного экрана человек читает как два разных места. */
+export function navLabel(key: NavKey): string {
+  return NAV_ITEMS.find((item) => item.key === key)?.label ?? "Смены";
+}
+
 /** Left navigation rail: brand, nav items, and a footer identifying the signed-in admin. */
-export function Sidebar({ active, onChange, adminLabel }: SidebarProps) {
+export function Sidebar({ active, onChange, adminLabel, open }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${open ? " open" : ""}`}>
       <div className="sidebar-brand">Смены</div>
       <nav className="sidebar-nav">
         {NAV_ITEMS.map((item) => (

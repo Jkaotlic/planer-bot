@@ -16,7 +16,7 @@ import { AddEntryPanel } from "./components/AddEntryPanel";
 import { EventsFeed } from "./components/EventsFeed";
 import { PersonSearch } from "./components/PersonSearch";
 import { ScheduleGrid } from "./components/ScheduleGrid";
-import { Sidebar, type NavKey } from "./components/Sidebar";
+import { Sidebar, navLabel, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
@@ -81,6 +81,7 @@ export function rosterImportBlocker(state: Pick<RosterImportState, "preview" | "
 /** App shell: sidebar nav + top bar + the schedule grid (this task's scope). */
 export function App() {
   const [nav, setNav] = useState<NavKey>("schedule");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [weekMonday, setWeekMonday] = useState(() => mondayOf(new Date()));
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -120,6 +121,17 @@ export function App() {
     // loadBootstrap only closes over stable setters; safe to bind once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Esc закрывает шторку. Слушаем `document`, а не саму шторку: в момент
+  // нажатия фокус может быть где угодно — хоть в поле поиска под затемнением.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   async function loadBootstrap(cancelled: () => boolean = () => false) {
     setBootError(null);
@@ -357,8 +369,39 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar active={nav} onChange={setNav} adminLabel={viewer ? `${viewer.address} · админ` : "Админ"} />
+      <Sidebar
+        active={nav}
+        onChange={(key) => {
+          setNav(key);
+          // Закрываем сразу: иначе шторка остаётся поверх экрана, ради которого
+          // её и открывали.
+          setMenuOpen(false);
+        }}
+        adminLabel={viewer ? `${viewer.address} · админ` : "Админ"}
+        open={menuOpen}
+      />
+      {menuOpen && (
+        <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />
+      )}
       <div className="main-column">
+        {/* Шапка узкого режима: на телефоне сайдбар спрятан, и без неё нет ни
+            входа в меню, ни единого указания на то, где человек находится.
+            Прячется медиазапросом, а не условием по ширине окна — ширина в
+            React потребовала бы `matchMedia` и ререндера на каждый поворот. */}
+        <div className="mobile-topbar">
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            aria-label="Меню"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          <span className="mobile-topbar-title">{navLabel(nav)}</span>
+        </div>
         {bootError ? (
           <div className="centered-fill">
             <span>{bootError}</span>
