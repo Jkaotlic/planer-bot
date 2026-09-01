@@ -3,11 +3,13 @@ import { makeTestDb } from "../db/testdb";
 import { createChecklistItem, activeChecklistItems } from "./checklist";
 import { listActiveTemplates } from "./templates";
 import {
+  checklistIdsByTemplate,
   createChecklist,
   deleteChecklist,
   getChecklist,
   listChecklists,
-  setTemplateChecklist,
+  setChecklistTemplates,
+  templateIdsOf,
   updateChecklist,
 } from "./checklists";
 
@@ -48,23 +50,54 @@ describe("checklists", () => {
     const db = makeTestDb();
     const list = createChecklist(db, "Обход 47-го");
     const [first, second] = listActiveTemplates(db);
-    setTemplateChecklist(db, first!.id, list.id);
-    setTemplateChecklist(db, second!.id, list.id);
+    setChecklistTemplates(db, list.id, [first!.id, second!.id]);
 
-    const linked = listActiveTemplates(db).filter((t) => t.checklistId === list.id);
-    expect(linked.map((t) => t.id)).toEqual([first!.id, second!.id]);
+    expect(templateIdsOf(db, list.id)).toEqual([first!.id, second!.id]);
+  });
+
+  /**
+   * Регресс на прод-случай 2026-09-01: админ назначил новому списку тот же вид
+   * смены, и старый молча лишился рассылки. Назначение говорит только про свой
+   * список и ни у кого ничего не отнимает.
+   */
+  it("назначение вида смены второму списку не снимает его с первого", () => {
+    const db = makeTestDb();
+    const first = createChecklist(db, "Дежурства 47");
+    const second = createChecklist(db, "Обход этажа");
+    const duty = listActiveTemplates(db)[0]!;
+    setChecklistTemplates(db, first.id, [duty.id]);
+    setChecklistTemplates(db, second.id, [duty.id]);
+
+    expect(templateIdsOf(db, first.id)).toEqual([duty.id]);
+    expect(templateIdsOf(db, second.id)).toEqual([duty.id]);
+    // Порядок — по id списка: дежурный должен получать сообщения в одном и том
+    // же порядке изо дня в день, а не в том, в каком админ кликал кнопки.
+    expect(checklistIdsByTemplate(db).get(duty.id)).toEqual([first.id, second.id]);
+  });
+
+  // Второй тап по той же кнопке не должен заводить вторую строку и слать
+  // дежурному один и тот же список дважды.
+  it("повторное назначение того же вида идемпотентно", () => {
+    const db = makeTestDb();
+    const list = createChecklist(db, "Обход");
+    const duty = listActiveTemplates(db)[0]!;
+    setChecklistTemplates(db, list.id, [duty.id]);
+    setChecklistTemplates(db, list.id, [duty.id, duty.id]);
+    expect(templateIdsOf(db, list.id)).toEqual([duty.id]);
   });
 
   // Удаление не должно оставлять вид смены со ссылкой в пустоту: он бы требовал
   // чек-лист, которого нет, и бот молчал бы, не сказав почему.
-  it("удаление снимает привязку у видов смен", () => {
+  it("удаление снимает привязку у видов смен, не трогая чужие", () => {
     const db = makeTestDb();
-    const list = createChecklist(db, "Обход");
+    const doomed = createChecklist(db, "Обход");
+    const kept = createChecklist(db, "Дежурства 47");
     const template = listActiveTemplates(db)[0]!;
-    setTemplateChecklist(db, template.id, list.id);
+    setChecklistTemplates(db, doomed.id, [template.id]);
+    setChecklistTemplates(db, kept.id, [template.id]);
 
-    deleteChecklist(db, list.id);
-    expect(listChecklists(db)).toEqual([]);
-    expect(listActiveTemplates(db).find((t) => t.id === template.id)!.checklistId).toBeNull();
+    deleteChecklist(db, doomed.id);
+    expect(listChecklists(db).map((l) => l.id)).toEqual([kept.id]);
+    expect(checklistIdsByTemplate(db).get(template.id)).toEqual([kept.id]);
   });
 });

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, index, integer, text, real, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
+import { sqliteTable, index, integer, text, real, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type {
   SwapStatus,
   EntryCategory,
@@ -106,15 +106,6 @@ export const shiftTemplates = sqliteTable("shift_templates", {
   reminderText: text(),
   sortOrder: integer().notNull().default(0),
   isActive: integer({ mode: "boolean" }).notNull().default(true),
-  /**
-   * Какой чек-лист проходит дежурный этого вида смены. `null` — никакого.
-   *
-   * Ссылка, а не галочка: у «Дежурства с 07:00» и «Утра» проверки разные, и
-   * один список на всех означал бы, что человек с восьми читает пункты про то,
-   * чего в восемь уже не делают. Несколько видов смен могут ссылаться на один и
-   * тот же чек-лист — это и есть «скоп смен».
-   */
-  checklistId: integer().references((): AnySQLiteColumn => checklists.id),
   /** How many people this preset needs per weekday, Mon..Sun — 7 comma-separated ints.
    *  '0,0,0,0,0,0,0' (the default) means "not a role": never materialised, today's behaviour.
    *  '1,1,1,1,1,0,0' — the five roles that need exactly one person every working day.
@@ -567,6 +558,31 @@ export const checklists = sqliteTable("checklists", {
 });
 
 /**
+ * Кто проходит этот чек-лист: какие виды смен на него ссылаются.
+ *
+ * Отдельная таблица, а не колонка `shift_templates.checklist_id`, потому что
+ * связь с обеих сторон множественная: у вида смены бывает несколько списков
+ * (общая инструкция этажа и отдельная задача на ту же смену), и один список
+ * обслуживает несколько видов — это и есть «скоп смен».
+ *
+ * Пока связь была колонкой, назначение вида смены второму списку молча
+ * отнимало его у первого: 2026-09-01 инструкция 47 этажа перестала приходить
+ * дежурным, а экран сказал про неё лишь «не выбран вид смены», не назвав, кто
+ * забрал.
+ *
+ * Пара — первичный ключ: «назначен дважды» и «назначен» — одно и то же, и
+ * второй тап по кнопке не должен заводить вторую строку.
+ */
+export const checklistTemplates = sqliteTable(
+  "checklist_templates",
+  {
+    checklistId: integer().notNull().references(() => checklists.id),
+    templateId: integer().notNull().references(() => shiftTemplates.id),
+  },
+  (t) => [primaryKey({ columns: [t.checklistId, t.templateId] })],
+);
+
+/**
  * Пункт чек-листа дежурного.
  *
  * Содержимое — данные, а не код: процедуру пишет команда, а не этот репозиторий.
@@ -650,6 +666,7 @@ export type NewCollectionPayment = typeof collectionPayments.$inferInsert;
 
 export type Checklist = typeof checklists.$inferSelect;
 export type NewChecklist = typeof checklists.$inferInsert;
+export type ChecklistTemplate = typeof checklistTemplates.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type NewChecklistItem = typeof checklistItems.$inferInsert;
 export type ChecklistMark = typeof checklistMarks.$inferSelect;

@@ -1,14 +1,15 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { checklists, shiftTemplates, type Checklist } from "../db/schema";
+import { checklists, checklistTemplates, type Checklist } from "../db/schema";
 
 /**
  * Чек-листы как сущности: у каждого своё имя, своя инструкция и свои пункты.
  *
  * Именованные, а не один на систему: у дежурного с семи и у дежурного с восьми
  * проверки разные. «Скоп смен» задаётся с другой стороны — тем, какие виды смен
- * ссылаются на этот чек-лист (`shift_templates.checklist_id`), и один чек-лист
- * спокойно обслуживает несколько видов.
+ * ссылаются на этот чек-лист (`checklist_templates`), и связь множественная в
+ * обе стороны: один список обслуживает несколько видов, у одного вида бывает
+ * несколько списков.
  */
 export function listChecklists(db: Db): Checklist[] {
   return db.select().from(checklists).orderBy(asc(checklists.id)).all();
@@ -59,12 +60,75 @@ export function updateChecklist(
  */
 export function deleteChecklist(db: Db, id: number): void {
   db.transaction(() => {
-    db.update(shiftTemplates).set({ checklistId: null }).where(eq(shiftTemplates.checklistId, id)).run();
+    db.delete(checklistTemplates).where(eq(checklistTemplates.checklistId, id)).run();
     db.delete(checklists).where(eq(checklists.id, id)).run();
   });
 }
 
-/** Привязывает вид смены к чек-листу или снимает привязку (`null`). */
-export function setTemplateChecklist(db: Db, templateId: number, checklistId: number | null): void {
-  db.update(shiftTemplates).set({ checklistId }).where(eq(shiftTemplates.id, templateId)).run();
+/**
+ * Каким видам смен положен этот чек-лист.
+ *
+ * Порядок — по id вида смены: он же порядок кнопок на экране, и «Утро, Дежурство
+ * с 07:00» не должно меняться местами от перезагрузки.
+ */
+export function templateIdsOf(db: Db, checklistId: number): number[] {
+  return db
+    .select({ templateId: checklistTemplates.templateId })
+    .from(checklistTemplates)
+    .where(eq(checklistTemplates.checklistId, checklistId))
+    .orderBy(asc(checklistTemplates.templateId))
+    .all()
+    .map((row) => row.templateId);
+}
+
+/**
+ * Переписывает привязки ОДНОГО чек-листа и больше ничего не трогает.
+ *
+ * До 2026-09-01 это была колонка на виде смены, и назначение вида второму
+ * списку молча отнимало его у первого: инструкция 47 этажа перестала приходить
+ * дежурным, а экран объяснил это как «не выбран вид смены». Теперь чужие строки
+ * запросу не видны в принципе.
+ *
+ * Повтор в списке схлопывается: «назначен дважды» — это «назначен», а вторая
+ * строка означала бы второе сообщение дежурному об одном и том же.
+ */
+export function setChecklistTemplates(db: Db, checklistId: number, templateIds: readonly number[]): void {
+  const wanted = [...new Set(templateIds)];
+  db.transaction(() => {
+    const stale = wanted.length > 0
+      ? db.delete(checklistTemplates).where(
+          and(eq(checklistTemplates.checklistId, checklistId), notInArray(checklistTemplates.templateId, wanted)),
+        )
+      : db.delete(checklistTemplates).where(eq(checklistTemplates.checklistId, checklistId));
+    stale.run();
+    if (wanted.length === 0) return;
+    // `onConflictDoNothing`, а не «удалить всё и вставить заново»: строку,
+    // которая и так на месте, незачем трогать.
+    db.insert(checklistTemplates)
+      .values(wanted.map((templateId) => ({ checklistId, templateId })))
+      .onConflictDoNothing()
+      .run();
+  });
+}
+
+/**
+ * Карта «вид смены → его чек-листы» — то, чем `checklistsDueToday` отвечает на
+ * вопрос «кому что сегодня положено».
+ *
+ * Порядок списков внутри вида — по id: дежурный получает сообщения в одном и
+ * том же порядке изо дня в день, а не в том, в каком админ кликал кнопки.
+ */
+export function checklistIdsByTemplate(db: Db): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  const rows = db
+    .select()
+    .from(checklistTemplates)
+    .orderBy(asc(checklistTemplates.templateId), asc(checklistTemplates.checklistId))
+    .all();
+  for (const row of rows) {
+    const list = map.get(row.templateId);
+    if (list) list.push(row.checklistId);
+    else map.set(row.templateId, [row.checklistId]);
+  }
+  return map;
 }
