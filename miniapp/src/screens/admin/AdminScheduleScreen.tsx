@@ -8,6 +8,7 @@ import {
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   describeEntryRangeResult,
+  entryRangeHint,
   isAbsence,
   planEntryRange,
   resolveShiftTimes,
@@ -22,6 +23,7 @@ import {
   type Template,
   type TemplateRolesView,
 } from "../../api/client";
+import type { EntryRangeMode } from "@planer/shared";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
 import { CardShell, CardStack } from "../../components/Card";
@@ -556,11 +558,23 @@ function EntryForm({ employees, templates, existing, defaultDate, onCancel, onSa
   const absence = isAbsence(category);
   const isFriday = weekdayIndex(from) === FRIDAY_INDEX;
 
-  // Диапазон — только у создания: править сразу десять записей одним движением
-  // здесь не предлагается, это отдельная работа с отдельной ценой ошибки.
-  const isRange = !existing && to > from;
-  const showTo = !existing || absence;
-  const plan = planEntryRange({ from, to, category, includeWeekends, busyDates: [] });
+  /**
+   * Отрезок — и у создания, и у правки, но означает он разное: создание
+   * заполняет пустые дни, правка переписывает занятые. «Изменить запись» на
+   * неделю, молча пропускающая дни, где запись уже есть, не изменила бы ничего
+   * и выглядела бы поломкой.
+   *
+   * Отсутствие в отрезок не попадает: в базе оно живёт ОДНОЙ строкой с
+   * `endDate`, и правка его срока обязана остаться правкой той же строки — уйди
+   * она в расстановку, рядом со старым отпуском появился бы второй.
+   *
+   * Зеркало десктопной `AddEntryPanel`, слово в слово.
+   */
+  const mode: EntryRangeMode = existing ? "rewrite" : "fill";
+  const rangeAllowed = !(existing && absence);
+  const isRange = rangeAllowed && to > from;
+  const showTo = rangeAllowed || absence;
+  const plan = planEntryRange({ from, to, category, includeWeekends, mode });
 
   /** Значение списка «Что ставим»: пресет по id, «своё время» или отсутствие по категории. */
   const choiceValue = choice.kind === "preset" ? `p:${choice.templateId}` : choice.kind === "custom" ? "custom" : `a:${choice.category}`;
@@ -634,7 +648,7 @@ function EntryForm({ employees, templates, existing, defaultDate, onCancel, onSa
           setFormError("Выберите работника");
           return;
         }
-        const result = await apiClient.createEntryRange({ ...fields, employeeId, from, to, includeWeekends });
+        const result = await apiClient.createEntryRange({ ...fields, employeeId, from, to, includeWeekends, mode });
         await onSaved(result.notified, describeEntryRangeResult(result));
       } else {
         const input: NewEntryInput = { ...fields, date: from };
@@ -748,7 +762,7 @@ function EntryForm({ employees, templates, existing, defaultDate, onCancel, onSa
             Включая выходные
           </label>
           <div data-testid="range-preview" style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
-            Поставится {describeEntryRangePlan(plan)}. Дни, где у человека уже что-то стоит, пропустятся.
+            Поставится {describeEntryRangePlan(plan)}. {entryRangeHint(mode)}
           </div>
         </>
       )}

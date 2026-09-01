@@ -3,12 +3,13 @@ import {
   ABSENCE_CATEGORIES,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
+  entryRangeHint,
   isAbsence,
   planEntryRange,
   resolveShiftTimes,
   workPresets,
 } from "@planer/shared";
-import type { EntryCategory } from "@planer/shared";
+import type { EntryCategory, EntryRangeMode } from "@planer/shared";
 import type { Employee, NewEntryInput, NewEntryRangeInput, Shift, Template } from "../api/client";
 import { categoryLabel } from "../categories";
 import { PersonPicker } from "./PersonPicker";
@@ -95,9 +96,19 @@ export function AddEntryPanel({
   const absence = isAbsence(category);
   const isFriday = weekdayIndex(from) === FRIDAY_INDEX;
 
-  // Диапазон предлагается только при создании: править сразу десять записей —
-  // отдельная работа с отдельной ценой ошибки, и здесь её нет.
-  const rangeAllowed = !existing && onSaveRange != null;
+  /**
+   * Отрезок — и у добавления, и у правки, но означает он разное.
+   *
+   * Добавление заполняет пустые дни (`fill`), правка переписывает занятые
+   * (`rewrite`): «изменить запись» на неделю, которая молча пропускает дни, где
+   * запись уже есть, не меняет ничего и выглядит поломкой.
+   *
+   * Отсутствие в оба режима не попадает: в базе оно живёт ОДНОЙ строкой с
+   * `endDate`, и правка его срока обязана остаться правкой той же строки — уйди
+   * она в расстановку, рядом со старым отпуском появился бы второй.
+   */
+  const mode: EntryRangeMode = existing ? "rewrite" : "fill";
+  const rangeAllowed = onSaveRange != null && !(existing != null && absence);
   const isRange = to > from;
 
   /**
@@ -106,7 +117,7 @@ export function AddEntryPanel({
    * догадка «наверное, свободно» врала бы ровно там, где человек ей поверит.
    * Поэтому про занятые сказано словами, а точное число приходит в ответе.
    */
-  const plan = planEntryRange({ from, to, category, includeWeekends, busyDates: [] });
+  const plan = planEntryRange({ from, to, category, includeWeekends, mode });
 
   function selectPreset(template: Template) {
     setChoice({ kind: "preset", templateId: template.id });
@@ -173,7 +184,7 @@ export function AddEntryPanel({
     setSaving(true);
     try {
       if (rangeAllowed && isRange) {
-        await onSaveRange!({ ...entryFields(), employeeId, from, to, includeWeekends });
+        await onSaveRange!({ ...entryFields(), employeeId, from, to, includeWeekends, mode });
       } else {
         const input: NewEntryInput = { ...entryFields(), date: from };
         // Полоса отсутствия — единственный случай, когда `endDate` доезжает до базы.
@@ -201,7 +212,7 @@ export function AddEntryPanel({
   }
 
   const busy = saving || deleting;
-  /** «По какой день» у правки нужно только отсутствию — у работы полосы не бывает. */
+  /** «По какой день» — у отрезка и у полосы отсутствия; больше негде. */
   const showTo = rangeAllowed || (existing != null && absence);
 
   return (
@@ -343,7 +354,7 @@ export function AddEntryPanel({
               Включая выходные
             </label>
             <div className="range-preview" data-testid="range-preview">
-              Поставится {describeEntryRangePlan(plan)}. Дни, где у человека уже что-то стоит, пропустятся.
+              Поставится {describeEntryRangePlan(plan)}. {entryRangeHint(mode)}
             </div>
           </div>
         )}

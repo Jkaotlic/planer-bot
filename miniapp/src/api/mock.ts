@@ -64,6 +64,7 @@ import {
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
   planEntryRange,
+  type DayOccupancy,
   eachDayIso,
   isAbsence,
   REMINDER_HOUR_DEFAULT,
@@ -577,33 +578,57 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
  */
 export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult> {
   await delay(300);
-  const busyDates = ALL_ENTRIES.filter((s) => s.employeeId === input.employeeId).flatMap((s) =>
-    eachDayIso(s.date, s.endDate ?? s.date),
-  );
+  // Занятость с ВИДОМ, как на сервере: перезаписи мало знать «занят» — рабочую
+  // запись она заменит, отпуск оставит, а день с двумя записями пропустит.
+  const occupied: Record<string, DayOccupancy> = {};
+  const holder = new Map<string, Shift>();
+  for (const row of ALL_ENTRIES.filter((s) => s.employeeId === input.employeeId)) {
+    for (const day of eachDayIso(row.date, endOf(row))) {
+      if (occupied[day]) {
+        occupied[day] = "ambiguous";
+        holder.delete(day);
+        continue;
+      }
+      occupied[day] = isAbsence(row.category) ? "absence" : "work";
+      holder.set(day, row);
+    }
+  }
+  const mode = input.mode ?? "fill";
   const plan = planEntryRange({
     from: input.from,
     to: input.to,
     category: input.category,
     includeWeekends: input.includeWeekends ?? false,
-    busyDates,
+    mode,
+    occupied,
   });
-  const spans = isAbsence(input.category) && input.to !== input.from;
-  const created: Shift[] = plan.days.map((date) => ({
-    id: nextId++,
+  const span = isAbsence(input.category) && input.to !== input.from;
+  const rewrites = new Set(plan.rewritten);
+  const fields = (date: string) => ({
     date,
+    endDate: span ? input.to : null,
     start: input.start ?? null,
     end: input.end ?? null,
-    endDate: spans ? input.to : null,
     category: input.category,
     title: input.title ?? null,
-    location: input.location ?? null,
     templateId: input.templateId ?? null,
     employeeId: input.employeeId,
-    unrecognisedCode: null,
-    employeeName: personName(input.employeeId),
-  }));
+  });
+
+  const created: Shift[] = [];
+  const updated: Shift[] = [];
+  for (const date of plan.days) {
+    const existing = rewrites.has(date) ? holder.get(date) : undefined;
+    if (!existing) {
+      created.push(entry(fields(date)));
+      continue;
+    }
+    Object.assign(existing, fields(date), { location: null, unrecognisedCode: null });
+    updated.push(existing);
+  }
   ALL_ENTRIES.push(...created);
-  return { created, skipped: plan.skipped, notified: mockReach(created.length > 0 ? [input.employeeId] : []) };
+  const touched = created.length + updated.length;
+  return { created, updated, skipped: plan.skipped, notified: mockReach(touched > 0 ? [input.employeeId] : []) };
 }
 
 /** Один запрос вместо цикла — DEV-мок отвечает так же, чтобы «Заполнить неделю»

@@ -83,6 +83,7 @@ import {
   categoryLabel,
   resolveShiftTimes,
   planEntryRange,
+  type DayOccupancy,
   eachDayIso,
   dateStr,
   timeStr,
@@ -1218,10 +1219,23 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // вторую смену поверх первой ставить нельзя, а поверх отпуска — тем более.
     // `listShiftsOverlapping`, а не `listShiftsInRange`: отпуск, начавшийся до
     // `from`, второй не видит вовсе, и смена встала бы посреди него.
-    const busyDates = new Set<string>();
+    //
+    // Занятость хранится с ВИДОМ, а не флагом: перезаписи мало знать «занят» —
+    // рабочую запись она заменит, отпуск оставит, а день, где записей две,
+    // пропустит, потому что какую из них переписывать, знать неоткуда.
+    const occupied: Record<string, DayOccupancy> = {};
+    const holder = new Map<string, Shift>();
     for (const row of listShiftsOverlapping(db, input.from, input.to)) {
       if (row.employeeId !== input.employeeId) continue;
-      for (const day of eachDayIso(row.date, row.endDate ?? row.date)) busyDates.add(day);
+      for (const day of eachDayIso(row.date, row.endDate ?? row.date)) {
+        if (occupied[day]) {
+          occupied[day] = "ambiguous";
+          holder.delete(day);
+          continue;
+        }
+        occupied[day] = isAbsence(row.category) ? "absence" : "work";
+        holder.set(day, row);
+      }
     }
 
     const plan = planEntryRange({
@@ -1229,10 +1243,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
       to: input.to,
       category: input.category,
       includeWeekends: input.includeWeekends,
-      busyDates: [...busyDates],
+      mode: input.mode,
+      occupied,
     });
 
-    const { from, to, includeWeekends, ...entryFields } = input;
+    const { from, to, includeWeekends, mode, ...entryFields } = input;
     const now = teamNow(config.teamTz);
     // Часы считаются НА КАЖДЫЙ ДЕНЬ, а не берутся из тела один раз: у пресета
     // своя пятница, и смена, растянутая на неделю одними часами, ставит в
@@ -1241,35 +1256,72 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // показывает часы выбранного пресета, и без них не прошла бы валидация
     // «рабочей записи нужно время».
     const preset = input.templateId != null ? getTemplate(db, input.templateId) : undefined;
-    const created = db.transaction(() =>
-      plan.days.map((date) => {
-        const times = preset ? resolveShiftTimes(preset, date) : null;
-        return createShift(db, withPresetLocation({
-          ...entryFields,
-          date,
-          ...(times ?? {}),
-          // Отсутствие — одна запись на всю полосу; у работы полосы не бывает.
-          endDate: isAbsence(input.category) && to !== from ? to : null,
-        }));
-      }),
-    );
+    const fieldsFor = (date: string) => {
+      const times = preset ? resolveShiftTimes(preset, date) : null;
+      return withPresetLocation({
+        ...entryFields,
+        date,
+        ...(times ?? {}),
+        // Отсутствие — одна запись на всю полосу; у работы полосы не бывает.
+        endDate: isAbsence(input.category) && to !== from ? to : null,
+      });
+    };
+
+    const rewrites = new Set(plan.rewritten);
+    const created: Shift[] = [];
+    const updated: { before: Shift; after: Shift }[] = [];
+    db.transaction(() => {
+      for (const date of plan.days) {
+        const before = rewrites.has(date) ? holder.get(date) : undefined;
+        if (!before) {
+          created.push(createShift(db, fieldsFor(date)));
+          continue;
+        }
+        const fields = fieldsFor(date);
+        // Перезапись НАЗЫВАЕТ запись целиком, поэтому всё, чего тело не несёт,
+        // явно гасится, а не остаётся от прежней. Пресет и подпись — это цвет
+        // клетки и код в выгрузке: смена «Утро», переписанная в дежурство,
+        // осталась бы цвета «Утро» и вернулась бы сменой через круг в Excel.
+        // Тот же дефект уже чинили в правке одной записи строкой ниже.
+        const after = updateShift(db, before.id, {
+          ...fields,
+          templateId: fields.templateId ?? null,
+          title: fields.title ?? null,
+          location: fields.location ?? null,
+          note: fields.note ?? null,
+          // `unrecognisedCode` — «импорт не прочитал эту клетку», и он сильнее
+          // всего остального: выгрузка пишет обратно исходный текст, а сетки
+          // рисуют «?». Перезапись назвала запись целиком, значит клетку
+          // прочитал человек, и метке больше нечего означать.
+          unrecognisedCode: null,
+        });
+        if (after) updated.push({ before, after });
+      }
+    });
 
     let notified = { delivered: 0, intended: 0 };
     for (const entry of created) {
       notified = noticeBuffer.register({ actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now });
     }
+    for (const { before, after } of updated) {
+      notified = noticeBuffer.register({ actorEmployeeId: c.get("auth").employeeId, before, after, now });
+    }
 
-    recordAudit(db, "entries_range_created", c.get("auth").employeeId, {
+    // Перезапись и расстановка — разные события: «Расставлено диапазоном» про
+    // неделю, где четыре смены заменены, соврало бы ленте, которую команда
+    // читает как историю своего графика.
+    recordAudit(db, mode === "rewrite" ? "entries_range_rewritten" : "entries_range_created", c.get("auth").employeeId, {
       employeeId: input.employeeId,
       employeeName: nameOfDb(db, input.employeeId),
       from,
       to,
       label: rangeLabel(input),
       created: created.length,
+      ...(mode === "rewrite" ? { updated: updated.length } : {}),
       skipped: plan.skipped.length,
     });
 
-    return c.json({ created, skipped: plan.skipped, notified }, 201);
+    return c.json({ created, updated: updated.map((u) => u.after), skipped: plan.skipped, notified }, 201);
   });
 
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
