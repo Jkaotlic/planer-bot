@@ -100,6 +100,8 @@ import {
   type EntryCategory,
   validateReminderHour,
   validateReminderTemplate,
+  autoSendDateFor,
+  isCollectionActive,
 } from "@planer/shared";
 import {
   postSlot,
@@ -131,7 +133,10 @@ import {
   markCollectionSent,
   recipientsOf,
   collectionsForWorker,
+  claimCollectionSend,
+  releaseCollectionSend,
 } from "../collections/collection-service";
+import { notifyLinkReady } from "../collections/link-capture";
 import { listPayments, setPaid, unpaidRecipients } from "../collections/payment-service";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 import {
@@ -689,10 +694,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   // --- Дни рождения ---------------------------------------------------------
-  // The bot never mails the team on its own. It nudges admins a week ahead; every
-  // message after that is an admin pressing a button, having seen exactly what
-  // will go out and to whom. A round is created when an admin first SAVES it —
-  // looking at the card writes nothing.
+  // До 31.08.2026 бот не писал команде сам: нудж админам за неделю, а дальше
+  // каждое письмо — нажатая кнопка. С этой даты исключение одно, и ручка
+  // сохранения ниже его как раз и вооружает: пришедшая ссылка ставит раунду
+  // `autoSendOn`, и сбор на день рождения уходит команде сам за три дня.
+  // Предохранителем стала не кнопка, а видимость: тот, кто сохранил ссылку,
+  // тут же видит день на карточке и снимает его тумблером. Кастомный сбор
+  // по-прежнему рассылает человек.
+  // Раунд заводится первым СОХРАНЕНИЕМ — просмотр карточки не пишет ничего.
 
   const birthdayAsOf = (c: { req: { query(name: string): string | undefined } }) =>
     c.req.query("asOf") ?? teamNow(config.teamTz).date;
@@ -732,7 +741,31 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, round, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
 
-    const result = updateCollection(db, round.id, parsed.value);
+    // Ссылку ставят впервые или меняют — вооружаем автоотправку, если админ не
+    // задал день сам в этом же запросе (тумблер на карточке шлёт `autoSendOn`
+    // явно, и перебивать его вычисленным значением нельзя).
+    //
+    // Оповещение и вооружение разведены: у разосланного раунда ссылку менять
+    // можно и нужно (мини-приложение показывает именно её), а вооружать нечем —
+    // повторной рассылки дня рождения не бывает, и тик пропустит его по
+    // `sendCount > 0`. Письмо про такую правку уходит с другим текстом.
+    //
+    // Закрытый и прошедший сбор не вооружаем по той же причине, что и в
+    // `link-capture.ts`: `roundsToAutoSend` отбирает через `isCollectionActive`,
+    // и поставленный день обещал бы рассылку, которой не будет никогда. Ручка
+    // по `closedAt` и по дате не фильтрует, а список отдаёт такие сборы наравне
+    // с активными — то есть карточка закрытого сбора открывается и правится.
+    const linkChanged =
+      parsed.value.collectUrl !== undefined &&
+      parsed.value.collectUrl !== null &&
+      parsed.value.collectUrl !== round.collectUrl;
+    const arming = linkChanged && round.sendCount === 0 && isCollectionActive(round, asOf);
+    const patch =
+      arming && parsed.value.autoSendOn === undefined && round.celebratedOn
+        ? { ...parsed.value, autoSendOn: autoSendDateFor(round.celebratedOn, asOf) }
+        : parsed.value;
+
+    const result = updateCollection(db, round.id, patch);
     if (!result.ok) return c.json({ error: result.error }, 409);
     recordAudit(db, "birthday_campaign_updated", c.get("auth").employeeId, {
       employeeId,
@@ -741,6 +774,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
     });
+    // Остальные админы узнают о ссылке одинаково, откуда бы её ни вставили.
+    if (linkChanged && bot) {
+      await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);
+    }
     return c.json({ collection: result.collection });
   });
 
@@ -758,10 +795,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!collection || collection.employeeId === viewerId) return null;
     return collection;
   };
-
-  // Claimed synchronously by /send below (see the comment on that route) so a
-  // double-tap on the same collection can never produce two broadcasts.
-  const collectionSending = new Set<number>();
 
   app.get("/api/admin/collections", requireAdmin(db, config.jwtSecret), (c) => {
     const asOf = birthdayAsOf(c);
@@ -817,7 +850,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, collection, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
 
-    const result = updateCollection(db, collection.id, parsed.value);
+    // Тот же довод, что у ручки дней рождения выше: правило «есть ссылка → бот
+    // разошлёт за три дня» одно на все входы. Только для дня рождения: у
+    // кастомного сбора нет даты, от которой считать «за три дня», он сам не
+    // уйдёт, и письмо «делать ничего не надо» про него было бы неправдой.
+    const linkChanged =
+      collection.kind === "birthday" &&
+      parsed.value.collectUrl !== undefined &&
+      parsed.value.collectUrl !== null &&
+      parsed.value.collectUrl !== collection.collectUrl;
+    const arming = linkChanged && collection.sendCount === 0 && isCollectionActive(collection, asOf);
+    const patch =
+      arming && parsed.value.autoSendOn === undefined && collection.celebratedOn
+        ? { ...parsed.value, autoSendOn: autoSendDateFor(collection.celebratedOn, asOf) }
+        : parsed.value;
+
+    const result = updateCollection(db, collection.id, patch);
     if (!result.ok) return c.json({ error: result.error }, 409);
     recordAudit(db, "collection_updated", c.get("auth").employeeId, {
       collectionId: collection.id,
@@ -828,6 +876,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
     });
+    if (linkChanged && bot) {
+      await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);
+    }
     return c.json({ collection: result.collection });
   });
 
@@ -841,11 +892,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (preview.blocker) return c.json({ error: preview.blocker }, 409);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
 
-    // The claim is synchronous: between this line and the first `await` below
-    // nothing else can run (single-threaded Node), so a second simultaneous
-    // «Разослать» always finds the collection already taken.
-    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
-    collectionSending.add(collection.id);
+    if (!claimCollectionSend(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
     try {
       let delivered = 0;
       for (const recipient of recipientsOf(db, collection.employeeId)) {
@@ -865,7 +912,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       });
       return c.json({ delivered, intended: preview.recipients.length, round: collection.sendCount + (delivered > 0 ? 1 : 0) });
     } finally {
-      collectionSending.delete(collection.id);
+      releaseCollectionSend(collection.id);
     }
   });
 
@@ -895,8 +942,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     // Тот же замок, что у обычной рассылки: два нажатия подряд не должны
     // отправить людям два письма.
-    if (collectionSending.has(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
-    collectionSending.add(collection.id);
+    if (!claimCollectionSend(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
     try {
       // Текст берём из превью: `collectionMessage` на втором раунде уже звучит
       // как «⏰ Напоминаю про сбор», и второй текст был бы вторым источником
@@ -917,7 +963,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       });
       return c.json({ delivered, intended: waiting.length });
     } finally {
-      collectionSending.delete(collection.id);
+      releaseCollectionSend(collection.id);
     }
   });
 

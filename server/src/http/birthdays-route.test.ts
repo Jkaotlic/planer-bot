@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
+import { ensureBirthdayRound } from "../birthdays/birthday-service";
+import { markCollectionSent, setCollectionClosed, updateCollection } from "../collections/collection-service";
 import { signInitData } from "../auth/telegram";
 import { collections } from "../db/schema";
 import { testConfig } from "../test-config";
@@ -21,11 +24,19 @@ const send = (token: string, body: unknown, method: string) => ({
 });
 const ASOF = "asOf=2026-08-01";
 
-function person(db: Db, name: string, tg: number | null, birthDate: string | null): number {
+function person(db: Db, name: string, tg: number | null, birthDate: string | null, isAdmin = false): number {
   const employee = createEmployee(db, { displayName: name, inviteToken: `inv-${name}` });
   if (tg != null) linkTelegramAccount(db, `inv-${name}`, tg);
   if (birthDate) setBirthDate(db, employee.id, birthDate);
+  if (isAdmin) setEmployeeAdmin(db, employee.id, true);
   return employee.id;
+}
+
+/** Бот, который записывает письма вместо того, чтобы ходить в Telegram. */
+function fakeBot() {
+  const sent: { to: number; text: string }[] = [];
+  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  return { bot: bot as unknown as Bot, sent };
 }
 
 describe("GET /api/admin/birthdays", () => {
@@ -89,6 +100,134 @@ describe("PUT /api/admin/birthdays/:id", () => {
     const res = await app.request(`/api/admin/birthdays/${honouree}?${ASOF}`,
       send(token, { collectUrl: "javascript:alert(1)" }, "PUT"));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("PUT /api/admin/birthdays/:id — ссылка вооружает автоотправку", () => {
+  const SEP = "asOf=2026-09-01";
+
+  it("сохранение ссылки из консоли вооружает автоотправку", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const mark = person(db, "Марк", 1, "09-07");
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(await tokenFor(app, 111), { collectUrl: "https://example.com/sbor" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    const { collection } = await res.json();
+    expect(collection.autoSendOn).toBe("2026-09-04");
+  });
+
+  it("выключенную автоотправку новая ссылка вооружает заново", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const mark = person(db, "Марк", 1, "09-07");
+    const token = await tokenFor(app, 111);
+    // Раунд заводится вооружённым, поэтому «ссылка вооружает» видно только на
+    // выключенном: иначе тест прошёл бы и без единой строки вооружения в ручке.
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`, send(token, { autoSendOn: null }, "PUT"));
+
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(token, { collectUrl: "https://example.com/sbor" }, "PUT"));
+
+    expect((await res.json()).collection.autoSendOn).toBe("2026-09-04");
+  });
+
+  it("явно заданный день не перебивается вычисленным", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const mark = person(db, "Марк", 1, "09-07");
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(await tokenFor(app, 111), { collectUrl: "https://example.com/sbor", autoSendOn: "2026-09-06" }, "PUT"));
+
+    expect((await res.json()).collection.autoSendOn).toBe("2026-09-06");
+  });
+
+  it("переключатель выключает автоотправку", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const mark = person(db, "Марк", 1, "09-07");
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(await tokenFor(app, 111), { autoSendOn: null }, "PUT"));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).collection.autoSendOn).toBeNull();
+  });
+
+  it("остальные админы узнают о ссылке, вставленной из консоли", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Игорь", 2, null, true);
+    // Одинаковое поведение у двух входов и есть смысл этой правки: письмо про
+    // вставленную ссылку обязано уйти и когда её сохранили из вебки.
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(await tokenFor(app, 111), { collectUrl: "https://example.com/sbor" }, "PUT"));
+
+    expect(sent.map((m) => m.to)).toEqual([2]);
+    expect(sent[0]!.text).toContain("Марк");
+    expect(sent[0]!.text).toContain("4 сентября");
+  });
+
+  it("разосланному раунду ссылку меняет, автоотправку не вооружает и админам не врёт", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Игорь", 2, null, true);
+    const token = await tokenFor(app, 111);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+    // Разослано руками — повторной рассылки дня рождения не бывает.
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"));
+
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(token, { collectUrl: "https://example.com/svezhaya" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    const { collection } = await res.json();
+    expect(collection.collectUrl).toBe("https://example.com/svezhaya");
+    expect(collection.autoSendOn).toBeNull();
+    // Письмо всё равно уходит — но обещать в нём нечего.
+    expect(sent.map((m) => m.to)).toEqual([2]);
+    expect(sent[0]!.text).not.toContain("разошлёт");
+    expect(sent[0]!.text).not.toContain("делать ничего не надо");
+  });
+
+  it("закрытый сбор ссылка не вооружает и никого не будит", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Игорь", 2, null, true);
+    const token = await tokenFor(app, 111);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: null });
+    setCollectionClosed(db, round.id, true, new Date("2026-09-01T07:00:00Z"));
+
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(token, { collectUrl: "https://example.com/svezhaya" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    const { collection } = await res.json();
+    expect(collection.collectUrl).toBe("https://example.com/svezhaya");
+    // Закрытый сбор не увидит ни тик, ни мини-приложение: вооружать нечего и
+    // сообщать остальным не о чем.
+    expect(collection.autoSendOn).toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+
+  it("правка без ссылки никого не будит", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Игорь", 2, null, true);
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(await tokenFor(app, 111), { messageText: "Скидываемся Марку" }, "PUT"));
+
+    expect(sent).toHaveLength(0);
   });
 });
 

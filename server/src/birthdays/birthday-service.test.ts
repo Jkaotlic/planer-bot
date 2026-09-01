@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, archiveEmployee } from "../repo/employees";
 import {
@@ -10,6 +11,8 @@ import {
   roundsScheduledFor,
   markAdminNotified,
   markScheduleNotified,
+  roundsToAutoSend,
+  markAutoSent,
 } from "./birthday-service";
 import { createCustomCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
 import { collections } from "../db/schema";
@@ -96,6 +99,26 @@ describe("ensureBirthdayRound", () => {
     expect(next.id).not.toBe(first.id);
     expect(next.year).toBe(2027);
   });
+
+  it("новый раунд сразу знает, в какой день бот разошлёт его сам", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+
+    expect(round.celebratedOn).toBe("2026-09-07");
+    expect(round.autoSendOn).toBe("2026-09-04");
+    expect(round.autoSentAt).toBeNull();
+  });
+
+  it("раунд, заведённый впритык, рассылается сегодня, а не задним числом", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+
+    const round = ensureBirthdayRound(db, mark, "2026-09-06")!;
+
+    expect(round.autoSendOn).toBe("2026-09-06");
+  });
 });
 
 describe("birthdayRoundDraft", () => {
@@ -125,6 +148,16 @@ describe("birthdayRoundDraft", () => {
     const employee = person(db, "NoBirthday", 1, null);
     expect(birthdayRoundDraft(db, employee, "2026-08-01")).toBeNull();
   });
+
+  it("предпросмотр показывает тот же день, что запишет сохранение", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+
+    const draft = birthdayRoundDraft(db, mark, "2026-09-01")!;
+
+    expect(draft.id).toBe(0);
+    expect(draft.autoSendOn).toBe("2026-09-04");
+  });
 });
 
 describe("wording", () => {
@@ -132,25 +165,42 @@ describe("wording", () => {
     // One display name is stored and nothing that would let us inflect it, so
     // every phrase has to be built around the name as given. «день рождения у
     // Мишин Илья» is the failure this guards, and it would land in 25 chats.
-    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7);
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7, "2026-08-05", "2026-08-01");
     expect(notice).toContain("Мишин Илья");
     expect(notice).not.toMatch(/у Мишин Илья/);
   });
 
   it("tells admins what to do next, not just that a birthday exists", () => {
-    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7);
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7, "2026-08-05", "2026-08-01");
     expect(notice).toContain("через 7 дней");
     expect(notice).toContain("Сбербанк Онлайн");
-    expect(notice).toMatch(/сам решишь, когда разослать/i);
+    // Больше не «сам решишь, когда разослать»: с 31.08.2026 бот привязывает
+    // присланную ссылку и рассылает сам — это и есть путь, о котором нудж
+    // обязан сказать, единственное место, откуда админ о нём узнаёт.
+    expect(notice).toMatch(/пришли ссылку сюда/i);
+    expect(notice).toContain("Разошлю команде 5 августа, кроме именинника.");
+  });
+
+  it("without auto-send armed, tells admins they'll have to send it themselves — no false promise", () => {
+    const notice = adminNoticeMessage("Мишин Илья", "5 августа", 7, null, "2026-08-01");
+    expect(notice).toContain("Автоотправка выключена");
+    expect(notice).not.toMatch(/разошлю/i);
   });
 
   it("tells admins the collection is already ready, not to create one they already made", () => {
-    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7);
+    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7, "2026-08-05", "2026-08-01");
     expect(notice).toContain("через 7 дней");
     expect(notice).toContain("Мишин Илья");
     expect(notice).not.toContain("Создай сбор");
     expect(notice).not.toContain("Сбербанк Онлайн");
     expect(notice).not.toMatch(/у Мишин Илья/);
+    expect(notice).toContain("делать ничего не надо");
+  });
+
+  it("ready message without auto-send tells admins to send it themselves, not that the bot will", () => {
+    const notice = adminNoticeReadyMessage("Мишин Илья", "5 августа", 7, null, "2026-08-01");
+    expect(notice).toContain("разошли его из «Дней рождения»");
+    expect(notice).not.toMatch(/делать ничего не надо/);
   });
 });
 
@@ -255,5 +305,56 @@ describe("roundsScheduledFor", () => {
     updateCollection(db, round.id, { collectUrl: "https://sber/x", scheduledSendOn: "2026-07-30" });
     markAdminNotified(db, round.id, new Date());
     expect(roundsScheduledFor(db, ASOF).map((r) => r.employeeId)).toEqual([id]);
+  });
+});
+
+describe("roundsToAutoSend", () => {
+  it("берёт раунд, чей день настал, и не берёт будущий", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    ensureBirthdayRound(db, mark, "2026-09-01");
+
+    expect(roundsToAutoSend(db, "2026-09-03")).toHaveLength(0);
+    expect(roundsToAutoSend(db, "2026-09-04")).toHaveLength(1);
+  });
+
+  it("подбирает пропущенный день: сервер лежал четвёртого — разошлёт пятого", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    ensureBirthdayRound(db, mark, "2026-09-01");
+
+    expect(roundsToAutoSend(db, "2026-09-05")).toHaveLength(1);
+  });
+
+  it("не берёт раунд, по которому попытка уже была", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    markAutoSent(db, round.id, new Date());
+
+    expect(roundsToAutoSend(db, "2026-09-04")).toHaveLength(0);
+  });
+
+  it("не берёт раунд, у которого праздник уже прошёл", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    ensureBirthdayRound(db, mark, "2026-09-01");
+
+    expect(roundsToAutoSend(db, "2026-09-08")).toHaveLength(0);
+  });
+
+  it("не берёт кастомный сбор — у него своя дата напоминания", () => {
+    const db = makeTestDb();
+    createCustomCollection(db, {
+      title: "Свадьба", employeeId: null, eventDate: null, deadline: null,
+      amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/s",
+      messageText: null, scheduledSendOn: null,
+    });
+    // Кастомному сбору `autoSendOn` не ставит никто, но проверяем явно: если
+    // однажды поставят руками, рассылать всё равно нельзя. Колонкой напрямую, а
+    // не патчем: полем патча `autoSendOn` станет только в задаче 7.
+    db.update(collections).set({ autoSendOn: "2026-09-01" }).where(eq(collections.id, 1)).run();
+
+    expect(roundsToAutoSend(db, "2026-09-04")).toHaveLength(0);
   });
 });

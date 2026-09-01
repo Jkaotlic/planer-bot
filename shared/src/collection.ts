@@ -95,6 +95,63 @@ export function formatDayMonth(iso: string): string {
   return `${day} ${MONTH_NAMES[month - 1]}`;
 }
 
+/** За сколько дней до праздника сбор уходит команде. */
+export const AUTO_SEND_LEAD_DAYS = 3;
+
+/**
+ * Час, раньше которого бот про сборы молчит.
+ *
+ * Тик крутится каждые пять минут и до появления этой константы получал только
+ * дату — значит первым тиком после полуночи и работал. Админам это давало нудж
+ * в 00:03; команде, которой бот теперь пишет сам, так слать нельзя вовсе.
+ *
+ * Константой, а не строкой в `app_settings`: менять её никто не просил, а ряд
+ * настройки с переключателем в консоли — работа вперёд.
+ *
+ * Живёт здесь, рядом с `AUTO_SEND_LEAD_DAYS`: это правило рассылки, а не деталь
+ * сервера, и то же обещание («разошлю в 10:00») печатает подтверждение из
+ * `collections/`. Пока она лежала в `birthdays/`, каталог сборов был обязан
+ * тянуть её оттуда — а обратное ребро уже есть, `birthday-notice` импортирует
+ * `collection-service`, и следующий такой импорт замкнул бы кольцо.
+ */
+export const COLLECTION_SEND_HOUR = "10:00";
+
+/**
+ * День, в который бот разошлёт сбор сам.
+ *
+ * `max(праздник − опережение, сегодня)`, а не просто «минус три»: ссылку
+ * приносят и накануне, и в этом случае ждать до прошедшей даты значит не
+ * разослать никогда. Живёт здесь, а не на сервере, потому что ту же дату
+ * считают обе консоли, когда переключатель включают обратно.
+ */
+export function autoSendDateFor(
+  celebratedOn: string,
+  today: string,
+  leadDays: number = AUTO_SEND_LEAD_DAYS,
+): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(celebratedOn);
+  // Непонятная дата не должна превращаться в `NaN` и уехать строкой в базу:
+  // «сегодня» — единственный безопасный ответ, он рассылает, а не теряет сбор.
+  if (!match) return today;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  // `Date.parse` ниже не отвергает «30 февраля» — молча переносит его на
+  // 2 марта, и опережение посчиталось бы от дня, которого не существует. Та
+  // же ловушка и та же защита, что в `formatDayMonth` пятью строками выше.
+  if (month < 1 || month > 12) return today;
+  if (day < 1 || day > MONTH_LENGTHS[month - 1]!) return today;
+  const stamp = Date.parse(`${celebratedOn}T00:00:00Z`);
+  const lead = new Date(stamp - leadDays * 86_400_000).toISOString().slice(0, 10);
+  return lead > today ? lead : today;
+}
+
+/** «Бот разошлёт команде 4 сентября» — одна подпись на обе консоли. */
+export function autoSendLabel(autoSendOn: string | null, today: string): string | null {
+  if (!autoSendOn) return null;
+  if (autoSendOn <= today) return "Бот разошлёт команде сегодня";
+  return `Бот разошлёт команде ${formatDayMonth(autoSendOn)}`;
+}
+
 /** «Свадьба» или «День рождения — Пётр Иванов» — как сбор зовут на экране. */
 export function collectionTitle(c: Pick<CollectionShape, "kind" | "title">, personName: string | null): string {
   if (c.kind === "birthday") return personName ? `День рождения — ${personName}` : "День рождения";

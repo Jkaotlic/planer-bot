@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import {
+  autoSendDateFor,
+  autoSendLabel,
   collectionStatus,
   describeDaysUntil,
   formatDayMonth,
   formatMoney,
   isCollectionActive,
 } from "@planer/shared";
-import { Button, Input, List, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { Button, Cell, Input, List, Placeholder, Section, Spinner, Switch, Textarea } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
 import {
   apiClient,
@@ -29,12 +31,19 @@ import { withNotifyNotice } from "../../lib/shift";
  * «Сборы» (admin, mobile): деньги, которые команда скидывает — на день
  * рождения или по любому другому поводу.
  *
- * Правило, вокруг которого построен экран, — **бот никогда не пишет команде
- * сам.** За неделю до дня рождения он толкает админов; всё остальное здесь,
- * руками: вставить ссылку, поправить текст, прочитать точный текст и точный
- * поимённый список — и только потом отправить. Кнопка отправки сначала
- * взводится: на телефоне единственное действие, которое пишет сразу всем,
- * не должно быть в одном случайном тапе.
+ * Правило, вокруг которого экран строился, — «бот никогда не пишет команде
+ * сам» — с 31.08.2026 отменено для одного случая: сбор на день рождения со
+ * ссылкой уходит команде сам за три дня до праздника. Предохранителем вместо
+ * нажатой кнопки стала видимость, и стоит она здесь: строка «Бот разошлёт
+ * команде …» с тумблером на карточке, которым любой админ останавливает
+ * рассылку одним тапом.
+ *
+ * Всё остальное по-прежнему руками: вставить ссылку, поправить текст,
+ * прочитать точный текст и точный поимённый список — и только потом отправить.
+ * Кнопка отправки сначала взводится: на телефоне единственное действие,
+ * которое пишет сразу всем, не должно быть в одном случайном тапе. Кастомный
+ * сбор (свадьба, проводы) исключения не получил — у него нет даты, от которой
+ * считать «за три дня».
  *
  * Второе правило — **сюрприз**: сбор, где ты виновник, сервер тебе не отдаёт
  * вообще. Поэтому экран его и не прячет — прятать уже нечего.
@@ -308,8 +317,9 @@ export function AdminCollections() {
           <CardStack>
             <CardShell>
               <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                За неделю до дня рождения бот напишет админам. Команде ничего не уходит, пока ты сам не нажмёшь
-                «Разослать» — и не увидишь перед этим точный текст и поимённый список.
+                За неделю до дня рождения бот напишет админам. Пришли ему ссылку на сбор — он привяжет её сам
+                и за три дня разошлёт команде, кроме именинника. Не хочешь автоматом — выключи тумблер на карточке
+                или нажми «Разослать» раньше.
               </div>
             </CardShell>
 
@@ -1268,6 +1278,14 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
   const palette = personPalette(birthday.employeeId);
   const status = roundStatus(birthday.campaign, today);
 
+  async function toggleAutoSend(birthday: UpcomingBirthday) {
+    // Дату считает `shared`, а не экран: та же арифметика на сервере, и две
+    // копии означали бы две разные даты.
+    const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
+    await apiClient.saveBirthdayRound(birthday.employeeId, { autoSendOn: next });
+    await onChanged();
+  }
+
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1287,6 +1305,28 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
           {status.label}
         </span>
       </div>
+
+      {/* Только пока сбор не ушёл. После рассылки `autoSendOn` в базе остаётся
+          (гасить его нечем и незачем), и строка обещала бы вторую рассылку рядом
+          с чипом «Разослано · 14» — все три дня, пока команда скидывается.
+          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам. */}
+      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && (
+        <Cell
+          after={
+            <Switch
+              checked={Boolean(birthday.campaign.autoSendOn)}
+              aria-label="Бот рассылает сам"
+              onChange={() => void toggleAutoSend(birthday)}
+            />
+          }
+          subtitle={
+            autoSendLabel(birthday.campaign.autoSendOn, today) ??
+            "Разошлёшь сам — бот ждёт твоей кнопки"
+          }
+        >
+          Бот рассылает сам
+        </Cell>
+      )}
 
       <Button size="s" mode={open ? "gray" : "bezeled"} stretched onClick={onToggle}>
         {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}

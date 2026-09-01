@@ -52,7 +52,7 @@ setInterval(() => {
     // Четвёртым в тот же массив: чек-лист уходит с началом смены дежурного, а
     // не по общему часу, поэтому ему нужен тот же пятиминутный тик.
     { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },
-    { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz).date) },
+    { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz)) },
     // Третьим в тот же массив, а не своим setInterval: `runTicksIndependently`
     // и написан затем, чтобы падение одного тика не гасило соседей.
     {

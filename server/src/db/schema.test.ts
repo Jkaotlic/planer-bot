@@ -9,6 +9,8 @@ import {
   templatePool,
   templatePreference,
   calendarDays,
+  collections,
+  collectionLinkPending,
 } from "./schema";
 import { makeTestDb } from "./testdb";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
@@ -114,4 +116,28 @@ describe("роль наблюдателя", () => {
     const back = setEmployeeObserver(db, person.id, false)!;
     expect(back.excludedFromSwaps).toBe(true);
   });
+});
+
+it("сбор помнит день автоотправки и то, что попытка уже была", () => {
+  const db = makeTestDb();
+  const employee = createEmployee(db, { displayName: "Марк", inviteToken: "inv-mark" });
+  const row = db
+    .insert(collections)
+    .values({ kind: "birthday", employeeId: employee.id, year: 2026, celebratedOn: "2026-09-07", autoSendOn: "2026-09-04" })
+    .returning()
+    .all()[0]!;
+
+  expect(row.autoSendOn).toBe("2026-09-04");
+  // Пусто — значит «ещё не пробовал». Отличать «не пробовал» от «пробовал и не
+  // вышло» обязан тик, иначе он рассылает второй раз.
+  expect(row.autoSentAt).toBeNull();
+});
+
+it("окно ожидания держит ссылку, пока админ выбирает сбор", () => {
+  const db = makeTestDb();
+  const admin = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-igor" });
+  db.insert(collectionLinkPending).values({ employeeId: admin.id, url: "https://example.com/sbor" }).run();
+
+  const row = db.select().from(collectionLinkPending).all()[0]!;
+  expect(row.url).toBe("https://example.com/sbor");
 });

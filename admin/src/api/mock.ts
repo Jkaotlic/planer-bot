@@ -52,6 +52,7 @@ import {
   isAbsence,
   REMINDER_HOUR_DEFAULT,
   validateReminderHour,
+  autoSendDateFor,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -633,7 +634,7 @@ function blankCollection(patch: Partial<Collection>): Collection {
     id: nextCollectionId++, kind: "custom", employeeId: null, year: null, celebratedOn: null,
     title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
     collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
-    scheduleNotifiedAt: null, sentAt: null, sentCount: 0, sendCount: 0,
+    scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: null, sentCount: 0, sendCount: 0,
     createdAt: new Date().toISOString(), ...patch,
   };
 }
@@ -809,6 +810,9 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
   if (patch.deadline !== undefined) collection.deadline = patch.deadline ?? null;
   if (patch.amountPerPerson !== undefined) collection.amountPerPerson = patch.amountPerPerson ?? null;
   if (patch.totalGoal !== undefined) collection.totalGoal = patch.totalGoal ?? null;
+  // Чекбокс шлёт `null`, чтобы выключить, или уже посчитанную дату, чтобы
+  // включить обратно — сервер такую же дату не пересчитывает, а просто пишет.
+  if (patch.autoSendOn !== undefined) collection.autoSendOn = patch.autoSendOn ?? null;
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn ?? null;
     if (value !== null) {
@@ -854,7 +858,13 @@ function birthdayRoundDraft(employeeId: number, today: string): Collection | nul
     id: 0, kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn,
     title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
     collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
-    scheduleNotifiedAt: null, sentAt: null, sentCount: 0, sendCount: 0,
+    scheduleNotifiedAt: null,
+    // Вооружён сразу, как на сервере (`birthday-service.ts`): «за три дня бот
+    // разошлёт» — правило дня рождения, а не отдельная настройка, которую
+    // нужно не забыть включить.
+    autoSendOn: autoSendDateFor(occurrence.celebratedOn, today),
+    autoSentAt: null,
+    sentAt: null, sentCount: 0, sendCount: 0,
     createdAt: new Date(0).toISOString(),
   };
 }
@@ -867,7 +877,10 @@ function ensureBirthdayRound(employeeId: number, today: string): Collection | nu
   if (!occurrence) return null;
   const existing = findBirthdayRound(employeeId, occurrence.year);
   if (existing) return existing;
-  const created = blankCollection({ kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn });
+  const created = blankCollection({
+    kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn,
+    autoSendOn: autoSendDateFor(occurrence.celebratedOn, today),
+  });
   COLLECTIONS.push(created);
   return created;
 }

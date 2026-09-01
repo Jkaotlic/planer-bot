@@ -20,9 +20,17 @@ import { marksOfMany, removeMarksOf } from "./payment-repo";
  * path. What differs between them is data, not behaviour: a birthday round has
  * a person and a year, a custom one has a subject and an optional honouree.
  *
- * The rule that shapes this module, same as it shaped the birthday feature:
- * **the bot never mails the team on its own.** Everything here computes and
- * records; sending is an admin pressing a button after seeing the preview.
+ * Правило, которое сформировало этот модуль: бот не пишет команде сам, пока
+ * админ не нажмёт кнопку, увидев предпросмотр письма. Для кастомного сбора это
+ * по-прежнему верно без исключений. Для дня рождения с 31.08.2026 правило
+ * заменено предохранителем: рассылает и бот, но только вооружённый раунд, а
+ * вооружает его не код — человек, вставивший ссылку и в этот момент видевший
+ * и текст письма, и кнопку «🚫 Не рассылать сам».
+ *
+ * Автоотправка ходит теми же `previewCollection`, `recipientsOf`,
+ * `claimCollectionSend` и `markCollectionSent`, что и кнопка админа, а не мимо
+ * них: иначе у «разослано» стало бы два разных смысла в зависимости от того,
+ * кто нажал.
  */
 
 /** A collection with everything a screen needs spelled out. */
@@ -74,6 +82,7 @@ export interface CollectionPatch {
   collectUrl?: string | null;
   messageText?: string | null;
   scheduledSendOn?: string | null;
+  autoSendOn?: string | null;
 }
 
 export type UpdateResult = { ok: true; collection: Collection } | { ok: false; error: string };
@@ -150,9 +159,18 @@ export function updateCollection(db: Db, id: number, patch: CollectionPatch): Up
       ? null
       : current.scheduleNotifiedAt;
 
+  // Тот же довод, что у `scheduleNotifiedAt` строкой выше. Новая ссылка или
+  // новый день — это новая попытка: сбор, не ушедший из-за отсутствия ссылки,
+  // обязан уйти после её появления, а не остаться помеченным «уже пробовал».
+  const autoSentAt =
+    (patch.autoSendOn !== undefined && patch.autoSendOn !== current.autoSendOn) ||
+    (patch.collectUrl !== undefined && patch.collectUrl !== current.collectUrl)
+      ? null
+      : current.autoSentAt;
+
   const collection = db
     .update(collections)
-    .set({ ...patch, scheduleNotifiedAt })
+    .set({ ...patch, scheduleNotifiedAt, autoSentAt })
     .where(eq(collections.id, id))
     .returning()
     .all()[0]!;
@@ -205,10 +223,16 @@ export function recipientsOf(db: Db, honoureeId: number | null): Employee[] {
 /** Кому уходит админский нудж: достижимые админы, минус виновник торжества,
  *  минус выключившие себе этот вид.
  *
- *  Проверка здесь, а не в двух циклах `birthday-notice`, потому что эта функция
- *  и есть «кому писать про сборы»: у неё ровно два вызывающих, и оба про это.
- *  Сама рассылка сбора команде идёт через `recipientsOf` и никаких выключателей
- *  не знает — от объявления о сборе не отписываются. */
+ *  Проверка здесь, а не в циклах `birthday-notice`, потому что эта функция
+ *  и есть «кому писать про сборы»: все её вызывающие — а с 31.08.2026 их три —
+ *  про это. Сама рассылка сбора команде идёт через `recipientsOf` и никаких
+ *  выключателей не знает — от объявления о сборе не отписываются.
+ *
+ *  Следствие, о котором надо знать: третий вызывающий — автоотправка, и её
+ *  громкое «⚠️ сбор не ушёл» ходит тем же списком. Значит админ, выключивший
+ *  себе `celebrations`, не узнает и о несостоявшемся подарке. Похоже на цену
+ *  одного выключателя на все письма про сборы, но осознанно её никто не
+ *  выбирал; разводить их — отдельное решение, а не правка по дороге. */
 export function adminRecipients(db: Db, honoureeId: number | null): Employee[] {
   return recipientsOf(db, honoureeId).filter(
     (employee) => employee.isAdmin && !isNoticeMuted(db, employee.id, "celebrations"),
@@ -329,4 +353,25 @@ export function collectionsForWorker(db: Db, today: string, employeeId: number):
       recipientCount: progress.total,
     };
   });
+}
+
+/**
+ * Замок «этот сбор прямо сейчас рассылается».
+ *
+ * Живёт в сервисе, а не в `app.ts`, потому что рассылок теперь две: ручная из
+ * ручки и автоматическая из тика. Оба живут в ОДНОМ процессе (бот и API — один
+ * `node`), поэтому общий `Set` в модуле их и разводит. Захват синхронный:
+ * между `has` и `add` ничего выполниться не может, и второй претендент всегда
+ * видит сбор занятым.
+ */
+const sending = new Set<number>();
+
+export function claimCollectionSend(id: number): boolean {
+  if (sending.has(id)) return false;
+  sending.add(id);
+  return true;
+}
+
+export function releaseCollectionSend(id: number): void {
+  sending.delete(id);
 }

@@ -1,5 +1,5 @@
 import { and, eq, isNull, lte } from "drizzle-orm";
-import { daysUntilBirthday, describeDaysUntil, formatBirthDate, parseBirthDate, type CollectionKind } from "@planer/shared";
+import { autoSendDateFor, autoSendLabel, daysUntilBirthday, describeDaysUntil, formatBirthDate, formatDayMonth, isCollectionActive, parseBirthDate, type CollectionKind } from "@planer/shared";
 import type { Db } from "../db/client";
 import { collections, employees, type Collection } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -7,10 +7,16 @@ import { listActive } from "../repo/employees";
 /**
  * Birthdays, and the collection round that goes with one.
  *
- * The rule that shapes everything here: **the bot never mails the team on its
- * own.** It nudges admins a week ahead, and after that every message is an admin
- * pressing a button. So this module computes and records; the only thing it
- * decides by itself is who is eligible to receive what.
+ * До 31.08.2026 здесь действовало правило без исключений: бот не пишет команде
+ * сам, только нудж админам за неделю, а дальше каждое письмо — это админ,
+ * нажавший кнопку. Теперь исключение одно, и оно совпадает ровно с тем, что
+ * человек уже одобрил: бот рассылает сам ТОЛЬКО сбор на день рождения, и
+ * ТОЛЬКО когда у него есть ссылка — а ссылка появляется лишь тогда, когда её
+ * вставил человек, в этот момент видевший и текст письма, и кнопку
+ * «🚫 Не рассылать сам».
+ *
+ * `roundsToAutoSend` — вот это исключение; сам модуль от этого не изменился:
+ * он по-прежнему только считает и записывает, а рассылает `birthday-notice.ts`.
  *
  * The round itself — reading, editing, sending, previewing — is owned by
  * `../collections/collection-service`, on the same `collections` table a custom
@@ -101,7 +107,16 @@ export function ensureBirthdayRound(db: Db, employeeId: number, asOf: string): C
 
   return db
     .insert(collections)
-    .values({ kind: "birthday", employeeId, year: occurrence.year, celebratedOn: occurrence.celebratedOn })
+    .values({
+      kind: "birthday",
+      employeeId,
+      year: occurrence.year,
+      celebratedOn: occurrence.celebratedOn,
+      // Вооружается сразу: «за три дня бот разошлёт» — правило дня рождения, а
+      // не отдельная настройка, которую надо не забыть включить. Выключается
+      // одной кнопкой в боте и переключателем на карточке.
+      autoSendOn: autoSendDateFor(occurrence.celebratedOn, asOf),
+    })
     .returning()
     .all()[0]!;
 }
@@ -151,6 +166,8 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
     adminNotifiedAt: null,
     scheduledSendOn: null,
     scheduleNotifiedAt: null,
+    autoSendOn: autoSendDateFor(occurrence.celebratedOn, asOf),
+    autoSentAt: null,
     sentAt: null,
     sentCount: 0,
     sendCount: 0,
@@ -158,14 +175,35 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
   };
 }
 
-/** The nudge admins get a week ahead. Same nominative rule as everywhere else. */
-export function adminNoticeMessage(name: string, birthDateLabel: string, daysUntil: number): string {
+/**
+ * Нудж админам за неделю.
+ *
+ * Зовёт прислать ссылку прямо сюда: с 31.08.2026 бот привязывает её сам и сам
+ * рассылает за три дня. Это единственное место, откуда админ узнаёт про новый
+ * путь, поэтому старый (раздел «Дни рождения») оставлен строкой ниже, а не
+ * убран — переключатель на карточке всё ещё умеет разослать вручную.
+ *
+ * `autoSendOn` может быть пустым: тумблер уже выключен, а ссылки ещё нет.
+ * Молчать об этом или обещать рассылку было бы неправдой — ветка ниже говорит,
+ * что разошлёт человек, а не бот.
+ */
+export function adminNoticeMessage(
+  name: string,
+  birthDateLabel: string,
+  daysUntil: number,
+  autoSendOn: string | null,
+  today: string,
+): string {
   return [
     // «через 7 дней» / «завтра» / «сегодня» — the same wording both screens show.
     `🎂 ${name} празднует день рождения ${describeDaysUntil(daysUntil)} — ${birthDateLabel}.`,
     "",
-    "Создай сбор в Сбербанк Онлайн и вставь ссылку в разделе «Дни рождения»,",
-    "а потом сам решишь, когда разослать команде.",
+    "Создай сбор в Сбербанк Онлайн и пришли ссылку сюда — я привяжу её сам.",
+    autoSendOn
+      ? `Разошлю команде ${autoSendOn <= today ? "сегодня" : formatDayMonth(autoSendOn)}, кроме именинника.`
+      : "Автоотправка выключена — как сделаешь сбор, разошли его сам из «Дней рождения».",
+    "",
+    "Можно и по-старому: раздел «Дни рождения» в мини-приложении.",
   ].join("\n");
 }
 
@@ -175,12 +213,25 @@ export function adminNoticeMessage(name: string, birthDateLabel: string, daysUnt
  * feature landed. Telling them to create a collection they already made would
  * be exactly the noise this message exists to avoid, so it only carries the
  * heads-up and drops the instructions to create the link.
+ *
+ * `autoSendOn` пустой значит тумблер уже выключен вручную: тогда письмо не
+ * обещает рассылку, а прямо говорит, что разошлёт админ — так же, как ручка
+ * `collection:autooff` уже отвечает в чат в момент выключения.
  */
-export function adminNoticeReadyMessage(name: string, birthDateLabel: string, daysUntil: number): string {
+export function adminNoticeReadyMessage(
+  name: string,
+  birthDateLabel: string,
+  daysUntil: number,
+  autoSendOn: string | null,
+  today: string,
+): string {
+  const when = autoSendLabel(autoSendOn, today);
   return [
     `🎂 ${name} празднует день рождения ${describeDaysUntil(daysUntil)} — ${birthDateLabel}.`,
     "",
-    "Сбор уже готов — открой «Дни рождения» и разошли его команде, когда будет время.",
+    when
+      ? `Сбор готов. ${when} — делать ничего не надо.`
+      : "Сбор готов — разошли его из «Дней рождения», когда будет время.",
   ].join("\n");
 }
 
@@ -239,4 +290,113 @@ export function scheduleNoticeMessage(title: string, collectUrl: string | null, 
   if (collectUrl) lines.push("", `Ссылка: ${collectUrl}`);
   lines.push("", `Открой «Сборы» в мини-приложении и нажми «${kind === "birthday" ? "Разослать" : "Напомнить"}».`);
   return lines.join("\n");
+}
+
+/**
+ * Раунды, которые бот обязан разослать сам прямо сейчас.
+ *
+ * `lte`, а не `eq`: сервер, лежавший в назначенный день, разошлёт на следующий,
+ * — тот же довод, что записан у `roundsScheduledFor`. Праздник, который уже
+ * прошёл, отсекается `isCollectionActive`: сбор на вчерашний день рождения —
+ * это не сбор, а недоразумение.
+ *
+ * Только дни рождения. У кастомного сбора нет даты, от которой считать «за три
+ * дня», и есть своя «дата напоминания» — правило «бот не пишет команде сам» для
+ * них продолжает действовать без изменений.
+ */
+export function roundsToAutoSend(db: Db, date: string): Collection[] {
+  return db
+    .select()
+    .from(collections)
+    .where(and(lte(collections.autoSendOn, date), isNull(collections.autoSentAt)))
+    .all()
+    .filter((round) => round.kind === "birthday")
+    .filter((round) => isCollectionActive(round, date));
+}
+
+/** Отмечает, что попытка автоотправки была — удачная или нет. */
+export function markAutoSent(db: Db, roundId: number, when: Date): void {
+  db.update(collections).set({ autoSentAt: when }).where(eq(collections.id, roundId)).run();
+}
+
+/**
+ * Снимает отметку о попытке: у раунда снова есть будущее.
+ *
+ * Отдельно от `updateCollection`, который обнуляет её сам, когда меняются
+ * ссылка или день: здесь как раз те случаи, где не изменилось ни то, ни другое,
+ * а попытки фактически не было или она была обещана заново. С непогашенной
+ * отметкой `roundsToAutoSend` не вернёт раунд НИКОГДА — и это тупик, в котором
+ * бот пообещал рассылку и молча её не сделал.
+ */
+export function clearAutoSent(db: Db, roundId: number): Collection | null {
+  return db
+    .update(collections)
+    .set({ autoSentAt: null })
+    .where(eq(collections.id, roundId))
+    .returning()
+    .all()[0] ?? null;
+}
+
+/** Отчёт админам после автоотправки. */
+export function autoSentMessage(name: string, delivered: number, intended: number): string {
+  return `💰 Разослал сбор на ${name} — ${delivered} из ${intended}.`;
+}
+
+/**
+ * Автоотправка не состоялась. Молчать нельзя: тишина читается как «всё под
+ * контролем», а подарка не будет.
+ *
+ * Причина ставится отдельной строкой и дословно: это текст блокера, который
+ * админ уже видел в мини-аппе, и переписывать его здесь значило бы завести
+ * второй способ сказать одно и то же.
+ */
+export function autoSendFailedMessage(name: string, reason: string, daysUntil: number): string {
+  return [
+    `⚠️ Сбор на ${name} не ушёл. День рождения ${describeDaysUntil(daysUntil)}.`,
+    "",
+    reason,
+    "",
+    "Пришли ссылку сюда — разошлю сразу.",
+  ].join("\n");
+}
+
+/**
+ * Горизонт, в котором присланная ссылка ищет свой сбор.
+ *
+ * Шире, чем нудж за неделю: сбор делают и заранее, а «прислал ссылку — бот
+ * промолчал» — худший исход для главного жеста этой фичи.
+ */
+export const LINK_WINDOW_DAYS = 14;
+
+export interface LinkCandidate {
+  employeeId: number;
+  displayName: string;
+  celebratedOn: string;
+  daysUntil: number;
+  /** `null`, если раунда ещё нет: он заведётся при привязке. */
+  collectionId: number | null;
+  hasUrl: boolean;
+}
+
+/**
+ * Сборы, к которым админ может привязать присланную ссылку.
+ *
+ * Читает, но не пишет: раунда может не быть, и заводит его привязка, а не
+ * просмотр — то же правило, по которому `birthdayRoundDraft` отдаёт черновик с
+ * `id: 0`, ничего не сохраняя.
+ *
+ * Отправитель передаётся в `upcomingBirthdays` как «зритель», и это единственная
+ * причина, по которой именинник не может привязать ссылку к сбору на себя.
+ */
+export function linkCandidates(db: Db, asOf: string, senderEmployeeId: number): LinkCandidate[] {
+  return upcomingBirthdays(db, asOf, LINK_WINDOW_DAYS, senderEmployeeId)
+    .filter((b) => !b.campaign || (b.campaign.sendCount === 0 && b.campaign.closedAt == null))
+    .map((b) => ({
+      employeeId: b.employeeId,
+      displayName: b.displayName,
+      celebratedOn: b.celebratedOn,
+      daysUntil: b.daysUntil,
+      collectionId: b.campaign?.id ?? null,
+      hasUrl: Boolean(b.campaign?.collectUrl),
+    }));
 }

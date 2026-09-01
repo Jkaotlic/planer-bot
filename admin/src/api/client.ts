@@ -427,6 +427,8 @@ export interface Collection {
   closedAt: string | null;
   scheduledSendOn: string | null;
   scheduleNotifiedAt: string | null;
+  autoSendOn: string | null;
+  autoSentAt: string | null;
   sentAt: string | null;
   sentCount: number;
   sendCount: number;
@@ -472,7 +474,11 @@ export interface NewCollectionInput {
 }
 
 /** Правка сбора: отсутствующий ключ значит «оставить как есть». */
-export type CollectionPatch = Partial<NewCollectionInput>;
+/** Правка сбора: отсутствующий ключ значит «оставить как есть».
+ *
+ *  `autoSendOn` — не поле создания (`NewCollectionInput`): его не задают при
+ *  заведении кастомного сбора, только тумблером на уже существующем раунде ДР. */
+export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null };
 
 export interface UpcomingBirthday {
   employeeId: number;

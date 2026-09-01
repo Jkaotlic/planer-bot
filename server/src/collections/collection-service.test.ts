@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
+import { ensureBirthdayRound, markAutoSent } from "../birthdays/birthday-service";
 import type { Db } from "../db/client";
-import { collections } from "../db/schema";
+import { collections, type Collection } from "../db/schema";
 import {
   adminRecipients,
+  claimCollectionSend,
   collectionsForWorker,
   createCustomCollection,
   deleteCollection,
@@ -13,15 +15,17 @@ import {
   markCollectionSent,
   previewCollection,
   recipientsOf,
+  releaseCollectionSend,
   setCollectionClosed,
   updateCollection,
 } from "./collection-service";
 
 const TODAY = "2026-08-10";
 
-function person(db: Db, name: string, tg: number | null): number {
+function person(db: Db, name: string, tg: number | null, birthDate: string | null = null): number {
   const employee = createEmployee(db, { displayName: name, inviteToken: `inv-${name}` });
   if (tg != null) linkTelegramAccount(db, `inv-${name}`, tg);
+  if (birthDate) setBirthDate(db, employee.id, birthDate);
   return employee.id;
 }
 
@@ -230,6 +234,29 @@ describe("updateCollection", () => {
     // …while an actual change to the same field still is refused.
     expect(updateCollection(db, collection.id, { title: "Проводы" }).ok).toBe(false);
   });
+
+  it("новая ссылка снимает «уже пробовал»: сбор, не ушедший без ссылки, обязан уйти после", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    markAutoSent(db, round.id, new Date());
+
+    const result = updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+
+    expect(result.ok).toBe(true);
+    expect((result as { collection: Collection }).collection.autoSentAt).toBeNull();
+  });
+
+  it("передвинутый день автоотправки тоже снимает отметку", () => {
+    const db = makeTestDb();
+    const mark = person(db, "Марк", 1, "09-07");
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    markAutoSent(db, round.id, new Date());
+
+    const result = updateCollection(db, round.id, { autoSendOn: "2026-09-05" });
+
+    expect((result as { collection: Collection }).collection.autoSentAt).toBeNull();
+  });
 });
 
 describe("deleteCollection", () => {
@@ -273,6 +300,31 @@ describe("collectionsForWorker", () => {
     // Exactly one of four survives, and the other three fail for three different
     // reasons — a filter that drops everything would not pass this.
     expect(collectionsForWorker(db, TODAY, me).map((c) => c.title)).toEqual(["Про другого"]);
+  });
+});
+
+describe("замок рассылки", () => {
+  // Уборка — в `finally`, а не последней строкой: она обязана пережить падение
+  // ассерта, иначе пропускается ровно в тот момент, когда нужна, — при регрессе замка.
+  it("второй захват того же сбора не проходит, пока первый не отпустил", () => {
+    try {
+      expect(claimCollectionSend(42)).toBe(true);
+      expect(claimCollectionSend(42)).toBe(false);
+      releaseCollectionSend(42);
+      expect(claimCollectionSend(42)).toBe(true);
+    } finally {
+      releaseCollectionSend(42);
+    }
+  });
+
+  it("разные сборы друг друга не блокируют", () => {
+    try {
+      expect(claimCollectionSend(1)).toBe(true);
+      expect(claimCollectionSend(2)).toBe(true);
+    } finally {
+      releaseCollectionSend(1);
+      releaseCollectionSend(2);
+    }
   });
 });
 

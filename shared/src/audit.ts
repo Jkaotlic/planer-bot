@@ -45,7 +45,7 @@ export const AUDIT_TYPES = [
   "birthday_campaign_updated",
   "collection_created", "collection_updated", "collection_sent",
   "collection_closed", "collection_deleted", "collection_payment_marked",
-  "collection_reminded",
+  "collection_reminded", "collection_auto_send_failed", "collection_link_set",
   "reminder_undeliverable", "reminders_dispatched",
   "announcement_sent",
   "checklist_completed", "checklist_doc_changed", "checklist_changed",
@@ -68,7 +68,7 @@ export const HONOUREE_AUDIT_TYPES: readonly AuditType[] = [
   "birthday_campaign_updated",
   "collection_created", "collection_updated", "collection_sent",
   "collection_closed", "collection_deleted", "collection_payment_marked",
-  "collection_reminded",
+  "collection_reminded", "collection_auto_send_failed", "collection_link_set",
 ];
 
 export interface AuditView {
@@ -499,6 +499,19 @@ const DESCRIBERS: Record<AuditType, Describer> = {
       ],
     };
   },
+  collection_link_set: (p) => ({
+    icon: "🔗",
+    title: "Ссылка на сбор вставлена",
+    lines: [
+      str(p.collectUrl) ?? "ссылка",
+      str(p.autoSendOn) ? `бот разошлёт ${dayLabel(p.autoSendOn)}` : "автоотправка выключена",
+    ],
+  }),
+  collection_auto_send_failed: (p) => ({
+    icon: "⚠️",
+    title: "Сбор не разослался сам",
+    lines: [str(p.title) ?? "сбор", str(p.reason) ?? "причина неизвестна"],
+  }),
   collection_reminded: (p) => ({
     icon: "⏰",
     title: "Дожим по сбору",

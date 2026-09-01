@@ -18,12 +18,12 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
-import { getCollection, previewCollection, setCollectionClosed } from "../collections/collection-service";
+import { getCollection, previewCollection, setCollectionClosed, updateCollection } from "../collections/collection-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, canAnnounce, canAddOwnShifts } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import {
@@ -45,6 +45,9 @@ import { safeErrorMessage } from "../util/safe-error";
 import { openBugPrompt, getBugPending, clearBugPending, shouldCapture, submitBugReport, resolveBugReport } from "../bugs/bug-service";
 import { getChecklist, listChecklists, updateChecklist } from "../repo/checklists";
 import { clearDocPending, docPendingFor, startDocPending } from "../bugs/doc-pending";
+import { attachLink, extractUrl, linkAcceptedMessage, notifyLinkReady } from "../collections/link-capture";
+import { ensureBirthdayRound, linkCandidates, type LinkCandidate } from "../birthdays/birthday-service";
+import { clearLinkPending, linkPendingFor, setLinkPending } from "../repo/link-pending";
 
 // How long an /admin magic link stays valid. It carries a full admin JWT in
 // plain Telegram chat text — Telegram syncs history to every signed-in device
@@ -206,6 +209,14 @@ export function miniAppKeyboard(publicUrl: string, opts: { canAnnounce: boolean;
   // видимая только админу, спрятала бы вход в его же законную вкладку.
   if (opts.canAnnounce) kb.row().webApp("📣 Анонс", `${publicUrl}/app/?screen=announce`);
   return kb;
+}
+
+/** Кнопки под подтверждением: подвинуть день или отказаться от автоотправки. */
+function autoSendKeyboard(collectionId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✏️ Другой день", `collection:autoday:${collectionId}`)
+    .row()
+    .text("🚫 Не рассылать сам", `collection:autooff:${collectionId}`);
 }
 
 export function createBot(deps: BotDeps): Bot {
@@ -599,6 +610,91 @@ export function createBot(deps: BotDeps): Bot {
     openBugPrompt(db, who.me.id, sent.message_id, new Date());
   }
 
+  /**
+   * Ссылка на сбор, присланная админом в личку.
+   *
+   * Стоит перед баг-репортом, потому что у багрепорта есть окно ожидания, а у
+   * ссылки его нет: сообщение со ссылкой — единственный признак, по которому
+   * бот вообще узнаёт, что от него чего-то хотят. Обратный порядок означал бы,
+   * что ссылка не работает, пока окно открыто, и никто бы не понял почему.
+   *
+   * Но открытое окно эту ветку обходит, и это не мелочь: «не открывается
+   * https://…/app/?screen=sick» — самая обычная жалоба, и без выхода ниже она
+   * уезжала бы в чужой сбор, а команде через три дня уходило бы письмо со
+   * ссылкой на экран мини-аппа. Вопрос «жалоба ли это» задаётся не своей
+   * копией условия, а тем же `shouldCapture`, что и у `captureBugReport`: два
+   * похожих условия здесь — это ровно тот случай, когда сообщение достаётся
+   * обоим или никому.
+   *
+   * Возвращает `true`, если сообщение было ссылкой и обработано. Бот молчит,
+   * когда ждать нечего: на произвольный текст он молчал всегда, и ссылка сама
+   * по себе поводом заговорить не является.
+   */
+  async function captureCollectionLink(ctx: Context, text: string): Promise<boolean> {
+    const from = ctx.from;
+    if (!from) return false;
+    const who = acting(from.id);
+    if (!who.ok || !actsAsAdmin(who.me, from.id)) return false;
+
+    const pending = getBugPending(db, who.me.id);
+    if (pending && shouldCapture(pending, ctx.msg?.reply_to_message?.message_id, new Date())) return false;
+
+    const url = extractUrl(text);
+    if (!url) return false;
+
+    const today = teamNow(config.teamTz).date;
+    const candidates = linkCandidates(db, today, who.me.id);
+    if (candidates.length === 0) return false;
+
+    const waiting = candidates.filter((c) => !c.hasUrl);
+    if (waiting.length !== 1) {
+      // Ноль ждущих — значит все со ссылками, и это замена: спрашиваем всё равно,
+      // потому что молча подменить ссылку под чужим готовым сбором нельзя.
+      await askWhichCollection(ctx, who.me.id, url, waiting.length > 0 ? waiting : candidates);
+      return true;
+    }
+
+    await bindLink(ctx, who.me.id, waiting[0]!.employeeId, url, today);
+    return true;
+  }
+
+  /** Привязка и ответ. Общая для прямого случая и для выбора кнопкой. */
+  async function bindLink(
+    ctx: Context, adminEmployeeId: number, honoureeId: number, url: string, today: string,
+  ): Promise<void> {
+    const round = ensureBirthdayRound(db, honoureeId, today);
+    if (!round) {
+      await ctx.reply("Не нашёл, к какому дню рождения это привязать.");
+      return;
+    }
+    const updated = attachLink(db, { round, url, asOf: today, actorEmployeeId: adminEmployeeId });
+    const preview = previewCollection(db, updated);
+
+    await ctx.reply(
+      linkAcceptedMessage(
+        preview.personName ?? "именинника", updated.autoSendOn, today,
+        preview.recipients.length, preview.message,
+      ),
+      { reply_markup: autoSendKeyboard(updated.id) },
+    );
+    await notifyLinkReady(db, bot, updated, adminEmployeeId, today);
+  }
+
+  /** Несколько кандидатов — спрашиваем. Ссылка ждёт в окне, а не в `callback_data`. */
+  async function askWhichCollection(
+    ctx: Context, adminEmployeeId: number, url: string, candidates: LinkCandidate[],
+  ): Promise<void> {
+    setLinkPending(db, adminEmployeeId, url);
+    await ctx.reply("К какому сбору эта ссылка?", {
+      reply_markup: {
+        inline_keyboard: candidates.map((c) => [{
+          text: c.hasUrl ? `${c.displayName} · заменить ссылку` : c.displayName,
+          callback_data: `collection:link:${c.employeeId}`,
+        }]),
+      },
+    });
+  }
+
   /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
    *  разбираются раньше и сюда не доходят. */
   async function captureBugReport(ctx: Context, text: string): Promise<void> {
@@ -751,6 +847,95 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.reply(`Сбор «${title}» закрыт.`);
   });
 
+  /**
+   * Выбор сбора для присланной ссылки.
+   *
+   * Ссылка лежит в окне ожидания, а не в `callback_data`: там 64 байта, и
+   * ссылка на сбор в них не помещается.
+   */
+  bot.callbackQuery(/^collection:link:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const url = linkPendingFor(db, who.me.id);
+    if (!url) {
+      await ctx.answerCallbackQuery();
+      await ctx.reply("Не помню, какую ссылку ты присылал. Пришли ссылку ещё раз.");
+      return;
+    }
+    clearLinkPending(db, who.me.id);
+    await ctx.answerCallbackQuery();
+    await bindLink(ctx, who.me.id, Number(ctx.match[1]), url, teamNow(config.teamTz).date);
+  });
+
+  /**
+   * Готовые опережения для кнопки «другой день».
+   *
+   * Ввод даты текстом — ещё одно окно ожидания и ещё один парсер ради случая
+   * раз в год; кому нужно точнее, у того в мини-аппе календарь.
+   */
+  const AUTO_SEND_LEADS: { label: string; days: number }[] = [
+    { label: "за 5 дней", days: 5 },
+    { label: "за 3 дня", days: 3 },
+    { label: "за 1 день", days: 1 },
+    { label: "в день ДР", days: 0 },
+  ];
+
+  bot.callbackQuery(/^collection:autoday:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const id = Number(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    await ctx.reply("За сколько дней разослать?", {
+      reply_markup: {
+        inline_keyboard: AUTO_SEND_LEADS.map((lead) => [
+          { text: lead.label, callback_data: `collection:autoday:${id}:${lead.days}` },
+        ]),
+      },
+    });
+  });
+
+  bot.callbackQuery(/^collection:autoday:(\d+):(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const collection = getCollection(db, Number(ctx.match[1]));
+    if (!collection?.celebratedOn) {
+      await ctx.answerCallbackQuery({ text: "Сбор не найден" });
+      return;
+    }
+    const today = teamNow(config.teamTz).date;
+    const autoSendOn = autoSendDateFor(collection.celebratedOn, today, Number(ctx.match[2]));
+    updateCollection(db, collection.id, { autoSendOn });
+    await ctx.answerCallbackQuery({ text: "Переставил" });
+    await ctx.reply(autoSendLabel(autoSendOn, today) ?? "Автоотправка выключена.");
+  });
+
+  bot.callbackQuery(/^collection:autooff:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
+      return;
+    }
+    const collection = getCollection(db, Number(ctx.match[1]));
+    if (!collection) {
+      await ctx.answerCallbackQuery({ text: "Сбор не найден" });
+      return;
+    }
+    // Гасим только автоотправку. Ссылку не трогаем: отвязывать её заодно —
+    // значит наказывать за нажатие кнопки «подожди».
+    updateCollection(db, collection.id, { autoSendOn: null });
+    await ctx.answerCallbackQuery({ text: "Не разошлю" });
+    await ctx.reply("Не разошлю сам. Сбор остался в «Днях рождения» — разошлёшь, когда решишь.");
+  });
+
   bot.callbackQuery(/^checklist:docclear:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
@@ -809,6 +994,7 @@ export function createBot(deps: BotDeps): Bot {
     else if (text === BTN_BUG) await startBugReport(ctx);
     // Последним и только здесь: всё, что выше, — метки кнопок, и они всегда кнопки.
     // На остальное бот молчит, как молчал, — если окна ожидания нет.
+    else if (await captureCollectionLink(ctx, text)) return;
     else await captureBugReport(ctx, text);
   });
 

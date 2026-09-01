@@ -421,6 +421,19 @@ export const bugReportPending = sqliteTable("bug_report_pending", {
   createdAt: createdAt(),
 });
 
+/**
+ * Ссылка, присланная админом, пока он выбирает, к какому сбору её привязать.
+ *
+ * Отдельная таблица, а не `callback_data`: там 64 байта, ссылка на сбор в них
+ * не помещается. Одна строка на админа — выбор делается следующим тапом, а не
+ * через час; новая присланная ссылка затирает прежнюю, и это и есть «передумал».
+ */
+export const collectionLinkPending = sqliteTable("collection_link_pending", {
+  employeeId: integer().primaryKey().references(() => employees.id),
+  url: text().notNull(),
+  createdAt: createdAt(),
+});
+
 /** Жалоба на бота от живого человека. Своя таблица, а не строка в журнале:
  *  у неё есть жизнь после доставки — «новый» и «разобран». */
 export const bugReports = sqliteTable("bug_reports", {
@@ -459,8 +472,11 @@ export type NewAuditLog = typeof auditLog.$inferInsert;
  * be a second source of truth, and with reminders it would start lying outright
  * — a custom collection marked «sent» still has a live send button.
  *
- * The bot still never mails the team on its own: it nudges admins, and every
- * message after that is a button they pressed.
+ * Правило «бот не пишет команде сам» с 31.08.2026 действует не везде:
+ * `auto_send_on` ниже — заведённое тогда исключение, и оно ровно одно. Сбор на
+ * день рождения, у которого есть ссылка, уходит команде сам за три дня до
+ * праздника; вооружает его человек, вставивший ссылку и увидевший день.
+ * Кастомный сбор рассылает по-прежнему только нажатая кнопка.
  */
 export const collections = sqliteTable(
   "collections",
@@ -491,6 +507,16 @@ export const collections = sqliteTable(
     adminNotifiedAt: integer({ mode: "timestamp" }),
     scheduledSendOn: text(),
     scheduleNotifiedAt: integer({ mode: "timestamp" }),
+    /**
+     * День, в который бот разошлёт сбор команде САМ. NULL — не разошлёт.
+     *
+     * Отдельно от `scheduledSendOn`, у которого смысл «пни админов»: раунды с
+     * уже проставленной той датой начали бы молча рассылать сами, а смена
+     * смысла живого поля — это не миграция, а сюрприз.
+     */
+    autoSendOn: text(),
+    /** Когда попытка БЫЛА СДЕЛАНА — удачная или нет. Метка «не пробуй снова». */
+    autoSentAt: integer({ mode: "timestamp" }),
     /** The LAST send. */
     sentAt: integer({ mode: "timestamp" }),
     /** How many people the LAST send actually reached. */

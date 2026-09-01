@@ -614,6 +614,8 @@ export interface Collection {
   closedAt: string | null;
   scheduledSendOn: string | null;
   scheduleNotifiedAt: string | null;
+  autoSendOn: string | null;
+  autoSentAt: string | null;
   sentAt: string | null;
   sentCount: number;
   sendCount: number;
@@ -658,8 +660,11 @@ export interface NewCollectionInput {
   scheduledSendOn?: string | null;
 }
 
-/** Правка сбора: отсутствующий ключ значит «оставить как есть». */
-export type CollectionPatch = Partial<NewCollectionInput>;
+/** Правка сбора: отсутствующий ключ значит «оставить как есть».
+ *
+ *  `autoSendOn` — не поле создания (`NewCollectionInput`): его не задают при
+ *  заведении кастомного сбора, только тумблером на уже существующем раунде ДР. */
+export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null };
 
 /** Активный сбор глазами работника — то, что видно во вкладке «Команда». */
 export interface WorkerCollection {
