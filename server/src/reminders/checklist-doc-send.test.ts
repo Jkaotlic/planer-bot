@@ -9,7 +9,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem } from "../repo/checklist";
-import { createChecklist, getChecklist, setTemplateChecklist, updateChecklist } from "../repo/checklists";
+import { createChecklist, getChecklist, setChecklistTemplates, updateChecklist } from "../repo/checklists";
 import { testConfig } from "../test-config";
 import { runChecklistTick } from "./checklist-tick";
 import type { Db } from "../db/client";
@@ -45,7 +45,7 @@ function stage() {
   linkTelegramAccount(db, "inv-1", 333);
   const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
   const list = createChecklist(db, "Обход 47-го");
-  setTemplateChecklist(db, duty.id, list.id);
+  setChecklistTemplates(db, list.id, [duty.id]);
   createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
   createChecklistItem(db, list.id, "Свет");
   return { db, list };
