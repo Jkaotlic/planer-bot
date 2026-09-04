@@ -38,6 +38,48 @@ export function AdminSettings() {
   // гасить ошибку, оставшуюся от неудачной попытки на «Дни рождения».
   const [noticeErrors, setNoticeErrors] = useState<Record<string, string>>({});
 
+  const [savingHolidays, setSavingHolidays] = useState(false);
+  const [holidaysNotice, setHolidaysNotice] = useState<string | null>(null);
+  const [holidaysError, setHolidaysError] = useState<string | null>(null);
+
+  async function handleHolidaysAuto(enabled: boolean) {
+    setSavingHolidays(true);
+    setHolidaysError(null);
+    try {
+      await apiClient.setHolidaysAuto(enabled);
+      await reload();
+    } catch (err) {
+      setHolidaysError(err instanceof Error ? err.message : "Не удалось переключить");
+    } finally {
+      setSavingHolidays(false);
+    }
+  }
+
+  /** Итог по каждому году словами: «ещё не опубликован» — не ошибка. */
+  async function handleRefreshHolidays() {
+    setSavingHolidays(true);
+    setHolidaysError(null);
+    setHolidaysNotice(null);
+    try {
+      const years = await apiClient.refreshHolidays();
+      setHolidaysNotice(
+        years
+          .map((year) =>
+            year.status === "ok" ? `${year.year}: загружено ${year.added}`
+            : year.status === "bundled" ? `${year.year}: источник не ответил, взята зашитая копия`
+            : year.status === "missing" ? `${year.year}: ещё не опубликован`
+            : `${year.year}: не загрузился`,
+          )
+          .join(" · "),
+      );
+      await reload();
+    } catch (err) {
+      setHolidaysError(err instanceof Error ? err.message : "Не удалось обновить");
+    } finally {
+      setSavingHolidays(false);
+    }
+  }
+
   async function reload() {
     try {
       const next = await apiClient.getSettings();
@@ -172,6 +214,59 @@ export function AdminSettings() {
   }
 
   /**
+   * Секция «Праздники»: рычаг автозагрузки, что уже загружено и кнопка.
+   *
+   * Год, которого в ответе нет, подписан «ещё не опубликован»: 404 источника —
+   * это «Правительство пока не утвердило», и промолчать значило бы показать
+   * пустоту, которая читается как сбой.
+   */
+  function renderHolidaysSection() {
+    if (!settings) return null;
+    const nextYear = new Date().getUTCFullYear() + 1;
+    const known = new Map(settings.holidays.map((year) => [year.year, year]));
+    const years = [...settings.holidays.map((year) => year.year), ...(known.has(nextYear) ? [] : [nextYear])].sort();
+
+    return (
+      <>
+        <Cell
+          after={
+            <Switch
+              checked={settings.holidaysAuto}
+              disabled={savingHolidays}
+              aria-label="Брать праздники из календаря"
+              onChange={() => void handleHolidaysAuto(!settings.holidaysAuto)}
+            />
+          }
+          description="Производственный календарь РФ с xmlcalendar.ru. Дни, отмеченные руками, автозагрузка не трогает."
+        >
+          Брать праздники из календаря
+        </Cell>
+        <CardStack>
+          <CardShell>
+            {years.map((year) => {
+              const row = known.get(year);
+              return (
+                <div key={year} style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                  {row
+                    ? `${year}: ${row.days} дн., обновлено ${formatAuditMoment(row.refreshedAt)}${row.source === "bundled" ? " (зашитая копия)" : ""}`
+                    : `${year}: ещё не опубликован`}
+                </div>
+              );
+            })}
+            {holidaysNotice && <div style={{ fontSize: 13.5, marginTop: 6 }}>{holidaysNotice}</div>}
+            {holidaysError && (
+              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5, marginTop: 6 }}>{holidaysError}</div>
+            )}
+            <Button size="s" mode="bezeled" stretched disabled={savingHolidays} style={{ marginTop: 8 }} onClick={() => void handleRefreshHolidays()}>
+              {savingHolidays ? "Обновляю…" : "Обновить сейчас"}
+            </Button>
+          </CardShell>
+        </CardStack>
+      </>
+    );
+  }
+
+  /**
    * Содержимое секции «Настройки» (замок обменов) — своя загрузка, своя ошибка,
    * свой спиннер. Раньше сбой или ожидание `GET /api/admin/settings` подменяли
    * весь экран через ранний `return` из компонента, из-за чего секция «Что мне
@@ -282,6 +377,8 @@ export function AdminSettings() {
         <Section header="Настройки">{renderSwapsSection()}</Section>
 
         <Section header="Напоминания о смене">{renderReminderSection()}</Section>
+
+        <Section header="Праздники">{renderHolidaysSection()}</Section>
 
         <Section header="Что мне писать">
           {noticePrefs === null ? (

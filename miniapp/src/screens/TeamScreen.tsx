@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner, Title } from "@telegram-apps/telegram-ui";
 import { apiClient, type TeamSchedule, type Template } from "../api/client";
+import { calendarFrom } from "@planer/shared";
 import { useIsDark } from "../lib/theme";
 import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
 import {
@@ -195,7 +196,7 @@ function WeekView({
   const model = buildWeekModel(from, schedule, templates);
   return (
     <>
-      <TeamWeekGrid model={model} today={today} isDark={isDark} />
+      <TeamWeekGrid model={model} today={today} isDark={isDark} calendar={calendarFrom(schedule.calendar)} />
       <TeamWeekLegend items={buildWeekLegend(model)} isDark={isDark} />
     </>
   );

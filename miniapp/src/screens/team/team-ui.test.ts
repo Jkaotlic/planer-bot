@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import type { Shift, TeamSchedule } from "../../api/client";
 import {
   buildTodayModel,
@@ -405,6 +406,7 @@ describe("team schedule UI", () => {
         model,
         today: "2026-07-27",
         isDark: false,
+        calendar: EMPTY_CALENDAR,
       }),
     );
     const dark = renderToStaticMarkup(
@@ -412,6 +414,7 @@ describe("team schedule UI", () => {
         model,
         today: "2026-07-27",
         isDark: true,
+        calendar: EMPTY_CALENDAR,
       }),
     );
 
@@ -526,6 +529,7 @@ describe("team schedule UI", () => {
         model,
         today: "2026-07-30",
         isDark: false,
+        calendar: EMPTY_CALENDAR,
       }),
     );
 
@@ -592,6 +596,7 @@ describe("team schedule UI", () => {
         ),
         today: "2026-07-30",
         isDark: false,
+        calendar: EMPTY_CALENDAR,
       }),
     );
     expect(withoutUnassigned.match(/class="team-week__row"/g)).toHaveLength(3);

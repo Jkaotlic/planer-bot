@@ -3,6 +3,8 @@ import type { StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
+  CalendarDayDto,
+  HolidayRefreshYear,
   AdminSlotView,
   Employee,
   Me,
@@ -319,8 +321,11 @@ export function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
   return readMock.getMyShifts();
 }
 
-export function mockGetTeamSchedule(from: string, to: string): Promise<TeamScheduleResponse> {
-  return readMock.getTeamSchedule(from, to);
+export async function mockGetTeamSchedule(from: string, to: string): Promise<TeamScheduleResponse> {
+  const schedule = await readMock.getTeamSchedule(from, to);
+  // Мок читает праздники из того же списка, что правит `mockSetCalendarDay`:
+  // иначе отмеченный руками день не красился бы до перезагрузки страницы.
+  return { ...schedule, calendar: mockCalendar.filter((day) => day.date >= from && day.date <= to) };
 }
 
 /**
@@ -582,6 +587,42 @@ export const mockCalendar: { date: string; kind: "holiday" | "workday"; note: st
 
 export function mockDayCalendar() {
   return calendarFrom(mockCalendar);
+}
+
+/** DEV-рычаг автозагрузки: ведёт себя как настоящий между вызовами. */
+let mockHolidaysAuto = true;
+
+export async function mockSetHolidaysAuto(enabled: boolean): Promise<void> {
+  await delay(150);
+  mockHolidaysAuto = enabled;
+}
+
+export function mockHolidaysAutoValue(): boolean {
+  return mockHolidaysAuto;
+}
+
+/** «Обновить сейчас» в DEV: год текущий загружен, следующий ещё не опубликован. */
+export async function mockRefreshHolidays(): Promise<HolidayRefreshYear[]> {
+  await delay(300);
+  const year = new Date().getUTCFullYear();
+  return [
+    { year, status: "ok", added: mockCalendar.length, removed: 0 },
+    { year: year + 1, status: "missing", added: 0, removed: 0 },
+  ];
+}
+
+export async function mockSetCalendarDay(
+  date: string,
+  kind: "holiday" | "workday" | null,
+  note: string | null,
+): Promise<CalendarDayDto | null> {
+  await delay(150);
+  const at = mockCalendar.findIndex((day) => day.date === date);
+  if (at >= 0) mockCalendar.splice(at, 1);
+  if (kind === null) return null;
+  const row: CalendarDayDto = { date, kind, note, source: "manual" };
+  mockCalendar.push(row);
+  return row;
 }
 
 /**
@@ -1693,6 +1734,8 @@ export async function mockGetSettings(): Promise<AdminSettings> {
     swapsLockUpdatedBy: mockSwapsLocked ? "Игорь Петров" : null,
     reminderHour: mockReminderHour,
     reminderHourUpdatedBy: mockReminderHour === REMINDER_HOUR_DEFAULT ? null : "Игорь Петров",
+    holidaysAuto: mockHolidaysAuto,
+    holidays: [{ year: 2026, refreshedAt: new Date().toISOString(), source: "xmlcalendar", days: mockCalendar.length }],
   };
 }
 

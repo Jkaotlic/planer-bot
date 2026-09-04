@@ -51,7 +51,7 @@ async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
   window.history.replaceState(null, "", `/${search}`);
   vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith(me) as never);
   // Экран «Команда» тянет расписание сам, отдельно от `bootstrap`.
-  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [] } as never);
+  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);

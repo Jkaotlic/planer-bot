@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import type { Employee } from "../../api/client";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import { FillWeekPanel } from "./AdminScheduleScreen";
 
 // React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
@@ -34,6 +35,7 @@ async function mount(employees: Employee[]) {
   document.body.appendChild(host);
   root = createRoot(host);
   const panel = createElement(FillWeekPanel, {
+    calendar: EMPTY_CALENDAR,
     employees, templates: [], weekDates: [],
     onCancel: () => {}, onFilled: async () => {},
   });

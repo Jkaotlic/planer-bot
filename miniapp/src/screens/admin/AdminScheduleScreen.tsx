@@ -5,6 +5,8 @@ import {
   ABSENCE_CATEGORIES,
   coverageHint,
   calendarFrom,
+  dayOffLabel,
+  isDayOff,
   missingCoverage,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
@@ -191,6 +193,9 @@ export function AdminScheduleScreen() {
       .then((schedule) => {
         if (cancelled || !gate.current.isLatest(id)) return;
         setShifts(schedule.shifts);
+        // Календарь берётся из того же ответа, что и записи: иначе неделя,
+        // прочитанная этим путём, красилась бы по календарю прежней.
+        setCalendar(schedule.calendar);
         setScheduleError(null);
       })
       .catch((err: unknown) => {
@@ -224,6 +229,24 @@ export function AdminScheduleScreen() {
 
   // Праздники видимой недели: приезжают вместе с расписанием (см. `loadWeek`).
   const dayCalendar = useMemo(() => calendarFrom(calendar), [calendar]);
+
+  const selectedDayRow = calendar.find((day) => day.date === selectedDate);
+  // Подпись выходного и его происхождение: ручную отметку можно снять, а
+  // пришедшую из календаря — только перекрыть своей.
+  const dayOffText = dayOffLabel(selectedDate, selectedDayRow?.kind, selectedDayRow?.note ?? null);
+  const [dayOffBusy, setDayOffBusy] = useState(false);
+
+  async function markDay(kind: "holiday" | "workday" | null) {
+    setDayOffBusy(true);
+    try {
+      await apiClient.setCalendarDay(selectedDate, kind);
+      await loadWeek(from, to);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Не удалось отметить день");
+    } finally {
+      setDayOffBusy(false);
+    }
+  }
 
   // Считается по видимой неделе: `shifts` — её расписание, `selectedDate` — день.
   const dayHint = coverageHint(missingCoverage(shifts ?? [], templateRoles, selectedDate));
@@ -279,6 +302,7 @@ export function AdminScheduleScreen() {
           <Section header="Заполнить неделю">
             <CardStack>
               <FillWeekPanel
+                calendar={dayCalendar}
                 employees={employees}
                 templates={templates}
                 weekDates={weekDates}
@@ -335,6 +359,25 @@ export function AdminScheduleScreen() {
                 {/* Подсказка стоит НАД записями: она про то, чего в дне нет, и
                     под списком её пришлось бы искать глазами. Молчит, пока
                     норма не задана — см. `missingCoverage`. */}
+                {/* Над подсказкой о норме: сперва «какой это день», потом
+                    «чего в нём не хватает». Кнопки рядом, потому что решение
+                    принимают, глядя на день, а не в настройках. */}
+                <div style={{ padding: "2px 20px 8px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {dayOffText && (
+                    <span style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 }}>
+                      {dayOffText}
+                      {selectedDayRow?.source === "manual" ? " (вручную)" : ""}
+                    </span>
+                  )}
+                  <Button size="s" mode="gray" disabled={dayOffBusy} onClick={() => void markDay(isDayOff(selectedDate, dayCalendar) ? "workday" : "holiday")}>
+                    {isDayOff(selectedDate, dayCalendar) ? "Сделать рабочим" : "Сделать выходным"}
+                  </Button>
+                  {selectedDayRow?.source === "manual" && (
+                    <Button size="s" mode="plain" disabled={dayOffBusy} onClick={() => void markDay(null)}>
+                      Как в календаре
+                    </Button>
+                  )}
+                </div>
                 {dayHint && (
                   <div
                     role="status"
@@ -819,6 +862,8 @@ export interface FillWeekPanelProps {
   employees: readonly Employee[];
   templates: readonly Template[];
   weekDates: readonly string[];
+  /** Праздники недели: «на всю неделю» их пропускает так же, как Сб и Вс. */
+  calendar: DayCalendar;
   onCancel: () => void;
   onFilled: (count: number, notified: { delivered: number; intended: number }) => Promise<void>;
 }
@@ -831,7 +876,7 @@ export interface FillWeekPanelProps {
  * следующую». Она ушла вместе с самой раздачей: подсказка про решение функции,
  * которой больше нет, — это не подсказка.
  */
-export function FillWeekPanel({ employees, templates, weekDates, onCancel, onFilled }: FillWeekPanelProps) {
+export function FillWeekPanel({ employees, templates, weekDates, calendar, onCancel, onFilled }: FillWeekPanelProps) {
   const [employeeId, setEmployeeId] = useState<number>(employees[0]?.id ?? 0);
   /** Per-day choice, encoded: "" = выходной, "p:<id>" = preset, "c:<category>" = a
    * category that has no preset (отпуск/больничный/командировка/…). Same option set
@@ -854,11 +899,11 @@ export function FillWeekPanel({ employees, templates, weekDates, onCancel, onFil
     setByDay((prev) => ({ ...prev, [iso]: value }));
   }
 
-  /** Convenience: apply one choice to every WEEKDAY — Сб/Вс stay "выходной" unless
-   * set by hand, since a blanket fill shouldn't silently roster the weekend.
-   * Passing "" clears every day. */
+  /** Convenience: apply one choice to every WEEKDAY — выходные по календарю
+   * (Сб/Вс и праздники) stay "выходной" unless set by hand, since a blanket fill
+   * shouldn't silently roster a day off. Passing "" clears every day. */
   function setWholeWeek(value: string) {
-    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value && isWeekendIso(iso) ? "" : value])));
+    setByDay(Object.fromEntries(weekDates.map((iso) => [iso, value && isDayOff(iso, calendar) ? "" : value])));
   }
 
   async function handleFill() {
