@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import { ScheduleGrid } from "./ScheduleGrid";
 import type { Employee } from "../api/client";
 
@@ -33,6 +34,7 @@ async function render(today?: string) {
   await act(async () => {
     root!.render(
       createElement(ScheduleGrid, {
+      calendar: EMPTY_CALENDAR,
         employees: [employee], shifts: [], templates: [], weekDates: WEEK,
         onAddClick: () => {}, onEntryClick: () => {}, today,
       }),

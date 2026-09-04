@@ -1,5 +1,5 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
-import type { EntryCategory } from "@planer/shared";
+import type { CalendarDayDto, EntryCategory } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
@@ -217,6 +217,11 @@ const readMock = createReadMock({
 export async function mockGetTeamSchedule(from: string, to: string): Promise<Shift[]> {
   const { shifts } = await readMock.getTeamSchedule(from, to);
   return shifts;
+}
+
+export async function mockGetDayCalendar(from: string, to: string): Promise<CalendarDayDto[]> {
+  const { calendar } = await readMock.getTeamSchedule(from, to);
+  return calendar;
 }
 
 export function mockGetTemplates(): Promise<Template[]> {

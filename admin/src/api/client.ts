@@ -1,5 +1,7 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
+export type { CalendarDayDto };
+
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -11,6 +13,7 @@ import type {
   ScheduleEntryDto,
   TemplateAccent,
   TemplateDto,
+  CalendarDayDto,
 } from "@planer/shared";
 // Реэкспорт, а не копия: строка списка отметок описана в shared, потому что её
 // одинаково читают сервер и оба админских экрана.
@@ -35,6 +38,7 @@ import {
   mockDeleteEntry,
   mockGetEvents,
   mockGetTeamSchedule,
+  mockGetDayCalendar,
   mockGetTemplates,
   mockGetWeekendSlots,
   mockPostSlot,
@@ -571,6 +575,8 @@ export interface ApiClient {
   getMe(): Promise<Viewer>;
   getEmployees(): Promise<Employee[]>;
   getTeamSchedule(from: string, to: string): Promise<Shift[]>;
+  /** Праздники и рабочие субботы недели — из того же ответа, что и записи. */
+  getDayCalendar(from: string, to: string): Promise<CalendarDayDto[]>;
   getTemplates(): Promise<Template[]>;
   getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
@@ -898,6 +904,13 @@ export const realClient: ApiClient = {
     const { shifts } = await readApi.getTeamSchedule(from, to);
     return shifts;
   },
+  // Отдельным методом, а не полем в `getTeamSchedule`: консоли из ответа нужны
+  // записи, и менять её форму ради второго поля значило бы задеть всех её
+  // читателей. Ответ сервера всё равно один — его кэширует браузер.
+  async getDayCalendar(from, to) {
+    const { calendar } = await readApi.getTeamSchedule(from, to);
+    return calendar;
+  },
 
   // `accent` сужается здесь: сервер типизирует его строкой намеренно, а палитре
   // консоли нужен перечислимый тип.
@@ -1191,6 +1204,7 @@ const devClient: ApiClient = {
 
   getEmployees: () => employeesMock.getAdminEmployees(),
   getTeamSchedule: (from, to) => mockGetTeamSchedule(from, to),
+  getDayCalendar: (from, to) => mockGetDayCalendar(from, to),
   getTemplates: () => mockGetTemplates(),
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),

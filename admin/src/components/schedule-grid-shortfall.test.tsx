@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Employee, Shift, Template } from "../api/client";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import { ScheduleGrid } from "./ScheduleGrid";
 
 /**
@@ -29,6 +30,7 @@ const MORNING = { templateId: 10, name: "Утро", coverage: [2, 0, 0, 0, 0, 0,
 function render(props: { shifts?: Shift[]; coverage?: { templateId: number; name: string; coverage: number[] }[] } = {}) {
   return renderToStaticMarkup(
     createElement(ScheduleGrid, {
+      calendar: EMPTY_CALENDAR,
       employees: EMPLOYEES,
       shifts: props.shifts ?? [],
       templates: TEMPLATES,
