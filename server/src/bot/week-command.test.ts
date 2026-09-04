@@ -157,7 +157,56 @@ describe("/week", () => {
     // Третьей кнопкой — переключатель расшифровки букв: он живёт под картинкой,
     // потому что там виден его результат.
     expect(buttons.map((b: { callback_data: string }) => b.callback_data))
-      .toEqual(["week:-1", "week:1", "week:legend:0"]);
+      .toEqual(["week:-1", "week:1", "week:legend:0", "week:refresh:0"]);
+  });
+
+  it("кнопка «Обновить» есть и на текущей неделе, и на соседней — и целит в показанную неделю", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 445);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(commandUpdate(445, "/week"));
+    const firstPhoto = calls.find((call) => call.method === "sendPhoto")!;
+    expect(JSON.stringify(firstPhoto.payload.reply_markup)).toContain('"week:refresh:0"');
+
+    await bot.handleUpdate(callbackUpdate(445, "week:1"));
+    const redrawn = calls.find((call) => call.method === "editMessageMedia")!;
+    expect(JSON.stringify(redrawn.payload.reply_markup)).toContain('"week:refresh:1"');
+    expect(JSON.stringify(redrawn.payload.reply_markup)).not.toContain('"week:refresh:0"');
+  });
+
+  it("«Обновить» перерисовывает ту же неделю и говорит, что обновил", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 446);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(446, "week:refresh:1"));
+
+    const redrawn = calls.find((call) => call.method === "editMessageMedia")!;
+    expect(redrawn).toBeDefined();
+    expect(redrawn.payload.media.caption).toBe(expectedCaption(1));
+    expect(JSON.stringify(redrawn.payload.reply_markup)).toContain('"week:refresh:1"');
+    expect(calls.some((call) => call.method === "sendPhoto")).toBe(false);
+    expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toBe("Обновил");
+  });
+
+  it("«Обновить» за границей диапазона отказывает так же, как листание", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 447);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(callbackUpdate(447, `week:refresh:${WEEK_OFFSET_LIMIT + 1}`));
+
+    expect(calls.some((call) => call.method === "editMessageMedia")).toBe(false);
+    expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toContain("Дальше не листаю");
+  });
+
+  it("«Обновить» в группе не перерисовывает ростер — только тост", async () => {
+    const db = makeTestDb();
+    linkedWorker(db, 448);
+    const { bot, calls } = testBot(db);
+    await bot.handleUpdate(groupCallbackUpdate(448, "week:refresh:0"));
+
+    expect(calls.some((call) => call.method === "editMessageMedia")).toBe(false);
+    expect(calls.find((call) => call.method === "answerCallbackQuery")?.payload.text).toBe("Только в личном чате");
   });
 
   it("на текущей неделе кнопки «Текущая» нет, а на соседней есть", async () => {
