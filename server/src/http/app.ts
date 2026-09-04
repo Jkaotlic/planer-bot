@@ -15,6 +15,7 @@ import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../r
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
+import { loadCalendar } from "../repo/calendar-days";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -79,7 +80,6 @@ import {
   parseCoverage,
   serializeCoverage,
   isWeekend,
-  EMPTY_CALENDAR,
   isAbsence,
   countsForBalance,
   categoryLabel,
@@ -1186,6 +1186,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
+    // Праздники живут в базе, поэтому «в какой день годится категория» спрашивается
+    // здесь, а не в схеме разбора: она синхронна и базы не видит.
+    const dateErr = entryDateError(parsed.data, loadCalendar(db, parsed.data.date, parsed.data.endDate ?? parsed.data.date));
+    if (dateErr) return c.json({ error: "invalid", issues: [{ path: ["date"], message: dateErr }] }, 400);
     const entry = createShift(db, withPresetLocation(parsed.data));
     recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = noticeBuffer.register({
@@ -1248,7 +1252,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       includeWeekends: input.includeWeekends,
       mode: input.mode,
       occupied,
-      calendar: EMPTY_CALENDAR,
+      calendar: loadCalendar(db, input.from, input.to),
     });
 
     const { from, to, includeWeekends, mode, ...entryFields } = input;
@@ -1393,7 +1397,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       start: patch.start !== undefined ? patch.start : existing.start,
       end: patch.end !== undefined ? patch.end : existing.end,
     };
-    const err = entryTimesError(merged) ?? entryDateError(merged, EMPTY_CALENDAR) ?? entryRangeError(merged);
+    const err =
+      entryTimesError(merged) ??
+      entryDateError(merged, loadCalendar(db, merged.date, merged.endDate ?? merged.date)) ??
+      entryRangeError(merged);
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
 
     // `unrecognisedCode` means «импорт не смог прочитать эту клетку», and every
@@ -1457,6 +1464,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       if (archived) return c.json({ error: archived }, 400);
     }
     const dates = parsed.data.entries.map((e) => e.date).sort();
+    // Один календарь на всю пачку: она пишется одной транзакцией, и день,
+    // который сервер отвергнет, должен остановить её до записи, а не после.
+    const bulkCalendar = loadCalendar(db, dates[0]!, dates.at(-1)!);
+    for (const input of parsed.data.entries) {
+      const dateErr = entryDateError(input, bulkCalendar);
+      if (dateErr) return c.json({ error: "invalid", issues: [{ path: ["date"], message: dateErr }] }, 400);
+    }
     const { result: entries, diffs } = withScheduleDiff(db, { from: dates[0]!, to: dates.at(-1)! }, () =>
       db.transaction(() => parsed.data.entries.map((input) => createShift(db, withPresetLocation(input)))),
     );

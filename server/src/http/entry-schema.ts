@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, EMPTY_CALENDAR, type DayCalendar, type EntryCategory } from "@planer/shared";
+import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, type DayCalendar, type EntryCategory } from "@planer/shared";
 
 const baseEntry = z.object({
   date: dateStr,
@@ -44,9 +44,19 @@ export function entryDateError(
   // Само правило живёт в `categoryFitsDate` (@planer/shared): его второй
   // читатель — `planEntryRange`, который не должен класть в план день, который
   // эта проверка потом отвергнет.
+  //
+  // Календарь приходит параметром, потому что лежит в базе, а схема разбора
+  // синхронна и базы не видит. Отсюда и разделение: «диапазоном пишутся только
+  // отсутствия» проверяет схема (`entrySpanError`), а «в какой день годится
+  // категория» — маршрут, который умеет прочитать праздники.
   if (!categoryFitsDate(v.category, v.date, calendar)) {
-    return "«Работа в выходной» может стоять только на субботу или воскресенье";
+    return "«Работа в выходной» может стоять только на выходной или праздник";
   }
+  return entrySpanError(v);
+}
+
+/** Многодневной бывает только полоса отсутствия — правило без календаря. */
+export function entrySpanError(v: { category: EntryCategory; date: string; endDate?: string | null }): string | null {
   if (v.endDate && v.endDate !== v.date && !isAbsence(v.category)) {
     return "диапазоном записываются только отпуск, больничный и командировка";
   }
@@ -73,7 +83,7 @@ export function entryRangeError(v: { date: string; endDate?: string | null }): s
 export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
   const err = entryTimesError(v);
   if (err) ctx.addIssue({ code: "custom", path: ["start"], message: err });
-  const dateErr = entryDateError(v, EMPTY_CALENDAR);
+  const dateErr = entrySpanError(v);
   if (dateErr) ctx.addIssue({ code: "custom", path: ["date"], message: dateErr });
   const rangeErr = entryRangeError(v);
   if (rangeErr) ctx.addIssue({ code: "custom", path: ["endDate"], message: rangeErr });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createEntrySchema, updateEntrySchema } from "./entry-schema";
+import { createEntrySchema, entryDateError, updateEntrySchema } from "./entry-schema";
+import { EMPTY_CALENDAR, calendarFrom } from "@planer/shared";
 
 describe("entry input schema", () => {
   it("parses a regular shift with a template", () => {
@@ -78,16 +79,20 @@ describe("entry input schema", () => {
   });
 
   /**
-   * «Работа в выходной» = только суббота или воскресенье. Государственные
-   * праздники в будни днями отдыха не считаются — календаря праздников в системе
-   * нет (`calendar_days` пуста и никем не пишется), и до тех пор это правило надо
-   * называть вслух: мини-апп обещал команде «выходные и праздники».
+   * «Работа в выходной» = выходной ПО КАЛЕНДАРЮ, и судит об этом маршрут, а не
+   * схема: праздники лежат в базе, а схема разбора синхронна и базы не видит.
+   * Здесь остаётся то, что схема действительно проверяет, — форма записи.
+   * Правило про день проверяется в `entries-holiday.test.ts`.
    */
-  it("refuses weekend work on a weekday, holiday or not", () => {
-    // 2026-06-12 — День России, пятница.
+  it("схема пропускает день, о котором судит календарь", () => {
+    // 2026-06-12 — День России, пятница: без календаря это будни, и всё равно
+    // отказывать здесь схема не должна — она не знает, праздник ли это.
     const holiday = createEntrySchema.safeParse({ date: "2026-06-12", category: "weekend_work", start: "10:00", end: "18:00" });
-    expect(holiday.success).toBe(false);
-    const saturday = createEntrySchema.safeParse({ date: "2026-06-13", category: "weekend_work", start: "10:00", end: "18:00" });
-    expect(saturday.success).toBe(true);
+    expect(holiday.success).toBe(true);
+
+    expect(entryDateError({ category: "weekend_work", date: "2026-06-12" }, EMPTY_CALENDAR)).toMatch(/выходной или праздник/);
+    expect(
+      entryDateError({ category: "weekend_work", date: "2026-06-12" }, calendarFrom([{ date: "2026-06-12", kind: "holiday" }])),
+    ).toBeNull();
   });
 });
