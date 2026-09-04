@@ -1,3 +1,4 @@
+import { ADMIN_NOTICE_KINDS } from "@planer/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildTodayModel, buildWeekModel } from "../lib/team-schedule";
 import { addDays, mondayOf, toISODate } from "../lib/week";
@@ -363,9 +364,9 @@ describe("уведомления администратора: mockGetNoticePref
     await Promise.all(kinds.filter((k) => !k.enabled).map((k) => mockSetNoticePref(k.kind, true)));
   });
 
-  it("по умолчанию отдаёт все семь видов включёнными", async () => {
+  it("по умолчанию отдаёт все виды включёнными", async () => {
     const { kinds } = await mockGetNoticePrefs();
-    expect(kinds).toHaveLength(7);
+    expect(kinds.map((k) => k.kind)).toEqual([...ADMIN_NOTICE_KINDS]);
     expect(kinds.every((k) => k.enabled)).toBe(true);
   });
 

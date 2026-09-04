@@ -12,6 +12,7 @@ import { appSettings, type AppSetting } from "../db/schema";
  */
 const SWAPS_LOCKED = "swaps_locked";
 const REMINDER_HOUR = "reminder_hour";
+const COVERAGE_ADVICE_SENT_ON = "coverage_advice_sent_on";
 
 /**
  * The database, or a transaction opened on it.
@@ -71,4 +72,26 @@ export function setReminderHour(db: Db, value: string, actorEmployeeId: number):
 
 export function reminderHourSetting(db: Db): AppSetting | undefined {
   return readSetting(db, REMINDER_HOUR);
+}
+
+/**
+ * В какой день вечерний совет про пробелы графика уже уходил.
+ *
+ * Тик крутится каждые пять минут весь вечер, а совет — одно письмо в день.
+ * Отметка здесь, а не в `reminders`: та таблица привязана к смене, а у совета
+ * смены нет — он про то, чего в графике НЕТ. `updatedByEmployeeId` пуст: писал
+ * тик, а не человек.
+ */
+export function coverageAdviceSentOn(db: Db): string | null {
+  return readSetting(db, COVERAGE_ADVICE_SENT_ON)?.value ?? null;
+}
+
+export function markCoverageAdviceSent(db: Db, date: string): void {
+  db.insert(appSettings)
+    .values({ key: COVERAGE_ADVICE_SENT_ON, value: date, updatedByEmployeeId: null, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value: date, updatedByEmployeeId: null, updatedAt: new Date() },
+    })
+    .run();
 }

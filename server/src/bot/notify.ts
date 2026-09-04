@@ -155,6 +155,29 @@ export function noticeMuteKeyboard(kind: AdminNoticeKind): InlineKeyboard {
 }
 
 /**
+ * «Я перевёл» под письмом сбора — и та же кнопка после нажатия, уже без дела.
+ *
+ * Письмо со ссылкой человек читает в боте и по ссылке переводит из бота, значит
+ * и отметиться должен там же, а не в мини-аппе, куда за этим надо идти. Один
+ * билдер на три рассылки (ручная, дожим, автоотправка), чтобы строка колбэка
+ * `collection:paid:<id>` не разошлась между ними.
+ *
+ * Бот не знает, переходил ли человек по ссылке: кнопка висит под письмом сразу.
+ */
+export function collectionPaidKeyboard(collectionId: number): InlineKeyboard {
+  return new InlineKeyboard().text("✅ Я перевёл", `collection:paid:${collectionId}`);
+}
+
+/**
+ * Та же кнопка после нажатия. Колбэк тот же, а не «пустой»: повторный тап
+ * отвечает словами, где снять галочку, вместо молчания. Снять её здесь нельзя
+ * намеренно — второй тап по старому письму чаще случайный, чем осознанный.
+ */
+export function collectionPaidDoneKeyboard(collectionId: number): InlineKeyboard {
+  return new InlineKeyboard().text("✓ Вы отметились", `collection:paid:${collectionId}`);
+}
+
+/**
  * How a send ended, for callers that retry.
  *
  * `permanent` separates «Telegram is busy, ask again» from «this chat will never

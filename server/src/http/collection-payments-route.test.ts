@@ -10,8 +10,17 @@ import type { Db } from "../db/client";
 
 /** A bot that records what it was asked to send instead of talking to Telegram. */
 function fakeBot() {
-  const sent: { to: number; text: string }[] = [];
-  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  const sent: { to: number; text: string; buttons: string[] }[] = [];
+  const bot = {
+    api: {
+      sendMessage: vi.fn(async (to: number, text: string, extra?: { reply_markup?: unknown }) => {
+        // Кнопки — часть письма: дожим уходит с «Я перевёл», ради которого он и
+        // написан, и тест обязан их видеть.
+        const markup = extra?.reply_markup as { inline_keyboard?: { text: string }[][] } | undefined;
+        sent.push({ to, text, buttons: (markup?.inline_keyboard ?? []).flat().map((b) => b.text) });
+      }),
+    },
+  };
   return { bot: bot as unknown as Bot, sent };
 }
 
@@ -185,6 +194,8 @@ describe("POST /api/admin/collections/:id/remind-unpaid", () => {
     expect(await res.json()).toMatchObject({ delivered: 2, intended: 2 });
     expect(sent.map((m) => m.to).sort()).toEqual([100, 102]);
     expect(sent[0]!.text).toContain("Напоминаю про сбор");
+    // Дожим и есть просьба нажать «Я перевёл» — кнопка обязана быть под ним.
+    for (const m of sent) expect(m.buttons).toContain("✅ Я перевёл");
   });
 
   it("когда отметились все — 409 и ни одного сообщения", async () => {

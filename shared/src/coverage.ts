@@ -1,4 +1,6 @@
-import { weekdayIndex } from "./week-dates";
+import { weekdayIndex, weekdayShort } from "./week-dates";
+import { countsForBalance, type EntryCategory } from "./category";
+import { formatDayMonth } from "./collection";
 
 /**
  * Норма покрытия дня: сколько людей нужно на этом виде смены в каждый день недели.
@@ -135,5 +137,80 @@ export function missingCoverage(
  */
 export function coverageHint(missing: readonly MissingKind[]): string | null {
   if (missing.length === 0) return null;
-  return `Не хватает: ${missing.map((kind) => `${kind.name} — ${kind.need - kind.have}`).join(", ")}`;
+  return `Не хватает: ${missingList(missing)}`;
+}
+
+/** «Утро — 1, Дежурство — 2» — общий хвост подсказки дня и вечернего совета. */
+function missingList(missing: readonly MissingKind[]): string {
+  return missing.map((kind) => `${kind.name} — ${kind.need - kind.have}`).join(", ");
+}
+
+/** Запись графика, о которой совет может сказать «день пуст»: нужна категория. */
+export interface GapEntry extends CoverageEntry {
+  category: EntryCategory;
+}
+
+/** День, где график расходится с нормой или пуст вовсе. */
+export interface DayGap {
+  date: string;
+  missing: MissingKind[];
+  /** Ни одной рабочей записи с человеком — «смен нет», независимо от норм. */
+  empty: boolean;
+}
+
+/**
+ * Пробелы графика на заданные дни — материал для вечернего совета админам.
+ *
+ * Две проверки, а не одна, потому что норма дня в проде у всех видов смен
+ * нулевая: совет, построенный только на `missingCoverage`, молчал бы ровно до
+ * того дня, когда админ соберётся её задать. «Смен нет» видно и без норм.
+ *
+ * Пустота считается по рабочим записям с человеком (`countsForBalance`):
+ * отпуск на весь отдел день не заполняет, и строка без `employeeId` — тоже.
+ * Суббота и воскресенье пустыми не бывают: команда в выходные не работает,
+ * а выходная смена — отдельный поток со своими объявлениями. Нормы при этом
+ * на выходные смотрят как обычно: ненулевая норма на субботу — решение админа.
+ */
+export function scheduleGaps(
+  entries: readonly GapEntry[],
+  templates: readonly CoverageTemplate[],
+  dates: readonly string[],
+): DayGap[] {
+  const out: DayGap[] = [];
+  for (const date of dates) {
+    const missing = missingCoverage(entries, templates, date);
+    const weekend = weekdayIndex(date) >= 5;
+    const worked = entries.some(
+      (entry) =>
+        entry.employeeId != null &&
+        countsForBalance(entry.category) &&
+        entry.date <= date &&
+        (entry.endDate ?? entry.date) >= date,
+    );
+    const empty = !weekend && !worked;
+    if (empty || missing.length > 0) out.push({ date, missing, empty });
+  }
+  return out;
+}
+
+/**
+ * Текст совета, или `null`, когда сказать нечего.
+ *
+ * Пустой день перекрывает норму: «смен нет» уже говорит всё, и перечень
+ * недостающих видов под ним был бы тем же самым другими словами. Подпись
+ * «совет» — намеренно: письмо не требует действия, и день, оставленный
+ * пустым нарочно, не должен читаться как ошибка.
+ */
+export function coverageAdviceText(gaps: readonly DayGap[]): string | null {
+  if (gaps.length === 0) return null;
+  const lines = gaps.map((gap) => {
+    const label = `${weekdayShort(gap.date)} ${formatDayMonth(gap.date)}`;
+    return gap.empty ? `${label} — смен нет` : `${label} — не хватает: ${missingList(gap.missing)}`;
+  });
+  return [
+    "💡 Совет: в графике на неделю вперёд есть пробелы.",
+    ...lines,
+    "",
+    "Если так и задумано — просто пропусти.",
+  ].join("\n");
 }

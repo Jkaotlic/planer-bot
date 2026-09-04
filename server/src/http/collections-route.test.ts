@@ -12,8 +12,17 @@ import type { Db } from "../db/client";
 
 /** A bot that records what it was asked to send instead of talking to Telegram. */
 function fakeBot() {
-  const sent: { to: number; text: string }[] = [];
-  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
+  const sent: { to: number; text: string; buttons: string[] }[] = [];
+  const bot = {
+    api: {
+      sendMessage: vi.fn(async (to: number, text: string, extra?: { reply_markup?: unknown }) => {
+        // Кнопки — часть письма: под письмом команде висит «Я перевёл», и тест
+        // обязан их видеть.
+        const markup = extra?.reply_markup as { inline_keyboard?: { text: string }[][] } | undefined;
+        sent.push({ to, text, buttons: (markup?.inline_keyboard ?? []).flat().map((b) => b.text) });
+      }),
+    },
+  };
   return { bot: bot as unknown as Bot, sent };
 }
 
@@ -76,6 +85,8 @@ describe("POST /api/admin/collections/:id/send", () => {
     expect(first.status).toBe(200);
     expect(sent.map((m) => m.to)).not.toContain(5);
     expect(sent.length).toBeGreaterThan(0);
+    // Отметиться — там же, где прочитал: под каждым письмом команде «Я перевёл».
+    for (const m of sent) expect(m.buttons).toContain("✅ Я перевёл");
 
     const again = await app.request(`/api/admin/collections/${collection.id}/send?${ASOF}`,
       send(token, { confirm: true }, "POST"));
@@ -83,6 +94,7 @@ describe("POST /api/admin/collections/:id/send", () => {
     expect(await again.json()).toMatchObject({ round: 2 });
     // The second round is worded as a reminder.
     expect(sent.at(-1)!.text).toContain("Напоминаю про сбор");
+    expect(sent.at(-1)!.buttons).toContain("✅ Я перевёл");
   });
 
   it("needs an explicit confirmation", async () => {
