@@ -15,26 +15,33 @@ import {
   updateChecklistItem,
 } from "../../repo/checklist";
 import {
+  checklistIdsByTemplate,
   createChecklist,
   deleteChecklist,
   getChecklist,
   listChecklists,
-  setTemplateChecklist,
+  setChecklistTemplates,
+  templateIdsOf,
   updateChecklist,
 } from "../../repo/checklists";
 import { listShiftsOverlapping } from "../../repo/shifts";
 import { listActiveTemplates } from "../../repo/templates";
 import { getEmployeeById } from "../../repo/employees";
 import { recordAudit } from "../../repo/audit";
-import { CHECKLIST_KIND, reminderSentAt } from "../../repo/reminders";
+import { checklistKind, reminderSentAt } from "../../repo/reminders";
 import { teamNow, teamTimeAt } from "../../util/team-time";
 import { requireAdmin, requireAuth, type Env } from "../middleware";
 import { MAX_DOC_BYTES, removeChecklistDoc, safeDocName, writeChecklistDoc } from "../checklist-doc";
 
-/** Какой чек-лист у какого вида смены — карта, которой отвечает `checklistsDueToday`. */
-export function checklistByTemplate(db: Db): Map<number, number> {
-  const pairs = listActiveTemplates(db).flatMap((t) => (t.checklistId != null ? [[t.id, t.checklistId] as const] : []));
-  return new Map(pairs);
+/**
+ * Какие чек-листы у какого вида смены — карта, которой отвечает `checklistsDueToday`.
+ *
+ * Только активные виды смен: смен погашенного пресета не ставят, а его связи
+ * пережили бы его в таблице и приносили бы списки задним числом.
+ */
+export function checklistByTemplate(db: Db): Map<number, number[]> {
+  const active = new Set(listActiveTemplates(db).map((t) => t.id));
+  return new Map([...checklistIdsByTemplate(db)].filter(([templateId]) => active.has(templateId)));
 }
 
 /**
@@ -73,6 +80,9 @@ const checklistPatchSchema = z
 function checklistView(db: Db, id: number) {
   const list = getChecklist(db, id);
   if (!list) return null;
+  // Погашенный вид смены в «кому положен» показывать нечего: смен такого вида
+  // не ставят, и строка обещала бы рассылку, которой не будет.
+  const activeTemplateIds = new Set(listActiveTemplates(db).map((t) => t.id));
   return {
     id: list.id,
     name: list.name,
@@ -83,7 +93,7 @@ function checklistView(db: Db, id: number) {
     // первой рассылки второго ещё нет, а показать «приложен» надо сразу.
     hasDoc: list.docFileId != null || list.docPath != null,
     items: activeChecklistItems(db, list.id).map((item) => ({ id: item.id, title: item.title, note: item.note })),
-    templateIds: listActiveTemplates(db).filter((t) => t.checklistId === list.id).map((t) => t.id),
+    templateIds: templateIdsOf(db, list.id).filter((templateId) => activeTemplateIds.has(templateId)),
   };
 }
 
@@ -176,17 +186,12 @@ export function createChecklistRoutes(db: Db, config: Config) {
     const parsed = z.object({ templateIds: z.array(z.number().int()) }).safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
 
-    const wanted = new Set(parsed.data.templateIds);
-    db.transaction(() => {
-      for (const template of listActiveTemplates(db)) {
-        const should = wanted.has(template.id);
-        if (should && template.checklistId !== id) setTemplateChecklist(db, template.id, id);
-        // Снимаем только СВОЮ привязку: вид смены, отданный другому чек-листу,
-        // этот запрос не касается, иначе сохранение одного списка молча
-        // отвязывало бы виды смен у соседнего.
-        else if (!should && template.checklistId === id) setTemplateChecklist(db, template.id, null);
-      }
-    });
+    // Запрос говорит только про свой список и чужих строк не видит вовсе: до
+    // 2026-09-01 назначение вида смены второму чек-листу молча отнимало его у
+    // первого. Погашенные пресеты отсеиваются — id из старой вкладки завёл бы
+    // связь на вид смены, которого больше нет.
+    const active = new Set(listActiveTemplates(db).map((t) => t.id));
+    setChecklistTemplates(db, id, parsed.data.templateIds.filter((templateId) => active.has(templateId)));
     return c.json({ checklist: checklistView(db, id) });
   });
 
@@ -234,11 +239,13 @@ export function createChecklistRoutes(db: Db, config: Config) {
     const marks = listMarksOnDate(db, date);
 
     const seen = new Set<string>();
+    // Строка на каждый список, а не на человека: дежурному с 07:00 положены и
+    // общая инструкция этажа, и отдельная задача на ту же смену, и «ушло/не
+    // ушло» у них своё.
     const people = listShiftsOverlapping(db, date, date).flatMap((shift) => {
       const employeeId = shift.employeeId;
       if (employeeId == null || shift.templateId == null) return [];
-      const checklistId = byTemplate.get(shift.templateId);
-      if (checklistId == null) return [];
+      return (byTemplate.get(shift.templateId) ?? []).flatMap((checklistId) => {
       const key = `${employeeId}:${checklistId}`;
       if (seen.has(key)) return [];
       seen.add(key);
@@ -248,7 +255,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
       const done = marks.filter((m) => m.employeeId === employeeId && itemIds.has(m.itemId)).length;
       const list = getChecklist(db, checklistId);
       const owner = getEmployeeById(db, employeeId);
-      const sentAt = reminderSentAt(db, shift.id, CHECKLIST_KIND);
+      const sentAt = reminderSentAt(db, shift.id, checklistKind(checklistId));
       return [{
         employeeId,
         displayName: owner?.displayName ?? `работник #${employeeId}`,
@@ -274,6 +281,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
           hasTelegram: owner?.telegramUserId != null,
         }),
       }];
+      });
     });
 
     return c.json({ date, people });

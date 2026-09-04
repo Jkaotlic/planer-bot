@@ -5,7 +5,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem, setMark, updateChecklistItem } from "../repo/checklist";
-import { createChecklist, setTemplateChecklist, updateChecklist } from "../repo/checklists";
+import { createChecklist, setChecklistTemplates, updateChecklist } from "../repo/checklists";
 import { testConfig } from "../test-config";
 import { runChecklistTick } from "./checklist-tick";
 import type { Db } from "../db/client";
@@ -29,7 +29,7 @@ function fakeBot() {
 const TODAY = "2026-08-24";
 
 /** Дежурный с чек-листом: пресет отмечен галочкой, смена с 07:00 стоит на сегодня. */
-function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: boolean } = {}) {
+function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: boolean; linkedList?: boolean } = {}) {
   const db: Db = makeTestDb();
   const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-1" });
   if (opts.linked !== false) linkTelegramAccount(db, "inv-1", 333);
@@ -38,13 +38,69 @@ function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: bo
   }
   const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
   const list = createChecklist(db, "Обход 47-го");
-  setTemplateChecklist(db, duty.id, list.id);
+  if (opts.linkedList !== false) setChecklistTemplates(db, list.id, [duty.id]);
   createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
   for (const title of opts.items ?? ["Свет", "Окна"]) createChecklistItem(db, list.id, title);
   return { db, igor, duty, list };
 }
 
 describe("runChecklistTick", () => {
+  /**
+   * Ровно то, ради чего правка 2026-09-01: дежурному с 07:00 положены и общая
+   * инструкция этажа, и отдельная задача на ту же смену. Пока связь была
+   * колонкой, второй список отнимал вид смены у первого и уходил один.
+   */
+  it("шлёт по сообщению на каждый список смены", async () => {
+    const { db, duty } = stage();
+    const second = createChecklist(db, "Рисовалка");
+    createChecklistItem(db, second.id, "Проверить рисовалку");
+    setChecklistTemplates(db, second.id, [duty.id]);
+
+    const { bot, sent } = fakeBot();
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(2);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.text).toContain("Свет");
+    expect(sent[1]!.text).toContain("Проверить рисовалку");
+  });
+
+  // Дедупликация пер-списочная: общая пометка означала бы «что-то одно уже
+  // уходило», и второй список молчал бы всегда.
+  it("повторный тик не шлёт ни один из списков второй раз", async () => {
+    const { db, duty } = stage();
+    const second = createChecklist(db, "Рисовалка");
+    createChecklistItem(db, second.id, "Проверить рисовалку");
+    setChecklistTemplates(db, second.id, [duty.id]);
+
+    const { bot, sent } = fakeBot();
+    await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" })).toBe(0);
+    expect(sent).toHaveLength(2);
+  });
+
+  /**
+   * Упавшая отправка не должна стоить дежурному второго списка — и не должна
+   * пометить себя отправленной: чек-лист нужен в начале смены, и следующий тик
+   * обязан попробовать снова.
+   */
+  it("падение одной отправки не мешает второй и не помечает упавшую", async () => {
+    const { db, duty } = stage();
+    const second = createChecklist(db, "Рисовалка");
+    createChecklistItem(db, second.id, "Проверить рисовалку");
+    setChecklistTemplates(db, second.id, [duty.id]);
+
+    const { bot, sent } = fakeBot();
+    vi.mocked(bot.api.sendMessage).mockRejectedValueOnce(new Error("Telegram молчит"));
+    const failing = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+    expect(sent.map((m) => m.text.includes("Проверить рисовалку"))).toEqual([true]);
+
+    // Следующий тик досылает ровно упавший список.
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" })).toBe(1);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.text).toContain("Свет");
+    failing.mockRestore();
+  });
+
   it("присылает дежурному список пунктов после начала смены", async () => {
     const { db } = stage();
     const { bot, sent } = fakeBot();
@@ -104,8 +160,8 @@ describe("runChecklistTick", () => {
   });
 
   it("не пишет тому, чей вид смены к чек-листу не привязан", async () => {
-    const { db, igor, duty } = stage();
-    setTemplateChecklist(db, duty.id, null);
+    const { db, igor, list } = stage();
+    setChecklistTemplates(db, list.id, []);
     expect(igor.id).toBeGreaterThan(0);
     const { bot, sent } = fakeBot();
     expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);

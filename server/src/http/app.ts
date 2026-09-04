@@ -12,7 +12,7 @@ import { rateLimiter } from "./rate-limit";
 import { describeClientError, CLIENT_ERROR_BODY_MAX, type ClientErrorReport } from "./client-error";
 import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../repo/templates";
-import { getChecklist, setTemplateChecklist } from "../repo/checklists";
+import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
 import type { Shift, SwapRequest } from "../db/schema";
@@ -1628,13 +1628,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // an empty pool is an unconfigured preset and means everyone.
   app.get("/api/admin/templates/roles", requireAdmin(db, config.jwtSecret), (c) => {
     const roles = getAllTemplateRoles(db);
+    const byTemplate = checklistIdsByTemplate(db);
     return c.json({
       templates: listActiveTemplates(db).map((template) => ({
         templateId: template.id,
         name: template.name,
         category: template.category,
         accent: template.accent,
-        checklistId: template.checklistId,
+        checklistIds: byTemplate.get(template.id) ?? [],
         sendReminder: template.sendReminder,
         reminderText: template.reminderText,
         // Числами, а не строкой: по норме считают нехватку дня оба фронта, и
@@ -1665,27 +1666,35 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   /**
-   * Какой чек-лист проходит дежурный этого вида смены. `null` — никакого.
+   * Какие чек-листы проходит дежурный этого вида смены. Пустой список — никаких.
    *
    * Своей ручкой, а не полем в `roles`: там лежит «кто допущен и кто просил» —
    * про людей, а это про саму смену. Одно тело на два разных решения означало
    * бы, что правка допуска молча трогает чек-лист.
+   *
+   * Списков несколько: у дежурного бывает и общая инструкция этажа, и отдельная
+   * задача на ту же смену. Пока поле было одиночным, назначение второго списка
+   * молча снимало первый (2026-09-01).
    */
   app.put("/api/admin/templates/:id/checklist", requireAdmin(db, config.jwtSecret), async (c) => {
     const templateId = Number(c.req.param("id"));
     if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
-    const parsed = z.object({ checklistId: z.number().int().nullable() }).safeParse(await c.req.json().catch(() => ({})));
+    const parsed = z.object({ checklistIds: z.array(z.number().int()) }).safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
-    if (parsed.data.checklistId != null && !getChecklist(db, parsed.data.checklistId)) {
-      return c.json({ error: "unknown_checklist" }, 400);
-    }
-    setTemplateChecklist(db, templateId, parsed.data.checklistId);
+    const wanted = [...new Set(parsed.data.checklistIds)];
+    // Несуществующий список — отказ, а не тихий пропуск: экран показал бы
+    // «назначено», а бот не слал бы ничего и никогда.
+    const names = wanted.map((id) => getChecklist(db, id)?.name);
+    if (names.some((name) => name === undefined)) return c.json({ error: "unknown_checklist" }, 400);
+
+    setTemplatesChecklists(db, templateId, wanted);
     recordAudit(db, "template_checklist_changed", c.get("auth").employeeId, {
       templateId,
       templateName: getTemplate(db, templateId)?.name ?? null,
-      checklistName: parsed.data.checklistId != null ? (getChecklist(db, parsed.data.checklistId)?.name ?? null) : null,
+      // Именами, а не числами: журнал читает человек, и «3» ему ничего не говорит.
+      checklistName: names.length > 0 ? names.join(", ") : null,
     });
-    return c.json({ templateId, checklistId: parsed.data.checklistId });
+    return c.json({ templateId, checklistIds: wanted });
   });
 
   /**

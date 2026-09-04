@@ -927,7 +927,7 @@ export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
     accent: template.accent,
     pool: [...(TEMPLATE_ROLES.get(template.id)?.pool ?? [])],
     preference: { ...(TEMPLATE_ROLES.get(template.id)?.preference ?? {}) },
-    checklistId: CHECKLISTS.find((l) => l.templateIds.includes(template.id))?.id ?? null,
+    checklistIds: CHECKLISTS.filter((l) => l.templateIds.includes(template.id)).map((l) => l.id),
     coverage: [...(TEMPLATE_COVERAGE.get(template.id) ?? [0, 0, 0, 0, 0, 0, 0])],
     sendReminder: template.sendReminder,
     reminderText: TEMPLATE_REMINDER_TEXT.get(template.id) ?? null,
@@ -2012,8 +2012,12 @@ export async function mockRemoveChecklistItem(itemId: number): Promise<Checklist
   return { ...list };
 }
 
-export async function mockSetTemplateChecklist(templateId: number, checklistId: number | null): Promise<void> {
+export async function mockSetTemplateChecklists(templateId: number, checklistIds: readonly number[]): Promise<void> {
   await delay(150);
-  for (const list of CHECKLISTS) list.templateIds = list.templateIds.filter((t) => t !== templateId);
-  if (checklistId != null) CHECKLISTS.find((l) => l.id === checklistId)?.templateIds.push(templateId);
+  for (const list of CHECKLISTS) {
+    const should = checklistIds.includes(list.id);
+    const has = list.templateIds.includes(templateId);
+    if (should && !has) list.templateIds.push(templateId);
+    else if (!should && has) list.templateIds = list.templateIds.filter((t) => t !== templateId);
+  }
 }

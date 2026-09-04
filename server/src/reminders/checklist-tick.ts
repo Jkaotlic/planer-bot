@@ -4,11 +4,11 @@ import { checklistHasContent, checklistText, checklistsDueToday } from "@planer/
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
-import { getChecklist, updateChecklist } from "../repo/checklists";
+import { checklistIdsByTemplate, getChecklist, updateChecklist } from "../repo/checklists";
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { addReminder, CHECKLIST_KIND, hasReminder } from "../repo/reminders";
+import { addReminder, checklistKind, hasReminder } from "../repo/reminders";
 import { safeErrorMessage } from "../util/safe-error";
 
 /**
@@ -35,9 +35,8 @@ export async function runChecklistTick(
   config: Config,
   now: { date: string; time: string },
 ): Promise<number> {
-  const byTemplate = new Map(
-    listActiveTemplates(db).flatMap((t) => (t.checklistId != null ? [[t.id, t.checklistId] as const] : [])),
-  );
+  const active = new Set(listActiveTemplates(db).map((t) => t.id));
+  const byTemplate = new Map([...checklistIdsByTemplate(db)].filter(([templateId]) => active.has(templateId)));
   if (byTemplate.size === 0) return 0;
 
   const today = listShiftsOverlapping(db, now.date, now.date);
@@ -46,11 +45,11 @@ export async function runChecklistTick(
   for (const shift of today) {
     const employeeId = shift.employeeId;
     if (employeeId == null) continue;
-    // Чек-лист берётся у ЭТОЙ смены, а не «какой-нибудь сегодняшний»: у человека
-    // в один день бывают две записи разных видов, и каждая приносит свой список
-    // в своё время.
-    const [checklistId] = checklistsDueToday([shift], byTemplate, now.date, employeeId);
-    if (checklistId == null) continue;
+    // Списки берутся у ЭТОЙ смены, а не «какие-нибудь сегодняшние»: у человека
+    // в один день бывают две записи разных видов, и каждая приносит свои списки
+    // в своё время. Их может быть несколько и у одного вида смены — общая
+    // инструкция этажа и отдельная задача на ту же смену.
+    for (const checklistId of checklistsDueToday([shift], byTemplate, now.date, employeeId)) {
     const list = getChecklist(db, checklistId);
     if (!list) continue;
     const items = activeChecklistItems(db, checklistId);
@@ -59,7 +58,9 @@ export async function runChecklistTick(
 
     // Смена ещё не началась — человек не на этаже, и проверять нечего.
     if (shift.start != null && now.time < shift.start) continue;
-    if (hasReminder(db, shift.id, CHECKLIST_KIND)) continue;
+    // Пометка на список, а не на смену: общая означала бы «что-то одно уже
+    // уходило», и второй список молчал бы всегда.
+    if (hasReminder(db, shift.id, checklistKind(checklistId))) continue;
 
     // Личная галочка «не пиши мне про смены» здесь НЕ проверяется, в отличие от
     // `runReminderTick`: вечернее напоминание — удобство, от которого человек
@@ -126,13 +127,15 @@ export async function runChecklistTick(
       // `inline_keyboard` — это разметка ради разметки.
       const markup = kb.inline_keyboard.flat().length > 0 ? { reply_markup: kb } : undefined;
       await bot.api.sendMessage(owner.telegramUserId, text, markup);
-      addReminder(db, shift.id, CHECKLIST_KIND);
+      addReminder(db, shift.id, checklistKind(checklistId));
       sent += 1;
     } catch (err) {
-      // Одна неудача не должна оставить без чек-листа остальных дежурных: тот же
-      // довод, что у `runReminderTick`. Пометки нет — следующий тик попробует
-      // снова, и это правильно: чек-лист нужен в начале смены, а не назавтра.
-      console.error(`runChecklistTick: shift ${shift.id} skipped:`, safeErrorMessage(err));
+      // Одна неудача не должна оставить без чек-листа ни остальных дежурных, ни
+      // остальные списки этого же: тот же довод, что у `runReminderTick`.
+      // Пометки нет — следующий тик попробует снова, и это правильно: чек-лист
+      // нужен в начале смены, а не назавтра.
+      console.error(`runChecklistTick: shift ${shift.id}, чек-лист ${checklistId} skipped:`, safeErrorMessage(err));
+    }
     }
   }
 

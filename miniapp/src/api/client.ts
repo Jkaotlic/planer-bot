@@ -85,7 +85,7 @@ import {
   mockGetTemplateQueue,
   mockSetRotationUnit,
   mockSaveTemplateRoles,
-  mockSetTemplateChecklist,
+  mockSetTemplateChecklists,
   mockSetTemplateCoverage,
   mockSetTemplateReminder,
   mockSetReminderHour,
@@ -547,7 +547,7 @@ export interface TemplateRolesView {
   /** employeeId -> weight. Present means "asked for this kind". */
   preference: Record<number, number>;
   /** Чек-лист, который проходит дежурный этого вида смены. `null` — никакого. */
-  checklistId: number | null;
+  checklistIds: number[];
   /** Норма дня, Пн..Вс: сколько людей нужно. Ноль значит «не считаем». */
   coverage: number[];
   /** Слать ли напоминание накануне тому, у кого завтра смена этого вида. */
@@ -849,7 +849,7 @@ export interface ApiClient {
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
   saveTemplateRoles(templateId: number, pool: number[], preference: Record<number, number>): Promise<void>;
-  setTemplateChecklist(templateId: number, checklistId: number | null): Promise<void>;
+  setTemplateChecklists(templateId: number, checklistIds: readonly number[]): Promise<void>;
   setTemplateCoverage(templateId: number, coverage: number[]): Promise<void>;
   /** Напоминание вида смены: слать ли и каким текстом. `null` — стандартный. */
   setTemplateReminder(templateId: number, sendReminder: boolean, reminderText: string | null): Promise<void>;
@@ -1497,8 +1497,8 @@ export const realClient: ApiClient = {
     if (!res.ok) throw new Error(await errorMessage(res));
   },
 
-  async setTemplateChecklist(templateId, checklistId) {
-    await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { checklistId });
+  async setTemplateChecklists(templateId, checklistIds) {
+    await authorizedPutJson(`/api/admin/templates/${templateId}/checklist`, { checklistIds: [...checklistIds] });
   },
 
   async setTemplateCoverage(templateId, coverage) {
@@ -1632,7 +1632,7 @@ const devClient: ApiClient = {
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
   saveTemplateRoles: (templateId, pool, preference) => mockSaveTemplateRoles(templateId, pool, preference),
-  setTemplateChecklist: (templateId, requiresChecklist) => mockSetTemplateChecklist(templateId, requiresChecklist),
+  setTemplateChecklists: (templateId, checklistIds) => mockSetTemplateChecklists(templateId, checklistIds),
   setTemplateCoverage: (templateId, coverage) => mockSetTemplateCoverage(templateId, coverage),
   setTemplateReminder: (templateId, sendReminder, reminderText) => mockSetTemplateReminder(templateId, sendReminder, reminderText),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),

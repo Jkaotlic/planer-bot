@@ -32,16 +32,21 @@ export interface ChecklistItemLike {
  * однажды прислать чек-лист не тому. Какой именно чек-лист у какого вида смены,
  * решает админ на «Видах смен».
  *
- * Множество, а не «да/нет»: у человека в один день бывает две записи разных
- * видов, и каждая приносит свой список. Порядок — как в расписании, чтобы у
- * ранней смены проверки шли первыми.
+ * Множество, а не «да/нет», по двум причинам сразу: у человека в один день
+ * бывает две записи разных видов, и у одного вида смены бывает несколько
+ * списков — общая инструкция этажа и отдельная задача на ту же смену. Порядок —
+ * как в расписании, чтобы у ранней смены проверки шли первыми.
+ *
+ * До 2026-09-01 вид смены нёс ровно один список, и назначение второго молча
+ * отнимало вид смены у первого: инструкция 47 этажа перестала приходить
+ * дежурным, и узнали об этом через неделю.
  *
  * Запись без пресета чек-листа не приносит: привязка живёт на пресете, и у
  * смены, поставленной «своим временем», взять её неоткуда.
  */
 export function checklistsDueToday(
   entries: readonly ChecklistEntryLike[],
-  checklistIdByTemplate: ReadonlyMap<number, number>,
+  checklistIdsByTemplate: ReadonlyMap<number, readonly number[]>,
   date: string,
   employeeId: number,
 ): number[] {
@@ -50,10 +55,11 @@ export function checklistsDueToday(
     if (entry.employeeId !== employeeId) continue;
     if (entry.templateId == null) continue;
     if (entry.date > date || (entry.endDate ?? entry.date) < date) continue;
-    const checklistId = checklistIdByTemplate.get(entry.templateId);
-    // Один и тот же чек-лист у двух записей дня — это один чек-лист, а не два:
-    // человек не проходит одни и те же пункты дважды.
-    if (checklistId != null && !due.includes(checklistId)) due.push(checklistId);
+    for (const checklistId of checklistIdsByTemplate.get(entry.templateId) ?? []) {
+      // Один и тот же чек-лист у двух записей дня — это один чек-лист, а не два:
+      // человек не проходит одни и те же пункты дважды.
+      if (!due.includes(checklistId)) due.push(checklistId);
+    }
   }
   return due;
 }

@@ -232,6 +232,13 @@
       "when": 1787592171987,
       "tag": "0032_collection_auto_send",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1787595771987,
+      "tag": "0033_checklist_templates",
+      "breakpoints": true
     }
   ]
 }

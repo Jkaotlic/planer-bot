@@ -29,7 +29,7 @@ const person = (id: number, displayName: string): Employee => ({
 const EMPLOYEES: Employee[] = [person(1, "Аня Смирнова"), person(IGOR, "Игорь Петров")];
 
 const NIGHT: TemplateRolesView = {
-  templateId: 7, name: "Ночь", category: "shift", accent: "blue", checklistId: null, sendReminder: false, reminderText: null,
+  templateId: 7, name: "Ночь", category: "shift", accent: "blue", checklistIds: [], sendReminder: false, reminderText: null,
   coverage: [0, 0, 0, 0, 0, 0, 0],
   pool: [IGOR], preference: {},
 };
