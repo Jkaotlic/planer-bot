@@ -48,6 +48,7 @@ import {
   isCollectionActive,
   compareCollections,
   planEntryRange,
+  EMPTY_CALENDAR,
   type DayOccupancy,
   eachDayIso,
   isAbsence,
@@ -277,6 +278,8 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     includeWeekends: input.includeWeekends ?? false,
     mode,
     occupied,
+    // DEV-мок живёт без базы: праздников у него нет, и это честнее выдуманных.
+    calendar: EMPTY_CALENDAR,
   });
   const span = isAbsence(input.category) && input.to !== input.from;
   const rewrites = new Set(plan.rewritten);

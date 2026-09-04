@@ -109,6 +109,9 @@ export function createReadMock(opts: ReadMockOptions) {
           .filter((entry) => overlapsRange(entry, from, to))
           .sort(byDateThenStart)
           .map(toEntry),
+        // У мока нет базы, а выдуманный праздник менял бы поведение экранов,
+        // которые на нём и проверяют.
+        calendar: [],
       };
     },
   };

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { AddEntryPanel, type AddEntryPanelProps } from "./AddEntryPanel";
@@ -55,6 +56,7 @@ async function mount(props: Partial<AddEntryPanelProps> = {}) {
         templates: TEMPLATES,
         initialEmployeeId: 1,
         initialDate: "2026-06-08",
+        calendar: EMPTY_CALENDAR,
         onCancel: () => {},
         onSave: async () => {},
         ...props,

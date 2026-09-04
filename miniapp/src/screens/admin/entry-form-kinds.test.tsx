@@ -55,7 +55,7 @@ async function settle(times = 8) {
 async function openForm() {
   vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([EMPLOYEE]);
   vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
-  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [] });
+  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [], calendar: [] });
   vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
 
   host = document.createElement("div");
@@ -163,6 +163,8 @@ describe("форма записи в мини-аппе — правка отре
     vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
     vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
       employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [EXISTING],
+    
+      calendar: [],
     });
     vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
 

@@ -11,6 +11,7 @@ import type {
   TeamScheduleResponse,
   TemplateDto,
   StartTab,
+  CalendarDayDto,
 } from "@planer/shared";
 // Реэкспорт, а не копия: строка списка отметок описана в shared, потому что её
 // одинаково читают сервер и оба админских экрана.
@@ -134,6 +135,8 @@ export interface TeamEmployee {
 export interface TeamSchedule {
   employees: TeamEmployee[];
   shifts: Shift[];
+  /** Праздники и рабочие субботы недели — из того же ответа сервера. */
+  calendar: CalendarDayDto[];
 }
 
 export interface Me {
@@ -1114,6 +1117,7 @@ function withEmployeeNames(schedule: TeamScheduleResponse): TeamSchedule {
   const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
   return {
     employees: schedule.employees,
+    calendar: schedule.calendar,
     shifts: schedule.shifts.map((shift) => ({
       ...shift,
       employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,

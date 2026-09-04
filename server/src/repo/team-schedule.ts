@@ -2,6 +2,7 @@ import type { Db } from "../db/client";
 import { canSwap, type EntryCategory } from "@planer/shared";
 import { listActiveInRosterOrder } from "./employees";
 import { listShiftsOverlapping } from "./shifts";
+import { listCalendarDays } from "./calendar-days";
 
 /** A schedule entry shaped so it's safe to show to any worker. */
 export interface TeamScheduleEntry {
@@ -21,6 +22,8 @@ export interface TeamScheduleEntry {
 export interface TeamScheduleView {
   employees: { id: number; displayName: string; rosterOrder: number | null; excludedFromSwaps: boolean }[];
   shifts: TeamScheduleEntry[];
+  /** Праздники и рабочие субботы окна — исключения из правила «Сб/Вс». */
+  calendar: { date: string; kind: "holiday" | "workday"; note: string | null; source: "auto" | "manual" }[];
 }
 
 /**
@@ -66,5 +69,6 @@ export function readTeamSchedule(db: Db, from: string, to: string): TeamSchedule
       templateId: shift.templateId,
       employeeId: shift.employeeId,
     }));
-  return { employees, shifts };
+  const calendar = listCalendarDays(db, from, to).map(({ date, kind, note, source }) => ({ date, kind, note, source }));
+  return { employees, shifts, calendar };
 }

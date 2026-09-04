@@ -75,6 +75,23 @@ export const teamScheduleResponseSchema = z
         .strict(),
     ),
     shifts: z.array(scheduleEntrySchema),
+    /**
+     * Праздники и рабочие субботы диапазона — только исключения из правила
+     * «Сб/Вс». Едет вместе с расписанием, а не отдельной ручкой: обе консоли
+     * красят день ровно тогда, когда рисуют неделю, и второй запрос означал бы
+     * неделю, у которой цвета приезжают позже клеток.
+     */
+    calendar: z.array(
+      z
+        .object({
+          date: dateStr,
+          kind: z.enum(["holiday", "workday"]),
+          note: z.string().nullable(),
+          source: z.enum(["auto", "manual"]),
+        })
+        .strict(),
+    ),
   })
   .strict();
 export type TeamScheduleResponse = z.infer<typeof teamScheduleResponseSchema>;
+export type CalendarDayDto = TeamScheduleResponse["calendar"][number];

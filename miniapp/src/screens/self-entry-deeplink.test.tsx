@@ -63,7 +63,7 @@ let host: HTMLDivElement | null = null;
 
 beforeEach(() => {
   vi.spyOn(apiClient, "getMyShifts").mockResolvedValue({ shifts: [MY_SICK_LEAVE], today: daysFromNow(0) });
-  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ employees: [], shifts: [] });
+  vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ employees: [], shifts: [], calendar: [] });
   vi.spyOn(apiClient, "getSwaps").mockResolvedValue([]);
   vi.spyOn(apiClient, "getWeekendSlots").mockResolvedValue([]);
   vi.spyOn(apiClient, "getWeekendOffers").mockResolvedValue([]);

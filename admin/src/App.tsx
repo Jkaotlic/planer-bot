@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
+import { EMPTY_CALENDAR, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
   AuthRequiredError,
@@ -88,6 +88,8 @@ export function App() {
   /** Нормы дня по видам смен — из них сетка рисует «чего в дне не хватает». */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
+  // Праздники показанной недели; наполняется вместе с расписанием (см. `loadWeek`).
+  const dayCalendar = EMPTY_CALENDAR;
   const [events, setEvents] = useState<FeedEvent[]>([]);
   // Две разные беды, и раньше они лежали в одном поле, которое рисовалось вместо
   // всей `main-column`. Загрузка людей и пресетов не удалась — показывать
@@ -505,6 +507,7 @@ export function App() {
           templates={templates}
           initialEmployeeId={panelTarget?.employeeId ?? activeEmployees[0]?.id ?? 0}
           initialDate={panelTarget?.date ?? weekDates[0]!}
+          calendar={dayCalendar}
           existing={editingEntry}
           onCancel={() => {
             setPanelTarget(null);

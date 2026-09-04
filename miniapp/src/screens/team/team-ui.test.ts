@@ -99,6 +99,8 @@ function fallbackPaletteSchedule(): TeamSchedule {
       location: null,
       unrecognisedCode: null,
     })),
+  
+    calendar: [],
   };
 }
 
@@ -331,6 +333,8 @@ describe("team schedule UI", () => {
           employeeId: 10,
         },
       ],
+    
+      calendar: [],
     };
     const model = buildTodayModel("2026-07-28", schedule, [
       { id: 6, name: "Дежурство с 07:00", accent: "amber", sortOrder: 0 },
@@ -507,6 +511,8 @@ describe("team schedule UI", () => {
           employeeId: null,
         },
       ],
+    
+      calendar: [],
     };
     const templates = [
       { id: 6, name: "Дежурство с 07:00", accent: "amber", sortOrder: 0 },

@@ -64,6 +64,7 @@ import {
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
   planEntryRange,
+  calendarFrom,
   type DayOccupancy,
   eachDayIso,
   isAbsence,
@@ -570,6 +571,20 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
 }
 
 /**
+ * Праздники DEV-мока: один день, чтобы экран было чем проверить руками.
+ *
+ * Живёт между вызовами, как и остальные переключатели мока: отметив день
+ * рабочим, следующий `getTeamSchedule` отдаёт его уже таким.
+ */
+export const mockCalendar: { date: string; kind: "holiday" | "workday"; note: string | null; source: "auto" | "manual" }[] = [
+  { date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" },
+];
+
+export function mockDayCalendar() {
+  return calendarFrom(mockCalendar);
+}
+
+/**
  * Демо-расстановка диапазоном.
  *
  * Дни считает та же `planEntryRange`, что и сервер, а не своё похожее правило:
@@ -601,6 +616,8 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     includeWeekends: input.includeWeekends ?? false,
     mode,
     occupied,
+    // DEV-мок живёт без базы: праздников у него нет, и выдумывать их нечем.
+    calendar: mockDayCalendar(),
   });
   const span = isAbsence(input.category) && input.to !== input.from;
   const rewrites = new Set(plan.rewritten);

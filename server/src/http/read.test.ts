@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
+import { setManualDay } from "../repo/calendar-days";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
@@ -126,6 +127,22 @@ describe("read endpoints", () => {
     expect(body.shifts).toHaveLength(2);
     expect(body.shifts.some((shift: { employeeId: number | null }) => shift.employeeId === null)).toBe(true);
     expect(body.shifts.some((shift: { date: string }) => shift.date === "2026-06-28")).toBe(true);
+  });
+
+  it("отдаёт праздники и рабочие субботы диапазона, а без них — пустой список", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    const app = createApp({ db, config });
+    const empty = await app.request("/api/team/schedule?from=2026-06-01&to=2026-06-30", bearer(await tokenFor(app, 333)));
+    expect((await empty.json()).calendar).toEqual([]);
+
+    setManualDay(db, "2026-06-12", "holiday", "День России", new Date());
+    setManualDay(db, "2026-07-04", "workday", null, new Date());
+    const res = await app.request("/api/team/schedule?from=2026-06-01&to=2026-06-30", bearer(await tokenFor(app, 333)));
+    // Только дни диапазона: 4 июля в июньский ответ попасть не должно.
+    expect((await res.json()).calendar).toEqual([
+      { date: "2026-06-12", kind: "holiday", note: "День России", source: "manual" },
+    ]);
   });
 
   it.each([
