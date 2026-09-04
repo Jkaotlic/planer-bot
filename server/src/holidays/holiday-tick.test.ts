@@ -100,6 +100,15 @@ describe("runHolidayTick", () => {
     expect(listCalendarYear(db, 2026)[0]).toMatchObject({ kind: "workday", source: "manual" });
   });
 
+  it("календарь чужого года не пишется под запрошенный", async () => {
+    const db = makeTestDb();
+    // На 2027-й источник отдаёт документ 2026-го — кэш или редирект.
+    await runHolidayTick(db, fetcher({ 2026: { status: "ok", xml: XML(2026) }, 2027: { status: "ok", xml: XML(2026) } }), NOW);
+
+    expect(listCalendarYear(db, 2027)).toHaveLength(0);
+    expect(listCalendarYear(db, 2026).map((d) => d.date)).toEqual(["2026-06-12"]);
+  });
+
   it("битый ответ с кодом 200 год не стирает", async () => {
     const db = makeTestDb();
     await runHolidayTick(db, fetcher({ 2026: { status: "ok", xml: XML(2026) } }), NOW);

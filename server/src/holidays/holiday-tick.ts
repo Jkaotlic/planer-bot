@@ -73,6 +73,14 @@ export async function refreshHolidays(
       out.push(failed(db, year, err instanceof Error ? err.message : String(err), actor, now));
       continue;
     }
+    // Год ответа обязан совпадать с запрошенным. Иначе кэш или редирект отдал
+    // бы документ соседнего года, и его даты уехали бы в базу под чужим годом:
+    // строки того года остались бы нетронутыми, а `replaceAutoYear` упёрся бы
+    // в чужой первичный ключ.
+    if (parsed.year !== year) {
+      out.push(failed(db, year, `источник ответил календарём на ${parsed.year}`, actor, now));
+      continue;
+    }
     const days = storable(parsed);
     const { added, removed } = replaceAutoYear(db, year, days, now);
     setHolidayYearState(db, year, { refreshedAt: now.toISOString(), source: "xmlcalendar", days: days.length });

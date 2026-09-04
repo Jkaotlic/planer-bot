@@ -15,7 +15,10 @@ import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../r
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
-import { loadCalendar } from "../repo/calendar-days";
+import { listCalendarDays, loadCalendar, setManualDay } from "../repo/calendar-days";
+import { refreshHolidays } from "../holidays/holiday-tick";
+import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
+import { holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -154,6 +157,11 @@ export interface AppDeps {
   db: Db;
   config: Config;
   bot?: Bot;
+  /**
+   * Откуда брать производственный календарь по кнопке «Обновить сейчас».
+   * Подменяется в тестах; в проде это тот же загрузчик, что у суточного тика.
+   */
+  fetchHolidays?: FetchYear;
 }
 
 function displayNameOf(u: TelegramUser): string {
@@ -174,8 +182,18 @@ function rangeLabel(input: { title?: string | null; category: EntryCategory; sta
   return input.start && input.end ? `${name} ${input.start}–${input.end}` : name;
 }
 
+/**
+ * Идёт ли прямо сейчас загрузка календаря.
+ *
+ * Модульная, а не на экземпляр приложения, по той же причине, что и замок
+ * рассылки сбора: бот и API — один процесс, и второй одновременной загрузки
+ * не должно быть даже из другой вкладки.
+ */
+let holidaysRefreshing = false;
+
 export function createApp(deps: AppDeps): Hono<Env> {
   const { db, config, bot } = deps;
+  const fetchHolidays = deps.fetchHolidays ?? xmlcalendarFetcher();
   const app = new Hono<Env>();
 
   // Registered first (= outermost) so it runs for every response this process
@@ -643,6 +661,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
       swapsLockUpdatedBy: actor?.displayName ?? null,
       reminderHour: reminderHour(db),
       reminderHourUpdatedBy: hourActor?.displayName ?? null,
+      holidaysAuto: isHolidaysAuto(db),
+      // По годам и по порядку: экран печатает их строками, и «2027 выше 2026»
+      // читалось бы как ошибка загрузки.
+      holidays: Object.entries(holidaysState(db))
+        .map(([year, state]) => ({ year: Number(year), ...state }))
+        .sort((a, b) => a.year - b.year),
     });
   });
 
@@ -694,6 +718,69 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     recordAudit(db, "swaps_lock_changed", actorId, { locked: body.locked, cancelled: cancelled.length, ...reach });
     return c.json({ locked: body.locked, cancelled: cancelled.length, ...reach });
+  });
+
+  /**
+   * Рычаг «брать праздники из производственного календаря».
+   *
+   * Выключенный означает «бот таблицу не трогает»: ручные отметки админа при
+   * этом работают, и уже загруженные дни остаются — выключатель про будущее,
+   * а не про уборку.
+   */
+  app.put("/api/admin/settings/holidays-auto", requireAdmin(db, config.jwtSecret), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== "boolean") return c.json({ error: "enabled должен быть true или false" }, 400);
+    const actorId = c.get("auth").employeeId;
+    setHolidaysAuto(db, body.enabled, actorId);
+    recordAudit(db, "holidays_auto_changed", actorId, { enabled: body.enabled });
+    return c.json({ enabled: body.enabled });
+  });
+
+  /**
+   * «Обновить сейчас»: тот же код, что у суточного тика, но по нажатию.
+   *
+   * Замок, как у рассылки сбора: два нажатия подряд — это два похода в сеть за
+   * одним и тем же, а второй ещё и переписывал бы год под первым.
+   */
+  app.post("/api/admin/holidays/refresh", requireAdmin(db, config.jwtSecret), async (c) => {
+    if (holidaysRefreshing) return c.json({ error: "Обновление уже идёт." }, 409);
+    holidaysRefreshing = true;
+    try {
+      const today = birthdayAsOf(c);
+      if (!dateStr.safeParse(today).success) return c.json({ error: "asOf must be a valid YYYY-MM-DD date" }, 400);
+      const year = Number(today.slice(0, 4));
+      const years = await refreshHolidays(db, fetchHolidays, [year, year + 1], c.get("auth").employeeId, new Date());
+      return c.json({ years: years.map(({ year: y, status, added, removed }) => ({ year: y, status, added, removed })) });
+    } finally {
+      holidaysRefreshing = false;
+    }
+  });
+
+  /**
+   * Ручная отметка дня: «работаем» в праздник, «отдыхаем» в обычный день.
+   *
+   * `kind: null` снимает ручную строку, и день возвращается к тому, что скажет
+   * календарь на следующем обновлении. Ручное решение всегда сильнее
+   * автоматического — см. `replaceAutoYear`.
+   */
+  app.put("/api/admin/calendar/:date", requireAdmin(db, config.jwtSecret), async (c) => {
+    const date = c.req.param("date");
+    if (!dateStr.safeParse(date).success) return c.json({ error: "Дата должна быть в виде ГГГГ-ММ-ДД" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; note?: unknown };
+    if (body.kind !== null && body.kind !== "holiday" && body.kind !== "workday") {
+      return c.json({ error: "kind должен быть holiday, workday или null" }, 400);
+    }
+    if (body.note !== undefined && body.note !== null && typeof body.note !== "string") {
+      return c.json({ error: "note должен быть строкой" }, 400);
+    }
+    const note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : null;
+    setManualDay(db, date, body.kind, note, new Date());
+    recordAudit(db, "calendar_day_set", c.get("auth").employeeId, { date, kind: body.kind, note });
+    return c.json(
+      body.kind === null
+        ? { date, kind: null, note: null, source: null }
+        : { date, kind: body.kind, note, source: "manual" },
+    );
   });
 
   // --- Дни рождения ---------------------------------------------------------
