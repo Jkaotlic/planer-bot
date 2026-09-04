@@ -100,7 +100,12 @@ async function tap(bot: Bot, from: number, data: string) {
 }
 
 describe("ссылка на сбор, присланная боту в личку", () => {
-  it("привязывается к единственному ждущему дню рождения и подтверждается текстом письма", async () => {
+  /**
+   * С 2026-09-04 бот спрашивает и при единственном ждущем сборе: та же ссылка
+   * может быть просьбой про QR-код, и молчаливая привязка подменила бы сбор.
+   * Тап — часть сценария, а не обход теста.
+   */
+  it("привязывается к единственному ждущему дню рождения после тапа и подтверждается текстом письма", async () => {
     const { db, bot, api } = stage();
     const mark = person(db, "Марк", 1, birthDateIn(7));
     person(db, "Игорь", 222, null, true);
@@ -111,19 +116,22 @@ describe("ссылка на сбор, присланная боту в личк�
     updateCollection(db, round.id, { autoSendOn: null });
 
     await say(bot, 222, "https://example.com/sbor");
+    expect(buttonsOf(api.sent.find((m) => m.chat_id === 222)!)).toEqual(["Марк", "Просто QR-код"]);
+    await tap(bot, 222, `collection:link:${mark}`);
 
     const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
     expect(birthday.campaign?.collectUrl).toBe("https://example.com/sbor");
     // Семь минус три: день считается от праздника, а не «через столько-то от сегодня».
     expect(birthday.campaign?.autoSendOn).toBe(plusDays(TODAY, 4));
 
-    const reply = api.sent.find((m) => m.chat_id === 222)!;
+    // Последнее, а не первое сообщение: первым был вопрос «К какому сбору?».
+    const reply = api.sent.filter((m) => m.chat_id === 222).at(-1)!;
     expect(reply.text).toContain("Марк");
     expect(reply.text).toContain("Сбор на подарок");
     expect(buttonsOf(reply)).toContain("🚫 Не рассылать сам");
   });
 
-  it("молчит на ссылку от не-админа", async () => {
+  it("не-админу сбор не предлагает: ни вопроса, ни привязки", async () => {
     const { db, bot, api } = stage();
     person(db, "Марк", 1, birthDateIn(7));
     person(db, "Аня", 333, null);
@@ -131,9 +139,10 @@ describe("ссылка на сбор, присланная боту в личк�
     await say(bot, 333, "https://example.com/sbor");
 
     expect(api.sent).toHaveLength(0);
+    expect(upcomingBirthdays(db, TODAY).every((b) => b.campaign === null)).toBe(true);
   });
 
-  it("молчит, когда ждущих сборов нет", async () => {
+  it("не спрашивает про сбор, когда ждущих нет", async () => {
     const { db, bot, api } = stage();
     person(db, "Игорь", 222, null, true);
 
@@ -159,15 +168,17 @@ describe("ссылка на сбор, присланная боту в личк�
     await say(bot, 222, "https://example.com/sbor");
 
     expect(api.sent).toHaveLength(0);
+    expect(upcomingBirthdays(db, TODAY).every((b) => b.campaign === null)).toBe(true);
   });
 
   it("говорит остальным админам, что ссылка появилась, и молчит имениннику", async () => {
     const { db, bot, api } = stage();
-    person(db, "Марк", 1, birthDateIn(7));
+    const mark = person(db, "Марк", 1, birthDateIn(7));
     person(db, "Игорь", 222, null, true);
     person(db, "Аня", 444, null, true);
 
     await say(bot, 222, "https://example.com/sbor");
+    await tap(bot, 222, `collection:link:${mark}`);
 
     const toAnya = api.sent.find((m) => m.chat_id === 444)!;
     expect(toAnya.text).toContain("Игорь");
@@ -185,7 +196,7 @@ describe("ссылка на сбор, присланная боту в личк�
 
     const ask = api.sent.find((m) => m.chat_id === 222)!;
     expect(ask.text).toContain("К какому сбору эта ссылка?");
-    expect(buttonsOf(ask)).toEqual(["Марк", "Аня"]);
+    expect(buttonsOf(ask)).toEqual(["Марк", "Аня", "Просто QR-код"]);
     // Ссылка ждёт ответа, а не лежит в `callback_data`: в 64 байта она не влезает.
     expect(linkPendingFor(db, igor)).toBe("https://example.com/sbor");
     // Просмотр кандидатов не пишет: раунда нет, пока привязки не было.
@@ -207,7 +218,7 @@ describe("ссылка на сбор, присланная боту в личк�
     await say(bot, 222, "https://example.com/novaya");
 
     const ask = api.sent.find((m) => m.chat_id === 222)!;
-    expect(buttonsOf(ask)).toEqual(["Марк · заменить ссылку"]);
+    expect(buttonsOf(ask)).toEqual(["Марк · заменить ссылку", "Просто QR-код"]);
     const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
     expect(birthday.campaign?.collectUrl).toBe("https://example.com/staraya");
 
@@ -281,11 +292,12 @@ describe("жалоба на бота, внутри которой есть сс�
     // Обратная сторона правки: «есть окно — молчим» заперло бы ссылку навсегда
     // у каждого, кто когда-то нажал «🐞 Баг» и не дописал.
     const { db, bot } = stage();
-    person(db, "Марк", 1, birthDateIn(7));
+    const mark = person(db, "Марк", 1, birthDateIn(7));
     const igor = person(db, "Игорь", 222, null, true);
     openBugPrompt(db, igor, 42, new Date(Date.now() - 16 * 60_000));
 
     await say(bot, 222, "https://example.com/sbor");
+    await tap(bot, 222, `collection:link:${mark}`);
 
     const birthday = upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!;
     expect(birthday.campaign?.collectUrl).toBe("https://example.com/sbor");
@@ -296,9 +308,10 @@ describe("жалоба на бота, внутри которой есть сс�
 describe("кнопки под подтверждением", () => {
   /** Привязать ссылку и вернуть готовый раунд — общее начало трёх тестов. */
   async function withLink(db: Db, bot: Bot) {
-    person(db, "Марк", 1, birthDateIn(7));
+    const mark = person(db, "Марк", 1, birthDateIn(7));
     person(db, "Игорь", 222, null, true);
     await say(bot, 222, "https://example.com/sbor");
+    await tap(bot, 222, `collection:link:${mark}`);
     return upcomingBirthdays(db, TODAY).find((b) => b.displayName === "Марк")!.campaign!;
   }
 

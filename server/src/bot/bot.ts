@@ -25,6 +25,7 @@ import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
+import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import {
   notifyUser,
@@ -626,9 +627,14 @@ export function createBot(deps: BotDeps): Bot {
    * похожих условия здесь — это ровно тот случай, когда сообщение достаётся
    * обоим или никому.
    *
-   * Возвращает `true`, если сообщение было ссылкой и обработано. Бот молчит,
-   * когда ждать нечего: на произвольный текст он молчал всегда, и ссылка сама
-   * по себе поводом заговорить не является.
+   * Возвращает `true`, если сообщение было ссылкой к сбору и обработано. Когда
+   * ждущих сборов нет, ссылка достаётся `sendQr` ниже — с 2026-09-04 бот
+   * отвечает на неё QR-кодом.
+   *
+   * Молчаливой привязки к единственному ждущему сбору больше нет, и это цена
+   * QR-кода: ссылка от админа в две недели перед чьим-то днём рождения могла
+   * быть и сбором, и просьбой нарисовать QR, и подменить ссылку сбора без
+   * вопроса — худший из двух исходов. Один лишний тап раз в год дешевле.
    */
   async function captureCollectionLink(ctx: Context, text: string): Promise<boolean> {
     const from = ctx.from;
@@ -646,15 +652,10 @@ export function createBot(deps: BotDeps): Bot {
     const candidates = linkCandidates(db, today, who.me.id);
     if (candidates.length === 0) return false;
 
+    // Ноль ждущих — значит все со ссылками, и это замена: спрашиваем со всеми,
+    // потому что молча подменить ссылку под чужим готовым сбором нельзя.
     const waiting = candidates.filter((c) => !c.hasUrl);
-    if (waiting.length !== 1) {
-      // Ноль ждущих — значит все со ссылками, и это замена: спрашиваем всё равно,
-      // потому что молча подменить ссылку под чужим готовым сбором нельзя.
-      await askWhichCollection(ctx, who.me.id, url, waiting.length > 0 ? waiting : candidates);
-      return true;
-    }
-
-    await bindLink(ctx, who.me.id, waiting[0]!.employeeId, url, today);
+    await askWhichCollection(ctx, who.me.id, url, waiting.length > 0 ? waiting : candidates);
     return true;
   }
 
@@ -680,36 +681,62 @@ export function createBot(deps: BotDeps): Bot {
     await notifyLinkReady(db, bot, updated, adminEmployeeId, today);
   }
 
-  /** Несколько кандидатов — спрашиваем. Ссылка ждёт в окне, а не в `callback_data`. */
+  /**
+   * Есть сборы — спрашиваем. Ссылка ждёт в окне, а не в `callback_data`.
+   *
+   * Последняя кнопка — выход из вопроса: ссылка может быть вовсе не про сбор,
+   * и без неё админу в эти две недели QR-код был бы недоступен.
+   */
   async function askWhichCollection(
     ctx: Context, adminEmployeeId: number, url: string, candidates: LinkCandidate[],
   ): Promise<void> {
     setLinkPending(db, adminEmployeeId, url);
     await ctx.reply("К какому сбору эта ссылка?", {
       reply_markup: {
-        inline_keyboard: candidates.map((c) => [{
-          text: c.hasUrl ? `${c.displayName} · заменить ссылку` : c.displayName,
-          callback_data: `collection:link:${c.employeeId}`,
-        }]),
+        inline_keyboard: [
+          ...candidates.map((c) => [{
+            text: c.hasUrl ? `${c.displayName} · заменить ссылку` : c.displayName,
+            callback_data: `collection:link:${c.employeeId}`,
+          }]),
+          [{ text: "Просто QR-код", callback_data: "collection:qr" }],
+        ],
       },
     });
   }
 
-  /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
-   *  разбираются раньше и сюда не доходят. */
-  async function captureBugReport(ctx: Context, text: string): Promise<void> {
+  /**
+   * QR-код по ссылке из сообщения. Последняя ветка текстового обработчика:
+   * всё, что могло забрать сообщение себе (кнопки, сбор, жалоба), уже
+   * отказалось. Ошибку рендера не глотаем: `/week` тоже не глотает, а тихое
+   * молчание на ссылку выглядело бы как «бот сломался».
+   */
+  async function sendQr(ctx: Context, url: string): Promise<void> {
     const from = ctx.from;
     if (!from) return;
+    if (!acting(from.id).ok) return;
+    const image = await buildQrImage(url);
+    if (image.kind === "text") {
+      await ctx.reply(image.text);
+      return;
+    }
+    await ctx.replyWithPhoto(new InputFile(image.png, "qr.png"), { caption: image.caption });
+  }
+
+  /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
+   *  разбираются раньше и сюда не доходят. */
+  async function captureBugReport(ctx: Context, text: string): Promise<boolean> {
+    const from = ctx.from;
+    if (!from) return false;
     const who = acting(from.id);
-    if (!who.ok) return;
+    if (!who.ok) return false;
     const pending = getBugPending(db, who.me.id);
-    if (!pending) return;
-    if (!shouldCapture(pending, ctx.msg?.reply_to_message?.message_id, new Date())) return;
+    if (!pending) return false;
+    if (!shouldCapture(pending, ctx.msg?.reply_to_message?.message_id, new Date())) return false;
 
     const res = submitBugReport(db, who.me.id, text, new Date());
     if (!res.ok) {
       await ctx.reply(res.reason);
-      return;
+      return true;
     }
     // Аудит уже записал `submitBugReport` — второй записи здесь не нужно,
     // иначе одна жалоба легла бы в журнал дважды. Сверено с bug-service.ts.
@@ -719,6 +746,7 @@ export function createBot(deps: BotDeps): Bot {
     // путь «нажал → написал → отправил» обязан возвращать её сам, без лишнего тапа.
     await replyWithMenu(ctx, "Записал, спасибо 🙏 Разберёмся.");
     await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
+    return true;
   }
 
   /**
@@ -736,8 +764,9 @@ export function createBot(deps: BotDeps): Bot {
    * стала бы обходом защиты `sendWeek`, которая существует ровно для того,
    * чтобы роспись всей команды не публиковалась в группу.
    *
-   * На всё остальное бот молчит, как молчал до этой клавиатуры. Отвечать на
-   * произвольный текст его никто не просил.
+   * На всё остальное, кроме ссылки, бот молчит, как молчал до этой клавиатуры.
+   * Отвечать на произвольный текст его никто не просил; на ссылку с 2026-09-04
+   * просили — QR-кодом, см. `sendQr`.
    */
   /**
    * `/instruction` — приложить дежурным файл с инструкцией.
@@ -870,6 +899,24 @@ export function createBot(deps: BotDeps): Bot {
     await bindLink(ctx, who.me.id, Number(ctx.match[1]), url, teamNow(config.teamTz).date);
   });
 
+  /** «Просто QR-код» под вопросом про сбор: ссылка та же, что ждёт в окне. */
+  bot.callbackQuery(/^collection:qr$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: `${who.text}.` });
+      return;
+    }
+    const url = linkPendingFor(db, who.me.id);
+    if (!url) {
+      await ctx.answerCallbackQuery();
+      await ctx.reply("Не помню, какую ссылку ты присылал. Пришли ссылку ещё раз.");
+      return;
+    }
+    clearLinkPending(db, who.me.id);
+    await ctx.answerCallbackQuery();
+    await sendQr(ctx, url);
+  });
+
   /**
    * Готовые опережения для кнопки «другой день».
    *
@@ -992,10 +1039,14 @@ export function createBot(deps: BotDeps): Bot {
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
     else if (text === BTN_BUG) await startBugReport(ctx);
-    // Последним и только здесь: всё, что выше, — метки кнопок, и они всегда кнопки.
-    // На остальное бот молчит, как молчал, — если окна ожидания нет.
+    // Всё, что выше, — метки кнопок, и они всегда кнопки. Дальше по порядку:
+    // сбор, жалоба, и только потом QR — ссылка внутри жалобы остаётся жалобой.
     else if (await captureCollectionLink(ctx, text)) return;
-    else await captureBugReport(ctx, text);
+    else if (await captureBugReport(ctx, text)) return;
+    else {
+      const url = extractUrl(text);
+      if (url) await sendQr(ctx, url);
+    }
   });
 
   /**
