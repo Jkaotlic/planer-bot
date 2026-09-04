@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, type EntryCategory } from "@planer/shared";
+import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, EMPTY_CALENDAR, type DayCalendar, type EntryCategory } from "@planer/shared";
 
 const baseEntry = z.object({
   date: dateStr,
@@ -37,11 +37,14 @@ export function entryTimesError(v: { category: EntryCategory; start?: string | n
  *
  * Returns an error message, or null if coherent.
  */
-export function entryDateError(v: { category: EntryCategory; date: string; endDate?: string | null }): string | null {
+export function entryDateError(
+  v: { category: EntryCategory; date: string; endDate?: string | null },
+  calendar: DayCalendar,
+): string | null {
   // Само правило живёт в `categoryFitsDate` (@planer/shared): его второй
   // читатель — `planEntryRange`, который не должен класть в план день, который
   // эта проверка потом отвергнет.
-  if (!categoryFitsDate(v.category, v.date)) {
+  if (!categoryFitsDate(v.category, v.date, calendar)) {
     return "«Работа в выходной» может стоять только на субботу или воскресенье";
   }
   if (v.endDate && v.endDate !== v.date && !isAbsence(v.category)) {
@@ -70,7 +73,7 @@ export function entryRangeError(v: { date: string; endDate?: string | null }): s
 export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
   const err = entryTimesError(v);
   if (err) ctx.addIssue({ code: "custom", path: ["start"], message: err });
-  const dateErr = entryDateError(v);
+  const dateErr = entryDateError(v, EMPTY_CALENDAR);
   if (dateErr) ctx.addIssue({ code: "custom", path: ["date"], message: dateErr });
   const rangeErr = entryRangeError(v);
   if (rangeErr) ctx.addIssue({ code: "custom", path: ["endDate"], message: rangeErr });

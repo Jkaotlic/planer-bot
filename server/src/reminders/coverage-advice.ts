@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { addDaysIso, coverageAdviceText, eachDayIso, parseCoverage, scheduleGaps } from "@planer/shared";
+import { EMPTY_CALENDAR, addDaysIso, coverageAdviceText, eachDayIso, parseCoverage, scheduleGaps } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
@@ -42,7 +42,7 @@ export async function runCoverageAdviceTick(db: Db, bot: Bot, now: { date: strin
     name: t.name,
     coverage: parseCoverage(t.coverage),
   }));
-  const gaps = scheduleGaps(entries, templates, eachDayIso(from, to));
+  const gaps = scheduleGaps(entries, templates, eachDayIso(from, to), EMPTY_CALENDAR);
   const text = coverageAdviceText(gaps);
 
   // Отметка ставится и когда сказать нечего: иначе тик пересчитывал бы неделю

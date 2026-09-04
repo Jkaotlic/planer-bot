@@ -79,6 +79,7 @@ import {
   parseCoverage,
   serializeCoverage,
   isWeekend,
+  EMPTY_CALENDAR,
   isAbsence,
   countsForBalance,
   categoryLabel,
@@ -1247,6 +1248,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       includeWeekends: input.includeWeekends,
       mode: input.mode,
       occupied,
+      calendar: EMPTY_CALENDAR,
     });
 
     const { from, to, includeWeekends, mode, ...entryFields } = input;
@@ -1391,7 +1393,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       start: patch.start !== undefined ? patch.start : existing.start,
       end: patch.end !== undefined ? patch.end : existing.end,
     };
-    const err = entryTimesError(merged) ?? entryDateError(merged) ?? entryRangeError(merged);
+    const err = entryTimesError(merged) ?? entryDateError(merged, EMPTY_CALENDAR) ?? entryRangeError(merged);
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
 
     // `unrecognisedCode` means «импорт не смог прочитать эту клетку», and every

@@ -10,6 +10,7 @@ import {
   serializeCoverage,
 } from "./coverage";
 import type { EntryCategory } from "./category";
+import { EMPTY_CALENDAR, calendarFrom } from "./calendar";
 
 describe("parseCoverage", () => {
   it("reads the verified Monday rule for Утро", () => {
@@ -153,17 +154,17 @@ describe("scheduleGaps — пробелы недели для совета ад�
     ({ date, employeeId, templateId, category });
 
   it("будний день без единой смены — пробел, даже если норм нет", () => {
-    const gaps = scheduleGaps([], [], ["2026-09-07"]);
+    const gaps = scheduleGaps([], [], ["2026-09-07"], EMPTY_CALENDAR);
     expect(gaps).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
   });
 
   it("пустые суббота и воскресенье пробелом не считаются", () => {
-    expect(scheduleGaps([], [], ["2026-09-12", "2026-09-13"])).toEqual([]);
+    expect(scheduleGaps([], [], ["2026-09-12", "2026-09-13"], EMPTY_CALENDAR)).toEqual([]);
   });
 
   it("день ниже нормы — пробел с перечнем, чего не хватает", () => {
     const entries = [shift("2026-09-07", 10, 1), shift("2026-09-07", 11, 2)];
-    const gaps = scheduleGaps(entries, [morning, duty], ["2026-09-07"]);
+    const gaps = scheduleGaps(entries, [morning, duty], ["2026-09-07"], EMPTY_CALENDAR);
     expect(gaps).toEqual([
       { date: "2026-09-07", empty: false, missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }] },
     ]);
@@ -171,17 +172,22 @@ describe("scheduleGaps — пробелы недели для совета ад�
 
   it("день по норме в ответ не попадает", () => {
     const entries = [shift("2026-09-07", 10, 1), shift("2026-09-07", 12, 1), shift("2026-09-07", 11, 2)];
-    expect(scheduleGaps(entries, [morning, duty], ["2026-09-07"])).toEqual([]);
+    expect(scheduleGaps(entries, [morning, duty], ["2026-09-07"], EMPTY_CALENDAR)).toEqual([]);
   });
 
   it("отпуск и запись без человека день не заполняют", () => {
     const entries = [shift("2026-09-07", 10, null, "vacation"), shift("2026-09-07", null, 1)];
-    expect(scheduleGaps(entries, [], ["2026-09-07"])).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
+    expect(scheduleGaps(entries, [], ["2026-09-07"], EMPTY_CALENDAR)).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
+  });
+
+  it("праздник в будни пустым днём не считается, рабочая суббота — считается", () => {
+    const cal = calendarFrom([{ date: "2026-09-07", kind: "holiday" }, { date: "2026-09-12", kind: "workday" }]);
+    expect(scheduleGaps([], [], ["2026-09-07", "2026-09-12"], cal)).toEqual([{ date: "2026-09-12", missing: [], empty: true }]);
   });
 
   it("многодневное дежурство закрывает каждый свой день", () => {
     const entries = [{ date: "2026-09-07", endDate: "2026-09-11", employeeId: 11, templateId: 2, category: "duty" as const }];
-    expect(scheduleGaps(entries, [], ["2026-09-07", "2026-09-08", "2026-09-11"])).toEqual([]);
+    expect(scheduleGaps(entries, [], ["2026-09-07", "2026-09-08", "2026-09-11"], EMPTY_CALENDAR)).toEqual([]);
   });
 });
 

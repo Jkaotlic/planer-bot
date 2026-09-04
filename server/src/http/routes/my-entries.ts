@@ -8,6 +8,7 @@ import {
   selfEntryRefusal,
   selfEntryEditRefusal,
   canAddOwnShifts,
+  EMPTY_CALENDAR,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -131,7 +132,9 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
   /** Category-vs-times, category-vs-date and range coherence — the entry's own rules. */
   function shapeError(body: SelfEntryBody): string | null {
     const row = rowFor(body);
-    return entryTimesError(row) ?? entryDateError(row) ?? entryRangeError(row);
+    // Пустой календарь намеренно: единственное правило «категория ↔ дата» — про
+    // «работу в выходной», а её работник себе не ставит (`isSelfWritable`).
+    return entryTimesError(row) ?? entryDateError(row, EMPTY_CALENDAR) ?? entryRangeError(row);
   }
 
   routes.post("/api/my/entries", requireAuth(db, config.jwtSecret), async (c) => {
