@@ -77,7 +77,7 @@ describe("role configuration columns", () => {
     db.insert(templatePreference).values({ templateId: tpl.id, employeeId: emp.id }).run();
     expect(db.select().from(templatePreference).all()[0]!.weight).toBe(1);
 
-    db.insert(calendarDays).values({ date: "2026-06-12", kind: "holiday", note: "День России" }).run();
+    db.insert(calendarDays).values({ date: "2026-06-12", kind: "holiday", note: "День России", updatedAt: new Date() }).run();
     expect(db.select().from(calendarDays).all()[0]!.kind).toBe("holiday");
   });
 
