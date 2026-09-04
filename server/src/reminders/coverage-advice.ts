@@ -4,6 +4,7 @@ import type { Db } from "../db/client";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { coverageAdviceSentOn, markCoverageAdviceSent, reminderHour } from "../repo/settings";
+import { loadCalendar } from "../repo/calendar-days";
 import { recordAudit } from "../repo/audit";
 import { notifyAdmins } from "../bot/notify";
 
@@ -42,7 +43,9 @@ export async function runCoverageAdviceTick(db: Db, bot: Bot, now: { date: strin
     name: t.name,
     coverage: parseCoverage(t.coverage),
   }));
-  const gaps = scheduleGaps(entries, templates, eachDayIso(from, to));
+  // Праздник не пуст: в него не выходят. Рабочая суббота, наоборот, обычный
+  // день, и оставленная без смен она — тот самый пробел.
+  const gaps = scheduleGaps(entries, templates, eachDayIso(from, to), loadCalendar(db, from, to));
   const text = coverageAdviceText(gaps);
 
   // Отметка ставится и когда сказать нечего: иначе тик пересчитывал бы неделю

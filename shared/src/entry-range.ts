@@ -1,19 +1,19 @@
 import { isAbsence, type EntryCategory } from "./category";
-import { isWeekend } from "./time";
+import { isDayOff, type DayCalendar } from "./calendar";
 import { eachDayIso } from "./week-dates";
 
 /**
  * Подходит ли день этой категории.
  *
  * Пока правило одно — «Работа в выходной» по определению отработанный выходной,
- * и на будни она встать не может (календаря праздников нет, так что праздник
- * среди недели выходным не считается). Отдельной функцией, а не строкой внутри
- * серверной валидации, потому что читателей теперь двое: та же валидация и
- * `planEntryRange`, которому нельзя класть в план день, который сервер потом
- * отвергнет, — он уронил бы всю транзакцию из-за одной клетки.
+ * и на будни она встать не может. Выходной — по календарю: с 2026-09-04 праздник
+ * среди недели тоже выходной, а перенесённая рабочая суббота — нет. Отдельной
+ * функцией, а не строкой внутри серверной валидации, потому что читателей
+ * двое: та же валидация и `planEntryRange`, которому нельзя класть в план день,
+ * который сервер потом отвергнет, — он уронил бы всю транзакцию из-за одной клетки.
  */
-export function categoryFitsDate(category: EntryCategory, date: string): boolean {
-  if (category === "weekend_work") return isWeekend(date);
+export function categoryFitsDate(category: EntryCategory, date: string, calendar: DayCalendar): boolean {
+  if (category === "weekend_work") return isDayOff(date, calendar);
   return true;
 }
 
@@ -66,10 +66,16 @@ export interface EntryRangeInput {
    * знать чем — смену он заменит, отпуск оставит.
    */
   occupied?: Readonly<Record<string, DayOccupancy | undefined>>;
+  /**
+   * Календарь исключений: праздники и рабочие субботы. Обязательный, без
+   * умолчания: вызов, забывший его, молча жил бы без праздников, и заметили
+   * бы это по жалобе. Тесты передают `EMPTY_CALENDAR` явно.
+   */
+  calendar: DayCalendar;
 }
 
 export function planEntryRange(input: EntryRangeInput): EntryRangePlan {
-  const { from, to, category, includeWeekends, mode, occupied } = input;
+  const { from, to, category, includeWeekends, mode, occupied, calendar } = input;
   if (to < from) return { days: [], rewritten: [], skipped: [] };
   if (isAbsence(category)) return { days: [from], rewritten: [], skipped: [] };
 
@@ -83,8 +89,8 @@ export function planEntryRange(input: EntryRangeInput): EntryRangePlan {
     // сколько бы флагов ни стояло. Занятость идёт последней, потому что режим
     // перезаписи ослабляет только её: выходной он не берёт так же, как и
     // расстановка.
-    if (!categoryFitsDate(category, date)) skipped.push({ date, reason: "category" });
-    else if (!includeWeekends && isWeekend(date)) skipped.push({ date, reason: "weekend" });
+    if (!categoryFitsDate(category, date, calendar)) skipped.push({ date, reason: "category" });
+    else if (!includeWeekends && isDayOff(date, calendar)) skipped.push({ date, reason: "weekend" });
     else {
       const busy = occupied?.[date];
       if (!busy) days.push(date);

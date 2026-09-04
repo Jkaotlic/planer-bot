@@ -9,7 +9,7 @@ import {
   resolveShiftTimes,
   workPresets,
 } from "@planer/shared";
-import type { EntryCategory, EntryRangeMode } from "@planer/shared";
+import type { DayCalendar, EntryCategory, EntryRangeMode } from "@planer/shared";
 import type { Employee, NewEntryInput, NewEntryRangeInput, Shift, Template } from "../api/client";
 import { categoryLabel } from "../categories";
 import { PersonPicker } from "./PersonPicker";
@@ -33,6 +33,12 @@ export interface AddEntryPanelProps {
   onSaveRange?: (input: NewEntryRangeInput) => Promise<void>;
   /** Only offered while editing. */
   onDelete?: () => Promise<void>;
+  /**
+   * Праздники и рабочие субботы показанной недели. Обязательный, а не «по
+   * умолчанию пусто»: предпросмотр, молча забывший праздники, обещал бы дни,
+   * которые сервер не поставит.
+   */
+  calendar: DayCalendar;
 }
 
 const FRIDAY_INDEX = 4;
@@ -74,6 +80,7 @@ export function AddEntryPanel({
   onSave,
   onSaveRange,
   onDelete,
+  calendar,
 }: AddEntryPanelProps) {
   // Смены и дежурства одним списком, в порядке `sortOrder` — правило живёт в
   // `@planer/shared`, чтобы мини-апп показывал ровно тот же список.
@@ -116,8 +123,12 @@ export function AddEntryPanel({
    * занятых дней: панель не знает расписание за пределами показанной недели, а
    * догадка «наверное, свободно» врала бы ровно там, где человек ей поверит.
    * Поэтому про занятые сказано словами, а точное число приходит в ответе.
+   *
+   * `calendar` — из недели, показанной на экране (см. `App.tsx`): предпросмотр
+   * обязан считать праздник выходным ровно так же, как посчитает сервер, иначе
+   * он пообещает пять дней там, где встанет четыре.
    */
-  const plan = planEntryRange({ from, to, category, includeWeekends, mode });
+  const plan = planEntryRange({ from, to, category, includeWeekends, mode, calendar });
 
   function selectPreset(template: Template) {
     setChoice({ kind: "preset", templateId: template.id });

@@ -1,6 +1,7 @@
 import { addDaysIso, buildWeekLegend, buildWeekModel, formatWeekRangeLabelIso } from "@planer/shared";
 import type { Db } from "../db/client";
 import { readTeamSchedule } from "../repo/team-schedule";
+import { loadCalendar } from "../repo/calendar-days";
 import { listActiveTemplates } from "../repo/templates";
 import { renderWeekSvg } from "../render/week-svg";
 import { svgToPng } from "../render/rasterize";
@@ -23,6 +24,13 @@ export function buildWeekImage(db: Db, mondayIso: string, today: string, showLeg
 
   const model = buildWeekModel(mondayIso, schedule, listActiveTemplates(db));
   const label = `Команда · ${formatWeekRangeLabelIso(mondayIso, sunday)}`;
-  const svg = renderWeekSvg({ model, legend: buildWeekLegend(model), weekLabel: label, today, showLegend });
+  const svg = renderWeekSvg({
+    model,
+    legend: buildWeekLegend(model),
+    weekLabel: label,
+    today,
+    calendar: loadCalendar(db, mondayIso, sunday),
+    showLegend,
+  });
   return { kind: "photo", png: svgToPng(svg), caption: label };
 }

@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import type { Shift, TeamSchedule } from "../../api/client";
 import {
   buildTodayModel,
@@ -99,6 +100,8 @@ function fallbackPaletteSchedule(): TeamSchedule {
       location: null,
       unrecognisedCode: null,
     })),
+  
+    calendar: [],
   };
 }
 
@@ -331,6 +334,8 @@ describe("team schedule UI", () => {
           employeeId: 10,
         },
       ],
+    
+      calendar: [],
     };
     const model = buildTodayModel("2026-07-28", schedule, [
       { id: 6, name: "Дежурство с 07:00", accent: "amber", sortOrder: 0 },
@@ -401,6 +406,7 @@ describe("team schedule UI", () => {
         model,
         today: "2026-07-27",
         isDark: false,
+        calendar: EMPTY_CALENDAR,
       }),
     );
     const dark = renderToStaticMarkup(
@@ -408,6 +414,7 @@ describe("team schedule UI", () => {
         model,
         today: "2026-07-27",
         isDark: true,
+        calendar: EMPTY_CALENDAR,
       }),
     );
 
@@ -507,6 +514,8 @@ describe("team schedule UI", () => {
           employeeId: null,
         },
       ],
+    
+      calendar: [],
     };
     const templates = [
       { id: 6, name: "Дежурство с 07:00", accent: "amber", sortOrder: 0 },
@@ -520,6 +529,7 @@ describe("team schedule UI", () => {
         model,
         today: "2026-07-30",
         isDark: false,
+        calendar: EMPTY_CALENDAR,
       }),
     );
 
@@ -586,6 +596,7 @@ describe("team schedule UI", () => {
         ),
         today: "2026-07-30",
         isDark: false,
+        calendar: EMPTY_CALENDAR,
       }),
     );
     expect(withoutUnassigned.match(/class="team-week__row"/g)).toHaveLength(3);

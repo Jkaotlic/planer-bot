@@ -52,6 +52,7 @@ const schedule: TeamSchedule = {
     shift({ id: 4, date: "2026-07-27", employeeId: null }),
     shift({ id: 5, date: "2026-07-27", start: "09:00", end: "18:00", employeeId: 20 }),
   ],
+  calendar: [],
 };
 
 const nextSchedule: TeamSchedule = {
@@ -65,6 +66,7 @@ const nextSchedule: TeamSchedule = {
       employeeId: 30,
     }),
   ],
+  calendar: [],
 };
 
 describe("team schedule model", () => {
@@ -113,6 +115,8 @@ describe("team schedule model", () => {
           employeeId: 10,
         }),
       ],
+    
+      calendar: [],
     };
 
     const model = buildTodayModel("2026-07-27", collisionSchedule, templates);
@@ -592,6 +596,8 @@ describe("buildWeekLegend", () => {
       excludedFromSwaps: false,
     })),
     shifts,
+  
+    calendar: [],
   });
 
   const shift = (over: Partial<Shift> & Pick<Shift, "id" | "employeeId" | "date">): Shift => ({

@@ -3,6 +3,8 @@ import type { StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
+  CalendarDayDto,
+  HolidayRefreshYear,
   AdminSlotView,
   Employee,
   Me,
@@ -64,6 +66,7 @@ import {
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
   planEntryRange,
+  calendarFrom,
   type DayOccupancy,
   eachDayIso,
   isAbsence,
@@ -318,8 +321,11 @@ export function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
   return readMock.getMyShifts();
 }
 
-export function mockGetTeamSchedule(from: string, to: string): Promise<TeamScheduleResponse> {
-  return readMock.getTeamSchedule(from, to);
+export async function mockGetTeamSchedule(from: string, to: string): Promise<TeamScheduleResponse> {
+  const schedule = await readMock.getTeamSchedule(from, to);
+  // Мок читает праздники из того же списка, что правит `mockSetCalendarDay`:
+  // иначе отмеченный руками день не красился бы до перезагрузки страницы.
+  return { ...schedule, calendar: mockCalendar.filter((day) => day.date >= from && day.date <= to) };
 }
 
 /**
@@ -570,6 +576,56 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
 }
 
 /**
+ * Праздники DEV-мока: один день, чтобы экран было чем проверить руками.
+ *
+ * Живёт между вызовами, как и остальные переключатели мока: отметив день
+ * рабочим, следующий `getTeamSchedule` отдаёт его уже таким.
+ */
+export const mockCalendar: { date: string; kind: "holiday" | "workday"; note: string | null; source: "auto" | "manual" }[] = [
+  { date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" },
+];
+
+export function mockDayCalendar() {
+  return calendarFrom(mockCalendar);
+}
+
+/** DEV-рычаг автозагрузки: ведёт себя как настоящий между вызовами. */
+let mockHolidaysAuto = true;
+
+export async function mockSetHolidaysAuto(enabled: boolean): Promise<void> {
+  await delay(150);
+  mockHolidaysAuto = enabled;
+}
+
+export function mockHolidaysAutoValue(): boolean {
+  return mockHolidaysAuto;
+}
+
+/** «Обновить сейчас» в DEV: год текущий загружен, следующий ещё не опубликован. */
+export async function mockRefreshHolidays(): Promise<HolidayRefreshYear[]> {
+  await delay(300);
+  const year = new Date().getUTCFullYear();
+  return [
+    { year, status: "ok", added: mockCalendar.length, removed: 0 },
+    { year: year + 1, status: "missing", added: 0, removed: 0 },
+  ];
+}
+
+export async function mockSetCalendarDay(
+  date: string,
+  kind: "holiday" | "workday" | null,
+  note: string | null,
+): Promise<CalendarDayDto | null> {
+  await delay(150);
+  const at = mockCalendar.findIndex((day) => day.date === date);
+  if (at >= 0) mockCalendar.splice(at, 1);
+  if (kind === null) return null;
+  const row: CalendarDayDto = { date, kind, note, source: "manual" };
+  mockCalendar.push(row);
+  return row;
+}
+
+/**
  * Демо-расстановка диапазоном.
  *
  * Дни считает та же `planEntryRange`, что и сервер, а не своё похожее правило:
@@ -601,6 +657,8 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     includeWeekends: input.includeWeekends ?? false,
     mode,
     occupied,
+    // DEV-мок живёт без базы: праздников у него нет, и выдумывать их нечем.
+    calendar: mockDayCalendar(),
   });
   const span = isAbsence(input.category) && input.to !== input.from;
   const rewrites = new Set(plan.rewritten);
@@ -1676,6 +1734,8 @@ export async function mockGetSettings(): Promise<AdminSettings> {
     swapsLockUpdatedBy: mockSwapsLocked ? "Игорь Петров" : null,
     reminderHour: mockReminderHour,
     reminderHourUpdatedBy: mockReminderHour === REMINDER_HOUR_DEFAULT ? null : "Игорь Петров",
+    holidaysAuto: mockHolidaysAuto,
+    holidays: [{ year: 2026, refreshedAt: new Date().toISOString(), source: "xmlcalendar", days: mockCalendar.length }],
   };
 }
 

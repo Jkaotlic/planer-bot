@@ -50,7 +50,7 @@ beforeEach(() => {
   vi.spyOn(apiClient, "getMyShifts").mockResolvedValue({ shifts: [MY_SHIFT], today: daysFromNow(0) });
   vi.spyOn(apiClient, "getTeamSchedule").mockImplementation(async (from: string, to: string) => {
     asked.push({ from, to });
-    return { employees: [], shifts: [] };
+    return { employees: [], shifts: [], calendar: [] };
   });
   vi.spyOn(apiClient, "getSwaps").mockResolvedValue([]);
   vi.spyOn(apiClient, "getWeekendSlots").mockResolvedValue([]);

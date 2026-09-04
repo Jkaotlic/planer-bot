@@ -349,10 +349,23 @@ export const templatePreference = sqliteTable(
 );
 
 /** Public holidays and Russia's transferred working Saturdays. */
+/**
+ * Исключения из правила «Сб/Вс — выходные»: праздник в будни и рабочая суббота.
+ * Обычные выходные сюда не пишутся — их считает `isDayOff` в shared.
+ *
+ * `source` — чья строка. Автообновление переписывает только `auto`: день,
+ * который админ поставил руками, не должен исчезать оттого, что бот перечитал
+ * календарь. См. `repo/calendar-days.ts`.
+ */
 export const calendarDays = sqliteTable("calendar_days", {
   date: text().primaryKey(),
   kind: text().$type<"holiday" | "workday">().notNull(),
   note: text(),
+  source: text().$type<"auto" | "manual">().notNull().default("auto"),
+  // Без умолчания `unixepoch()`: SQLite не даёт добавить колонку с
+  // неконстантным умолчанием, а расходиться со схемой миграция не должна.
+  // Момент ставит писатель — оба живут в `repo/calendar-days.ts`.
+  updatedAt: integer({ mode: "timestamp" }).notNull(),
 });
 
 /**

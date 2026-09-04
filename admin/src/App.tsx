@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
+import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
+  type CalendarDayDto,
   AuthRequiredError,
   type Employee,
   type FeedEvent,
@@ -88,6 +89,9 @@ export function App() {
   /** Нормы дня по видам смен — из них сетка рисует «чего в дне не хватает». */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
+  // Праздники показанной недели: приезжают вместе с расписанием (см. `loadWeek`).
+  const [calendarDays, setCalendarDays] = useState<CalendarDayDto[]>([]);
+  const dayCalendar = calendarFrom(calendarDays);
   const [events, setEvents] = useState<FeedEvent[]>([]);
   // Две разные беды, и раньше они лежали в одном поле, которое рисовалось вместо
   // всей `main-column`. Загрузка людей и пресетов не удалась — показывать
@@ -203,8 +207,11 @@ export function App() {
     const to = weekDates[6]!;
     setScheduleError(null);
     try {
-      const s = await apiClient.getTeamSchedule(from, to);
-      if (!cancelled()) setShifts(s);
+      const [s, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
+      if (!cancelled()) {
+        setShifts(s);
+        setCalendarDays(calendar);
+      }
     } catch (err) {
       if (cancelled()) return;
       setShifts(null);
@@ -216,7 +223,9 @@ export function App() {
   async function refreshSchedule() {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
-    setShifts(await apiClient.getTeamSchedule(from, to));
+    const [next, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
+    setShifts(next);
+    setCalendarDays(calendar);
   }
 
   async function previewRosterFile(file: File) {
@@ -487,6 +496,7 @@ export function App() {
                   onEntryClick={setEditingEntry}
                   query={scheduleQuery}
                   coverage={templateRoles}
+                  calendar={dayCalendar}
                 />
                 <aside className="right-rail">
                   <EventsFeed events={events} onOpenJournal={() => setNav("log")} />
@@ -505,6 +515,7 @@ export function App() {
           templates={templates}
           initialEmployeeId={panelTarget?.employeeId ?? activeEmployees[0]?.id ?? 0}
           initialDate={panelTarget?.date ?? weekDates[0]!}
+          calendar={dayCalendar}
           existing={editingEntry}
           onCancel={() => {
             setPanelTarget(null);

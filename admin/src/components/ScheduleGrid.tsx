@@ -2,7 +2,8 @@ import { coverageHint, filterPeople, missingCoverage, type CoverageTemplate } fr
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
-import { dayOfMonth, isWeekendIso, toISODate, weekdayShort } from "../lib/week";
+import { dayOfMonth, toISODate, weekdayShort } from "../lib/week";
+import { isDayOff, type DayCalendar } from "@planer/shared";
 
 export interface ScheduleGridProps {
   employees: Employee[];
@@ -16,6 +17,11 @@ export interface ScheduleGridProps {
   onEntryClick: (entry: Shift) => void;
   /** From `PersonSearch` in `App.tsx` — filters which rows render. Absent/empty shows everyone. */
   query?: string;
+  /**
+   * Праздники и рабочие субботы недели. Обязательный: сетка, забывшая праздник,
+   * красит его как рабочий день, а сервер в этот день записи уже не примет.
+   */
+  calendar: DayCalendar;
   /**
    * Нормы дня по видам смен — из них считается подсказка «чего в дне не хватает».
    * Пусто (или норма нулевая) — подсказки нет вовсе.
@@ -54,7 +60,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()) }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()) }: ScheduleGridProps) {
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
   const visibleEmployees = filterPeople(employees, query ?? "");
@@ -70,7 +76,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
             {weekDates.map((date) => (
               <th
                 key={date}
-                className={[isWeekendIso(date) ? "weekend-col" : "", date === today ? "today-col" : ""].filter(Boolean).join(" ") || undefined}
+                className={[isDayOff(date, calendar) ? "weekend-col" : "", date === today ? "today-col" : ""].filter(Boolean).join(" ") || undefined}
                 aria-current={date === today ? "date" : undefined}
               >
                 <span className="day-col-header">
@@ -107,7 +113,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, onAddCli
                 <DayCell
                   key={date}
                   entries={entriesFor(shifts, employee.id, date)}
-                  weekend={isWeekendIso(date)}
+                  weekend={isDayOff(date, calendar)}
                   today={date === today}
                   onAdd={() => onAddClick(employee.id, date)}
                   onEntryClick={onEntryClick}

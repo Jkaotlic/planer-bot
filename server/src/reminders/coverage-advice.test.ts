@@ -8,6 +8,7 @@ import { createShift } from "../repo/shifts";
 import { listRecentAudit } from "../repo/audit";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { setCoverage } from "../repo/templates";
+import { setManualDay } from "../repo/calendar-days";
 import { runCoverageAdviceTick } from "./coverage-advice";
 import type { Db } from "../db/client";
 
@@ -118,6 +119,21 @@ describe("runCoverageAdviceTick", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain("Пн 7 сентября — не хватает: Утро — 1");
     expect(sent[0]!.text).not.toContain("8 сентября");
+  });
+
+  it("праздник пустым днём не считается, а рабочая суббота — считается", async () => {
+    const { db } = stage();
+    const { bot, sent } = testBot();
+    // Пн 07.09 объявлен выходным, Сб 05.09 — рабочим днём по переносу.
+    // Оба внутри окна: сб 05.09 … пт 11.09.
+    setManualDay(db, "2026-09-07", "holiday", "Перенос", new Date());
+    setManualDay(db, "2026-09-05", "workday", null, new Date());
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    const text = sent[0]!.text;
+    expect(text).not.toContain("7 сентября");
+    expect(text).toContain("Сб 5 сентября — смен нет");
   });
 
   it("выключивший «пробелы в графике» админ письма не получает", async () => {

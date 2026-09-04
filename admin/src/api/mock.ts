@@ -1,5 +1,5 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
-import type { EntryCategory } from "@planer/shared";
+import type { CalendarDayDto, EntryCategory } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
@@ -48,6 +48,7 @@ import {
   isCollectionActive,
   compareCollections,
   planEntryRange,
+  EMPTY_CALENDAR,
   type DayOccupancy,
   eachDayIso,
   isAbsence,
@@ -218,6 +219,11 @@ export async function mockGetTeamSchedule(from: string, to: string): Promise<Shi
   return shifts;
 }
 
+export async function mockGetDayCalendar(from: string, to: string): Promise<CalendarDayDto[]> {
+  const { calendar } = await readMock.getTeamSchedule(from, to);
+  return calendar;
+}
+
 export function mockGetTemplates(): Promise<Template[]> {
   return readMock.getTemplates() as Promise<Template[]>;
 }
@@ -277,6 +283,8 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     includeWeekends: input.includeWeekends ?? false,
     mode,
     occupied,
+    // DEV-мок живёт без базы: праздников у него нет, и это честнее выдуманных.
+    calendar: EMPTY_CALENDAR,
   });
   const span = isAbsence(input.category) && input.to !== input.from;
   const rewrites = new Set(plan.rewritten);

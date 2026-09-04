@@ -1,6 +1,7 @@
 import { weekdayIndex, weekdayShort } from "./week-dates";
 import { countsForBalance, type EntryCategory } from "./category";
 import { formatDayMonth } from "./collection";
+import { isDayOff, type DayCalendar } from "./calendar";
 
 /**
  * Норма покрытия дня: сколько людей нужно на этом виде смены в каждый день недели.
@@ -167,19 +168,23 @@ export interface DayGap {
  *
  * Пустота считается по рабочим записям с человеком (`countsForBalance`):
  * отпуск на весь отдел день не заполняет, и строка без `employeeId` — тоже.
- * Суббота и воскресенье пустыми не бывают: команда в выходные не работает,
- * а выходная смена — отдельный поток со своими объявлениями. Нормы при этом
- * на выходные смотрят как обычно: ненулевая норма на субботу — решение админа.
+ * Выходной по календарю пустым не бывает: команда в выходные и праздники не
+ * работает, а выходная смена — отдельный поток со своими объявлениями. Нормы
+ * при этом на выходные смотрят как обычно: ненулевая норма на субботу — решение
+ * админа.
  */
 export function scheduleGaps(
   entries: readonly GapEntry[],
   templates: readonly CoverageTemplate[],
   dates: readonly string[],
+  calendar: DayCalendar,
 ): DayGap[] {
   const out: DayGap[] = [];
   for (const date of dates) {
     const missing = missingCoverage(entries, templates, date);
-    const weekend = weekdayIndex(date) >= 5;
+    // По календарю, а не по дню недели: в праздник не выходят, и пустой он
+    // по праву; рабочая суббота, в которую никто не вышел, — пробел.
+    const dayOff = isDayOff(date, calendar);
     const worked = entries.some(
       (entry) =>
         entry.employeeId != null &&
@@ -187,7 +192,7 @@ export function scheduleGaps(
         entry.date <= date &&
         (entry.endDate ?? entry.date) >= date,
     );
-    const empty = !weekend && !worked;
+    const empty = !dayOff && !worked;
     if (empty || missing.length > 0) out.push({ date, missing, empty });
   }
   return out;

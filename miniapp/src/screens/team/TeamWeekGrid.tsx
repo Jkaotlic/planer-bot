@@ -7,6 +7,7 @@ import type {
 } from "../../lib/team-schedule";
 import { splitDisplayName } from "../../lib/team-schedule";
 import { weekdayShort } from "../../lib/week";
+import { dayOffLabel, isDayOff, type DayCalendar } from "@planer/shared";
 import { TeamEntryDetails } from "./TeamEntryDetails";
 
 export interface WeekCellSelection {
@@ -30,10 +31,13 @@ export function TeamWeekGrid({
   model,
   today,
   isDark,
+  calendar,
 }: {
   model: WeekModel;
   today: string;
   isDark: boolean;
+  /** Праздники и рабочие субботы недели: серым красится выходной по календарю. */
+  calendar: DayCalendar;
 }) {
   const [selection, setSelection] = useState<WeekCellSelection | null>(null);
   const details = resolveWeekCellSelection(model, selection);
@@ -50,13 +54,20 @@ export function TeamWeekGrid({
           {model.days.map((day) => (
             <div
               key={day}
-              className={`team-week__day${day === today ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`}
+              className={`team-week__day${day === today ? " is-today" : ""}${isDayOff(day, calendar) ? " is-weekend" : ""}`}
               data-date={day}
               aria-current={day === today ? "date" : undefined}
               role="columnheader"
             >
               <b>{weekdayShort(day)}</b>
               <span>{day.slice(8, 10)}</span>
+              {/* Значок, а не название: в колонку шириной под две цифры имя
+                  праздника не влезет, а `title` его показывает по нажатию. */}
+              {calendar.get(day) && (
+                <small title={dayOffLabel(day, calendar.get(day), null) ?? undefined}>
+                  {calendar.get(day) === "holiday" ? "🎉" : "💼"}
+                </small>
+              )}
             </div>
           ))}
         </div>
@@ -79,6 +90,7 @@ export function TeamWeekGrid({
                   employeeName={row.displayName}
                   isDark={isDark}
                   isToday={cell.date === today}
+                  isDayOffCell={isDayOff(cell.date, calendar)}
                   onOpen={() => {
                     setSelection({
                       employeeId: row.employeeId,
@@ -109,18 +121,21 @@ function WeekCellButton({
   employeeName,
   isDark,
   isToday,
+  isDayOffCell,
   onOpen,
 }: {
   cell: WeekCell;
   employeeName: string;
   isDark: boolean;
   isToday: boolean;
+  /** Выходной по календарю — решает шапка, клетка только красится. */
+  isDayOffCell: boolean;
   onOpen: () => void;
 }) {
   if (!cell.primary) {
     return (
       <div
-        className={`team-week__cell${isWeekend(cell.date) ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
+        className={`team-week__cell${isDayOffCell ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
         role="gridcell"
         aria-label={`${employeeName}, ${cell.date}: нет записи`}
       />
@@ -133,7 +148,7 @@ function WeekCellButton({
     <div className="team-week__slot" role="gridcell">
       <button
         type="button"
-        className={`team-week__cell has-entry${isWeekend(cell.date) ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
+        className={`team-week__cell has-entry${isDayOffCell ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
         style={{ background: palette.bg, color: palette.fg }}
         aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => entry.title).join(", ")}`}
         onClick={onOpen}
@@ -145,7 +160,4 @@ function WeekCellButton({
   );
 }
 
-function isWeekend(day: string): boolean {
-  const weekday = new Date(`${day}T12:00:00`).getDay();
-  return weekday === 0 || weekday === 6;
-}
+

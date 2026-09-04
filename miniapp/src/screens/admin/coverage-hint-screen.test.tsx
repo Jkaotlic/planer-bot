@@ -60,7 +60,7 @@ describe("подсказка «чего не хватает» в дне", () => 
 
   it("называет вид смены, когда норма задана и день пуст", async () => {
     vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([kind([2, 2, 2, 2, 2, 2, 2])]);
-    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [] });
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] });
 
     const el = await mount();
 

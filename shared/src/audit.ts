@@ -47,6 +47,7 @@ export const AUDIT_TYPES = [
   "collection_closed", "collection_deleted", "collection_payment_marked",
   "collection_reminded", "collection_auto_send_failed", "collection_link_set",
   "reminder_undeliverable", "reminders_dispatched", "coverage_advice_sent",
+  "holidays_refreshed", "holidays_refresh_failed", "holidays_auto_changed", "calendar_day_set",
   "announcement_sent",
   "checklist_completed", "checklist_doc_changed", "checklist_changed",
   "bug_report_created", "bug_report_resolved",
@@ -564,6 +565,32 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     icon: "🔔",
     title: "Разосланы напоминания на завтра",
     lines: [`на ${dayLabel(p.forDate)}`, `${num(p.sent) ?? 0} из ${num(p.considered) ?? 0} человек`],
+  }),
+  holidays_refreshed: (p) => ({
+    icon: "📅",
+    title: `Загружен календарь праздников на ${num(p.year) ?? "?"}`,
+    lines: [
+      `${num(p.added) ?? 0} дней`,
+      p.source === "bundled" ? "источник: зашитая копия" : "источник: xmlcalendar.ru",
+    ],
+  }),
+  holidays_refresh_failed: (p) => ({
+    icon: "⚠️",
+    title: `Календарь на ${num(p.year) ?? "?"} не загрузился`,
+    lines: [str(p.message) ?? "без подробностей"],
+  }),
+  holidays_auto_changed: (p) => ({
+    icon: "📅",
+    title: p.enabled ? "Праздники берутся из календаря" : "Автозагрузка праздников выключена",
+    lines: [],
+  }),
+  calendar_day_set: (p) => ({
+    icon: "📅",
+    title:
+      p.kind === "holiday" ? "День отмечен выходным"
+      : p.kind === "workday" ? "День отмечен рабочим"
+      : "Ручная отметка дня снята",
+    lines: [dayLabel(p.date), ...(str(p.note) ? [str(p.note)!] : [])],
   }),
   coverage_advice_sent: (p) => ({
     icon: "💡",

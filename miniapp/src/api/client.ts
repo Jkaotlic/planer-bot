@@ -11,10 +11,13 @@ import type {
   TeamScheduleResponse,
   TemplateDto,
   StartTab,
+  CalendarDayDto,
 } from "@planer/shared";
 // Реэкспорт, а не копия: строка списка отметок описана в shared, потому что её
 // одинаково читают сервер и оба админских экрана.
 export type { PaymentRow };
+// Тот же довод: строка календаря описана в контракте, и мини-апп берёт её оттуда.
+export type { CalendarDayDto };
 import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
@@ -89,6 +92,9 @@ import {
   mockSetTemplateCoverage,
   mockSetTemplateReminder,
   mockSetReminderHour,
+  mockSetHolidaysAuto,
+  mockRefreshHolidays,
+  mockSetCalendarDay,
   mockGetRosterCsv,
   mockPreviewRosterImport,
   mockApplyRosterImport,
@@ -134,6 +140,8 @@ export interface TeamEmployee {
 export interface TeamSchedule {
   employees: TeamEmployee[];
   shifts: Shift[];
+  /** Праздники и рабочие субботы недели — из того же ответа сервера. */
+  calendar: CalendarDayDto[];
 }
 
 export interface Me {
@@ -434,6 +442,26 @@ export interface AdminSettings {
   /** Во сколько накануне уходят напоминания о завтрашней смене, «ЧЧ:ММ». */
   reminderHour: string;
   reminderHourUpdatedBy: string | null;
+  /** Тянет ли бот производственный календарь сам. */
+  holidaysAuto: boolean;
+  /** Что уже загружено, по годам — для строки «2026: 22 дня, обновлено …». */
+  holidays: HolidayYearView[];
+}
+
+/** Один загруженный год календаря на экране настроек. */
+export interface HolidayYearView {
+  year: number;
+  refreshedAt: string;
+  source: "xmlcalendar" | "bundled";
+  days: number;
+}
+
+/** Итог кнопки «Обновить сейчас» по одному году. */
+export interface HolidayRefreshYear {
+  year: number;
+  status: "ok" | "missing" | "error" | "bundled";
+  added: number;
+  removed: number;
 }
 
 /** Итог переключения замка: что стало, и какой ценой (кому дошло уведомление). */
@@ -859,6 +887,10 @@ export interface ApiClient {
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
   setReminderHour(hour: string): Promise<void>;
+  setHolidaysAuto(enabled: boolean): Promise<void>;
+  refreshHolidays(): Promise<HolidayRefreshYear[]>;
+  /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
+  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
@@ -1114,6 +1146,7 @@ function withEmployeeNames(schedule: TeamScheduleResponse): TeamSchedule {
   const nameById = new Map(schedule.employees.map((employee) => [employee.id, employee.displayName]));
   return {
     employees: schedule.employees,
+    calendar: schedule.calendar,
     shifts: schedule.shifts.map((shift) => ({
       ...shift,
       employeeName: shift.employeeId != null ? nameById.get(shift.employeeId) : undefined,
@@ -1532,6 +1565,22 @@ export const realClient: ApiClient = {
   async setReminderHour(hour) {
     await authorizedPutJson("/api/admin/settings/reminder-hour", { hour });
   },
+  async setHolidaysAuto(enabled) {
+    await authorizedPutJson("/api/admin/settings/holidays-auto", { enabled });
+  },
+  async refreshHolidays() {
+    const { years } = await authorizedPostJson<{ years: HolidayRefreshYear[] }>("/api/admin/holidays/refresh", {});
+    return years;
+  },
+  async setCalendarDay(date, kind, note = null) {
+    // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
+    // про день, а не про строку, которой больше нет.
+    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "manual" | null }>(
+      `/api/admin/calendar/${date}`,
+      { kind, note },
+    );
+    return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+  },
   getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
   setNoticePref: (kind, enabled) =>
     authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
@@ -1641,6 +1690,9 @@ const devClient: ApiClient = {
   getSettings: () => mockGetSettings(),
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
   setReminderHour: (hour) => mockSetReminderHour(hour),
+  setHolidaysAuto: (enabled) => mockSetHolidaysAuto(enabled),
+  refreshHolidays: () => mockRefreshHolidays(),
+  setCalendarDay: (date, kind, note) => mockSetCalendarDay(date, kind, note ?? null),
   getNoticePrefs: () => mockGetNoticePrefs(),
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),

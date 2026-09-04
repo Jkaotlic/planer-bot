@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeEntryRangePlan, describeEntryRangeResult, entryRangeHint, planEntryRange } from "./entry-range";
+import { categoryFitsDate, describeEntryRangePlan, describeEntryRangeResult, entryRangeHint, planEntryRange } from "./entry-range";
+import { EMPTY_CALENDAR, calendarFrom } from "./calendar";
 
 /**
  * Правило «какие дни диапазона получат запись».
@@ -14,7 +15,7 @@ describe("planEntryRange", () => {
   const SUN = "2026-08-30";
 
   it("будни берёт, выходные пропускает с причиной", () => {
-    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, mode: "fill" });
+    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, mode: "fill", calendar: EMPTY_CALENDAR });
     expect(plan.days).toEqual(["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"]);
     expect(plan.skipped).toEqual([
       { date: "2026-08-29", reason: "weekend" },
@@ -23,7 +24,7 @@ describe("planEntryRange", () => {
   });
 
   it("с поднятым флагом берёт и выходные", () => {
-    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: true, mode: "fill" });
+    const plan = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: true, mode: "fill", calendar: EMPTY_CALENDAR });
     expect(plan.days).toHaveLength(7);
     expect(plan.skipped).toEqual([]);
   });
@@ -32,7 +33,7 @@ describe("planEntryRange", () => {
   // «Работе в выходной» на будни, и день, который сервер всё равно не примет,
   // нельзя молча положить в список — он бы уронил всю транзакцию.
   it("«Работа в выходной» берёт только субботу и воскресенье, даже с флагом", () => {
-    const plan = planEntryRange({ from: MON, to: SUN, category: "weekend_work", includeWeekends: true, mode: "fill" });
+    const plan = planEntryRange({ from: MON, to: SUN, category: "weekend_work", includeWeekends: true, mode: "fill", calendar: EMPTY_CALENDAR });
     expect(plan.days).toEqual(["2026-08-29", "2026-08-30"]);
     expect(plan.skipped.map((s) => s.reason)).toEqual(["category", "category", "category", "category", "category"]);
   });
@@ -41,6 +42,7 @@ describe("planEntryRange", () => {
     const plan = planEntryRange({
       from: MON, to: "2026-08-26", category: "shift", includeWeekends: false,
       mode: "fill", occupied: { "2026-08-25": "work" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual(["2026-08-24", "2026-08-26"]);
     expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "busy" }]);
@@ -52,19 +54,20 @@ describe("planEntryRange", () => {
     const plan = planEntryRange({
       from: MON, to: SUN, category: "vacation", includeWeekends: false,
       mode: "fill", occupied: { "2026-08-25": "work" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([MON]);
     expect(plan.skipped).toEqual([]);
   });
 
   it("перевёрнутый диапазон пуст, а не бесконечен", () => {
-    const plan = planEntryRange({ from: SUN, to: MON, category: "shift", includeWeekends: true, mode: "fill" });
+    const plan = planEntryRange({ from: SUN, to: MON, category: "shift", includeWeekends: true, mode: "fill", calendar: EMPTY_CALENDAR });
     expect(plan.days).toEqual([]);
     expect(plan.skipped).toEqual([]);
   });
 
   it("один день — обычная запись, и никаких пропусков", () => {
-    const plan = planEntryRange({ from: MON, to: MON, category: "duty", includeWeekends: false, mode: "fill" });
+    const plan = planEntryRange({ from: MON, to: MON, category: "duty", includeWeekends: false, mode: "fill", calendar: EMPTY_CALENDAR });
     expect(plan.days).toEqual([MON]);
     expect(plan.skipped).toEqual([]);
   });
@@ -72,8 +75,8 @@ describe("planEntryRange", () => {
   // Отдельно от «дежурство тоже берётся»: смена и дежурство обязаны считаться
   // одним правилом — в этом весь пункт 5 его списка.
   it("дежурство считается тем же правилом, что смена", () => {
-    const shift = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, mode: "fill" });
-    const duty = planEntryRange({ from: MON, to: SUN, category: "duty", includeWeekends: false, mode: "fill" });
+    const shift = planEntryRange({ from: MON, to: SUN, category: "shift", includeWeekends: false, mode: "fill", calendar: EMPTY_CALENDAR });
+    const duty = planEntryRange({ from: MON, to: SUN, category: "duty", includeWeekends: false, mode: "fill", calendar: EMPTY_CALENDAR });
     expect(duty).toEqual(shift);
   });
 });
@@ -175,6 +178,7 @@ describe("planEntryRange в режиме перезаписи", () => {
     const plan = planEntryRange({
       from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite",
       occupied: { "2026-08-25": "work" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([MON, "2026-08-25", WED]);
     expect(plan.rewritten).toEqual(["2026-08-25"]);
@@ -185,6 +189,7 @@ describe("planEntryRange в режиме перезаписи", () => {
     const plan = planEntryRange({
       from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite",
       occupied: { "2026-08-25": "absence" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([MON, WED]);
     expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "absence" }]);
@@ -197,6 +202,7 @@ describe("planEntryRange в режиме перезаписи", () => {
     const plan = planEntryRange({
       from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite",
       occupied: { "2026-08-25": "ambiguous" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([MON, WED]);
     expect(plan.skipped).toEqual([{ date: "2026-08-25", reason: "ambiguous" }]);
@@ -205,6 +211,7 @@ describe("planEntryRange в режиме перезаписи", () => {
   it("свободный день заполняет — перезапись не только про занятые", () => {
     const plan = planEntryRange({
       from: MON, to: WED, category: "duty", includeWeekends: false, mode: "rewrite", occupied: {},
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([MON, "2026-08-25", WED]);
     expect(plan.rewritten).toEqual([]);
@@ -216,6 +223,7 @@ describe("planEntryRange в режиме перезаписи", () => {
     const plan = planEntryRange({
       from: "2026-08-29", to: "2026-08-29", category: "duty", includeWeekends: false, mode: "rewrite",
       occupied: { "2026-08-29": "work" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([]);
     expect(plan.skipped).toEqual([{ date: "2026-08-29", reason: "weekend" }]);
@@ -225,6 +233,7 @@ describe("planEntryRange в режиме перезаписи", () => {
     const plan = planEntryRange({
       from: MON, to: WED, category: "duty", includeWeekends: false, mode: "fill",
       occupied: { "2026-08-25": "work" },
+      calendar: EMPTY_CALENDAR,
     });
     expect(plan.days).toEqual([MON, WED]);
     expect(plan.rewritten).toEqual([]);
@@ -248,5 +257,29 @@ describe("entryRangeHint", () => {
     expect(entryRangeHint("rewrite")).toBe(
       "Смены и дежурства в этих днях перепишутся; отпуск, больничный и командировка останутся на месте.",
     );
+  });
+});
+
+describe("categoryFitsDate с календарём", () => {
+  // 2026-06-12 — пятница, День России; 2024-04-27 — рабочая суббота по переносу.
+  const cal = calendarFrom([{ date: "2026-06-12", kind: "holiday" }, { date: "2024-04-27", kind: "workday" }]);
+  it("работа в выходной встаёт на праздник", () => {
+    expect(categoryFitsDate("weekend_work", "2026-06-12", cal)).toBe(true);
+    expect(categoryFitsDate("weekend_work", "2026-06-12", EMPTY_CALENDAR)).toBe(false);
+  });
+  it("и не встаёт на рабочую субботу", () => {
+    expect(categoryFitsDate("weekend_work", "2024-04-27", cal)).toBe(false);
+  });
+});
+
+describe("planEntryRange с календарём", () => {
+  it("праздник пропускается как выходной, рабочая суббота — берётся", () => {
+    // чт 11.06 … вс 14.06: пятница объявлена праздником, суббота — рабочей.
+    const cal = calendarFrom([{ date: "2026-06-12", kind: "holiday" }, { date: "2026-06-13", kind: "workday" }]);
+    const plan = planEntryRange({
+      from: "2026-06-11", to: "2026-06-14", category: "shift", includeWeekends: false, mode: "fill", occupied: {}, calendar: cal,
+    });
+    expect(plan.days).toEqual(["2026-06-11", "2026-06-13"]);
+    expect(plan.skipped).toEqual([{ date: "2026-06-12", reason: "weekend" }, { date: "2026-06-14", reason: "weekend" }]);
   });
 });

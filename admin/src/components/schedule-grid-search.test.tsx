@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import { ScheduleGrid } from "./ScheduleGrid";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -32,7 +33,7 @@ async function mountGrid(employees: unknown[], extra: { query?: string }) {
   root = createRoot(host);
   await act(async () => {
     root!.render(createElement(ScheduleGrid, {
-      employees, shifts: [], templates: [], weekDates: WEEK,
+      employees, shifts: [], templates: [], weekDates: WEEK, calendar: EMPTY_CALENDAR,
       onAddClick: () => {}, onEntryClick: () => {}, ...extra,
     } as never));
   });
