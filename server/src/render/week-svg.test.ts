@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildWeekLegend, buildWeekModel, type ScheduleEntryLike, type SchedulePresetLike } from "@planer/shared";
+import { EMPTY_CALENDAR, calendarFrom } from "@planer/shared";
 import { escapeXml, renderWeekSvg } from "./week-svg";
 
 const MONDAY = "2026-08-03";
@@ -21,9 +22,15 @@ function svgFor(
   employees: { id: number; displayName: string; rosterOrder: number | null }[],
   shifts: ScheduleEntryLike[],
   today = "2026-08-05",
+  calendar = EMPTY_CALENDAR,
 ): string {
   const model = buildWeekModel(MONDAY, { employees, shifts }, PRESETS);
-  return renderWeekSvg({ model, legend: buildWeekLegend(model), weekLabel: "Команда · 3–9 августа", today });
+  return renderWeekSvg({ model, legend: buildWeekLegend(model), weekLabel: "Команда · 3–9 августа", today, calendar });
+}
+
+/** x-координаты закрашенных «выходных» колонок — по ним видно, какие дни серые. */
+function weekendColumns(svg: string): number[] {
+  return [...svg.matchAll(/<rect x="(\d+)"[^>]*fill="#E9EEF5"/g)].map((m) => Number(m[1]));
 }
 
 const TEAM = [
@@ -212,7 +219,7 @@ describe("renderWeekSvg — расшифровка по желанию", () => {
     const model = buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS);
     return renderWeekSvg({
       model, legend: buildWeekLegend(model), weekLabel: "Команда · 3–9 августа",
-      today: "2026-08-05", showLegend,
+      today: "2026-08-05", showLegend, calendar: EMPTY_CALENDAR,
     });
   }
 
@@ -238,5 +245,23 @@ describe("renderWeekSvg — расшифровка по желанию", () => {
     const svg = svgWithLegend(false);
     expect(svg).toContain("Иванов");
     expect(svg).toContain("Петров");
+  });
+});
+
+describe("праздники на картинке", () => {
+  const TEAM_ONE = [{ id: 1, displayName: "Иванов Иван", rosterOrder: 0 }];
+
+  it("праздник в будни закрашен, перенесённая рабочая суббота — нет", () => {
+    // Неделя 3–9 августа: среда объявлена выходным, суббота — рабочей.
+    const plain = weekendColumns(svgFor(TEAM_ONE, []));
+    const cal = calendarFrom([{ date: "2026-08-05", kind: "holiday" }, { date: "2026-08-08", kind: "workday" }]);
+    const withHoliday = weekendColumns(svgFor(TEAM_ONE, [], "2026-08-04", cal));
+
+    // Без календаря серые Сб и Вс; с ним — среда и воскресенье.
+    expect(plain).toHaveLength(2);
+    expect(withHoliday).toHaveLength(2);
+    expect(withHoliday).not.toEqual(plain);
+    // Среда левее субботы: колонка сместилась именно туда, а не «какая-то другая».
+    expect(withHoliday[0]!).toBeLessThan(plain[0]!);
   });
 });

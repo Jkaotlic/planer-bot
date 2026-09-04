@@ -1,6 +1,7 @@
 import {
   categoryPalette,
-  isWeekend,
+  isDayOff,
+  type DayCalendar,
   splitDisplayName,
   weekdayShort,
   type ScheduleEntryLike,
@@ -78,6 +79,12 @@ export interface WeekSvgInput {
   weekLabel: string;
   /** Today in TEAM_TZ; if that day falls inside the week, its column is outlined. */
   today: string;
+  /**
+   * Праздники и рабочие субботы недели: серым красится выходной ПО КАЛЕНДАРЮ.
+   * Обязательное поле — картинка, молча забывшая праздник, красит день так же,
+   * как обычный рабочий, и это ровно та ошибка, ради которой календарь заведён.
+   */
+  calendar: DayCalendar;
 }
 
 /**
@@ -153,7 +160,7 @@ function rowLabelSpans(row: WeekRow<ScheduleEntryLike>): string {
     : head;
 }
 
-export function renderWeekSvg({ model, legend, weekLabel, today, showLegend = true }: WeekSvgInput): string {
+export function renderWeekSvg({ model, legend, weekLabel, today, calendar, showLegend = true }: WeekSvgInput): string {
   const gridTop = PAD + TITLE_H;
   const bodyTop = gridTop + HEADER_H;
   const bodyHeight = model.rows.length * ROW_H;
@@ -192,7 +199,7 @@ export function renderWeekSvg({ model, legend, weekLabel, today, showLegend = tr
   out.push(`<rect x="${PAD}" y="${gridTop}" width="${WEEK_SVG_WIDTH - 2 * PAD}" height="${HEADER_H}" fill="${INK.header}"/>`);
   model.days.forEach((day, index) => {
     const x = dayX(index);
-    if (isWeekend(day)) {
+    if (isDayOff(day, calendar)) {
       out.push(`<rect x="${x}" y="${gridTop}" width="${DAY_COL}" height="${HEADER_H + bodyHeight}" fill="${INK.weekend}"/>`);
     }
     const centre = x + DAY_COL / 2;
