@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   CoverageError,
+  coverageAdviceText,
   coverageHint,
   coverageSummary,
   missingCoverage,
   parseCoverage,
+  scheduleGaps,
   serializeCoverage,
 } from "./coverage";
+import type { EntryCategory } from "./category";
 
 describe("parseCoverage", () => {
   it("reads the verified Monday rule for Утро", () => {
@@ -139,5 +142,62 @@ describe("coverageHint", () => {
 
   it("считает разницу, а не норму", () => {
     expect(coverageHint([{ templateId: 10, name: "Утро", need: 3, have: 1 }])).toBe("Не хватает: Утро — 2");
+  });
+});
+
+describe("scheduleGaps — пробелы недели для совета админам", () => {
+  // 2026-09-07 — понедельник; 2026-09-12 — суббота.
+  const morning = { templateId: 1, name: "Утро", coverage: [2, 2, 2, 2, 2, 0, 0] };
+  const duty = { templateId: 2, name: "Дежурство", coverage: [1, 1, 1, 1, 1, 0, 0] };
+  const shift = (date: string, employeeId: number | null, templateId: number | null, category: EntryCategory = "shift") =>
+    ({ date, employeeId, templateId, category });
+
+  it("будний день без единой смены — пробел, даже если норм нет", () => {
+    const gaps = scheduleGaps([], [], ["2026-09-07"]);
+    expect(gaps).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
+  });
+
+  it("пустые суббота и воскресенье пробелом не считаются", () => {
+    expect(scheduleGaps([], [], ["2026-09-12", "2026-09-13"])).toEqual([]);
+  });
+
+  it("день ниже нормы — пробел с перечнем, чего не хватает", () => {
+    const entries = [shift("2026-09-07", 10, 1), shift("2026-09-07", 11, 2)];
+    const gaps = scheduleGaps(entries, [morning, duty], ["2026-09-07"]);
+    expect(gaps).toEqual([
+      { date: "2026-09-07", empty: false, missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }] },
+    ]);
+  });
+
+  it("день по норме в ответ не попадает", () => {
+    const entries = [shift("2026-09-07", 10, 1), shift("2026-09-07", 12, 1), shift("2026-09-07", 11, 2)];
+    expect(scheduleGaps(entries, [morning, duty], ["2026-09-07"])).toEqual([]);
+  });
+
+  it("отпуск и запись без человека день не заполняют", () => {
+    const entries = [shift("2026-09-07", 10, null, "vacation"), shift("2026-09-07", null, 1)];
+    expect(scheduleGaps(entries, [], ["2026-09-07"])).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
+  });
+
+  it("многодневное дежурство закрывает каждый свой день", () => {
+    const entries = [{ date: "2026-09-07", endDate: "2026-09-11", employeeId: 11, templateId: 2, category: "duty" as const }];
+    expect(scheduleGaps(entries, [], ["2026-09-07", "2026-09-08", "2026-09-11"])).toEqual([]);
+  });
+});
+
+describe("coverageAdviceText", () => {
+  it("молчит, когда пробелов нет", () => {
+    expect(coverageAdviceText([])).toBeNull();
+  });
+
+  it("называет день и что именно не так, по строке на день", () => {
+    const text = coverageAdviceText([
+      { date: "2026-09-09", missing: [], empty: true },
+      { date: "2026-09-11", missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }], empty: false },
+    ])!;
+    expect(text).toContain("Ср 9 сентября — смен нет");
+    expect(text).toContain("Пт 11 сентября — не хватает: Утро — 1");
+    // Совет, а не тревога: так и подписан.
+    expect(text).toMatch(/совет/i);
   });
 });

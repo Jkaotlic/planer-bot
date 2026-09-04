@@ -1,3 +1,4 @@
+import { ADMIN_NOTICE_KINDS } from "@planer/shared";
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee } from "../repo/employees";
@@ -23,7 +24,7 @@ describe("GET/PATCH /api/me/notifications", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { kinds: { kind: string; enabled: boolean; title: string }[] };
-    expect(body.kinds).toHaveLength(7);
+    expect(body.kinds.map((k) => k.kind)).toEqual([...ADMIN_NOTICE_KINDS]);
     expect(body.kinds.find((k) => k.kind === "swaps")?.enabled).toBe(false);
     expect(body.kinds.find((k) => k.kind === "weekend")?.enabled).toBe(true);
   });

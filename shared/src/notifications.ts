@@ -20,6 +20,7 @@ export const ADMIN_NOTICE_KINDS = [
   "handovers",
   "celebrations",
   "bug_reports",
+  "coverage",
 ] as const;
 
 export type AdminNoticeKind = (typeof ADMIN_NOTICE_KINDS)[number];
@@ -35,4 +36,8 @@ export const ADMIN_NOTICE_LABELS: Record<AdminNoticeKind, { title: string; hint:
   handovers: { title: "Передача смен", hint: "Чужую смену забрал коллега. Письмо «смену никто не взял» приходит всегда." },
   celebrations: { title: "Дни рождения и сборы", hint: "Напоминания разослать поздравление и собрать деньги." },
   bug_reports: { title: "Сообщения о проблемах", hint: "Кто-то из команды пожаловался через кнопку «Проблема»." },
+  coverage: {
+    title: "Пробелы в графике",
+    hint: "Вечерний совет: где на неделе вперёд нет смен или людей меньше нормы.",
+  },
 };
