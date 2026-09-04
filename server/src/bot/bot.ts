@@ -88,6 +88,11 @@ function weekKeyboard(offset: number, legendOn: boolean): InlineKeyboard {
   if (offset !== 0) keyboard.text("⌂ Текущая", "week:0");
   if (offset < WEEK_OFFSET_LIMIT) keyboard.text("След. ›", `week:${offset + 1}`);
   keyboard.row().text(legendOn ? "🔤 Скрыть расшифровку" : "🔤 Показать расшифровку", `week:legend:${offset}`);
+  // Замены случаются уже после того, как картинка прислана. Без этой кнопки
+  // свежий график добывали в два нажатия — «След.» и обратно «Текущая», а на
+  // соседней неделе такого обходного пути и вовсе нет. Кнопка целит в ту
+  // неделю, что на экране, а не в текущую.
+  keyboard.row().text("↻ Обновить", `week:refresh:${offset}`);
   return keyboard;
 }
 
@@ -1098,8 +1103,13 @@ export function createBot(deps: BotDeps): Bot {
     }
   });
 
-  bot.callbackQuery(/^week:(-?\d+)$/, async (ctx) => {
-    const offset = Number(ctx.match[1]);
+  // «Обновить» — то же листание с нулевым шагом: картинка перерисовывается по
+  // тем же правилам, отличается только тост. Молчаливый успех здесь не годится:
+  // если в графике ничего не изменилось, человек не увидел бы, что нажатие
+  // вообще сработало.
+  bot.callbackQuery(/^week:(refresh:)?(-?\d+)$/, async (ctx) => {
+    const isRefresh = ctx.match[1] !== undefined;
+    const offset = Number(ctx.match[2]);
     const who = acting(ctx.from.id);
     if (!who.ok) {
       await ctx.answerCallbackQuery({ text: who.text });
@@ -1149,7 +1159,7 @@ export function createBot(deps: BotDeps): Bot {
         { reply_markup: weekKeyboard(offset, who.me.weekLegend) },
       );
       answered = true;
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery(isRefresh ? { text: "Обновил" } : undefined);
     } catch (err) {
       console.error("week: redraw failed:", safeErrorMessage(err));
       // Also what a person sees once the message crosses Telegram's 48-hour
