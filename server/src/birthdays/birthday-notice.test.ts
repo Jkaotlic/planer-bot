@@ -452,6 +452,8 @@ describe("автоотправка сбора", () => {
     const toTeam = sent.filter((m) => m.text.includes("Сбор на подарок"));
     expect(toTeam.map((m) => m.to).sort()).toEqual([2, 3]);
     expect(toTeam.some((m) => m.to === 1)).toBe(false);
+    // Автоотправка — то же письмо команде, что и ручная: с «Я перевёл» под ним.
+    for (const m of toTeam) expect(m.buttons).toContain("✅ Я перевёл");
 
     const report = sent.find((m) => m.text.startsWith("💰 Разослал"));
     expect(report?.to).toBe(3);

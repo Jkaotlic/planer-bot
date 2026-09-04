@@ -58,6 +58,7 @@ import {
   weekendConfirmedAdminText,
   weekendDeclinedAdminText,
   weekendUnassignedText,
+  collectionPaidKeyboard,
 } from "../bot/notify";
 import {
   slotLineOf,
@@ -896,8 +897,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!claimCollectionSend(collection.id)) return c.json({ error: "Рассылка уже идёт." }, 409);
     try {
       let delivered = 0;
+      // «Я перевёл» под письмом: отметиться там же, где прочитал (см. `collectionPaidKeyboard`).
       for (const recipient of recipientsOf(db, collection.employeeId)) {
-        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(collection.id))) delivered += 1;
       }
       // Only count a round that reached somebody: zero delivered is not a round,
       // it is Telegram having refused the lot. Counting it would tell the admin
@@ -951,7 +953,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       const preview = previewCollection(db, collection);
       let delivered = 0;
       for (const recipient of waiting) {
-        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(collection.id))) delivered += 1;
       }
       // `sentAt` и `sendCount` не трогаем: они отвечают на вопрос «когда и
       // сколько раз письмо ушло команде», а это письмо ушло не команде.

@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import { COLLECTION_SEND_HOUR, collectionTitle } from "@planer/shared";
 import type { Db } from "../db/client";
-import { notifyUser, noticeMuteKeyboard } from "../bot/notify";
+import { notifyUser, noticeMuteKeyboard, collectionPaidKeyboard } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
 import {
@@ -158,8 +158,9 @@ export async function runBirthdayNoticeTick(
     }
     try {
       let delivered = 0;
+      // То же письмо, что уходит руками из `/send`, — и с той же кнопкой «Я перевёл».
       for (const recipient of recipientsOf(db, round.employeeId)) {
-        if (await notifyUser(bot, recipient.telegramUserId!, preview.message)) delivered += 1;
+        if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(round.id))) delivered += 1;
       }
       if (delivered > 0) markCollectionSent(db, round.id, delivered, new Date());
       // `actorEmployeeId = null` — обе консоли уже рисуют такое как «система».

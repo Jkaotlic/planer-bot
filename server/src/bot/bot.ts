@@ -18,7 +18,8 @@ import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { getVacantSlot } from "../repo/weekend";
-import { getCollection, previewCollection, setCollectionClosed, updateCollection } from "../collections/collection-service";
+import { collectionsForWorker, getCollection, previewCollection, setCollectionClosed, updateCollection } from "../collections/collection-service";
+import { setPaid } from "../collections/payment-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
@@ -39,6 +40,7 @@ import {
   swapExpiredText,
   weekendConfirmedAdminText,
   weekendDeclinedAdminText,
+  collectionPaidDoneKeyboard,
 } from "./notify";
 import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { outsidePoolFacts } from "../swap/duty-notice";
@@ -879,6 +881,53 @@ export function createBot(deps: BotDeps): Bot {
     });
     await ctx.answerCallbackQuery({ text: "Закрыл" });
     await ctx.reply(`Сбор «${title}» закрыт.`);
+  });
+
+  /**
+   * «Я перевёл» прямо из письма сбора.
+   *
+   * Правила те же, что у ручки `/api/collections/:id/paid`, и проверяются в том
+   * же порядке: отметиться можно только в сборе, который человек и так видит,
+   * — разосланном, идущем и не своём. Закрытый спрашивается ДО видимости: он
+   * из видимых уже выпал, а «сбор закрыт» честнее, чем «сбор не виден».
+   *
+   * Повторный тап галочку не снимает: письмо живёт в чате неделями, и второе
+   * нажатие по нему чаще случайное, чем осознанное. Снять — в мини-аппе, и
+   * ответ это говорит словами.
+   */
+  bot.callbackQuery(/^collection:paid:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    const id = Number(ctx.match[1]);
+    const collection = getCollection(db, id);
+    if (!collection) {
+      await ctx.answerCallbackQuery({ text: "Сбор удалён" });
+      return;
+    }
+    if (collection.closedAt != null) {
+      await ctx.answerCallbackQuery({ text: "Сбор закрыт — отметки больше не меняются" });
+      return;
+    }
+    const row = collectionsForWorker(db, teamNow(config.teamTz).date, who.me.id).find((r) => r.id === id);
+    if (!row) {
+      await ctx.answerCallbackQuery({ text: "Этот сбор уже не идёт" });
+      return;
+    }
+    if (row.paid) {
+      await ctx.answerCallbackQuery({ text: "Уже отмечено. Снять галочку — в мини-аппе, вкладка «Сборы»." });
+      await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: collectionPaidDoneKeyboard(id) }));
+      return;
+    }
+    const result = setPaid(db, collection, who.me.id, who.me.id, true);
+    if (!result.ok) {
+      await ctx.answerCallbackQuery({ text: result.error });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Отметил ✓" });
+    await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: collectionPaidDoneKeyboard(id) }));
   });
 
   /**
