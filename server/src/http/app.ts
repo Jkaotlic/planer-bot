@@ -79,7 +79,7 @@ import {
   type StartTab,
   parseCoverage,
   serializeCoverage,
-  isWeekend,
+  isDayOff,
   isAbsence,
   countsForBalance,
   categoryLabel,
@@ -1965,8 +1965,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     // Assigning a slot writes a weekend_work entry, so a weekday slot could never
     // produce a coherent one — reject it here rather than at assign time.
-    if (!isWeekend(body.date)) {
-      return c.json({ error: "Вакантный день может быть только субботой или воскресеньем" }, 400);
+    if (!isDayOff(body.date, loadCalendar(db, body.date, body.date))) {
+      return c.json({ error: "Вакантный день — суббота, воскресенье или праздник" }, 400);
     }
     // A slot in the past can't be volunteered for or handed to anybody (see
     // `slotUnusableReason`), so posting one only broadcasts a question nobody can

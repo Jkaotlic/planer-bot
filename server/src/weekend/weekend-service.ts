@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
-import { shiftDurationHours, isWeekend, isAbsence, takesPartInAssignment, type EntryCategory } from "@planer/shared";
+import { shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
+import { loadCalendar } from "../repo/calendar-days";
 import { weekendAssignments, type VacantSlot, type WeekendAssignment } from "../db/schema";
 import {
   createVacantSlot,
@@ -78,9 +79,12 @@ function isOnStaff(db: Db, employeeId: number): boolean {
  * `createEntrySchema`, which is what enforces «только суббота или воскресенье» on
  * the other path. Two ways in, one rule each.
  */
-function slotUnusableReason(slot: VacantSlot, today: string): "slot_passed" | "not_weekend" | null {
+function slotUnusableReason(db: Db, slot: VacantSlot, today: string): "slot_passed" | "not_weekend" | null {
   if (slot.date < today) return "slot_passed";
-  if (!isWeekend(slot.date)) return "not_weekend";
+  // По календарю, а не по дню недели: слот, открытый на праздник, остаётся
+  // рабочим, а перенесённая рабочая суббота выходным быть перестала — и запись
+  // `weekend_work` на неё сервер потом отвергнет (`entryDateError`).
+  if (!isDayOff(slot.date, loadCalendar(db, slot.date, slot.date))) return "not_weekend";
   return null;
 }
 
@@ -88,7 +92,7 @@ export function expressInterest(db: Db, slotId: number, employeeId: number, toda
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status !== "open") return { ok: false, reason: "not_open" };
-  const unusable = slotUnusableReason(slot, today);
+  const unusable = slotUnusableReason(db, slot, today);
   if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
   // The mini-app's «Выходные» tab is empty for an excluded worker (see
@@ -157,7 +161,7 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status === "closed") return { ok: false, reason: "not_open" };
-  const unusable = slotUnusableReason(slot, today);
+  const unusable = slotUnusableReason(db, slot, today);
   if (unusable) return { ok: false, reason: unusable };
   if (!isOnStaff(db, employeeId)) return { ok: false, reason: "not_active" };
   // `expressInterest` above refuses an excluded worker outright, and the
