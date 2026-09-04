@@ -10,6 +10,8 @@ import { shutdownSafely } from "./bot/lifecycle";
 import { runReminderTick } from "./reminders/reminder-service";
 import { runChecklistTick } from "./reminders/checklist-tick";
 import { runCoverageAdviceTick } from "./reminders/coverage-advice";
+import { runHolidayTick } from "./holidays/holiday-tick";
+import { xmlcalendarFetcher } from "./holidays/xmlcalendar";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { runHandoverTick } from "./handover/handover-tick";
 import { createHandoverMessenger } from "./handover/handover-messenger";
@@ -44,6 +46,9 @@ bot.start({
 // previously they were chained with `.then()`, which skipped the birthday tick
 // entirely whenever the reminder tick rejected.
 const REMINDER_TICK_MS = 5 * 60 * 1000;
+// Один загрузчик на весь процесс: у него нет состояния, но и создавать его
+// каждые пять минут незачем.
+const fetchHolidays = xmlcalendarFetcher();
 let ticking = false;
 setInterval(() => {
   if (ticking) return;
@@ -54,6 +59,8 @@ setInterval(() => {
     // не по общему часу, поэтому ему нужен тот же пятиминутный тик.
     { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },
     { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz)) },
+    // Календарь праздников — раз в сутки; свой дедуп по дню внутри тика.
+    { name: "holidays", run: () => runHolidayTick(db, fetchHolidays, teamNow(config.teamTz)) },
     // Совет про пробелы графика — по тому же вечернему часу, что и напоминания.
     { name: "coverage", run: () => runCoverageAdviceTick(db, bot, teamNow(config.teamTz)) },
     // Третьим в тот же массив, а не своим setInterval: `runTicksIndependently`
