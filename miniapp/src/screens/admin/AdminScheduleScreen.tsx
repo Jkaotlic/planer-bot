@@ -45,7 +45,6 @@ import {
   formatDayLabel,
   formatWeekRangeLabel,
   isCurrentPeriod,
-  isWeekendIso,
   mondayOf,
   toISODate,
   weekdayIndex,

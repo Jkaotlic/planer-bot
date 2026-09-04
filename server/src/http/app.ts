@@ -15,7 +15,7 @@ import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../r
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
-import { listCalendarDays, loadCalendar, setManualDay } from "../repo/calendar-days";
+import { loadCalendar, setManualDay } from "../repo/calendar-days";
 import { refreshHolidays } from "../holidays/holiday-tick";
 import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
 import { holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
