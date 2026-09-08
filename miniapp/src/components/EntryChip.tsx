@@ -38,6 +38,11 @@ export function EntryChip({ entry, templates, style }: EntryChipProps) {
     background: palette.bg,
     "--tgui--plain_foreground": palette.fg,
     fontWeight: 500,
+    // Кольцо внутрь — ради тех цветов пресетов, что рассчитаны на клетку с
+    // рамкой: «День» это #EAF0F0, и на белой карточке чип пропадал целиком.
+    // Серое кольцо читается и на светлой, и на тёмной подложке, а насыщенным
+    // цветам не мешает.
+    boxShadow: "inset 0 0 0 1px rgb(128 128 128 / 30%)",
     ...style,
   };
   return (

@@ -139,7 +139,9 @@ export function SectionChips<K extends string>({
               whiteSpace: "nowrap",
               cursor: "pointer",
               color: selected ? "var(--tgui--button_text_color)" : "var(--tgui--text_color)",
-              background: selected ? "var(--tgui--button_color)" : "var(--tgui--secondary_bg_color)",
+              // Невыбранная — карточкой, а не цветом холста: холст теперь и есть
+              // `secondary_bg_color`, и на нём такая таблетка исчезала целиком.
+              background: selected ? "var(--tgui--button_color)" : "var(--app-card)",
             }}
           >
             {label}

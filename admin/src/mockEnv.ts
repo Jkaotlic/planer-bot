@@ -70,9 +70,20 @@ const initDataRaw = new URLSearchParams([
   ["chat_instance", "8428209589180549439"],
 ]);
 
+/**
+ * `?no-tg=1` выключает подделку клиента.
+ *
+ * Консоль в проде открывают ссылкой в обычном браузере: там SDK не поднимается,
+ * `--tg-theme-*` не появляются, и цвета берутся из `--fallback-*` по
+ * `prefers-color-scheme`. Пока мок стоял всегда, локальная проверка показывала
+ * ДРУГОЕ приложение — с телеграмной палитрой, которой в проде нет. Этот флаг и
+ * есть способ посмотреть консоль такой, какой её видит человек.
+ */
+const withoutTelegram = new URLSearchParams(window.location.search).has("no-tg");
+
 // Only active in local development: lets the mini app run in a plain browser
 // tab (no real Telegram client) by imitating the bridge it talks to.
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && !withoutTelegram) {
   mockTelegramEnv({
     launchParams: {
       tgWebAppThemeParams: themeParams,

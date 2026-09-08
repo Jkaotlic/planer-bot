@@ -1,8 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Chip } from "@telegram-apps/telegram-ui";
 import {
+  categoryChipPalette,
   categoryPalette,
-  exactSchedulePalette,
+  SCHEDULE_ACCENT_PALETTES,
   UNRECOGNISED_SCHEDULE_PALETTE,
   type CategoryPalette,
   type EntryCategory,
@@ -61,15 +62,27 @@ export function useEntryPalette(entry: ColourableEntry, templates: readonly Acce
   // its own grey whatever category it was filed under.
   if (entry.unrecognisedCode) return { bg: UNRECOGNISED_SCHEDULE_PALETTE.bg, fg: UNRECOGNISED_SCHEDULE_PALETTE.fg };
   const accent = entry.templateId != null ? templates.find((t) => t.id === entry.templateId)?.accent : undefined;
-  const exact = exactSchedulePalette(accent, entry.category);
-  if (exact) return { bg: exact.bg, fg: exact.fg };
-  return categoryPalette(entry.category, isDark);
+  // Цвет пресета остаётся цветом пресета: «Утро», «День», «Ночь» команда узнаёт
+  // по нему и в приложении, и в картинке недели, и свести их к одному синему
+  // значило бы стереть разницу между сменами.
+  if (accent) return { bg: SCHEDULE_ACCENT_PALETTES[accent].bg, fg: SCHEDULE_ACCENT_PALETTES[accent].fg };
+  // А вот у записи без пресета — отпуск, больничный, командировка — цвет брался
+  // из клетки сетки: чистый #FD0100 у отпуска орал на карточке громче всего
+  // экрана. Здесь чип, а не клетка, и палитра у него своя.
+  return categoryChipPalette(entry.category, isDark);
 }
 
-/** The category's chip colors for the currently active Telegram theme. */
+/**
+ * Цвета чипа категории для текущей темы.
+ *
+ * Именно `categoryChipPalette`, а не `categoryPaletteForTheme`: у чипа нет ни
+ * рамки, ни соседей по решётке, и цвет клетки на нём либо исчезает («День» —
+ * почти белый #EAF0F0), либо орёт («Отпуск» — чистый #FD0100). Сетка и
+ * картинка недели для бота продолжают жить на цветах клеток.
+ */
 export function useCategoryPalette(category: Category): CategoryPalette {
   const isDark = useIsDark();
-  return categoryPaletteForTheme(category, isDark);
+  return categoryChipPalette(category, isDark);
 }
 
 export interface CategoryChipProps {

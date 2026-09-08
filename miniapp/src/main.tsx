@@ -2,7 +2,7 @@
 // Telegram bridge (dev only) so the app can run in a plain browser tab.
 import "./mockEnv";
 
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { isThemeParamsDark, useSignal } from "@telegram-apps/sdk-react";
@@ -20,6 +20,17 @@ function Root() {
   // Reflect the (real or mocked) Telegram theme's light/dark-ness natively,
   // rather than trusting AppRoot's own browser-only auto-detection.
   const isDark = useSignal(isThemeParamsDark);
+
+  /**
+   * Нативные контролы красит браузер, и он смотрит на `color-scheme`, а не на
+   * тему Telegram. Без этой строки селект, поле даты и полоса прокрутки внутри
+   * тёмного мини-аппа оставались светлыми: тема здесь приходит от клиента, а не
+   * от системы, и совпадать они не обязаны — у человека телефон может быть
+   * светлым, а Telegram тёмным.
+   */
+  useEffect(() => {
+    document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+  }, [isDark]);
 
   return (
     <AppRoot appearance={isDark ? "dark" : "light"}>

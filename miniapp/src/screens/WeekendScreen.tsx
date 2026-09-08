@@ -97,8 +97,14 @@ function SlotCard({ view, busy, error, onInterest }: { view: WeekendSlotView; bu
   const { slot, interested, assignees } = view;
   return (
     <CardShell>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 15.5 }}>{slot.title ?? "Работа в выходной"}</div>
+      {/* `wrap` — ради узких телефонов: на 320px длинное название вроде
+          «Инвентаризация» не сжимается ниже своего слова и выдавливало чип
+          «Выходной» за край карточки на 6px. Не помещаются рядом — чип уходит
+          строкой ниже, а не за кромку. */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontWeight: 600, fontSize: 15.5, minWidth: 0, overflowWrap: "anywhere" }}>
+          {slot.title ?? "Работа в выходной"}
+        </div>
         <CategoryChip category="weekend_work">Выходной</CategoryChip>
       </div>
       <div style={{ fontSize: 14.5, fontWeight: 500 }}>{slotWhen(slot)}</div>
