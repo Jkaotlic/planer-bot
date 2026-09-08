@@ -43,29 +43,36 @@ export function StartTabPicker({ me, onChanged }: { me: Me; onChanged: (next: St
     }
   }
 
+  /**
+   * Селект — своей строкой во всю ширину, а не в слоте `after`.
+   *
+   * В `after` его зажимало до 74px при собственных отступах 16+58: содержимое
+   * получало НОЛЬ пикселей, и выбранного экрана не было видно вовсе — только
+   * галочка. Заодно пояснение рядом сжималось до 168px и вставало в шесть
+   * строк. Замер обоих чисел — в живой странице на 390px.
+   */
   return (
     <>
       <Cell
-        Component="label"
         multiline
         description="С этого экрана приложение будет открываться. Ссылка из бота всё равно откроет то, что в ней обещано."
-        after={
-          <Select
-            value={me.startTab ?? "mine"}
-            disabled={busy}
-            aria-label="Экран при открытии"
-            onChange={(e) => void choose(e.target.value as StartTab)}
-          >
-            {options.map((tab) => (
-              <option key={tab} value={tab}>
-                {TAB_LABELS[tab]}
-              </option>
-            ))}
-          </Select>
-        }
       >
         Открывать сразу
       </Cell>
+      <div className="start-tab-picker">
+        <Select
+          value={me.startTab ?? "mine"}
+          disabled={busy}
+          aria-label="Экран при открытии"
+          onChange={(e) => void choose(e.target.value as StartTab)}
+        >
+          {options.map((tab) => (
+            <option key={tab} value={tab}>
+              {TAB_LABELS[tab]}
+            </option>
+          ))}
+        </Select>
+      </div>
       {error && (
         <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
       )}

@@ -453,7 +453,9 @@ function DayStrip({ dates, selected, today, onSelect }: { dates: readonly string
 function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: boolean; isToday: boolean; onSelect: () => void }) {
   const isDark = useIsDark();
   const weekend = weekdayIndex(iso) >= FRIDAY_INDEX + 1;
-  const bg = active ? "var(--tgui--button_color)" : "var(--tgui--secondary_bg_color)";
+  // Невыбранный день — карточкой: холст теперь `secondary_bg_color`, и клетка
+  // этого цвета на нём не читалась бы вовсе.
+  const bg = active ? "var(--tgui--button_color)" : "var(--app-card)";
   const fg = active ? "var(--tgui--button_text_color)" : weekend ? "var(--tgui--hint_color)" : "var(--tgui--text_color)";
   return (
     <button

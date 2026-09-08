@@ -23,10 +23,19 @@ const darkThemeParams: ThemeParams = {
   text_color: "#f5f5f5",
 };
 
-/** Light counterpart, aligned with the product's approved mockups (light palette). */
+/**
+ * Светлая тема — ровно та, что присылает настоящий клиент.
+ *
+ * Раньше здесь стоял `bg_color: #efeef4` и `secondary_bg_color: #efeef4` —
+ * подогнанные под макет числа, которых Telegram не присылает никогда. Из-за
+ * них локальная проверка показывала белые карточки на сером фоне, а на
+ * телефоне фон был белым и карточки на нём исчезали: макет проверялся против
+ * выдумки. Числа ниже — из светлой темы клиента: холст белый, «за карточками»
+ * серый лежит в `secondary_bg_color`, а `section_bg_color` совпадает с фоном.
+ */
 const lightThemeParams: ThemeParams = {
   accent_text_color: "#3390ec",
-  bg_color: "#efeef4",
+  bg_color: "#ffffff",
   button_color: "#3390ec",
   button_text_color: "#ffffff",
   bottom_bar_bg_color: "#ffffff",
@@ -34,7 +43,7 @@ const lightThemeParams: ThemeParams = {
   header_bg_color: "#ffffff",
   hint_color: "#8a9099",
   link_color: "#3390ec",
-  secondary_bg_color: "#efeef4",
+  secondary_bg_color: "#efeff4",
   section_bg_color: "#ffffff",
   section_header_text_color: "#8a9099",
   section_separator_color: "#e7e7ed",

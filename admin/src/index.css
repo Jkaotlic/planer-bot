@@ -20,6 +20,15 @@
   --fallback-separator: #dcdbe3;
 }
 
+/* Нативные контролы — чекбоксы, селекты, поля даты и времени, полосы прокрутки —
+   браузер красит сам и о `--fallback-*` не знает. Без этой строки в тёмной
+   консоли они оставались белыми: белые квадраты чекбоксов «Ограничений» посреди
+   тёмной карточки. `light dark` отдаёт выбор системе — ровно тому же
+   `prefers-color-scheme`, по которому переключается палитра ниже. */
+:root {
+  color-scheme: light dark;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --fallback-bg: #14181f;
@@ -309,6 +318,10 @@ button {
     flex: 0 0 auto;
   }
 
+  /* Под сеткой полка перестаёт быть колонкой и становится полосой во всю
+     ширину: на 1440px карточка «Событий» занимала 348px из 1392, а справа от
+     неё оставалось ровно ничего — тысяча пустых пикселей под самой заметной
+     частью экрана. */
   .right-rail {
     flex: 0 0 auto;
     overflow-y: visible;
@@ -316,8 +329,15 @@ button {
     border-top: 1px solid var(--separator);
     margin-left: 0;
     padding: 20px 24px 24px;
+    display: block;
+  }
+
+  /* Сами события раскладываются в несколько колонок — событие короткое, и
+     строка во всю ширину читалась бы хуже узкой. */
+  .right-rail .feed-list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px 28px;
     align-items: start;
   }
 }
@@ -1046,6 +1066,9 @@ button {
   background: var(--surface-secondary);
 }
 
+/* Кольцо внутрь — ради «Д» (#EAF0F0) и «У» (#FEFF01): цвета клеток рассчитаны
+   на решётку с рамкой, а здесь квадратик стоит один на карточке, и почти белый
+   растворялся в ней. Серое кольцо читается в обеих темах и цвет не трогает. */
 .kind-swatch {
   flex: none;
   display: grid;
@@ -1053,6 +1076,7 @@ button {
   width: 30px;
   height: 30px;
   border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgb(128 128 128 / 30%);
   font-size: 14px;
   font-weight: 700;
 }

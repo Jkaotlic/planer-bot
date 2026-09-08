@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
+  categoryChipPalette,
   categoryPalette,
   exactSchedulePalette,
   UNRECOGNISED_SCHEDULE_PALETTE,
@@ -50,10 +51,16 @@ export function useEntryPalette(entry: ColourableEntry, templates: readonly Acce
   return categoryPalette(entry.category, isDark);
 }
 
-/** The category's chip colors for the currently active Telegram theme. */
+/**
+ * Цвета чипа категории для текущей темы.
+ *
+ * `categoryChipPalette`, а не `categoryPalette`: чип стоит один на карточке, и
+ * цвет клетки сетки на нём либо исчезает, либо орёт. Клетки сетки красит
+ * `useEntryPalette` — они как были, так и остались на цветах картинки недели.
+ */
 export function useCategoryPalette(category: EntryCategory): CategoryPalette {
   const isDark = useIsDark();
-  return categoryPalette(category, isDark);
+  return categoryChipPalette(category, isDark);
 }
 
 export interface CategoryChipProps {
