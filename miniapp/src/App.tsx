@@ -35,6 +35,7 @@ import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
 import { runRowAction } from "./lib/row-action";
+import { createLatestRequestGate } from "./lib/request-gate";
 import { swapCandidates } from "./lib/swap-candidates";
 
 interface AppData {
@@ -66,6 +67,11 @@ export function App() {
   /** Настройку применяем один раз за открытие: иначе возврат на «Смены» руками
    *  отменялся бы следующим же перечитыванием данных. */
   const startTabApplied = useRef(false);
+  // Перезагрузка по смене вкладки — тяжёлый bootstrap, и он мог прийти ПОСЛЕ
+  // того, как человек нажал «Принять»: снимок «до» возвращал заявку в
+  // «ожидает» с живой кнопкой, и второй тап получал отказ. Успешное действие
+  // аннулирует всё, что в полёте.
+  const reloadGate = useRef(createLatestRequestGate());
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
   // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
@@ -213,7 +219,10 @@ export function App() {
     setSwapErrors((prev) => withoutError(prev, id));
     await runRowAction({
       action: () => action(id),
-      refresh: refreshSwaps,
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshSwaps();
+      },
       onActionFailed: (err) => {
         console.error("Swap action failed:", err);
         setSwapErrors((prev) => withError(prev, id, failureMessage));
@@ -277,7 +286,9 @@ export function App() {
       // переключении вкладки и возврате в приложение, то есть чаще, чем старт.
       // Пресеты перечитываются вместе с остальным, чтобы правка админа (имя или
       // цвет «Утро»/«День») доезжала и до строк работника.
+      const ticket = reloadGate.current.begin();
       const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = await apiClient.getBootstrap(from, to);
+      if (!reloadGate.current.isLatest(ticket)) return;
       const teamShifts = teamSchedule.shifts;
       setData((prev) =>
         prev
@@ -310,7 +321,10 @@ export function App() {
     setSlotErrors((prev) => withoutError(prev, slotId));
     await runRowAction({
       action: () => apiClient.expressInterest(slotId),
-      refresh: refreshWeekend,
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshWeekend();
+      },
       onActionFailed: (err) => {
         console.error("Interest action failed:", err);
         setSlotErrors((prev) => withError(prev, slotId, "Не получилось записаться на смену. Попробуй ещё раз."));
@@ -329,7 +343,10 @@ export function App() {
     setOfferErrors((prev) => withoutError(prev, id));
     await runRowAction({
       action: () => action(id),
-      refresh: refreshWeekend,
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshWeekend();
+      },
       onActionFailed: (err) => {
         console.error("Offer action failed:", err);
         setOfferErrors((prev) => withError(prev, id, failureMessage));
