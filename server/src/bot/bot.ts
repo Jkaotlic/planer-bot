@@ -1119,7 +1119,7 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     updateChecklist(db, checklistId, { docFileId: null, docName: null });
-    clearDocPending(db);
+    clearDocPending(db, who.me.id);
     recordAudit(db, "checklist_doc_changed", who.me.id, { fileName: list.docName, attached: false, checklistName: list.name });
     await ctx.answerCallbackQuery({ text: "Убрал" });
     await ctx.reply(`«${list.name}»: инструкция снята — дежурным она больше не уходит.`);
@@ -1139,13 +1139,13 @@ export function createBot(deps: BotDeps): Bot {
     if (pending == null) return;
     const list = getChecklist(db, pending);
     if (!list) {
-      clearDocPending(db);
+      clearDocPending(db, who.me.id);
       return;
     }
 
     const doc = ctx.msg.document;
     updateChecklist(db, pending, { docFileId: doc.file_id, docName: doc.file_name ?? "Инструкция" });
-    clearDocPending(db);
+    clearDocPending(db, who.me.id);
     recordAudit(db, "checklist_doc_changed", who.me.id, {
       fileName: doc.file_name ?? null,
       attached: true,
