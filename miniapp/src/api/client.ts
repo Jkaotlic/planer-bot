@@ -1346,16 +1346,13 @@ export const realClient: ApiClient = {
   removeChecklistDoc: (id) =>
     authorizedDelete<{ checklist: Checklist }>(`/api/admin/checklists/${id}/doc`).then((r) => r.checklist),
   uploadChecklistDoc: async (id, file) => {
-    const token = await authToken();
     const form = new FormData();
     form.append("file", file);
     // Без заголовка Content-Type: его ставит браузер вместе с boundary, и
-    // заданный руками ломает разбор multipart на сервере.
-    const res = await apiFetch(`${API_BASE}/api/admin/checklists/${id}/doc`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
+    // заданный руками ломает разбор multipart на сервере. Через
+    // `authorizedFetch`, как всё остальное: мимо него протухший токен давал
+    // «Не удалось приложить файл» до перезапуска мини-аппа.
+    const res = await authorizedFetch(`/api/admin/checklists/${id}/doc`, { method: "POST", body: form });
     if (!res.ok) {
       throw new Error(res.status === 413 ? "Файл больше 5 МБ — выбери поменьше" : "Не удалось приложить файл");
     }
@@ -1509,22 +1506,18 @@ export const realClient: ApiClient = {
   },
 
   async setRotationUnit(templateId, rotationUnit) {
-    const token = await authToken();
-    const path = `/api/admin/templates/${templateId}/rotation`;
-    const res = await apiFetch(`${API_BASE}${path}`, {
+    const res = await authorizedFetch(`/api/admin/templates/${templateId}/rotation`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rotationUnit }),
     });
     if (!res.ok) throw new Error(await errorMessage(res));
   },
 
   async saveTemplateRoles(templateId, pool, preference) {
-    const token = await authToken();
-    const path = `/api/admin/templates/${templateId}/roles`;
-    const res = await apiFetch(`${API_BASE}${path}`, {
+    const res = await authorizedFetch(`/api/admin/templates/${templateId}/roles`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pool, preference }),
     });
     if (!res.ok) throw new Error(await errorMessage(res));

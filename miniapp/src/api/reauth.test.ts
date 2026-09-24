@@ -52,6 +52,28 @@ describe("переавторизация", () => {
     expect(calls.filter((call) => call.endsWith("/api/auth"))).toHaveLength(2);
   });
 
+  it.each([
+    ["uploadChecklistDoc", "/doc", (c: any) => c.uploadChecklistDoc(3, new File(["x"], "a.pdf")), { checklist: { id: 3 } }],
+    ["setRotationUnit", "/rotation", (c: any) => c.setRotationUnit(3, "week"), {}],
+    ["saveTemplateRoles", "/roles", (c: any) => c.saveTemplateRoles(3, [1], {}), {}],
+  ])("%s тоже переживает протухший токен — а не показывает админу «unauthorized»", async (_name, suffix, call, okBody) => {
+    let hits = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/auth")) return jsonResponse({ token: "t" });
+      if (url.endsWith(suffix)) {
+        hits += 1;
+        return hits === 1 ? jsonResponse({ error: "unauthorized" }, 401) : jsonResponse(okBody);
+      }
+      return jsonResponse({});
+    });
+
+    const { realClient } = await import("./client");
+    // Один вызов — и он проходит: первый заход упёрся в 401, второй ушёл со свежим токеном.
+    await call(realClient);
+    expect(hits).toBe(2);
+  });
+
   it("разовый сбой входа не запоминается навсегда", async () => {
     let authAttempts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

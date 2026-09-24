@@ -49,16 +49,29 @@ export function createTransport(opts: TransportOptions): Transport {
    */
   const doFetch = (input: string, init: RequestInit) => (fetchImpl ?? globalThis.fetch)(input, init);
 
-  async function send(path: string, init: RequestInit): Promise<unknown> {
+  async function attempt(path: string, init: RequestInit): Promise<Response> {
     const token = await tokenSource.get();
-    let res: Response;
     try {
-      res = await doFetch(`${baseUrl}${path}`, {
+      return await doFetch(`${baseUrl}${path}`, {
         ...init,
         headers: { ...init.headers, Authorization: `Bearer ${token}` },
       });
     } catch {
       throw new Error(OFFLINE_MESSAGE);
+    }
+  }
+
+  async function send(path: string, init: RequestInit): Promise<unknown> {
+    let res = await attempt(path, init);
+    // JWT живёт шесть часов, вебвью Telegram — дольше. Одна повторная попытка со
+    // свежим токеном — та же, что у `authorizedFetch` мини-аппа: без неё экраны
+    // на этом транспорте после простоя отвечали «Сессия истекла — войди заново»,
+    // а войти заново в мини-аппе нечем. Консоли повтор ничего не ломает: её
+    // источник после сброса либо сам попросит войти, либо вернёт тот же токен,
+    // и второй 401 скажет то же, что и раньше.
+    if (res.status === 401) {
+      tokenSource.clear();
+      res = await attempt(path, init);
     }
     if (!res.ok) throw await toError(path, res, tokenSource);
     return await res.json();

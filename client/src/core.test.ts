@@ -18,6 +18,21 @@ describe("транспорт", () => {
     expect(tokenSource.clear).toHaveBeenCalled();
   });
 
+  it("протухший токен (мини-апп открыт дольше шести часов) переспрашивает и повторяет запрос", async () => {
+    // Раньше первый же 401 давал «Сессия истекла — войди заново», а войти заново
+    // в мини-аппе нечем: листание недели и действия с сотрудниками умирали.
+    const tokens = ["old", "fresh"];
+    const tokenSource = { get: vi.fn(async () => tokens[0]!), clear: vi.fn(() => void tokens.shift()) };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
+    const t = createTransport({ baseUrl: "", tokenSource, fetchImpl });
+
+    await expect(t.get("/api/templates")).resolves.toEqual({ ok: true });
+    expect(fetchImpl.mock.calls[1]![1].headers.Authorization).toBe("Bearer fresh");
+  });
+
   it("показывает текст ошибки сервера, а не код", async () => {
     const fetchImpl = vi
       .fn()
