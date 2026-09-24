@@ -1968,7 +1968,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: confirm an offer -> creates a weekend_work shift
   app.post("/api/weekend/offers/:id/confirm", requireAuth(db, config.jwtSecret), async (c) => {
-    const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     const slot = getVacantSlot(db, res.slotId);
     const name = nameOf(c.get("auth").employeeId) ?? "Работник";
@@ -1984,7 +1984,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: decline an offer -> slot reopens
   app.post("/api/weekend/offers/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
-    const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     const slot = getVacantSlot(db, res.slotId);
     const name = nameOf(c.get("auth").employeeId) ?? "Работник";

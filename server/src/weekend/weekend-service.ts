@@ -244,10 +244,22 @@ export function assigneesForSlot(
     }));
 }
 
-export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: number): ConfirmOutcome {
+/**
+ * Прошёл ли день выходного. «Беру» и «Не смогу» живут в чате вечно, а статус
+ * `offered` никто не гасит по времени: без этой проверки отказ через неделю
+ * стирал из графика уже отработанную смену, а «Беру» задним числом клал её в
+ * ведомость. `expressInterest` отвечает тем же `slot_passed`.
+ */
+function offerPassed(db: Db, slotId: number, today: string): boolean {
+  const slot = getVacantSlot(db, slotId);
+  return slot != null && slot.date < today;
+}
+
+export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: number, today: string): ConfirmOutcome {
   const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
+  if (offerPassed(db, assignment.slotId, today)) return { ok: false, reason: "slot_passed" };
   // The entry was created when the admin assigned it; accepting just records that.
   if (assignment.shiftId != null) {
     confirmAssignment(db, assignmentId, assignment.shiftId);
@@ -273,10 +285,11 @@ export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: num
   return { ok: true, slotId: assignment.slotId };
 }
 
-export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: number): ConfirmOutcome {
+export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: number, today: string): ConfirmOutcome {
   const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
+  if (offerPassed(db, assignment.slotId, today)) return { ok: false, reason: "slot_passed" };
   // Turning it down pulls the entry back out of the schedule; the slot itself stays
   // open for someone else (it was never closed by assigning).
   db.transaction(() => {

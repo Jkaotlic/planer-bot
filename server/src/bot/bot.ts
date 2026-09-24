@@ -1478,9 +1478,14 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const me = who.me;
-    const res = action === "confirm" ? confirmOffer(db, id, me.id) : declineOffer(db, id, me.id);
+    const today = teamNow(config.teamTz).date;
+    const res = action === "confirm" ? confirmOffer(db, id, me.id, today) : declineOffer(db, id, me.id, today);
     if (!res.ok) {
-      const text = res.reason === "not_yours" ? "Это не твой оффер" : res.reason === "not_offered" ? "Уже обработано" : "Не получилось";
+      const text =
+        res.reason === "not_yours" ? "Это не твой оффер"
+        : res.reason === "not_offered" ? "Уже обработано"
+        : res.reason === "slot_passed" ? "Этот выходной уже прошёл"
+        : "Не получилось";
       await ctx.answerCallbackQuery({ text });
       return;
     }
