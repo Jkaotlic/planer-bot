@@ -157,7 +157,7 @@ describe("/week", () => {
     // Третьей кнопкой — переключатель расшифровки букв: он живёт под картинкой,
     // потому что там виден его результат.
     expect(buttons.map((b: { callback_data: string }) => b.callback_data))
-      .toEqual(["week:-1", "week:1", "week:legend:0", "week:refresh:0"]);
+      .toEqual(["week:-1", "week:1", "week:legend:hide:0", "week:refresh:0"]);
   });
 
   it("кнопка «Обновить» есть и на текущей неделе, и на соседней — и целит в показанную неделю", async () => {

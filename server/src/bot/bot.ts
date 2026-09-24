@@ -90,7 +90,12 @@ function weekKeyboard(offset: number, legendOn: boolean): InlineKeyboard {
   // One tap back home: from week 26, walking back on foot is 26 taps.
   if (offset !== 0) keyboard.text("⌂ Текущая", "week:0");
   if (offset < WEEK_OFFSET_LIMIT) keyboard.text("След. ›", `week:${offset + 1}`);
-  keyboard.row().text(legendOn ? "🔤 Скрыть расшифровку" : "🔤 Показать расшифровку", `week:legend:${offset}`);
+  // Намерение — в самой кнопке, а не «переключить текущее»: в чате бывают две
+  // картинки, нарисованные при разных настройках, и нажатие «Показать» на
+  // старой гасило расшифровку.
+  keyboard
+    .row()
+    .text(legendOn ? "🔤 Скрыть расшифровку" : "🔤 Показать расшифровку", `week:legend:${legendOn ? "hide" : "show"}:${offset}`);
   // Замены случаются уже после того, как картинка прислана. Без этой кнопки
   // свежий график добывали в два нажатия — «След.» и обратно «Текущая», а на
   // соседней неделе такого обходного пути и вовсе нет. Кнопка целит в ту
@@ -1153,7 +1158,9 @@ export function createBot(deps: BotDeps): Bot {
    * «🔤 Скрыть/Показать расшифровку» — личная настройка, переключаемая там, где
    * виден результат. Картинка перерисовывается на месте, как при листании.
    */
-  bot.callbackQuery(/^week:legend:(-?\d+)$/, async (ctx) => {
+  // Старый вид `week:legend:<offset>` остаётся в уже отправленных сообщениях —
+  // он по-прежнему переключает; новый несёт намерение.
+  bot.callbackQuery(/^week:legend:(?:(show|hide):)?(-?\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok) {
       await ctx.answerCallbackQuery({ text: who.text });
@@ -1165,12 +1172,13 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: "Только в личном чате" });
       return;
     }
-    const offset = Number(ctx.match[1]);
+    const offset = Number(ctx.match[2]);
     if (Math.abs(offset) > WEEK_OFFSET_LIMIT) {
       await ctx.answerCallbackQuery({ text: "Дальше не листаю" });
       return;
     }
-    const showLegend = !who.me.weekLegend;
+    const intent = ctx.match[1];
+    const showLegend = intent ? intent === "show" : !who.me.weekLegend;
     setWeekLegend(db, who.me.id, showLegend);
     const { monday, today } = mondayForOffset(offset);
     let answered = false;
