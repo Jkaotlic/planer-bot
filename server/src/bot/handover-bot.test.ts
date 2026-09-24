@@ -132,6 +132,38 @@ describe("handover buttons", () => {
     expect(mark.id).toBeGreaterThan(0);
   });
 
+  it("второй «Не могу» (двойной тап) не рассылает смену всей команде ещё раз", async () => {
+    const db = makeTestDb();
+    const { bot, sent, answers } = testBot(db);
+    const { igor, handover } = await scene(db);
+    await offerTo({ db, config, messenger: createHandoverMessenger(bot, db) }, handover.id, igor.id);
+    await bot.handleUpdate(callbackUpdate(202, `handover:decline:${handover.id}`));
+    sent.length = 0;
+    answers.length = 0;
+
+    await bot.handleUpdate(callbackUpdate(202, `handover:decline:${handover.id}`));
+
+    expect(sent).toEqual([]);
+    expect(answers).toEqual(["Уже спросили всех — спасибо"]);
+  });
+
+  it("«Не могу» по старому личному предложению не отбирает смену у того, кому её предложили теперь", async () => {
+    const db = makeTestDb();
+    const { bot, sent, answers } = testBot(db);
+    const { igor, mark, handover } = await scene(db);
+    const deps = { db, config, messenger: createHandoverMessenger(bot, db) };
+    await offerTo(deps, handover.id, igor.id);
+    await offerTo(deps, handover.id, mark.id);
+    sent.length = 0;
+
+    await bot.handleUpdate(callbackUpdate(202, `handover:decline:${handover.id}`));
+
+    expect(getHandover(db, handover.id)?.status).toBe("offered");
+    expect(getHandover(db, handover.id)?.offeredToEmployeeId).toBe(mark.id);
+    expect(sent).toEqual([]);
+    expect(answers).toEqual(["Это предложение уже ушло другому"]);
+  });
+
   it("the fan-out carries one button — a refusal answers nothing in a broadcast", async () => {
     const db = makeTestDb();
     const { bot, sent } = testBot(db);

@@ -215,6 +215,12 @@ export async function declineHandover(deps: HandoverDeps, handoverId: number, em
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
     return { ok: false, reason: "Эту смену уже закрыли" };
   }
+  // «Не могу» есть только в личном предложении, а кнопка в чате живёт вечно.
+  // Без этих двух проверок второй тап (или старое сообщение, нажатое после
+  // веера) снова рассылал смену всей команде, а отказ по предложению, которое
+  // админ уже переадресовал другому, отбирал смену и у нового адресата.
+  if (handover.status === "fanned") return { ok: false, reason: "Уже спросили всех — спасибо" };
+  if (handover.offeredToEmployeeId !== employeeId) return { ok: false, reason: "Это предложение уже ушло другому" };
   const shift = shiftOf(db, handover);
   addDecline(db, handoverId, employeeId);
   recordAudit(db, "handover_declined", employeeId, auditPayload(db, handover, shift, employeeId));
