@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Bot } from "grammy";
+import { GrammyError, type Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
@@ -287,5 +287,73 @@ describe("runChecklistTick", () => {
     const [, , extra] = calls[0] as [number, string, { reply_markup?: { inline_keyboard: { text: string }[][] } }];
     const buttons = (extra?.reply_markup?.inline_keyboard ?? []).flat();
     expect(buttons.map((b) => b.text)).not.toContain("☑️ Отметить");
+  });
+
+  describe("сбои отправки", () => {
+    function refusal(code: number, description: string): GrammyError {
+      return new GrammyError(`Call failed! (${code}: ${description})`, { ok: false, error_code: code, description }, "sendMessage", {});
+    }
+
+    it("файл ушёл, а текст нет — на следующем тике файл не повторяется", async () => {
+      const { db, list } = stage();
+      updateChecklist(db, list.id, { docFileId: "BQACAgIAAx", docName: "Проверка 47.pdf" });
+      const { bot, sent, docs } = fakeBot();
+      let textDown = true;
+      (bot.api.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(async (to: number, text: string) => {
+        if (textDown) throw new Error("Network request for 'sendMessage' failed!");
+        sent.push({ to, text });
+      });
+
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+      textDown = false;
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" });
+
+      expect(docs).toHaveLength(1);
+      expect(sent).toHaveLength(1);
+    });
+
+    it("битый файл (Telegram отверг file_id) не оставляет дежурного без списка", async () => {
+      const { db, list } = stage();
+      updateChecklist(db, list.id, { docFileId: "stale-file-id" });
+      const { bot, sent } = fakeBot();
+      (bot.api.sendDocument as ReturnType<typeof vi.fn>).mockRejectedValue(refusal(400, "Bad Request: wrong file identifier"));
+
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+
+      expect(sent).toHaveLength(1);
+    });
+
+    it("заблокировавшему бота не долбит каждые пять минут до полуночи", async () => {
+      const { db } = stage();
+      const { bot } = fakeBot();
+      const send = bot.api.sendMessage as ReturnType<typeof vi.fn>;
+      send.mockRejectedValue(refusal(403, "Forbidden: bot was blocked by the user"));
+
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" });
+
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it("после конца смены не пишет — сеть вернулась, а дежурный уже ушёл", async () => {
+      const { db } = stage();
+      const { bot, sent } = fakeBot();
+
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "16:30" });
+
+      expect(sent).toEqual([]);
+    });
+
+    it("ночную смену (конец раньше начала) до полуночи не считает закончившейся", async () => {
+      const { db, igor, duty } = stage({ linkedList: true });
+      // Дневную смену из stage убираем из уравнения: смотрим на ночную.
+      db.run("delete from shifts" as never);
+      createShift(db, { date: TODAY, start: "20:00", end: "08:00", employeeId: igor.id, category: "duty", templateId: duty.id });
+      const { bot, sent } = fakeBot();
+
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "20:05" });
+
+      expect(sent).toHaveLength(1);
+    });
   });
 });

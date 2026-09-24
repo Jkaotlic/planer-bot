@@ -2,6 +2,7 @@ import { shiftsOverlap } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
+import { reachedNobody, type AdminReach } from "../bot/notify";
 import { getEmployeeById } from "../repo/employees";
 import {
   addDecline,
@@ -40,7 +41,7 @@ export interface HandoverMessenger {
   plain(employeeId: number, text: string): Promise<void>;
   admins(text: string): Promise<void>;
   /** Письмо, которое админ не может себе выключить: смена осталась без человека. */
-  adminsAlways(text: string): Promise<void>;
+  adminsAlways(text: string): Promise<AdminReach>;
 }
 
 export interface HandoverDeps {
@@ -215,6 +216,12 @@ export async function declineHandover(deps: HandoverDeps, handoverId: number, em
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
     return { ok: false, reason: "Эту смену уже закрыли" };
   }
+  // «Не могу» есть только в личном предложении, а кнопка в чате живёт вечно.
+  // Без этих двух проверок второй тап (или старое сообщение, нажатое после
+  // веера) снова рассылал смену всей команде, а отказ по предложению, которое
+  // админ уже переадресовал другому, отбирал смену и у нового адресата.
+  if (handover.status === "fanned") return { ok: false, reason: "Уже спросили всех — спасибо" };
+  if (handover.offeredToEmployeeId !== employeeId) return { ok: false, reason: "Это предложение уже ушло другому" };
   const shift = shiftOf(db, handover);
   addDecline(db, handoverId, employeeId);
   recordAudit(db, "handover_declined", employeeId, auditPayload(db, handover, shift, employeeId));
@@ -297,9 +304,12 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
   const declinedNames = declinedIds.map((id) => getEmployeeById(db, id)?.displayName ?? `работник #${id}`);
   const silent = handoverCandidates(db, shift, { excludeIds: declinedIds }).length;
 
+  // Отметка до отправки — против второго письма, если тик пересечётся сам с
+  // собой. Но письмо, не дошедшее ни до кого (обрыв сети), — не сказанное:
+  // отметку снимаем, иначе следующий тик промолчит, а `expireHandover` потом
+  // промолчит тоже, «потому что админы уже знают».
   const updated = updateHandover(db, handoverId, { escalatedAt: new Date() })!;
-  recordAudit(db, "handover_escalated", null, auditPayload(db, updated, shift, null));
-  await deps.messenger.adminsAlways(
+  const reach = await deps.messenger.adminsAlways(
     handoverEscalationText(
       nameOf(db, handover.fromEmployeeId) ?? "Работник",
       lineOf(shift),
@@ -307,6 +317,11 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
       silent,
     ),
   );
+  if (reachedNobody(reach)) {
+    updateHandover(db, handoverId, { escalatedAt: null });
+    return { ok: false, reason: "Письмо админам не дошло" };
+  }
+  recordAudit(db, "handover_escalated", null, auditPayload(db, updated, shift, null));
   return { ok: true };
 }
 

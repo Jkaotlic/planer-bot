@@ -180,4 +180,25 @@ describe("карточка чек-листа", () => {
     expect(items[0]!.getAttribute("aria-pressed")).toBe("false");
     expect(items[1]!.getAttribute("aria-pressed")).toBe("true");
   });
+
+  it("пока летит отметка второго пункта, ответ по первому не отпускает его кнопку", async () => {
+    vi.spyOn(apiClient, "getMyChecklists").mockResolvedValue(state());
+    const pending: Array<() => void> = [];
+    vi.spyOn(apiClient, "markChecklistItem").mockImplementation(
+      (_day, itemId) =>
+        new Promise((resolve) => {
+          pending[itemId] = () => resolve({ checklistId: 1, markedItemIds: [itemId] });
+        }),
+    );
+
+    const el = await mount();
+    const [first, second] = [...el.querySelectorAll<HTMLButtonElement>(".checklist-item")];
+    await act(async () => first!.click());
+    await act(async () => second!.click());
+    await act(async () => pending[1]!());
+    await settle();
+
+    expect([...el.querySelectorAll<HTMLButtonElement>(".checklist-item")][1]!.disabled).toBe(true);
+  });
 });
+

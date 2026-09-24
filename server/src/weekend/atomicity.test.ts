@@ -71,7 +71,7 @@ describe("weekend assignment writes are all-or-nothing", () => {
     db.run(sql.raw(`DELETE FROM shifts`));
     raiseOn(db, "no_confirm", "UPDATE", "weekend_assignments");
 
-    expect(() => confirmOffer(db, assigned.assignment.id, worker.id)).toThrow();
+    expect(() => confirmOffer(db, assigned.assignment.id, worker.id, TODAY)).toThrow();
 
     // Otherwise: a fresh weekend_work entry exists, the offer is still `offered`
     // with shift_id NULL — and the next «Назначить» writes a *second* entry

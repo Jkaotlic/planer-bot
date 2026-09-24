@@ -31,6 +31,7 @@ function deps(db: Db) {
       },
       adminsAlways: async (text: string) => {
         sent.push({ to: "admins", text });
+        return { attempted: 1, delivered: 1 };
       },
     },
   };
@@ -105,6 +106,33 @@ describe("handover tick", () => {
 
     expect(sent.filter((m) => m.to === "admins")).toHaveLength(1);
     expect(auditTypes(db).filter((t) => t === "handover_escalated")).toHaveLength(1);
+  });
+
+  it("эскалация, не дошедшая ни до одного админа (обрыв сети), повторяется следующим тиком", async () => {
+    // Отметка стояла до отправки: при обрыве админы не узнавали ничего, а
+    // потом `expireHandover` молчал, «потому что админы уже знают».
+    const db = makeTestDb();
+    const { handover, igor } = await scene(db, { date: "2026-08-12" });
+    await offerTo(deps(db), handover.id, igor);
+    let networkUp = false;
+    const flaky = {
+      ...deps(db),
+      messenger: {
+        ...deps(db).messenger,
+        adminsAlways: async (text: string) => {
+          if (!networkUp) return { attempted: 1, delivered: 0 };
+          sent.push({ to: "admins", text });
+          return { attempted: 1, delivered: 1 };
+        },
+      },
+    };
+    sent = [];
+
+    await runHandoverTick(flaky, NOW);
+    networkUp = true;
+    await runHandoverTick(flaky, NOW + 5 * 60 * 1000);
+
+    expect(sent.filter((m) => m.to === "admins")).toHaveLength(1);
   });
 
   it("does both when both are due, and the fan-out goes first", async () => {

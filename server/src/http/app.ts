@@ -278,7 +278,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ error: "internal" }, 500);
   });
 
-  app.get("/api/health", (c) => c.json({ ok: true }));
+  // Про бота тоже: 7 сентября процесс жил, HTTP отвечал, а опрос Telegram был
+  // мёртв — кнопки не работали ни у кого, и health этого не видел. Без бота
+  // (тесты HTTP-слоя) проверять нечего.
+  app.get("/api/health", (c) =>
+    bot && !bot.isRunning() ? c.json({ ok: false, bot: "down" }, 503) : c.json({ ok: true }),
+  );
 
   /**
    * Куда мини-апп жалуется, что не открылся. Без токена — по устройству и
@@ -1963,7 +1968,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: confirm an offer -> creates a weekend_work shift
   app.post("/api/weekend/offers/:id/confirm", requireAuth(db, config.jwtSecret), async (c) => {
-    const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    const res = confirmOffer(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     const slot = getVacantSlot(db, res.slotId);
     const name = nameOf(c.get("auth").employeeId) ?? "Работник";
@@ -1979,7 +1984,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Worker: decline an offer -> slot reopens
   app.post("/api/weekend/offers/:id/decline", requireAuth(db, config.jwtSecret), async (c) => {
-    const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId);
+    const res = declineOffer(db, Number(c.req.param("id")), c.get("auth").employeeId, teamNow(config.teamTz).date);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     const slot = getVacantSlot(db, res.slotId);
     const name = nameOf(c.get("auth").employeeId) ?? "Работник";

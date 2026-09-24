@@ -65,7 +65,7 @@ describe("notify", () => {
     admin(db, "Игорь", 222);
     const { bot, sent } = testBotFailing(111);
     try {
-      await expect(notifyAdmins(bot, db, "swaps", "обмен состоялся")).resolves.toBeUndefined();
+      await expect(notifyAdmins(bot, db, "swaps", "обмен состоялся")).resolves.toEqual({ attempted: 2, delivered: 1 });
       expect(sent.map((s) => s.chat_id)).toEqual([222]);
       expect(errorLog).toHaveBeenCalledTimes(1);
       expect(errorLog).toHaveBeenCalledWith(

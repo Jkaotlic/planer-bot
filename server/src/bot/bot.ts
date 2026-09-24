@@ -1,4 +1,6 @@
-import { Bot, InlineKeyboard, InputFile, Keyboard, type Context } from "grammy";
+import { createHash } from "node:crypto";
+import { Bot, InlineKeyboard, InputFile, Keyboard, type ApiClientOptions, type Context } from "grammy";
+import { DEFAULT_API_TIMEOUTS, installApiTimeouts, type ApiTimeouts } from "./api-timeouts";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import type { Employee } from "../db/schema";
@@ -24,7 +26,7 @@ import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
@@ -89,7 +91,12 @@ function weekKeyboard(offset: number, legendOn: boolean): InlineKeyboard {
   // One tap back home: from week 26, walking back on foot is 26 taps.
   if (offset !== 0) keyboard.text("⌂ Текущая", "week:0");
   if (offset < WEEK_OFFSET_LIMIT) keyboard.text("След. ›", `week:${offset + 1}`);
-  keyboard.row().text(legendOn ? "🔤 Скрыть расшифровку" : "🔤 Показать расшифровку", `week:legend:${offset}`);
+  // Намерение — в самой кнопке, а не «переключить текущее»: в чате бывают две
+  // картинки, нарисованные при разных настройках, и нажатие «Показать» на
+  // старой гасило расшифровку.
+  keyboard
+    .row()
+    .text(legendOn ? "🔤 Скрыть расшифровку" : "🔤 Показать расшифровку", `week:legend:${legendOn ? "hide" : "show"}:${offset}`);
   // Замены случаются уже после того, как картинка прислана. Без этой кнопки
   // свежий график добывали в два нажатия — «След.» и обратно «Текущая», а на
   // соседней неделе такого обходного пути и вовсе нет. Кнопка целит в ту
@@ -101,6 +108,10 @@ function weekKeyboard(offset: number, legendOn: boolean): InlineKeyboard {
 export interface BotDeps {
   db: Db;
   config: Config;
+  /** Только для тестов: куда ходит клиент grammY (локальный «висящий» сервер). */
+  client?: ApiClientOptions;
+  /** Сроки вызовов Telegram; в проде — значения по умолчанию, см. `api-timeouts.ts`. */
+  apiTimeouts?: Partial<ApiTimeouts>;
 }
 
 /** Maps a swap-service failure reason to a short Russian message for the tapping user. */
@@ -219,6 +230,11 @@ export function miniAppKeyboard(publicUrl: string, opts: { canAnnounce: boolean;
   return kb;
 }
 
+/** Восемь знаков хеша ссылки — сверить кнопку с отложенной ссылкой в 64 байтах `callback_data`. */
+function linkFingerprint(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 8);
+}
+
 /** Кнопки под подтверждением: подвинуть день или отказаться от автоотправки. */
 function autoSendKeyboard(collectionId: number): InlineKeyboard {
   return new InlineKeyboard()
@@ -229,7 +245,32 @@ function autoSendKeyboard(collectionId: number): InlineKeyboard {
 
 export function createBot(deps: BotDeps): Bot {
   const { db, config } = deps;
-  const bot = new Bot(config.botToken);
+  const bot = new Bot(config.botToken, deps.client ? { client: deps.client } : undefined);
+  // Первым перехватчиком: тестовые `recordApi` встают снаружи и в сеть не ходят,
+  // а настоящий вызов получает свой срок.
+  installApiTimeouts(bot, { ...DEFAULT_API_TIMEOUTS, ...deps.apiTimeouts });
+
+  /**
+   * Нажатие, на которое никто не ответил, у человека выглядит как «кнопка не
+   * работает»: спиннер крутится, потом ничего. `bot.catch` только пишет в лог,
+   * поэтому упавший до ответа обработчик оставлял человека без слова. Первым в
+   * цепочке, чтобы накрыть все обработчики; ошибка идёт дальше — в лог.
+   */
+  bot.use(async (ctx, next) => {
+    if (!ctx.callbackQuery) return next();
+    let answered = false;
+    const answer = ctx.answerCallbackQuery.bind(ctx);
+    ctx.answerCallbackQuery = (...args) => {
+      answered = true;
+      return answer(...args);
+    };
+    try {
+      await next();
+    } catch (error) {
+      if (!answered) await answer({ text: "Не получилось — попробуй ещё раз" }).catch(() => {});
+      throw error;
+    }
+  });
 
   /**
    * Whoever tapped, if they may still act.
@@ -703,7 +744,7 @@ export function createBot(deps: BotDeps): Bot {
         inline_keyboard: [
           ...candidates.map((c) => [{
             text: c.hasUrl ? `${c.displayName} · заменить ссылку` : c.displayName,
-            callback_data: `collection:link:${c.employeeId}`,
+            callback_data: `collection:link:${c.employeeId}:${linkFingerprint(url)}`,
           }]),
           [{ text: "Просто QR-код", callback_data: "collection:qr" }],
         ],
@@ -936,7 +977,9 @@ export function createBot(deps: BotDeps): Bot {
    * Ссылка лежит в окне ожидания, а не в `callback_data`: там 64 байта, и
    * ссылка на сбор в них не помещается.
    */
-  bot.callbackQuery(/^collection:link:(\d+)$/, async (ctx) => {
+  // Отпечаток ссылки — необязательный: кнопки без него остались в чатах с
+  // прошлых выкладок и работают как раньше.
+  bot.callbackQuery(/^collection:link:(\d+)(?::([0-9a-f]{8}))?$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
       await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
@@ -948,9 +991,24 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply("Не помню, какую ссылку ты присылал. Пришли ссылку ещё раз.");
       return;
     }
+    // Отложенная ссылка одна на админа, и новая затирает прежнюю. Без сверки
+    // тап под вопросом про первую ссылку молча привязывал вторую.
+    const fingerprint = ctx.match[2];
+    if (fingerprint && fingerprint !== linkFingerprint(url)) {
+      await ctx.answerCallbackQuery({ text: "Эту ссылку ты уже заменил — выбери под последним вопросом" });
+      return;
+    }
+    const honoureeId = Number(ctx.match[1]);
+    const today = teamNow(config.teamTz).date;
+    // Вопрос мог пролежать неделю: день рождения прошёл, и `ensureBirthdayRound`
+    // завёл бы раунд следующего года. Кандидаты — те же, что при вопросе.
+    if (!linkCandidates(db, today, who.me.id).some((c) => c.employeeId === honoureeId)) {
+      await ctx.answerCallbackQuery({ text: "Этот сбор уже не ждёт ссылку — пришли её ещё раз" });
+      return;
+    }
     clearLinkPending(db, who.me.id);
     await ctx.answerCallbackQuery();
-    await bindLink(ctx, who.me.id, Number(ctx.match[1]), url, teamNow(config.teamTz).date);
+    await bindLink(ctx, who.me.id, honoureeId, url, today);
   });
 
   /** «Просто QR-код» под вопросом про сбор: ссылка та же, что ждёт в окне. */
@@ -1013,6 +1071,17 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const today = teamNow(config.teamTz).date;
+    // Те же условия, что у `link-capture.ts`: тик пропускает разосланный и
+    // неактивный раунд, и поставленный ему день обещал бы рассылку, которой не
+    // будет никогда. Кнопка под подтверждением живёт в чате вечно.
+    if (collection.sendCount > 0) {
+      await ctx.answerCallbackQuery({ text: "Сбор уже разослан — второй раз бот не шлёт" });
+      return;
+    }
+    if (!isCollectionActive(collection, today)) {
+      await ctx.answerCallbackQuery({ text: "Сбор закрыт или праздник прошёл" });
+      return;
+    }
     const autoSendOn = autoSendDateFor(collection.celebratedOn, today, Number(ctx.match[2]));
     updateCollection(db, collection.id, { autoSendOn });
     await ctx.answerCallbackQuery({ text: "Переставил" });
@@ -1050,7 +1119,7 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     updateChecklist(db, checklistId, { docFileId: null, docName: null });
-    clearDocPending(db);
+    clearDocPending(db, who.me.id);
     recordAudit(db, "checklist_doc_changed", who.me.id, { fileName: list.docName, attached: false, checklistName: list.name });
     await ctx.answerCallbackQuery({ text: "Убрал" });
     await ctx.reply(`«${list.name}»: инструкция снята — дежурным она больше не уходит.`);
@@ -1070,13 +1139,13 @@ export function createBot(deps: BotDeps): Bot {
     if (pending == null) return;
     const list = getChecklist(db, pending);
     if (!list) {
-      clearDocPending(db);
+      clearDocPending(db, who.me.id);
       return;
     }
 
     const doc = ctx.msg.document;
     updateChecklist(db, pending, { docFileId: doc.file_id, docName: doc.file_name ?? "Инструкция" });
-    clearDocPending(db);
+    clearDocPending(db, who.me.id);
     recordAudit(db, "checklist_doc_changed", who.me.id, {
       fileName: doc.file_name ?? null,
       attached: true,
@@ -1112,7 +1181,9 @@ export function createBot(deps: BotDeps): Bot {
    * «🔤 Скрыть/Показать расшифровку» — личная настройка, переключаемая там, где
    * виден результат. Картинка перерисовывается на месте, как при листании.
    */
-  bot.callbackQuery(/^week:legend:(-?\d+)$/, async (ctx) => {
+  // Старый вид `week:legend:<offset>` остаётся в уже отправленных сообщениях —
+  // он по-прежнему переключает; новый несёт намерение.
+  bot.callbackQuery(/^week:legend:(?:(show|hide):)?(-?\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok) {
       await ctx.answerCallbackQuery({ text: who.text });
@@ -1124,12 +1195,13 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: "Только в личном чате" });
       return;
     }
-    const offset = Number(ctx.match[1]);
+    const offset = Number(ctx.match[2]);
     if (Math.abs(offset) > WEEK_OFFSET_LIMIT) {
       await ctx.answerCallbackQuery({ text: "Дальше не листаю" });
       return;
     }
-    const showLegend = !who.me.weekLegend;
+    const intent = ctx.match[1];
+    const showLegend = intent ? intent === "show" : !who.me.weekLegend;
     setWeekLegend(db, who.me.id, showLegend);
     const { monday, today } = mondayForOffset(offset);
     let answered = false;
@@ -1448,9 +1520,14 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const me = who.me;
-    const res = action === "confirm" ? confirmOffer(db, id, me.id) : declineOffer(db, id, me.id);
+    const today = teamNow(config.teamTz).date;
+    const res = action === "confirm" ? confirmOffer(db, id, me.id, today) : declineOffer(db, id, me.id, today);
     if (!res.ok) {
-      const text = res.reason === "not_yours" ? "Это не твой оффер" : res.reason === "not_offered" ? "Уже обработано" : "Не получилось";
+      const text =
+        res.reason === "not_yours" ? "Это не твой оффер"
+        : res.reason === "not_offered" ? "Уже обработано"
+        : res.reason === "slot_passed" ? "Этот выходной уже прошёл"
+        : "Не получилось";
       await ctx.answerCallbackQuery({ text });
       return;
     }
@@ -1510,6 +1587,13 @@ export function createBot(deps: BotDeps): Bot {
     // the text stays. Through `safeEdit`, like every cosmetic edit in this file:
     // a failure here must not reach `bot.catch` as an unexplained handler error.
     await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  // Последним: сюда доходит только нажатие, которое не узнал ни один обработчик, —
+  // кнопка из старого сообщения, чью callback_data с тех пор переименовали
+  // (`checklist:doc:clear` до cdb74a2). Без ответа она крутила спиннер вечно.
+  bot.on("callback_query:data", async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "Кнопка устарела — открой свежее сообщение или /start" });
   });
 
   bot.catch((err) => {

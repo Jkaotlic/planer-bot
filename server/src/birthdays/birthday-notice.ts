@@ -139,7 +139,10 @@ export async function runBirthdayNoticeTick(
 
     if (preview.blocker) {
       const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
-      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, text);
+      let adminsTold = 0;
+      for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
+      // Как ниже: «подарка не будет», которое не дошло ни до кого, — не сказанное.
+      if (admins.length > 0 && adminsTold === 0) clearAutoSent(db, round.id);
       recordAudit(db, "collection_auto_send_failed", null, {
         collectionId: round.id, employeeId: round.employeeId, title: preview.title, reason: preview.blocker,
       });
@@ -178,7 +181,14 @@ export async function runBirthdayNoticeTick(
         : autoSendFailedMessage(personName ?? "именинника", "Telegram не принял ни одного письма.", daysUntil);
       // Ноль доставленных — это провал, а не тихий успех: `markCollectionSent`
       // выше его не засчитал, и админ обязан узнать об этом словами.
-      for (const admin of admins) await notifyUser(bot, admin.telegramUserId!, report);
+      let adminsTold = 0;
+      for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, report)) adminsTold += 1;
+      // Не узнал никто — ни команда, ни админы: это обрыв сети, а не отказ, и
+      // отметку о попытке надо снять, иначе сбор пропадёт молча (пять обрывов
+      // ENOTFOUND за сентябрь 2026). Второго письма это не открывает — первого
+      // никто не получил; а раз админам «⚠️» дошёл, повторять каждые пять минут
+      // незачем, дальше решают они.
+      if (delivered === 0 && adminsTold === 0) clearAutoSent(db, round.id);
       sent += delivered;
     } finally {
       releaseCollectionSend(round.id);

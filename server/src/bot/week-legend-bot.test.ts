@@ -63,7 +63,7 @@ describe("расшифровка букв под картинкой недели
     const photo = api.calls.find((c) => c.method === "sendPhoto")!;
     const buttons = ((photo.payload as { reply_markup?: { inline_keyboard?: { callback_data?: string }[][] } })
       .reply_markup?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
-    expect(buttons).toContain("week:legend:0");
+    expect(buttons).toContain("week:legend:hide:0");
 
     await tap(bot, 333, "week:legend:0");
 
@@ -103,4 +103,22 @@ describe("расшифровка букв под картинкой недели
       .reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text);
     expect(labels.some((t) => t.includes("Скрыть расшифровку"))).toBe(true);
   });
+
+  it("кнопка делает то, что на ней написано, даже со старой картинки", async () => {
+    // Две картинки в чате, нарисованные при разных настройках: «Показать» на
+    // старой раньше переключала текущее значение — и расшифровка пропадала.
+    const { db, bot, igor } = stage();
+    const api = recordApi(bot);
+
+    await send(bot, 333, "📅 График");
+    const photo = api.calls.find((c) => c.method === "sendPhoto")!;
+    const legendData = ((photo.payload as { reply_markup?: { inline_keyboard?: { text: string; callback_data?: string }[][] } })
+      .reply_markup?.inline_keyboard ?? []).flat().find((b) => b.text.includes("расшифровку"))!.callback_data;
+    expect(legendData).toBe("week:legend:hide:0");
+
+    await tap(bot, 333, "week:legend:show:0");
+
+    expect(getEmployeeById(db, igor.id)!.weekLegend).toBe(true);
+  });
 });
+

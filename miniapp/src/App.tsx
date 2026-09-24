@@ -34,6 +34,8 @@ const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
+import { runRowAction } from "./lib/row-action";
+import { createLatestRequestGate } from "./lib/request-gate";
 import { swapCandidates } from "./lib/swap-candidates";
 
 interface AppData {
@@ -65,6 +67,11 @@ export function App() {
   /** Настройку применяем один раз за открытие: иначе возврат на «Смены» руками
    *  отменялся бы следующим же перечитыванием данных. */
   const startTabApplied = useRef(false);
+  // Перезагрузка по смене вкладки — тяжёлый bootstrap, и он мог прийти ПОСЛЕ
+  // того, как человек нажал «Принять»: снимок «до» возвращал заявку в
+  // «ожидает» с живой кнопкой, и второй тап получал отказ. Успешное действие
+  // аннулирует всё, что в полёте.
+  const reloadGate = useRef(createLatestRequestGate());
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
   // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
@@ -210,15 +217,22 @@ export function App() {
   async function runSwapAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusySwapIds((prev) => withBusy(prev, id));
     setSwapErrors((prev) => withoutError(prev, id));
-    try {
-      await action(id);
-      await refreshSwaps();
-    } catch (err) {
-      console.error("Swap action failed:", err);
-      setSwapErrors((prev) => withError(prev, id, failureMessage));
-    } finally {
-      setBusySwapIds((prev) => withoutBusy(prev, id));
-    }
+    await runRowAction({
+      action: () => action(id),
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshSwaps();
+      },
+      onActionFailed: (err) => {
+        console.error("Swap action failed:", err);
+        setSwapErrors((prev) => withError(prev, id, failureMessage));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusySwapIds((prev) => withoutBusy(prev, id));
   }
 
   /** Свои записи после самозаписи — чтобы список в форме и «Мои смены» сразу
@@ -272,7 +286,9 @@ export function App() {
       // переключении вкладки и возврате в приложение, то есть чаще, чем старт.
       // Пресеты перечитываются вместе с остальным, чтобы правка админа (имя или
       // цвет «Утро»/«День») доезжала и до строк работника.
+      const ticket = reloadGate.current.begin();
       const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = await apiClient.getBootstrap(from, to);
+      if (!reloadGate.current.isLatest(ticket)) return;
       const teamShifts = teamSchedule.shifts;
       setData((prev) =>
         prev
@@ -303,30 +319,44 @@ export function App() {
   async function handleInterest(slotId: number) {
     setBusySlotIds((prev) => withBusy(prev, slotId));
     setSlotErrors((prev) => withoutError(prev, slotId));
-    try {
-      await apiClient.expressInterest(slotId);
-      await refreshWeekend();
-    } catch (err) {
-      console.error("Interest action failed:", err);
-      setSlotErrors((prev) => withError(prev, slotId, "Не получилось записаться на смену. Попробуй ещё раз."));
-    } finally {
-      setBusySlotIds((prev) => withoutBusy(prev, slotId));
-    }
+    await runRowAction({
+      action: () => apiClient.expressInterest(slotId),
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshWeekend();
+      },
+      onActionFailed: (err) => {
+        console.error("Interest action failed:", err);
+        setSlotErrors((prev) => withError(prev, slotId, "Не получилось записаться на смену. Попробуй ещё раз."));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusySlotIds((prev) => withoutBusy(prev, slotId));
   }
 
   /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`. */
   async function runOfferAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusyOfferIds((prev) => withBusy(prev, id));
     setOfferErrors((prev) => withoutError(prev, id));
-    try {
-      await action(id);
-      await refreshWeekend();
-    } catch (err) {
-      console.error("Offer action failed:", err);
-      setOfferErrors((prev) => withError(prev, id, failureMessage));
-    } finally {
-      setBusyOfferIds((prev) => withoutBusy(prev, id));
-    }
+    await runRowAction({
+      action: () => action(id),
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshWeekend();
+      },
+      onActionFailed: (err) => {
+        console.error("Offer action failed:", err);
+        setOfferErrors((prev) => withError(prev, id, failureMessage));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusyOfferIds((prev) => withoutBusy(prev, id));
   }
 
   if (error) {

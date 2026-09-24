@@ -16,6 +16,19 @@ export function checklistKind(checklistId: number): string {
   return `duty_checklist:${checklistId}`;
 }
 
+/**
+ * Две служебные пометки рядом с основной — отдельными видами, а не ею самой:
+ * по основной админский экран отвечает «сегодня уже ушло», а это неправда ни
+ * про ушедший без текста файл, ни про отказ Telegram.
+ */
+export function checklistDocKind(checklistId: number): string {
+  return `duty_checklist_doc:${checklistId}`;
+}
+
+export function checklistUndeliverableKind(checklistId: number): string {
+  return `duty_checklist_undeliverable:${checklistId}`;
+}
+
 export function hasReminder(db: Db, shiftId: number, kind: string): boolean {
   return reminderSentAt(db, shiftId, kind) !== null;
 }

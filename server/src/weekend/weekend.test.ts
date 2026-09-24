@@ -49,7 +49,7 @@ describe("weekend market service", () => {
     if (!assigned.ok) throw new Error("unreachable");
     expect(assigned.assignment.hours).toBe(8);
 
-    const confirmed = confirmOffer(db, assigned.assignment.id, fair.id);
+    const confirmed = confirmOffer(db, assigned.assignment.id, fair.id, TEST_TODAY);
     expect(confirmed.ok).toBe(true);
     if (confirmed.ok) expect(confirmed.slotId).toBe(slot.id); // callers build "<name> confirmed <slot>" without a second lookup
 
@@ -124,8 +124,33 @@ describe("weekend market service", () => {
     expressInterest(db, slot.id, worker.id, TEST_TODAY);
     const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
-    const res = confirmOffer(db, assigned.assignment.id, other.id);
+    const res = confirmOffer(db, assigned.assignment.id, other.id, TEST_TODAY);
     expect(res.ok).toBe(false);
+  });
+
+  it("«Не смогу» по прошедшему выходному не стирает отработанную смену из графика", () => {
+    // Кнопка в чате живёт вечно: человек отработал субботу, не нажав «Беру», а
+    // через неделю случайно жмёт «Не смогу» — и смена исчезала из графика и ведомости.
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
+    if (!assigned.ok) throw new Error("unreachable");
+
+    expect(declineOffer(db, assigned.assignment.id, worker.id, "2026-07-25")).toEqual({ ok: false, reason: "slot_passed" });
+    expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
+  });
+
+  it("«Беру» по прошедшему выходному не пишет его задним числом в ведомость", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    expressInterest(db, slot.id, worker.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
+    if (!assigned.ok) throw new Error("unreachable");
+
+    expect(confirmOffer(db, assigned.assignment.id, worker.id, "2026-07-25")).toEqual({ ok: false, reason: "slot_passed" });
   });
 
   it("declining pulls the entry out of the schedule and drops them off the slot", () => {
@@ -137,7 +162,7 @@ describe("weekend market service", () => {
     if (!assigned.ok) throw new Error("unreachable");
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
 
-    expect(declineOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
+    expect(declineOffer(db, assigned.assignment.id, worker.id, TEST_TODAY).ok).toBe(true);
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(0);
     expect(assigneesForSlot(db, slot.id)).toHaveLength(0);
     // The slot stays on offer for someone else.
@@ -186,7 +211,7 @@ describe("weekend market service", () => {
     expressInterest(db, slot.id, worker.id, TEST_TODAY);
     const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
-    expect(confirmOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
+    expect(confirmOffer(db, assigned.assignment.id, worker.id, TEST_TODAY).ok).toBe(true);
 
     const reassigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!reassigned.ok) throw new Error("unreachable");
@@ -214,7 +239,7 @@ describe("weekend market service", () => {
     expressInterest(db, slot.id, worker.id, TEST_TODAY);
     const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("unreachable");
-    expect(declineOffer(db, assigned.assignment.id, worker.id).ok).toBe(true);
+    expect(declineOffer(db, assigned.assignment.id, worker.id, TEST_TODAY).ok).toBe(true);
 
     const reoffered = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!reoffered.ok) throw new Error("unreachable");
@@ -432,7 +457,7 @@ describe("payroll follows the schedule, not the snapshot taken at assign time", 
     expressInterest(db, slot.id, worker.id, TEST_TODAY);
     const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!assigned.ok) throw new Error("setup");
-    confirmOffer(db, assigned.assignment.id, worker.id);
+    confirmOffer(db, assigned.assignment.id, worker.id, TEST_TODAY);
     return { worker, slot, shiftId: assigned.assignment.shiftId! };
   }
 

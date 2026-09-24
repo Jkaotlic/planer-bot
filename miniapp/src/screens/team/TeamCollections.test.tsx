@@ -193,4 +193,16 @@ describe("TeamCollections", () => {
     expect(el.textContent ?? "").not.toContain("Вы отметились");
     expect(el.textContent ?? "").toContain("отметились 2 из 5");
   });
+
+  it("отказ сервера человек видит словами, а не как кнопку, которая «ничего не делает»", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([COFFEE]);
+    vi.spyOn(apiClient, "setCollectionPaid").mockRejectedValue(new Error("Сбор закрыт"));
+
+    const el = await mount();
+    const button = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Я перевёл"));
+    await act(async () => { button!.click(); });
+    await settle();
+
+    expect(el.textContent ?? "").toContain("Не получилось отметить");
+  });
 });

@@ -332,6 +332,22 @@ export async function notifyHandoverFan(
  * выключить, и заметили бы это по жалобе. Здесь же tsc не даст добавить админское
  * уведомление, не решив, к какому виду оно относится.
  */
+/**
+ * Сколько писем админам пытались отправить и сколько дошло.
+ *
+ * Нужно отметкам «уже сказали»: тик, пометивший письмо до отправки, при обрыве
+ * сети терял его молча. «Не дошло ни одно из попыток» — это обрыв, и отметку
+ * надо снять; «попыток не было» (все выключили вид) — это решение людей.
+ */
+export interface AdminReach {
+  attempted: number;
+  delivered: number;
+}
+
+export function reachedNobody(reach: AdminReach): boolean {
+  return reach.attempted > 0 && reach.delivered === 0;
+}
+
 export async function notifyAdmins(
   bot: Bot,
   db: Db,
@@ -341,7 +357,8 @@ export async function notifyAdmins(
    *  строкой, над выключателем: она про то, что человек только что прочитал, а
    *  выключатель — про поток вообще. */
   action?: { text: string; data: string },
-): Promise<void> {
+): Promise<AdminReach> {
+  const reach: AdminReach = { attempted: 0, delivered: 0 };
   // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
   // `notifyReminder`: за настройкой, о существовании которой не знаешь, не ходят.
   // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
@@ -355,12 +372,15 @@ export async function notifyAdmins(
     // понадобится где-то ещё — значит, письмо шлют мимо `notifyAdmins`, и чинить
     // надо это, а не копировать условие.
     if (isNoticeMuted(db, admin.id, kind)) continue;
+    reach.attempted += 1;
     try {
       await bot.api.sendMessage(admin.telegramUserId, text, { reply_markup: kb });
+      reach.delivered += 1;
     } catch (err) {
       console.error(`notifyAdmins(${kind}): failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
   }
+  return reach;
 }
 
 /** Багрепорт админам, с кнопкой «Разобрал». Через `notifyAdmins`, а не своим
@@ -376,13 +396,17 @@ export async function notifyBugReport(bot: Bot, db: Db, reportId: number, text: 
  * вызова должен видеть, что письмо пройдёт сквозь любые настройки, не ходя за
  * определением. Сегодня так уходит ровно одно — «смену никто не взял».
  */
-export async function notifyAdminsAlways(bot: Bot, db: Db, text: string): Promise<void> {
+export async function notifyAdminsAlways(bot: Bot, db: Db, text: string): Promise<AdminReach> {
+  const reach: AdminReach = { attempted: 0, delivered: 0 };
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
+    reach.attempted += 1;
     try {
       await bot.api.sendMessage(admin.telegramUserId, text);
+      reach.delivered += 1;
     } catch (err) {
       console.error(`notifyAdminsAlways: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
   }
+  return reach;
 }
