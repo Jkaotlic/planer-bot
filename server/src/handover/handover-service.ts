@@ -2,6 +2,7 @@ import { shiftsOverlap } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
+import { safeErrorMessage } from "../util/safe-error";
 import { reachedNobody, type AdminReach } from "../bot/notify";
 import { getEmployeeById } from "../repo/employees";
 import {
@@ -209,8 +210,29 @@ export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<Ou
   return { ok: true };
 }
 
+/**
+ * Сказать нажавшему «принято» — после решения, но до рассылки.
+ *
+ * Рассылка — это десятки сообщений по очереди, а Telegram не принимает ответ на
+ * нажатие позже ~15 с. Пока бот отвечал в самом конце, у человека крутился
+ * спиннер, а опоздавший ответ ронял обработчик раньше, чем тот снимал кнопки.
+ * Решение к этому моменту уже в базе, так что сказать «принято» — правда.
+ * Сбой ответа рассылку не отменяет: смена уже переехала.
+ */
+export type OnDecided = () => Promise<unknown>;
+
+async function tellDecided(onDecided: OnDecided | undefined): Promise<void> {
+  try {
+    await onDecided?.();
+  } catch (err) {
+    console.error("handover: ответ на нажатие не ушёл:", safeErrorMessage(err));
+  }
+}
+
 /** «Не могу». */
-export async function declineHandover(deps: HandoverDeps, handoverId: number, employeeId: number): Promise<Outcome> {
+export async function declineHandover(
+  deps: HandoverDeps, handoverId: number, employeeId: number, onDecided?: OnDecided,
+): Promise<Outcome> {
   const { db } = deps;
   const handover = getHandover(db, handoverId);
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
@@ -225,6 +247,7 @@ export async function declineHandover(deps: HandoverDeps, handoverId: number, em
   const shift = shiftOf(db, handover);
   addDecline(db, handoverId, employeeId);
   recordAudit(db, "handover_declined", employeeId, auditPayload(db, handover, shift, employeeId));
+  await tellDecided(onDecided);
   // Straight to the fan-out: a refusal is an answer, and waiting out the silence
   // window after it would burn three hours on a question already answered.
   await fanOut(deps, handoverId);
@@ -244,7 +267,9 @@ export async function declineHandover(deps: HandoverDeps, handoverId: number, em
  * The double-booking check lives inside that transaction too: hours passed since
  * the offer went out, and «свободен» stops being true without warning.
  */
-export async function takeHandover(deps: HandoverDeps, handoverId: number, employeeId: number): Promise<Outcome> {
+export async function takeHandover(
+  deps: HandoverDeps, handoverId: number, employeeId: number, onDecided?: OnDecided,
+): Promise<Outcome> {
   const { db } = deps;
   const claimed = db.transaction(() => {
     const handover = getHandover(db, handoverId);
@@ -277,6 +302,7 @@ export async function takeHandover(deps: HandoverDeps, handoverId: number, emplo
   });
 
   if (!claimed.ok) return claimed;
+  await tellDecided(onDecided);
 
   // Everything below is I/O and may fail. The shift has already moved — the part
   // that must not depend on Telegram being reachable.

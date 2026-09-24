@@ -1570,10 +1570,12 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const deps = { db, config, messenger: createHandoverMessenger(bot, db) };
+    // Ответ — между решением и рассылкой, см. `OnDecided` в сервисе.
+    const onDecided = () => ctx.answerCallbackQuery({ text: action === "take" ? "Готово ✅" : "Понял, спрошу других" });
     const res =
       action === "take"
-        ? await takeHandover(deps, handoverId, who.me.id)
-        : await declineHandover(deps, handoverId, who.me.id);
+        ? await takeHandover(deps, handoverId, who.me.id, onDecided)
+        : await declineHandover(deps, handoverId, who.me.id, onDecided);
     if (!res.ok) {
       // The service writes its refusals in Russian a person can read — «Уже
       // забрали», «У тебя в это время уже стоит своя смена» — so they go straight
@@ -1581,7 +1583,6 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: res.reason });
       return;
     }
-    await ctx.answerCallbackQuery({ text: action === "take" ? "Готово ✅" : "Понял, спрошу других" });
 
     // Only the buttons go stale — which shift it was is still worth reading, so
     // the text stays. Through `safeEdit`, like every cosmetic edit in this file:
