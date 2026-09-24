@@ -8,7 +8,8 @@ import { checklistIdsByTemplate, getChecklist, updateChecklist } from "../repo/c
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { addReminder, checklistKind, hasReminder } from "../repo/reminders";
+import { addReminder, checklistDocKind, checklistKind, checklistUndeliverableKind, hasReminder } from "../repo/reminders";
+import { isPermanentSendFailure } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
 
 /**
@@ -58,9 +59,16 @@ export async function runChecklistTick(
 
     // Смена ещё не началась — человек не на этаже, и проверять нечего.
     if (shift.start != null && now.time < shift.start) continue;
+    // Смена уже кончилась — инструкция опоздала. Так бывает после обрыва сети:
+    // 24.09.2026 чек-листы дошли в 12:36 вместо 07:00. Ночная смена (конец раньше
+    // начала) до полуночи не кончается, её не трогаем.
+    if (shift.start != null && shift.end != null && shift.end > shift.start && now.time >= shift.end) continue;
     // Пометка на список, а не на смену: общая означала бы «что-то одно уже
     // уходило», и второй список молчал бы всегда.
     if (hasReminder(db, shift.id, checklistKind(checklistId))) continue;
+    // Telegram отказал насовсем (заблокировали бота) — повтор до полуночи
+    // каждые пять минут ничего не изменит.
+    if (hasReminder(db, shift.id, checklistUndeliverableKind(checklistId))) continue;
 
     // Личная галочка «не пиши мне про смены» здесь НЕ проверяется, в отличие от
     // `runReminderTick`: вечернее напоминание — удобство, от которого человек
@@ -102,38 +110,58 @@ export async function runChecklistTick(
     // отжимает сам список вниз, а нажать её всё равно надо отдельным касанием.
     if (settings.docUrl) kb.url("📄 Инструкция", settings.docUrl);
 
-    try {
-      // Документ первым: он контекст к списку, а не сноска после него. Один раз
-      // в день — вместе с сообщением, которое дедуплицировано `reminder_log`.
-      const caption = settings.docName ? `📄 ${settings.docName}` : "📄 Инструкция дежурного";
+    const chatId = owner.telegramUserId;
+    const caption = settings.docName ? `📄 ${settings.docName}` : "📄 Инструкция дежурного";
+    /** Шлёт файл, если он есть; `true` — если что-то ушло. */
+    const sendDoc = async (): Promise<boolean> => {
       if (settings.docFileId) {
-        await bot.api.sendDocument(owner.telegramUserId, settings.docFileId, { caption });
-      } else if (settings.docPath && existsSync(settings.docPath)) {
+        await bot.api.sendDocument(chatId, settings.docFileId, { caption });
+        return true;
+      }
+      if (settings.docPath && existsSync(settings.docPath)) {
         // С диска — только первый раз. Ответ Telegram содержит идентификатор
         // файла, и он же становится кэшем: следующая отправка не читает диск и
         // не гонит мегабайты через канал, который держит и API, и бота.
         //
         // Файла может не оказаться на месте — его могли убрать руками; список
         // дежурному нужен всё равно, поэтому это не ошибка, а пропуск.
-        const posted = await bot.api.sendDocument(
-          owner.telegramUserId,
-          new InputFile(settings.docPath, settings.docName ?? undefined),
-          { caption },
-        );
+        const posted = await bot.api.sendDocument(chatId, new InputFile(settings.docPath, settings.docName ?? undefined), {
+          caption,
+        });
         const fileId = posted?.document?.file_id;
         if (fileId) updateChecklist(db, list.id, { docFileId: fileId });
+        return true;
+      }
+      return false;
+    };
+
+    try {
+      // Документ первым: он контекст к списку, а не сноска после него. Один раз
+      // в день — своей пометкой: если файл ушёл, а текст упал, следующий тик
+      // повторял файл, и при мигающей сети дежурный получал пачку одинаковых docx.
+      try {
+        if (!hasReminder(db, shift.id, checklistDocKind(checklistId)) && (await sendDoc())) {
+          addReminder(db, shift.id, checklistDocKind(checklistId));
+        }
+      } catch (err) {
+        // Отвергнутый файл (протухший file_id) не должен отнимать у дежурного
+        // список: сообщение уходит без него. Сетевой сбой — другое дело, его
+        // пусть повторит следующий тик целиком.
+        if (!isPermanentSendFailure(err)) throw err;
+        console.error(`runChecklistTick: shift ${shift.id}, чек-лист ${checklistId}: файл отвергнут:`, safeErrorMessage(err));
       }
       // Клавиатура прикладывается, только если в ней есть кнопки: пустой
       // `inline_keyboard` — это разметка ради разметки.
       const markup = kb.inline_keyboard.flat().length > 0 ? { reply_markup: kb } : undefined;
-      await bot.api.sendMessage(owner.telegramUserId, text, markup);
+      await bot.api.sendMessage(chatId, text, markup);
       addReminder(db, shift.id, checklistKind(checklistId));
       sent += 1;
     } catch (err) {
+      if (isPermanentSendFailure(err)) addReminder(db, shift.id, checklistUndeliverableKind(checklistId));
       // Одна неудача не должна оставить без чек-листа ни остальных дежурных, ни
       // остальные списки этого же: тот же довод, что у `runReminderTick`.
-      // Пометки нет — следующий тик попробует снова, и это правильно: чек-лист
-      // нужен в начале смены, а не назавтра.
+      // Сетевой сбой пометки не ставит — следующий тик попробует снова, и это
+      // правильно: чек-лист нужен в начале смены, а не назавтра.
       console.error(`runChecklistTick: shift ${shift.id}, чек-лист ${checklistId} skipped:`, safeErrorMessage(err));
     }
     }
