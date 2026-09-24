@@ -26,13 +26,13 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-function hangingBot(callMs: number, pollGraceMs: number) {
+function hangingBot(callMs: number, pollGraceMs: number, uploadMs = callMs) {
   return stubBotInfo(
     createBot({
       db: makeTestDb(),
       config: testConfig(),
       client: { apiRoot },
-      apiTimeouts: { callMs, pollGraceMs },
+      apiTimeouts: { callMs, pollGraceMs, uploadMs },
     }),
   );
 }
@@ -58,4 +58,27 @@ describe("таймауты вызовов Telegram", () => {
     expect(ms).toBeGreaterThanOrEqual(1000);
     expect(ms).toBeLessThan(3000);
   });
+
+  it("отмена снаружи (bot.stop) по-прежнему обрывает запрос — и сигналом полифила grammY", async () => {
+    // grammY передаёт сигнал из пакета `abort-controller`, а не нативный.
+    // `AbortSignal.any` такой сигнал принимает, но его отмену не видит: после
+    // первой версии перехватчика `bot.stop()` не мог прервать висящий опрос.
+    const { AbortController: PolyfillController } = await import("abort-controller");
+    const bot = hangingBot(5000, 5000);
+    const controller = new PolyfillController();
+    setTimeout(() => controller.abort(), 100);
+
+    const ms = await elapsedUntilRejected(() => bot.api.getUpdates({ timeout: 3 }, controller.signal as never));
+
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("файл инструкции получает свой, более долгий срок — первая загрузка с диска небыстрая", async () => {
+    // Чек-лист шлёт файл с диска один раз; 20 с на медленном канале могло не
+    // хватить, и тик повторял бы файл и весь список каждые пять минут.
+    const bot = hangingBot(100, 100, 1200);
+    const ms = await elapsedUntilRejected(() => bot.api.sendDocument(1, "file-id"));
+    expect(ms).toBeGreaterThanOrEqual(1000);
+  });
 });
+

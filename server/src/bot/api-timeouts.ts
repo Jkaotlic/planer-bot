@@ -5,6 +5,12 @@ export interface ApiTimeouts {
   callMs: number;
   /** Запас сверх long-poll `timeout` у `getUpdates`: Telegram вправе держать его столько. */
   pollGraceMs: number;
+  /**
+   * Срок `sendDocument`. Файл инструкции чек-листа уходит с диска один раз, и
+   * на медленном канале 20 с могло не хватить — тик повторял бы его вечно. Это
+   * путь тика, а не кнопки: очередь нажатий он не держит.
+   */
+  uploadMs: number;
 }
 
 /**
@@ -14,7 +20,7 @@ export interface ApiTimeouts {
  * «переставали работать» минут на восемь и отходили сами. Ответ на кнопку
  * Telegram и так не принимает позже ~15 с, ждать дольше незачем.
  */
-export const DEFAULT_API_TIMEOUTS: ApiTimeouts = { callMs: 20_000, pollGraceMs: 15_000 };
+export const DEFAULT_API_TIMEOUTS: ApiTimeouts = { callMs: 20_000, pollGraceMs: 15_000, uploadMs: 120_000 };
 
 /**
  * Свой срок на каждый вызов — через перехватчик, а не `client.timeoutSeconds`:
@@ -26,12 +32,23 @@ export const DEFAULT_API_TIMEOUTS: ApiTimeouts = { callMs: 20_000, pollGraceMs: 
 export function installApiTimeouts(bot: Bot, timeouts: ApiTimeouts): void {
   bot.api.config.use((prev, method, payload, signal) => {
     const pollSeconds = method === "getUpdates" ? ((payload as { timeout?: number }).timeout ?? 0) : 0;
-    const ms = method === "getUpdates" ? pollSeconds * 1000 + timeouts.pollGraceMs : timeouts.callMs;
-    const deadline = AbortSignal.timeout(ms);
-    // grammY описывает сигнал типом из полифила `abort-controller`; в рантайме это
-    // обычный AbortSignal Node, отсюда приведение в обе стороны.
+    const ms =
+      method === "getUpdates" ? pollSeconds * 1000 + timeouts.pollGraceMs
+      : method === "sendDocument" ? timeouts.uploadMs
+      : timeouts.callMs;
+    // Свой контроллер и подписка руками, а не `AbortSignal.any`: grammY передаёт
+    // сигнал из полифила `abort-controller`, и `any` его отмену не видит — так
+    // `bot.stop()` переставал прерывать висящий опрос. `addEventListener`
+    // понимает любой сигнал.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    const onOuterAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", onOuterAbort);
     type GrammySignal = Parameters<typeof prev>[2];
-    const combined = signal ? AbortSignal.any([signal as unknown as AbortSignal, deadline]) : deadline;
-    return prev(method, payload, combined as unknown as GrammySignal);
+    return prev(method, payload, controller.signal as unknown as GrammySignal).finally(() => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onOuterAbort);
+    });
   });
 }
