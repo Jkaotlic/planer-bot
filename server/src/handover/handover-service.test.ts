@@ -235,6 +235,23 @@ describe("declining", () => {
 });
 
 describe("taking a shift", () => {
+  it("несостоявшийся ответ на нажатие не отменяет письма: смена уже переехала", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    sent = [];
+
+    const result = await takeHandover(deps(db), handover!.id, igor, async () => {
+      throw new Error("Bad Request: query is too old");
+    });
+
+    expect(result.ok).toBe(true);
+    expect(sent.map((m) => m.to)).toContain(`employee:${anya}`);
+  });
+
   it("moves the entry to the taker and closes the handover", async () => {
     const db = makeTestDb();
     const anya = person(db, "Аня");

@@ -15,8 +15,8 @@ const config = testConfig();
 
 function testBot(db: Db) {
   const bot = stubBotInfo(createBot({ db, config }));
-  const { sent, answers } = recordApi(bot);
-  return { bot, sent, answers };
+  const { sent, answers, calls } = recordApi(bot);
+  return { bot, sent, answers, calls };
 }
 
 function callbackUpdate(tgId: number, data: string) {
@@ -163,6 +163,27 @@ describe("handover buttons", () => {
     expect(sent).toEqual([]);
     expect(answers).toEqual(["Это предложение уже ушло другому"]);
   });
+
+  it.each(["take", "decline"] as const)(
+    "«%s» отвечает на нажатие до рассылки, а не после неё",
+    async (action) => {
+      // Рассылка — это до ~28 сообщений по очереди. Пока ответа не было, у
+      // человека крутился спиннер; Telegram не принимает ответ позже ~15 с, и
+      // тогда падала и снятая следом клавиатура — кнопки оставались живыми.
+      const db = makeTestDb();
+      const { bot, calls } = testBot(db);
+      const { igor, handover } = await scene(db);
+      await offerTo({ db, config, messenger: createHandoverMessenger(bot, db) }, handover.id, igor.id);
+      calls.length = 0;
+
+      await bot.handleUpdate(callbackUpdate(202, `handover:${action}:${handover.id}`));
+
+      const methods = calls.map((c) => c.method);
+      const firstSend = methods.indexOf("sendMessage");
+      expect(firstSend).toBeGreaterThan(-1);
+      expect(methods.indexOf("answerCallbackQuery")).toBeLessThan(firstSend);
+    },
+  );
 
   it("the fan-out carries one button — a refusal answers nothing in a broadcast", async () => {
     const db = makeTestDb();
