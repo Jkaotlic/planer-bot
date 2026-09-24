@@ -42,8 +42,17 @@ export function ChecklistCard({ today }: { today: string }) {
       const { checklistId, markedItemIds } = await apiClient.markChecklistItem(today, itemId, next);
       // Отметки приходят от сервера и подменяются только у своего списка:
       // у человека в день бывает два чек-листа, и ответ про один не должен
-      // трогать другой.
-      setLists((current) => current.map((list) => (list.id === checklistId ? { ...list, markedItemIds } : list)));
+      // трогать другой. И только у своего пункта: сервер отдаёт список целиком,
+      // и ответ по пункту A, пришедший позже ответа по B, не знал про B —
+      // затирал его галочку на экране.
+      const markedNow = markedItemIds.includes(itemId);
+      setLists((current) =>
+        current.map((list) => {
+          if (list.id !== checklistId) return list;
+          const others = list.markedItemIds.filter((id) => id !== itemId);
+          return { ...list, markedItemIds: markedNow ? [...others, itemId] : others };
+        }),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить отметку");
     } finally {

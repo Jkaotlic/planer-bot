@@ -200,5 +200,29 @@ describe("карточка чек-листа", () => {
 
     expect([...el.querySelectorAll<HTMLButtonElement>(".checklist-item")][1]!.disabled).toBe(true);
   });
+
+  it("запоздавший ответ по одному пункту не снимает на экране галочку другого", async () => {
+    // Сервер отдаёт отметки списка целиком. Ответ по A, посланный раньше, но
+    // пришедший позже ответа по B, не знает про B — и затирал его галочку.
+    vi.spyOn(apiClient, "getMyChecklists").mockResolvedValue(state());
+    const pending: Array<(ids: number[]) => void> = [];
+    vi.spyOn(apiClient, "markChecklistItem").mockImplementation(
+      (_day, itemId) =>
+        new Promise((resolve) => {
+          pending[itemId] = (ids) => resolve({ checklistId: 1, markedItemIds: ids });
+        }),
+    );
+
+    const el = await mount();
+    const [first, second] = [...el.querySelectorAll<HTMLButtonElement>(".checklist-item")];
+    await act(async () => first!.click());
+    await act(async () => second!.click());
+    await act(async () => pending[2]!([1, 2]));
+    await act(async () => pending[1]!([1]));
+    await settle();
+
+    const pressed = [...el.querySelectorAll(".checklist-item")].map((b) => b.getAttribute("aria-pressed"));
+    expect(pressed).toEqual(["true", "true"]);
+  });
 });
 
