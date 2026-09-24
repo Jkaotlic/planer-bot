@@ -348,6 +348,30 @@ describe("кнопки под подтверждением", () => {
     expect(getCollection(db, round.id)!.autoSendOn).toBe(plusDays(TODAY, 2));
   });
 
+  it("разосланному сбору новый день не ставит и не обещает рассылку, которой не будет", async () => {
+    // Тик пропускает разосланный раунд (`sendCount > 0`), а бот отвечал
+    // «Бот разошлёт команде …» — обещание, которое не исполнится никогда.
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    db.run(`update collections set send_count = 1, auto_send_on = null where id = ${round.id}` as never);
+
+    await tap(bot, 222, `collection:autoday:${round.id}:5`);
+
+    expect(getCollection(db, round.id)!.autoSendOn).toBeNull();
+    expect(api.answers.at(-1)).toBe("Сбор уже разослан — второй раз бот не шлёт");
+  });
+
+  it("закрытому сбору новый день не ставит", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    db.run(`update collections set closed_at = 1, auto_send_on = null where id = ${round.id}` as never);
+
+    await tap(bot, 222, `collection:autoday:${round.id}:5`);
+
+    expect(getCollection(db, round.id)!.autoSendOn).toBeNull();
+    expect(api.answers.at(-1)).toBe("Сбор закрыт или праздник прошёл");
+  });
+
   it("«в день ДР» ставит сам праздник", async () => {
     const { db, bot } = stage();
     const round = await withLink(db, bot);

@@ -25,7 +25,7 @@ import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
@@ -1043,6 +1043,17 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const today = teamNow(config.teamTz).date;
+    // Те же условия, что у `link-capture.ts`: тик пропускает разосланный и
+    // неактивный раунд, и поставленный ему день обещал бы рассылку, которой не
+    // будет никогда. Кнопка под подтверждением живёт в чате вечно.
+    if (collection.sendCount > 0) {
+      await ctx.answerCallbackQuery({ text: "Сбор уже разослан — второй раз бот не шлёт" });
+      return;
+    }
+    if (!isCollectionActive(collection, today)) {
+      await ctx.answerCallbackQuery({ text: "Сбор закрыт или праздник прошёл" });
+      return;
+    }
     const autoSendOn = autoSendDateFor(collection.celebratedOn, today, Number(ctx.match[2]));
     updateCollection(db, collection.id, { autoSendOn });
     await ctx.answerCallbackQuery({ text: "Переставил" });
