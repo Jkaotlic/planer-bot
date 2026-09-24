@@ -70,10 +70,12 @@ function CollectionCard({ row }: { row: WorkerCollection }) {
   const [paid, setPaid] = useState(row.paid);
   const [paidCount, setPaidCount] = useState(row.paidCount);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const togglePaid = () => {
     if (busy) return;
     setBusy(true);
+    setFailed(false);
     apiClient
       .setCollectionPaid(row.id, !paid)
       .then((result) => {
@@ -81,8 +83,10 @@ function CollectionCard({ row }: { row: WorkerCollection }) {
         setPaidCount(result.paidCount);
       })
       // Отказ оставляет кнопку как была: галочка — это утверждение человека о
-      // деньгах, и показать её, не записав, значит показать неправду.
-      .catch(() => {})
+      // деньгах, и показать её, не записав, значит показать неправду. Но и
+      // молчать нельзя: кнопка мигала и возвращалась, и это читалось как «не
+      // работает». Чаще всего отказ значит, что сбор закрыли, пока экран был открыт.
+      .catch(() => setFailed(true))
       .finally(() => setBusy(false));
   };
   const meta = [
@@ -143,6 +147,13 @@ function CollectionCard({ row }: { row: WorkerCollection }) {
           отметились {paidCount} из {row.recipientCount}
         </span>
       </div>
+      {/* Под кнопкой, в своей карточке: отказ, нарисованный над списком, уезжает
+          за край экрана (см. `error-map.ts`). */}
+      {failed && (
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+          Не получилось отметить — возможно, сбор уже закрыли. Обнови экран.
+        </div>
+      )}
     </CardShell>
   );
 }

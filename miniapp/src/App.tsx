@@ -34,6 +34,7 @@ const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError } from "./lib/error-map";
+import { runRowAction } from "./lib/row-action";
 import { swapCandidates } from "./lib/swap-candidates";
 
 interface AppData {
@@ -210,15 +211,19 @@ export function App() {
   async function runSwapAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusySwapIds((prev) => withBusy(prev, id));
     setSwapErrors((prev) => withoutError(prev, id));
-    try {
-      await action(id);
-      await refreshSwaps();
-    } catch (err) {
-      console.error("Swap action failed:", err);
-      setSwapErrors((prev) => withError(prev, id, failureMessage));
-    } finally {
-      setBusySwapIds((prev) => withoutBusy(prev, id));
-    }
+    await runRowAction({
+      action: () => action(id),
+      refresh: refreshSwaps,
+      onActionFailed: (err) => {
+        console.error("Swap action failed:", err);
+        setSwapErrors((prev) => withError(prev, id, failureMessage));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusySwapIds((prev) => withoutBusy(prev, id));
   }
 
   /** Свои записи после самозаписи — чтобы список в форме и «Мои смены» сразу
@@ -303,30 +308,38 @@ export function App() {
   async function handleInterest(slotId: number) {
     setBusySlotIds((prev) => withBusy(prev, slotId));
     setSlotErrors((prev) => withoutError(prev, slotId));
-    try {
-      await apiClient.expressInterest(slotId);
-      await refreshWeekend();
-    } catch (err) {
-      console.error("Interest action failed:", err);
-      setSlotErrors((prev) => withError(prev, slotId, "Не получилось записаться на смену. Попробуй ещё раз."));
-    } finally {
-      setBusySlotIds((prev) => withoutBusy(prev, slotId));
-    }
+    await runRowAction({
+      action: () => apiClient.expressInterest(slotId),
+      refresh: refreshWeekend,
+      onActionFailed: (err) => {
+        console.error("Interest action failed:", err);
+        setSlotErrors((prev) => withError(prev, slotId, "Не получилось записаться на смену. Попробуй ещё раз."));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusySlotIds((prev) => withoutBusy(prev, slotId));
   }
 
   /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`. */
   async function runOfferAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusyOfferIds((prev) => withBusy(prev, id));
     setOfferErrors((prev) => withoutError(prev, id));
-    try {
-      await action(id);
-      await refreshWeekend();
-    } catch (err) {
-      console.error("Offer action failed:", err);
-      setOfferErrors((prev) => withError(prev, id, failureMessage));
-    } finally {
-      setBusyOfferIds((prev) => withoutBusy(prev, id));
-    }
+    await runRowAction({
+      action: () => action(id),
+      refresh: refreshWeekend,
+      onActionFailed: (err) => {
+        console.error("Offer action failed:", err);
+        setOfferErrors((prev) => withError(prev, id, failureMessage));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusyOfferIds((prev) => withoutBusy(prev, id));
   }
 
   if (error) {
