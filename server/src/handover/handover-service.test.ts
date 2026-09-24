@@ -41,6 +41,7 @@ function deps(db: Db) {
       },
       adminsAlways: async (text: string) => {
         sent.push({ to: "admins", text });
+        return { attempted: 1, delivered: 1 };
       },
     },
   };

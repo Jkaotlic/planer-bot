@@ -99,6 +99,12 @@ export function markCoverageAdviceSent(db: Db, date: string): void {
   putSetting(db, COVERAGE_ADVICE_SENT_ON, date, null);
 }
 
+/** Вернуть отметку, какой она была до попытки: письмо не дошло ни до кого. */
+export function restoreCoverageAdviceSent(db: Db, previous: string | null): void {
+  if (previous === null) db.delete(appSettings).where(eq(appSettings.key, COVERAGE_ADVICE_SENT_ON)).run();
+  else putSetting(db, COVERAGE_ADVICE_SENT_ON, previous, null);
+}
+
 /**
  * Брать ли праздники из производственного календаря.
  *

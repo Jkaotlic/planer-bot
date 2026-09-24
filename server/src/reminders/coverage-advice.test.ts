@@ -83,6 +83,36 @@ describe("runCoverageAdviceTick", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("обрыв сети вечером — совет уходит следующим тиком, а не пропадает до завтра", async () => {
+    const { db } = stage();
+    const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+    const sent: string[] = [];
+    let networkUp = false;
+    bot.api.config.use((_prev, method, payload) => {
+      if (!networkUp) throw new Error("Network request for 'sendMessage' failed!");
+      if (method === "sendMessage") sent.push((payload as { text: string }).text);
+      return { ok: true, result: {} } as never;
+    });
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+    networkUp = true;
+    await runCoverageAdviceTick(db, bot, { date: TODAY, time: "20:10" });
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it("все админы выключили совет — это не обрыв, повторять весь вечер не нужно", async () => {
+    const { db, admin } = stage();
+    setNoticeMuted(db, admin.id, "coverage", true);
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+    const second = await runCoverageAdviceTick(db, bot, { date: TODAY, time: "20:10" });
+
+    expect(sent).toHaveLength(0);
+    expect(second).toBe(0);
+  });
+
   it("назавтра пишет снова, если пробелы остались", async () => {
     const { db } = stage();
     const { bot, sent } = testBot();

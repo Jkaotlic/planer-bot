@@ -2,6 +2,7 @@ import { shiftsOverlap } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
+import { reachedNobody, type AdminReach } from "../bot/notify";
 import { getEmployeeById } from "../repo/employees";
 import {
   addDecline,
@@ -40,7 +41,7 @@ export interface HandoverMessenger {
   plain(employeeId: number, text: string): Promise<void>;
   admins(text: string): Promise<void>;
   /** Письмо, которое админ не может себе выключить: смена осталась без человека. */
-  adminsAlways(text: string): Promise<void>;
+  adminsAlways(text: string): Promise<AdminReach>;
 }
 
 export interface HandoverDeps {
@@ -303,9 +304,12 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
   const declinedNames = declinedIds.map((id) => getEmployeeById(db, id)?.displayName ?? `работник #${id}`);
   const silent = handoverCandidates(db, shift, { excludeIds: declinedIds }).length;
 
+  // Отметка до отправки — против второго письма, если тик пересечётся сам с
+  // собой. Но письмо, не дошедшее ни до кого (обрыв сети), — не сказанное:
+  // отметку снимаем, иначе следующий тик промолчит, а `expireHandover` потом
+  // промолчит тоже, «потому что админы уже знают».
   const updated = updateHandover(db, handoverId, { escalatedAt: new Date() })!;
-  recordAudit(db, "handover_escalated", null, auditPayload(db, updated, shift, null));
-  await deps.messenger.adminsAlways(
+  const reach = await deps.messenger.adminsAlways(
     handoverEscalationText(
       nameOf(db, handover.fromEmployeeId) ?? "Работник",
       lineOf(shift),
@@ -313,6 +317,11 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
       silent,
     ),
   );
+  if (reachedNobody(reach)) {
+    updateHandover(db, handoverId, { escalatedAt: null });
+    return { ok: false, reason: "Письмо админам не дошло" };
+  }
+  recordAudit(db, "handover_escalated", null, auditPayload(db, updated, shift, null));
   return { ok: true };
 }
 

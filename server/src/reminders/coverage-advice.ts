@@ -3,10 +3,10 @@ import { addDaysIso, coverageAdviceText, eachDayIso, parseCoverage, scheduleGaps
 import type { Db } from "../db/client";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { coverageAdviceSentOn, markCoverageAdviceSent, reminderHour } from "../repo/settings";
+import { coverageAdviceSentOn, markCoverageAdviceSent, reminderHour, restoreCoverageAdviceSent } from "../repo/settings";
 import { loadCalendar } from "../repo/calendar-days";
 import { recordAudit } from "../repo/audit";
-import { notifyAdmins } from "../bot/notify";
+import { notifyAdmins, reachedNobody } from "../bot/notify";
 
 /**
  * Насколько вперёд смотрит совет.
@@ -50,10 +50,17 @@ export async function runCoverageAdviceTick(db: Db, bot: Bot, now: { date: strin
 
   // Отметка ставится и когда сказать нечего: иначе тик пересчитывал бы неделю
   // каждые пять минут весь вечер ради того же молчания.
+  const previous = coverageAdviceSentOn(db);
   markCoverageAdviceSent(db, now.date);
   if (!text) return 0;
 
-  await notifyAdmins(bot, db, "coverage", text);
+  const reach = await notifyAdmins(bot, db, "coverage", text);
+  // Не дошло ни до кого — обрыв сети, а не решение админов: вернуть прежнюю
+  // отметку, и следующий тик того же вечера попробует снова.
+  if (reachedNobody(reach)) {
+    restoreCoverageAdviceSent(db, previous);
+    return 0;
+  }
   recordAudit(db, "coverage_advice_sent", null, { from, to, days: gaps.length });
   return 1;
 }

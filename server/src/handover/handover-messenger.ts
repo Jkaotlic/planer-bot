@@ -34,7 +34,7 @@ export function createHandoverMessenger(bot: Bot | null, db: Db): HandoverMessen
       if (bot) await notifyAdmins(bot, db, "handovers", text);
     },
     async adminsAlways(text) {
-      if (bot) await notifyAdminsAlways(bot, db, text);
+      return bot ? notifyAdminsAlways(bot, db, text) : { attempted: 0, delivered: 0 };
     },
   };
 }
