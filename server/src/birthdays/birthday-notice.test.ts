@@ -567,6 +567,85 @@ describe("автоотправка сбора", () => {
     expect(logged?.payload).toMatchObject({ round: 0, delivered: 0 });
   });
 
+  it("сеть лежала целиком — никто ничего не узнал, и следующий тик рассылает сбор", async () => {
+    // Пять таких обрывов за сентябрь 2026 (ENOTFOUND api.telegram.org на iMac).
+    // Отметка о попытке стояла до отправки — и сбор на подарок пропадал молча:
+    // не дошло ни письмо команде, ни «⚠️ не ушёл» админам.
+    const db = makeTestDb();
+    const sent: { to: number; text: string }[] = [];
+    let networkUp = false;
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          if (!networkUp) throw new Error("Network request for 'sendMessage' failed!");
+          sent.push({ to, text });
+        }),
+      },
+    } as unknown as Bot;
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+    networkUp = true;
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "12:35" });
+
+    expect(sent.filter((m) => m.text.includes("Сбор на подарок")).map((m) => m.to).sort()).toEqual([2, 3]);
+    expect(getCollection(db, round.id)!.sendCount).toBeGreaterThan(0);
+  });
+
+  it("«нет ссылки» в обрыв сети не теряется: предупреждение уходит, когда связь вернулась", async () => {
+    const db = makeTestDb();
+    const sent: { to: number; text: string }[] = [];
+    let networkUp = false;
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          if (!networkUp) throw new Error("Network request for 'sendMessage' failed!");
+          sent.push({ to, text });
+        }),
+      },
+    } as unknown as Bot;
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+    networkUp = true;
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "12:35" });
+
+    expect(sent.filter((m) => m.text.startsWith("⚠️")).map((m) => m.to)).toEqual([3]);
+  });
+
+  it("админы узнали о провале — повторять каждые пять минут не нужно", async () => {
+    const db = makeTestDb();
+    const sent: { to: number; text: string }[] = [];
+    const bot = {
+      api: {
+        sendMessage: vi.fn(async (to: number, text: string) => {
+          // Письмо сбора не принимается ни у кого, отчёт админу — принимается.
+          if (text.includes("Сбор на подарок")) throw new Error("Bad Request: message is too long");
+          sent.push({ to, text });
+        }),
+      },
+    } as unknown as Bot;
+    const mark = person(db, "Марк", 1, "09-07");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:05" });
+
+    expect(sent.filter((m) => m.text.startsWith("⚠️"))).toHaveLength(1);
+  });
+
   it("в день, совпавший с днём напоминания, шлёт сбор, а не инструкцию его разослать", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
