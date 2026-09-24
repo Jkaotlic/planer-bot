@@ -100,6 +100,46 @@ async function tap(bot: Bot, from: number, data: string) {
 }
 
 describe("ссылка на сбор, присланная боту в личку", () => {
+  it("тап под вопросом, пролежавшим до после праздника, не заводит сбор следующего года", async () => {
+    const { db, bot, api } = stage();
+    const mark = person(db, "Марк", 1, birthDateIn(7));
+    person(db, "Игорь", 222, null, true);
+    ensureBirthdayRound(db, mark, TODAY);
+
+    await say(bot, 222, "https://example.com/sbor");
+    const question = api.sent.filter((m) => m.chat_id === 222).at(-1)!;
+    const markData = (question.reply_markup?.inline_keyboard ?? []).flat()
+      .map((b) => (b as { callback_data?: string }).callback_data)
+      .find((d) => d?.startsWith(`collection:link:${mark}`))!;
+    // Праздник прошёл, пока вопрос висел: у Марка больше нет ждущего сбора.
+    setBirthDate(db, mark, birthDateIn(-3));
+
+    await tap(bot, 222, markData);
+
+    expect(api.answers.at(-1)).toBe("Этот сбор уже не ждёт ссылку — пришли её ещё раз");
+  });
+
+  it("тап под старым вопросом не привязывает ссылку, присланную позже", async () => {
+    // Одна отложенная ссылка на админа, а кнопка несла только id именинника:
+    // прислал A, потом B — тап «Марк» под вопросом про A молча привязывал B.
+    const { db, bot, api } = stage();
+    const mark = person(db, "Марк", 1, birthDateIn(7));
+    person(db, "Игорь", 222, null, true);
+    const round = ensureBirthdayRound(db, mark, TODAY)!;
+
+    await say(bot, 222, "https://example.com/first");
+    const firstQuestion = api.sent.filter((m) => m.chat_id === 222).at(-1)!;
+    const firstMarkData = (firstQuestion.reply_markup?.inline_keyboard ?? []).flat()
+      .map((b) => (b as { callback_data?: string }).callback_data)
+      .find((d) => d?.startsWith(`collection:link:${mark}`))!;
+    await say(bot, 222, "https://example.com/second");
+
+    await tap(bot, 222, firstMarkData);
+
+    expect(getCollection(db, round.id)!.collectUrl).toBeNull();
+    expect(api.answers.at(-1)).toBe("Эту ссылку ты уже заменил — выбери под последним вопросом");
+  });
+
   /**
    * С 2026-09-04 бот спрашивает и при единственном ждущем сборе: та же ссылка
    * может быть просьбой про QR-код, и молчаливая привязка подменила бы сбор.

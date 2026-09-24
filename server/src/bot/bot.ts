@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Bot, InlineKeyboard, InputFile, Keyboard, type ApiClientOptions, type Context } from "grammy";
 import { DEFAULT_API_TIMEOUTS, installApiTimeouts, type ApiTimeouts } from "./api-timeouts";
 import type { Db } from "../db/client";
@@ -227,6 +228,11 @@ export function miniAppKeyboard(publicUrl: string, opts: { canAnnounce: boolean;
   // видимая только админу, спрятала бы вход в его же законную вкладку.
   if (opts.canAnnounce) kb.row().webApp("📣 Анонс", `${publicUrl}/app/?screen=announce`);
   return kb;
+}
+
+/** Восемь знаков хеша ссылки — сверить кнопку с отложенной ссылкой в 64 байтах `callback_data`. */
+function linkFingerprint(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 8);
 }
 
 /** Кнопки под подтверждением: подвинуть день или отказаться от автоотправки. */
@@ -738,7 +744,7 @@ export function createBot(deps: BotDeps): Bot {
         inline_keyboard: [
           ...candidates.map((c) => [{
             text: c.hasUrl ? `${c.displayName} · заменить ссылку` : c.displayName,
-            callback_data: `collection:link:${c.employeeId}`,
+            callback_data: `collection:link:${c.employeeId}:${linkFingerprint(url)}`,
           }]),
           [{ text: "Просто QR-код", callback_data: "collection:qr" }],
         ],
@@ -971,7 +977,9 @@ export function createBot(deps: BotDeps): Bot {
    * Ссылка лежит в окне ожидания, а не в `callback_data`: там 64 байта, и
    * ссылка на сбор в них не помещается.
    */
-  bot.callbackQuery(/^collection:link:(\d+)$/, async (ctx) => {
+  // Отпечаток ссылки — необязательный: кнопки без него остались в чатах с
+  // прошлых выкладок и работают как раньше.
+  bot.callbackQuery(/^collection:link:(\d+)(?::([0-9a-f]{8}))?$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
       await ctx.answerCallbackQuery({ text: "Сборы ведут админы" });
@@ -983,9 +991,24 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply("Не помню, какую ссылку ты присылал. Пришли ссылку ещё раз.");
       return;
     }
+    // Отложенная ссылка одна на админа, и новая затирает прежнюю. Без сверки
+    // тап под вопросом про первую ссылку молча привязывал вторую.
+    const fingerprint = ctx.match[2];
+    if (fingerprint && fingerprint !== linkFingerprint(url)) {
+      await ctx.answerCallbackQuery({ text: "Эту ссылку ты уже заменил — выбери под последним вопросом" });
+      return;
+    }
+    const honoureeId = Number(ctx.match[1]);
+    const today = teamNow(config.teamTz).date;
+    // Вопрос мог пролежать неделю: день рождения прошёл, и `ensureBirthdayRound`
+    // завёл бы раунд следующего года. Кандидаты — те же, что при вопросе.
+    if (!linkCandidates(db, today, who.me.id).some((c) => c.employeeId === honoureeId)) {
+      await ctx.answerCallbackQuery({ text: "Этот сбор уже не ждёт ссылку — пришли её ещё раз" });
+      return;
+    }
     clearLinkPending(db, who.me.id);
     await ctx.answerCallbackQuery();
-    await bindLink(ctx, who.me.id, Number(ctx.match[1]), url, teamNow(config.teamTz).date);
+    await bindLink(ctx, who.me.id, honoureeId, url, today);
   });
 
   /** «Просто QR-код» под вопросом про сбор: ссылка та же, что ждёт в окне. */
