@@ -59,14 +59,18 @@ export function AdminChecklists() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function run(action: () => Promise<unknown>) {
+  /** `true` — действие прошло. По нему кнопки чистят поле ввода: отказ,
+   *  стиравший набранное, заставлял админа набирать название заново. */
+  async function run(action: () => Promise<unknown>): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
       await action();
       await reload();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -129,7 +133,7 @@ export function AdminChecklists() {
               mode="filled"
               stretched
               disabled={busy || !draft.trim()}
-              onClick={() => void run(() => apiClient.createChecklist(draft.trim())).then(() => setDraft(""))}
+              onClick={() => void run(() => apiClient.createChecklist(draft.trim())).then((ok) => ok && setDraft(""))}
             >
               Завести
             </Button>
@@ -224,7 +228,7 @@ function ChecklistCard({
   open: boolean;
   busy: boolean;
   onToggle: () => void;
-  run: (action: () => Promise<unknown>) => Promise<void>;
+  run: (action: () => Promise<unknown>) => Promise<boolean>;
 }) {
   const [itemDraft, setItemDraft] = useState("");
   const [note, setNote] = useState(list.note ?? "");
@@ -360,7 +364,7 @@ function ChecklistCard({
             mode="bezeled"
             stretched
             disabled={busy || !itemDraft.trim()}
-            onClick={() => void run(() => apiClient.addChecklistItem(list.id, itemDraft.trim())).then(() => setItemDraft(""))}
+            onClick={() => void run(() => apiClient.addChecklistItem(list.id, itemDraft.trim())).then((ok) => ok && setItemDraft(""))}
           >
             Добавить пункт
           </Button>

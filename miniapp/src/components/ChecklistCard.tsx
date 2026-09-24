@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { List, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { checklistProgress } from "@planer/shared";
 import { apiClient, type MyChecklistView } from "../api/client";
+import { withBusy, withoutBusy } from "../lib/busy-set";
 
 /**
  * Чек-лист дежурного во вкладке «Мои смены».
@@ -16,7 +17,9 @@ import { apiClient, type MyChecklistView } from "../api/client";
  */
 export function ChecklistCard({ today }: { today: string }) {
   const [lists, setLists] = useState<MyChecklistView[]>([]);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  // Множество, а не один id — по той же причине, что в `busy-set.ts`: ответ по
+  // первому пункту отпускал кнопку второго, пока его отметка ещё летела.
+  const [busyIds, setBusyIds] = useState<ReadonlySet<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,7 +36,7 @@ export function ChecklistCard({ today }: { today: string }) {
   if (lists.length === 0) return null;
 
   async function toggle(itemId: number, next: boolean) {
-    setBusyId(itemId);
+    setBusyIds((prev) => withBusy(prev, itemId));
     setError(null);
     try {
       const { checklistId, markedItemIds } = await apiClient.markChecklistItem(today, itemId, next);
@@ -44,14 +47,14 @@ export function ChecklistCard({ today }: { today: string }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить отметку");
     } finally {
-      setBusyId(null);
+      setBusyIds((prev) => withoutBusy(prev, itemId));
     }
   }
 
   return (
     <>
       {lists.map((list) => (
-        <ChecklistSection key={list.id} list={list} busyId={busyId} error={error} onToggle={toggle} />
+        <ChecklistSection key={list.id} list={list} busyIds={busyIds} error={error} onToggle={toggle} />
       ))}
     </>
   );
@@ -60,12 +63,12 @@ export function ChecklistCard({ today }: { today: string }) {
 /** Один чек-лист: инструкция, пункты, счётчик. */
 function ChecklistSection({
   list,
-  busyId,
+  busyIds,
   error,
   onToggle,
 }: {
   list: MyChecklistView;
-  busyId: number | null;
+  busyIds: ReadonlySet<number>;
   error: string | null;
   onToggle: (itemId: number, next: boolean) => void;
 }) {
@@ -108,12 +111,12 @@ function ChecklistSection({
                 key={item.id}
                 type="button"
                 className={`checklist-item${checked ? " checklist-item--done" : ""}`}
-                disabled={busyId === item.id}
+                disabled={busyIds.has(item.id)}
                 aria-pressed={checked}
                 onClick={() => onToggle(item.id, !checked)}
               >
                 <span className="checklist-item__box" aria-hidden="true">
-                  {busyId === item.id ? <Spinner size="s" /> : checked ? "✅" : "◻️"}
+                  {busyIds.has(item.id) ? <Spinner size="s" /> : checked ? "✅" : "◻️"}
                 </span>
                 <span className="checklist-item__body">
                   <span className="checklist-item__title">{item.title}</span>
