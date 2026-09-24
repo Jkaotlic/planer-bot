@@ -278,7 +278,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ error: "internal" }, 500);
   });
 
-  app.get("/api/health", (c) => c.json({ ok: true }));
+  // Про бота тоже: 7 сентября процесс жил, HTTP отвечал, а опрос Telegram был
+  // мёртв — кнопки не работали ни у кого, и health этого не видел. Без бота
+  // (тесты HTTP-слоя) проверять нечего.
+  app.get("/api/health", (c) =>
+    bot && !bot.isRunning() ? c.json({ ok: false, bot: "down" }, 503) : c.json({ ok: true }),
+  );
 
   /**
    * Куда мини-апп жалуется, что не открылся. Без токена — по устройству и

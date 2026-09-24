@@ -27,6 +27,20 @@ describe("app auth", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
+  it("health краснеет, когда бот не слушает Telegram, — процесс жив, а кнопки мертвы", async () => {
+    const bot = { isRunning: () => false } as never;
+    const res = await createApp({ db: makeTestDb(), config, bot }).request("/api/health");
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, bot: "down" });
+  });
+
+  it("health зелёный, пока опрос идёт", async () => {
+    const bot = { isRunning: () => true } as never;
+    const res = await createApp({ db: makeTestDb(), config, bot }).request("/api/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
   it("bootstraps an allowlisted admin and issues a token", async () => {
     const res = await createApp({ db: makeTestDb(), config }).request(authReq(111));
     expect(res.status).toBe(200);

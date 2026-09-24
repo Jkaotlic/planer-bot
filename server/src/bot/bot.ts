@@ -1,4 +1,5 @@
-import { Bot, InlineKeyboard, InputFile, Keyboard, type Context } from "grammy";
+import { Bot, InlineKeyboard, InputFile, Keyboard, type ApiClientOptions, type Context } from "grammy";
+import { DEFAULT_API_TIMEOUTS, installApiTimeouts, type ApiTimeouts } from "./api-timeouts";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import type { Employee } from "../db/schema";
@@ -101,6 +102,10 @@ function weekKeyboard(offset: number, legendOn: boolean): InlineKeyboard {
 export interface BotDeps {
   db: Db;
   config: Config;
+  /** Только для тестов: куда ходит клиент grammY (локальный «висящий» сервер). */
+  client?: ApiClientOptions;
+  /** Сроки вызовов Telegram; в проде — значения по умолчанию, см. `api-timeouts.ts`. */
+  apiTimeouts?: Partial<ApiTimeouts>;
 }
 
 /** Maps a swap-service failure reason to a short Russian message for the tapping user. */
@@ -229,7 +234,32 @@ function autoSendKeyboard(collectionId: number): InlineKeyboard {
 
 export function createBot(deps: BotDeps): Bot {
   const { db, config } = deps;
-  const bot = new Bot(config.botToken);
+  const bot = new Bot(config.botToken, deps.client ? { client: deps.client } : undefined);
+  // Первым перехватчиком: тестовые `recordApi` встают снаружи и в сеть не ходят,
+  // а настоящий вызов получает свой срок.
+  installApiTimeouts(bot, { ...DEFAULT_API_TIMEOUTS, ...deps.apiTimeouts });
+
+  /**
+   * Нажатие, на которое никто не ответил, у человека выглядит как «кнопка не
+   * работает»: спиннер крутится, потом ничего. `bot.catch` только пишет в лог,
+   * поэтому упавший до ответа обработчик оставлял человека без слова. Первым в
+   * цепочке, чтобы накрыть все обработчики; ошибка идёт дальше — в лог.
+   */
+  bot.use(async (ctx, next) => {
+    if (!ctx.callbackQuery) return next();
+    let answered = false;
+    const answer = ctx.answerCallbackQuery.bind(ctx);
+    ctx.answerCallbackQuery = (...args) => {
+      answered = true;
+      return answer(...args);
+    };
+    try {
+      await next();
+    } catch (error) {
+      if (!answered) await answer({ text: "Не получилось — попробуй ещё раз" }).catch(() => {});
+      throw error;
+    }
+  });
 
   /**
    * Whoever tapped, if they may still act.
@@ -1510,6 +1540,13 @@ export function createBot(deps: BotDeps): Bot {
     // the text stays. Through `safeEdit`, like every cosmetic edit in this file:
     // a failure here must not reach `bot.catch` as an unexplained handler error.
     await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  // Последним: сюда доходит только нажатие, которое не узнал ни один обработчик, —
+  // кнопка из старого сообщения, чью callback_data с тех пор переименовали
+  // (`checklist:doc:clear` до cdb74a2). Без ответа она крутила спиннер вечно.
+  bot.on("callback_query:data", async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "Кнопка устарела — открой свежее сообщение или /start" });
   });
 
   bot.catch((err) => {

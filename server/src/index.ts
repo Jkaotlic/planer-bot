@@ -7,6 +7,7 @@ import { createApp } from "./http/app";
 import { assertBuilt, mountSpa } from "./http/spa";
 import { createBot, publishBotCommands } from "./bot/bot";
 import { shutdownSafely } from "./bot/lifecycle";
+import { keepPolling } from "./bot/polling";
 import { runReminderTick } from "./reminders/reminder-service";
 import { runChecklistTick } from "./reminders/checklist-tick";
 import { runCoverageAdviceTick } from "./reminders/coverage-advice";
@@ -16,8 +17,8 @@ import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { runHandoverTick } from "./handover/handover-tick";
 import { createHandoverMessenger } from "./handover/handover-messenger";
 import { teamNow } from "./util/team-time";
-import { safeErrorMessage } from "./util/safe-error";
 import { installFatalHandlers } from "./util/fatal-log";
+import { installLogTimestamps } from "./util/log-time";
 import { runTicksIndependently } from "./util/ticks";
 
 // Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
@@ -25,18 +26,23 @@ import { runTicksIndependently } from "./util/ticks";
 installFatalHandlers();
 
 const config = loadConfig(process.env);
+// Сразу за конфигом: поясу команды взяться больше неоткуда.
+installLogTimestamps(console, config.teamTz);
 const { db, sqlite } = openDb(config.databaseUrl);
 runMigrations(db, sqlite);
 
 const bot = createBot({ db, config });
-// Long-polling runs in the background; a bad/placeholder token must not crash the HTTP server.
-bot.start({
+// Long-polling runs in the background; a bad/placeholder token must not crash the
+// HTTP server, but a dead poll must not outlive the process either — see polling.ts.
+void keepPolling({
+  bot,
   onStart: (info) => {
     console.log(`bot @${info.username} started`);
     void publishBotCommands(bot);
   },
-}).catch((err) => {
-  console.error("bot failed to start (check BOT_TOKEN):", safeErrorMessage(err));
+  log: (line) => console.error(line),
+  sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
+  exit: (code) => process.exit(code),
 });
 
 // Soft evening-before reminders and the birthday nudges — polled every 5 minutes;
