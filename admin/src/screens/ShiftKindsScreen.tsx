@@ -242,7 +242,10 @@ function ReminderRow({
   const [text, setText] = useState(kind.reminderText ?? "");
   const trimmed = text.trim();
   const preview = trimmed ? previewReminderText(trimmed, kind.category) : null;
-  const hint = `Подстановки: ${REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст.`;
+  // «{с кем}» пуст у дневных смен и дежурств (решение владельца 2026-09-25) —
+  // без этой строки админ пишет «С тобой: {с кем}», ожидая имя, и получает
+  // письмо с пустым местом после двоеточия.
+  const hint = `Подстановки: ${REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст. «{с кем}» пуст у дневных смен и дежурств.`;
 
   return (
     <div className="kind-reminder">

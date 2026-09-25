@@ -219,7 +219,10 @@ function ReminderRow({
         }}
       />
       <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>
-        Подстановки: {REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст.
+        {/* «{с кем}» пуст у дневных смен и дежурств (решение владельца 2026-09-25) —
+            без этой строки админ пишет «С тобой: {с кем}», ожидая имя, и получает
+            письмо с пустым местом после двоеточия. */}
+        Подстановки: {REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст. «{"{с кем}"}» пуст у дневных смен и дежурств.
       </span>
       {preview?.ok && (
         <p style={{ margin: 0, padding: "8px 10px", borderRadius: 8, background: "var(--tgui--secondary_bg_color)", fontSize: 13, whiteSpace: "pre-wrap" }}>
