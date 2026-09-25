@@ -354,22 +354,31 @@ describe("события сборов", () => {
     expect(view.lines).toContain("не дошло ни до кого (0 из 2)");
   });
 
+  // Край 0 из 0: адресатов не было вовсе — это не то же самое, что «были,
+  // но не дошло». «0 из 0» не отвечает на вопрос, который у строки возникает
+  // первым: «а кому вообще пытались отправить».
+  it("некому было отправлять (0 из 0) — своя строка, не «0 из 0»", () => {
+    const view = describeAuditEvent({
+      type: "collection_sent",
+      payload: { title: "Кофемашина", round: 1, delivered: 0, intended: 0 },
+    });
+    expect(view.title).toBe("Сбор не разослан");
+    expect(view.lines).toContain("некому было отправлять");
+    expect(view.lines.some((l) => l.includes("0 из 0"))).toBe(false);
+  });
+
   // `round` берётся как есть: подмена отсутствующего/нулевого раунда на 1
   // раньше маскировала бы, что раунда в payload не было вовсе — а сама
   // строка «рассылка №…» просто не должна рисоваться без раунда.
-  it("round 0/отсутствует — без подмены на 1, строка «рассылка №…» не рисуется", () => {
-    const withoutRound = describeAuditEvent({
-      type: "collection_sent",
-      payload: { title: "Кофемашина", delivered: 5, intended: 5 },
-    });
-    expect(withoutRound.lines.some((l) => l.startsWith("рассылка №"))).toBe(false);
-
-    const zeroRound = describeAuditEvent({
-      type: "collection_sent",
-      payload: { title: "Кофемашина", round: 0, delivered: 5, intended: 5 },
-    });
-    expect(zeroRound.lines.some((l) => l.startsWith("рассылка №"))).toBe(false);
-  });
+  // Тест на «round 0/отсутствует» не пишется здесь намеренно: строка
+  // «рассылка №…» и заголовок гейтятся условием `round > 1` в обеих ветках, и
+  // ни `round: 0`, ни отсутствующий `round` никогда не проходили это условие —
+  // ни со старым `num(p.round) ?? 1`, ни без него (`num(0) ?? 1` тоже даёт 0,
+  // не 1: `??` не трогает 0). Разница видна только для `round: undefined`,
+  // и она не наблюдаема через `title`/`lines` — оба пути ведут к «Разослан
+  // сбор» без строки о раунде. Уборка `?? 1` здесь — рефакторинг вида
+  // «`round` живёт как есть, без скрытой подмены», а не поведенческий фикс:
+  // поведенческая часть 5b — это `delivered === 0`, и она проверена выше.
 
   it("«закрыт» и «открыт заново» — разные заголовки", () => {
     expect(describeAuditEvent({ type: "collection_closed", payload: { title: "Кофемашина", closed: true } }).title)
