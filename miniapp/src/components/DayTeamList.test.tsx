@@ -43,7 +43,7 @@ describe("DayTeamList", () => {
   it("дежурство называет своей подписью, а не общей категорией", async () => {
     const duty: Shift = { ...IGOR, id: 3, category: "duty", title: "Дежурство · Поклонка" };
     const el = await mount([duty]);
-    expect(el.textContent).toContain("Дежурство · Поклонка");
+    expect(el.textContent).toContain("Дежурство — Поклонка");
   });
 
   it("несколько строк — каждая своя", async () => {
@@ -51,5 +51,19 @@ describe("DayTeamList", () => {
     const el = await mount([IGOR, marat]);
     expect(el.textContent).toContain("Игорь · 09:00–18:00");
     expect(el.textContent).toContain("Марк · 07:00–16:00");
+  });
+
+  /**
+   * Вид записи — своя подпись через «·» («Дежурство · Поклонка»): в строке
+   * «Имя · время · Вид» это читалось бы как ЧЕТВЁРТОЕ поле, а не как «вид с
+   * местом внутри». Внутренний разделитель заменяется на тире, которое ни с
+   * чем не путают — ровно два «·» в строке остаются разделителями полей.
+   */
+  it("«·» внутри названия вида не путают с разделителями строки", async () => {
+    const duty: Shift = { ...IGOR, id: 5, category: "duty", title: "Дежурство · Телефон" };
+    const el = await mount([duty]);
+    const text = el.textContent ?? "";
+    expect(text).toContain("Дежурство — Телефон");
+    expect((text.match(/·/g) ?? []).length).toBe(2);
   });
 });

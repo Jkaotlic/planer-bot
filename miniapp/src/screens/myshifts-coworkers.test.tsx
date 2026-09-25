@@ -33,6 +33,15 @@ const IGOR_COWORKER: Shift = {
   unrecognisedCode: null, templateId: 2, employeeId: 8, employeeName: "Игорь",
 } as Shift;
 
+/** Многодневный отпуск — тот класс записи, что случайно открывался вместо
+ *  настоящей смены (скриншот ревью): у неё нет часов, а «за какой день»
+ *  спрашивать бессмысленно — человек в отпуске, а не «работает рядом». */
+const VACATION: Shift = {
+  id: 3, date: TODAY, endDate: "2026-09-12", start: null, end: null,
+  category: "vacation", title: null, location: null, note: null,
+  unrecognisedCode: null, templateId: null, employeeId: 7,
+} as Shift;
+
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
@@ -82,6 +91,18 @@ function swapButton(el: HTMLElement): HTMLElement {
   return found;
 }
 
+/** jsdom не реализует `scrollIntoView` вовсе (см. код: `?.` дважды именно по
+ *  этой причине) — на время теста подменяем его шпионом, чтобы проверить
+ *  сам факт и аргумент вызова. `restore()` возвращает как было (обычно
+ *  `undefined` — метод отсутствовал изначально). */
+function patchScrollIntoView(): { spy: ReturnType<typeof vi.fn>; restore: () => void } {
+  const proto = Element.prototype as unknown as Record<"scrollIntoView", (() => void) | undefined>;
+  const original = proto.scrollIntoView;
+  const spy = vi.fn();
+  proto.scrollIntoView = spy;
+  return { spy, restore: () => { proto.scrollIntoView = original; } };
+}
+
 describe("«Кто ещё работает» под своей сменой", () => {
   it("тап по строке зовёт onToggleCoworkers, тап по «Обменять» — нет", async () => {
     const onToggle = vi.fn();
@@ -102,10 +123,44 @@ describe("«Кто ещё работает» под своей сменой", ()
     expect(el.textContent).toContain("Игорь · 09:00–18:00");
   });
 
-  it("пока грузится — «Загружаю…»", async () => {
-    const el = await mount({ openDayLoading: true });
+  // Лист рисовался без заголовка прямо под строкой — на замере читался как
+  // хвост самой строки, а не отдельный блок с собственным смыслом.
+  it("лист подписан — «Кто ещё работает в этот день:»", async () => {
+    const el = await mount({ openDay: { date: TODAY, shifts: [IGOR_COWORKER] } });
+    await act(async () => row(el).click());
+    expect(el.textContent).toContain("Кто ещё работает в этот день:");
+  });
+
+  it("после загрузки докручивает раскрытый лист в видимую область", async () => {
+    const { spy, restore } = patchScrollIntoView();
+    try {
+      const el = await mount({ openDay: { date: TODAY, shifts: [IGOR_COWORKER] } });
+      await act(async () => row(el).click());
+      expect(spy).toHaveBeenCalledWith({ block: "nearest" });
+    } finally {
+      restore();
+    }
+  });
+
+  it("пока грузится — докрутки ещё нет (иначе метится высота спиннера, а не списка)", async () => {
+    const { spy, restore } = patchScrollIntoView();
+    try {
+      const el = await mount({ openDayLoading: true });
+      await act(async () => row(el).click());
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("пока грузится — «Загружаю…», а не уже пришедший список", async () => {
+    // `openDay` уже совпадает по дате и несёт готовые данные — без изоляции по
+    // одному `openDayLoading` этот тест прошёл бы и без проверки загрузки
+    // вовсе: ветка «!matches» (openDay: null) рисует то же «Загружаю…» сама.
+    const el = await mount({ openDay: { date: TODAY, shifts: [IGOR_COWORKER] }, openDayLoading: true });
     await act(async () => row(el).click());
     expect(el.textContent).toContain("Загружаю");
+    expect(el.textContent).not.toContain("Игорь · 09:00–18:00");
   });
 
   it("ошибка загрузки дня показана рядом со строкой", async () => {
@@ -127,5 +182,15 @@ describe("«Кто ещё работает» под своей сменой", ()
 
     await act(async () => row(el).click());
     expect(el.textContent).not.toContain("Игорь · 09:00–18:00");
+  });
+
+  it("тап по отпуску (без часов) не открывает лист «Кто ещё работает»", async () => {
+    const onToggle = vi.fn();
+    const el = await mount({ shifts: [VACATION], onToggleCoworkers: onToggle });
+
+    await act(async () => row(el).click());
+
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(el.textContent).not.toContain("Кто ещё работает");
   });
 });

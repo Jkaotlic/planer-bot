@@ -1,6 +1,6 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
-import { canAddOwnShifts, swapBlockReason } from "@planer/shared";
+import { canAddOwnShifts, isAbsence, swapBlockReason } from "@planer/shared";
 import type { StartTab } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
@@ -9,7 +9,7 @@ import { CalendarSection } from "../components/CalendarSection";
 import { ChecklistCard } from "../components/ChecklistCard";
 import { DayTeamList } from "../components/DayTeamList";
 import { GreetingHero } from "../components/GreetingHero";
-import { ScreenScroll } from "../components/ScreenScroll";
+import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
 import { RemindersSwitch } from "../components/RemindersSwitch";
 import { StartTabPicker } from "../components/StartTabPicker";
@@ -83,6 +83,15 @@ export function MyShiftsScreen({
   // локально и мгновенно (сворачивание не должно ждать сети), а сами данные
   // дня — снаружи, по той же причине, что и у «Предложить обмен».
   const [expandedShiftId, setExpandedShiftId] = useState<number | null>(null);
+
+  // Отсутствие (отпуск/больничный/командировка) не открывает лист: у него нет
+  // часов — «с кем рядом» отвечать нечем, — а многодневная запись к тому же
+  // рисуется под ПЕРВЫМ днём своего диапазона, так что «сегодня» дня, который
+  // ушёл бы в запрос, почти всегда не тот, что человек видит на экране (было
+  // видно на скриншоте: лист открывался под «Отпуск» и грузил вчерашний день).
+  function coworkersOpenable(shift: Shift): boolean {
+    return !isAbsence(shift.category) && shift.start != null;
+  }
 
   function handleRowOpen(shift: Shift) {
     if (expandedShiftId === shift.id) {
@@ -169,7 +178,7 @@ export function MyShiftsScreen({
                       shift={shift}
                       templates={templates}
                       onSwap={onProposeSwap}
-                      onOpen={handleRowOpen}
+                      onOpen={coworkersOpenable(shift) ? handleRowOpen : undefined}
                       isToday={shift.date === today}
                       swapBlockedReason={swapBlockedReason}
                     />
@@ -251,9 +260,39 @@ function CoworkersPanel({
 }) {
   const matches = openDay != null && openDay.date === shift.date;
   const list = matches ? coworkersOf(openDay.shifts, meId) : [];
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Готов показывать окончательное содержимое — не «Загружаю…», которое почти
+  // всегда короче итогового списка.
+  const settled = error != null || (!loading && matches);
+
+  // Лист раскрывается под строкой, а строка может быть у самого низа экрана —
+  // мини-апп один длинный скролл без своего скролл-контейнера. Голый
+  // `scrollIntoView({block: "nearest"})` этого не чинит: он метит в границы
+  // ВЬЮПОРТА, а не в то, что от него реально видно, — нижняя панель вкладок
+  // (`position: fixed`, 758–844 из 844 на замере 390×844) перекрывает ровно
+  // тот кусок вьюпорта, куда он и целится, так что «докрученный» лист всё
+  // равно рисовался за баром (проверено `elementFromPoint`: кнопка таб-бара, а
+  // не текст листа). `scrollMarginBottom` — тот же `TAB_BAR_CLEARANCE`, что
+  // `ScreenScroll` уже держит в самом низу каждого экрана (см. её комментарий):
+  // `scrollIntoView` учитывает `scroll-margin` нативно, и это ровно то число,
+  // которым уже посчитана высота бара плюс отступ на вырез снизу.
+  //
+  // Докрутка — ПОСЛЕ того, как содержимое устоялось: докрути раньше — высота
+  // ещё спиннера, а не итогового списка, и прокрутки не хватит.
+  // `?.` дважды — jsdom в тестах этот метод не реализует вовсе.
+  useEffect(() => {
+    if (!settled) return;
+    panelRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [settled]);
 
   return (
-    <div style={{ padding: "2px 20px 14px", fontSize: 14, lineHeight: 1.4 }}>
+    <div
+      ref={panelRef}
+      style={{ padding: "2px 20px 14px", fontSize: 14, lineHeight: 1.4, scrollMarginBottom: TAB_BAR_CLEARANCE }}
+    >
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, marginBottom: 6 }}>
+        Кто ещё работает в этот день:
+      </div>
       {error ? (
         <span style={{ color: "var(--tgui--destructive_text_color)" }}>{error}</span>
       ) : loading || !matches ? (
