@@ -1,6 +1,7 @@
 import { and, desc, eq, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db/client";
-import { swapRequests, type SwapRequest } from "../db/schema";
+import { swapRequests, shifts, type SwapRequest } from "../db/schema";
 import type { SwapStatus } from "@planer/shared";
 
 export function createSwapRequest(
@@ -68,6 +69,20 @@ export function listPendingSwapsForShift(db: Db, shiftId: number): SwapRequest[]
       eq(swapRequests.status, "pending"),
       or(eq(swapRequests.fromShiftId, shiftId), eq(swapRequests.toShiftId, shiftId)),
     ))
+    .all();
+}
+
+/** Висящие заявки с датами обеих смен — для тика просрочки. Заявку с
+ *  обнулённой сменой гасит удаление записи, тику она не нужна. */
+export function listPendingSwapsWithDates(db: Db): Array<{ request: SwapRequest; fromDate: string; toDate: string }> {
+  const fromShift = alias(shifts, "from_shift");
+  const toShift = alias(shifts, "to_shift");
+  return db
+    .select({ request: swapRequests, fromDate: fromShift.date, toDate: toShift.date })
+    .from(swapRequests)
+    .innerJoin(fromShift, eq(swapRequests.fromShiftId, fromShift.id))
+    .innerJoin(toShift, eq(swapRequests.toShiftId, toShift.id))
+    .where(eq(swapRequests.status, "pending"))
     .all();
 }
 

@@ -15,6 +15,7 @@ import { runHolidayTick } from "./holidays/holiday-tick";
 import { xmlcalendarFetcher } from "./holidays/xmlcalendar";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { runHandoverTick } from "./handover/handover-tick";
+import { runSwapExpiryTick } from "./swap/swap-expiry-tick";
 import { createHandoverMessenger } from "./handover/handover-messenger";
 import { teamNow } from "./util/team-time";
 import { installFatalHandlers } from "./util/fatal-log";
@@ -75,6 +76,10 @@ setInterval(() => {
       name: "handover",
       run: () => runHandoverTick({ db, config, messenger: createHandoverMessenger(bot, db) }, Date.now()),
     },
+    // Пятым в тот же массив, а не своим setInterval, по той же причине, что и
+    // у соседей: заявка, на которую никто не ответил, не должна ждать своего
+    // отдельного таймера, чтобы погаснуть, когда её смена уже прошла.
+    { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
   ]).finally(() => {
     ticking = false;
   });

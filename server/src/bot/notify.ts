@@ -81,10 +81,12 @@ export function swapAutoCancelledText(p: SwapAuditPayload): string {
 /** Why a pending swap stopped being possible without its initiator doing
  *  anything — an admin removed the entry under it, replaced the whole month, or
  *  the shift changed hands so the trade no longer adds up. */
-export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed";
+export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed" | "date_passed";
 
 /**
- * Sent to *both* sides of a pending swap an admin's edit just invalidated.
+ * Sent to *both* sides of a pending swap an admin's edit just invalidated —
+ * or, for `date_passed`, only to the initiator (see `swap-expiry-tick.ts`:
+ * the second side never saw an answer, but they also never had one due).
  *
  * Goes out to the initiator too, and that's the point: they proposed it and did
  * nothing since, so without this the request just turns «Истекло» in the archive
@@ -93,6 +95,9 @@ export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_cha
  * clause that varies, because two near-identical strings are how these drift.
  */
 export function swapExpiredText(p: SwapAuditPayload, cause: SwapExpiryCause): string {
+  if (cause === "date_passed") {
+    return `Заявка на обмен закрылась: смена уже прошла, а ответа не было. Было: ${p.fromShift} ↔ ${p.toShift}.`;
+  }
   const why =
     cause === "entry_deleted" ? "смену удалили из расписания"
     : cause === "roster_reimported" ? "график за этот период загрузили заново"
