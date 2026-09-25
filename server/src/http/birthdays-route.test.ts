@@ -154,6 +154,40 @@ describe("PUT /api/admin/birthdays/:id — ссылка вооружает ав�
     expect((await res.json()).collection.autoSendOn).toBeNull();
   });
 
+  // Баг из ledger: включая тумблер обратно, клиент сам вычислял дату браузерными
+  // часами и слал её готовой строкой — у админа в другом часовом поясе дата в
+  // базе разошлась бы с командной. Теперь клиент шлёт только флаг `armAutoSend`,
+  // а дату считает сервер по `asOf` (команднОЙ, как и везде в этой ручке) —
+  // без единой даты в теле запроса.
+  it("переключатель «включить обратно» — по флагу, дату считает сервер", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const mark = person(db, "Марк", 1, "09-07");
+    const token = await tokenFor(app, 111);
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`, send(token, { collectUrl: "https://example.com/sbor" }, "PUT"));
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`, send(token, { autoSendOn: null }, "PUT"));
+
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(token, { armAutoSend: true }, "PUT"));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).collection.autoSendOn).toBe("2026-09-04");
+  });
+
+  it("явно заданный день не перебивается флагом, даже если оба пришли вместе", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const mark = person(db, "Марк", 1, "09-07");
+    const token = await tokenFor(app, 111);
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`, send(token, { collectUrl: "https://example.com/sbor" }, "PUT"));
+    await app.request(`/api/admin/birthdays/${mark}?${SEP}`, send(token, { autoSendOn: null }, "PUT"));
+
+    const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
+      send(token, { armAutoSend: true, autoSendOn: "2026-09-06" }, "PUT"));
+
+    expect((await res.json()).collection.autoSendOn).toBe("2026-09-06");
+  });
+
   it("остальные админы узнают о ссылке, вставленной из консоли", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();

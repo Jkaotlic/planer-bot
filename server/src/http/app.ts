@@ -864,7 +864,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const employeeId = Number(c.req.param("id"));
     if (employeeId === c.get("auth").employeeId) return c.json({ error: "not_found" }, 404);
 
-    const parsed = parseCollectionBody(await c.req.json().catch(() => ({})), { requireTitle: false });
+    const rawBody = await c.req.json().catch(() => ({}));
+    // Тумблер «включить автоотправку обратно» шлёт этот флаг, а не готовую
+    // дату: раньше дату вычислял браузер (`autoSendDateFor(celebratedOn,
+    // today)` с клиентскими часами), и админ в другом часовом поясе ставил
+    // автоотправку по чужому «сегодня». Дату теперь всегда считает сервер —
+    // тем же `asOf`, что и вся эта ручка (командная дата, а не браузерная).
+    const armAutoSend = typeof rawBody === "object" && rawBody !== null && (rawBody as { armAutoSend?: unknown }).armAutoSend === true;
+
+    const parsed = parseCollectionBody(rawBody, { requireTitle: false });
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
     // A birthday round has no subject to edit — it is named after the person.
     if (parsed.value.title !== undefined || parsed.value.employeeId !== undefined) {
@@ -894,7 +902,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       parsed.value.collectUrl !== undefined &&
       parsed.value.collectUrl !== null &&
       parsed.value.collectUrl !== round.collectUrl;
-    const arming = linkChanged && round.sendCount === 0 && isCollectionActive(round, asOf);
+    const arming = (linkChanged || armAutoSend) && round.sendCount === 0 && isCollectionActive(round, asOf);
     const patch =
       arming && parsed.value.autoSendOn === undefined && round.celebratedOn
         ? { ...parsed.value, autoSendOn: autoSendDateFor(round.celebratedOn, asOf) }

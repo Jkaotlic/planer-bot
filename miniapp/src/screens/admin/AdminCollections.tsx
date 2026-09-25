@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  autoSendDateFor,
   autoSendLabel,
   collectionStatus,
   describeDaysUntil,
@@ -1279,10 +1278,11 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
   const status = roundStatus(birthday.campaign, today);
 
   async function toggleAutoSend(birthday: UpcomingBirthday) {
-    // Дату считает `shared`, а не экран: та же арифметика на сервере, и две
-    // копии означали бы две разные даты.
-    const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
-    await apiClient.saveBirthdayRound(birthday.employeeId, { autoSendOn: next });
+    // Включить — флагом `armAutoSend`, а не готовой датой: дату считает сервер
+    // по командному «сейчас», а не браузер по своим часам (баг из ledger — у
+    // админа в другом часовом поясе дата в базе расходилась с командной).
+    const patch = birthday.campaign?.autoSendOn ? { autoSendOn: null } : { armAutoSend: true };
+    await apiClient.saveBirthdayRound(birthday.employeeId, patch);
     await onChanged();
   }
 

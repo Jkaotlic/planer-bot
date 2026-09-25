@@ -493,7 +493,13 @@ export interface NewCollectionInput {
  *
  *  `autoSendOn` — не поле создания (`NewCollectionInput`): его не задают при
  *  заведении кастомного сбора, только тумблером на уже существующем раунде ДР. */
-export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null };
+/**
+ * `armAutoSend` — только для раунда дня рождения: «включи автоотправку
+ * обратно», без готовой даты. Дату всегда считает сервер по командному «сейчас»
+ * (`asOf`) — клиент, вычисливший её сам браузерными часами, однажды поставил
+ * бы дату не по той временной зоне (баг из ledger).
+ */
+export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null; armAutoSend?: boolean };
 
 export interface UpcomingBirthday {
   employeeId: number;

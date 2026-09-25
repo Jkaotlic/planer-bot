@@ -88,7 +88,10 @@ describe("автоотправка на карточке дня рождения
     expect(update).toHaveBeenCalledWith(1, { autoSendOn: null });
   });
 
-  it("тумблер включает автоотправку обратно — на день за три до праздника", async () => {
+  // Баг из ledger: экран сам считал дату браузерными часами и слал её готовой
+  // строкой — у админа в другом часовом поясе дата в базе расходилась бы с
+  // командной. Теперь экран шлёт только флаг, дату вычисляет сервер.
+  it("тумблер включает автоотправку обратно — флагом, без даты от браузера", async () => {
     const update = vi.spyOn(apiClient, "saveBirthdayRound").mockResolvedValue({} as never);
     const el = await mount({ ...BIRTHDAY, campaign: { ...ROUND, autoSendOn: null } });
 
@@ -96,7 +99,7 @@ describe("автоотправка на карточке дня рождения
     await act(async () => { toggle.click(); });
     await settle();
 
-    expect(update).toHaveBeenCalledWith(1, { autoSendOn: "2099-09-04" });
+    expect(update).toHaveBeenCalledWith(1, { armAutoSend: true });
   });
 
   /**

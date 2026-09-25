@@ -1353,9 +1353,11 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
   if (patch.deadline !== undefined) collection.deadline = patch.deadline ?? null;
   if (patch.amountPerPerson !== undefined) collection.amountPerPerson = patch.amountPerPerson ?? null;
   if (patch.totalGoal !== undefined) collection.totalGoal = patch.totalGoal ?? null;
-  // Тумблер шлёт `null`, чтобы выключить, или уже посчитанную дату, чтобы
-  // включить обратно — сервер такую же дату не пересчитывает, а просто пишет.
+  // Тумблер шлёт `null`, чтобы выключить, или флаг `armAutoSend`, чтобы включить
+  // обратно, — без готовой даты: дату считает сервер (здесь — мок) сам, тем же
+  // правилом, что и при вставке ссылки, а не браузер клиента (баг из ledger).
   if (patch.autoSendOn !== undefined) collection.autoSendOn = patch.autoSendOn ?? null;
+  else if (patch.armAutoSend && collection.celebratedOn) collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn ?? null;
     if (value !== null) {
