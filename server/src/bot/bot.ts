@@ -14,6 +14,7 @@ import {
   setWeekLegend,
   restoreEmployee,
   setEmployeeAdmin,
+  listAdmins,
 } from "../repo/employees";
 import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
@@ -150,25 +151,64 @@ async function safeEdit(fn: () => Promise<unknown>): Promise<void> {
   }
 }
 
+/** Команды, которые видит вся команда. */
+const TEAM_COMMANDS = [
+  { command: "start", description: "Начать и открыть смены" },
+  { command: "week", description: "График команды на неделю" },
+  { command: "menu", description: "Вернуть кнопки под полем ввода" },
+  { command: "notifications", description: "Напоминания о сменах — включить или выключить" },
+];
+
+/** Те же плюс две админские, поверх общего списка (см. `publishBotCommands`). */
+const ADMIN_COMMANDS = [
+  ...TEAM_COMMANDS,
+  { command: "admin", description: "Ссылка на консоль админа" },
+  { command: "instruction", description: "Загрузить файл инструкции к чек-листу" },
+];
+
 /**
- * The command menu Telegram shows next to the input field. Only the three commands
- * everybody has: `/admin` is checked server-side anyway, and listing it for the
- * whole team would just invite taps that answer «только для администраторов».
+ * The command menu Telegram shows next to the input field.
  *
- * Without this, `/notifications` is a command nobody can discover — which would
- * defeat the point of the switch being self-service.
+ * Общий список — всем; админский, с `/admin` и `/instruction` поверх него, —
+ * только тем, кто сейчас админ и у кого есть Telegram, через персональный
+ * `scope: { type: "chat", chat_id }`. Раньше `/admin` не было в меню вовсе —
+ * сервер всё равно проверял права, и листинг команды всей команде звал бы
+ * только тычки, отвеченные «только для администраторов». Список тех, кому
+ * ставится персональный scope, читается один раз при старте; смена прав
+ * одного человека между рестартами обновляет его меню через
+ * `refreshAdminCommands`, не дожидаясь следующего запуска.
  */
-export async function publishBotCommands(bot: Bot): Promise<void> {
+export async function publishBotCommands(bot: Bot, db?: Db): Promise<void> {
   try {
-    await bot.api.setMyCommands([
-      { command: "start", description: "Начать и открыть смены" },
-      { command: "week", description: "График команды на неделю" },
-      { command: "menu", description: "Вернуть кнопки под полем ввода" },
-      { command: "notifications", description: "Напоминания о сменах — включить или выключить" },
-    ]);
+    await bot.api.setMyCommands(TEAM_COMMANDS);
   } catch (err) {
     // A command menu is a nicety; never let it stop the bot from running.
     console.error("setMyCommands failed:", safeErrorMessage(err));
+  }
+  if (!db) return;
+  for (const admin of listAdmins(db)) {
+    if (admin.telegramUserId == null) continue;
+    try {
+      await bot.api.setMyCommands(ADMIN_COMMANDS, { scope: { type: "chat", chat_id: admin.telegramUserId } });
+    } catch (err) {
+      console.error(`setMyCommands(admin ${admin.telegramUserId}) failed:`, safeErrorMessage(err));
+    }
+  }
+}
+
+/**
+ * Меню одного человека сразу после того, как его права поменялись — иначе
+ * `/admin` появился (или не пропал) бы у него в списке только после
+ * следующего рестарта сервера, который и без того запускает `publishBotCommands`
+ * один раз при старте поллинга.
+ */
+export async function refreshAdminCommands(bot: Bot, telegramUserId: number, isAdmin: boolean): Promise<void> {
+  const scope = { type: "chat" as const, chat_id: telegramUserId };
+  try {
+    if (isAdmin) await bot.api.setMyCommands(ADMIN_COMMANDS, { scope });
+    else await bot.api.deleteMyCommands({ scope });
+  } catch (err) {
+    console.error(`refreshAdminCommands(${telegramUserId}) failed:`, safeErrorMessage(err));
   }
 }
 
@@ -243,9 +283,25 @@ function autoSendKeyboard(collectionId: number): InlineKeyboard {
     .text("🚫 Не рассылать сам", `collection:autooff:${collectionId}`);
 }
 
+/**
+ * Ответ на текст, который не оказался ни меткой кнопки, ни ссылкой, ни
+ * ожидаемым ответом (жалоба, ссылка на сбор). Раньше бот на такое молчал —
+ * человек, написавший вопрос прямо в чат, не получал вообще ничего, и это
+ * читалось как зависший бот, а не как «бот не читает сообщения».
+ */
+export const FALLBACK_TEXT =
+  "Я бот графика и сообщения не читаю. Всё — кнопками внизу 👇\nЕсли что-то не работает — нажми «🐞 Проблема».";
+
+/** Один ответ в минуту на человека: пять сообщений подряд — это один вопрос. */
+const FALLBACK_COOLDOWN_MS = 60_000;
+
 export function createBot(deps: BotDeps): Bot {
   const { db, config } = deps;
   const bot = new Bot(config.botToken, deps.client ? { client: deps.client } : undefined);
+  // На один экземпляр бота, а не на модуль: тесты создают бота заново в каждом
+  // кейсе, и общее состояние на уровне модуля склеило бы кулдаун одного теста
+  // с другим, у которого тот же tgId.
+  const lastFallbackAt = new Map<number, number>();
   // Первым перехватчиком: тестовые `recordApi` встают снаружи и в сеть не ходят,
   // а настоящий вызов получает свой срок.
   installApiTimeouts(bot, { ...DEFAULT_API_TIMEOUTS, ...deps.apiTimeouts });
@@ -436,6 +492,11 @@ export function createBot(deps: BotDeps): Bot {
     if (!from) return;
     const isAllowlisted = config.adminTelegramIds.includes(from.id);
     let admin = getByTelegramId(db, from.id);
+    // Кем он был ДО этого обращения — чтобы после всех веток ниже одним
+    // сравнением решить, обновлять ли его персональное меню команд. `false`,
+    // если строки не было вовсе: `createAdminEmployee` ниже создаёт её сразу
+    // админской, и это тоже смена, которую меню должно отразить.
+    const wasAdmin = admin?.isAdmin ?? false;
 
     // Archiving only ever flips `isActive` — it never touches `isAdmin` — so a
     // former admin who got archived still passes the guard below and would
@@ -484,6 +545,13 @@ export function createBot(deps: BotDeps): Bot {
         isAdmin: true,
         via: "allowlist",
       });
+    }
+    // Меню команд обновляем сразу, а не ждём рестарта сервера, — тем же
+    // сравнением «до/после», что и у `/api/auth`: неважно, какая из веток выше
+    // сработала (восстановила и повысила, создала нового, повысила активного),
+    // важен только итог.
+    if (admin.isAdmin !== wasAdmin) {
+      await refreshAdminCommands(bot, from.id, admin.isAdmin);
     }
     const token = await issueToken({ employeeId: admin.id, isAdmin: true }, config.jwtSecret, ADMIN_LINK_TTL_SEC);
     const url = `${config.publicUrl}/admin/#token=${token}`;
@@ -1168,7 +1236,21 @@ export function createBot(deps: BotDeps): Bot {
     else if (await captureBugReport(ctx, text)) return;
     else {
       const url = extractUrl(text);
-      if (url) await sendQr(ctx, url);
+      if (url) {
+        await sendQr(ctx, url);
+      } else if (ctx.from) {
+        // Человек, написавший вопрос сюда, ждал ответа, которого не было.
+        // Свежая клавиатура заодно заменяет старую раскладку с web_app-кнопкой
+        // (см. `planer-bot-open-questions`: «старая клавиатура»). Кулдаун —
+        // чтобы пять сообщений подряд не стали пятью одинаковыми ответами.
+        const last = lastFallbackAt.get(ctx.from.id) ?? 0;
+        if (Date.now() - last >= FALLBACK_COOLDOWN_MS) {
+          lastFallbackAt.set(ctx.from.id, Date.now());
+          const who = acting(ctx.from.id);
+          const isAdminNow = who.ok && actsAsAdmin(who.me, ctx.from.id);
+          await ctx.reply(FALLBACK_TEXT, { reply_markup: mainKeyboard({ isAdmin: isAdminNow }) });
+        }
+      }
     }
   });
 

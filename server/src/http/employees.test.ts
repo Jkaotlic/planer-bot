@@ -471,6 +471,26 @@ describe("POST /api/admin/employees/:id/role", () => {
     expect(getEmployeeById(db, admin.id)?.isAdmin).toBe(true);
   });
 
+  it("сразу обновляет меню команд у того, кому только что дали или сняли права", async () => {
+    // Иначе `/admin` появился (или не пропал) бы в меню только после рестарта
+    // сервера — `publishBotCommands` запускает свою рассылку один раз при
+    // старте поллинга (см. `index.ts`).
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    const { calls } = recordApi(bot);
+    const app = createApp({ db, config, bot });
+    const adminToken = await tokenFor(app, 111);
+
+    await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: true }));
+    const promoted = calls.find((c) => c.method === "setMyCommands" && (c.payload as { scope?: { chat_id?: number } }).scope?.chat_id === 333);
+    expect(promoted).toBeDefined();
+
+    await app.request(`/api/admin/employees/${w.id}/role`, authedJson(adminToken, { isAdmin: false }));
+    const demoted = calls.find((c) => c.method === "deleteMyCommands" && (c.payload as { scope?: { chat_id?: number } }).scope?.chat_id === 333);
+    expect(demoted).toBeDefined();
+  });
+
   it("rejects a worker calling it (403)", async () => {
     const db = makeTestDb();
     const w = worker(db, "Игорь", 333);

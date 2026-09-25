@@ -39,7 +39,7 @@ void keepPolling({
   bot,
   onStart: (info) => {
     console.log(`bot @${info.username} started`);
-    void publishBotCommands(bot);
+    void publishBotCommands(bot, db);
   },
   log: (line) => console.error(line),
   sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),

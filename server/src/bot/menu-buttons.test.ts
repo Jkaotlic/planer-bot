@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { recordApi, stubBotInfo } from "./testbot";
 import type { Bot } from "grammy";
-import { createBot, publishBotCommands } from "./bot";
+import { createBot, publishBotCommands, refreshAdminCommands, FALLBACK_TEXT } from "./bot";
 import { BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import {
@@ -142,6 +142,21 @@ describe("постоянная клавиатура — доставка", () =>
     expect(keyboardLabels(reply.payload)).not.toContain(BTN_ADMIN);
   });
 
+  it("/admin от аллоулистнутого, ещё не ставшего админом в базе, сразу обновляет его меню команд", async () => {
+    // Тот же промоут, что у «аллоулистнутый получает кнопку админки…» выше —
+    // здесь проверяем побочный эффект на меню, а не на клавиатуру.
+    const db = makeTestDb();
+    linkedWorker(db, 111); // 111 ∈ adminTelegramIds, строка ещё обычная
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(commandUpdate(111, "/admin"));
+
+    const set = calls.find(
+      (c) => c.method === "setMyCommands" && (c.payload as any)?.scope?.chat_id === 111,
+    );
+    expect(set).toBeDefined();
+  });
+
   it("ссылка на админку приходит с клавиатурой и по-прежнему без превью", async () => {
     const db = makeTestDb();
     const worker = linkedWorker(db, 777);
@@ -238,13 +253,60 @@ describe("постоянная клавиатура — нажатия", () => {
     expect(calls).toEqual([]);
   });
 
-  it("на произвольный текст бот молчит, как молчал", async () => {
+  it("на произвольный текст отвечает подсказкой со свежей клавиатурой", async () => {
+    // Раньше бот на такой текст молчал; теперь у человека, который написал
+    // вопрос, есть хоть какой-то ответ — см. FALLBACK_TEXT в bot.ts.
     const db = makeTestDb();
     linkedWorker(db, 1005);
     const { bot, calls } = testBot(db);
     await bot.handleUpdate(textUpdate(1005, "привет"));
 
-    expect(calls).toEqual([]);
+    const reply = calls.find((c) => c.method === "sendMessage")!;
+    expect(reply.payload.text).toBe(FALLBACK_TEXT);
+    expect(keyboardLabels(reply.payload)).toContain(BTN_WEEK);
+  });
+});
+
+describe("publishBotCommands / refreshAdminCommands", () => {
+  it("общий список без scope, админский — только по чатам активных админов", async () => {
+    const db = makeTestDb();
+    const worker = linkedWorker(db, 555);
+    setEmployeeAdmin(db, worker.id, true);
+    const { bot, calls } = testBot(db);
+
+    await publishBotCommands(bot, db);
+
+    const setCalls = calls.filter((c) => c.method === "setMyCommands");
+    expect(setCalls).toHaveLength(2);
+    const [general, admin] = setCalls;
+    expect(general!.payload.scope).toBeUndefined();
+    expect(general!.payload.commands).toHaveLength(4);
+    expect(admin!.payload.scope).toEqual({ type: "chat", chat_id: 555 });
+    expect(admin!.payload.commands).toHaveLength(6);
+    const adminCommandNames = admin!.payload.commands.map((c: { command: string }) => c.command);
+    expect(adminCommandNames).toContain("admin");
+    expect(adminCommandNames).toContain("instruction");
+  });
+
+  it("refreshAdminCommands(false) снимает админское меню у конкретного чата", async () => {
+    const db = makeTestDb();
+    const { bot, calls } = testBot(db);
+
+    await refreshAdminCommands(bot, 555, false);
+
+    const del = calls.find((c) => c.method === "deleteMyCommands")!;
+    expect(del.payload.scope).toEqual({ type: "chat", chat_id: 555 });
+  });
+
+  it("refreshAdminCommands(true) ставит админское меню тому же чату", async () => {
+    const db = makeTestDb();
+    const { bot, calls } = testBot(db);
+
+    await refreshAdminCommands(bot, 555, true);
+
+    const set = calls.find((c) => c.method === "setMyCommands")!;
+    expect(set.payload.scope).toEqual({ type: "chat", chat_id: 555 });
+    expect(set.payload.commands).toHaveLength(6);
   });
 });
 

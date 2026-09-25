@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { z } from "zod";
 import type { Bot } from "grammy";
+import { refreshAdminCommands } from "../bot/bot";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import { validateInitData, type TelegramUser } from "../auth/telegram";
@@ -383,6 +384,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const allowlisted = config.adminTelegramIds.includes(user.id);
     let employee = getByTelegramId(db, user.id);
+    // Кем он был ДО этого входа — чтобы после всех веток ниже (восстановление,
+    // создание, промоут активного) решить одним сравнением, стоит ли обновлять
+    // его персональное меню команд. `false`, если строки не было вовсе: новый
+    // аллоулистнутый создаётся админом ниже, и это тоже смена, которую нужно
+    // отразить.
+    const isAdminBefore = employee?.isAdmin ?? false;
     if (employee && !employee.isActive) {
       // An archived worker stays locked out — that's the point of archiving. But
       // ADMIN_TELEGRAM_IDS lives in server/.env, outside this database: an operator
@@ -427,6 +434,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
         isAdmin: true,
         via: "allowlist",
       });
+    }
+    // Меню команд обновляем сразу, а не ждём рестарта сервера — иначе новый
+    // или только что повышенный админ увидел бы `/admin` в списке лишь после
+    // следующего деплоя. Один `if` на все три ветки промоута выше (восстановил
+    // и повысил, создал нового, повысил активного) — каждая уже отвечает за
+    // свою причину, здесь важен только итог.
+    if (bot && employee.isAdmin !== isAdminBefore) {
+      await refreshAdminCommands(bot, user.id, employee.isAdmin);
     }
     const token = await issueToken({ employeeId: employee.id, isAdmin: employee.isAdmin }, config.jwtSecret);
     return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin: employee.isAdmin } });
