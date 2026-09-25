@@ -16,7 +16,9 @@ export function announcementUnreachableLine(
   if (unreachable.length === 0 && archivedCount <= 0) return null;
   const parts = unreachable.map((name) => `${name} (нет Telegram)`);
   if (archivedCount > 0) {
-    parts.push(`ещё ${archivedCount} — в архиве`);
+    // «ещё» имеет смысл только вслед за именами: если перед архивным счётчиком
+    // никого не назвали, «ещё 2» отсылает к пустоте, и слово просто мусор.
+    parts.push(parts.length > 0 ? `ещё ${archivedCount} — в архиве` : `${archivedCount} — в архиве`);
   }
   return `Не дошло: ${parts.join("; ")}`;
 }

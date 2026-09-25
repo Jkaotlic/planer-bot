@@ -163,6 +163,6 @@ describe("поиск получателя в мини-апповском ано�
     await act(async () => { byText(el, "Да, отправить").click(); });
     await settle();
 
-    expect(el.textContent).toContain("Не дошло: ещё 2 — в архиве");
+    expect(el.textContent).toContain("Не дошло: 2 — в архиве");
   });
 });

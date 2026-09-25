@@ -10,9 +10,9 @@ describe("announcementUnreachableLine", () => {
     expect(announcementUnreachableLine(["Марк"], 0)).toBe("Не дошло: Марк (нет Telegram)");
   });
 
-  it("только архивные — числом, без единого имени", () => {
+  it("только архивные — числом, без единого имени, без «ещё» (перед числом нет имён)", () => {
     const line = announcementUnreachableLine([], 2);
-    expect(line).toBe("Не дошло: ещё 2 — в архиве");
+    expect(line).toBe("Не дошло: 2 — в архиве");
     expect(line).not.toContain("Семён");
   });
 
