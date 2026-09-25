@@ -1306,8 +1306,10 @@ export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecip
 /**
  * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
  * — иначе экран в DEV показал бы одних людей, а мок отчитывался бы про других.
- * Архивный или без телеграма, даже выбранный явно, попадает в пул и в
- * `unreachable` поимённо, а не пропадает молча; отправитель исключается всегда.
+ * Архивный, даже выбранный явно, попадает в пул, но не в `unreachable`
+ * поимённо — только числом в `archivedCount` (то же правило, что у сервера,
+ * см. `announcementRecipients`). Без телеграма, но активный — поимённо, а не
+ * пропадает молча. Отправитель исключается всегда.
  */
 export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
   await delay(300);
@@ -1322,9 +1324,10 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
           .filter((e): e is Employee => e != null && e.id !== self);
 
   const reachable = pool.filter((e) => e.isActive && e.telegramUserId != null);
-  const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
+  const unreachable = pool.filter((e) => e.isActive && e.telegramUserId == null).map((e) => e.displayName);
+  const archivedCount = pool.filter((e) => !e.isActive).length;
 
-  return { delivered: reachable.length, intended: reachable.length, unreachable };
+  return { delivered: reachable.length, intended: reachable.length, unreachable, archivedCount };
 }
 
 // --- Баги ------------------------------------------------------------------

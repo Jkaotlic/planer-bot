@@ -100,7 +100,7 @@ describe("поиск получателя в мини-апповском ано�
   });
 
   it("ПОИСК НЕ СНИМАЕТ ГАЛОЧКИ: отметил при одном запросе, отметил при другом — уйдёт обоим", async () => {
-    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 2, intended: 2, unreachable: [] });
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 2, intended: 2, unreachable: [], archivedCount: 0 });
     const el = await mount(TEAM);
     await openPicker(el);
 
@@ -146,5 +146,23 @@ describe("поиск получателя в мини-апповском ано�
     await openPicker(el);
 
     expect(el.querySelector('input[aria-label="Поиск по имени"]')).toBeNull();
+  });
+
+  // Баг из ledger: архивный в отчёте не называется по имени — только числом.
+  it("отчёт про архивных — числом, без единого имени бывшего сотрудника", async () => {
+    vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({
+      delivered: 1,
+      intended: 3,
+      unreachable: [],
+      archivedCount: 2,
+    });
+    const el = await mount(TEAM.slice(0, 1));
+
+    await typeInto(el.querySelector("textarea")!, "Завтра сбор в 10");
+    await act(async () => { byText(el, "Отправить").click(); });
+    await act(async () => { byText(el, "Да, отправить").click(); });
+    await settle();
+
+    expect(el.textContent).toContain("Не дошло: ещё 2 — в архиве");
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { filterPeople } from "@planer/shared";
+import { announcementUnreachableLine, filterPeople } from "@planer/shared";
 import { Button, List, Placeholder, Section, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
@@ -240,11 +240,14 @@ export function AdminAnnounce() {
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>
                   Дошло {report.delivered} из {report.intended}.
                 </div>
-                {report.unreachable.length > 0 && (
-                  <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                    Не получили (нет телеграма или в архиве): {report.unreachable.join(", ")}
-                  </div>
-                )}
+                {(() => {
+                  const line = announcementUnreachableLine(report.unreachable, report.archivedCount);
+                  return line ? (
+                    <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                      {line}
+                    </div>
+                  ) : null;
+                })()}
               </CardShell>
             )}
           </CardStack>

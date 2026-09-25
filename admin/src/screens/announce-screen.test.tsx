@@ -87,7 +87,7 @@ function checkboxIn(row: HTMLElement): HTMLInputElement {
 describe("AnnounceScreen", () => {
   it("первый клик по «Отправить» не шлёт, второй — шлёт", async () => {
     vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue([recipient()]);
-    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 1, intended: 1, unreachable: [] });
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 1, intended: 1, unreachable: [], archivedCount: 0 });
 
     const el = await mount();
     await type(textareaByLabel(el, "Текст анонса"), "Планёрка в пятницу в 10:00");
@@ -159,6 +159,7 @@ describe("AnnounceScreen", () => {
       delivered: 1,
       intended: 2,
       unreachable: ["Игорь"],
+      archivedCount: 0,
     });
 
     const el = await mount();
@@ -169,5 +170,24 @@ describe("AnnounceScreen", () => {
 
     expect(el.textContent).toContain("Дошло 1 из 2");
     expect(el.textContent).toContain("Игорь");
+  });
+
+  // Баг из ledger: архивный в отчёте не называется по имени — только числом.
+  it("отчёт про архивных — числом, без единого имени бывшего сотрудника", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue([recipient({ id: 1, displayName: "Аня" })]);
+    vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({
+      delivered: 1,
+      intended: 3,
+      unreachable: [],
+      archivedCount: 2,
+    });
+
+    const el = await mount();
+    await type(textareaByLabel(el, "Текст анонса"), "Текст");
+    act(() => buttonByText(el, "Отправить").click());
+    await act(async () => buttonByText(el, "Да, отправить").click());
+    await settle();
+
+    expect(el.textContent).toContain("Не дошло: ещё 2 — в архиве");
   });
 });

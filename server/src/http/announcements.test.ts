@@ -204,16 +204,37 @@ describe("POST /api/announcements", () => {
       body: JSON.stringify({ text: "Собрание в 15:00", audience: [igor.id] }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { delivered: number; intended: number; unreachable: string[] };
+    const body = (await res.json()) as { delivered: number; intended: number; unreachable: string[]; archivedCount: number };
     // Бота у тестового приложения нет (`createApp({ db, config })` без `bot`),
     // поэтому `delivered` — 0: важно, что маршрут не падает и честно докладывает.
-    expect(body).toEqual({ delivered: 0, intended: 1, unreachable: [] });
+    expect(body).toEqual({ delivered: 0, intended: 1, unreachable: [], archivedCount: 0 });
 
     const journal = await app.request("/api/admin/journal", {
       headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}` },
     });
     const events = (await journal.json()).events as { type: string }[];
     expect(events.some((e) => e.type === "announcement_sent")).toBe(true);
+  });
+
+  // Баг из ledger, теперь и на уровне HTTP: архивный, выбранный явно, не
+  // приезжает в ответе по имени — только числом в `archivedCount`.
+  it("выбранный архивный — в ответе счётчиком, а не именем", async () => {
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const semyon = linked(db, "Семён", 555);
+    const { archiveEmployee } = await import("../repo/employees");
+    archiveEmployee(db, semyon.id, "2026-08-17");
+    const app = createApp({ db, config });
+
+    const res = await app.request("/api/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await tokenFor(anya.id, true)}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "Переезд", audience: [semyon.id] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { unreachable: string[]; archivedCount: number };
+    expect(body.unreachable).not.toContain("Семён");
+    expect(body.archivedCount).toBe(1);
   });
 });
 

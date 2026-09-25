@@ -25,6 +25,7 @@ export * from "./collection-payment";
 export * from "./self-entry";
 export * from "./handover";
 export * from "./address";
+export * from "./announcement";
 export * from "./api";
 export * from "./notifications";
 export * from "./access";

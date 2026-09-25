@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { filterPeople } from "@planer/shared";
+import { announcementUnreachableLine, filterPeople } from "@planer/shared";
 import {
   ANNOUNCEMENT_TEXT_MAX,
   apiClient,
@@ -213,9 +213,10 @@ export function AnnounceScreen() {
       {report && (
         <div className="birthday-sent-note">
           Дошло {report.delivered} из {report.intended}.
-          {report.unreachable.length > 0 && (
-            <div>Не получили (нет телеграма или в архиве): {report.unreachable.join(", ")}</div>
-          )}
+          {(() => {
+            const line = announcementUnreachableLine(report.unreachable, report.archivedCount);
+            return line ? <div>{line}</div> : null;
+          })()}
         </div>
       )}
     </div>

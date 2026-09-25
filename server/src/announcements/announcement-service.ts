@@ -46,11 +46,18 @@ export function announcementRecipients(
   db: Db,
   audience: Audience,
   senderId: number,
-): { reachable: Employee[]; unreachable: string[] } {
+): { reachable: Employee[]; unreachable: string[]; archivedCount: number } {
   // Архивный в `pool` при явном выборе ПОПАДАЕТ, и это не недосмотр: письмо ему
-  // не уйдёт, но назвать его надо поимённо — админ, не увидевший имени в отчёте,
-  // решит, что письмо ушло. `listActive` архивных не отдаёт вовсе, поэтому в
-  // ветке «всем» их и нет.
+  // не уйдёт, но это надо отразить в отчёте — админ, не увидевший разницы
+  // `intended`/`delivered`, решит, что письмо ушло. `listActive` архивных не
+  // отдаёт вовсе, поэтому в ветке «всем» их и нет.
+  //
+  // Именем архивный НЕ называется (решение от 2026-09-25, ledger): отчёт про
+  // рассылку — не место, где вылезает, кто из бывших сотрудников когда-то был
+  // выбран получателем. Он идёт в `archivedCount` — числом, для честности
+  // отчёта, но без имени, которое не должно всплывать перед оставшейся
+  // командой. У активного без Telegram имя остаётся: это ныне работающий
+  // человек, и админ должен узнать, кто именно не привязан.
   //
   // `new Set(...)` — маршрут принимает произвольный JSON от кого угодно (curl,
   // Postman, будущий клиент), и повтор id в теле не обязан быть намеренным.
@@ -64,9 +71,13 @@ export function announcementRecipients(
           .map((id) => getEmployeeById(db, id))
           .filter((e): e is Employee => e != null && e.id !== senderId);
 
+  const archived = pool.filter((e) => !e.isActive);
+  const activeNoTelegram = pool.filter((e) => e.isActive && e.telegramUserId == null);
+
   return {
     reachable: pool.filter((e) => e.isActive && e.telegramUserId != null),
-    unreachable: pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName),
+    unreachable: activeNoTelegram.map((e) => e.displayName),
+    archivedCount: archived.length,
   };
 }
 
@@ -94,9 +105,9 @@ export async function sendAnnouncement(
   bot: Bot | null | undefined,
   db: Db,
   input: { senderId: number; text: string; audience: Audience },
-): Promise<{ delivered: number; intended: number; unreachable: string[] }> {
+): Promise<{ delivered: number; intended: number; unreachable: string[]; archivedCount: number }> {
   const sender = getEmployeeById(db, input.senderId);
-  const { reachable, unreachable } = announcementRecipients(db, input.audience, input.senderId);
+  const { reachable, unreachable, archivedCount } = announcementRecipients(db, input.audience, input.senderId);
   const message = announcementText(sender ? addressOf(sender) : "администратора", input.text);
 
   let delivered = 0;
@@ -106,5 +117,5 @@ export async function sendAnnouncement(
     // кого ещё можно достучаться. Тот же приём, что в `notifyVacantSlot`.
     if (bot && (await notifyUser(bot, person.telegramUserId, message))) delivered += 1;
   }
-  return { delivered, intended: reachable.length, unreachable };
+  return { delivered, intended: reachable.length, unreachable, archivedCount };
 }

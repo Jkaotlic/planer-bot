@@ -411,11 +411,13 @@ describe("mockSendAnnouncement", () => {
     expect(result.unreachable).not.toContain(MOCK_ME.displayName);
   });
 
-  it("явно выбранный архивный или без телеграма попадает в отчёт поимённо, а не пропадает", async () => {
+  it("явно выбранный без телеграма — в отчёте поимённо; архивный — числом, без имени", async () => {
     // id 3 — «Марк Волков», активен, но без телеграма; id 6 — «Света Орлова», в архиве.
     const result = await mockSendAnnouncement("Текст анонса", [3, 6, 4]);
     expect(result.delivered).toBe(1); // только id 4 достижим
-    expect(result.unreachable.sort()).toEqual(["Марк Волков", "Света Орлова"]);
+    expect(result.unreachable).toEqual(["Марк Волков"]);
+    expect(result.unreachable).not.toContain("Света Орлова");
+    expect(result.archivedCount).toBe(1);
   });
 
   it("повтор id в списке не удваивает адресата", async () => {
