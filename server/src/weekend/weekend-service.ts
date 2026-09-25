@@ -260,6 +260,11 @@ export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: num
   if (!assignment) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
   if (offerPassed(db, assignment.slotId, today)) return { ok: false, reason: "slot_passed" };
+  // Оффер мог уйти до того, как человека вывели из раздачи или сделали
+  // наблюдателем, а кнопка в чате живёт вечно. Остальные пути этого файла
+  // спрашивают то же самое — этот был единственным без вопроса.
+  const me = getEmployeeById(db, actingEmployeeId);
+  if (!me || !takesPartInAssignment(me)) return { ok: false, reason: "not_participating" };
   // The entry was created when the admin assigned it; accepting just records that.
   if (assignment.shiftId != null) {
     confirmAssignment(db, assignmentId, assignment.shiftId);

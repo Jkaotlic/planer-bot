@@ -1615,6 +1615,7 @@ export function createBot(deps: BotDeps): Bot {
         res.reason === "not_yours" ? "Это не твой оффер"
         : res.reason === "not_offered" ? "Уже обработано"
         : res.reason === "slot_passed" ? "Этот выходной уже прошёл"
+        : res.reason === "not_participating" ? "Ты сейчас не участвуешь в раздаче выходных"
         : "Не получилось";
       await ctx.answerCallbackQuery({ text });
       return;
@@ -1662,7 +1663,7 @@ export function createBot(deps: BotDeps): Bot {
     const onDecided = () => ctx.answerCallbackQuery({ text: action === "take" ? "Готово ✅" : "Понял, спрошу других" });
     const res =
       action === "take"
-        ? await takeHandover(deps, handoverId, who.me.id, onDecided)
+        ? await takeHandover(deps, handoverId, who.me.id, teamNow(config.teamTz).date, onDecided)
         : await declineHandover(deps, handoverId, who.me.id, onDecided);
     if (!res.ok) {
       // The service writes its refusals in Russian a person can read — «Уже

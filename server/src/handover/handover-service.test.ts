@@ -7,11 +7,13 @@ import { getShift } from "../repo/shifts";
 import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import type { Db } from "../db/client";
 
 const CONFIG = { teamTz: "Europe/Moscow" } as const;
+/** Fixtures below sit on 2026-08-12/13 — «today» has to sit on or after them. */
+const TODAY = "2026-08-12";
 
 /** Every message that would have gone to Telegram, without a bot at all. */
 let sent: { to: string; text: string }[] = [];
@@ -228,7 +230,7 @@ describe("declining", () => {
     const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
     shift(db, anya, "2026-08-12");
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
-    await takeHandover(deps(db), handover!.id, igor);
+    await takeHandover(deps(db), handover!.id, igor, TODAY);
 
     expect((await declineHandover(deps(db), handover!.id, igor)).ok).toBe(false);
   });
@@ -244,7 +246,7 @@ describe("taking a shift", () => {
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
     sent = [];
 
-    const result = await takeHandover(deps(db), handover!.id, igor, async () => {
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY, async () => {
       throw new Error("Bad Request: query is too old");
     });
 
@@ -260,7 +262,7 @@ describe("taking a shift", () => {
     const work = shift(db, anya, "2026-08-12");
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
 
-    const result = await takeHandover(deps(db), handover!.id, igor);
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
 
     expect(result.ok).toBe(true);
     expect(getShift(db, work.id)?.employeeId).toBe(igor);
@@ -283,8 +285,8 @@ describe("taking a shift", () => {
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
 
     const [first, second] = await Promise.all([
-      takeHandover(deps(db), handover!.id, igor),
-      takeHandover(deps(db), handover!.id, mark),
+      takeHandover(deps(db), handover!.id, igor, TODAY),
+      takeHandover(deps(db), handover!.id, mark, TODAY),
     ]);
 
     expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1);
@@ -302,7 +304,7 @@ describe("taking a shift", () => {
     // Три часа спустя Игорю поставили свою смену на те же часы.
     shift(db, igor, "2026-08-12", "12:00", "20:00");
 
-    const result = await takeHandover(deps(db), handover!.id, igor);
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
 
     expect(result.ok).toBe(false);
     expect(getShift(db, work.id)?.employeeId).toBe(anya);
@@ -317,14 +319,49 @@ describe("taking a shift", () => {
       const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
       const work = shift(db, anya, "2026-08-12");
       const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
-      if (closer === "taken") await takeHandover(deps(db), handover!.id, igor);
+      if (closer === "taken") await takeHandover(deps(db), handover!.id, igor, TODAY);
       else await cancelHandoversForEntry(deps(db), sick.id, []);
 
-      const result = await takeHandover(deps(db), handover!.id, mark);
+      const result = await takeHandover(deps(db), handover!.id, mark, TODAY);
 
       expect(result.ok, closer).toBe(false);
       expect(getShift(db, work.id)?.employeeId, closer).not.toBe(mark);
     }
+  });
+
+  // «Беру» под предложением живёт в чате вечно. Оффер мог уйти Семёну до того,
+  // как админ вывел его из обменов — кнопка не должна отпускать смену человеку,
+  // которому это сейчас запрещено.
+  it("refuses a taker excluded from swaps after the offer went out; the shift stays with the giver", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const semyon = person(db, "Семён");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+
+    setEmployeeRestrictions(db, semyon, { excludedFromSwaps: true });
+    const result = await takeHandover(deps(db), handover!.id, semyon, TODAY);
+
+    expect(result).toEqual({ ok: false, reason: "Ты сейчас не участвуешь в обменах — смену взять нельзя" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  // Тот же вечный-кнопки случай, что и у выходных: «Беру» нажали на смену,
+  // которая уже прошла.
+  it("refuses to take a shift that has already passed", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-11", "2026-08-11");
+    const work = shift(db, anya, "2026-08-11");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+
+    // "Сегодня" в этом тесте — на день позже даты смены.
+    const result = await takeHandover(deps(db), handover!.id, igor, "2026-08-12");
+
+    expect(result).toEqual({ ok: false, reason: "Эта смена уже прошла" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
   });
 });
 
@@ -375,7 +412,7 @@ describe("cancelling", () => {
     const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
     const work = shift(db, anya, "2026-08-12");
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
-    await takeHandover(deps(db), handover!.id, igor);
+    await takeHandover(deps(db), handover!.id, igor, TODAY);
 
     await cancelHandoversForEntry(deps(db), sick.id, []);
 
@@ -409,7 +446,7 @@ describe("выключенный вид фильтрует «забрали», �
     shift(db, igor, "2026-08-12");
     const [handover] = await startHandovers(realDeps, { sickEntry: sick, employeeId: igor });
     expect(handover!.status).toBe("offered");
-    await takeHandover(realDeps, handover!.id, mark);
+    await takeHandover(realDeps, handover!.id, mark, TODAY);
 
     expect(wire.some((m) => m.chat_id === 111)).toBe(false);
 
