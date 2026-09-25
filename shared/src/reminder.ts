@@ -63,6 +63,14 @@ export function remindsByDefault(entry: { start: string; end: string; category: 
   return isReminderWorthy(entry);
 }
 
+/**
+ * Виды смен, для которых считается и показывается «Завтра с тобой»: те, что и
+ * так меняют вечер человека. У дневных видов и дежурств (`day`) соседей не
+ * вычисляют и не подставляют, даже если админ сам поставил `{с кем}` в свой
+ * текст — решение владельца от 2026-09-25.
+ */
+const COWORKER_REMINDER_KINDS: ReadonlySet<ReminderKind> = new Set(["early", "morning", "evening", "night"]);
+
 export interface DutyRun {
   /** Дежурство уже идёт: вчера его держал тот же человек. */
   continuing: boolean;
@@ -117,8 +125,9 @@ export function buildReminderText(p: {
   what?: string;
   until?: string;
   location?: string | null;
+  coworkers?: readonly string[];
 }): string {
-  const { name, kind, timeRange, what, until } = p;
+  const { name, kind, timeRange, what, until, coworkers } = p;
   function baseText(): string {
     switch (kind) {
       case "early":
@@ -145,7 +154,16 @@ export function buildReminderText(p: {
   // Место — приписка, а не часть формулировки: у каждого вида смены и так своя
   // фраза, и городить пятое дублирование текста ради одной строки в конце незачем.
   const loc = p.location?.trim();
-  return loc ? `${baseText()}\n📍 ${loc}` : baseText();
+  let text = loc ? `${baseText()}\n📍 ${loc}` : baseText();
+  // «Завтра с тобой» — вторая приписка, после места. Только у видов, у которых
+  // и так что-то меняется вечером (см. COWORKER_REMINDER_KINDS): у дежурства
+  // 09:00–18:00 список соседей ничего не добавляет к тому, что человек и так
+  // знает про обычный день.
+  if (coworkers && coworkers.length > 0 && COWORKER_REMINDER_KINDS.has(kind)) {
+    const line = coworkersLine(coworkers);
+    if (line) text += `\n${line}`;
+  }
+  return text;
 }
 
 export class ReminderTextError extends Error {
@@ -162,7 +180,7 @@ export class ReminderTextError extends Error {
  * подсказка на экране, проверка и сама подстановка перечисляют одно и то же, и
  * разойдись они — админ получит отказ на подстановку, которую ему же и предложили.
  */
-export const REMINDER_PLACEHOLDERS = ["имя", "время", "подъём", "место"] as const;
+export const REMINDER_PLACEHOLDERS = ["имя", "время", "подъём", "место", "с кем"] as const;
 
 /** Длиннее одного экрана телефона напоминание перестаёт читаться. */
 export const REMINDER_TEXT_MAX = 400;
@@ -178,6 +196,8 @@ export interface ReminderVars {
   timeRange: string;
   wake: string;
   location: string;
+  /** Готовый текст перечисления без префикса «👥 …»: «Игорь, Марк» или «». */
+  coworkers: string;
 }
 
 /**
@@ -198,6 +218,7 @@ const PLACEHOLDER_VALUES: Record<string, (vars: ReminderVars) => string> = {
   время: (vars) => vars.timeRange,
   подъем: (vars) => vars.wake,
   место: (vars) => vars.location,
+  "с кем": (vars) => vars.coworkers,
 };
 
 /**
@@ -223,17 +244,41 @@ export function validateReminderTemplate(text: string): void {
   }
 }
 
-/** Подставляет значения в свой текст напоминания. Проверку делает вызывающий. */
-export function renderReminderText(template: string, vars: ReminderVars): string {
+/**
+ * Подставляет значения в свой текст напоминания. Проверку делает вызывающий.
+ *
+ * `kind` — необязательный: превью своего текста (ShiftKindsScreen) вызывает
+ * без него, потому что не знает, каким видом смены этот текст обернётся у
+ * конкретной записи. Без `kind` подстановка `{с кем}` работает как обычная —
+ * маскирует её в пустую строку только явное `kind === "day"` (см. интерфейс).
+ */
+export function renderReminderText(template: string, vars: ReminderVars, kind?: ReminderKind): string {
+  const mentions = (placeholder: string) =>
+    [...template.matchAll(PLACEHOLDER_RE)].some((m) => normalisePlaceholder(m[1]) === placeholder);
+
   const rendered = template.replace(PLACEHOLDER_RE, (whole, raw: string) => {
-    const value = PLACEHOLDER_VALUES[normalisePlaceholder(raw)];
+    const name = normalisePlaceholder(raw);
+    // У дневных видов и дежурств соседей не показывают даже по прямой просьбе
+    // в своём тексте — решение владельца от 2026-09-25.
+    if (name === "с кем" && kind === "day") return "";
+    const value = PLACEHOLDER_VALUES[name];
     return value ? value(vars) : whole;
   });
+
   const loc = vars.location.trim();
   // Место — то, что накануне нужнее всего, после времени. Админ, написавший свой
   // текст до появления `{место}`, не должен лишать людей адреса по незнанию.
-  const mentions = [...template.matchAll(PLACEHOLDER_RE)].some((m) => normalisePlaceholder(m[1]) === "место");
-  return loc && !mentions ? `${rendered}\n📍 ${loc}` : rendered;
+  let result = loc && !mentions("место") ? `${rendered}\n📍 ${loc}` : rendered;
+
+  // «Завтра с тобой» — вторая приписка, после места, и только у видов из
+  // COWORKER_REMINDER_KINDS: без `kind` (превью) или у дневного вида её не
+  // добавляют самостоятельно, ровно как и не подставляют по `{с кем}` выше.
+  const coworkers = vars.coworkers.trim();
+  const coworkersAllowed = kind !== undefined && COWORKER_REMINDER_KINDS.has(kind);
+  if (coworkersAllowed && coworkers && !mentions("с кем")) {
+    result = `${result}\n👥 Завтра с тобой: ${coworkers}`;
+  }
+  return result;
 }
 
 /**
@@ -255,6 +300,34 @@ export function validateReminderHour(value: string): void {
 }
 
 /**
+ * Перечисление имён без префикса «👥 …» — «Игорь, Марк» или «» при пустом
+ * списке. Отдельная функция, а не тело `coworkersLine`, потому что тот же
+ * готовый текст нужен серверу для `ReminderVars.coworkers`, когда админ вписал
+ * `{с кем}` в свой текст напоминания: подстановка не должна дублировать
+ * усечение «первые шесть и ещё N» второй копией этого правила.
+ *
+ * Хвост «и ещё N» после шестого имени — длинный список нечитаем на экране
+ * телефона, и после шести человек он перестаёт нести пользу (то же
+ * ограничение, что и в анонсе по именам).
+ */
+export function coworkersEnumeration(names: readonly string[]): string {
+  if (names.length === 0) return "";
+  const shown = names.slice(0, 6);
+  const rest = names.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")}, и ещё ${rest}` : shown.join(", ");
+}
+
+/**
+ * Строка «Завтра с тобой: …» для напоминания — только те, чьи часы
+ * пересекаются со сменой. `null` при пустом списке: строки вида «Завтра с
+ * тобой: (никого)» не бывает — её просто нет.
+ */
+export function coworkersLine(names: readonly string[]): string | null {
+  const text = coworkersEnumeration(names);
+  return text ? `👥 Завтра с тобой: ${text}` : null;
+}
+
+/**
  * Пример, на котором админ видит своё письмо до того, как оно уйдёт команде.
  *
  * Имя вымышленное: репозиторий публичный, и настоящих ФИО в нём быть не может
@@ -263,7 +336,13 @@ export function validateReminderHour(value: string): void {
  * то же самое «Поклонка» всем — включая приписанную строку `📍 …` в конце
  * текста без `{место}`, ровно как это будет выглядеть у настоящей смены.
  */
-export const REMINDER_PREVIEW_VARS: ReminderVars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "Поклонка" };
+export const REMINDER_PREVIEW_VARS: ReminderVars = {
+  name: "Аня",
+  timeRange: "08:00–17:00",
+  wake: "07:00",
+  location: "Поклонка",
+  coworkers: "Игорь, Марк",
+};
 
 export type ReminderPreview = { ok: true; text: string } | { ok: false; error: string };
 

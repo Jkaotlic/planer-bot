@@ -708,3 +708,49 @@ describe("дежурство напоминает один раз на отре�
     expect(sent).toHaveLength(2);
   });
 });
+
+describe("«Завтра с тобой»: кто ещё работает в этот день", () => {
+  it("только те, чьи часы пересекаются со сменой, по имени из addressOf", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 950);
+    // Обращение — по имени из Telegram (addressOf), а не по «Фамилия Имя» ростера.
+    createEmployee(db, { displayName: "Петров Игорь", inviteToken: "i-951" });
+    const igor = linkTelegramAccount(db, "i-951", 951, "igor_tg", "Игорь")!;
+    const mark = linkedEmployee(db, "Марк", 952);
+    const semyon = linkedEmployee(db, "Семён", 953);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: igor.id }); // пересекается с Аней
+    createShift(db, { date: TOMORROW, start: "18:00", end: "23:00", employeeId: mark.id }); // не пересекается
+    createShift(db, { date: TOMORROW, category: "vacation", employeeId: semyon.id, start: null, end: null }); // отсутствие
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 950)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
+    expect(anyaMsg.text).not.toContain("Петров");
+    expect(anyaMsg.text).not.toContain("Марк");
+    expect(anyaMsg.text).not.toContain("Семён");
+  });
+
+  it("у дежурства (день) строки «Завтра с тобой» нет, даже если рядом есть пересекающаяся смена", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 954);
+    const igor = linkedEmployee(db, "Игорь", 955);
+    const duty = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "09:00", end: "18:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    createShift(db, {
+      date: TOMORROW, start: "09:00", end: "18:00", category: "duty", employeeId: anya.id, templateId: duty.id,
+    });
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: igor.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 954)!;
+    expect(anyaMsg.text).not.toContain("👥");
+  });
+});

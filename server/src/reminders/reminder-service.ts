@@ -10,6 +10,8 @@ import {
   buildReminderText,
   renderReminderText,
   addressOf,
+  coworkersEnumeration,
+  shiftsOverlap,
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsInRange, listDatesHolding } from "../repo/shifts";
@@ -109,6 +111,28 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
  * двумя днями больше нечем, а угадывать по названию значило бы склеить два
  * разных дежурства в одном месте.
  */
+/**
+ * Кто ещё работает в этот день — для строки «Завтра с тобой».
+ *
+ * Только записи с другим `employeeId` и заданными часами (отсутствия — вроде
+ * отпуска Семёна — часов не имеют и не попадают в список), чьё время
+ * пересекается со сменой владельца (`shiftsOverlap`, а не просто «тот же
+ * день»: сосед с 18:00 не «с тобой», если твоя смена кончилась в 17:00).
+ * Имя — через `addressOf`, как и у самого адресата письма.
+ */
+function coworkerNamesFor(db: Db, shift: { date: string; start: string; end: string; employeeId: number | null }): string[] {
+  const dayShifts = listShiftsInRange(db, shift.date, shift.date);
+  const names: string[] = [];
+  for (const other of dayShifts) {
+    if (other.employeeId == null || other.employeeId === shift.employeeId) continue;
+    if (other.start == null || other.end == null) continue;
+    if (!shiftsOverlap({ date: shift.date, start: shift.start, end: shift.end }, { date: other.date, start: other.start, end: other.end })) continue;
+    const person = getEmployeeById(db, other.employeeId);
+    if (person) names.push(addressOf(person));
+  }
+  return names;
+}
+
 function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
   if (!template || template.category === "shift" || shift.employeeId == null || shift.templateId == null) return undefined;
   const until = addDaysIso(shift.date, MAX_DUTY_RUN_DAYS);
@@ -147,9 +171,15 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
     // формулировках его нет ни у одного вида смены — распоряжаться чужим
     // будильником письмо не должно.
     const location = shift.location;
+    // «Завтра с тобой» — только у ранней, утренней, вечерней и ночной (решение
+    // владельца от 2026-09-25). У дневных видов и дежурств (kind === "day")
+    // соседей вообще не считаем: без этой проверки дежурство получило бы
+    // список людей, которые для него не новость — те же коллеги на тех же
+    // дневных часах, что и всегда.
+    const coworkers = kind === "day" ? [] : coworkerNamesFor(db, { date: shift.date, start, end, employeeId: shift.employeeId });
     const text = custom
-      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "" })
-      : buildReminderText({ name, kind, timeRange, what, until, location });
+      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers) }, kind)
+      : buildReminderText({ name, kind, timeRange, what, until, location, coworkers });
 
     const appUrl = publicUrl ? `${publicUrl}/app/` : undefined;
     const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl);
