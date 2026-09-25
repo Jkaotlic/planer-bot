@@ -71,6 +71,7 @@ import {
   nameOf as nameOfDb,
   swapAuditPayload as swapAuditPayloadDb,
   entryAuditPayload,
+  type SwapAuditPayload,
 } from "../util/message-lines";
 import { teamNow } from "../util/team-time";
 import { createEmployeesRoutes } from "./routes/employees";
@@ -184,6 +185,19 @@ function displayNameOf(u: TelegramUser): string {
 function rangeLabel(input: { title?: string | null; category: EntryCategory; start?: string | null; end?: string | null }): string {
   const name = input.title?.trim() || categoryLabel(input.category);
   return input.start && input.end ? `${name} ${input.start}–${input.end}` : name;
+}
+
+/**
+ * Меняться договаривались о конкретной смене: другой день, другие часы или
+ * другой вид — уже другая смена, и согласие на старую за неё не считается.
+ * Общая для одиночной `PATCH` и перезаписи диапазоном (`rewrite`) — раньше
+ * диапазон эту проверку не делал вовсе, и обмен на переписанную смену
+ * оставался висеть.
+ */
+type TradeFields = { date: string; endDate: string | null; start: string | null; end: string | null; templateId: number | null; category: EntryCategory };
+const TRADE_FIELDS = ["date", "endDate", "start", "end", "templateId", "category"] as const;
+function tradeFieldsChanged(before: TradeFields, after: TradeFields): boolean {
+  return TRADE_FIELDS.some((field) => after[field] !== before[field]);
 }
 
 /**
@@ -1392,6 +1406,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const rewrites = new Set(plan.rewritten);
     const created: Shift[] = [];
     const updated: { before: Shift; after: Shift }[] = [];
+    // Обмен, висящий на переписываемой смене, гасится тем же правилом, что и
+    // одиночная `PATCH` — раньше диапазон эту дыру не закрывал вовсе, и админ
+    // мог переписать неделю в другой пресет, оставив команду с обменом на
+    // смену, которой больше нет. Снято ДО `updateShift`, в цикле транзакции —
+    // так же, как у одиночной правки, письмо должно назвать смену, о которой
+    // договаривались, а не ту, что получилась.
+    const swapsBeforeByShiftId = new Map<number, { request: SwapRequest; payload: SwapAuditPayload }[]>();
     db.transaction(() => {
       for (const date of plan.days) {
         const before = rewrites.has(date) ? holder.get(date) : undefined;
@@ -1405,7 +1426,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // клетки и код в выгрузке: смена «Утро», переписанная в дежурство,
         // осталась бы цвета «Утро» и вернулась бы сменой через круг в Excel.
         // Тот же дефект уже чинили в правке одной записи строкой ниже.
-        const after = updateShift(db, before.id, {
+        const finalFields = {
           ...fields,
           templateId: fields.templateId ?? null,
           title: fields.title ?? null,
@@ -1416,7 +1437,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
           // рисуют «?». Перезапись назвала запись целиком, значит клетку
           // прочитал человек, и метке больше нечего означать.
           unrecognisedCode: null,
-        });
+        };
+        // Отсутствие не несёт часов вовсе (`start`/`end` в теле нет), и это НЕ
+        // значит «часы обнулились» — значит «этот путь их не называет», и
+        // старые часы записи остаются как есть (см. `updateShift` ниже). Та же
+        // логика «не назвал — не изменил», что у одиночной `PATCH`.
+        if (tradeFieldsChanged(before, {
+          date: finalFields.date,
+          endDate: finalFields.endDate,
+          start: finalFields.start !== undefined ? finalFields.start : before.start,
+          end: finalFields.end !== undefined ? finalFields.end : before.end,
+          templateId: finalFields.templateId,
+          category: finalFields.category,
+        })) {
+          swapsBeforeByShiftId.set(
+            before.id,
+            listPendingSwapsForShift(db, before.id).map((request) => ({ request, payload: swapAuditPayload(request) })),
+          );
+        }
+        const after = updateShift(db, before.id, finalFields);
         if (after) updated.push({ before, after });
       }
     });
@@ -1427,6 +1466,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     for (const { before, after } of updated) {
       notified = noticeBuffer.register({ actorEmployeeId: c.get("auth").employeeId, before, after, now });
+      const swapsBefore = swapsBeforeByShiftId.get(before.id);
+      if (swapsBefore) await finalizeTradeChangingSwaps(after.id, swapsBefore, c.get("auth").employeeId);
     }
 
     // Перезапись и расстановка — разные события: «Расставлено диапазоном» про
@@ -1536,29 +1577,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // Место и заметка смену не меняют. Payload собирается ДО правки: письмо
     // говорит «Было: … ↔ …», то есть называет те смены, о которых договаривались,
     // а не ту, что получилась.
-    const changesTheTrade = (["date", "endDate", "start", "end", "templateId", "category"] as const).some(
-      (field) => patch[field] !== undefined && patch[field] !== existing[field],
-    );
+    const changesTheTrade = tradeFieldsChanged(existing, {
+      ...merged,
+      templateId: patch.templateId !== undefined ? patch.templateId : existing.templateId,
+    });
     const swapsToExpire = changesTheTrade
       ? listPendingSwapsForShift(db, id).map((request) => ({ request, payload: swapAuditPayload(request) }))
       : [];
 
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
-    if (changesTheTrade) {
-      const expired = new Set(expirePendingSwapsForShift(db, id).map((r) => r.id));
-      for (const { request, payload } of swapsToExpire) {
-        if (!expired.has(request.id)) continue;
-        // Актор — админ, перенёсший смену: в обмене никто из двоих ничего не делал,
-        // ровно поэтому сказать надо обоим (то же правило, что у удаления записи).
-        recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
-        if (!bot) continue;
-        for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
-          const tg = tgOf(employeeId);
-          if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
-        }
-      }
-    }
+    if (changesTheTrade) await finalizeTradeChangingSwaps(id, swapsToExpire, c.get("auth").employeeId);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
@@ -1646,6 +1675,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const nameOf = (employeeId: number): string | null => nameOfDb(db, employeeId);
   const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number | null; toShiftId: number | null }) =>
     swapAuditPayloadDb(db, request);
+
+  /**
+   * Смена задела условия сделки — гасит любой обмен, висящий на ней, и
+   * говорит обоим. Общая для `PATCH /api/admin/entries/:id` и `rewrite`-режима
+   * `/api/admin/entries/range`: у обоих путей `swapsBefore` снимается ДО
+   * `updateShift`, чтобы письмо назвало смену, о которой договаривались
+   * («Было: … ↔ …»), а не ту, что получилась после правки.
+   */
+  const finalizeTradeChangingSwaps = async (
+    shiftId: number,
+    swapsBefore: { request: SwapRequest; payload: SwapAuditPayload }[],
+    actorEmployeeId: number,
+  ): Promise<void> => {
+    if (swapsBefore.length === 0) return;
+    const expired = new Set(expirePendingSwapsForShift(db, shiftId).map((r) => r.id));
+    for (const { request, payload } of swapsBefore) {
+      if (!expired.has(request.id)) continue;
+      // Актор — админ, поменявший смену: в обмене никто из двоих ничего не
+      // делал, ровно поэтому сказать надо обоим (то же правило, что у удаления записи).
+      recordAudit(db, "swap_expired", actorEmployeeId, payload);
+      if (!bot) continue;
+      for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
+        const tg = tgOf(employeeId);
+        if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
+      }
+    }
+  };
 
   /** Journals a swap that expired on its own and tells the side that wasn't
    *  looking — the initiator, who proposed it and did nothing since. */
