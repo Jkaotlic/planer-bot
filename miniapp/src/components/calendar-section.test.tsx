@@ -100,6 +100,17 @@ describe("раздел «Календарь»", () => {
     expect(el.textContent).toContain("Отключить");
   });
 
+  // webcal из WebView Telegram не проверен «в бою» (ledger-раунд ревью
+  // 2026-09-25): подсказка не может утверждать, что тап всегда сработает, и
+  // должна оставлять ручной путь для тех, у кого не открылось.
+  it("подсказка для iPhone называет ручной путь на случай, если webcal не открылся", async () => {
+    vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
+    const el = await mount();
+
+    expect(el.textContent).toContain("Если не открылось");
+    expect(el.textContent).toContain("Настройки → Календарь → Учётные записи → Новая учётная запись → Другое → Подписной календарь");
+  });
+
   it("уже подключено — «Добавить в календарь» ведёт на webcal://", async () => {
     vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
     const el = await mount();
