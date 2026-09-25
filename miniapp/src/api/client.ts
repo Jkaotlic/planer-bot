@@ -28,6 +28,9 @@ import {
   mockSetStartTab,
   mockSetSelfScheduleEnabled,
   mockSetPreferredName,
+  mockGetCalendarLink,
+  mockCreateCalendarLink,
+  mockDeleteCalendarLink,
   mockGetMyShifts,
   mockGetSwaps,
   mockGetTeamSchedule,
@@ -763,6 +766,13 @@ export interface ApiClient {
   setSelfScheduleEnabled(enabled: boolean): Promise<boolean>;
   /** `null` clears it and hands the greeting back to Telegram's name. */
   setPreferredName(preferredName: string | null): Promise<{ preferredName: string | null; address: string }>;
+  /** `null` — подписка выключена. Не приходит в bootstrap намеренно (см.
+   *  CalendarSection) — грузится отдельным запросом при открытии раздела. */
+  getCalendarLink(): Promise<string | null>;
+  /** Заводит новый токен (и для «Подключить», и для «Сменить ссылку») —
+   *  старая ссылка после этого отвечает 404. */
+  createCalendarLink(): Promise<string>;
+  deleteCalendarLink(): Promise<void>;
   getMyShifts(): Promise<{ shifts: Shift[]; today: string }>;
   getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
@@ -1268,6 +1278,20 @@ export const realClient: ApiClient = {
   setPreferredName: (preferredName) =>
     authorizedPatchJson<{ preferredName: string | null; address: string }>("/api/me/settings", { preferredName }),
 
+  async getCalendarLink() {
+    const { url } = await authorizedGet<{ url: string | null }>("/api/me/calendar");
+    return url;
+  },
+
+  async createCalendarLink() {
+    const { url } = await authorizedPostJson<{ url: string }>("/api/me/calendar", {});
+    return url;
+  },
+
+  async deleteCalendarLink() {
+    await authorizedDelete("/api/me/calendar");
+  },
+
   // `from` не передаётся намеренно: сервер сам возьмёт сегодняшний день команды.
   getMyShifts: () => readApi.getMyShifts(),
 
@@ -1609,6 +1633,9 @@ const devClient: ApiClient = {
   setStartTab: (tab) => mockSetStartTab(tab),
   setSelfScheduleEnabled: (enabled) => mockSetSelfScheduleEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
+  getCalendarLink: () => mockGetCalendarLink(),
+  createCalendarLink: () => mockCreateCalendarLink(),
+  deleteCalendarLink: () => mockDeleteCalendarLink(),
   getMyShifts: () => mockGetMyShifts(),
   getTeamSchedule: async (from, to) => withEmployeeNames(await mockGetTeamSchedule(from, to)),
   getSwaps: () => mockGetSwaps(),

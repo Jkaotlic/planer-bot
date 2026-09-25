@@ -4,6 +4,7 @@ import type { StartTab } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
 import { AddressField } from "../components/AddressField";
+import { CalendarSection } from "../components/CalendarSection";
 import { ChecklistCard } from "../components/ChecklistCard";
 import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
@@ -153,6 +154,14 @@ export function MyShiftsScreen({
           {me.isObserver && (
             <SelfScheduleSwitch enabled={me.selfScheduleEnabled} onChanged={onSelfScheduleChanged} />
           )}
+        </Section>
+      </List>
+
+      {/* Своим запросом, не из bootstrap: токен подписки нарочно не отдаётся
+          там (см. CalendarSection) — раздел спрашивает сам, когда открыт. */}
+      <List>
+        <Section header="Календарь">
+          <CalendarSection />
         </Section>
       </List>
 

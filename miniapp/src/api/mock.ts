@@ -133,6 +133,36 @@ export async function mockSetPreferredName(preferredName: string | null): Promis
 }
 
 /**
+ * Личная ICS-подписка. Отдельная переменная, не поле `MOCK_ME`: сервер тоже
+ * не отдаёт этот токен в `/api/me` (см. CalendarSection) — мок держит ту же
+ * форму, чтобы дев-путь не подсказывал того, чего не отдаёт прод.
+ */
+let mockCalendarUrl: string | null = null;
+
+/** `?calendarError` — тот же приём, что `?theme`/`?fs` в mockEnv.ts: ручной
+ *  переключатель, чтобы посмотреть на отказ ручки без правки кода. */
+function calendarErrorForced(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).has("calendarError");
+}
+
+export async function mockGetCalendarLink(): Promise<string | null> {
+  await delay(150);
+  return mockCalendarUrl;
+}
+
+export async function mockCreateCalendarLink(): Promise<string> {
+  await delay(200);
+  if (calendarErrorForced()) throw new Error("Сеть недоступна");
+  mockCalendarUrl = `https://example.com/cal/${Math.random().toString(16).slice(2)}.ics`;
+  return mockCalendarUrl;
+}
+
+export async function mockDeleteCalendarLink(): Promise<void> {
+  await delay(150);
+  mockCalendarUrl = null;
+}
+
+/**
  * In-memory roster shared by the worker screens (name lookups) and the admin
  * "Работники" screen (full rows). Mutated live by create/archive/restore so
  * both surfaces update without a reload. Ids 1–5 mirror the worker mock's
