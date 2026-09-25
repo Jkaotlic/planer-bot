@@ -135,7 +135,7 @@ describe("real announcements client", () => {
       }
       if (url.endsWith("/api/announcements") && method === "POST") {
         return new Response(
-          JSON.stringify({ delivered: 2, intended: 3, unreachable: ["Марк Волков"] }),
+          JSON.stringify({ delivered: 2, intended: 3, unreachable: ["Марк Волков"], archivedCount: 0 }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
@@ -145,7 +145,7 @@ describe("real announcements client", () => {
     const { realClient } = await import("./client");
     const result = await realClient.sendAnnouncement("Завтра собрание в 10:00", [2, 3, 4]);
 
-    expect(result).toEqual({ delivered: 2, intended: 3, unreachable: ["Марк Волков"] });
+    expect(result).toEqual({ delivered: 2, intended: 3, unreachable: ["Марк Волков"], archivedCount: 0 });
     // Путь без /admin/: рассылать умеют и наблюдатели, которым админский
     // префикс закрыт сплошным гейтом — перепутать путь значило бы молча не
     // дойти до сервера для них.

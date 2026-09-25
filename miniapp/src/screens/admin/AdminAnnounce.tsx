@@ -111,6 +111,8 @@ export function AdminAnnounce() {
     }
   }
 
+  const unreachableLine = report ? announcementUnreachableLine(report.unreachable, report.archivedCount) : null;
+
   return (
     <ScreenScroll>
       <List>
@@ -240,14 +242,11 @@ export function AdminAnnounce() {
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>
                   Дошло {report.delivered} из {report.intended}.
                 </div>
-                {(() => {
-                  const line = announcementUnreachableLine(report.unreachable, report.archivedCount);
-                  return line ? (
-                    <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                      {line}
-                    </div>
-                  ) : null;
-                })()}
+                {unreachableLine && (
+                  <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+                    {unreachableLine}
+                  </div>
+                )}
               </CardShell>
             )}
           </CardStack>

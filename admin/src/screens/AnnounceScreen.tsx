@@ -104,6 +104,8 @@ export function AnnounceScreen() {
     }
   }
 
+  const unreachableLine = report ? announcementUnreachableLine(report.unreachable, report.archivedCount) : null;
+
   return (
     <div className="employees-screen">
       <div className="employees-header">
@@ -213,10 +215,7 @@ export function AnnounceScreen() {
       {report && (
         <div className="birthday-sent-note">
           Дошло {report.delivered} из {report.intended}.
-          {(() => {
-            const line = announcementUnreachableLine(report.unreachable, report.archivedCount);
-            return line ? <div>{line}</div> : null;
-          })()}
+          {unreachableLine && <div>{unreachableLine}</div>}
         </div>
       )}
     </div>

@@ -613,6 +613,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       delivered: result.delivered,
       intended: result.intended,
       unreachable: result.unreachable,
+      archivedCount: result.archivedCount,
     });
     return c.json(result);
   });

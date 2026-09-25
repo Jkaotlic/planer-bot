@@ -235,6 +235,12 @@ describe("POST /api/announcements", () => {
     const body = (await res.json()) as { unreachable: string[]; archivedCount: number };
     expect(body.unreachable).not.toContain("Семён");
     expect(body.archivedCount).toBe(1);
+
+    // В журнал archivedCount попадает тоже: без него сырой payload события
+    // не восстановил бы полную картину рассылки — сколько ушло, скольким не
+    // могло уйти по каждой причине.
+    const entry = listRecentAudit(db, 10).find((a) => a.type === "announcement_sent");
+    expect((entry?.payload as { archivedCount?: number })?.archivedCount).toBe(1);
   });
 });
 
