@@ -72,8 +72,9 @@ export function remindsByDefault(entry: { start: string; end: string; category: 
  * ночным — то же дежурство в 07:00–16:00 даёт `kind === "early"`, а не
  * "day". Этот модуль знает только часы, не категорию записи, и отличить
  * дежурство от обычной смены не может — это делает вызывающий
- * (`reminder-service.ts`, по `template.category`), передавая сюда пустой
- * список/пустую строку соседей заранее, если запись не «смена».
+ * (`reminder-service.ts`, по `shift.category` записи и, если он есть,
+ * `template.category` вида смены), передавая сюда пустой список/пустую
+ * строку соседей заранее, если запись не «смена».
  */
 const COWORKER_REMINDER_KINDS: ReadonlySet<ReminderKind> = new Set(["early", "morning", "evening", "night"]);
 

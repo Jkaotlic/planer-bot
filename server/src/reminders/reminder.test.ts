@@ -803,6 +803,27 @@ describe("«Завтра с тобой»: кто ещё работает в эт
     expect(anyaMsg.text).toBe("Дежурство. С тобой: .");
   });
 
+  it("дежурство без вида смены (импорт/ручная запись) — без «Завтра с тобой», даже если сосед есть", async () => {
+    // Без шаблона решать нечем по `template.category` — старый гейт проверял
+    // только его и пропускал кадры без шаблона насквозь. Категорию несёт сама
+    // запись (`shift.category`), и дежурство 07:00–16:00 по часам не отличить
+    // от обычной ранней смены.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 962);
+    const igor = linkedEmployee(db, "Игорь", 963);
+    createShift(db, {
+      date: TOMORROW, start: "07:00", end: "16:00", category: "duty", employeeId: anya.id, templateId: null,
+    });
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: igor.id }); // пересекается по часам
+
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 962)!;
+    expect(anyaMsg.text).not.toContain("👥");
+  });
+
   it("сосед с двумя пересекающимися записями за день попадает в список один раз", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 960);
