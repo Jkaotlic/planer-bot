@@ -104,6 +104,13 @@ export function listPendingSwapsWithDates(db: Db): Array<{ request: SwapRequest;
     .innerJoin(fromShift, eq(swapRequests.fromShiftId, fromShift.id))
     .innerJoin(toShift, eq(swapRequests.toShiftId, toShift.id))
     .where(eq(swapRequests.status, "pending"))
+    // Явно, а не как получится: тик обходит список последовательно, await'я
+    // письмо по каждой заявке (см. `swap-expiry-tick.test.ts` — «не
+    // переписывает заявку, которую отменили, пока тик ждал отправку письма по
+    // другой»), и тот тест держится на том, что A обходится раньше B. Без
+    // `orderBy` порядок строк — недокументированное поведение движка (обычно
+    // rowid, но не гарантия), а не контракт этого запроса.
+    .orderBy(swapRequests.id)
     .all();
 }
 
