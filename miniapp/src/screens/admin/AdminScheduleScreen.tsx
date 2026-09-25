@@ -46,6 +46,7 @@ import {
   formatWeekRangeLabel,
   isCurrentPeriod,
   mondayOf,
+  parseISODate,
   toISODate,
   weekdayIndex,
   weekdayShort,
@@ -90,9 +91,11 @@ export function showsWeekSwitcher(state: {
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
-export function AdminScheduleScreen() {
-  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
-  const [selectedDate, setSelectedDate] = useState<string>(() => toISODate(new Date()));
+export function AdminScheduleScreen({ initialDate }: { initialDate?: string } = {}) {
+  // Кнопка «📅 Открыть график» у админской тревоги приходит с датой — экран
+  // должен открыться на её неделе, а не на текущей.
+  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(initialDate ? parseISODate(initialDate) : new Date()));
+  const [selectedDate, setSelectedDate] = useState<string>(() => initialDate ?? toISODate(new Date()));
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   // Праздники и рабочие субботы недели — из того же ответа, что и расписание.
   const [calendar, setCalendar] = useState<TeamSchedule["calendar"]>([]);

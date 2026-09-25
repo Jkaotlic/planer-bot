@@ -11,7 +11,7 @@ import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "..
 import { setNoticeMuted } from "../repo/notice-prefs";
 import type { Db } from "../db/client";
 
-const CONFIG = { teamTz: "Europe/Moscow" } as const;
+const CONFIG = { teamTz: "Europe/Moscow", publicUrl: "https://example.com" } as const;
 /** Fixtures below sit on 2026-08-12/13 — «today» has to sit on or after them. */
 const TODAY = "2026-08-12";
 
@@ -487,5 +487,32 @@ describe("выключенный вид фильтрует «забрали», �
 
     expect(handover2!.status).toBe("fanned");
     expect(wire.some((m) => m.chat_id === 111)).toBe(true);
+  });
+});
+
+// Задача 2: у эскалации («смена без человека — нужно решение») есть кнопка на
+// график нужной даты. Живой бот — тем же доводом, что и в блоке выше: клавиатура
+// собирается в `notifyAdminsAlways`, за фейковым `messenger` из `deps()` её не
+// увидеть.
+describe("эскалация несёт кнопку «Открыть график»", () => {
+  it("web_app.url ведёт на график нужной даты", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i-anya3", isAdmin: true });
+    linkTelegramAccount(db, "i-anya3", 311);
+    const igor = person(db, "Игорь");
+    const { bot, wire } = testBot();
+    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db) };
+
+    // Никого свободного 14-го (Аня тоже занята) — эскалация при рождении.
+    const sick = sickLeave(db, igor, "2026-08-14", "2026-08-14");
+    shift(db, igor, "2026-08-14");
+    shift(db, anya.id, "2026-08-14");
+    await startHandovers(realDeps, { sickEntry: sick, employeeId: igor });
+
+    const msg = wire.find((m) => m.chat_id === 311)!;
+    const rows = msg.reply_markup!.inline_keyboard;
+    expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
+      "https://example.com/app/?screen=schedule&date=2026-08-14",
+    );
   });
 });

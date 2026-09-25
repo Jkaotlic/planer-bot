@@ -175,4 +175,26 @@ describe("runCoverageAdviceTick", () => {
 
     expect(sent).toHaveLength(0);
   });
+
+  it("несёт кнопку «Открыть график» на дату первого дня с пробелом", async () => {
+    const { db } = stage();
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING, "https://example.com");
+
+    const rows = sent[0]!.reply_markup!.inline_keyboard;
+    expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
+      "https://example.com/app/?screen=schedule&date=2026-09-07",
+    );
+  });
+
+  it("без publicUrl кнопки графика нет — только выключатель", async () => {
+    const { db } = stage();
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    const rows = sent[0]!.reply_markup!.inline_keyboard;
+    expect(rows.flat().some((b) => "web_app" in b)).toBe(false);
+  });
 });

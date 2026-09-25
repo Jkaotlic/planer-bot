@@ -6,7 +6,7 @@ import { listActiveTemplates } from "../repo/templates";
 import { coverageAdviceSentOn, markCoverageAdviceSent, reminderHour, restoreCoverageAdviceSent } from "../repo/settings";
 import { loadCalendar } from "../repo/calendar-days";
 import { recordAudit } from "../repo/audit";
-import { notifyAdmins, reachedNobody } from "../bot/notify";
+import { notifyAdmins, reachedNobody, scheduleLink } from "../bot/notify";
 
 /**
  * Насколько вперёд смотрит совет.
@@ -30,7 +30,12 @@ const ADVICE_DAYS = 7;
  *
  * Возвращает 1, если письмо ушло, иначе 0.
  */
-export async function runCoverageAdviceTick(db: Db, bot: Bot, now: { date: string; time: string }): Promise<number> {
+export async function runCoverageAdviceTick(
+  db: Db,
+  bot: Bot,
+  now: { date: string; time: string },
+  publicUrl?: string,
+): Promise<number> {
   if (now.time < reminderHour(db)) return 0;
   if (coverageAdviceSentOn(db) === now.date) return 0;
 
@@ -55,7 +60,10 @@ export async function runCoverageAdviceTick(db: Db, bot: Bot, now: { date: strin
   markCoverageAdviceSent(db, now.date);
   if (!text) return 0;
 
-  const reach = await notifyAdmins(bot, db, "coverage", text);
+  // Кнопка ведёт на первый день с пробелом — открывать всю неделю ради него
+  // незачем: `gaps` уже упорядочен по датам (`eachDayIso` идёт по возрастанию).
+  const action = publicUrl ? { text: "📅 Открыть график", webApp: scheduleLink(publicUrl, gaps[0]!.date) } : undefined;
+  const reach = await notifyAdmins(bot, db, "coverage", text, action);
   // Не дошло ни до кого — обрыв сети, а не решение админов: вернуть прежнюю
   // отметку, и следующий тик того же вечера попробует снова.
   if (reachedNobody(reach)) {

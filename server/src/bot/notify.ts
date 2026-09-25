@@ -368,15 +368,35 @@ export function reachedNobody(reach: AdminReach): boolean {
   return reach.attempted > 0 && reach.delivered === 0;
 }
 
+/**
+ * Кнопка про само событие — например «Разобрал» у багрепорта или «Открыть
+ * график» у тревоги о пробеле. Едет ПЕРВОЙ строкой, над выключателем (если он
+ * есть): она про то, что человек только что прочитал, а выключатель — про
+ * поток вообще.
+ *
+ * Два варианта, а не один: `data` — обычный callback-обработчик (`bug:resolve`
+ * и т.п.), `webApp` — инлайн-кнопка, открывающая мини-апп с подписанным
+ * initData (см. `keyboard.ts`) — ей открывают график на нужной дате.
+ */
+export type AdminAction = { text: string; data: string } | { text: string; webApp: string };
+
+function addActionButton(kb: InlineKeyboard, action: AdminAction): void {
+  if ("webApp" in action) kb.webApp(action.text, action.webApp);
+  else kb.text(action.text, action.data);
+}
+
+/** Ссылка на график мини-аппа на конкретную дату — кнопка «📅 Открыть график»
+ *  у админских тревог открывает мини-апп сразу на нужной неделе. */
+export function scheduleLink(publicUrl: string, date: string): string {
+  return `${publicUrl}/app/?screen=schedule&date=${date}`;
+}
+
 export async function notifyAdmins(
   bot: Bot,
   db: Db,
   kind: AdminNoticeKind,
   text: string,
-  /** Кнопка про само событие — например «Разобрал» у багрепорта. Едет ПЕРВОЙ
-   *  строкой, над выключателем: она про то, что человек только что прочитал, а
-   *  выключатель — про поток вообще. */
-  action?: { text: string; data: string },
+  action?: AdminAction,
 ): Promise<AdminReach> {
   const reach: AdminReach = { attempted: 0, delivered: 0 };
   // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
@@ -384,7 +404,10 @@ export async function notifyAdmins(
   // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
   // него на экране.
   const kb = new InlineKeyboard();
-  if (action) kb.text(action.text, action.data).row();
+  if (action) {
+    addActionButton(kb, action);
+    kb.row();
+  }
   kb.text("🔕 Не писать мне про это", `notice:mute:${kind}`);
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
@@ -416,13 +439,17 @@ export async function notifyBugReport(bot: Bot, db: Db, reportId: number, text: 
  * вызова должен видеть, что письмо пройдёт сквозь любые настройки, не ходя за
  * определением. Сегодня так уходит ровно одно — «смену никто не взял».
  */
-export async function notifyAdminsAlways(bot: Bot, db: Db, text: string): Promise<AdminReach> {
+export async function notifyAdminsAlways(bot: Bot, db: Db, text: string, action?: AdminAction): Promise<AdminReach> {
   const reach: AdminReach = { attempted: 0, delivered: 0 };
+  const kb = new InlineKeyboard();
+  if (action) addActionButton(kb, action);
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
     reach.attempted += 1;
     try {
-      await bot.api.sendMessage(admin.telegramUserId, text);
+      // Без действия — как и раньше, без клавиатуры вовсе: письмо, которое
+      // нельзя выключить, не должно молча обрастать пустым рядом кнопок.
+      await bot.api.sendMessage(admin.telegramUserId, text, action ? { reply_markup: kb } : undefined);
       reach.delivered += 1;
     } catch (err) {
       console.error(`notifyAdminsAlways: failed for ${admin.telegramUserId}:`, safeErrorMessage(err));

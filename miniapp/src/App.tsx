@@ -10,7 +10,7 @@ import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { adminSectionFromSearch } from "./screens/admin-section";
+import { adminSectionFromSearch, scheduleDateFromSearch } from "./screens/admin-section";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -592,7 +592,10 @@ export function App() {
         // Заглушка — на секунду и только у админа: кусок кэшируется как
         // `immutable`, поэтому платится один раз на устройство.
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю админку…</div>}>
-          <AdminScreen initialSection={adminSectionFromSearch(window.location.search) ?? undefined} />
+          <AdminScreen
+            initialSection={adminSectionFromSearch(window.location.search) ?? undefined}
+            initialDate={scheduleDateFromSearch(window.location.search) ?? undefined}
+          />
         </Suspense>
       )}
       {tab === "announce" && data.me.canAnnounce && !data.me.isAdmin && (

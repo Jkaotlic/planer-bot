@@ -30,7 +30,7 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
  * the tab is cheap. Rendered only when `me.isAdmin` (see `App`), and every
  * call it makes is `requireAdmin`-guarded server-side.
  */
-export function AdminScreen({ initialSection }: { initialSection?: AdminSection }) {
+export function AdminScreen({ initialSection, initialDate }: { initialSection?: AdminSection; initialDate?: string }) {
   const [section, setSection] = useState<AdminSection>(initialSection ?? "schedule");
 
   return (
@@ -38,7 +38,7 @@ export function AdminScreen({ initialSection }: { initialSection?: AdminSection 
       <SectionChips sections={SECTIONS} active={section} onChange={setSection} />
 
       <SectionPanel active={section}>
-        {section === "schedule" && <AdminScheduleScreen />}
+        {section === "schedule" && <AdminScheduleScreen initialDate={initialDate} />}
         {section === "weekend" && <AdminWeekendScreen />}
         {section === "employees" && <AdminEmployeesScreen />}
         {section === "checklists" && <AdminChecklists />}

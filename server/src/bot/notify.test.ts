@@ -1,7 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
 import { recordApi, stubBotInfo } from "./testbot";
 import { Bot } from "grammy";
-import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapCancelledText, swapExpiredText, swapAcceptedAdminText, dutyNoticeForReceiver, dutyNoticeForAdmins } from "./notify";
+import {
+  notifyUser,
+  notifyAdmins,
+  notifyAdminsAlways,
+  notifyVacantSlot,
+  swapProposalText,
+  swapCancelledText,
+  swapExpiredText,
+  swapAcceptedAdminText,
+  dutyNoticeForReceiver,
+  dutyNoticeForAdmins,
+  scheduleLink,
+} from "./notify";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import type { Db } from "../db/client";
@@ -100,6 +112,43 @@ describe("notify", () => {
     const { bot, sent } = testBot();
     await notifyAdmins(bot, db, "swaps", "обмен состоялся");
     expect(sent.map((s) => s.chat_id)).toEqual([222]);
+  });
+
+  it("notifyAdmins с web_app-действием кладёт его первой строкой, над «🔕»", async () => {
+    const db = makeTestDb();
+    admin(db, "Аня", 111);
+    const { bot, sent } = testBot();
+    await notifyAdmins(bot, db, "coverage", "совет", { text: "📅 Открыть график", webApp: "https://example.com/app/?screen=schedule&date=2026-10-07" });
+
+    const rows = sent[0]!.reply_markup!.inline_keyboard;
+    expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
+      "https://example.com/app/?screen=schedule&date=2026-10-07",
+    );
+    expect((rows[1]![0] as { callback_data?: string }).callback_data).toBe("notice:mute:coverage");
+  });
+
+  it("notifyAdminsAlways без действия не несёт клавиатуры — как и раньше", async () => {
+    const db = makeTestDb();
+    admin(db, "Аня", 111);
+    const { bot, sent } = testBot();
+    await notifyAdminsAlways(bot, db, "смена без человека");
+    expect(sent[0]!.reply_markup).toBeUndefined();
+  });
+
+  it("notifyAdminsAlways с web_app-действием несёт одну кнопку — эту, без выключателя", async () => {
+    const db = makeTestDb();
+    admin(db, "Аня", 111);
+    const { bot, sent } = testBot();
+    await notifyAdminsAlways(bot, db, "смена без человека", {
+      text: "📅 Открыть график",
+      webApp: "https://example.com/app/?screen=schedule&date=2026-10-07",
+    });
+
+    const rows = sent[0]!.reply_markup!.inline_keyboard;
+    expect(rows).toHaveLength(1);
+    expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
+      "https://example.com/app/?screen=schedule&date=2026-10-07",
+    );
   });
 
   it("notifyVacantSlot skips excluded workers and does not count them as intended", async () => {
@@ -230,5 +279,13 @@ describe("уведомление про пул дежурства", () => {
     expect(text).toContain("Игорь");
     expect(text).toContain("Дежурство · Поклонка");
     expect(text).not.toContain("Ты не");
+  });
+});
+
+describe("scheduleLink", () => {
+  it("собирает ссылку на график мини-аппа на нужную дату", () => {
+    expect(scheduleLink("https://example.com", "2026-10-07")).toBe(
+      "https://example.com/app/?screen=schedule&date=2026-10-07",
+    );
   });
 });

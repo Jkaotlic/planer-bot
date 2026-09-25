@@ -15,7 +15,7 @@ let sent: { to: string; text: string }[] = [];
 function deps(db: Db) {
   return {
     db,
-    config: { teamTz: "Europe/Moscow", handoverFanHours: 3, handoverEscalateHours: 12 },
+    config: { teamTz: "Europe/Moscow", publicUrl: "https://example.com", handoverFanHours: 3, handoverEscalateHours: 12 },
     messenger: {
       offer: async (employeeId: number, _h: number, text: string) => {
         sent.push({ to: `employee:${employeeId}`, text });
