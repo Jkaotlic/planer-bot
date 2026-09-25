@@ -302,46 +302,6 @@ button {
   min-height: 0;
 }
 
-/* The week grid needs ~980px and the right rail takes a fixed 300, so on any
-   1440px laptop the last day of the week sat outside the grid's scroll area —
-   Sunday, the one an admin is most likely to be checking. Measured: at 1440px
-   124px of the table were out of view, at 1280px 284px.
-   Above this breakpoint both fit side by side; below it the rail moves under
-   the grid, where it is just as readable and costs the week nothing. */
-@media (max-width: 1599px) {
-  .schedule-layout {
-    flex-direction: column;
-    overflow-y: auto;
-  }
-
-  .grid-scroll {
-    flex: 0 0 auto;
-  }
-
-  /* Под сеткой полка перестаёт быть колонкой и становится полосой во всю
-     ширину: на 1440px карточка «Событий» занимала 348px из 1392, а справа от
-     неё оставалось ровно ничего — тысяча пустых пикселей под самой заметной
-     частью экрана. */
-  .right-rail {
-    flex: 0 0 auto;
-    overflow-y: visible;
-    border-left: none;
-    border-top: 1px solid var(--separator);
-    margin-left: 0;
-    padding: 20px 24px 24px;
-    display: block;
-  }
-
-  /* Сами события раскладываются в несколько колонок — событие короткое, и
-     строка во всю ширину читалась бы хуже узкой. */
-  .right-rail .feed-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 14px 28px;
-    align-items: start;
-  }
-}
-
 .right-rail {
   flex: 0 0 300px;
   display: flex;
@@ -762,6 +722,50 @@ button {
   flex: 1 1 auto;
   overflow: auto;
   padding: 0 24px 24px;
+}
+
+/* The week grid needs ~980px and the right rail takes a fixed 300, so on any
+   1440px laptop the last day of the week sat outside the grid's scroll area —
+   Sunday, the one an admin is most likely to be checking. Measured: at 1440px
+   124px of the table were out of view, at 1280px 284px.
+   Above this breakpoint both fit side by side; below it the rail moves under
+   the grid, where it is just as readable and costs the week nothing.
+   Этот блок обязан идти ПОСЛЕ безусловных `.right-rail`/`.grid-scroll` выше:
+   при равной специфичности класса позже объявленное правило перебивает
+   раньше объявленное независимо от медиазапроса, и он же и «побеждал», давая
+   на 900–1599px две вертикальные прокрутки вместо одной (баг из ledger). */
+@media (max-width: 1599px) {
+  .schedule-layout {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .grid-scroll {
+    flex: 0 0 auto;
+  }
+
+  /* Под сеткой полка перестаёт быть колонкой и становится полосой во всю
+     ширину: на 1440px карточка «Событий» занимала 348px из 1392, а справа от
+     неё оставалось ровно ничего — тысяча пустых пикселей под самой заметной
+     частью экрана. */
+  .right-rail {
+    flex: 0 0 auto;
+    overflow-y: visible;
+    border-left: none;
+    border-top: 1px solid var(--separator);
+    margin-left: 0;
+    padding: 20px 24px 24px;
+    display: block;
+  }
+
+  /* Сами события раскладываются в несколько колонок — событие короткое, и
+     строка во всю ширину читалась бы хуже узкой. */
+  .right-rail .feed-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px 28px;
+    align-items: start;
+  }
 }
 
 .schedule-table {
