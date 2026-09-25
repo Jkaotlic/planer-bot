@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Avatar, Button, Cell, IconButton, Input, List, Placeholder, Section, Selectable, Spinner, Textarea, Title } from "@telegram-apps/telegram-ui";
-import { SWAP_MESSAGE_MAX } from "@planer/shared";
+import { matchesPerson, SWAP_MESSAGE_MAX } from "@planer/shared";
 import type { Shift, Template } from "../api/client";
 import { DayBadge } from "../components/DayBadge";
 import { EntryChip } from "../components/EntryChip";
@@ -90,9 +90,12 @@ export function ProposeSwapScreen({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const needle = query.trim().toLowerCase();
-  const shown = needle
-    ? candidates.filter((s) => (s.employeeName ?? "").toLowerCase().includes(needle))
+  // `matchesPerson` — то же самое правило, что и на остальных экранах поиска
+  // человека: «ё» приравнена к «е», а слова запроса ищутся независимо друг от
+  // друга, а не только с начала строки. Свой `includes` здесь находил бы
+  // «Семёнов» по «семенов», но не по «семен» — реальному тому, что набирают.
+  const shown = query.trim()
+    ? candidates.filter((s) => matchesPerson({ displayName: s.employeeName ?? "" }, query))
     : candidates;
   const selected = candidates.find((s) => s.id === selectedId) ?? null;
   // `employeeName` is the roster's «Фамилия Имя», not an address — we only have the

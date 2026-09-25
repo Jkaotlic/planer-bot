@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Button, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
@@ -109,8 +109,17 @@ export function App() {
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  useEffect(() => {
+  /**
+   * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
+   * ошибки могла запустить ровно ту же загрузку заново: у админки такая
+   * кнопка была с первого дня (`admin/src/App.tsx`), а мини-апп открывают
+   * через облачный релей KeenDNS, где первая попытка падает чаще, чем на
+   * обычном интернете, — без кнопки единственным выходом была перезагрузка
+   * всей страницы.
+   */
+  const loadBootstrap = useCallback(() => {
     let cancelled = false;
+    setError(null);
     const monday = mondayOf(new Date());
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
@@ -134,6 +143,8 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => loadBootstrap(), [loadBootstrap]);
 
   // `?screen=announce` ставит начальную вкладку в "admin" ДО того, как известно
   // `me.isAdmin` — права могли пропасть между открытием меню бота и тапом по
@@ -364,7 +375,10 @@ export function App() {
   if (error) {
     return (
       <div style={centeredStyle}>
-        <Placeholder header="Не удалось загрузить" description={error} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <Placeholder header="Не удалось загрузить" description={error} />
+          <Button onClick={() => loadBootstrap()}>Повторить</Button>
+        </div>
       </div>
     );
   }
