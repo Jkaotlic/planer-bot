@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Avatar, Button, Cell, IconButton, Input, List, Placeholder, Section, Selectable, Spinner, Textarea, Title } from "@telegram-apps/telegram-ui";
+import { SWAP_MESSAGE_MAX } from "@planer/shared";
 import type { Shift, Template } from "../api/client";
 import { DayBadge } from "../components/DayBadge";
 import { EntryChip } from "../components/EntryChip";
@@ -225,6 +226,7 @@ export function ProposeSwapScreen({
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={3}
+              maxLength={SWAP_MESSAGE_MAX}
             />
           </div>
         </Section>

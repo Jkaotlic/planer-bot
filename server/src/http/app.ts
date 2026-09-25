@@ -50,6 +50,7 @@ import {
   notifyAdmins,
   notifySwapProposal,
   swapProposalText,
+  swapCancelledText,
   dutyNoticeForReceiver,
   dutyNoticeForAdmins,
   notifyVacantSlot,
@@ -108,6 +109,7 @@ import {
   validateReminderTemplate,
   autoSendDateFor,
   isCollectionActive,
+  SWAP_MESSAGE_MAX,
 } from "@planer/shared";
 import {
   postSlot,
@@ -1635,7 +1637,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
-    if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
+    if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > SWAP_MESSAGE_MAX)) return c.json({ error: "invalid_message" }, 400);
     const res = createSwap(
       db,
       { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message },
@@ -1652,7 +1654,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // пуле — она должна прочитать об этом ДО нажатия «Принять», а не потом.
         const fact = outsidePoolFact(db, { shiftId: res.request.fromShiftId, receiverId: res.counterpartyId });
         const notices = fact ? [dutyNoticeForReceiver(fact)] : [];
-        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices));
+        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices, res.request.message));
       }
     }
     return c.json({ request: res.request }, 201);
@@ -1715,7 +1717,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const res = cancelSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     recordAudit(db, "swap_cancelled", c.get("auth").employeeId, swapAuditPayload(res.request));
-    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Заявку на обмен отменили."); }
+    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapCancelledText(swapAuditPayload(res.request))); }
     return c.json({ ok: true });
   });
 

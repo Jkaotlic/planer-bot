@@ -215,6 +215,31 @@ describe("swap endpoints", () => {
     expect(cancelled.status).toBe(200);
   });
 
+  it("proposal carries the author's message, and a cancel names the author and both shifts", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const anya = await worker(db, app, "Аня", 201);
+    const igor = await worker(db, app, "Игорь", 202);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
+
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id, message: "подменишь?" }));
+    const reqId = (await created.json()).request.id as number;
+    const toIgor = sent.filter((s) => s.chat_id === 202).map((s) => s.text).join("\n");
+    expect(toIgor).toContain("подменишь?");
+
+    const cancelled = await app.request(`/api/swaps/${reqId}/cancel`, authed(anya.token));
+    expect(cancelled.status).toBe(200);
+    // Голое «Заявку на обмен отменили.» не говорило, кто и какую — а заявок бывает
+    // несколько сразу. Вторая сторона должна прочитать имя автора и обе смены.
+    const secondToIgor = sent.filter((s) => s.chat_id === 202).map((s) => s.text).at(-1)!;
+    expect(secondToIgor).not.toBe("Заявку на обмен отменили.");
+    expect(secondToIgor).toContain("Аня");
+    expect(secondToIgor).toContain("08:00–17:00");
+    expect(secondToIgor).toContain("11:00–20:00");
+  });
+
   it("journals swap_proposed for the initiator and swap_accepted for the accepter, both with readable names and shifts", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });

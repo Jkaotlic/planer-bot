@@ -39,9 +39,18 @@ export function swapDeclinedText(p: SwapAuditPayload): string {
  * отдельным абзацем, а не в конце строки, потому что строка с двумя записями
  * графика длинная, и приписанный к ней хвост читается как её продолжение.
  */
-export function swapProposalText(p: SwapAuditPayload, notices: readonly string[] = []): string {
+export function swapProposalText(p: SwapAuditPayload, notices: readonly string[] = [], message?: string | null): string {
   const head = `«${p.fromName} предлагает обмен: отдаёт ${p.fromShift}, хочет твою ${p.toShift}»`;
-  return notices.length === 0 ? head : `${head}\n\n${notices.join("\n")}`;
+  // Просьба автора — между шапкой и пометками: пометка про пул должна остаться
+  // последним, что человек читает перед «Принять».
+  const note = message?.trim() ? `💬 «${message.trim()}»` : null;
+  return [head, note, notices.length ? notices.join("\n") : null].filter(Boolean).join("\n\n");
+}
+
+/** Второй стороне, когда автор сам отозвал заявку. Голое «Заявку отменили» не
+ *  говорило, какую — а у человека их бывает несколько сразу. */
+export function swapCancelledText(p: SwapAuditPayload): string {
+  return `${p.fromName} отменил(а) заявку на обмен: ${p.fromShift} ↔ ${p.toShift}.`;
 }
 
 /** Admin broadcast once a swap actually goes through. Named and dated, so with
