@@ -455,8 +455,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // следующего деплоя. Один `if` на все три ветки промоута выше (восстановил
     // и повысил, создал нового, повысил активного) — каждая уже отвечает за
     // свою причину, здесь важен только итог.
+    // Не `await`: `refreshAdminCommands` сама глотает свою ошибку (см. её
+    // тело) и ничего не возвращает вызывающему, кроме факта завершения —
+    // ждать её здесь значило бы держать логин человека заложником скорости
+    // ответа Telegram. Вход не должен тормозить из-за медленной смены меню.
     if (bot && employee.isAdmin !== isAdminBefore) {
-      await refreshAdminCommands(bot, user.id, employee.isAdmin);
+      void refreshAdminCommands(bot, user.id, employee.isAdmin);
     }
     const token = await issueToken({ employeeId: employee.id, isAdmin: employee.isAdmin }, config.jwtSecret);
     return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin: employee.isAdmin } });

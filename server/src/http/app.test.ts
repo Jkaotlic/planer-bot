@@ -127,6 +127,27 @@ describe("app auth", () => {
     expect(admin.status).toBe(200);
   });
 
+  it("вход не ждёт refreshAdminCommands — токен приходит, пока Telegram ещё думает", async () => {
+    // Раунд ревью улучшений: `refreshAdminCommands` сама глотает свою ошибку и
+    // ничего не возвращает вызывающему — ждать её значит держать логин
+    // заложником скорости ответа Telegram. Бот здесь никогда не отвечает на
+    // `setMyCommands`, и если бы `/api/auth` всё ещё делал `await`, этот тест
+    // не уложился бы в таймаут.
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Игорь", inviteToken: "tok-slow-menu" });
+    linkTelegramAccount(db, "tok-slow-menu", 111);
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    bot.api.config.use((_prev, method) =>
+      method === "setMyCommands" ? new Promise(() => {}) : { ok: true, result: {} } as never,
+    );
+    const app = createApp({ db, config, bot });
+
+    const res = await app.request(authReq(111));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).token).toBeTruthy();
+  });
+
   it("промоушен через аллоулист сразу выдаёт персональное меню команд", async () => {
     // Тот же путь, что «grants admin to an active allowlisted employee» выше, —
     // только здесь проверяем побочный эффект: `/admin` и `/instruction`
