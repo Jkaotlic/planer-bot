@@ -73,4 +73,18 @@ describe("TabBar — метки «ждёт тебя»", () => {
     const badge = itemFor(el, "Обмены").querySelector(".tab-badge");
     expect((badge!.textContent ?? "").trim()).toBe("9+");
   });
+
+  // `aria-label` на голом `<span>` без роли скринридеры игнорируют — метка
+  // была бы видна глазами и не существовала бы для VoiceOver/TalkBack. Число
+  // должно быть доступно текстом внутри самого пункта (скрытым визуально, но
+  // не из accessibility-дерева), а декоративный кружок — вовсе исключён из
+  // него (`aria-hidden`), чтобы число не звучало дважды.
+  it("число доступно скринридеру текстом внутри пункта, а не aria-label на кружке", async () => {
+    const el = await mount({ swaps: 2 });
+    const swapsItem = itemFor(el, "Обмены");
+    const badge = swapsItem.querySelector(".tab-badge");
+    expect(badge?.getAttribute("aria-label")).toBeNull();
+    expect(badge?.getAttribute("aria-hidden")).toBe("true");
+    expect(swapsItem.textContent ?? "").toContain("ждёт ответа: 2");
+  });
 });

@@ -45,7 +45,59 @@ async function settle(times = 30) {
   }
 }
 
+function bootstrapAs(address: string) {
+  return {
+    ...BOOTSTRAP_FIXTURE,
+    me: { ...BOOTSTRAP_FIXTURE.me, address },
+  };
+}
+
 describe("экран ошибки загрузки", () => {
+  it("двойной быстрый клик «Повторить» не даёт устаревшему ответу победить более новый", async () => {
+    const getBootstrap = vi.spyOn(apiClient, "getBootstrap");
+    getBootstrap.mockRejectedValueOnce(new Error("Не удалось загрузить данные"));
+    // Дальше — управляемые вручную промисы: без них порядок разрешения задаёт
+    // микротаск-очередь, а не тест, и гонку было бы не воспроизвести детерминированно.
+    const resolvers: Array<(value: typeof BOOTSTRAP_FIXTURE) => void> = [];
+    getBootstrap.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)) as never);
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(App)));
+    });
+    await settle();
+    expect(host.textContent).toContain("Не удалось загрузить");
+
+    const retryButton = [...host.querySelectorAll("button")].find(
+      (b) => (b.textContent ?? "").trim() === "Повторить",
+    ) as HTMLButtonElement;
+    // Оба клика — в одном `act`, синхронно: React ещё не успел перерисовать
+    // экран между ними (кнопка убирается вместе с `error`), так что это ровно
+    // то самое «два быстрых тапа», а не два отдельных цикла рендера.
+    await act(async () => {
+      retryButton.click();
+      retryButton.click();
+    });
+    expect(resolvers).toHaveLength(2);
+
+    // Новый (второй) запрос отвечает первым — устаревший (первый) прилетает
+    // позже с другими данными. Без отмены предыдущей загрузки он победил бы,
+    // потому что пришёл последним, а не потому, что запущен последним.
+    await act(async () => {
+      resolvers[1]!(bootstrapAs("Марк"));
+    });
+    await settle();
+    await act(async () => {
+      resolvers[0]!(bootstrapAs("Игорь"));
+    });
+    await settle();
+
+    expect(host.textContent).toContain("Привет, Марк");
+    expect(host.textContent).not.toContain("Привет, Игорь");
+  });
+
   it("«Повторить» запрашивает bootstrap заново и открывает приложение", async () => {
     const getBootstrap = vi
       .spyOn(apiClient, "getBootstrap")

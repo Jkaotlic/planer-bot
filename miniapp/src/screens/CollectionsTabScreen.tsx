@@ -18,7 +18,14 @@ const AdminCollections = lazy(() => import("./admin/AdminCollections"));
  * админке, и на вопрос «где посмотреть сбор» было два разных ответа в
  * зависимости от роли.
  */
-export function CollectionsTabScreen({ isAdmin }: { isAdmin: boolean }) {
+export interface CollectionsTabScreenProps {
+  isAdmin: boolean;
+  /** Только для работника — у админа своя отметка «Я перевёл» этому экрану
+   *  не показывается, и метки на «Сборах» у него вовсе нет (см. `tabBadges`). */
+  onPaidChanged?: (id: number, paid: boolean) => void;
+}
+
+export function CollectionsTabScreen({ isAdmin, onPaidChanged }: CollectionsTabScreenProps) {
   if (isAdmin) {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю сборы…</div>}>
@@ -35,7 +42,10 @@ export function CollectionsTabScreen({ isAdmin }: { isAdmin: boolean }) {
       {/* Секция во вкладке «Команда» умела исчезать целиком, когда сборов нет.
           Отдельная вкладка исчезнуть не может, и пустой экран без слов читался
           бы как «не загрузилось». */}
-      <TeamCollections emptyLabel="Сейчас сборов нет. Когда админ разошлёт новый — он появится здесь." />
+      <TeamCollections
+        emptyLabel="Сейчас сборов нет. Когда админ разошлёт новый — он появится здесь."
+        onPaidChanged={onPaidChanged}
+      />
     </ScreenScroll>
   );
 }

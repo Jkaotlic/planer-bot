@@ -19,7 +19,15 @@ import { CardShell, CardStack } from "../../components/Card";
  * Отказ сервера — тоже ничего: график команды не должен пропадать из-за того,
  * что не загрузился сбор.
  */
-export function TeamCollections({ emptyLabel }: { emptyLabel?: string } = {}) {
+export interface TeamCollectionsProps {
+  emptyLabel?: string;
+  /** Сказать наверх, что здесь только что отметились/сняли отметку — на нём
+   *  считается метка «ждёт тебя» на вкладке «Сборы» (`App.tsx`), а этот экран
+   *  о ней ничего не знает и знать не должен. */
+  onPaidChanged?: (id: number, paid: boolean) => void;
+}
+
+export function TeamCollections({ emptyLabel, onPaidChanged }: TeamCollectionsProps = {}) {
   const [rows, setRows] = useState<WorkerCollection[]>([]);
 
   useEffect(() => {
@@ -48,7 +56,7 @@ export function TeamCollections({ emptyLabel }: { emptyLabel?: string } = {}) {
         {rows.length === 1 ? "Идёт сбор" : "Идут сборы"}
       </div>
       {rows.map((row) => (
-        <CollectionCard key={row.id} row={row} />
+        <CollectionCard key={row.id} row={row} onPaidChanged={onPaidChanged} />
       ))}
     </CardStack>
   );
@@ -65,7 +73,7 @@ function subjectOf(row: WorkerCollection): string {
   return row.personName ? `${row.title} — ${row.personName}` : row.title;
 }
 
-function CollectionCard({ row }: { row: WorkerCollection }) {
+function CollectionCard({ row, onPaidChanged }: { row: WorkerCollection; onPaidChanged?: (id: number, paid: boolean) => void }) {
   const [copied, setCopied] = useState(false);
   const [paid, setPaid] = useState(row.paid);
   const [paidCount, setPaidCount] = useState(row.paidCount);
@@ -81,6 +89,10 @@ function CollectionCard({ row }: { row: WorkerCollection }) {
       .then((result) => {
         setPaid(result.paid);
         setPaidCount(result.paidCount);
+        // Наверх — не пересчитать заново с сервера, а сказать ровно то, что уже
+        // подтвердил ответ: метка «ждёт тебя» на вкладке иначе оставалась бы с
+        // прежним числом до следующего фонового `reloadData`.
+        onPaidChanged?.(row.id, result.paid);
       })
       // Отказ оставляет кнопку как была: галочка — это утверждение человека о
       // деньгах, и показать её, не записав, значит показать неправду. Но и

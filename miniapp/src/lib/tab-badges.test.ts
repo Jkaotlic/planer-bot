@@ -88,4 +88,14 @@ describe("tabBadges", () => {
     const collections = [collection({ id: 1, paid: true })];
     expect(tabBadges({ swaps, weekendOffers, collections, today: TODAY })).toEqual({});
   });
+
+  // Ruling: у админа «Сборы» — консоль, которой он их ведёт, а не список с
+  // кнопкой «Я перевёл» (см. `CollectionsTabScreen`) — отмечаться там не за
+  // что, и метка «ждёт тебя» была бы враньём про кнопку, которой нет.
+  it("админ не получает метку «Сборы», даже если есть неоплаченные", () => {
+    const collections = [collection({ id: 1, paid: false })];
+    expect(tabBadges({ swaps: [], weekendOffers: [], collections, today: TODAY, isAdmin: true })).toEqual({});
+    // У работника с теми же данными метка есть — разница ровно в `isAdmin`.
+    expect(tabBadges({ swaps: [], weekendOffers: [], collections, today: TODAY, isAdmin: false })).toEqual({ collections: 1 });
+  });
 });

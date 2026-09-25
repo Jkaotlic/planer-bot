@@ -114,6 +114,17 @@ export function App() {
   // врёт нулём. Не в `AppData`/bootstrap намеренно — см. комментарий в
   // `loadBootstrap` ниже.
   const [collections, setCollections] = useState<WorkerCollection[] | null>(null);
+  // Отдельный от `reloadGate` гейт: сборы перечитываются в `reloadData`
+  // независимо от bootstrap-запроса (см. там же), и общий счётчик с ним
+  // выдавал бы тикеты не по своей, а по чужой последовательности вызовов.
+  const collectionsReloadGate = useRef(createLatestRequestGate());
+  // Отмена предыдущей ещё не завершённой загрузки — целиком, а не только той
+  // её ветки, что уже успела вернуться. Кнопка «Повторить» вызывает
+  // `loadBootstrap` напрямую, в обход эффекта, поэтому предыдущий возврат
+  // cleanup-функции эффектом не подхватывается: без этого рефа два быстрых
+  // тапа «Повторить» запускали бы два параллельных запроса, и на экране
+  // остался бы тот, чей ответ пришёл позже, а не тот, что запущен позже.
+  const cancelLoadRef = useRef<() => void>(() => {});
 
   /**
    * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
@@ -124,7 +135,14 @@ export function App() {
    * всей страницы.
    */
   const loadBootstrap = useCallback(() => {
+    // Новый вызов побеждает по построению: он первым делом гасит тот, что был
+    // запущен раньше (если ещё жив), и сам становится тем, что остановит
+    // следующий.
+    cancelLoadRef.current();
     let cancelled = false;
+    cancelLoadRef.current = () => {
+      cancelled = true;
+    };
     setError(null);
     const monday = mondayOf(new Date());
     const from = toISODate(monday);
@@ -160,13 +178,12 @@ export function App() {
         console.error("Collections for badges failed:", err);
         if (!cancelled) setCollections(null);
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
-  useEffect(() => loadBootstrap(), [loadBootstrap]);
+  useEffect(() => {
+    loadBootstrap();
+    return () => cancelLoadRef.current();
+  }, [loadBootstrap]);
 
   // `?screen=announce` ставит начальную вкладку в "admin" ДО того, как известно
   // `me.isAdmin` — права могли пропасть между открытием меню бота и тапом по
@@ -336,12 +353,19 @@ export function App() {
       setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
     }
 
-    // Отдельно от bootstrap-запроса выше, той же причине, что в `loadBootstrap`:
-    // правка (кто-то оплатил сбор, пришёл новый) должна дойти без повторного
-    // открытия мини-аппа, а отказ — не повод трогать `refreshError`: метка на
-    // «Сборах» просто останется прежней до следующего успешного обновления.
+    // Отдельно от bootstrap-запроса выше, по той же причине, что в
+    // `loadBootstrap`: правка (кто-то оплатил сбор, пришёл новый) должна
+    // дойти без повторного открытия мини-аппа. Свой гейт — `reloadData`
+    // может быть вызван повторно (смена вкладки, возврат в приложение) раньше,
+    // чем ответил предыдущий вызов, и без тикета более старый, но более
+    // медленный ответ переписал бы уже показанное свежее число. Отказ не
+    // трогает `collections` вовсе: на экране остаётся то, что показывалось
+    // до этого вызова, а не сбрасывается в `null` — метка молчит только тогда,
+    // когда сборы не приходили ни разу.
     try {
-      setCollections(await apiClient.getMyCollections());
+      const ticket = collectionsReloadGate.current.begin();
+      const cs = await apiClient.getMyCollections();
+      if (collectionsReloadGate.current.isLatest(ticket)) setCollections(cs);
     } catch (err) {
       console.error("Collections refresh failed:", err);
     }
@@ -470,7 +494,7 @@ export function App() {
     );
   }
 
-  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today });
+  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin });
 
   return (
     // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
@@ -505,7 +529,14 @@ export function App() {
       {tab === "team" && (
         <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} />
       )}
-      {tab === "collections" && <CollectionsTabScreen isAdmin={data.me.isAdmin} />}
+      {tab === "collections" && (
+        <CollectionsTabScreen
+          isAdmin={data.me.isAdmin}
+          onPaidChanged={(id, paid) =>
+            setCollections((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, paid } : c)) : prev))
+          }
+        />
+      )}
       {tab === "swaps" && (
         <SwapsScreen
           swaps={data.swaps}
