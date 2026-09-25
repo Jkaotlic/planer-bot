@@ -151,17 +151,39 @@ describe("раздел «Календарь»", () => {
     expect(el.textContent).toContain("Сменить ссылку");
   });
 
-  it("«Отключить» зовёт deleteCalendarLink и возвращает «Подключить»", async () => {
+  // Отключение необратимо для владельца телефона: подписка там не просто
+  // отвязывается на сервере, она перестаёт обновляться навсегда, ту же цену
+  // платит «Сменить ссылку» — и спрашивает подтверждение тем же способом.
+  it("«Отключить» спрашивает подтверждение и зовёт deleteCalendarLink только после «Да»", async () => {
     vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
     const del = vi.spyOn(apiClient, "deleteCalendarLink").mockResolvedValue(undefined);
     const el = await mount();
 
     await act(async () => buttonWithText(el, "Отключить").click());
     await settle();
+    expect(del).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("перестанет обновляться");
+
+    await act(async () => buttonWithText(el, "Да, отключить").click());
+    await settle();
 
     expect(del).toHaveBeenCalledTimes(1);
     expect(el.textContent).toContain("Подключить");
     expect(el.textContent).not.toContain("Добавить в календарь");
+  });
+
+  it("«Отмена» у подтверждения отключения не зовёт deleteCalendarLink", async () => {
+    vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
+    const del = vi.spyOn(apiClient, "deleteCalendarLink");
+    const el = await mount();
+
+    await act(async () => buttonWithText(el, "Отключить").click());
+    await settle();
+    await act(async () => buttonWithText(el, "Отмена").click());
+    await settle();
+
+    expect(del).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("Отключить");
   });
 
   it("ошибка создания ссылки рисуется рядом с кнопкой, а не молча теряется", async () => {
@@ -183,6 +205,8 @@ describe("раздел «Календарь»", () => {
     const el = await mount();
 
     await act(async () => buttonWithText(el, "Отключить").click());
+    await settle();
+    await act(async () => buttonWithText(el, "Да, отключить").click());
     await settle();
 
     expect(el.textContent).toContain("Сеть недоступна");

@@ -49,6 +49,7 @@ export function CalendarSection() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingChange, setConfirmingChange] = useState(false);
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFallback, setCopyFallback] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,7 +99,7 @@ export function CalendarSection() {
     try {
       await apiClient.deleteCalendarLink();
       setLink(null);
-      setConfirmingChange(false);
+      setConfirmingDisconnect(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Не удалось отключить");
     } finally {
@@ -208,13 +209,28 @@ export function CalendarSection() {
             </Button>
           </div>
         </>
+      ) : confirmingDisconnect ? (
+        // Тот же двухшаговый confirm, что у «Сменить ссылку»: отключение здесь
+        // необратимо для владельца телефона так же — подписка в его календаре
+        // перестанет обновляться навсегда, а не просто отвяжется на сервере.
+        <>
+          <div style={{ padding: "0 12px 4px", fontSize: 13 }}>Подписка в календаре телефона перестанет обновляться.</div>
+          <div style={ROW}>
+            <Button size="s" stretched mode="filled" disabled={busy} onClick={() => void disconnect()}>
+              {busy ? "Отключаю…" : "Да, отключить"}
+            </Button>
+            <Button size="s" stretched mode="gray" disabled={busy} onClick={() => setConfirmingDisconnect(false)}>
+              Отмена
+            </Button>
+          </div>
+        </>
       ) : (
         <div style={ROW}>
           <Button size="s" stretched mode="bezeled" disabled={busy} onClick={() => setConfirmingChange(true)}>
             Сменить ссылку
           </Button>
-          <Button size="s" stretched mode="bezeled" disabled={busy} onClick={() => void disconnect()}>
-            {busy ? "Отключаю…" : "Отключить"}
+          <Button size="s" stretched mode="bezeled" disabled={busy} onClick={() => setConfirmingDisconnect(true)}>
+            Отключить
           </Button>
         </div>
       )}
