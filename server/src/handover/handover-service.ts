@@ -1,4 +1,4 @@
-import { shiftsOverlap } from "@planer/shared";
+import { shiftsOverlap, canSwap } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
@@ -268,7 +268,7 @@ export async function declineHandover(
  * the offer went out, and «свободен» stops being true without warning.
  */
 export async function takeHandover(
-  deps: HandoverDeps, handoverId: number, employeeId: number, onDecided?: OnDecided,
+  deps: HandoverDeps, handoverId: number, employeeId: number, today: string, onDecided?: OnDecided,
 ): Promise<Outcome> {
   const { db } = deps;
   const claimed = db.transaction(() => {
@@ -278,6 +278,21 @@ export async function takeHandover(
     }
     const shift = shiftOf(db, handover);
     if (!shift) return { ok: false as const, reason: "Смены больше нет — её изменил админ" };
+
+    // «Беру» живёт в чате вечно. Без этих двух проверок кнопка под старым
+    // сообщением брала смену человеку, которого админ тем временем вывел из
+    // обменов, или переносила во «взято» смену, которая уже прошла.
+    const taker = getEmployeeById(db, employeeId);
+    if (!taker || !canSwap(taker)) {
+      return { ok: false as const, reason: "Ты сейчас не участвуешь в обменах — смену взять нельзя" };
+    }
+    // `endDate` — не `date`: диапазоном пишется только отпуск, больничный и
+    // командировка (`entrySpanError`), и у такой записи `date` остаётся первым
+    // днём всей полосы. Сравнение по одному `date` гасило бы передачу смены на
+    // ещё идущий остаток полосы, как будто она уже прошла.
+    if ((shift.endDate ?? shift.date) < today) {
+      return { ok: false as const, reason: "Эта смена уже прошла" };
+    }
 
     const clash = listShiftsOverlapping(db, shift.date, shift.endDate ?? shift.date).some(
       (mine) =>

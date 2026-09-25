@@ -3,6 +3,11 @@ import type { EntryCategory } from "./category";
 import { shiftsOverlap, shiftInterval } from "./overlap";
 import { absMinutes } from "./time";
 
+/** Верхняя граница просьбы автора обмена — общая для проверки на сервере
+ *  (`app.ts`) и для `maxLength` текстового поля в мини-аппе, чтобы два места
+ *  не разъехались числом. */
+export const SWAP_MESSAGE_MAX = 500;
+
 const TRANSITIONS: Record<SwapStatus, Partial<Record<SwapEvent, SwapStatus>>> = {
   pending: { accept: "accepted", decline: "declined", cancel: "cancelled", expire: "expired" },
   accepted: {},

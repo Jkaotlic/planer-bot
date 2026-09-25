@@ -9,6 +9,7 @@ import { createChecklist, setChecklistTemplates, updateChecklist } from "../repo
 import { testConfig } from "../test-config";
 import { runChecklistTick } from "./checklist-tick";
 import type { Db } from "../db/client";
+import { reminderLog } from "../db/schema";
 
 const config = testConfig();
 
@@ -287,6 +288,51 @@ describe("runChecklistTick", () => {
     const [, , extra] = calls[0] as [number, string, { reply_markup?: { inline_keyboard: { text: string }[][] } }];
     const buttons = (extra?.reply_markup?.inline_keyboard ?? []).flat();
     expect(buttons.map((b) => b.text)).not.toContain("☑️ Отметить");
+  });
+
+  // Задача 7: у многодневной записи (дежурство на неделю) один ряд `shifts` на
+  // весь диапазон — без дня в ключе пометки чек-лист уходил один раз в
+  // понедельник и молчал до воскресенья.
+  describe("многодневная запись получает чек-лист каждый день", () => {
+    function multiDayStage() {
+      const db: Db = makeTestDb();
+      const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-1" });
+      linkTelegramAccount(db, "inv-1", 333);
+      const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
+      const list = createChecklist(db, "Обход 47-го");
+      setChecklistTemplates(db, list.id, [duty.id]);
+      createShift(db, {
+        date: "2026-07-13", endDate: "2026-07-19", start: "07:00", end: "16:00",
+        employeeId: igor.id, category: "duty", templateId: duty.id,
+      });
+      createChecklistItem(db, list.id, "Свет");
+      return { db, igor, duty, list };
+    }
+
+    it("уходит на 13-е и снова на 14-е; повторный тик 14-го не дублирует", async () => {
+      const { db } = multiDayStage();
+      const { bot, sent } = fakeBot();
+
+      expect(await runChecklistTick(db, bot, config, { date: "2026-07-13", time: "07:05" })).toBe(1);
+      expect(await runChecklistTick(db, bot, config, { date: "2026-07-14", time: "07:05" })).toBe(1);
+      expect(await runChecklistTick(db, bot, config, { date: "2026-07-14", time: "07:10" })).toBe(0);
+      expect(sent).toHaveLength(2);
+    });
+
+    // Однодневная запись держит прежний вид пометки — без `@дня` — иначе в день
+    // выкатки сегодняшние чек-листы ушли бы второй раз.
+    it("однодневная запись: одна отправка в день, вид пометки без «@»", async () => {
+      const { db } = stage();
+
+      const { bot, sent } = fakeBot();
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" });
+      expect(sent).toHaveLength(1);
+
+      const rows = db.select().from(reminderLog).all().filter((r) => r.kind.startsWith("duty_checklist:"));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.kind).toMatch(/^duty_checklist:\d+$/);
+    });
   });
 
   describe("сбои отправки", () => {

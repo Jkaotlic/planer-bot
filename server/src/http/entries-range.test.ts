@@ -34,6 +34,14 @@ const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>
 const authedJson = (t: string, body: unknown, method = "POST") => ({
   method, headers: { Authorization: `Bearer ${t}`, "content-type": "application/json" }, body: JSON.stringify(body),
 });
+// createSwap отказывает смене в прошлом («from-shift-in-past»), а этот файл
+// живёт годами на фиксированных датах 2026-08-*, поэтому тестам про обмен
+// нужна настоящая будущая дата, а не литерал.
+const daysFromNow = (n: number): string => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + n);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
+};
 
 // 2026-08-24 — понедельник; 29-е и 30-е — суббота и воскресенье.
 const MON = "2026-08-24";
@@ -428,5 +436,78 @@ describe("POST /api/admin/entries/range · mode=rewrite", () => {
 
     expect(body.skipped).toEqual([{ date: "2026-08-25", reason: "busy" }]);
     expect(listShiftsInRange(db, "2026-08-25", "2026-08-25")[0]).toMatchObject({ category: "shift" });
+  });
+
+  // Та же дыра, что чинили у одиночной PATCH (2026-09-25, ledger «Смена,
+  // сменившая вид»): перезапись отрезком может превратить смену в дежурство
+  // с другими часами не хуже одиночной правки, и висящий на ней обмен должен
+  // гаснуть тем же способом — иначе Аня и Игорь соглашались на одну смену, а
+  // получили бы другую, и ни один не узнал бы.
+  it("перезапись диапазоном, сменившая вид записи, гасит висящий на ней обмен и шлёт обоим", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-anya-r" });
+    const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-igor-r" });
+    linkTelegramAccount(db, "inv-anya-r", 811);
+    linkTelegramAccount(db, "inv-igor-r", 812);
+    const sa = createShift(db, { date: daysFromNow(30), start: "08:00", end: "17:00", employeeId: anya.id, category: "shift" });
+    const sb = createShift(db, { date: daysFromNow(30), start: "09:00", end: "18:00", employeeId: igor.id, category: "shift" });
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anyaToken = await tokenFor(app, 811);
+
+    const created = await app.request("/api/swaps", authedJson(anyaToken, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    // Диапазон — только день Игоря; форма поменяла вид и часы, как в правке
+    // одной записи, только теперь через «Расставить с какого по какое».
+    const res = await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: igor.id, from: daysFromNow(30), to: daysFromNow(30), category: "duty",
+      start: "10:00", end: "19:00", mode: "rewrite", includeWeekends: true,
+    }));
+    expect(res.status).toBe(201);
+    expect(getShift(db, sb.id)).toMatchObject({ category: "duty", start: "10:00", end: "19:00" });
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anyaToken}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("expired");
+
+    for (const chat of [811, 812]) {
+      expect(sent.filter((m) => m.to === chat).map((m) => m.text).join("\n")).toContain("Обмен неактуален");
+    }
+    const expired = listRecentAudit(db, 20).find((e) => e.type === "swap_expired");
+    expect(expired).toBeDefined();
+    expect(expired!.payload).toMatchObject({ requestId: reqId });
+  });
+
+  it("перезапись диапазоном, не сменившая условия сделки, висящий обмен не трогает", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-anya-r2" });
+    const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-igor-r2" });
+    linkTelegramAccount(db, "inv-anya-r2", 813);
+    linkTelegramAccount(db, "inv-igor-r2", 814);
+    const sa = createShift(db, { date: daysFromNow(30), start: "08:00", end: "17:00", employeeId: anya.id, category: "shift" });
+    const sb = createShift(db, { date: daysFromNow(30), start: "09:00", end: "18:00", employeeId: igor.id, category: "shift" });
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anyaToken = await tokenFor(app, 813);
+
+    const created = await app.request("/api/swaps", authedJson(anyaToken, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    // Те же день, часы и вид — только подпись назвали по-другому. Сделка,
+    // о которой договаривались, не изменилась, гасить нечего.
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: igor.id, from: daysFromNow(30), to: daysFromNow(30), category: "shift",
+      start: "09:00", end: "18:00", title: "Вавилова", mode: "rewrite", includeWeekends: true,
+    }));
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anyaToken}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("pending");
+    expect(sent.filter((m) => m.text.includes("Обмен неактуален"))).toHaveLength(0);
   });
 });

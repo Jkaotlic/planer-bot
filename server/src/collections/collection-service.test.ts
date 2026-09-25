@@ -115,7 +115,7 @@ describe("previewCollection", () => {
       amountPerPerson: 1000, collectUrl: "https://example.test/c/1",
     }));
 
-    const preview = previewCollection(db, collection);
+    const preview = previewCollection(db, collection, TODAY);
     expect(preview.message.split("\n")[0]).toBe("🎁 Свадьба — Honouree, 22 августа");
     expect(preview.recipients.map((r) => r.displayName)).toEqual(["Colleague"]);
     expect(preview.blocker).toBeNull();
@@ -125,11 +125,11 @@ describe("previewCollection", () => {
     const db = makeTestDb();
     person(db, "Colleague", 2);
     const collection = createCustomCollection(db, blank());
-    expect(previewCollection(db, collection).blocker).toContain("Нет ссылки");
+    expect(previewCollection(db, collection, TODAY).blocker).toContain("Нет ссылки");
 
     const saved = updateCollection(db, collection.id, { collectUrl: "https://example.test/c/1" });
     expect(saved.ok).toBe(true);
-    expect(previewCollection(db, saved.ok ? saved.collection : collection).blocker).toBeNull();
+    expect(previewCollection(db, saved.ok ? saved.collection : collection, TODAY).blocker).toBeNull();
   });
 
   /**
@@ -148,7 +148,7 @@ describe("previewCollection", () => {
       messageText: "Скидываемся на кофемашину, кто сколько может",
     }));
 
-    const preview = previewCollection(db, collection);
+    const preview = previewCollection(db, collection, TODAY);
     expect(preview.message).toContain("Скидываемся на кофемашину");
     expect(preview.message).toContain("https://example.test/c/1");
     expect(preview.blocker).toBeNull();
@@ -161,7 +161,7 @@ describe("previewCollection", () => {
 
     const custom = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
     markCollectionSent(db, custom.id, 1, new Date("2026-08-12T09:00:00Z"));
-    const again = previewCollection(db, getCollectionOrThrow(db, custom.id));
+    const again = previewCollection(db, getCollectionOrThrow(db, custom.id), TODAY);
     expect(again.blocker).toBeNull();
     expect(again.sendCount).toBe(1);
     // The second round is worded as a reminder, not as the first announcement.
@@ -171,12 +171,12 @@ describe("previewCollection", () => {
     // is worse than one nobody re-sent.
     const birthday = birthdayRound(db, honouree);
     markCollectionSent(db, birthday.id, 1, new Date("2026-08-12T09:00:00Z"));
-    expect(previewCollection(db, getCollectionOrThrow(db, birthday.id)).blocker)
+    expect(previewCollection(db, getCollectionOrThrow(db, birthday.id), TODAY).blocker)
       .toContain("Уже разослано");
     // Before it went out it was sendable — otherwise this assertion would hold
     // against a birthday round that is blocked for some entirely other reason.
     const fresh = birthdayRound(db, person(db, "Second", 3));
-    expect(previewCollection(db, fresh).blocker).toBeNull();
+    expect(previewCollection(db, fresh, TODAY).blocker).toBeNull();
   });
 
   it("a closed collection is blocked whatever else is true", () => {
@@ -184,7 +184,7 @@ describe("previewCollection", () => {
     person(db, "Colleague", 2);
     const collection = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
     setCollectionClosed(db, collection.id, true, new Date("2026-08-11T00:00:00Z"));
-    expect(previewCollection(db, getCollectionOrThrow(db, collection.id)).blocker).toContain("закрыт");
+    expect(previewCollection(db, getCollectionOrThrow(db, collection.id), TODAY).blocker).toContain("закрыт");
   });
 
   it("closing is reversible", () => {
@@ -193,11 +193,43 @@ describe("previewCollection", () => {
     const collection = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
 
     setCollectionClosed(db, collection.id, true, new Date("2026-08-11T00:00:00Z"));
-    expect(previewCollection(db, getCollectionOrThrow(db, collection.id)).blocker).toContain("закрыт");
+    expect(previewCollection(db, getCollectionOrThrow(db, collection.id), TODAY).blocker).toContain("закрыт");
 
     setCollectionClosed(db, collection.id, false, new Date("2026-08-12T00:00:00Z"));
     expect(getCollectionOrThrow(db, collection.id).closedAt).toBeNull();
-    expect(previewCollection(db, getCollectionOrThrow(db, collection.id)).blocker).toBeNull();
+    expect(previewCollection(db, getCollectionOrThrow(db, collection.id), TODAY).blocker).toBeNull();
+  });
+
+  /**
+   * Задача 8: после праздника письмо «скидываемся на подарок» читается как
+   * ошибка. Раунд сам не закрывается — деньги доходят позже, и «Собрали»
+   * остаётся на решении админа, — но рассылать уже поздно.
+   */
+  describe("день рождения после праздника", () => {
+    it("сегодня позже дня рождения, ссылка есть, ещё не рассылали — блокер «поздно»", () => {
+      const db = makeTestDb();
+      const honouree = person(db, "Honouree", 1);
+      person(db, "Colleague", 2);
+      const round = birthdayRound(db, honouree, { celebratedOn: "2026-07-13" });
+      expect(previewCollection(db, round, "2026-07-14").blocker).toBe("День рождения уже прошёл — рассылать поздно.");
+    });
+
+    it("сегодня — ровно день рождения: блокера нет", () => {
+      const db = makeTestDb();
+      const honouree = person(db, "Honouree", 1);
+      person(db, "Colleague", 2);
+      const round = birthdayRound(db, honouree, { celebratedOn: "2026-07-13" });
+      expect(previewCollection(db, round, "2026-07-13").blocker).toBeNull();
+    });
+
+    it("обычный (не ДР) сбор с прошедшей eventDate блокер «поздно» не получает", () => {
+      const db = makeTestDb();
+      person(db, "Colleague", 2);
+      const collection = createCustomCollection(db, blank({
+        collectUrl: "https://example.test/c/1", eventDate: "2026-07-13",
+      }));
+      expect(previewCollection(db, collection, "2026-07-14").blocker).toBeNull();
+    });
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Bot } from "grammy";
-import { createBot } from "./bot";
+import { createBot, FALLBACK_TEXT } from "./bot";
 import { recordApi, stubBotInfo, type SentMessage } from "./testbot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
@@ -191,14 +191,18 @@ describe("ссылка на сбор, присланная боту в личк�
     expect(api.sent).toHaveLength(0);
   });
 
-  it("молчит на текст без ссылки — так бот вёл себя всегда", async () => {
+  it("на текст без ссылки отвечает подсказкой, а не привязкой к сбору", async () => {
+    // Раньше бот на такой текст молчал вовсе; теперь отвечает FALLBACK_TEXT
+    // (см. text-fallback.test.ts) — здесь важно, что это не задевает логику
+    // ссылок на сбор.
     const { db, bot, api } = stage();
     person(db, "Марк", 1, birthDateIn(7));
     person(db, "Игорь", 222, null, true);
 
     await say(bot, 222, "сделал сбор, скину позже");
 
-    expect(api.sent).toHaveLength(0);
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]!.text).toBe(FALLBACK_TEXT);
   });
 
   it("не даёт имениннику привязать ссылку к сбору на самого себя", async () => {

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { z } from "zod";
 import type { Bot } from "grammy";
+import { refreshAdminCommands } from "../bot/bot";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import { validateInitData, type TelegramUser } from "../auth/telegram";
@@ -50,6 +51,7 @@ import {
   notifyAdmins,
   notifySwapProposal,
   swapProposalText,
+  swapCancelledText,
   dutyNoticeForReceiver,
   dutyNoticeForAdmins,
   notifyVacantSlot,
@@ -69,6 +71,7 @@ import {
   nameOf as nameOfDb,
   swapAuditPayload as swapAuditPayloadDb,
   entryAuditPayload,
+  type SwapAuditPayload,
 } from "../util/message-lines";
 import { teamNow } from "../util/team-time";
 import { createEmployeesRoutes } from "./routes/employees";
@@ -76,6 +79,7 @@ import { createReadRoutes } from "./routes/read";
 import { createMyEntryRoutes } from "./routes/my-entries";
 import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
+import { createCalendarRoutes } from "./routes/calendar";
 import {
   isStartTab,
   startTabVisible,
@@ -108,6 +112,7 @@ import {
   validateReminderTemplate,
   autoSendDateFor,
   isCollectionActive,
+  SWAP_MESSAGE_MAX,
 } from "@planer/shared";
 import {
   postSlot,
@@ -180,6 +185,19 @@ function displayNameOf(u: TelegramUser): string {
 function rangeLabel(input: { title?: string | null; category: EntryCategory; start?: string | null; end?: string | null }): string {
   const name = input.title?.trim() || categoryLabel(input.category);
   return input.start && input.end ? `${name} ${input.start}–${input.end}` : name;
+}
+
+/**
+ * Меняться договаривались о конкретной смене: другой день, другие часы или
+ * другой вид — уже другая смена, и согласие на старую за неё не считается.
+ * Общая для одиночной `PATCH` и перезаписи диапазоном (`rewrite`) — раньше
+ * диапазон эту проверку не делал вовсе, и обмен на переписанную смену
+ * оставался висеть.
+ */
+type TradeFields = { date: string; endDate: string | null; start: string | null; end: string | null; templateId: number | null; category: EntryCategory };
+const TRADE_FIELDS = ["date", "endDate", "start", "end", "templateId", "category"] as const;
+function tradeFieldsChanged(before: TradeFields, after: TradeFields): boolean {
+  return TRADE_FIELDS.some((field) => after[field] !== before[field]);
 }
 
 /**
@@ -381,6 +399,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
     const allowlisted = config.adminTelegramIds.includes(user.id);
     let employee = getByTelegramId(db, user.id);
+    // Кем он был ДО этого входа — чтобы после всех веток ниже (восстановление,
+    // создание, промоут активного) решить одним сравнением, стоит ли обновлять
+    // его персональное меню команд. `false`, если строки не было вовсе: новый
+    // аллоулистнутый создаётся админом ниже, и это тоже смена, которую нужно
+    // отразить.
+    const isAdminBefore = employee?.isAdmin ?? false;
     if (employee && !employee.isActive) {
       // An archived worker stays locked out — that's the point of archiving. But
       // ADMIN_TELEGRAM_IDS lives in server/.env, outside this database: an operator
@@ -425,6 +449,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
         isAdmin: true,
         via: "allowlist",
       });
+    }
+    // Меню команд обновляем сразу, а не ждём рестарта сервера — иначе новый
+    // или только что повышенный админ увидел бы `/admin` в списке лишь после
+    // следующего деплоя. Один `if` на все три ветки промоута выше (восстановил
+    // и повысил, создал нового, повысил активного) — каждая уже отвечает за
+    // свою причину, здесь важен только итог.
+    // Не `await`: `refreshAdminCommands` сама глотает свою ошибку (см. её
+    // тело) и ничего не возвращает вызывающему, кроме факта завершения —
+    // ждать её здесь значило бы держать логин человека заложником скорости
+    // ответа Telegram. Вход не должен тормозить из-за медленной смены меню.
+    if (bot && employee.isAdmin !== isAdminBefore) {
+      void refreshAdminCommands(bot, user.id, employee.isAdmin);
     }
     const token = await issueToken({ employeeId: employee.id, isAdmin: employee.isAdmin }, config.jwtSecret);
     return c.json({ token, employee: { id: employee.id, displayName: employee.displayName, isAdmin: employee.isAdmin } });
@@ -641,6 +677,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.route("/", createMyEntryRoutes({ db, config, bot }));
   app.route("/", createMyHandoverRoutes({ db, config, bot }));
   app.route("/", createChecklistRoutes(db, config));
+  // `/cal/*` — вне `/api`, поэтому его не касаются `no-store` и `requireAdmin`/
+  // `requireAnnouncer` мидлвары выше: календарь телефона это самостоятельный
+  // GET по токену, а не запрос из мини-аппа.
+  app.route("/", createCalendarRoutes({ db, config }));
 
   app.route("/", createEmployeesRoutes({ db, config, bot }));
 
@@ -815,7 +855,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (employeeId === c.get("auth").employeeId) return c.json({ error: "not_found" }, 404);
     const draft = birthdayRoundDraft(db, employeeId, asOf);
     if (!draft) return c.json({ error: "not_found" }, 404);
-    return c.json(previewCollection(db, draft));
+    return c.json(previewCollection(db, draft, asOf));
   });
 
   app.put("/api/admin/birthdays/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -927,7 +967,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/admin/collections/:id/preview", requireAdmin(db, config.jwtSecret), (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
-    return c.json(previewCollection(db, collection));
+    return c.json(previewCollection(db, collection, teamNow(config.teamTz).date));
   });
 
   app.put("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -983,7 +1023,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
 
-    const preview = previewCollection(db, collection);
+    const preview = previewCollection(db, collection, teamNow(config.teamTz).date);
     if (preview.blocker) return c.json({ error: preview.blocker }, 409);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
 
@@ -1043,7 +1083,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Текст берём из превью: `collectionMessage` на втором раунде уже звучит
       // как «⏰ Напоминаю про сбор», и второй текст был бы вторым источником
       // одной формулировки.
-      const preview = previewCollection(db, collection);
+      const preview = previewCollection(db, collection, teamNow(config.teamTz).date);
       let delivered = 0;
       for (const recipient of waiting) {
         if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(collection.id))) delivered += 1;
@@ -1074,7 +1114,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     recordAudit(db, "collection_closed", c.get("auth").employeeId, {
       collectionId: collection.id,
       employeeId: collection.employeeId,
-      title: previewCollection(db, updated).title,
+      title: previewCollection(db, updated, teamNow(config.teamTz).date).title,
       closed: body.closed,
     });
     return c.json({ collection: updated });
@@ -1105,7 +1145,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       recordAudit(db, "collection_payment_marked", me, {
         collectionId: collection.id,
         employeeId: collection.employeeId,
-        title: previewCollection(db, collection).title,
+        title: previewCollection(db, collection, teamNow(config.teamTz).date).title,
         payerId,
         payerName: getEmployeeById(db, payerId)?.displayName ?? null,
         paid: body.paid,
@@ -1119,7 +1159,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.delete("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
-    const title = previewCollection(db, collection).title;
+    const title = previewCollection(db, collection, teamNow(config.teamTz).date).title;
     const result = deleteCollection(db, collection.id);
     if (!result.ok) return c.json({ error: result.error }, 409);
     recordAudit(db, "collection_deleted", c.get("auth").employeeId, {
@@ -1370,6 +1410,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const rewrites = new Set(plan.rewritten);
     const created: Shift[] = [];
     const updated: { before: Shift; after: Shift }[] = [];
+    // Обмен, висящий на переписываемой смене, гасится тем же правилом, что и
+    // одиночная `PATCH` — раньше диапазон эту дыру не закрывал вовсе, и админ
+    // мог переписать неделю в другой пресет, оставив команду с обменом на
+    // смену, которой больше нет. Снято ДО `updateShift`, в цикле транзакции —
+    // так же, как у одиночной правки, письмо должно назвать смену, о которой
+    // договаривались, а не ту, что получилась.
+    const swapsBeforeByShiftId = new Map<number, { request: SwapRequest; payload: SwapAuditPayload }[]>();
     db.transaction(() => {
       for (const date of plan.days) {
         const before = rewrites.has(date) ? holder.get(date) : undefined;
@@ -1383,7 +1430,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // клетки и код в выгрузке: смена «Утро», переписанная в дежурство,
         // осталась бы цвета «Утро» и вернулась бы сменой через круг в Excel.
         // Тот же дефект уже чинили в правке одной записи строкой ниже.
-        const after = updateShift(db, before.id, {
+        const finalFields = {
           ...fields,
           templateId: fields.templateId ?? null,
           title: fields.title ?? null,
@@ -1394,7 +1441,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
           // рисуют «?». Перезапись назвала запись целиком, значит клетку
           // прочитал человек, и метке больше нечего означать.
           unrecognisedCode: null,
-        });
+        };
+        // Отсутствие не несёт часов вовсе (`start`/`end` в теле нет), и это НЕ
+        // значит «часы обнулились» — значит «этот путь их не называет», и
+        // старые часы записи остаются как есть (см. `updateShift` ниже). Та же
+        // логика «не назвал — не изменил», что у одиночной `PATCH`.
+        if (tradeFieldsChanged(before, {
+          date: finalFields.date,
+          endDate: finalFields.endDate,
+          start: finalFields.start !== undefined ? finalFields.start : before.start,
+          end: finalFields.end !== undefined ? finalFields.end : before.end,
+          templateId: finalFields.templateId,
+          category: finalFields.category,
+        })) {
+          swapsBeforeByShiftId.set(
+            before.id,
+            listPendingSwapsForShift(db, before.id).map((request) => ({ request, payload: swapAuditPayload(request) })),
+          );
+        }
+        const after = updateShift(db, before.id, finalFields);
         if (after) updated.push({ before, after });
       }
     });
@@ -1405,6 +1470,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     for (const { before, after } of updated) {
       notified = noticeBuffer.register({ actorEmployeeId: c.get("auth").employeeId, before, after, now });
+      const swapsBefore = swapsBeforeByShiftId.get(before.id);
+      if (swapsBefore) await finalizeTradeChangingSwaps(after.id, swapsBefore, c.get("auth").employeeId);
     }
 
     // Перезапись и расстановка — разные события: «Расставлено диапазоном» про
@@ -1509,31 +1576,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const namesTheEntry = ["templateId", "title", "start", "end", "category"] as const;
     const clearsUnread = existing.unrecognisedCode != null && namesTheEntry.some((field) => patch[field] !== undefined);
 
-    // Смена уезжает на другое число — висящий обмен становится невозможен, потому
-    // что меняться можно только внутри одного дня (его решение от 2026-08-03).
-    // Payload собирается ДО правки: письмо говорит «Было: … ↔ …», то есть называет
-    // те смены, о которых договаривались, а не ту, что получилась.
-    const movedToAnotherDay = patch.date !== undefined && patch.date !== existing.date;
-    const swapsToExpire = movedToAnotherDay
+    // Меняться договаривались о конкретной смене: другой день, другие часы или
+    // другой вид — это уже другая смена, и согласие на старую за неё не считается.
+    // Место и заметка смену не меняют. Payload собирается ДО правки: письмо
+    // говорит «Было: … ↔ …», то есть называет те смены, о которых договаривались,
+    // а не ту, что получилась.
+    const changesTheTrade = tradeFieldsChanged(existing, {
+      ...merged,
+      templateId: patch.templateId !== undefined ? patch.templateId : existing.templateId,
+    });
+    const swapsToExpire = changesTheTrade
       ? listPendingSwapsForShift(db, id).map((request) => ({ request, payload: swapAuditPayload(request) }))
       : [];
 
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
-    if (movedToAnotherDay) {
-      const expired = new Set(expirePendingSwapsForShift(db, id).map((r) => r.id));
-      for (const { request, payload } of swapsToExpire) {
-        if (!expired.has(request.id)) continue;
-        // Актор — админ, перенёсший смену: в обмене никто из двоих ничего не делал,
-        // ровно поэтому сказать надо обоим (то же правило, что у удаления записи).
-        recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
-        if (!bot) continue;
-        for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
-          const tg = tgOf(employeeId);
-          if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
-        }
-      }
-    }
+    if (changesTheTrade) await finalizeTradeChangingSwaps(id, swapsToExpire, c.get("auth").employeeId);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
       actorEmployeeId: c.get("auth").employeeId, before: existing, after: entry, now: teamNow(config.teamTz),
@@ -1622,6 +1680,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
   const swapAuditPayload = (request: { id: number; fromEmployeeId: number; toEmployeeId: number; fromShiftId: number | null; toShiftId: number | null }) =>
     swapAuditPayloadDb(db, request);
 
+  /**
+   * Смена задела условия сделки — гасит любой обмен, висящий на ней, и
+   * говорит обоим. Общая для `PATCH /api/admin/entries/:id` и `rewrite`-режима
+   * `/api/admin/entries/range`: у обоих путей `swapsBefore` снимается ДО
+   * `updateShift`, чтобы письмо назвало смену, о которой договаривались
+   * («Было: … ↔ …»), а не ту, что получилась после правки.
+   */
+  const finalizeTradeChangingSwaps = async (
+    shiftId: number,
+    swapsBefore: { request: SwapRequest; payload: SwapAuditPayload }[],
+    actorEmployeeId: number,
+  ): Promise<void> => {
+    if (swapsBefore.length === 0) return;
+    const expired = new Set(expirePendingSwapsForShift(db, shiftId).map((r) => r.id));
+    for (const { request, payload } of swapsBefore) {
+      if (!expired.has(request.id)) continue;
+      // Актор — админ, поменявший смену: в обмене никто из двоих ничего не
+      // делал, ровно поэтому сказать надо обоим (то же правило, что у удаления записи).
+      recordAudit(db, "swap_expired", actorEmployeeId, payload);
+      if (!bot) continue;
+      for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
+        const tg = tgOf(employeeId);
+        if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "shift_changed"));
+      }
+    }
+  };
+
   /** Journals a swap that expired on its own and tells the side that wasn't
    *  looking — the initiator, who proposed it and did nothing since. */
   const announceExpiredSwap = async (request: SwapRequest, actorEmployeeId: number): Promise<void> => {
@@ -1635,7 +1720,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
-    if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500)) return c.json({ error: "invalid_message" }, 400);
+    if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > SWAP_MESSAGE_MAX)) return c.json({ error: "invalid_message" }, 400);
     const res = createSwap(
       db,
       { fromEmployeeId: c.get("auth").employeeId, fromShiftId: body.fromShiftId, toShiftId: body.toShiftId, message: body.message },
@@ -1652,7 +1737,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // пуле — она должна прочитать об этом ДО нажатия «Принять», а не потом.
         const fact = outsidePoolFact(db, { shiftId: res.request.fromShiftId, receiverId: res.counterpartyId });
         const notices = fact ? [dutyNoticeForReceiver(fact)] : [];
-        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices));
+        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices, res.request.message));
       }
     }
     return c.json({ request: res.request }, 201);
@@ -1715,7 +1800,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const res = cancelSwap(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     recordAudit(db, "swap_cancelled", c.get("auth").employeeId, swapAuditPayload(res.request));
-    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, "Заявку на обмен отменили."); }
+    if (bot) { const tg = tgOf(res.counterpartyId); if (tg != null) await notifyUser(bot, tg, swapCancelledText(swapAuditPayload(res.request))); }
     return c.json({ ok: true });
   });
 

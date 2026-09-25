@@ -15,6 +15,7 @@ import { runHolidayTick } from "./holidays/holiday-tick";
 import { xmlcalendarFetcher } from "./holidays/xmlcalendar";
 import { runBirthdayNoticeTick } from "./birthdays/birthday-notice";
 import { runHandoverTick } from "./handover/handover-tick";
+import { runSwapExpiryTick } from "./swap/swap-expiry-tick";
 import { createHandoverMessenger } from "./handover/handover-messenger";
 import { teamNow } from "./util/team-time";
 import { installFatalHandlers } from "./util/fatal-log";
@@ -38,7 +39,7 @@ void keepPolling({
   bot,
   onStart: (info) => {
     console.log(`bot @${info.username} started`);
-    void publishBotCommands(bot);
+    void publishBotCommands(bot, db);
   },
   log: (line) => console.error(line),
   sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
@@ -60,21 +61,25 @@ setInterval(() => {
   if (ticking) return;
   ticking = true;
   runTicksIndependently([
-    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz)) },
-    // Четвёртым в тот же массив: чек-лист уходит с началом смены дежурного, а
-    // не по общему часу, поэтому ему нужен тот же пятиминутный тик.
+    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
+    // В тот же массив: чек-лист уходит с началом смены дежурного, а не по
+    // общему часу, поэтому ему нужен тот же пятиминутный тик.
     { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },
     { name: "birthday", run: () => runBirthdayNoticeTick(db, bot, teamNow(config.teamTz)) },
     // Календарь праздников — раз в сутки; свой дедуп по дню внутри тика.
     { name: "holidays", run: () => runHolidayTick(db, fetchHolidays, teamNow(config.teamTz)) },
     // Совет про пробелы графика — по тому же вечернему часу, что и напоминания.
     { name: "coverage", run: () => runCoverageAdviceTick(db, bot, teamNow(config.teamTz)) },
-    // Третьим в тот же массив, а не своим setInterval: `runTicksIndependently`
+    // В тот же массив, а не своим setInterval: `runTicksIndependently`
     // и написан затем, чтобы падение одного тика не гасило соседей.
     {
       name: "handover",
       run: () => runHandoverTick({ db, config, messenger: createHandoverMessenger(bot, db) }, Date.now()),
     },
+    // В тот же массив, а не своим setInterval, по той же причине, что и у
+    // соседей: заявка, на которую никто не ответил, не должна ждать своего
+    // отдельного таймера, чтобы погаснуть, когда её смена уже прошла.
+    { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
   ]).finally(() => {
     ticking = false;
   });

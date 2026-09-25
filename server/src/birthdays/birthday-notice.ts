@@ -134,7 +134,7 @@ export async function runBirthdayNoticeTick(
 
     const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
     const admins = adminRecipients(db, round.employeeId);
-    const preview = previewCollection(db, round);
+    const preview = previewCollection(db, round, today);
     const daysUntil = round.celebratedOn ? Math.max(0, daysBetween(today, round.celebratedOn)) : 0;
 
     if (preview.blocker) {

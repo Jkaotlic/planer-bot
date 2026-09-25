@@ -15,6 +15,7 @@ import {
   normalizePreferredName,
 } from "@planer/shared";
 import { notifyUser } from "../../bot/notify";
+import { refreshAdminCommands } from "../../bot/bot";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import type { Employee as EmployeeRow } from "../../db/schema";
@@ -369,6 +370,11 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       displayName: employee?.displayName ?? target.displayName,
       isAdmin: body.isAdmin,
     });
+    // Меню команд обновляем сразу, а не ждём рестарта сервера — иначе новый
+    // админ увидел бы `/admin` в списке только после следующего деплоя.
+    if (bot && target.telegramUserId != null && target.isAdmin !== body.isAdmin) {
+      await refreshAdminCommands(bot, target.telegramUserId, body.isAdmin);
+    }
     // Единственная ручка домена без `satisfies`: `setEmployeeAdmin` объявлен
     // возвращающим `Employee | undefined`, и `undefined` сохраняется как было —
     // ряд под этим id читался двумя операторами выше, better-sqlite3 синхронный,

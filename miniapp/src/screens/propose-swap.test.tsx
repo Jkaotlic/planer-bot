@@ -61,6 +61,12 @@ const MANY = [
   shift({ id: 5, employeeId: 5, employeeName: "Мальцев Ким", start: "08:00", end: "17:00", templateId: 1, title: "Утро" }),
 ];
 
+/** С «ё» в фамилии и в имени — поиск должен находить её и по «е». */
+const WITH_YO = [
+  ...MANY,
+  shift({ id: 6, employeeId: 6, employeeName: "Семёнов Семён", start: "09:00", end: "18:00", templateId: 2, title: "День" }),
+];
+
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
@@ -126,6 +132,23 @@ describe("экран обмена", () => {
     const texts = rows(el).map((r) => r.textContent ?? "");
     expect(texts).toHaveLength(1);
     expect(texts[0]).toContain("Яшин Пётр");
+  });
+
+  // Поиск как везде (`matchesPerson` из `@planer/shared`): «ё» приравнивается к
+  // «е» — в ростере она есть, на клавиатуре её не набирают, — а слова запроса
+  // ищутся независимо друг от друга, а не только с начала строки.
+  it("поиск находит «Семён» без буквы «ё» и по нескольким словам", async () => {
+    const el = await mount({ candidates: WITH_YO });
+    const hasSemyon = () => rows(el).some((r) => (r.textContent ?? "").includes("Семёнов Семён"));
+
+    await type(el, "семен");
+    expect(hasSemyon()).toBe(true);
+
+    await type(el, "семён сем");
+    expect(hasSemyon()).toBe(true);
+
+    await type(el, "игорь");
+    expect(hasSemyon()).toBe(false);
   });
 
   // На двух-трёх строках поиск — лишняя строка на маленьком экране: их видно и так.

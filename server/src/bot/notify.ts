@@ -39,9 +39,18 @@ export function swapDeclinedText(p: SwapAuditPayload): string {
  * отдельным абзацем, а не в конце строки, потому что строка с двумя записями
  * графика длинная, и приписанный к ней хвост читается как её продолжение.
  */
-export function swapProposalText(p: SwapAuditPayload, notices: readonly string[] = []): string {
+export function swapProposalText(p: SwapAuditPayload, notices: readonly string[] = [], message?: string | null): string {
   const head = `«${p.fromName} предлагает обмен: отдаёт ${p.fromShift}, хочет твою ${p.toShift}»`;
-  return notices.length === 0 ? head : `${head}\n\n${notices.join("\n")}`;
+  // Просьба автора — между шапкой и пометками: пометка про пул должна остаться
+  // последним, что человек читает перед «Принять».
+  const note = message?.trim() ? `💬 «${message.trim()}»` : null;
+  return [head, note, notices.length ? notices.join("\n") : null].filter(Boolean).join("\n\n");
+}
+
+/** Второй стороне, когда автор сам отозвал заявку. Голое «Заявку отменили» не
+ *  говорило, какую — а у человека их бывает несколько сразу. */
+export function swapCancelledText(p: SwapAuditPayload): string {
+  return `${p.fromName} отменил(а) заявку на обмен: ${p.fromShift} ↔ ${p.toShift}.`;
 }
 
 /** Admin broadcast once a swap actually goes through. Named and dated, so with
@@ -72,10 +81,13 @@ export function swapAutoCancelledText(p: SwapAuditPayload): string {
 /** Why a pending swap stopped being possible without its initiator doing
  *  anything — an admin removed the entry under it, replaced the whole month, or
  *  the shift changed hands so the trade no longer adds up. */
-export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed";
+export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed" | "date_passed";
 
 /**
- * Sent to *both* sides of a pending swap an admin's edit just invalidated.
+ * Sent to *both* sides of a pending swap an admin's edit just invalidated —
+ * or, for `date_passed`, only to the initiator (see `swap-expiry-tick.ts`):
+ * the shift has already happened, so the counterparty has nothing left to
+ * act on and no answer to give — there's nothing to tell them.
  *
  * Goes out to the initiator too, and that's the point: they proposed it and did
  * nothing since, so without this the request just turns «Истекло» in the archive
@@ -84,6 +96,9 @@ export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_cha
  * clause that varies, because two near-identical strings are how these drift.
  */
 export function swapExpiredText(p: SwapAuditPayload, cause: SwapExpiryCause): string {
+  if (cause === "date_passed") {
+    return `Заявка на обмен закрылась: смена уже прошла, а ответа не было. Было: ${p.fromShift} ↔ ${p.toShift}.`;
+  }
   const why =
     cause === "entry_deleted" ? "смену удалили из расписания"
     : cause === "roster_reimported" ? "график за этот период загрузили заново"
@@ -206,8 +221,13 @@ export function isPermanentSendFailure(err: unknown): boolean {
  * they didn't know existed — the moment somebody wants these to stop is the
  * moment one is in front of them, so that is where the button belongs.
  */
-export async function notifyReminder(bot: Bot, telegramUserId: number, text: string): Promise<SendOutcome> {
-  const kb = new InlineKeyboard().text("🔕 Отключить напоминания", "reminders:off");
+export async function notifyReminder(bot: Bot, telegramUserId: number, text: string, appUrl?: string): Promise<SendOutcome> {
+  const kb = new InlineKeyboard();
+  // Вечер накануне — момент, когда человек понимает, что выйти не может. Под
+  // рукой должно быть действие, а не только «замолчи». Инлайн-`web_app`, не
+  // клавиатурная: только она несёт подпись initData (см. `keyboard.ts`).
+  if (appUrl) kb.webApp("📋 Мои смены", appUrl).row();
+  kb.text("🔕 Отключить напоминания", "reminders:off");
   try {
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
     return { ok: true };

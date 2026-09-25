@@ -8,7 +8,7 @@ import { checklistIdsByTemplate, getChecklist, updateChecklist } from "../repo/c
 import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { addReminder, checklistDocKind, checklistKind, checklistUndeliverableKind, hasReminder } from "../repo/reminders";
+import { addReminder, checklistDayKey, checklistDocKind, checklistKind, checklistUndeliverableKind, hasReminder } from "../repo/reminders";
 import { isPermanentSendFailure } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
 
@@ -50,6 +50,10 @@ export async function runChecklistTick(
     // в один день бывают две записи разных видов, и каждая приносит свои списки
     // в своё время. Их может быть несколько и у одного вида смены — общая
     // инструкция этажа и отдельная задача на ту же смену.
+    // Один ряд `shifts` на весь диапазон многодневной записи — без дня в ключе
+    // пометка «ушло» пережила бы весь диапазон целиком, и дежурство на неделю
+    // получало бы инструкцию один раз в первый день.
+    const day = checklistDayKey(shift, now.date);
     for (const checklistId of checklistsDueToday([shift], byTemplate, now.date, employeeId)) {
     const list = getChecklist(db, checklistId);
     if (!list) continue;
@@ -65,10 +69,10 @@ export async function runChecklistTick(
     if (shift.start != null && shift.end != null && shift.end > shift.start && now.time >= shift.end) continue;
     // Пометка на список, а не на смену: общая означала бы «что-то одно уже
     // уходило», и второй список молчал бы всегда.
-    if (hasReminder(db, shift.id, checklistKind(checklistId))) continue;
+    if (hasReminder(db, shift.id, checklistKind(checklistId, day))) continue;
     // Telegram отказал насовсем (заблокировали бота) — повтор до полуночи
     // каждые пять минут ничего не изменит.
-    if (hasReminder(db, shift.id, checklistUndeliverableKind(checklistId))) continue;
+    if (hasReminder(db, shift.id, checklistUndeliverableKind(checklistId, day))) continue;
 
     // Личная галочка «не пиши мне про смены» здесь НЕ проверяется, в отличие от
     // `runReminderTick`: вечернее напоминание — удобство, от которого человек
@@ -140,8 +144,8 @@ export async function runChecklistTick(
       // в день — своей пометкой: если файл ушёл, а текст упал, следующий тик
       // повторял файл, и при мигающей сети дежурный получал пачку одинаковых docx.
       try {
-        if (!hasReminder(db, shift.id, checklistDocKind(checklistId)) && (await sendDoc())) {
-          addReminder(db, shift.id, checklistDocKind(checklistId));
+        if (!hasReminder(db, shift.id, checklistDocKind(checklistId, day)) && (await sendDoc())) {
+          addReminder(db, shift.id, checklistDocKind(checklistId, day));
         }
       } catch (err) {
         // Отвергнутый файл (протухший file_id) не должен отнимать у дежурного
@@ -154,10 +158,10 @@ export async function runChecklistTick(
       // `inline_keyboard` — это разметка ради разметки.
       const markup = kb.inline_keyboard.flat().length > 0 ? { reply_markup: kb } : undefined;
       await bot.api.sendMessage(chatId, text, markup);
-      addReminder(db, shift.id, checklistKind(checklistId));
+      addReminder(db, shift.id, checklistKind(checklistId, day));
       sent += 1;
     } catch (err) {
-      if (isPermanentSendFailure(err)) addReminder(db, shift.id, checklistUndeliverableKind(checklistId));
+      if (isPermanentSendFailure(err)) addReminder(db, shift.id, checklistUndeliverableKind(checklistId, day));
       // Одна неудача не должна оставить без чек-листа ни остальных дежурных, ни
       // остальные списки этого же: тот же довод, что у `runReminderTick`.
       // Сетевой сбой пометки не ставит — следующий тик попробует снова, и это

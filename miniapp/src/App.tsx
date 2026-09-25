@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Button, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
-import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
+import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
@@ -33,10 +33,11 @@ const AdminScreen = lazy(() => import("./screens/AdminScreen"));
 const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
-import { withError, withoutError } from "./lib/error-map";
+import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
 import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
 import { swapCandidates } from "./lib/swap-candidates";
+import { tabBadges } from "./lib/tab-badges";
 
 interface AppData {
   me: Me;
@@ -108,9 +109,41 @@ export function App() {
   // instead of a per-screen error — nothing to retry by hand, it just says the
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  // Сборы для меток «ждёт тебя» на вкладках (`tabBadges`). `null` — ещё не
+  // пришли или запрос упал: метка на «Сборах» тогда просто молчит, а не
+  // врёт нулём. Не в `AppData`/bootstrap намеренно — см. комментарий в
+  // `loadBootstrap` ниже.
+  const [collections, setCollections] = useState<WorkerCollection[] | null>(null);
+  // Отдельный от `reloadGate` гейт: сборы перечитываются в `reloadData`
+  // независимо от bootstrap-запроса (см. там же), и общий счётчик с ним
+  // выдавал бы тикеты не по своей, а по чужой последовательности вызовов.
+  const collectionsReloadGate = useRef(createLatestRequestGate());
+  // Отмена предыдущей ещё не завершённой загрузки — целиком, а не только той
+  // её ветки, что уже успела вернуться. Кнопка «Повторить» вызывает
+  // `loadBootstrap` напрямую, в обход эффекта, поэтому предыдущий возврат
+  // cleanup-функции эффектом не подхватывается: без этого рефа два быстрых
+  // тапа «Повторить» запускали бы два параллельных запроса, и на экране
+  // остался бы тот, чей ответ пришёл позже, а не тот, что запущен позже.
+  const cancelLoadRef = useRef<() => void>(() => {});
 
-  useEffect(() => {
+  /**
+   * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
+   * ошибки могла запустить ровно ту же загрузку заново: у админки такая
+   * кнопка была с первого дня (`admin/src/App.tsx`), а мини-апп открывают
+   * через облачный релей KeenDNS, где первая попытка падает чаще, чем на
+   * обычном интернете, — без кнопки единственным выходом была перезагрузка
+   * всей страницы.
+   */
+  const loadBootstrap = useCallback(() => {
+    // Новый вызов побеждает по построению: он первым делом гасит тот, что был
+    // запущен раньше (если ещё жив), и сам становится тем, что остановит
+    // следующий.
+    cancelLoadRef.current();
     let cancelled = false;
+    cancelLoadRef.current = () => {
+      cancelled = true;
+    };
+    setError(null);
     const monday = mondayOf(new Date());
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
@@ -122,18 +155,38 @@ export function App() {
     apiClient
       .getBootstrap(from, to)
       .then(({ me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers }) => {
-        if (!cancelled) {
-          setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
-        }
+        if (cancelled) return;
+        setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
+
+        // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
+        // «Команда»), и тащить её в общий контракт ради одной метки значило бы
+        // менять его ради удобства этого экрана. Запущен ПОСЛЕ ответа bootstrap,
+        // а не параллельно с ним: соединение до релея — HTTP/1.1, то есть один
+        // запрос за раз, и второй, запущенный до того как первый получил ответ,
+        // не переиспользует его TLS-рукопожатие, а поднимает своё — bootstrap и
+        // сборы наперегонки делили бы то же узкое место. У админа «Сборы» —
+        // консоль, а не список для отметки, метки там не бывает вовсе
+        // (`tabBadges`), и звать ручку ради неё незачем.
+        if (me.isAdmin) return;
+        apiClient
+          .getMyCollections()
+          .then((cs) => {
+            if (!cancelled) setCollections(cs);
+          })
+          .catch((err: unknown) => {
+            console.error("Collections for badges failed:", err);
+            if (!cancelled) setCollections(null);
+          });
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    loadBootstrap();
+    return () => cancelLoadRef.current();
+  }, [loadBootstrap]);
 
   // `?screen=announce` ставит начальную вкладку в "admin" ДО того, как известно
   // `me.isAdmin` — права могли пропасть между открытием меню бота и тапом по
@@ -281,13 +334,21 @@ export function App() {
     const monday = mondayOf(new Date());
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
+    // `me` живёт вне try — нужен ПОСЛЕ него, чтобы решить, звать ли сборы, а
+    // `reloadData` привязан к `visibilitychange` один раз (см. эффект ниже) и
+    // не может читать `data` из замыкания: там навсегда осталось бы значение
+    // самого первого рендера. Свежий ответ bootstrap — единственный надёжный
+    // источник актуального `isAdmin` здесь.
+    let me: Me | undefined;
     try {
       // Тем же одним запросом, что и старт: перезагрузка случается на каждом
       // переключении вкладки и возврате в приложение, то есть чаще, чем старт.
       // Пресеты перечитываются вместе с остальным, чтобы правка админа (имя или
       // цвет «Утро»/«День») доезжала и до строк работника.
       const ticket = reloadGate.current.begin();
-      const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = await apiClient.getBootstrap(from, to);
+      const bootstrap = await apiClient.getBootstrap(from, to);
+      me = bootstrap.me;
+      const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = bootstrap;
       if (!reloadGate.current.isLatest(ticket)) return;
       const teamShifts = teamSchedule.shifts;
       setData((prev) =>
@@ -301,6 +362,30 @@ export function App() {
       // Quiet, not urgent — the worker didn't ask for this refresh, and what's
       // already on screen is still whatever the last successful load showed.
       setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+    }
+
+    // У админа «Сборы» — консоль, а не список для отметки, метки там не
+    // бывает вовсе (`tabBadges`), и звать ручку ради неё незачем — та же
+    // причина, что у `loadBootstrap`. `me` не пришёл (bootstrap выше упал) —
+    // делаем попытку по-старому: узнать админство не от кого, а метка сборов
+    // важнее лишнего запроса при и так неудачном обновлении.
+    if (me?.isAdmin) return;
+
+    // Отдельно от bootstrap-запроса выше, по той же причине, что в
+    // `loadBootstrap`: правка (кто-то оплатил сбор, пришёл новый) должна
+    // дойти без повторного открытия мини-аппа. Свой гейт — `reloadData`
+    // может быть вызван повторно (смена вкладки, возврат в приложение) раньше,
+    // чем ответил предыдущий вызов, и без тикета более старый, но более
+    // медленный ответ переписал бы уже показанное свежее число. Отказ не
+    // трогает `collections` вовсе: на экране остаётся то, что показывалось
+    // до этого вызова, а не сбрасывается в `null` — метка молчит только тогда,
+    // когда сборы не приходили ни разу.
+    try {
+      const ticket = collectionsReloadGate.current.begin();
+      const cs = await apiClient.getMyCollections();
+      if (collectionsReloadGate.current.isLatest(ticket)) setCollections(cs);
+    } catch (err) {
+      console.error("Collections refresh failed:", err);
     }
   }
 
@@ -337,7 +422,9 @@ export function App() {
     setBusySlotIds((prev) => withoutBusy(prev, slotId));
   }
 
-  /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`. */
+  /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`,
+   *  with one named exception: `weekendOfferErrorMessage` overrides it for
+   *  `not_participating` — see that function's comment. */
   async function runOfferAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusyOfferIds((prev) => withBusy(prev, id));
     setOfferErrors((prev) => withoutError(prev, id));
@@ -349,7 +436,7 @@ export function App() {
       },
       onActionFailed: (err) => {
         console.error("Offer action failed:", err);
-        setOfferErrors((prev) => withError(prev, id, failureMessage));
+        setOfferErrors((prev) => withError(prev, id, weekendOfferErrorMessage(err, failureMessage)));
       },
       onRefreshFailed: (err) => {
         console.error("Refresh after action failed:", err);
@@ -362,7 +449,10 @@ export function App() {
   if (error) {
     return (
       <div style={centeredStyle}>
-        <Placeholder header="Не удалось загрузить" description={error} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <Placeholder header="Не удалось загрузить" description={error} />
+          <Button onClick={() => loadBootstrap()}>Повторить</Button>
+        </div>
       </div>
     );
   }
@@ -422,6 +512,8 @@ export function App() {
     );
   }
 
+  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin });
+
   return (
     // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
     // под шапку клиента, и 100vh поверх этого дало бы лишний скролл ровно на её
@@ -455,7 +547,14 @@ export function App() {
       {tab === "team" && (
         <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} />
       )}
-      {tab === "collections" && <CollectionsTabScreen isAdmin={data.me.isAdmin} />}
+      {tab === "collections" && (
+        <CollectionsTabScreen
+          isAdmin={data.me.isAdmin}
+          onPaidChanged={(id, paid) =>
+            setCollections((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, paid } : c)) : prev))
+          }
+        />
+      )}
       {tab === "swaps" && (
         <SwapsScreen
           swaps={data.swaps}
@@ -530,6 +629,7 @@ export function App() {
         isAdmin={data.me.isAdmin}
         isObserver={data.me.isObserver}
         canAnnounce={data.me.canAnnounce}
+        badges={badges}
       />
     </div>
   );

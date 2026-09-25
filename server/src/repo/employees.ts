@@ -316,6 +316,18 @@ export function setInviteToken(db: Db, id: number, inviteToken: string): Employe
   return db.update(employees).set({ inviteToken }).where(eq(employees.id, id)).returning().all()[0];
 }
 
+/** Личная ICS-подписка. `null` выключает её; новый токен на каждое включение —
+ *  «Сменить ссылку» обязана погасить старую, а не завести вторую рабочую рядом. */
+export function setCalendarToken(db: Db, id: number, token: string | null): Employee | undefined {
+  return db.update(employees).set({ calendarToken: token }).where(eq(employees.id, id)).returning().all()[0];
+}
+
+/** Публичная ручка ищет по токену, не по id: токен сам и есть предъявленное
+ *  право, а id в адресе позволил бы перебирать чужие подписки. */
+export function getByCalendarToken(db: Db, token: string): Employee | undefined {
+  return db.select().from(employees).where(eq(employees.calendarToken, token)).get();
+}
+
 /** Count of active admins — used to block removing the last one (lockout guard). */
 export function countActiveAdmins(db: Db): number {
   return db.select().from(employees).where(and(eq(employees.isAdmin, true), eq(employees.isActive, true))).all().length;

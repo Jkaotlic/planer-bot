@@ -306,6 +306,35 @@ describe("who a reminder is addressed to", () => {
     expect(sent[0]!.text).toContain("Привет, Петров Алексей!");
   });
 
+  it("напоминание называет место смены и несёт кнопку «Мои смены»", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 940);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, location: "Поклонка" });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" }, "https://example.com");
+
+    expect(sent[0]!.text).toContain("📍 Поклонка");
+    const rows = sent[0]!.reply_markup!.inline_keyboard;
+    expect(rows[0]![0]!.text).toBe("📋 Мои смены");
+    expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe("https://example.com/app/");
+    expect((rows[1]![0] as { callback_data?: string }).callback_data).toBe("reminders:off");
+  });
+
+  it("без publicUrl кнопки «Мои смены» нет — только отключение", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 941);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, location: "Поклонка" });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" }); // без publicUrl
+
+    const rows = sent[0]!.reply_markup!.inline_keyboard;
+    expect(rows).toHaveLength(1);
+    expect((rows[0]![0] as { callback_data?: string }).callback_data).toBe("reminders:off");
+    expect(rows.flat().some((b) => b.text === "📋 Мои смены")).toBe(false);
+  });
+
   it("carries the button that turns these off", async () => {
     // The moment somebody wants reminders to stop is the moment one is in front
     // of them — the switch has to be reachable from the message itself.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { stubBotInfo, type ApiCall } from "./testbot";
 import type { Bot } from "grammy";
-import { createBot } from "./bot";
+import { createBot, FALLBACK_TEXT } from "./bot";
 import { BTN_BUG, BTN_WEEK } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
@@ -151,9 +151,10 @@ describe("багрепорт из бота", () => {
     expect(gotBugReplyInstead).toBe(false);
   });
 
-  it("кнопку не нажимал → написал «привет» → в bug_reports пусто и бот промолчал", async () => {
-    // Сегодня бот не отвечает на произвольный текст — эта работа не должна
-    // это менять.
+  it("кнопку не нажимал → написал «привет» → в bug_reports пусто, а не открытое окно жалобы", async () => {
+    // Бот отвечает подсказкой (FALLBACK_TEXT) — это отдельная работа, см.
+    // text-fallback.test.ts. Здесь важно, что это НЕ попадает в bug_reports:
+    // текст без открытого окна жалобы — не жалоба.
     const db = makeTestDb();
     worker(db, "Игорь", 603);
     const { bot, calls } = testBot(db);
@@ -161,10 +162,10 @@ describe("багрепорт из бота", () => {
     await bot.handleUpdate(textUpdate(603, "привет"));
 
     expect(listBugReports(db, "all")).toHaveLength(0);
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([expect.objectContaining({ method: "sendMessage", payload: expect.objectContaining({ text: FALLBACK_TEXT }) })]);
   });
 
-  it("окно старше 15 минут → сообщение не поймано", async () => {
+  it("окно старше 15 минут → сообщение не поймано жалобой", async () => {
     const db = makeTestDb();
     const marina = worker(db, "Марина", 604);
     // Окно открыто напрямую (в обход кнопки), чтобы управлять временем: кнопка
@@ -176,7 +177,7 @@ describe("багрепорт из бота", () => {
     await bot.handleUpdate(textUpdate(604, "Уже не важно, но всё равно не работало"));
 
     expect(listBugReports(db, "all")).toHaveLength(0);
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([expect.objectContaining({ method: "sendMessage", payload: expect.objectContaining({ text: FALLBACK_TEXT }) })]);
   });
 });
 

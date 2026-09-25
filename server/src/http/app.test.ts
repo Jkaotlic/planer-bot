@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
+import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getEmployeeById, setEmployeeObserver } from "../repo/employees";
 import { signInitData } from "../auth/telegram";
 import { employees } from "../db/schema";
 import { testConfig } from "../test-config";
+import { recordApi, stubBotInfo } from "../bot/testbot";
 
 const config = testConfig();
 
@@ -123,6 +125,66 @@ describe("app auth", () => {
     // And the token it just handed out actually opens an admin route.
     const admin = await app.request("/api/admin/employees", { headers: { Authorization: `Bearer ${body.token}` } });
     expect(admin.status).toBe(200);
+  });
+
+  it("вход не ждёт refreshAdminCommands — токен приходит, пока Telegram ещё думает", async () => {
+    // Раунд ревью улучшений: `refreshAdminCommands` сама глотает свою ошибку и
+    // ничего не возвращает вызывающему — ждать её значит держать логин
+    // заложником скорости ответа Telegram. Бот здесь никогда не отвечает на
+    // `setMyCommands`, и если бы `/api/auth` всё ещё делал `await`, этот тест
+    // не уложился бы в таймаут.
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Игорь", inviteToken: "tok-slow-menu" });
+    linkTelegramAccount(db, "tok-slow-menu", 111);
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    bot.api.config.use((_prev, method) =>
+      method === "setMyCommands" ? new Promise(() => {}) : { ok: true, result: {} } as never,
+    );
+    const app = createApp({ db, config, bot });
+
+    const res = await app.request(authReq(111));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).token).toBeTruthy();
+  });
+
+  it("промоушен через аллоулист сразу выдаёт персональное меню команд", async () => {
+    // Тот же путь, что «grants admin to an active allowlisted employee» выше, —
+    // только здесь проверяем побочный эффект: `/admin` и `/instruction`
+    // появляются в меню этого чата немедленно, а не после рестарта сервера.
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Игорь", inviteToken: "tok-active-menu" });
+    linkTelegramAccount(db, "tok-active-menu", 111);
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    const { calls } = recordApi(bot);
+    const app = createApp({ db, config, bot });
+
+    await app.request(authReq(111));
+
+    const set = calls.find(
+      (c) => c.method === "setMyCommands" && (c.payload as { scope?: { chat_id?: number } }).scope?.chat_id === 111,
+    );
+    expect(set).toBeDefined();
+  });
+
+  it("восстановление архивного через аллоулист тоже обновляет его меню, если заодно повысило", async () => {
+    // Тот же путь, что «un-archives and grants admin to an allowlisted employee
+    // who wasn't previously an admin» выше — здесь этот работник не был
+    // админом, и восстановление его повышает.
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Игорь", inviteToken: "tok-restore-menu" }); // isAdmin: false
+    linkTelegramAccount(db, "tok-restore-menu", 111);
+    db.update(employees).set({ isActive: false }).where(eq(employees.id, w.id)).run();
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    const { calls } = recordApi(bot);
+    const app = createApp({ db, config, bot });
+
+    await app.request(authReq(111));
+
+    const set = calls.find(
+      (c) => c.method === "setMyCommands" && (c.payload as { scope?: { chat_id?: number } }).scope?.chat_id === 111,
+    );
+    expect(set).toBeDefined();
   });
 
   it("/api/me needs a token and returns the caller", async () => {

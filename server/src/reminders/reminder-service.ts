@@ -60,7 +60,7 @@ function wantsReminder(
 }
 
 /** Sends soft evening-before reminders for tomorrow's morning/night shifts. Returns the number sent. */
-export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }): Promise<number> {
+export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }, publicUrl?: string): Promise<number> {
   // Час — настройка админа, а не константа. Строки нет — те же 20:00, что и до неё.
   if (now.time < reminderHour(db)) return 0;
 
@@ -79,7 +79,7 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
   let count = 0;
   for (const shift of shifts) {
     try {
-      count += await remindFor(db, bot, shift);
+      count += await remindFor(db, bot, shift, publicUrl);
     } catch (err) {
       // The list of shifts was read once, up front, and each send below awaits
       // Telegram — an admin deleting tomorrow's shift in that gap leaves the
@@ -117,7 +117,7 @@ function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
 }
 
 /** One shift's reminder. Returns 1 if it went out, 0 otherwise. */
-async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
+async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Promise<number> {
     if (hasReminder(db, shift.id, REMINDER_KIND)) return 0;
     const owner = getEmployeeById(db, shift.employeeId!);
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) return 0;
@@ -146,11 +146,13 @@ async function remindFor(db: Db, bot: Bot, shift: Shift): Promise<number> {
     // Время подъёма живёт только в СВОЁМ тексте, через `{подъём}`: в стандартных
     // формулировках его нет ни у одного вида смены — распоряжаться чужим
     // будильником письмо не должно.
+    const location = shift.location;
     const text = custom
-      ? renderReminderText(custom, { name, timeRange, wake })
-      : buildReminderText({ name, kind, timeRange, what, until });
+      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "" })
+      : buildReminderText({ name, kind, timeRange, what, until, location });
 
-    const outcome = await notifyReminder(bot, owner.telegramUserId, text);
+    const appUrl = publicUrl ? `${publicUrl}/app/` : undefined;
+    const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl);
     if (outcome.ok) {
       addReminder(db, shift.id, REMINDER_KIND);
       return 1;

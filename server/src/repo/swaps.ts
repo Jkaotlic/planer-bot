@@ -1,6 +1,7 @@
 import { and, desc, eq, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db/client";
-import { swapRequests, type SwapRequest } from "../db/schema";
+import { swapRequests, shifts, type SwapRequest } from "../db/schema";
 import type { SwapStatus } from "@planer/shared";
 
 export function createSwapRequest(
@@ -26,6 +27,27 @@ export function getSwapRequest(db: Db, id: number): SwapRequest | undefined {
 
 export function setSwapStatus(db: Db, id: number, status: SwapStatus): void {
   db.update(swapRequests).set({ status, resolvedAt: new Date() }).where(eq(swapRequests.id, id)).run();
+}
+
+/**
+ * Гасит одну заявку в `expired`, но только если она в базе всё ещё `pending` —
+ * иначе ничего не пишет и возвращает `undefined`.
+ *
+ * Нужна тику просрочки (`swap-expiry-tick.ts`): он читает список pending-заявок
+ * один раз, а затем на каждую await'ит отправку письма — за это время вторую
+ * заявку из того же списка вполне успевают принять, отклонить или отменить с
+ * другого конца (HTTP-запрос или кнопка в боте). Условие в WHERE — как у
+ * `expirePendingSwapsForShift` в `repo/shifts.ts` — превращает «читал pending,
+ * пишу expired» в одну атомарную проверку-и-запись, а не в два отдельных шага
+ * с окном между ними, где успевает вклиниться чужое решение.
+ */
+export function expireSwapIfPending(db: Db, id: number): SwapRequest | undefined {
+  return db
+    .update(swapRequests)
+    .set({ status: "expired", resolvedAt: new Date() })
+    .where(and(eq(swapRequests.id, id), eq(swapRequests.status, "pending")))
+    .returning()
+    .all()[0];
 }
 
 /**
@@ -68,6 +90,27 @@ export function listPendingSwapsForShift(db: Db, shiftId: number): SwapRequest[]
       eq(swapRequests.status, "pending"),
       or(eq(swapRequests.fromShiftId, shiftId), eq(swapRequests.toShiftId, shiftId)),
     ))
+    .all();
+}
+
+/** Висящие заявки с датами обеих смен — для тика просрочки. Заявку с
+ *  обнулённой сменой гасит удаление записи, тику она не нужна. */
+export function listPendingSwapsWithDates(db: Db): Array<{ request: SwapRequest; fromDate: string; toDate: string }> {
+  const fromShift = alias(shifts, "from_shift");
+  const toShift = alias(shifts, "to_shift");
+  return db
+    .select({ request: swapRequests, fromDate: fromShift.date, toDate: toShift.date })
+    .from(swapRequests)
+    .innerJoin(fromShift, eq(swapRequests.fromShiftId, fromShift.id))
+    .innerJoin(toShift, eq(swapRequests.toShiftId, toShift.id))
+    .where(eq(swapRequests.status, "pending"))
+    // Явно, а не как получится: тик обходит список последовательно, await'я
+    // письмо по каждой заявке (см. `swap-expiry-tick.test.ts` — «не
+    // переписывает заявку, которую отменили, пока тик ждал отправку письма по
+    // другой»), и тот тест держится на том, что A обходится раньше B. Без
+    // `orderBy` порядок строк — недокументированное поведение движка (обычно
+    // rowid, но не гарантия), а не контракт этого запроса.
+    .orderBy(swapRequests.id)
     .all();
 }
 

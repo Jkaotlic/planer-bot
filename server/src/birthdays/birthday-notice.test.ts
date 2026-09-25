@@ -567,6 +567,64 @@ describe("автоотправка сбора", () => {
     expect(logged?.payload).toMatchObject({ round: 0, delivered: 0 });
   });
 
+  /**
+   * Задача 8, ревью раунда 1: без `deadline` и без `eventDate` на раунде,
+   * `isCollectionActive` падает до своей последней ветки — `celebratedOn >=
+   * today` — и `roundsToAutoSend` отсеивает прошедший день рождения раньше,
+   * чем до него доходит `previewCollection`. В ЭТОМ узком случае (нет
+   * дедлайна) для автотика ничего не меняется: он такой раунд не трогает
+   * вовсе. Это НЕ общее правило — `isCollectionActive` проверяет `deadline`
+   * ПЕРВЫМ, и раунд с дедлайном позже праздника остаётся «активным» и после
+   * дня рождения; этот случай — отдельным тестом ниже, и именно там
+   * действительно срабатывает новый блокер через автотик.
+   */
+  it("прошедший день рождения без дедлайна и без единой попытки: автотик его не трогает вовсе", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "07-13");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    // Раунд без единой попытки автоотправки: `autoSentAt` не тронут, ссылка
+    // так и не появилась до самого праздника, дедлайна на раунде нет.
+    const round = db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13",
+      autoSendOn: "2026-07-10",
+    }).returning().all()[0]!;
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(sent).toEqual([]);
+    expect(getCollection(db, round.id)!.autoSentAt).toBeNull();
+  });
+
+  /**
+   * Ровно то, что находка ревью назвала: `deadline` (деньги ещё собираются
+   * дольше праздника) держит `isCollectionActive` в `true`, и автотик всё
+   * равно подбирает раунд после дня рождения — до `previewCollection`
+   * доходит, и новый блокер срабатывает через тот же путь, что и «нет
+   * ссылки»: команде ничего не уходит, админам — `autoSendFailedMessage` с
+   * причиной блокера.
+   */
+  it("прошедший день рождения, но раунд ещё активен по дедлайну — автотик ловит новый блокер", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "07-13");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const round = db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13",
+      deadline: "2026-07-20", collectUrl: "https://example.com/sbor", autoSendOn: "2026-07-10",
+    }).returning().all()[0]!;
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(sent.some((m) => m.text.includes("Сбор на подарок"))).toBe(false);
+    const warning = sent.find((m) => m.text.startsWith("⚠️"));
+    expect(warning?.to).toBe(3);
+    expect(warning?.text).toContain("День рождения уже прошёл — рассылать поздно.");
+    expect(getCollection(db, round.id)!.sendCount).toBe(0);
+  });
+
   it("сеть лежала целиком — никто ничего не узнал, и следующий тик рассылает сбор", async () => {
     // Пять таких обрывов за сентябрь 2026 (ENOTFOUND api.telegram.org на iMac).
     // Отметка о попытке стояла до отправки — и сбор на подарок пропадал молча:

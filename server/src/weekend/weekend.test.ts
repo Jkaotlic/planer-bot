@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
+import { createEmployee, archiveEmployee, setEmployeeRestrictions, setEmployeeObserver } from "../repo/employees";
 import { createShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
 
@@ -521,5 +521,54 @@ describe("«кто хочет» marks a volunteer who is away that day", () => {
     createShift(db, { date: "2026-07-20", endDate: "2026-07-24", category: "sick_leave", employeeId: worker.id, start: null, end: null });
 
     expect(interestedForSlot(db, slot.id)[0]!.absence).toBeNull();
+  });
+});
+
+// Кнопки «Беру»/«Не смогу» под оффером живут в чате вечно. `assignSlot` уже
+// отказывает выведенному из раздачи, но сам оффер мог уйти ДО того, как его
+// вывели или сделали наблюдателем — этот путь ничего не спрашивал.
+describe("confirmOffer and being excluded/observer after the offer went out", () => {
+  it("refuses to confirm once excludedFromAssignment is set, and creates no shift", () => {
+    const db = makeTestDb();
+    const mark = createEmployee(db, { displayName: "Марк" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    // Как в проде: оффер выдан без предзаписанной смены — confirmOffer сам её создаёт.
+    const assignment = createAssignment(db, { slotId: slot.id, employeeId: mark.id, hours: 8 });
+
+    setEmployeeRestrictions(db, mark.id, { excludedFromAssignment: true });
+    expect(confirmOffer(db, assignment.id, mark.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_participating" });
+    expect(listShiftsByEmployee(db, mark.id)).toHaveLength(0);
+  });
+
+  it("refuses to confirm once made an observer, and creates no shift", () => {
+    const db = makeTestDb();
+    const mark = createEmployee(db, { displayName: "Марк" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    const assignment = createAssignment(db, { slotId: slot.id, employeeId: mark.id, hours: 8 });
+
+    setEmployeeObserver(db, mark.id, true);
+    expect(confirmOffer(db, assignment.id, mark.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_participating" });
+    expect(listShiftsByEmployee(db, mark.id)).toHaveLength(0);
+  });
+
+  // Ревью раунда 1: два разных пути в `confirmOffer` — `assignment.shiftId ==
+  // null` (выше) и «админ уже назначил» (`assignSlot`, где смена ставится
+  // сразу). Гейт должен срабатывать на обоих, а не только на том, что был под
+  // рукой первым.
+  it("refuses to confirm once excluded, even on the admin-pre-assigned path (shift already exists)", () => {
+    const db = makeTestDb();
+    const mark = createEmployee(db, { displayName: "Марк" });
+    const slot = postSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00", title: "Суббота" });
+    expressInterest(db, slot.id, mark.id, TEST_TODAY);
+    const assigned = assignSlot(db, slot.id, mark.id, TEST_TODAY);
+    if (!assigned.ok) throw new Error("unreachable");
+
+    setEmployeeRestrictions(db, mark.id, { excludedFromAssignment: true });
+    expect(confirmOffer(db, assigned.assignment.id, mark.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_participating" });
+
+    // Смена, которую поставил `assignSlot`, остаётся как есть — отказ не
+    // должен ни создать вторую, ни задним числом подтвердить эту.
+    const scheduled = listShiftsByEmployee(db, mark.id).filter((s) => s.category === "weekend_work");
+    expect(scheduled).toHaveLength(1);
   });
 });

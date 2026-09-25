@@ -31,6 +31,30 @@ export function listShiftsOverlapping(db: Db, from: string, to: string): Shift[]
 }
 
 /**
+ * То же окно, что и `listShiftsOverlapping`, но одного человека — для личной
+ * ICS-подписки.
+ *
+ * Отдельная функция с `employeeId` в `where`, а не `listShiftsOverlapping(...)
+ * .filter(...)` в вызывающем коде: публичная ручка не проходится по чужим
+ * записям команды даже на секунду внутри процесса — фильтр SQL, а не JS-код,
+ * который кто-то однажды забудет вызвать до сериализации ответа.
+ */
+export function listEmployeeShiftsOverlapping(db: Db, employeeId: number, from: string, to: string): Shift[] {
+  return db
+    .select()
+    .from(shifts)
+    .where(
+      and(
+        eq(shifts.employeeId, employeeId),
+        lte(shifts.date, to),
+        gte(sql`coalesce(${shifts.endDate}, ${shifts.date})`, from),
+      ),
+    )
+    .orderBy(shifts.date, shifts.start)
+    .all();
+}
+
+/**
  * Записи работника, которые ещё не кончились на `fromDate`.
  *
  * Граница по концу записи, а не по началу: отпуск с 1 по 20 июля идёт прямо

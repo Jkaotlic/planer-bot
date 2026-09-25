@@ -69,6 +69,10 @@ export const employees = sqliteTable("employees", {
   rosterOrder: integer(),
   /** «MM-DD» — day and month, no year. See shared/src/birthday.ts for why. */
   birthDate: text(),
+  /** Ключ личной ICS-подписки. `null` — подписка выключена. Никогда не отдаётся
+   *  в `/api/me`, bootstrap или админский список — только ответом ручек
+   *  `/api/me/calendar`, той же дисциплиной, что и `inviteToken` (ledger 2026-08-11). */
+  calendarToken: text().unique(),
   createdAt: createdAt(),
 });
 
