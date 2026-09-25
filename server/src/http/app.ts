@@ -1511,18 +1511,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const namesTheEntry = ["templateId", "title", "start", "end", "category"] as const;
     const clearsUnread = existing.unrecognisedCode != null && namesTheEntry.some((field) => patch[field] !== undefined);
 
-    // Смена уезжает на другое число — висящий обмен становится невозможен, потому
-    // что меняться можно только внутри одного дня (его решение от 2026-08-03).
-    // Payload собирается ДО правки: письмо говорит «Было: … ↔ …», то есть называет
-    // те смены, о которых договаривались, а не ту, что получилась.
-    const movedToAnotherDay = patch.date !== undefined && patch.date !== existing.date;
-    const swapsToExpire = movedToAnotherDay
+    // Меняться договаривались о конкретной смене: другой день, другие часы или
+    // другой вид — это уже другая смена, и согласие на старую за неё не считается.
+    // Место и заметка смену не меняют. Payload собирается ДО правки: письмо
+    // говорит «Было: … ↔ …», то есть называет те смены, о которых договаривались,
+    // а не ту, что получилась.
+    const changesTheTrade = (["date", "endDate", "start", "end", "templateId", "category"] as const).some(
+      (field) => patch[field] !== undefined && patch[field] !== existing[field],
+    );
+    const swapsToExpire = changesTheTrade
       ? listPendingSwapsForShift(db, id).map((request) => ({ request, payload: swapAuditPayload(request) }))
       : [];
 
     const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
     if (!entry) return c.json({ error: "not_found" }, 404);
-    if (movedToAnotherDay) {
+    if (changesTheTrade) {
       const expired = new Set(expirePendingSwapsForShift(db, id).map((r) => r.id));
       for (const { request, payload } of swapsToExpire) {
         if (!expired.has(request.id)) continue;

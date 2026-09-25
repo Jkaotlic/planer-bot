@@ -387,6 +387,143 @@ describe("swap endpoints", () => {
     expect(sent.filter((s) => s.text.includes("Обмен неактуален"))).toHaveLength(0);
   });
 
+  // Меняться договаривались о конкретной смене: другой день был первым таким
+  // случаем (2026-08-17), но другие часы или другой вид — та же история. Смена,
+  // которую подвинули на 12:00–21:00 вместо 11:00–20:00, — уже не та смена,
+  // на которую соглашалась Аня, и обмен «Было: … ↔ …» больше не описывает
+  // ничего настоящего.
+  it("правка часов той же самой даты гасит висящий обмен", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const adminToken = (await (await app.request(new Request("http://x/api/auth", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(111) }),
+    }))).json()).token as string;
+
+    const anya = await worker(db, app, "Аня", 215);
+    const igor = await worker(db, app, "Игорь", 216);
+    const day = daysFromNow(2);
+    const sa = createShift(db, { date: day, start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: day, start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    // Только начало — конец не назван, значит форма его не трогает и он остаётся
+    // прежним (20:00). Одного изменившегося поля должно быть достаточно.
+    const moved = await app.request(`/api/admin/entries/${sb.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ date: day, start: "12:00" }),
+    });
+    expect(moved.status).toBe(200);
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("expired");
+    for (const chat of [215, 216]) {
+      const text = sent.filter((s) => s.chat_id === chat).map((s) => s.text).join("\n");
+      expect(text).toContain("Обмен неактуален");
+    }
+  });
+
+  it("смена пресета той же самой даты гасит висящий обмен", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const adminToken = (await (await app.request(new Request("http://x/api/auth", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(111) }),
+    }))).json()).token as string;
+
+    const anya = await worker(db, app, "Аня", 217);
+    const igor = await worker(db, app, "Игорь", 218);
+    const day = daysFromNow(2);
+    const sa = createShift(db, { date: day, start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: day, start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    const preset = db.insert(shiftTemplates).values({ name: "Вечер", category: "shift", start: "11:00", end: "20:00" }).returning().all()[0]!;
+    const moved = await app.request(`/api/admin/entries/${sb.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ date: day, templateId: preset.id }),
+    });
+    expect(moved.status).toBe(200);
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("expired");
+  });
+
+  it("правка только места не трогает висящий обмен", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const adminToken = (await (await app.request(new Request("http://x/api/auth", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(111) }),
+    }))).json()).token as string;
+
+    const anya = await worker(db, app, "Аня", 219);
+    const igor = await worker(db, app, "Игорь", 220);
+    const day = daysFromNow(2);
+    const sa = createShift(db, { date: day, start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: day, start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    const moved = await app.request(`/api/admin/entries/${sb.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ date: day, location: "Поклонка" }),
+    });
+    expect(moved.status).toBe(200);
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("pending");
+    expect(sent.filter((s) => s.text.includes("Обмен неактуален"))).toHaveLength(0);
+  });
+
+  // «Поле пришло» — не «поле поменялось»: форма мини-аппа шлёт `start` тем же
+  // значением, что уже стоит в записи (например, submit без изменений), и это
+  // не должно читаться как новая смена.
+  it("правка тем же самым временем начала обмен не трогает", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const adminToken = (await (await app.request(new Request("http://x/api/auth", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(111) }),
+    }))).json()).token as string;
+
+    const anya = await worker(db, app, "Аня", 221);
+    const igor = await worker(db, app, "Игорь", 222);
+    const day = daysFromNow(2);
+    const sa = createShift(db, { date: day, start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: day, start: "11:00", end: "20:00", employeeId: igor.w.id });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    const moved = await app.request(`/api/admin/entries/${sb.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ date: day, start: "11:00", end: "20:00" }),
+    });
+    expect(moved.status).toBe(200);
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("pending");
+    expect(sent.filter((s) => s.text.includes("Обмен неактуален"))).toHaveLength(0);
+  });
+
   // Without its own event the journal shows the sibling as `swap_cancelled` —
   // nothing, in other words, which reads exactly like the initiator withdrawing it.
   it("journals an auto-cancelled sibling as its own event, with the accepter as actor", async () => {
