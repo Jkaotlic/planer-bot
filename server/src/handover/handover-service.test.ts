@@ -363,6 +363,28 @@ describe("taking a shift", () => {
     expect(result).toEqual({ ok: false, reason: "Эта смена уже прошла" });
     expect(getShift(db, work.id)?.employeeId).toBe(anya);
   });
+
+  // Ревью раунда 1: сравнение по `shift.date` одному гасило передачу ещё
+  // идущей многодневной записи (дежурство на неделю с понедельника) — `date`
+  // остаётся понедельником всю неделю, и «Беру» в среду читалось как «смена
+  // уже прошла».
+  it("многодневная запись, начавшаяся вчера и ещё идущая — «Беру» проходит", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const work = db.insert(shifts).values({
+      date: "2026-08-10", endDate: "2026-08-16", start: "07:00", end: "16:00",
+      category: "duty", employeeId: anya,
+    }).returning().get();
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+
+    // "Сегодня" — среда, запись идёт с понедельника по воскресенье.
+    const result = await takeHandover(deps(db), handover!.id, igor, "2026-08-12");
+
+    expect(result.ok).toBe(true);
+    expect(getShift(db, work.id)?.employeeId).toBe(igor);
+  });
 });
 
 describe("cancelling", () => {

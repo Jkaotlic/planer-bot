@@ -322,7 +322,7 @@ describe("runChecklistTick", () => {
     // Однодневная запись держит прежний вид пометки — без `@дня` — иначе в день
     // выкатки сегодняшние чек-листы ушли бы второй раз.
     it("однодневная запись: одна отправка в день, вид пометки без «@»", async () => {
-      const { db, igor } = stage();
+      const { db } = stage();
 
       const { bot, sent } = fakeBot();
       await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
@@ -332,7 +332,6 @@ describe("runChecklistTick", () => {
       const rows = db.select().from(reminderLog).all().filter((r) => r.kind.startsWith("duty_checklist:"));
       expect(rows).toHaveLength(1);
       expect(rows[0]!.kind).toMatch(/^duty_checklist:\d+$/);
-      expect(igor.id).toBeGreaterThan(0);
     });
   });
 

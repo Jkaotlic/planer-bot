@@ -33,7 +33,7 @@ const AdminScreen = lazy(() => import("./screens/AdminScreen"));
 const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
-import { withError, withoutError } from "./lib/error-map";
+import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
 import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
 import { swapCandidates } from "./lib/swap-candidates";
@@ -337,7 +337,9 @@ export function App() {
     setBusySlotIds((prev) => withoutBusy(prev, slotId));
   }
 
-  /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`. */
+  /** See `runSwapAction` — same reasoning for a fixed Russian `failureMessage`,
+   *  with one named exception: `weekendOfferErrorMessage` overrides it for
+   *  `not_participating` — see that function's comment. */
   async function runOfferAction(id: number, action: (id: number) => Promise<void>, failureMessage: string) {
     setBusyOfferIds((prev) => withBusy(prev, id));
     setOfferErrors((prev) => withoutError(prev, id));
@@ -349,7 +351,7 @@ export function App() {
       },
       onActionFailed: (err) => {
         console.error("Offer action failed:", err);
-        setOfferErrors((prev) => withError(prev, id, failureMessage));
+        setOfferErrors((prev) => withError(prev, id, weekendOfferErrorMessage(err, failureMessage)));
       },
       onRefreshFailed: (err) => {
         console.error("Refresh after action failed:", err);

@@ -765,7 +765,7 @@ export async function mockRemindUnpaid(id: number) {
 }
 
 /** То, что реально уйдёт команде, и кому — теми же правилами, что у сервера. */
-function previewOf(collection: Collection): CollectionPreview {
+function previewOf(collection: Collection, today: string): CollectionPreview {
   const personName = personNameOf(collection.employeeId);
   const recipients = mockRecipients(collection.employeeId);
   const honouree = collection.employeeId != null ? EMPLOYEES.find((e) => e.id === collection.employeeId) : null;
@@ -788,7 +788,12 @@ function previewOf(collection: Collection): CollectionPreview {
 
   let blocker: string | null = null;
   if (collection.closedAt) blocker = "Сбор закрыт — рассылать нечего.";
-  else if (collection.kind === "birthday" && collection.sendCount > 0) {
+  // Та же правка, что и на сервере (`collection-service.ts`): после праздника
+  // письмо «скидываемся на подарок» читается как ошибка, а сам раунд не
+  // закрывается — деньги ещё доходят.
+  else if (collection.kind === "birthday" && collection.celebratedOn != null && collection.celebratedOn < today) {
+    blocker = "День рождения уже прошёл — рассылать поздно.";
+  } else if (collection.kind === "birthday" && collection.sendCount > 0) {
     blocker = "Уже разослано — повторная отправка отключена.";
   } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
@@ -956,7 +961,7 @@ export async function mockGetBirthdayPreview(employeeId: number): Promise<Collec
   const today = toISODate(new Date());
   const draft = birthdayRoundDraft(employeeId, today);
   if (!draft) throw new Error("У этого работника не указан день рождения");
-  return previewOf(draft);
+  return previewOf(draft, today);
 }
 
 export async function mockSaveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection> {
@@ -1017,7 +1022,7 @@ export async function mockGetCollectionPreview(id: number): Promise<CollectionPr
   await delay(180);
   const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
-  return previewOf(collection);
+  return previewOf(collection, toISODate(new Date()));
 }
 
 export async function mockSaveCollection(id: number, patch: CollectionPatch): Promise<Collection> {
@@ -1032,7 +1037,7 @@ export async function mockSendCollection(id: number): Promise<{ delivered: numbe
   await delay(400);
   const collection = readableCollection(id);
   if (!collection) throw new Error("not_found");
-  const preview = previewOf(collection);
+  const preview = previewOf(collection, toISODate(new Date()));
   if (preview.blocker) throw new Error(preview.blocker);
   const delivered = preview.recipients.length;
   collection.sentAt = new Date().toISOString();

@@ -286,7 +286,10 @@ export async function takeHandover(
     if (!taker || !canSwap(taker)) {
       return { ok: false as const, reason: "Ты сейчас не участвуешь в обменах — смену взять нельзя" };
     }
-    if (shift.date < today) {
+    // `endDate` — не `date`: у многодневной записи (дежурство на неделю) `date`
+    // остаётся понедельником всю неделю, и сравнение по нему одному гасило
+    // передачу смены на ещё идущий вторник-пятницу, как будто она уже прошла.
+    if ((shift.endDate ?? shift.date) < today) {
       return { ok: false as const, reason: "Эта смена уже прошла" };
     }
 
