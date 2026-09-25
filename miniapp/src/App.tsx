@@ -155,28 +155,31 @@ export function App() {
     apiClient
       .getBootstrap(from, to)
       .then(({ me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers }) => {
-        if (!cancelled) {
-          setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
-        }
+        if (cancelled) return;
+        setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
+
+        // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
+        // «Команда»), и тащить её в общий контракт ради одной метки значило бы
+        // менять его ради удобства этого экрана. Запущен ПОСЛЕ ответа bootstrap,
+        // а не параллельно с ним: соединение до релея — HTTP/1.1, то есть один
+        // запрос за раз, и второй, запущенный до того как первый получил ответ,
+        // не переиспользует его TLS-рукопожатие, а поднимает своё — bootstrap и
+        // сборы наперегонки делили бы то же узкое место. У админа «Сборы» —
+        // консоль, а не список для отметки, метки там не бывает вовсе
+        // (`tabBadges`), и звать ручку ради неё незачем.
+        if (me.isAdmin) return;
+        apiClient
+          .getMyCollections()
+          .then((cs) => {
+            if (!cancelled) setCollections(cs);
+          })
+          .catch((err: unknown) => {
+            console.error("Collections for badges failed:", err);
+            if (!cancelled) setCollections(null);
+          });
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
-      });
-
-    // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
-    // «Команда»), и тащить её в общий контракт ради одной метки значило бы
-    // менять его ради удобства этого экрана. Запущен здесь же, а не после
-    // bootstrap — второй запрос идёт тем же уже открытым HTTP/1.1-соединением,
-    // а не поднимает второе поверх первого TLS-рукопожатия. Отказ не показывает
-    // экран ошибки: метка — удобство, а не то, без чего приложение не работает.
-    apiClient
-      .getMyCollections()
-      .then((cs) => {
-        if (!cancelled) setCollections(cs);
-      })
-      .catch((err: unknown) => {
-        console.error("Collections for badges failed:", err);
-        if (!cancelled) setCollections(null);
       });
   }, []);
 
@@ -331,13 +334,21 @@ export function App() {
     const monday = mondayOf(new Date());
     const from = toISODate(monday);
     const to = toISODate(addDays(monday, 6));
+    // `me` живёт вне try — нужен ПОСЛЕ него, чтобы решить, звать ли сборы, а
+    // `reloadData` привязан к `visibilitychange` один раз (см. эффект ниже) и
+    // не может читать `data` из замыкания: там навсегда осталось бы значение
+    // самого первого рендера. Свежий ответ bootstrap — единственный надёжный
+    // источник актуального `isAdmin` здесь.
+    let me: Me | undefined;
     try {
       // Тем же одним запросом, что и старт: перезагрузка случается на каждом
       // переключении вкладки и возврате в приложение, то есть чаще, чем старт.
       // Пресеты перечитываются вместе с остальным, чтобы правка админа (имя или
       // цвет «Утро»/«День») доезжала и до строк работника.
       const ticket = reloadGate.current.begin();
-      const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = await apiClient.getBootstrap(from, to);
+      const bootstrap = await apiClient.getBootstrap(from, to);
+      me = bootstrap.me;
+      const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = bootstrap;
       if (!reloadGate.current.isLatest(ticket)) return;
       const teamShifts = teamSchedule.shifts;
       setData((prev) =>
@@ -352,6 +363,13 @@ export function App() {
       // already on screen is still whatever the last successful load showed.
       setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
     }
+
+    // У админа «Сборы» — консоль, а не список для отметки, метки там не
+    // бывает вовсе (`tabBadges`), и звать ручку ради неё незачем — та же
+    // причина, что у `loadBootstrap`. `me` не пришёл (bootstrap выше упал) —
+    // делаем попытку по-старому: узнать админство не от кого, а метка сборов
+    // важнее лишнего запроса при и так неудачном обновлении.
+    if (me?.isAdmin) return;
 
     // Отдельно от bootstrap-запроса выше, по той же причине, что в
     // `loadBootstrap`: правка (кто-то оплатил сбор, пришёл новый) должна

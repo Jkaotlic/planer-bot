@@ -89,6 +89,25 @@ function badgeOf(el: HTMLElement, label: string): Element | null {
 }
 
 describe("метки на TabBar реагируют на действия, а не только на bootstrap", () => {
+  // У админа «Сборы» — консоль (`AdminCollections`), а не список с кнопкой
+  // «Я перевёл»: метки там не бывает вовсе (`tabBadges` про `isAdmin` уже
+  // знает), и запрос ради метки, которая никогда не нарисуется, — лишняя
+  // поездка через медленный релей. Ни при старте, ни при фоновом обновлении
+  // (смена вкладки) `getMyCollections` для админа звать не за чем.
+  it("админ не получает запрос сборов вовсе — ни при старте, ни при фоновом обновлении", async () => {
+    const admin = bootstrapWith();
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue({ ...admin, me: { ...admin.me, isAdmin: true } } as never);
+    const getMyCollections = vi.spyOn(apiClient, "getMyCollections");
+
+    const el = await mount();
+    expect(getMyCollections).not.toHaveBeenCalled();
+
+    await act(async () => tabItem(el, "Обмены").click());
+    await settle();
+    expect(getMyCollections).not.toHaveBeenCalled();
+  });
+
+
   it("«Обмены»: принять входящий обмен убирает метку", async () => {
     vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ swaps: [INCOMING_SWAP] }) as never);
     vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([]);
