@@ -858,8 +858,12 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
   // Чекбокс шлёт `null`, чтобы выключить, или флаг `armAutoSend`, чтобы включить
   // обратно, — без готовой даты: дату считает сервер (здесь — мок) сам, тем же
   // правилом, что и при вставке ссылки, а не браузер клиента (баг из ledger).
+  // Те же условия, что у сервера (`arming` в app.ts): разосланный или закрытый
+  // раунд не вооружаем — иначе тумблер обещал бы рассылку, которой не будет.
   if (patch.autoSendOn !== undefined) collection.autoSendOn = patch.autoSendOn ?? null;
-  else if (patch.armAutoSend && collection.celebratedOn) collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
+  else if (patch.armAutoSend && collection.celebratedOn && collection.sendCount === 0 && isCollectionActive(collection, today)) {
+    collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
+  }
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn ?? null;
     if (value !== null) {
@@ -932,12 +936,12 @@ function ensureBirthdayRound(employeeId: number, today: string): Collection | nu
   return created;
 }
 
-export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
+export async function mockGetBirthdays(): Promise<{ asOf: string; birthdays: UpcomingBirthday[] }> {
   await delay(200);
   const today = toISODate(new Date());
   // Сюрприз-правило: тикающий раз в неделю пуш видят все админы, кроме
   // именинника — даже когда именинник сам админ и смотрит список.
-  return EMPLOYEES.filter((e) => e.isActive && e.birthDate && e.id !== viewerEmployeeId())
+  const birthdays = EMPLOYEES.filter((e) => e.isActive && e.birthDate && e.id !== viewerEmployeeId())
     .flatMap((employee) => {
       const occurrence = birthdayOccurrence(employee, today);
       const daysUntil = daysUntilBirthday(employee.birthDate!, today);
@@ -953,6 +957,7 @@ export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
       }];
     })
     .sort((a, b) => a.daysUntil - b.daysUntil || a.displayName.localeCompare(b.displayName, "ru"));
+  return { asOf: today, birthdays };
 }
 
 export async function mockGetBirthdayPreview(employeeId: number): Promise<CollectionPreview> {

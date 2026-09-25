@@ -36,7 +36,7 @@ import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
 import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
-import { swapCandidates } from "./lib/swap-candidates";
+import { nowOnTeamDay, swapCandidates } from "./lib/swap-candidates";
 import { tabBadges } from "./lib/tab-badges";
 
 interface AppData {
@@ -507,7 +507,10 @@ export function App() {
     const day = dayShifts?.date === proposingFor.date ? dayShifts.shifts : [];
     const dayEmployees = dayShifts?.date === proposingFor.date ? dayShifts.employees : [];
     const excludedIds = new Set(dayEmployees.filter((e) => e.excludedFromSwaps).map((e) => e.id));
-    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, new Date(), excludedIds);
+    // Командный день (`data.today`), а не часы телефона: баг из ledger — на
+    // расходящихся часах уже начавшаяся смена могла выглядеть будущей и
+    // предлагалась кандидатом на обмен, или наоборот.
+    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, nowOnTeamDay(data.today), excludedIds);
     return (
       <ProposeSwapScreen
         fromShift={proposingFor}
@@ -574,6 +577,7 @@ export function App() {
       {tab === "collections" && (
         <CollectionsTabScreen
           isAdmin={data.me.isAdmin}
+          today={data.today}
           onPaidChanged={(id, paid) =>
             setCollections((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, paid } : c)) : prev))
           }

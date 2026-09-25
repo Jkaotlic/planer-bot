@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Shift } from "../api/client";
-import { swapCandidates } from "./swap-candidates";
+import { nowOnTeamDay, swapCandidates } from "./swap-candidates";
 
 const DAY = "2026-09-10";
 const NOW = new Date("2026-09-01T10:00:00");
@@ -124,5 +124,47 @@ describe("swapCandidates", () => {
     const other = shift({ id: 9, employeeId: 7, employeeName: "Игорь Петров", start: "09:00", end: "18:00" });
     const { candidates } = swapCandidates(mine, [other], 1, NOW, new Set());
     expect(candidates.map((s) => s.id)).toEqual([9]);
+  });
+});
+
+describe("nowOnTeamDay", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("берёт день с сервера, а не с телефона", () => {
+    // Баг из ledger: телефон спешит на неделю — «сейчас» для swapCandidates
+    // считалось его часами, и уже начавшаяся сегодня смена команды выглядела
+    // как будущая (или наоборот).
+    vi.setSystemTime(new Date("2026-09-17T10:00:00"));
+    const now = nowOnTeamDay("2026-09-10");
+    expect(now.getFullYear()).toBe(2026);
+    expect(now.getMonth()).toBe(8); // сентябрь
+    expect(now.getDate()).toBe(10);
+  });
+
+  it("время суток — с телефона: сервер отдаёт только дату", () => {
+    vi.setSystemTime(new Date("2026-09-17T14:30:45.500"));
+    const now = nowOnTeamDay("2026-09-10");
+    expect(now.getHours()).toBe(14);
+    expect(now.getMinutes()).toBe(30);
+    expect(now.getSeconds()).toBe(45);
+  });
+
+  it("используется по назначению: с ним уже начавшаяся сегодня смена не предлагается кандидатом, даже если телефон думает, что сегодня — вчера", () => {
+    // Телефон отстаёт на день: по его часам смена, начавшаяся сегодня в 09:00
+    // по команде, ещё не наступила («вчера, 09:00» в будущем для «вчерашнего
+    // сейчас» 10:00 — нет, наоборот: разберём явно ниже).
+    vi.setSystemTime(new Date("2026-09-09T23:00:00")); // телефон: 9 сентября, 23:00
+    const today = "2026-09-10"; // сервер: уже 10 сентября
+    const other = shift({ id: 2 });
+    const phoneNow = new Date();
+    const withPhoneClock = swapCandidates(mine, [other], 1, phoneNow, new Set());
+    const withTeamDay = swapCandidates(mine, [other], 1, nowOnTeamDay(today, phoneNow), new Set());
+    // Смена сегодня в 09:00 по телефонным часам (9 сентября, 23:00) выглядит
+    // будущей — кандидат прошёл бы. По команднОМУ дню (10 сентября, те же
+    // 23:00 часов) смена уже 14 часов как началась и кандидатом быть не должна.
+    expect(withPhoneClock.candidates.map((s) => s.id)).toEqual([2]);
+    expect(withTeamDay.candidates.map((s) => s.id)).toEqual([]);
   });
 });

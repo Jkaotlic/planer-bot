@@ -46,7 +46,7 @@ async function mount(isAdmin: boolean) {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(CollectionsTabScreen, { isAdmin })));
+    root!.render(createElement(AppRoot, null, createElement(CollectionsTabScreen, { isAdmin, today: "2026-01-01" })));
   });
   await settle();
   return host;

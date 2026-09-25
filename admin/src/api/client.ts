@@ -641,7 +641,13 @@ export interface ApiClient {
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
   getShiftCountsCsv(from: string, to: string): Promise<string>;
   getJournal(params: { types?: string[]; actor?: number; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
-  getBirthdays(): Promise<UpcomingBirthday[]>;
+  /**
+   * `asOf` — командная дата, которой сервер посчитал список (`teamNow`, если
+   * консоль не передала свою). Экран берёт её вместо часов браузера для всего,
+   * что зависит от «сегодня» в этих карточках — баг из ledger: админ в другом
+   * часовом поясе видел статусы и минимум даты по своим часам, а не по команде.
+   */
+  getBirthdays(): Promise<{ asOf: string; birthdays: UpcomingBirthday[] }>;
   getBirthdayPreview(employeeId: number): Promise<CollectionPreview>;
   /** Сохраняет раунд ДР; на первом сохранении он и заводится. */
   saveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection>;
@@ -1065,9 +1071,8 @@ export const realClient: ApiClient = {
     return authorizedGet<JournalPage>(`/api/admin/journal?${q.toString()}`);
   },
 
-  async getBirthdays() {
-    const { birthdays } = await authorizedGet<{ birthdays: UpcomingBirthday[] }>("/api/admin/birthdays");
-    return birthdays;
+  getBirthdays() {
+    return authorizedGet<{ asOf: string; birthdays: UpcomingBirthday[] }>("/api/admin/birthdays");
   },
 
   getBirthdayPreview(employeeId) {

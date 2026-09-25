@@ -1356,8 +1356,12 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
   // Тумблер шлёт `null`, чтобы выключить, или флаг `armAutoSend`, чтобы включить
   // обратно, — без готовой даты: дату считает сервер (здесь — мок) сам, тем же
   // правилом, что и при вставке ссылки, а не браузер клиента (баг из ledger).
+  // Те же условия, что у сервера (`arming` в app.ts): разосланный или закрытый
+  // раунд не вооружаем — иначе тумблер обещал бы рассылку, которой не будет.
   if (patch.autoSendOn !== undefined) collection.autoSendOn = patch.autoSendOn ?? null;
-  else if (patch.armAutoSend && collection.celebratedOn) collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
+  else if (patch.armAutoSend && collection.celebratedOn && collection.sendCount === 0 && isCollectionActive(collection, today)) {
+    collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
+  }
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn ?? null;
     if (value !== null) {

@@ -93,7 +93,7 @@ async function click(el: HTMLElement) {
 
 describe("рассылка ДР говорит, до скольких дошло (консоль)", () => {
   it("дошло не до всех — строка про N из M видна", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([BIRTHDAY]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [BIRTHDAY] });
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([]);
     vi.spyOn(apiClient, "getBirthdayPreview").mockResolvedValue(PREVIEW);
     const send = vi.spyOn(apiClient, "sendCollection").mockResolvedValue({ delivered: 1, intended: 3, round: 1 });

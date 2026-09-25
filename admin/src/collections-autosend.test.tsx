@@ -45,7 +45,7 @@ async function settle(times = 10) {
 }
 
 async function mount(birthday: UpcomingBirthday) {
-  vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([birthday]);
+  vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [birthday] });
   vi.spyOn(apiClient, "getCollections").mockResolvedValue([]);
   vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
 
@@ -117,5 +117,15 @@ describe("автоотправка на карточке дня рождения
     const el = await mount(BIRTHDAY);
 
     expect(el.textContent).not.toContain("пока ты сам не нажмёшь");
+  });
+
+  // Баг из ledger: сервер отказывается вооружать закрытый раунд
+  // (`isCollectionActive`), а тумблер этого не знал — тап отправлял
+  // `armAutoSend`, ручка молча не сохраняла ничего и отвечала 200, будто всё
+  // получилось. Тумблера у закрытого раунда просто нет — вооружать нечего.
+  it("у закрытого раунда тумблера автоотправки нет — сервер такой не вооружает", async () => {
+    const el = await mount({ ...BIRTHDAY, campaign: { ...ROUND, autoSendOn: null, closedAt: "2026-09-02T10:00:00Z" } });
+
+    expect(el.querySelector('input[aria-label="Бот рассылает сам"]')).toBeNull();
   });
 });

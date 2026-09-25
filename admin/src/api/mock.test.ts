@@ -11,6 +11,7 @@ import {
   mockSendCollection,
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
+  mockSetCollectionClosed,
 } from "./mock";
 
 describe("admin schedule mock", () => {
@@ -55,6 +56,21 @@ describe("мок сборов", () => {
 
     await mockSendCollection(round.id);
     expect((await mockGetBirthdayPreview(BIRTHDAY_EMPLOYEE_ID)).blocker).toBe("Уже разослано — повторная отправка отключена.");
+  });
+
+  // Мок повторяет условия сервера (`arming` в app.ts): `armAutoSend` не
+  // вооружает разосланный или закрытый раунд, а молча ничего не пишет — иначе
+  // DEV-мок расходился бы с проверенным сервером, и этот баг проверялся бы
+  // только руками.
+  it("armAutoSend не вооружает закрытый раунд ДР", async () => {
+    // id 4 — «Даша Кузнецова», своя дата рождения, ещё не занята другим тестом
+    // в этом файле (id 2 уже разослан выше, тот же модуль хранит состояние).
+    const BIRTHDAY_EMPLOYEE_ID = 4;
+    const created = await mockSaveBirthdayRound(BIRTHDAY_EMPLOYEE_ID, { collectUrl: "https://example.test/dr", autoSendOn: null });
+    await mockSetCollectionClosed(created.id, true);
+
+    const after = await mockSaveBirthdayRound(BIRTHDAY_EMPLOYEE_ID, { armAutoSend: true });
+    expect(after.autoSendOn).toBeNull();
   });
 
   it("сюрприз-правило: свой сбор не виден в списке и не открывается по id — чужой виден", async () => {

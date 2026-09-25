@@ -49,7 +49,7 @@ export function AdminScreen({
 
       <SectionPanel active={section}>
         {section === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} />}
-        {section === "weekend" && <AdminWeekendScreen />}
+        {section === "weekend" && <AdminWeekendScreen today={today} />}
         {section === "employees" && <AdminEmployeesScreen />}
         {section === "checklists" && <AdminChecklists />}
         {section === "announce" && <AdminAnnounce />}

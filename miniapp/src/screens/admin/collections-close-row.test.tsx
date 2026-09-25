@@ -59,7 +59,7 @@ async function mount(rows: CollectionRow[]) {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminCollections)));
+    root!.render(createElement(AppRoot, null, createElement(AdminCollections, { today: "2026-01-01" })));
   });
   await settle();
   return host;

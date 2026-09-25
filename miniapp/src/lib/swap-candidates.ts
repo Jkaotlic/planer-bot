@@ -2,6 +2,21 @@ import { isIdenticalShift, isSwappable } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { hasStarted } from "./swaps";
 
+/**
+ * «Сейчас» для `swapCandidates`/`hasStarted`: командный ДЕНЬ (`today` из
+ * bootstrap, `data.today`), а не день телефона — но время суток берётся у
+ * телефона, потому что сервер отдаёт только дату, без часа. Смешивать можно:
+ * `hasStarted` сравнивает полный момент времени, и часть про «сегодня —
+ * позавчера» — единственная, где расхождение телефона с командой всплывало
+ * на практике (баг из ledger: телефон в другом часовом поясе или просто
+ * спешащий на день-два считал уже начавшуюся смену завтрашней и предлагал её
+ * как кандидата на обмен, или наоборот прятал ещё не начавшуюся).
+ */
+export function nowOnTeamDay(today: string, phoneNow: Date = new Date()): Date {
+  const [y, m, d] = today.split("-").map(Number) as [number, number, number];
+  return new Date(y, m - 1, d, phoneNow.getHours(), phoneNow.getMinutes(), phoneNow.getSeconds(), phoneNow.getMilliseconds());
+}
+
 export interface SwapCandidates {
   /** С кем обмен реально пройдёт — те же условия, что проверяет сервер. */
   candidates: Shift[];

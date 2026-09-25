@@ -119,10 +119,13 @@ describe("CollectionsScreen", () => {
   // рождения, и до того, ради чего экран открывают чаще всего, приходилось
   // прокручивать год чужих праздников.
   it("ставит идущие сборы выше календаря дней рождения", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([
-      { employeeId: 7, displayName: "Марк Волков", birthDateLabel: "25 августа", daysUntil: 4,
-        celebratedOn: "2026-08-25", campaign: null } as never,
-    ]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({
+      asOf: "2026-01-01",
+      birthdays: [
+        { employeeId: 7, displayName: "Марк Волков", birthDateLabel: "25 августа", daysUntil: 4,
+          celebratedOn: "2026-08-25", campaign: null } as never,
+      ],
+    });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([
       row({ collection: collection({ id: 1, title: "Кофемашина" }), title: "Кофемашина" }),
@@ -136,7 +139,7 @@ describe("CollectionsScreen", () => {
   });
 
   it("рисует активные выше закрытых и называет закрытый закрытым", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([
       row({ collection: collection({ id: 1, title: "Идёт" }), title: "Идёт" }),
@@ -169,7 +172,7 @@ describe("CollectionsScreen", () => {
   });
 
   it("«Создать» погашена, пока не введён повод", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([]);
 
@@ -187,7 +190,7 @@ describe("CollectionsScreen", () => {
   });
 
   it("строка разворачивает СВОЙ редактор — предпросмотр запрашивается по её id", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([
       row({ collection: collection({ id: 11, title: "Первый" }), title: "Первый" }),
@@ -217,7 +220,7 @@ describe("CollectionsScreen", () => {
  */
 describe("PersonPicker подключён к экрану «Сборы»", () => {
   it("клик по строке пикера уходит в create тем же employeeId, что клал <select>", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([employee({ id: 5, displayName: "Иванова Анна" })]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([]);
     const create = vi
@@ -236,7 +239,7 @@ describe("PersonPicker подключён к экрану «Сборы»", () =>
   });
 
   it("замороженный повод (команда уже прочитала, на что скидывается) блокирует и выбор человека", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([employee({ id: 5, displayName: "Иванова Анна" })]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([
       row({
