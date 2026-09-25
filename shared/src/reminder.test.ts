@@ -327,6 +327,30 @@ describe("previewReminderText", () => {
     expect(preview.ok).toBe(false);
     expect(!preview.ok && preview.error).toMatch(/погода/);
   });
+
+  // Баг из ledger (гигиена): превью всегда рисовалось с `kind === "morning"` и
+  // непустым примером соседей, даже когда админ правит текст дежурства или
+  // прочей не-рутины. В проде `reminder-service.ts` для таких видов смены
+  // (`template.category !== "shift"`) считает соседей всегда пустым списком —
+  // независимо от часов, — и строка «👥 Завтра с тобой» у дежурства никогда не
+  // появляется. Превью дежурства не должно её обещать.
+  it("у дежурства и прочей не-рутины превью не обещает соседей — их нет и в проде", () => {
+    const shift = previewReminderText("Завтра {время}. С тобой: {с кем}.", "shift");
+    expect(shift.ok && shift.text).toContain("Игорь, Марк");
+
+    const duty = previewReminderText("Завтра {время}. С тобой: {с кем}.", "duty");
+    expect(duty.ok && duty.text).toBe("Завтра 08:00–17:00. С тобой: .\n📍 Поклонка");
+    expect(duty.ok && duty.text).not.toContain("Игорь");
+
+    // Без явного `{с кем}` — автодобавленной строки тоже нет.
+    const dutyAuto = previewReminderText("{имя}, завтра {время}", "duty");
+    expect(dutyAuto.ok && dutyAuto.text).not.toContain("👥");
+  });
+
+  it("категория по умолчанию — «смена»: старые вызовы без второго аргумента не меняются", () => {
+    const preview = previewReminderText("{имя}, завтра {время}");
+    expect(preview.ok && preview.text).toContain("👥 Завтра с тобой: Игорь, Марк");
+  });
 });
 
 describe("remindsByDefault", () => {

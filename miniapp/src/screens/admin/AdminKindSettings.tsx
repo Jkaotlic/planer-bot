@@ -193,7 +193,7 @@ function ReminderRow({
 }) {
   const [text, setText] = useState(kind.reminderText ?? "");
   const trimmed = text.trim();
-  const preview = trimmed ? previewReminderText(trimmed) : null;
+  const preview = trimmed ? previewReminderText(trimmed, kind.category) : null;
 
   return (
     <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>

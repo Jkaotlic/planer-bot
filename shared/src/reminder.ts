@@ -373,12 +373,20 @@ export type ReminderPreview = { ok: true; text: string } | { ok: false; error: s
  * которые в проде дают `kind === "day"` (обычная дневная смена, многие
  * дежурства), эта строка в реальном письме не появится — здесь она показана
  * как возможность механизма, а не как гарантия для конкретного вида.
+ *
+ * `category` — категория вида смены, который редактируют («shift» по
+ * умолчанию, для обратной совместимости старых вызовов). У дежурства и прочей
+ * не-рутины (`category !== "shift"`) сервер (`reminder-service.ts`,
+ * `isNonShiftKind`) считает соседей всегда пустым списком — независимо от
+ * часов, — и строка «👥 Завтра с тобой» у них никогда не появляется. Без этого
+ * превью повторяло чужой пример соседей даже для дежурства (баг из ledger).
  */
-export function previewReminderText(template: string): ReminderPreview {
+export function previewReminderText(template: string, category: EntryCategory = "shift"): ReminderPreview {
   try {
     validateReminderTemplate(template);
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Неверный текст напоминания" };
   }
-  return { ok: true, text: renderReminderText(template, REMINDER_PREVIEW_VARS, "morning") };
+  const vars: ReminderVars = category === "shift" ? REMINDER_PREVIEW_VARS : { ...REMINDER_PREVIEW_VARS, coworkers: "" };
+  return { ok: true, text: renderReminderText(template, vars, "morning") };
 }

@@ -241,7 +241,7 @@ function ReminderRow({
 }) {
   const [text, setText] = useState(kind.reminderText ?? "");
   const trimmed = text.trim();
-  const preview = trimmed ? previewReminderText(trimmed) : null;
+  const preview = trimmed ? previewReminderText(trimmed, kind.category) : null;
   const hint = `Подстановки: ${REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст.`;
 
   return (
