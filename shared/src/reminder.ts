@@ -258,13 +258,12 @@ export function validateReminderHour(value: string): void {
  * Пример, на котором админ видит своё письмо до того, как оно уйдёт команде.
  *
  * Имя вымышленное: репозиторий публичный, и настоящих ФИО в нём быть не может
- * (`server/src/db/no-real-names.test.ts`).
- *
- * Место в примере нарочно пустое: непустое значение приписало бы строку с
- * местом и к тексту, где админ его вовсе не упоминал, — предпросмотр обязан
- * быть точным, а не оптимистичным.
+ * (`server/src/db/no-real-names.test.ts`). Место — тоже пример, а не место
+ * конкретной смены: превью не знает, для какой смены его смотрят, и показывает
+ * то же самое «Поклонка» всем — включая приписанную строку `📍 …` в конце
+ * текста без `{место}`, ровно как это будет выглядеть у настоящей смены.
  */
-export const REMINDER_PREVIEW_VARS: ReminderVars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "" };
+export const REMINDER_PREVIEW_VARS: ReminderVars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "Поклонка" };
 
 export type ReminderPreview = { ok: true; text: string } | { ok: false; error: string };
 

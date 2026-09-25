@@ -4,7 +4,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { createBot, FALLBACK_TEXT } from "./bot";
 import { BTN_ADMIN, BTN_WEEK } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -93,6 +93,19 @@ describe("ответ на обычный текст", () => {
     await bot.handleUpdate(textUpdate(2005, "второй вопрос"));
 
     expect(calls.filter((c) => c.method === "sendMessage")).toHaveLength(2);
+  });
+
+  it("админ получает подсказку с кнопкой админки в клавиатуре", async () => {
+    const db = makeTestDb();
+    const admin = linkedWorker(db, 2006);
+    setEmployeeAdmin(db, admin.id, true);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(2006, "а как посмотреть график другого человека?"));
+
+    const sent = calls.find((c) => c.method === "sendMessage")!;
+    expect(sent.payload.text).toBe(FALLBACK_TEXT);
+    expect(keyboardLabels(sent.payload)).toContain(BTN_ADMIN);
   });
 
   it("незарегистрированный получает подсказку без кнопки админки", async () => {

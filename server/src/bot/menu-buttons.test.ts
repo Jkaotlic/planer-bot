@@ -142,6 +142,20 @@ describe("постоянная клавиатура — доставка", () =>
     expect(keyboardLabels(reply.payload)).not.toContain(BTN_ADMIN);
   });
 
+  it("/start первого аллоулистнутого админа (строки ещё нет) сразу заводит ему персональное меню", async () => {
+    // Без этого первый /admin у только что созданного через /start админа
+    // появился бы в списке лишь после рестарта сервера.
+    const db = makeTestDb();
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(commandUpdate(111, "/start")); // 111 ∈ adminTelegramIds, строки ещё нет
+
+    const set = calls.find(
+      (c) => c.method === "setMyCommands" && (c.payload as any)?.scope?.chat_id === 111,
+    );
+    expect(set).toBeDefined();
+  });
+
   it("/admin от аллоулистнутого, ещё не ставшего админом в базе, сразу обновляет его меню команд", async () => {
     // Тот же промоут, что у «аллоулистнутый получает кнопку админки…» выше —
     // здесь проверяем побочный эффект на меню, а не на клавиатуру.
