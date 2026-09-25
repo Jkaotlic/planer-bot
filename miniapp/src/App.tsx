@@ -74,6 +74,10 @@ export function App() {
   // аннулирует всё, что в полёте.
   const reloadGate = useRef(createLatestRequestGate());
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
+  // Тап по своей смене в «Моих сменах» раскрывает «Кто ещё работает» под ней.
+  // Живёт здесь, не в `MyShiftsScreen`: данные дня грузятся тем же запросом,
+  // что и для «Предложить обмен» (см. эффект ниже), а сеть — забота App.
+  const [openCoworkersFor, setOpenCoworkersFor] = useState<Shift | null>(null);
   // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
   // «📌 Мероприятие» в боте открывают мини-апп сразу на нужной форме.
@@ -224,13 +228,19 @@ export function App() {
   }, [data]);
 
   useEffect(() => {
-    if (!proposingFor) {
+    // Один и тот же загрузчик обслуживает «Предложить обмен» и «Кто ещё
+    // работает»: оба спрашивают ровно один день. Совпасть по времени они не
+    // могут — `MyShiftsScreen` (где раскрывают строку) не рендерится, пока
+    // `proposingFor` задан (см. return ниже), так что активен всегда только
+    // один из двух.
+    const activeShift = proposingFor ?? openCoworkersFor;
+    if (!activeShift) {
       setDayShifts(null);
       setDayError(null);
       return;
     }
     let cancelled = false;
-    const date = proposingFor.date;
+    const date = activeShift.date;
     setDayLoading(true);
     setDayError(null);
     apiClient
@@ -248,7 +258,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [proposingFor]);
+  }, [proposingFor, openCoworkersFor]);
 
   async function refreshSwaps() {
     const swaps = await apiClient.getSwaps();
@@ -525,7 +535,13 @@ export function App() {
           today={data.today}
           shifts={data.myShifts}
           templates={data.templates}
-          onProposeSwap={setProposingFor}
+          // Обмен и «Кто ещё работает» не бывают открыты вместе (см. эффект
+          // загрузки дня выше) — уход в обмен закрывает раскрытую строку, а не
+          // оставляет её висеть на дне, которое эффект уже переключил.
+          onProposeSwap={(shift) => {
+            setOpenCoworkersFor(null);
+            setProposingFor(shift);
+          }}
           onSelfEntry={setSelfEntryMode}
           onRemindersChanged={(remindersEnabled) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
@@ -539,6 +555,14 @@ export function App() {
           onAddressChanged={({ preferredName, address }) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))
           }
+          openDay={
+            openCoworkersFor && dayShifts?.date === openCoworkersFor.date
+              ? { date: dayShifts.date, shifts: dayShifts.shifts }
+              : null
+          }
+          openDayLoading={openCoworkersFor != null && dayLoading}
+          openDayError={openCoworkersFor != null ? dayError : null}
+          onToggleCoworkers={setOpenCoworkersFor}
         />
       )}
       {/* «Команда — неделя» открывает эту вкладку недельной сеткой — и в первый
@@ -626,6 +650,11 @@ export function App() {
           setSwapErrors(new Map());
           setSlotErrors(new Map());
           setOfferErrors(new Map());
+          // «Моих смен» больше не видно — раскрытая строка и её лог всё равно
+          // пропадут при следующем входе (`MyShiftsScreen` монтируется заново),
+          // но без этого эффект загрузки дня продолжал бы держать её день в
+          // памяти и гонять на него запрос при каждом возврате в приложение.
+          setOpenCoworkersFor(null);
           // Leaving the Админ tab (or any switch) re-pulls data so edits show immediately.
           void reloadData();
         }}

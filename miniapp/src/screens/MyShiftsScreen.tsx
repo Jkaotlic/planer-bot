@@ -1,3 +1,4 @@
+import { Fragment, useState } from "react";
 import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, swapBlockReason } from "@planer/shared";
 import type { StartTab } from "@planer/shared";
@@ -6,12 +7,14 @@ import type { SelfEntryMode } from "./SelfEntryScreen";
 import { AddressField } from "../components/AddressField";
 import { CalendarSection } from "../components/CalendarSection";
 import { ChecklistCard } from "../components/ChecklistCard";
+import { DayTeamList } from "../components/DayTeamList";
 import { GreetingHero } from "../components/GreetingHero";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
 import { RemindersSwitch } from "../components/RemindersSwitch";
 import { StartTabPicker } from "../components/StartTabPicker";
 import { SelfScheduleSwitch } from "../components/SelfScheduleSwitch";
+import { coworkersOf } from "../lib/coworkers";
 import { groupUpcomingByWeek, remainingThisWeek } from "../lib/upcoming";
 import { pluralizeRu } from "../lib/shift";
 
@@ -47,6 +50,15 @@ export interface MyShiftsScreenProps {
   onSelfScheduleChanged: (enabled: boolean) => void;
   /** Keeps `me` in step when the greeting name is saved. */
   onAddressChanged: (next: { preferredName: string | null; address: string }) => void;
+  /** Расписание дня раскрытой строки — тот же загрузчик, что кормит экран
+   *  обмена (см. `App.tsx`). `null`, пока не пришло или дата не совпадает с
+   *  раскрытой строкой (предыдущий день ещё висит в памяти, пока грузится новый). */
+  openDay: { date: string; shifts: Shift[] } | null;
+  openDayLoading: boolean;
+  openDayError: string | null;
+  /** Тап по своей смене: раскрыть её лист (передаётся смена) или закрыть
+   *  (передаётся `null`) — экран сам решает, какая строка раскрыта сейчас. */
+  onToggleCoworkers: (shift: Shift | null) => void;
 }
 
 /** «Мои смены»: приветствие с остатком недели, ближайшие записи секциями по
@@ -62,7 +74,26 @@ export function MyShiftsScreen({
   onStartTabChanged,
   onSelfScheduleChanged,
   onAddressChanged,
+  openDay,
+  openDayLoading,
+  openDayError,
+  onToggleCoworkers,
 }: MyShiftsScreenProps) {
+  // Какая строка раскрыта — состояние экрана, а не App: тап переключает её
+  // локально и мгновенно (сворачивание не должно ждать сети), а сами данные
+  // дня — снаружи, по той же причине, что и у «Предложить обмен».
+  const [expandedShiftId, setExpandedShiftId] = useState<number | null>(null);
+
+  function handleRowOpen(shift: Shift) {
+    if (expandedShiftId === shift.id) {
+      setExpandedShiftId(null);
+      onToggleCoworkers(null);
+    } else {
+      setExpandedShiftId(shift.id);
+      onToggleCoworkers(shift);
+    }
+  }
+
   const weeks = groupUpcomingByWeek(shifts, today);
   const rest = remainingThisWeek(shifts, today);
   const summary =
@@ -128,14 +159,30 @@ export function MyShiftsScreen({
             {weeks.map((week) => (
               <Section key={week.key} header={week.label}>
                 {week.shifts.map((shift) => (
-                  <ShiftRow
-                    key={shift.id}
-                    shift={shift}
-                    templates={templates}
-                    onSwap={onProposeSwap}
-                    isToday={shift.date === today}
-                    swapBlockedReason={swapBlockedReason}
-                  />
+                  // `Fragment`, не `div`: `Section` считает дивайдеры по числу
+                  // ПРЯМЫХ детей (`Children.map` в её исходнике) — обёртка-`div`
+                  // добавила бы лишний узел в этот счёт и не изменила бы место
+                  // дивайдера, а `Fragment` даёт строку и раскрытый под ней лист
+                  // одной группой без лишнего DOM-узла.
+                  <Fragment key={shift.id}>
+                    <ShiftRow
+                      shift={shift}
+                      templates={templates}
+                      onSwap={onProposeSwap}
+                      onOpen={handleRowOpen}
+                      isToday={shift.date === today}
+                      swapBlockedReason={swapBlockedReason}
+                    />
+                    {expandedShiftId === shift.id && (
+                      <CoworkersPanel
+                        shift={shift}
+                        meId={me.id}
+                        openDay={openDay}
+                        loading={openDayLoading}
+                        error={openDayError}
+                      />
+                    )}
+                  </Fragment>
                 ))}
               </Section>
             ))}
@@ -175,5 +222,47 @@ export function MyShiftsScreen({
         </Section>
       </List>
     </ScreenScroll>
+  );
+}
+
+/**
+ * Раскрывающийся лист под тапнутой строкой: «Кто ещё работает» этот день.
+ *
+ * Плоский `div`, не `Cell`: `Cell`/`Tappable` несёт свой рипл- и hover-фон на
+ * весь блок — тот же дефект, что уже разбирали в «Записать себе». Свой фон
+ * этому `div` не задан нарочно: он, как и строка над ним, прямой ребёнок
+ * `Section`, а фон карточки красит именно она (`var(--tgui--section_bg_color)`
+ * на её обёртке) — задать здесь ещё и «свой» цвет означало бы гадать его
+ * заново вместо того, чтобы получить точно тот же по построению. Замер
+ * (headless, 390×844): фон блока и фон строки совпадают в обеих темах.
+ */
+function CoworkersPanel({
+  shift,
+  meId,
+  openDay,
+  loading,
+  error,
+}: {
+  shift: Shift;
+  meId: number;
+  openDay: { date: string; shifts: Shift[] } | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  const matches = openDay != null && openDay.date === shift.date;
+  const list = matches ? coworkersOf(openDay.shifts, meId) : [];
+
+  return (
+    <div style={{ padding: "2px 20px 14px", fontSize: 14, lineHeight: 1.4 }}>
+      {error ? (
+        <span style={{ color: "var(--tgui--destructive_text_color)" }}>{error}</span>
+      ) : loading || !matches ? (
+        <span style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</span>
+      ) : list.length === 0 ? (
+        <span style={{ color: "var(--tgui--hint_color)" }}>Никого, кроме тебя</span>
+      ) : (
+        <DayTeamList shifts={list} />
+      )}
+    </div>
   );
 }
