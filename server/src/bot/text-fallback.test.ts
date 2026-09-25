@@ -4,7 +4,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { createBot, FALLBACK_TEXT } from "./bot";
 import { BTN_ADMIN, BTN_WEEK } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeAdmin, archiveEmployee } from "../repo/employees";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -108,7 +108,11 @@ describe("ответ на обычный текст", () => {
     expect(keyboardLabels(sent.payload)).toContain(BTN_ADMIN);
   });
 
-  it("незарегистрированный получает подсказку без кнопки админки", async () => {
+  // `menuFor` намеренно прячет клавиатуру от незарегистрированного: жать ему
+  // нечего, а «Мои смены» привели бы в мини-апп, который ответит 403. Подсказка
+  // идёт тем же путём (`replyWithMenu`), что и весь остальной бот — второй копии
+  // этого правила в файле быть не должно.
+  it("незарегистрированный получает подсказку вовсе без клавиатуры", async () => {
     const db = makeTestDb();
     const { bot, calls } = testBot(db);
 
@@ -116,7 +120,20 @@ describe("ответ на обычный текст", () => {
 
     const sent = calls.find((c) => c.method === "sendMessage")!;
     expect(sent.payload.text).toBe(FALLBACK_TEXT);
-    expect(keyboardLabels(sent.payload)).not.toContain(BTN_ADMIN);
+    expect(keyboardLabels(sent.payload)).toBeNull();
+  });
+
+  it("архивный получает подсказку вовсе без клавиатуры", async () => {
+    const db = makeTestDb();
+    const worker = linkedWorker(db, 3002);
+    archiveEmployee(db, worker.id, "2026-01-01");
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(3002, "я всё ещё тут?"));
+
+    const sent = calls.find((c) => c.method === "sendMessage")!;
+    expect(sent.payload.text).toBe(FALLBACK_TEXT);
+    expect(keyboardLabels(sent.payload)).toBeNull();
   });
 
   it("неизвестная команда тоже получает подсказку — grammY не перехватывает её раньше", async () => {

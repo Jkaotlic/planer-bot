@@ -1249,12 +1249,13 @@ export function createBot(deps: BotDeps): Bot {
         // Свежая клавиатура заодно заменяет старую раскладку с web_app-кнопкой
         // (см. `planer-bot-open-questions`: «старая клавиатура»). Кулдаун —
         // чтобы пять сообщений подряд не стали пятью одинаковыми ответами.
+        // Клавиатуру — через `replyWithMenu`/`menuFor`, а не свою копию правила:
+        // незарегистрированному и архивному она не положена (жать им нечего),
+        // и второе решение о том же самом здесь только разъехалось бы с первым.
         const last = lastFallbackAt.get(ctx.from.id) ?? 0;
         if (Date.now() - last >= FALLBACK_COOLDOWN_MS) {
           lastFallbackAt.set(ctx.from.id, Date.now());
-          const who = acting(ctx.from.id);
-          const isAdminNow = who.ok && actsAsAdmin(who.me, ctx.from.id);
-          await ctx.reply(FALLBACK_TEXT, { reply_markup: mainKeyboard({ isAdmin: isAdminNow }) });
+          await replyWithMenu(ctx, FALLBACK_TEXT);
         }
       }
     }
