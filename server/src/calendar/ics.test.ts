@@ -81,6 +81,27 @@ describe("buildIcs", () => {
     expect(unfold(ics)).toContain("LOCATION:Поклонка\\nвторой этаж");
   });
 
+  // Форма могла прийти с Windows: `\r\n`. Голый `\r` в property RFC 5545 не
+  // разрешает, и он не должен долетать до файла необработанным.
+  it("нормализует \\r\\n в один перенос перед экранированием", () => {
+    const ics = buildIcs([entry({ id: 61, location: "Поклонка\r\nвторой этаж" })], {
+      tz: TZ,
+      nowMs: NOW_MS,
+      calName: "Мои смены",
+    });
+    expect(unfold(ics)).toContain("LOCATION:Поклонка\\nвторой этаж");
+    expect(ics).not.toContain("\rвторой");
+  });
+
+  it("нормализует одиночный \\r (старый Mac) в перенос", () => {
+    const ics = buildIcs([entry({ id: 62, location: "Поклонка\rвторой этаж" })], {
+      tz: TZ,
+      nowMs: NOW_MS,
+      calName: "Мои смены",
+    });
+    expect(unfold(ics)).toContain("LOCATION:Поклонка\\nвторой этаж");
+  });
+
   it("сворачивает длинную строку по 75 октетам, продолжение — с пробела, склейка даёт исходное", () => {
     const longSummary = "Дежурство на смене выходного дня в главном корпусе с полным списком обязанностей и передачей ключей";
     const ics = buildIcs([entry({ id: 7, summary: longSummary })], {

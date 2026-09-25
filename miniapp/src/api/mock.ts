@@ -139,14 +139,23 @@ export async function mockSetPreferredName(preferredName: string | null): Promis
  */
 let mockCalendarUrl: string | null = null;
 
-/** `?calendarError` — тот же приём, что `?theme`/`?fs` в mockEnv.ts: ручной
- *  переключатель, чтобы посмотреть на отказ ручки без правки кода. */
+/** `?calendarError`/`?calendarLoadError` — тот же приём, что `?theme`/`?fs` в
+ *  mockEnv.ts: ручной переключатель, чтобы посмотреть на отказ ручки без
+ *  правки кода. Разные флаги на чтение и на запись — это два разных экрана
+ *  (см. CalendarSection: отказ чтения красит «Повторить», отказ записи —
+ *  ошибку рядом с кнопкой действия), и один сценарий не должен маскировать
+ *  другой. */
 function calendarErrorForced(): boolean {
   return typeof window !== "undefined" && new URLSearchParams(window.location.search).has("calendarError");
 }
 
+function calendarLoadErrorForced(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).has("calendarLoadError");
+}
+
 export async function mockGetCalendarLink(): Promise<string | null> {
   await delay(150);
+  if (calendarLoadErrorForced()) throw new Error("Сеть недоступна");
   return mockCalendarUrl;
 }
 

@@ -52,6 +52,39 @@ describe("раздел «Календарь»", () => {
     expect(el.textContent).not.toContain("Отключить");
   });
 
+  /**
+   * Отказ первого запроса — это «не знаем, подключено ли», а не «точно
+   * выключено». Показать здесь «Подключить» значило бы дать кнопку, которая
+   * при реально существующей подписке молча пересоздаёт токен (POST заводит
+   * новый всегда) — человек не просил менять ссылку, просто не дождался
+   * ответа на чтение.
+   */
+  it("отказ первого запроса — ошибка и «Повторить», а не «Подключить»", async () => {
+    const get = vi.spyOn(apiClient, "getCalendarLink").mockRejectedValue(new Error("Сеть недоступна"));
+    const el = await mount();
+
+    expect(el.textContent).toContain("Сеть недоступна");
+    expect(el.textContent).toContain("Повторить");
+    expect(el.textContent).not.toContain("Подключить");
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("«Повторить» зовёт getCalendarLink заново и показывает результат", async () => {
+    const get = vi
+      .spyOn(apiClient, "getCalendarLink")
+      .mockRejectedValueOnce(new Error("Сеть недоступна"))
+      .mockResolvedValueOnce("https://x.example.com/cal/abc123.ics");
+    const el = await mount();
+    expect(el.textContent).toContain("Повторить");
+
+    await act(async () => buttonWithText(el, "Повторить").click());
+    await settle();
+
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(el.textContent).toContain("Добавить в календарь");
+    expect(el.textContent).not.toContain("Повторить");
+  });
+
   it("тап «Подключить» зовёт createCalendarLink и показывает управление ссылкой", async () => {
     vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue(null);
     const create = vi.spyOn(apiClient, "createCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
@@ -176,6 +209,36 @@ describe("раздел «Календарь»", () => {
       const input = el.querySelector<HTMLInputElement>("input");
       expect(input).not.toBeNull();
       expect(input!.value).toBe("https://x.example.com/cal/abc123.ics");
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  /**
+   * Таймер «Скопировано ✓» (1500мс) не должен звать `setState` после того, как
+   * компонент уже размонтирован — раздел закрывают свайпом на другую вкладку
+   * быстрее, чем таймер успевает сработать.
+   */
+  it("таймер сброса «Скопировано ✓» гасится при размонтировании", async () => {
+    vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+    try {
+      const el = await mount();
+      await act(async () => buttonWithText(el, "Скопировать ссылку").click());
+      await settle();
+      expect(el.textContent).toContain("Скопировано");
+
+      const callsBeforeUnmount = clearTimeoutSpy.mock.calls.length;
+      await act(async () => root!.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+
+      expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(callsBeforeUnmount);
     } finally {
       if (original) Object.defineProperty(navigator, "clipboard", original);
       else delete (navigator as { clipboard?: unknown }).clipboard;

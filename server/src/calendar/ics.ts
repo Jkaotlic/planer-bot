@@ -41,11 +41,18 @@ function formatDateOnly(date: string): string {
 }
 
 /**
- * Экранирование текстовых полей по RFC 5545: обратный слэш — первым, иначе
- * слэш, вставленный экранированием переноса строки, тут же удвоился бы сам.
+ * Экранирование текстовых полей по RFC 5545.
+ *
+ * Переносы строк нормализуются в `\n` первым делом: `location`/`note` часто
+ * приходят из формы, набранной на Windows (`\r\n`), а голый `\r` в теле
+ * property RFC 5545 не разрешает — не нормализовав его, мы вписали бы в файл
+ * управляющий символ, который не экранируется ничем из идущего дальше.
+ * Обратный слэш экранируется следующим, до всего остального: слэш, который
+ * вставит экранирование переноса строки, иначе тут же удвоился бы сам.
  */
 function escapeText(text: string): string {
   return text
+    .replace(/\r\n?/g, "\n")
     .replace(/\\/g, "\\\\")
     .replace(/\n/g, "\\n")
     .replace(/,/g, "\\,")
@@ -86,6 +93,15 @@ function foldLine(line: string): string {
 function buildEvent(entry: IcsEntry, opts: BuildIcsOptions): string[] {
   const lines: string[] = ["BEGIN:VEVENT", `UID:shift-${entry.id}@planer`, `DTSTAMP:${formatUtc(opts.nowMs)}`];
 
+  // `endDate` игнорируется в этой ветке, и запись без `end` не получает
+  // `DTEND` вовсе — оба намеренно, не пропуск. Категории, у которых бывает
+  // `start` (`countsForBalance`), обязаны иметь и `end` (`entryTimesError`
+  // в entry-schema.ts), а диапазоном (`endDate !== date`) по той же схеме
+  // пишутся только отсутствия без времени (`entrySpanError`) — значит
+  // «со временем» и «на несколько дней» в этих данных не пересекаются.
+  // Если когда-нибудь появится путь в обход схемы (импорт, ручная правка
+  // базы), эта функция тихо промолчит про второй день и про открытый конец,
+  // а не подставит что-то на угад.
   if (entry.start) {
     const startMs = shiftStartMs({ date: entry.date, start: entry.start }, opts.tz);
     lines.push(`DTSTART:${formatUtc(startMs)}`);
