@@ -342,6 +342,35 @@ describe("события сборов", () => {
     expect(again.lines).toContain("рассылка №3");
   });
 
+  // Баг из ledger: `delivered === 0` рисовался как «Разослан сбор — доставлено
+  // 0 из 2» — провал выглядел успехом в ленте. Ни один сотрудник не должен
+  // спутать это с реальной рассылкой.
+  it("провал рассылки (0 доставлено) не выглядит успехом", () => {
+    const view = describeAuditEvent({
+      type: "collection_sent",
+      payload: { title: "Кофемашина", round: 1, delivered: 0, intended: 2 },
+    });
+    expect(view.title).toBe("Сбор не разослан");
+    expect(view.lines).toContain("не дошло ни до кого (0 из 2)");
+  });
+
+  // `round` берётся как есть: подмена отсутствующего/нулевого раунда на 1
+  // раньше маскировала бы, что раунда в payload не было вовсе — а сама
+  // строка «рассылка №…» просто не должна рисоваться без раунда.
+  it("round 0/отсутствует — без подмены на 1, строка «рассылка №…» не рисуется", () => {
+    const withoutRound = describeAuditEvent({
+      type: "collection_sent",
+      payload: { title: "Кофемашина", delivered: 5, intended: 5 },
+    });
+    expect(withoutRound.lines.some((l) => l.startsWith("рассылка №"))).toBe(false);
+
+    const zeroRound = describeAuditEvent({
+      type: "collection_sent",
+      payload: { title: "Кофемашина", round: 0, delivered: 5, intended: 5 },
+    });
+    expect(zeroRound.lines.some((l) => l.startsWith("рассылка №"))).toBe(false);
+  });
+
   it("«закрыт» и «открыт заново» — разные заголовки", () => {
     expect(describeAuditEvent({ type: "collection_closed", payload: { title: "Кофемашина", closed: true } }).title)
       .toBe("Сбор закрыт");
