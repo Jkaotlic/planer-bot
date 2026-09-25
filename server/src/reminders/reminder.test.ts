@@ -753,4 +753,71 @@ describe("«Завтра с тобой»: кто ещё работает в эт
     const anyaMsg = sent.find((s) => s.chat_id === 954)!;
     expect(anyaMsg.text).not.toContain("👥");
   });
+
+  it("дежурство в ранние часы (07:00–16:00) — без «Завтра с тобой», даже если сосед есть", async () => {
+    // Ловит регресс с первого прогона ревью: дежурство — не то же самое, что
+    // «kind === day». Дежурство в 07:00 — это «early» (та же граница, что у
+    // reminderKind), и старый гейт `kind === "day" ? [] : ...` пропускал его.
+    // Категорию решает вид смены (template.category), а не часы.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 956);
+    const igor = linkedEmployee(db, "Игорь", 957);
+    const duty = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "07:00", end: "16:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    createShift(db, {
+      date: TOMORROW, start: "07:00", end: "16:00", category: "duty", employeeId: anya.id, templateId: duty.id,
+    });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id }); // пересекается по часам
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 956)!;
+    expect(anyaMsg.text).not.toContain("👥");
+  });
+
+  it("свой текст дежурства с {с кем} — пусто даже в ранние часы", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 958);
+    const igor = linkedEmployee(db, "Игорь", 959);
+    const duty = db
+      .insert(shiftTemplates)
+      .values({
+        name: "Дежурство · Поклонка", category: "duty", start: "07:00", end: "16:00", sendReminder: true,
+        reminderText: "Дежурство. С тобой: {с кем}.",
+      })
+      .returning()
+      .all()[0]!;
+    createShift(db, {
+      date: TOMORROW, start: "07:00", end: "16:00", category: "duty", employeeId: anya.id, templateId: duty.id,
+    });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 958)!;
+    expect(anyaMsg.text).toBe("Дежурство. С тобой: .");
+  });
+
+  it("сосед с двумя пересекающимися записями за день попадает в список один раз", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 960);
+    const igor = linkedEmployee(db, "Игорь", 961);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    // У Игоря две пересекающиеся с Аней записи в этот день (например, смена и
+    // подработка рядом) — без дедупа он попал бы в перечень дважды.
+    createShift(db, { date: TOMORROW, start: "09:00", end: "12:00", employeeId: igor.id });
+    createShift(db, { date: TOMORROW, start: "13:00", end: "16:00", employeeId: igor.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 960)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
+    expect(anyaMsg.text).not.toContain("Игорь, Игорь");
+  });
 });

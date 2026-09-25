@@ -104,14 +104,6 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
 }
 
 /**
- * Отрезок дежурства, в который попадает эта запись, — или `undefined`, если
- * запись не дежурство и отрезка у неё нет.
- *
- * Без `templateId` отрезок не считается: связать «то же самое дежурство» между
- * двумя днями больше нечем, а угадывать по названию значило бы склеить два
- * разных дежурства в одном месте.
- */
-/**
  * Кто ещё работает в этот день — для строки «Завтра с тобой».
  *
  * Только записи с другим `employeeId` и заданными часами (отсутствия — вроде
@@ -119,20 +111,36 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
  * пересекается со сменой владельца (`shiftsOverlap`, а не просто «тот же
  * день»: сосед с 18:00 не «с тобой», если твоя смена кончилась в 17:00).
  * Имя — через `addressOf`, как и у самого адресата письма.
+ *
+ * Дедуп по `employeeId`, а не по имени: у одного человека в этот день может
+ * стоять больше одной пересекающейся записи (например, дежурство и подработка
+ * рядом), и без дедупа он попал бы в перечень дважды под одним и тем же именем.
  */
 function coworkerNamesFor(db: Db, shift: { date: string; start: string; end: string; employeeId: number | null }): string[] {
   const dayShifts = listShiftsInRange(db, shift.date, shift.date);
+  const seen = new Set<number>();
   const names: string[] = [];
   for (const other of dayShifts) {
     if (other.employeeId == null || other.employeeId === shift.employeeId) continue;
     if (other.start == null || other.end == null) continue;
+    if (seen.has(other.employeeId)) continue;
     if (!shiftsOverlap({ date: shift.date, start: shift.start, end: shift.end }, { date: other.date, start: other.start, end: other.end })) continue;
     const person = getEmployeeById(db, other.employeeId);
-    if (person) names.push(addressOf(person));
+    if (!person) continue;
+    seen.add(other.employeeId);
+    names.push(addressOf(person));
   }
   return names;
 }
 
+/**
+ * Отрезок дежурства, в который попадает эта запись, — или `undefined`, если
+ * запись не дежурство и отрезка у неё нет.
+ *
+ * Без `templateId` отрезок не считается: связать «то же самое дежурство» между
+ * двумя днями больше нечем, а угадывать по названию значило бы склеить два
+ * разных дежурства в одном месте.
+ */
 function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
   if (!template || template.category === "shift" || shift.employeeId == null || shift.templateId == null) return undefined;
   const until = addDaysIso(shift.date, MAX_DUTY_RUN_DAYS);
@@ -171,12 +179,23 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
     // формулировках его нет ни у одного вида смены — распоряжаться чужим
     // будильником письмо не должно.
     const location = shift.location;
-    // «Завтра с тобой» — только у ранней, утренней, вечерней и ночной (решение
-    // владельца от 2026-09-25). У дневных видов и дежурств (kind === "day")
-    // соседей вообще не считаем: без этой проверки дежурство получило бы
-    // список людей, которые для него не новость — те же коллеги на тех же
-    // дневных часах, что и всегда.
-    const coworkers = kind === "day" ? [] : coworkerNamesFor(db, { date: shift.date, start, end, employeeId: shift.employeeId });
+    // «Завтра с тобой» — только у смен категории «смена» (не у дежурств и
+    // прочей не-рутины) и только для ранней, утренней, вечерней и ночной
+    // (решение владельца от 2026-09-25).
+    //
+    // Дежурство НЕ всегда день: Поклонка в 07:00–16:00 — то же дежурство, что и
+    // 09:00–18:00, и по одним часам их не отличить (`kind` для первого — уже
+    // "early", а не "day"). Гейта по `kind === "day"` одного было недостаточно —
+    // дежурство в ранние или поздние часы получало бы список соседей, которые
+    // для дежурного не новость: он и так каждый раз выходит в те же часы, что и
+    // обычная смена. Категорию решает вид смены (`template.category`), а без
+    // него — решать нечем, и остаётся только правило по `kind` (как и везде
+    // выше в этой функции).
+    const isNonShiftKind = template != null && template.category !== "shift";
+    const coworkers =
+      kind === "day" || isNonShiftKind
+        ? []
+        : coworkerNamesFor(db, { date: shift.date, start, end, employeeId: shift.employeeId });
     const text = custom
       ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers) }, kind)
       : buildReminderText({ name, kind, timeRange, what, until, location, coworkers });

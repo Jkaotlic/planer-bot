@@ -5,7 +5,7 @@ import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
 import { getShift } from "../repo/shifts";
 import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
-import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry } from "./handover-service";
+import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, escalate } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
 import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
@@ -495,7 +495,7 @@ describe("выключенный вид фильтрует «забрали», �
 // собирается в `notifyAdminsAlways`, за фейковым `messenger` из `deps()` её не
 // увидеть.
 describe("эскалация несёт кнопку «Открыть график»", () => {
-  it("web_app.url ведёт на график нужной даты", async () => {
+  it("рождение без свободных (startHandovers): web_app.url ведёт на график нужной даты", async () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня", inviteToken: "i-anya3", isAdmin: true });
     linkTelegramAccount(db, "i-anya3", 311);
@@ -513,6 +513,34 @@ describe("эскалация несёт кнопку «Открыть графи
     const rows = msg.reply_markup!.inline_keyboard;
     expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
       "https://example.com/app/?screen=schedule&date=2026-08-14",
+    );
+  });
+
+  // Второй путь той же кнопки: не рождение, а сама лестница (`escalate`, зовёт
+  // её `handover-tick.ts` через N часов без ответа). Найдено при ревью раунда
+  // 1 — фейки `deps()` роняли `action` молча, и этот путь оставался без теста.
+  it("лестница (escalate): web_app.url ведёт на график той же даты смены", async () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "Аня", inviteToken: "i-anya5", isAdmin: true });
+    linkTelegramAccount(db, "i-anya5", 511);
+    const igor = person(db, "Игорь");
+    person(db, "Марк"); // свободен → handover рождается «offered», не эскалирует сам
+    const { bot, wire } = testBot();
+    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db) };
+
+    const sick = sickLeave(db, igor, "2026-08-15", "2026-08-15");
+    shift(db, igor, "2026-08-15");
+    const [handover] = await startHandovers(realDeps, { sickEntry: sick, employeeId: igor });
+    expect(handover!.status).toBe("offered");
+    expect(wire).toHaveLength(0); // никакого письма админам пока — это birth-путь молчал
+
+    const outcome = await escalate(realDeps, handover!.id);
+
+    expect(outcome).toEqual({ ok: true });
+    const msg = wire.find((m) => m.chat_id === 511)!;
+    const rows = msg.reply_markup!.inline_keyboard;
+    expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
+      "https://example.com/app/?screen=schedule&date=2026-08-15",
     );
   });
 });
