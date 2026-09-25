@@ -116,29 +116,36 @@ export function buildReminderText(p: {
   timeRange: string;
   what?: string;
   until?: string;
+  location?: string | null;
 }): string {
   const { name, kind, timeRange, what, until } = p;
-  switch (kind) {
-    case "early":
-      return `🌄 Привет, ${name}! Завтра ранняя смена — ${timeRange}. Вставать совсем рано, так что ложись сегодня пораньше. Тёплого утра и лёгкой смены ☕`;
-    case "morning":
-      return `🌅 Привет, ${name}! Завтра у тебя утренняя смена — ${timeRange}. Ложись сегодня пораньше, и пусть утро будет добрым ☕`;
-    case "night":
-      return `🌙 Привет, ${name}! Завтра ночная смена — ${timeRange}. Отдохни днём, продумай дорогу домой и возьми с собой что-нибудь вкусное. Ты справишься 💪`;
-    case "evening":
-      return `🌇 Привет, ${name}! Завтра вечерняя смена — ${timeRange}. Утро в твоём распоряжении, высыпайся вволю. До встречи вечером 💛`;
-    case "day":
-    default:
-      if (what && until) {
-        // «Завтра дежурство» про пятидневный отрезок — неправда, по которой
-        // человек спланирует только понедельник.
-        return `👋 Привет, ${name}! С завтрашнего дня и по ${formatDayMonth(until)} у тебя «${what}» — ${timeRange}. Хорошей недели, ты справишься 🍀`;
-      }
-      if (what) {
-        return `👋 Привет, ${name}! Завтра у тебя «${what}» — ${timeRange}. Хорошего дня и лёгкой смены 🍀`;
-      }
-      return `👋 Привет, ${name}! Напоминаем: завтра смена — ${timeRange}. Хорошего дня и лёгкой смены 🍀`;
+  function baseText(): string {
+    switch (kind) {
+      case "early":
+        return `🌄 Привет, ${name}! Завтра ранняя смена — ${timeRange}. Вставать совсем рано, так что ложись сегодня пораньше. Тёплого утра и лёгкой смены ☕`;
+      case "morning":
+        return `🌅 Привет, ${name}! Завтра у тебя утренняя смена — ${timeRange}. Ложись сегодня пораньше, и пусть утро будет добрым ☕`;
+      case "night":
+        return `🌙 Привет, ${name}! Завтра ночная смена — ${timeRange}. Отдохни днём, продумай дорогу домой и возьми с собой что-нибудь вкусное. Ты справишься 💪`;
+      case "evening":
+        return `🌇 Привет, ${name}! Завтра вечерняя смена — ${timeRange}. Утро в твоём распоряжении, высыпайся вволю. До встречи вечером 💛`;
+      case "day":
+      default:
+        if (what && until) {
+          // «Завтра дежурство» про пятидневный отрезок — неправда, по которой
+          // человек спланирует только понедельник.
+          return `👋 Привет, ${name}! С завтрашнего дня и по ${formatDayMonth(until)} у тебя «${what}» — ${timeRange}. Хорошей недели, ты справишься 🍀`;
+        }
+        if (what) {
+          return `👋 Привет, ${name}! Завтра у тебя «${what}» — ${timeRange}. Хорошего дня и лёгкой смены 🍀`;
+        }
+        return `👋 Привет, ${name}! Напоминаем: завтра смена — ${timeRange}. Хорошего дня и лёгкой смены 🍀`;
+    }
   }
+  // Место — приписка, а не часть формулировки: у каждого вида смены и так своя
+  // фраза, и городить пятое дублирование текста ради одной строки в конце незачем.
+  const loc = p.location?.trim();
+  return loc ? `${baseText()}\n📍 ${loc}` : baseText();
 }
 
 export class ReminderTextError extends Error {
@@ -155,7 +162,7 @@ export class ReminderTextError extends Error {
  * подсказка на экране, проверка и сама подстановка перечисляют одно и то же, и
  * разойдись они — админ получит отказ на подстановку, которую ему же и предложили.
  */
-export const REMINDER_PLACEHOLDERS = ["имя", "время", "подъём"] as const;
+export const REMINDER_PLACEHOLDERS = ["имя", "время", "подъём", "место"] as const;
 
 /** Длиннее одного экрана телефона напоминание перестаёт читаться. */
 export const REMINDER_TEXT_MAX = 400;
@@ -170,6 +177,7 @@ export interface ReminderVars {
   name: string;
   timeRange: string;
   wake: string;
+  location: string;
 }
 
 /**
@@ -189,6 +197,7 @@ const PLACEHOLDER_VALUES: Record<string, (vars: ReminderVars) => string> = {
   имя: (vars) => vars.name,
   время: (vars) => vars.timeRange,
   подъем: (vars) => vars.wake,
+  место: (vars) => vars.location,
 };
 
 /**
@@ -216,10 +225,15 @@ export function validateReminderTemplate(text: string): void {
 
 /** Подставляет значения в свой текст напоминания. Проверку делает вызывающий. */
 export function renderReminderText(template: string, vars: ReminderVars): string {
-  return template.replace(PLACEHOLDER_RE, (whole, raw: string) => {
+  const rendered = template.replace(PLACEHOLDER_RE, (whole, raw: string) => {
     const value = PLACEHOLDER_VALUES[normalisePlaceholder(raw)];
     return value ? value(vars) : whole;
   });
+  const loc = vars.location.trim();
+  // Место — то, что накануне нужнее всего, после времени. Админ, написавший свой
+  // текст до появления `{место}`, не должен лишать людей адреса по незнанию.
+  const mentions = [...template.matchAll(PLACEHOLDER_RE)].some((m) => normalisePlaceholder(m[1]) === "место");
+  return loc && !mentions ? `${rendered}\n📍 ${loc}` : rendered;
 }
 
 /**
@@ -245,8 +259,12 @@ export function validateReminderHour(value: string): void {
  *
  * Имя вымышленное: репозиторий публичный, и настоящих ФИО в нём быть не может
  * (`server/src/db/no-real-names.test.ts`).
+ *
+ * Место в примере нарочно пустое: непустое значение приписало бы строку с
+ * местом и к тексту, где админ его вовсе не упоминал, — предпросмотр обязан
+ * быть точным, а не оптимистичным.
  */
-export const REMINDER_PREVIEW_VARS: ReminderVars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00" };
+export const REMINDER_PREVIEW_VARS: ReminderVars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "" };
 
 export type ReminderPreview = { ok: true; text: string } | { ok: false; error: string };
 

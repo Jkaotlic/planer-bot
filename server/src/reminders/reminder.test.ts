@@ -306,6 +306,21 @@ describe("who a reminder is addressed to", () => {
     expect(sent[0]!.text).toContain("Привет, Петров Алексей!");
   });
 
+  it("напоминание называет место смены и несёт кнопку «Мои смены»", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 940);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, location: "Поклонка" });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" }, "https://example.com");
+
+    expect(sent[0]!.text).toContain("📍 Поклонка");
+    const markup = JSON.stringify((sent[0] as unknown as { reply_markup?: unknown }).reply_markup);
+    expect(markup).toContain("📋 Мои смены");
+    expect(markup).toContain("https://example.com/app/");
+    expect(markup).toContain("reminders:off");
+  });
+
   it("carries the button that turns these off", async () => {
     // The moment somebody wants reminders to stop is the moment one is in front
     // of them — the switch has to be reachable from the message itself.

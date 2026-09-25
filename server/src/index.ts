@@ -61,7 +61,7 @@ setInterval(() => {
   if (ticking) return;
   ticking = true;
   runTicksIndependently([
-    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz)) },
+    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
     // Четвёртым в тот же массив: чек-лист уходит с началом смены дежурного, а
     // не по общему часу, поэтому ему нужен тот же пятиминутный тик.
     { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },

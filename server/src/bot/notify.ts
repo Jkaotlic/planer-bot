@@ -221,8 +221,13 @@ export function isPermanentSendFailure(err: unknown): boolean {
  * they didn't know existed — the moment somebody wants these to stop is the
  * moment one is in front of them, so that is where the button belongs.
  */
-export async function notifyReminder(bot: Bot, telegramUserId: number, text: string): Promise<SendOutcome> {
-  const kb = new InlineKeyboard().text("🔕 Отключить напоминания", "reminders:off");
+export async function notifyReminder(bot: Bot, telegramUserId: number, text: string, appUrl?: string): Promise<SendOutcome> {
+  const kb = new InlineKeyboard();
+  // Вечер накануне — момент, когда человек понимает, что выйти не может. Под
+  // рукой должно быть действие, а не только «замолчи». Инлайн-`web_app`, не
+  // клавиатурная: только она несёт подпись initData (см. `keyboard.ts`).
+  if (appUrl) kb.webApp("📋 Мои смены", appUrl).row();
+  kb.text("🔕 Отключить напоминания", "reminders:off");
   try {
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
     return { ok: true };

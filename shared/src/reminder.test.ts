@@ -141,7 +141,7 @@ describe("validateReminderTemplate", () => {
 });
 
 describe("renderReminderText", () => {
-  const vars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00" };
+  const vars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "" };
 
   it("подставляет имя, время и подъём", () => {
     expect(renderReminderText("{имя}, завтра {время}, подъём в {подъём}", vars)).toBe(
@@ -160,6 +160,33 @@ describe("renderReminderText", () => {
 
   it("оставляет текст без подстановок нетронутым", () => {
     expect(renderReminderText("Завтра смена, не проспи", vars)).toBe("Завтра смена, не проспи");
+  });
+
+  it("стандартный текст кончается строкой с местом", () => {
+    const t = buildReminderText({ name: "Аня", kind: "morning", timeRange: "08:00–17:00", location: "Поклонка" });
+    expect(t.endsWith("\n📍 Поклонка")).toBe(true);
+  });
+
+  it("без места строки 📍 нет", () => {
+    expect(buildReminderText({ name: "Аня", kind: "morning", timeRange: "08:00–17:00" })).not.toContain("📍");
+  });
+
+  it("{место} подставляется и не дублируется в конце", () => {
+    const t = renderReminderText("Завтра {время}, {Место}", { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "Поклонка" });
+    expect(t).toBe("Завтра 08:00–17:00, Поклонка");
+  });
+
+  it("свой текст без {место} получает строку с местом в конце", () => {
+    const t = renderReminderText("Завтра {время}", { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "Поклонка" });
+    expect(t).toBe("Завтра 08:00–17:00\n📍 Поклонка");
+  });
+
+  it("{место} при пустом месте — пустая строка, без 📍", () => {
+    expect(renderReminderText("Где: {место}.", { name: "Аня", timeRange: "x", wake: "y", location: "" })).toBe("Где: .");
+  });
+
+  it("validateReminderTemplate принимает {место}", () => {
+    expect(() => validateReminderTemplate("Завтра в {место}")).not.toThrow();
   });
 });
 
