@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { recordApi, stubBotInfo } from "./testbot";
 import { Bot } from "grammy";
-import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapCancelledText, swapAcceptedAdminText, dutyNoticeForReceiver, dutyNoticeForAdmins } from "./notify";
+import { notifyUser, notifyAdmins, notifyVacantSlot, swapProposalText, swapCancelledText, swapExpiredText, swapAcceptedAdminText, dutyNoticeForReceiver, dutyNoticeForAdmins } from "./notify";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import type { Db } from "../db/client";
@@ -185,6 +185,17 @@ describe("swapCancelledText", () => {
     // Род по имени не угадываем — `отменил(а)`, как соседний `отклонил(а)`.
     expect(swapCancelledText(TRADE)).toBe(
       "Аня отменил(а) заявку на обмен: Ср 12 авг · 09:00–18:00 · Дежурство · Поклонка ↔ Ср 12 авг · 10:00–19:00 · День.",
+    );
+  });
+});
+
+describe("swapExpiredText", () => {
+  // Автору тика просрочки — единственному, кому это письмо вообще уходит
+  // (см. `swap-expiry-tick.ts`): у второй стороны заявка просто пропадает из
+  // входящих, отвечать ей уже нечего.
+  it("date_passed называет обе смены и не путает причину с админской правкой", () => {
+    expect(swapExpiredText(TRADE, "date_passed")).toBe(
+      "Заявка на обмен закрылась: смена уже прошла, а ответа не было. Было: Ср 12 авг · 09:00–18:00 · Дежурство · Поклонка ↔ Ср 12 авг · 10:00–19:00 · День.",
     );
   });
 });

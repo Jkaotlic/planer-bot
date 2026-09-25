@@ -1,8 +1,7 @@
 import type { Bot } from "grammy";
 import { addDaysIso } from "@planer/shared";
 import type { Db } from "../db/client";
-import { listPendingSwapsWithDates } from "../repo/swaps";
-import { setSwapStatus } from "../repo/swaps";
+import { listPendingSwapsWithDates, expireSwapIfPending } from "../repo/swaps";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
 import { swapAuditPayload } from "../util/message-lines";
@@ -20,19 +19,26 @@ const NOTIFY_WITHIN_DAYS = 2;
  *
  * Пишет только автору (см. `swapExpiredText`): у второй стороны заявка просто
  * пропадает из входящих, а автор ждал ответа и должен узнать, что ждать
- * больше нечего. Возвращает число погашенных заявок — тик его логирует.
+ * больше нечего. Возвращает число погашенных заявок — вызывающий её не
+ * логирует, `runTicksIndependently` результаты тиков не читает.
  */
 export async function runSwapExpiryTick(db: Db, bot: Bot | null, now: { date: string; time: string }): Promise<number> {
   let expired = 0;
   for (const { request, fromDate, toDate } of listPendingSwapsWithDates(db)) {
     const earliest = fromDate < toDate ? fromDate : toDate;
     if (earliest >= now.date) continue;
-    setSwapStatus(db, request.id, "expired");
+    // Список читан один раз, а дальше на каждую заявку — `await notifyUser`: за
+    // это время другую заявку из того же списка успевают принять/отклонить/
+    // отменить с другого конца. `expireSwapIfPending` пишет `expired` только если
+    // в базе она всё ещё `pending`, иначе возвращает `undefined` — тогда её
+    // трогать больше не надо, чужое решение уже случилось.
+    const updated = expireSwapIfPending(db, request.id);
+    if (!updated) continue;
     expired += 1;
-    const payload = swapAuditPayload(db, request);
+    const payload = swapAuditPayload(db, updated);
     recordAudit(db, "swap_expired", null, { ...payload, cause: "date_passed" });
     if (!bot || earliest < addDaysIso(now.date, -NOTIFY_WITHIN_DAYS)) continue;
-    const tg = getEmployeeById(db, request.fromEmployeeId)?.telegramUserId;
+    const tg = getEmployeeById(db, updated.fromEmployeeId)?.telegramUserId;
     if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "date_passed"));
   }
   return expired;

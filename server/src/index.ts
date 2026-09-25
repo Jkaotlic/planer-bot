@@ -70,14 +70,14 @@ setInterval(() => {
     { name: "holidays", run: () => runHolidayTick(db, fetchHolidays, teamNow(config.teamTz)) },
     // Совет про пробелы графика — по тому же вечернему часу, что и напоминания.
     { name: "coverage", run: () => runCoverageAdviceTick(db, bot, teamNow(config.teamTz)) },
-    // Третьим в тот же массив, а не своим setInterval: `runTicksIndependently`
+    // В тот же массив, а не своим setInterval: `runTicksIndependently`
     // и написан затем, чтобы падение одного тика не гасило соседей.
     {
       name: "handover",
       run: () => runHandoverTick({ db, config, messenger: createHandoverMessenger(bot, db) }, Date.now()),
     },
-    // Пятым в тот же массив, а не своим setInterval, по той же причине, что и
-    // у соседей: заявка, на которую никто не ответил, не должна ждать своего
+    // В тот же массив, а не своим setInterval, по той же причине, что и у
+    // соседей: заявка, на которую никто не ответил, не должна ждать своего
     // отдельного таймера, чтобы погаснуть, когда её смена уже прошла.
     { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
   ]).finally(() => {

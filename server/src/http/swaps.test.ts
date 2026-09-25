@@ -457,6 +457,48 @@ describe("swap endpoints", () => {
     const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
     const rows = (await list.json()).swaps as { id: number; status: string }[];
     expect(rows.find((r) => r.id === reqId)?.status).toBe("expired");
+    for (const chat of [217, 218]) {
+      const text = sent.filter((s) => s.chat_id === chat).map((s) => s.text).join("\n");
+      expect(text).toContain("Обмен неактуален");
+    }
+  });
+
+  // `category` — тоже часть того, о чём договаривались (смена → дежурство —
+  // другая запись, не просто другие часы), и стоит в том же списке, что date/
+  // start/end/templateId. Отдельный тест, а не расширение соседнего: выпадение
+  // ровно этого поля из списка не должно прятаться за другим изменившимся полем.
+  it("смена категории той же самой даты гасит висящий обмен", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    createAdminEmployee(db, { telegramUserId: 111, tgUsername: "boss", displayName: "Босс" });
+    const adminToken = (await (await app.request(new Request("http://x/api/auth", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ initData: initDataFor(111) }),
+    }))).json()).token as string;
+
+    const anya = await worker(db, app, "Аня", 223);
+    const igor = await worker(db, app, "Игорь", 224);
+    const day = daysFromNow(2);
+    const sa = createShift(db, { date: day, start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: day, start: "11:00", end: "20:00", employeeId: igor.w.id, category: "duty" });
+    const created = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    const reqId = (await created.json()).request.id as number;
+    sent.length = 0;
+
+    const moved = await app.request(`/api/admin/entries/${sb.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ date: day, category: "shift", start: "11:00", end: "20:00" }),
+    });
+    expect(moved.status).toBe(200);
+
+    const list = await app.request("/api/swaps", { headers: { Authorization: `Bearer ${anya.token}` } });
+    const rows = (await list.json()).swaps as { id: number; status: string }[];
+    expect(rows.find((r) => r.id === reqId)?.status).toBe("expired");
+    for (const chat of [223, 224]) {
+      const text = sent.filter((s) => s.chat_id === chat).map((s) => s.text).join("\n");
+      expect(text).toContain("Обмен неактуален");
+    }
   });
 
   it("правка только места не трогает висящий обмен", async () => {

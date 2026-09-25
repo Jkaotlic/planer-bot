@@ -7,7 +7,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { getSwapRequest } from "../repo/swaps";
 import { listRecentAudit } from "../repo/audit";
-import { createSwap } from "./swap-service";
+import { createSwap, cancelSwap } from "./swap-service";
 import { swapRequests } from "../db/schema";
 import { runSwapExpiryTick } from "./swap-expiry-tick";
 import type { Db } from "../db/client";
@@ -100,6 +100,49 @@ describe("runSwapExpiryTick", () => {
     expect(n).toBe(0);
     expect(getSwapRequest(db, request.id)!.status).toBe("pending");
     expect(sent).toHaveLength(0);
+  });
+
+  // Тик читает список pending-заявок один раз, а дальше на каждую await'ит
+  // отправку письма — окно, за которое вторую заявку из той же пачки успевают
+  // отменить с другого конца (HTTP или кнопка в боте). Безусловная запись
+  // статуса переписала бы её обратно в "expired" поверх уже случившейся
+  // отмены и наврала бы автору «ответа не было».
+  it("не переписывает заявку, которую отменили, пока тик ждал отправку письма по другой", async () => {
+    const db = makeTestDb();
+    const { request: reqA } = pendingSwap(db, "2026-07-13");
+
+    const mark = createEmployee(db, { displayName: "Марк", inviteToken: "i-mark" });
+    linkTelegramAccount(db, "i-mark", 333);
+    const semyon = createEmployee(db, { displayName: "Семён", inviteToken: "i-semyon" });
+    linkTelegramAccount(db, "i-semyon", 444);
+    const sm = createShift(db, { date: "2026-07-13", start: "09:00", end: "18:00", employeeId: mark.id });
+    const ss = createShift(db, { date: "2026-07-13", start: "10:00", end: "19:00", employeeId: semyon.id });
+    const resB = createSwap(db, { fromEmployeeId: mark.id, fromShiftId: sm.id, toShiftId: ss.id }, { date: "2026-01-01", time: "09:00" });
+    if (!resB.ok) throw new Error(`fixture setup failed: ${resB.reason}`);
+    const reqB = resB.request;
+    expect(reqA.id).toBeLessThan(reqB.id); // порядок обхода тика — по id вставки
+
+    const bot = stubBotInfo(new Bot("12345:tok"), { id: 42, first_name: "P", username: "p_bot" });
+    const sent: { chat_id: number | string; text: string }[] = [];
+    bot.api.config.use((_prev, method, payload) => {
+      if (method === "sendMessage") {
+        const p = payload as { chat_id: number | string; text: string };
+        sent.push(p);
+        // Письмо по A ушло — имитируем, что именно в этот момент Марк сам
+        // отменил свою заявку B, ещё не дойдя до которой тик уже прочитал её
+        // как pending в самом начале прогона.
+        if (p.chat_id === ANYA_TG) cancelSwap(db, reqB.id, mark.id);
+      }
+      return { ok: true, result: {} } as any;
+    });
+
+    const n = await runSwapExpiryTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(n).toBe(1); // погашена только A
+    expect(getSwapRequest(db, reqA.id)!.status).toBe("expired");
+    expect(getSwapRequest(db, reqB.id)!.status).toBe("cancelled"); // не переписано обратно
+    expect(sent.filter((m) => m.chat_id === 333)).toHaveLength(0); // Марку письма про просрочку не было
+    expect(listRecentAudit(db, 20).filter((a) => a.type === "swap_expired")).toHaveLength(1);
   });
 
   it("без бота гасит и журналит", async () => {

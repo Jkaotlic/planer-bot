@@ -85,8 +85,9 @@ export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_cha
 
 /**
  * Sent to *both* sides of a pending swap an admin's edit just invalidated —
- * or, for `date_passed`, only to the initiator (see `swap-expiry-tick.ts`:
- * the second side never saw an answer, but they also never had one due).
+ * or, for `date_passed`, only to the initiator (see `swap-expiry-tick.ts`):
+ * the shift has already happened, so the counterparty has nothing left to
+ * act on and no answer to give — there's nothing to tell them.
  *
  * Goes out to the initiator too, and that's the point: they proposed it and did
  * nothing since, so without this the request just turns «Истекло» in the archive

@@ -30,6 +30,27 @@ export function setSwapStatus(db: Db, id: number, status: SwapStatus): void {
 }
 
 /**
+ * Гасит одну заявку в `expired`, но только если она в базе всё ещё `pending` —
+ * иначе ничего не пишет и возвращает `undefined`.
+ *
+ * Нужна тику просрочки (`swap-expiry-tick.ts`): он читает список pending-заявок
+ * один раз, а затем на каждую await'ит отправку письма — за это время вторую
+ * заявку из того же списка вполне успевают принять, отклонить или отменить с
+ * другого конца (HTTP-запрос или кнопка в боте). Условие в WHERE — как у
+ * `expirePendingSwapsForShift` в `repo/shifts.ts` — превращает «читал pending,
+ * пишу expired» в одну атомарную проверку-и-запись, а не в два отдельных шага
+ * с окном между ними, где успевает вклиниться чужое решение.
+ */
+export function expireSwapIfPending(db: Db, id: number): SwapRequest | undefined {
+  return db
+    .update(swapRequests)
+    .set({ status: "expired", resolvedAt: new Date() })
+    .where(and(eq(swapRequests.id, id), eq(swapRequests.status, "pending")))
+    .returning()
+    .all()[0];
+}
+
+/**
  * Is this exact pair of shifts already up for trade?
  *
  * Direction-blind on purpose: «A отдаёт SA, хочет SB» and «B отдаёт SB, хочет SA»
