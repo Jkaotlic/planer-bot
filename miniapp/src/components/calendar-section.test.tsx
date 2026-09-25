@@ -144,4 +144,41 @@ describe("раздел «Календарь»", () => {
     expect(el.textContent).toContain("Сеть недоступна");
     expect(el.textContent).toContain("Добавить в календарь");
   });
+
+  it("«Скопировать ссылку» пишет в navigator.clipboard, когда он доступен", async () => {
+    vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    try {
+      const el = await mount();
+      await act(async () => buttonWithText(el, "Скопировать ссылку").click());
+      await settle();
+
+      expect(writeText).toHaveBeenCalledWith("https://x.example.com/cal/abc123.ics");
+      // Никакого поля со ссылкой текстом — клипборд сработал сам.
+      expect(el.querySelector("input")).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it("«Скопировать ссылку» без navigator.clipboard показывает ссылку текстом, а не молчит", async () => {
+    vi.spyOn(apiClient, "getCalendarLink").mockResolvedValue("https://x.example.com/cal/abc123.ics");
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    try {
+      const el = await mount();
+      await act(async () => buttonWithText(el, "Скопировать ссылку").click());
+      await settle();
+
+      const input = el.querySelector<HTMLInputElement>("input");
+      expect(input).not.toBeNull();
+      expect(input!.value).toBe("https://x.example.com/cal/abc123.ics");
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
 });
