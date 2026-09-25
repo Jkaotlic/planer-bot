@@ -243,7 +243,7 @@ export function adminRecipients(db: Db, honoureeId: number | null): Employee[] {
  * What would be sent, to whom, right now. The admin sees this before anything
  * leaves — the whole point of the flow is that nothing surprises them.
  */
-export function previewCollection(db: Db, collection: Collection): CollectionPreview {
+export function previewCollection(db: Db, collection: Collection, today: string): CollectionPreview {
   const personName = personNameOf(db, collection);
   const recipients = recipientsOf(db, collection.employeeId);
   const honouree = collection.employeeId != null ? getEmployeeById(db, collection.employeeId) : null;
@@ -266,7 +266,12 @@ export function previewCollection(db: Db, collection: Collection): CollectionPre
 
   let blocker: string | null = null;
   if (collection.closedAt) blocker = "Сбор закрыт — рассылать нечего.";
-  else if (collection.kind === "birthday" && collection.sendCount > 0) {
+  // После праздника письмо «скидываемся на подарок» читается как ошибка, а не
+  // как сбор. Сам раунд не закрывается: деньги доходят позже, и галочки должны
+  // ставиться, пока админ не нажмёт «Собрали» (его решение от 2026-09-25).
+  else if (collection.kind === "birthday" && collection.celebratedOn != null && collection.celebratedOn < today) {
+    blocker = "День рождения уже прошёл — рассылать поздно.";
+  } else if (collection.kind === "birthday" && collection.sendCount > 0) {
     blocker = "Уже разослано — повторная отправка отключена.";
   } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";

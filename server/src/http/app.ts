@@ -832,7 +832,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (employeeId === c.get("auth").employeeId) return c.json({ error: "not_found" }, 404);
     const draft = birthdayRoundDraft(db, employeeId, asOf);
     if (!draft) return c.json({ error: "not_found" }, 404);
-    return c.json(previewCollection(db, draft));
+    return c.json(previewCollection(db, draft, asOf));
   });
 
   app.put("/api/admin/birthdays/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -944,7 +944,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/api/admin/collections/:id/preview", requireAdmin(db, config.jwtSecret), (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
-    return c.json(previewCollection(db, collection));
+    return c.json(previewCollection(db, collection, teamNow(config.teamTz).date));
   });
 
   app.put("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -1000,7 +1000,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
 
-    const preview = previewCollection(db, collection);
+    const preview = previewCollection(db, collection, teamNow(config.teamTz).date);
     if (preview.blocker) return c.json({ error: preview.blocker }, 409);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
 
@@ -1060,7 +1060,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       // Текст берём из превью: `collectionMessage` на втором раунде уже звучит
       // как «⏰ Напоминаю про сбор», и второй текст был бы вторым источником
       // одной формулировки.
-      const preview = previewCollection(db, collection);
+      const preview = previewCollection(db, collection, teamNow(config.teamTz).date);
       let delivered = 0;
       for (const recipient of waiting) {
         if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(collection.id))) delivered += 1;
@@ -1091,7 +1091,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     recordAudit(db, "collection_closed", c.get("auth").employeeId, {
       collectionId: collection.id,
       employeeId: collection.employeeId,
-      title: previewCollection(db, updated).title,
+      title: previewCollection(db, updated, teamNow(config.teamTz).date).title,
       closed: body.closed,
     });
     return c.json({ collection: updated });
@@ -1122,7 +1122,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       recordAudit(db, "collection_payment_marked", me, {
         collectionId: collection.id,
         employeeId: collection.employeeId,
-        title: previewCollection(db, collection).title,
+        title: previewCollection(db, collection, teamNow(config.teamTz).date).title,
         payerId,
         payerName: getEmployeeById(db, payerId)?.displayName ?? null,
         paid: body.paid,
@@ -1136,7 +1136,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.delete("/api/admin/collections/:id", requireAdmin(db, config.jwtSecret), (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
-    const title = previewCollection(db, collection).title;
+    const title = previewCollection(db, collection, teamNow(config.teamTz).date).title;
     const result = deleteCollection(db, collection.id);
     if (!result.ok) return c.json({ error: result.error }, 409);
     recordAudit(db, "collection_deleted", c.get("auth").employeeId, {

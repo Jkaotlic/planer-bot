@@ -567,6 +567,35 @@ describe("автоотправка сбора", () => {
     expect(logged?.payload).toMatchObject({ round: 0, delivered: 0 });
   });
 
+  /**
+   * Задача 8: раунд остался без ссылки (или без единой попытки) и до сих пор
+   * `sendCount === 0`, а праздник тем временем прошёл. `roundsToAutoSend` уже
+   * отсеивает такой раунд через `isCollectionActive` (день рождения активен,
+   * только пока `celebratedOn >= today`) — раньше, чем до него доходит
+   * `previewCollection` с новым блокером. Значит для автотика ничего не
+   * меняется: он и до, и после фикса такой раунд не трогает вовсе — ни письма
+   * команде, ни предупреждения админам. Новый блокер защищает не тик, а ручную
+   * отправку (`/send`, «Разослать» в чате) — это и фиксирует тест ниже.
+   */
+  it("прошедший день рождения без единой попытки: автотик его не трогает вовсе", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "07-13");
+    person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    // Раунд без единой попытки автоотправки: `autoSentAt` не тронут, ссылка
+    // так и не появилась до самого праздника.
+    const round = db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13",
+      autoSendOn: "2026-07-10",
+    }).returning().all()[0]!;
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(sent).toEqual([]);
+    expect(getCollection(db, round.id)!.autoSentAt).toBeNull();
+  });
+
   it("сеть лежала целиком — никто ничего не узнал, и следующий тик рассылает сбор", async () => {
     // Пять таких обрывов за сентябрь 2026 (ENOTFOUND api.telegram.org на iMac).
     // Отметка о попытке стояла до отправки — и сбор на подарок пропадал молча:

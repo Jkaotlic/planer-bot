@@ -790,7 +790,7 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const updated = attachLink(db, { round, url, asOf: today, actorEmployeeId: adminEmployeeId });
-    const preview = previewCollection(db, updated);
+    const preview = previewCollection(db, updated, today);
 
     await ctx.reply(
       linkAcceptedMessage(
@@ -967,7 +967,7 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const updated = setCollectionClosed(db, id, true, new Date());
-    const title = previewCollection(db, updated ?? collection).title;
+    const title = previewCollection(db, updated ?? collection, teamNow(config.teamTz).date).title;
     recordAudit(db, "collection_closed", who.me.id, {
       collectionId: collection.id,
       employeeId: collection.employeeId,
