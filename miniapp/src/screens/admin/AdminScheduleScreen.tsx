@@ -91,11 +91,14 @@ export function showsWeekSwitcher(state: {
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
-export function AdminScheduleScreen({ initialDate }: { initialDate?: string } = {}) {
+export function AdminScheduleScreen({ initialDate, today }: { initialDate?: string; today: string }) {
   // Кнопка «📅 Открыть график» у админской тревоги приходит с датой — экран
-  // должен открыться на её неделе, а не на текущей.
-  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(initialDate ? parseISODate(initialDate) : new Date()));
-  const [selectedDate, setSelectedDate] = useState<string>(() => initialDate ?? toISODate(new Date()));
+  // должен открыться на её неделе, а не на текущей. Без неё — командная дата
+  // сервера (`today`), не часы телефона: рядом с полуночью они расходятся, и
+  // «Эта неделя»/день по умолчанию раньше вели туда, где, по мнению телефона,
+  // сейчас сегодня, а не туда, где сейчас команда.
+  const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(parseISODate(initialDate ?? today)));
+  const [selectedDate, setSelectedDate] = useState<string>(() => initialDate ?? today);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   // Праздники и рабочие субботы недели — из того же ответа, что и расписание.
   const [calendar, setCalendar] = useState<TeamSchedule["calendar"]>([]);
@@ -127,7 +130,6 @@ export function AdminScheduleScreen({ initialDate }: { initialDate?: string } = 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
   const to = weekDates[6]!;
-  const today = toISODate(new Date());
 
   // «📅 Заполнить неделю» и импорт файла держат в замыкании ту неделю, на
   // которой начались, и, будучи асинхронными, могут доработать уже после того,
@@ -223,9 +225,8 @@ export function AdminScheduleScreen({ initialDate }: { initialDate?: string } = 
   /** Back to the current week AND to today. Returning to the week but leaving the
    *  selection on, say, Thursday would drop the admin on a day they never picked. */
   function goToday() {
-    const todayIso = toISODate(new Date());
-    setWeekStart(mondayOf(new Date()));
-    setSelectedDate(todayIso);
+    setWeekStart(mondayOf(parseISODate(today)));
+    setSelectedDate(today);
     setNotice(null);
   }
 

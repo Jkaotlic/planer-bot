@@ -40,12 +40,14 @@ async function settle(times = 14) {
   }
 }
 
+const TODAY = new Date().toISOString().slice(0, 10);
+
 async function mount() {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen)));
+    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY })));
   });
   await settle();
   return host;

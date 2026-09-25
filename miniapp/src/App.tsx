@@ -569,7 +569,7 @@ export function App() {
           раз, и когда на неё возвращаются: выбор человека про то, каким видом
           он смотрит график, а не только про первый экран за сеанс. */}
       {tab === "team" && (
-        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} />
+        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} today={data.today} />
       )}
       {tab === "collections" && (
         <CollectionsTabScreen
@@ -619,6 +619,7 @@ export function App() {
           <AdminScreen
             initialSection={adminSectionFromSearch(window.location.search) ?? undefined}
             initialDate={scheduleDateFromSearch(window.location.search) ?? undefined}
+            today={data.today}
           />
         </Suspense>
       )}

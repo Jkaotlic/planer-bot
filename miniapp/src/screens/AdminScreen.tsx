@@ -8,7 +8,6 @@ import { AdminJournal } from "./admin/AdminJournal";
 import { AdminSettings } from "./admin/AdminSettings";
 import { AdminChecklists } from "./admin/AdminChecklists";
 import { SectionChips, SectionPanel } from "../components/SectionChips";
-import { toISODate } from "../lib/week";
 import type { AdminSection } from "./admin-section";
 
 const SECTIONS: readonly { key: AdminSection; label: string }[] = [
@@ -30,7 +29,18 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
  * the tab is cheap. Rendered only when `me.isAdmin` (see `App`), and every
  * call it makes is `requireAdmin`-guarded server-side.
  */
-export function AdminScreen({ initialSection, initialDate }: { initialSection?: AdminSection; initialDate?: string }) {
+export function AdminScreen({
+  initialSection,
+  initialDate,
+  today,
+}: {
+  initialSection?: AdminSection;
+  initialDate?: string;
+  /** Командная дата с сервера (`myShifts.today` из bootstrap) — часы телефона
+   *  расходятся с ней рядом с полуночью, и расписание/журнал не должны решать
+   *  «какой сегодня день» сами. */
+  today: string;
+}) {
   const [section, setSection] = useState<AdminSection>(initialSection ?? "schedule");
 
   return (
@@ -38,13 +48,13 @@ export function AdminScreen({ initialSection, initialDate }: { initialSection?: 
       <SectionChips sections={SECTIONS} active={section} onChange={setSection} />
 
       <SectionPanel active={section}>
-        {section === "schedule" && <AdminScheduleScreen initialDate={initialDate} />}
+        {section === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} />}
         {section === "weekend" && <AdminWeekendScreen />}
         {section === "employees" && <AdminEmployeesScreen />}
         {section === "checklists" && <AdminChecklists />}
         {section === "announce" && <AdminAnnounce />}
         {section === "bugs" && <AdminBugs />}
-        {section === "journal" && <AdminJournal today={toISODate(new Date())} />}
+        {section === "journal" && <AdminJournal today={today} />}
         {section === "settings" && <AdminSettings />}
       </SectionPanel>
     </div>
