@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Tabbar } from "@telegram-apps/telegram-ui";
 
 export type TabKey = "mine" | "team" | "swaps" | "weekend" | "collections" | "admin" | "announce";
@@ -15,6 +16,10 @@ export interface TabBarProps {
    *  (`me.canAnnounce`). У админа своя копия уже внутри вкладки «Админ», и
    *  вторая здесь сбивала бы — см. условие ниже. */
   canAnnounce: boolean;
+  /** Что ждёт ответа на каждой вкладке — считает `tabBadges` в `App.tsx`.
+   *  Отсутствующий ключ — не ноль, а «нечего показывать»: `TabBar` рисует
+   *  метку по наличию ключа, а не по значению `> 0`. */
+  badges?: Partial<Record<TabKey, number>>;
 }
 
 /** Bottom navigation: "Смены", "Команда", "Сборы", и по роли — "Обмены"/"Выходные"
@@ -24,37 +29,49 @@ export interface TabBarProps {
  *  команды. У админа получается шесть пунктов — тесно, но подписи ужаты в
  *  `index.css` (`.tab-bar-fit`), и это дешевле, чем держать сборы в двух местах:
  *  секцией у работника и разделом админки у админа. */
-export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce }: TabBarProps) {
+export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce, badges }: TabBarProps) {
   // Built as an array (rather than inline JSX with a `&&`) so every optional
   // item stays a bare element — `Tabbar` types its children as a plain
   // element array and rejects the `false` a short-circuit would leave behind.
   const items = [
     <Tabbar.Item key="mine" selected={active === "mine"} text="Смены" onClick={() => onChange("mine")}>
-      <CalendarIcon />
+      <TabIcon tab="mine" badges={badges}>
+        <CalendarIcon />
+      </TabIcon>
     </Tabbar.Item>,
     <Tabbar.Item key="team" selected={active === "team"} text="Команда" onClick={() => onChange("team")}>
-      <PeopleIcon />
+      <TabIcon tab="team" badges={badges}>
+        <PeopleIcon />
+      </TabIcon>
     </Tabbar.Item>,
   ];
   if (!isObserver) {
     items.push(
       <Tabbar.Item key="swaps" selected={active === "swaps"} text="Обмены" onClick={() => onChange("swaps")}>
-        <SwapIcon />
+        <TabIcon tab="swaps" badges={badges}>
+          <SwapIcon />
+        </TabIcon>
       </Tabbar.Item>,
       <Tabbar.Item key="weekend" selected={active === "weekend"} text="Выходные" onClick={() => onChange("weekend")}>
-        <MarketIcon />
+        <TabIcon tab="weekend" badges={badges}>
+          <MarketIcon />
+        </TabIcon>
       </Tabbar.Item>,
     );
   }
   items.push(
     <Tabbar.Item key="collections" selected={active === "collections"} text="Сборы" onClick={() => onChange("collections")}>
-      <CollectIcon />
+      <TabIcon tab="collections" badges={badges}>
+        <CollectIcon />
+      </TabIcon>
     </Tabbar.Item>,
   );
   if (isAdmin) {
     items.push(
       <Tabbar.Item key="admin" selected={active === "admin"} text="Админ" onClick={() => onChange("admin")}>
-        <ShieldIcon />
+        <TabIcon tab="admin" badges={badges}>
+          <ShieldIcon />
+        </TabIcon>
       </Tabbar.Item>,
     );
   } else if (canAnnounce) {
@@ -62,7 +79,9 @@ export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce }: T
     // вторая вкладка с тем же экраном была бы дублем, а не удобством.
     items.push(
       <Tabbar.Item key="announce" selected={active === "announce"} text="Анонс" onClick={() => onChange("announce")}>
-        <AnnounceIcon />
+        <TabIcon tab="announce" badges={badges}>
+          <AnnounceIcon />
+        </TabIcon>
       </Tabbar.Item>,
     );
   }
@@ -74,6 +93,25 @@ export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce }: T
     <div className="tab-bar-fit">
       <Tabbar>{items}</Tabbar>
     </div>
+  );
+}
+
+/** Иконка вкладки + метка «ждёт тебя» поверх неё, одним `span` с
+ *  `position: relative` — иначе метка позиционировалась бы от `Tabbar.Item`
+ *  целиком и съезжала бы вбок вместе с подписью под ней. */
+function TabIcon({ tab, badges, children }: { tab: TabKey; badges?: Partial<Record<TabKey, number>>; children: ReactNode }) {
+  const count = badges?.[tab];
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }}>
+      {children}
+      {/* `> 9` — «9+», а не трёхзначное число: метка круглая и тесная, три
+          цифры распирали бы её в овал шире соседних букв подписи. */}
+      {count ? (
+        <span className="tab-badge" aria-label={`ждёт ответа: ${count}`}>
+          {count > 9 ? "9+" : count}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

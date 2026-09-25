@@ -120,6 +120,28 @@ textarea {
   padding-bottom: var(--app-inset-bottom);
 }
 
+/* Метка «ждёт тебя» поверх иконки вкладки. Абсолютно позиционирована
+   относительно обёртки иконки (`TabIcon`), а не всего пункта — иначе съезжала
+   бы вбок вслед за подписью, у которой на 320px другая ширина, чем на 390px.
+   Свой `font-size` — родительский `clamp(...)` для подписи вкладки ей не
+   нужен: одна-две цифры читаемы при любой ширине экрана. */
+.tab-badge {
+  position: absolute;
+  top: -3px;
+  right: -7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background-color: var(--tgui--destructive_text_color, #e53935);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  font-weight: 600;
+  text-align: center;
+  box-sizing: border-box;
+}
+
 /* ---------- Чек-лист дежурного ---------- */
 
 .checklist {

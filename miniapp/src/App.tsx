@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
-import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer } from "./api/client";
+import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
@@ -37,6 +37,7 @@ import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-m
 import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
 import { swapCandidates } from "./lib/swap-candidates";
+import { tabBadges } from "./lib/tab-badges";
 
 interface AppData {
   me: Me;
@@ -108,6 +109,11 @@ export function App() {
   // instead of a per-screen error — nothing to retry by hand, it just says the
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  // Сборы для меток «ждёт тебя» на вкладках (`tabBadges`). `null` — ещё не
+  // пришли или запрос упал: метка на «Сборах» тогда просто молчит, а не
+  // врёт нулём. Не в `AppData`/bootstrap намеренно — см. комментарий в
+  // `loadBootstrap` ниже.
+  const [collections, setCollections] = useState<WorkerCollection[] | null>(null);
 
   /**
    * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
@@ -137,6 +143,22 @@ export function App() {
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+      });
+
+    // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
+    // «Команда»), и тащить её в общий контракт ради одной метки значило бы
+    // менять его ради удобства этого экрана. Запущен здесь же, а не после
+    // bootstrap — второй запрос идёт тем же уже открытым HTTP/1.1-соединением,
+    // а не поднимает второе поверх первого TLS-рукопожатия. Отказ не показывает
+    // экран ошибки: метка — удобство, а не то, без чего приложение не работает.
+    apiClient
+      .getMyCollections()
+      .then((cs) => {
+        if (!cancelled) setCollections(cs);
+      })
+      .catch((err: unknown) => {
+        console.error("Collections for badges failed:", err);
+        if (!cancelled) setCollections(null);
       });
 
     return () => {
@@ -313,6 +335,16 @@ export function App() {
       // already on screen is still whatever the last successful load showed.
       setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
     }
+
+    // Отдельно от bootstrap-запроса выше, той же причине, что в `loadBootstrap`:
+    // правка (кто-то оплатил сбор, пришёл новый) должна дойти без повторного
+    // открытия мини-аппа, а отказ — не повод трогать `refreshError`: метка на
+    // «Сборах» просто останется прежней до следующего успешного обновления.
+    try {
+      setCollections(await apiClient.getMyCollections());
+    } catch (err) {
+      console.error("Collections refresh failed:", err);
+    }
   }
 
   // Refresh when the mini app comes back to the foreground (e.g. after the admin
@@ -438,6 +470,8 @@ export function App() {
     );
   }
 
+  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today });
+
   return (
     // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
     // под шапку клиента, и 100vh поверх этого дало бы лишний скролл ровно на её
@@ -546,6 +580,7 @@ export function App() {
         isAdmin={data.me.isAdmin}
         isObserver={data.me.isObserver}
         canAnnounce={data.me.canAnnounce}
+        badges={badges}
       />
     </div>
   );
