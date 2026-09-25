@@ -28,7 +28,7 @@ import { listShiftsOverlapping } from "../../repo/shifts";
 import { listActiveTemplates } from "../../repo/templates";
 import { getEmployeeById } from "../../repo/employees";
 import { recordAudit } from "../../repo/audit";
-import { checklistKind, reminderSentAt } from "../../repo/reminders";
+import { checklistDayKey, checklistKind, reminderSentAt } from "../../repo/reminders";
 import { teamNow, teamTimeAt } from "../../util/team-time";
 import { requireAdmin, requireAuth, type Env } from "../middleware";
 import { MAX_DOC_BYTES, removeChecklistDoc, safeDocName, writeChecklistDoc } from "../checklist-doc";
@@ -255,7 +255,9 @@ export function createChecklistRoutes(db: Db, config: Config) {
       const done = marks.filter((m) => m.employeeId === employeeId && itemIds.has(m.itemId)).length;
       const list = getChecklist(db, checklistId);
       const owner = getEmployeeById(db, employeeId);
-      const sentAt = reminderSentAt(db, shift.id, checklistKind(checklistId));
+      // Многодневная запись — один ряд `shifts` на весь диапазон, и «ушло»
+      // спрашивается за КОНКРЕТНЫЙ запрошенный день, а не за весь диапазон разом.
+      const sentAt = reminderSentAt(db, shift.id, checklistKind(checklistId, checklistDayKey(shift, date)));
       return [{
         employeeId,
         displayName: owner?.displayName ?? `работник #${employeeId}`,

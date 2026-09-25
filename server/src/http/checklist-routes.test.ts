@@ -343,6 +343,32 @@ describe("чек-лист: свой (работник)", () => {
     expect(igorRow.sentAt).toBe("07:02");
   });
 
+  // Задача 7: многодневная запись (дежурство на неделю) — один ряд `shifts` на
+  // весь диапазон. «Ушло» на первый день не должно означать «ушло» и на второй —
+  // до фикса второй день читал ту же, общую на весь диапазон пометку.
+  it("многодневная запись: пометка первого дня не выдаётся за «ушло» на второй", async () => {
+    const db = makeTestDb();
+    const igor = worker(db, "Игорь", 333);
+    const early = createChecklist(db, "С 07:00");
+    createChecklistItem(db, early.id, "Открыть 47-й");
+    const earlyPreset = preset(db, "Дежурство с 07:00");
+    setChecklistTemplates(db, early.id, [earlyPreset.id]);
+    const shift = createShift(db, {
+      date: "2026-08-24", endDate: "2026-08-30", start: "07:00", end: "16:00",
+      employeeId: igor.id, category: "duty", templateId: earlyPreset.id,
+    });
+    // Ушло только за 24-е — своим, дневным ключом.
+    addReminder(db, shift.id, checklistKind(early.id, "2026-08-24"));
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const day1 = await (await app.request(`/api/admin/checklist/day?date=2026-08-24`, bearer(admin))).json();
+    expect(day1.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("sent");
+
+    const day2 = await (await app.request(`/api/admin/checklist/day?date=2026-08-25`, bearer(admin))).json();
+    expect(day2.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("scheduled");
+  });
+
   it("у неотправленного часа нет", async () => {
     const { app } = await stage();
     const admin = await tokenFor(app, 111);
