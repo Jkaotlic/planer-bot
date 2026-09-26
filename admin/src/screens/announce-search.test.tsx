@@ -114,7 +114,7 @@ describe("поиск получателя в «Анонсах»", () => {
 
   it("ПОИСК НЕ СНИМАЕТ ГАЛОЧКИ: отметил при одном запросе, отметил при другом — уйдёт обоим", async () => {
     vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
-    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 2, intended: 2, unreachable: [] });
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 2, intended: 2, unreachable: [], archivedCount: 0 });
     const el = await mount();
     await act(async () => {
       buttonByText(el, "Выбрать").click();

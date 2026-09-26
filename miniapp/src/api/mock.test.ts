@@ -22,6 +22,7 @@ import {
   mockSendCollection,
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
+  mockSetCollectionClosed,
   mockGetNoticePrefs,
   mockSetNoticePref,
   mockSendAnnouncement,
@@ -343,6 +344,21 @@ describe("мок сборов", () => {
     expect((await mockGetBirthdayPreview(BIRTHDAY_EMPLOYEE_ID)).blocker).toBe("Уже разослано — повторная отправка отключена.");
   });
 
+  // Мок повторяет условия сервера (`arming` в app.ts): `armAutoSend` не
+  // вооружает разосланный или закрытый раунд, а молча ничего не пишет — иначе
+  // DEV-мок расходился бы с проверенным сервером, и этот баг проверялся бы
+  // только руками.
+  it("armAutoSend не вооружает закрытый раунд ДР", async () => {
+    // id 4 — «Даша Кузнецова», своя дата рождения, ещё не занята другим тестом
+    // в этом файле (id 2 уже разослан выше, тот же модуль хранит состояние).
+    const BIRTHDAY_EMPLOYEE_ID = 4;
+    const created = await mockSaveBirthdayRound(BIRTHDAY_EMPLOYEE_ID, { collectUrl: "https://example.test/dr", autoSendOn: null });
+    await mockSetCollectionClosed(created.id, true);
+
+    const after = await mockSaveBirthdayRound(BIRTHDAY_EMPLOYEE_ID, { armAutoSend: true });
+    expect(after.autoSendOn).toBeNull();
+  });
+
   it("сюрприз-правило: свой сбор не виден в списке и не открывается по id — чужой виден", async () => {
     const hidden = await mockCreateCollection({ title: "Секретный сбор", employeeId: MOCK_ME.id });
     const visible = await mockCreateCollection({ title: "Открытый сбор" });
@@ -411,11 +427,13 @@ describe("mockSendAnnouncement", () => {
     expect(result.unreachable).not.toContain(MOCK_ME.displayName);
   });
 
-  it("явно выбранный архивный или без телеграма попадает в отчёт поимённо, а не пропадает", async () => {
+  it("явно выбранный без телеграма — в отчёте поимённо; архивный — числом, без имени", async () => {
     // id 3 — «Марк Волков», активен, но без телеграма; id 6 — «Света Орлова», в архиве.
     const result = await mockSendAnnouncement("Текст анонса", [3, 6, 4]);
     expect(result.delivered).toBe(1); // только id 4 достижим
-    expect(result.unreachable.sort()).toEqual(["Марк Волков", "Света Орлова"]);
+    expect(result.unreachable).toEqual(["Марк Волков"]);
+    expect(result.unreachable).not.toContain("Света Орлова");
+    expect(result.archivedCount).toBe(1);
   });
 
   it("повтор id в списке не удваивает адресата", async () => {

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  autoSendDateFor,
   autoSendLabel,
   collectionStatus,
   describeDaysUntil,
@@ -24,7 +23,6 @@ import { CardShell, CardStack } from "../../components/Card";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
-import { toISODate } from "../../lib/week";
 import { withNotifyNotice } from "../../lib/shift";
 
 /**
@@ -163,8 +161,14 @@ const DATE_INPUT_STYLE = {
   fontSize: 13.5,
 } as const;
 
-export function AdminCollections() {
-  const today = toISODate(new Date());
+export function AdminCollections({
+  /** Командная дата из bootstrap (`data.today`), а не часы телефона: баг из
+   *  ledger — админ в другом часовом поясе видел статусы карточек и минимум
+   *  даты напоминания посчитанными по своим часам, а не по команде. */
+  today,
+}: {
+  today: string;
+}) {
   const [birthdays, setBirthdays] = useState<UpcomingBirthday[] | null>(null);
   const [rows, setRows] = useState<CollectionRow[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -1279,10 +1283,11 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
   const status = roundStatus(birthday.campaign, today);
 
   async function toggleAutoSend(birthday: UpcomingBirthday) {
-    // Дату считает `shared`, а не экран: та же арифметика на сервере, и две
-    // копии означали бы две разные даты.
-    const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
-    await apiClient.saveBirthdayRound(birthday.employeeId, { autoSendOn: next });
+    // Включить — флагом `armAutoSend`, а не готовой датой: дату считает сервер
+    // по командному «сейчас», а не браузер по своим часам (баг из ledger — у
+    // админа в другом часовом поясе дата в базе расходилась с командной).
+    const patch = birthday.campaign?.autoSendOn ? { autoSendOn: null } : { armAutoSend: true };
+    await apiClient.saveBirthdayRound(birthday.employeeId, patch);
     await onChanged();
   }
 
@@ -1309,8 +1314,11 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
       {/* Только пока сбор не ушёл. После рассылки `autoSendOn` в базе остаётся
           (гасить его нечем и незачем), и строка обещала бы вторую рассылку рядом
           с чипом «Разослано · 14» — все три дня, пока команда скидывается.
-          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам. */}
-      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && (
+          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам.
+          И только пока раунд активен: закрытый сервер вооружить отказывается,
+          и без этой проверки тумблер молча ничего не делал бы 200-м ответом
+          без единой правки — баг из ledger. */}
+      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && isCollectionActive(birthday.campaign, today) && (
         <Cell
           after={
             <Switch
@@ -1332,7 +1340,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
         {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}
       </Button>
 
-      {open && <BirthdayEditor birthday={birthday} onChanged={onChanged} onSent={onSent} />}
+      {open && <BirthdayEditor birthday={birthday} today={today} onChanged={onChanged} onSent={onSent} />}
     </CardShell>
   );
 }
@@ -1344,8 +1352,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
  * идентификатором раунда: раунда может ещё не быть — он заводится первым
  * сохранением, и до него у предпросмотра `id: 0`.
  */
-function BirthdayEditor({ birthday, onChanged, onSent }: Omit<CardProps, "open" | "onToggle" | "today">) {
-  const todayIso = toISODate(new Date());
+function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, "open" | "onToggle">) {
   const [collectUrl, setCollectUrl] = useState(birthday.campaign?.collectUrl ?? "");
   const [messageText, setMessageText] = useState(birthday.campaign?.messageText ?? "");
   const [scheduledSendOn, setScheduledSendOn] = useState(birthday.campaign?.scheduledSendOn ?? "");
@@ -1438,7 +1445,7 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<CardProps, "open" 
               type="date"
               value={scheduledSendOn}
               disabled={busy}
-              min={todayIso}
+              min={today}
               max={birthday.celebratedOn}
               aria-label="Дата напоминания о сборе"
               style={DATE_INPUT_STYLE}

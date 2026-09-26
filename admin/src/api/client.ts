@@ -493,7 +493,13 @@ export interface NewCollectionInput {
  *
  *  `autoSendOn` — не поле создания (`NewCollectionInput`): его не задают при
  *  заведении кастомного сбора, только тумблером на уже существующем раунде ДР. */
-export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null };
+/**
+ * `armAutoSend` — только для раунда дня рождения: «включи автоотправку
+ * обратно», без готовой даты. Дату всегда считает сервер по командному «сейчас»
+ * (`asOf`) — клиент, вычисливший её сам браузерными часами, однажды поставил
+ * бы дату не по той временной зоне (баг из ledger).
+ */
+export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null; armAutoSend?: boolean };
 
 export interface UpcomingBirthday {
   employeeId: number;
@@ -543,11 +549,19 @@ export const ANNOUNCEMENT_TEXT_MAX = 2000;
 /** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/announcements`. */
 export type AnnouncementAudience = "all" | number[];
 
-/** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
+/**
+ * Кому реально ушло и кто не получил ничего — отчёт после отправки.
+ *
+ * `unreachable` — только активные без Telegram, поимённо: это ныне работающие
+ * люди, и админ должен узнать, кто именно не привязан. Архивные — числом в
+ * `archivedCount`, без имени: отчёт про рассылку не место, где всплывает, кто
+ * из бывших сотрудников был выбран получателем (решение от 2026-09-25).
+ */
 export interface AnnouncementResult {
   delivered: number;
   intended: number;
   unreachable: string[];
+  archivedCount: number;
 }
 
 /** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
@@ -627,7 +641,13 @@ export interface ApiClient {
   getShiftCounts(from: string, to: string): Promise<ShiftCountsReport>;
   getShiftCountsCsv(from: string, to: string): Promise<string>;
   getJournal(params: { types?: string[]; actor?: number; from?: string; to?: string; limit?: number; offset?: number }): Promise<JournalPage>;
-  getBirthdays(): Promise<UpcomingBirthday[]>;
+  /**
+   * `asOf` — командная дата, которой сервер посчитал список (`teamNow`, если
+   * консоль не передала свою). Экран берёт её вместо часов браузера для всего,
+   * что зависит от «сегодня» в этих карточках — баг из ledger: админ в другом
+   * часовом поясе видел статусы и минимум даты по своим часам, а не по команде.
+   */
+  getBirthdays(): Promise<{ asOf: string; birthdays: UpcomingBirthday[] }>;
   getBirthdayPreview(employeeId: number): Promise<CollectionPreview>;
   /** Сохраняет раунд ДР; на первом сохранении он и заводится. */
   saveBirthdayRound(employeeId: number, patch: CollectionPatch): Promise<Collection>;
@@ -1051,9 +1071,8 @@ export const realClient: ApiClient = {
     return authorizedGet<JournalPage>(`/api/admin/journal?${q.toString()}`);
   },
 
-  async getBirthdays() {
-    const { birthdays } = await authorizedGet<{ birthdays: UpcomingBirthday[] }>("/api/admin/birthdays");
-    return birthdays;
+  getBirthdays() {
+    return authorizedGet<{ asOf: string; birthdays: UpcomingBirthday[] }>("/api/admin/birthdays");
   },
 
   getBirthdayPreview(employeeId) {

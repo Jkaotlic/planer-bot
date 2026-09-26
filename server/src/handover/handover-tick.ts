@@ -5,7 +5,7 @@ import { safeErrorMessage } from "../util/safe-error";
 import { escalate, expireHandover, fanOut, type HandoverDeps } from "./handover-service";
 
 export interface HandoverTickDeps extends HandoverDeps {
-  config: { teamTz: string; handoverFanHours: number; handoverEscalateHours: number };
+  config: { teamTz: string; publicUrl: string; handoverFanHours: number; handoverEscalateHours: number };
 }
 
 /**

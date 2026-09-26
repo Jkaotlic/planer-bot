@@ -69,7 +69,7 @@ setInterval(() => {
     // Календарь праздников — раз в сутки; свой дедуп по дню внутри тика.
     { name: "holidays", run: () => runHolidayTick(db, fetchHolidays, teamNow(config.teamTz)) },
     // Совет про пробелы графика — по тому же вечернему часу, что и напоминания.
-    { name: "coverage", run: () => runCoverageAdviceTick(db, bot, teamNow(config.teamTz)) },
+    { name: "coverage", run: () => runCoverageAdviceTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
     // В тот же массив, а не своим setInterval: `runTicksIndependently`
     // и написан затем, чтобы падение одного тика не гасило соседей.
     {

@@ -3,7 +3,7 @@ import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
 import { safeErrorMessage } from "../util/safe-error";
-import { reachedNobody, type AdminReach } from "../bot/notify";
+import { reachedNobody, scheduleLink, type AdminAction, type AdminReach } from "../bot/notify";
 import { getEmployeeById } from "../repo/employees";
 import {
   addDecline,
@@ -41,14 +41,20 @@ export interface HandoverMessenger {
   /** A plain message with nothing to tap. */
   plain(employeeId: number, text: string): Promise<void>;
   admins(text: string): Promise<void>;
-  /** Письмо, которое админ не может себе выключить: смена осталась без человека. */
-  adminsAlways(text: string): Promise<AdminReach>;
+  /** Письмо, которое админ не может себе выключить: смена осталась без человека.
+   *  `action` — кнопка «Открыть график» на дату этой смены (см. `notify.ts`). */
+  adminsAlways(text: string, action?: AdminAction): Promise<AdminReach>;
 }
 
 export interface HandoverDeps {
   db: Db;
-  config: { teamTz: string };
+  config: { teamTz: string; publicUrl: string };
   messenger: HandoverMessenger;
+}
+
+/** Кнопка «Открыть график» на дату этой смены — у обеих эскалаций ниже. */
+function scheduleAction(publicUrl: string, shift: Shift): AdminAction {
+  return { text: "📅 Открыть график", webApp: scheduleLink(publicUrl, shift.date) };
 }
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
@@ -148,6 +154,7 @@ export async function startHandovers(
       recordAudit(db, "handover_escalated", input.employeeId, auditPayload(db, escalated, shift, null));
       await deps.messenger.adminsAlways(
         handoverEscalationText(nameOf(db, input.employeeId) ?? "Работник", lineOf(shift), [], 0),
+        scheduleAction(deps.config.publicUrl, shift),
       );
       made.push(escalated);
       continue;
@@ -357,6 +364,7 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
       declinedNames,
       silent,
     ),
+    scheduleAction(deps.config.publicUrl, shift),
   );
   if (reachedNobody(reach)) {
     updateHandover(db, handoverId, { escalatedAt: null });

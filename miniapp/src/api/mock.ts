@@ -1353,9 +1353,15 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
   if (patch.deadline !== undefined) collection.deadline = patch.deadline ?? null;
   if (patch.amountPerPerson !== undefined) collection.amountPerPerson = patch.amountPerPerson ?? null;
   if (patch.totalGoal !== undefined) collection.totalGoal = patch.totalGoal ?? null;
-  // Тумблер шлёт `null`, чтобы выключить, или уже посчитанную дату, чтобы
-  // включить обратно — сервер такую же дату не пересчитывает, а просто пишет.
+  // Тумблер шлёт `null`, чтобы выключить, или флаг `armAutoSend`, чтобы включить
+  // обратно, — без готовой даты: дату считает сервер (здесь — мок) сам, тем же
+  // правилом, что и при вставке ссылки, а не браузер клиента (баг из ledger).
+  // Те же условия, что у сервера (`arming` в app.ts): разосланный или закрытый
+  // раунд не вооружаем — иначе тумблер обещал бы рассылку, которой не будет.
   if (patch.autoSendOn !== undefined) collection.autoSendOn = patch.autoSendOn ?? null;
+  else if (patch.armAutoSend && collection.celebratedOn && collection.sendCount === 0 && isCollectionActive(collection, today)) {
+    collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
+  }
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn ?? null;
     if (value !== null) {
@@ -1841,9 +1847,10 @@ export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecip
 /**
  * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
  * — иначе экран в dev показал бы одних людей, а мок отчитывался бы про других.
- * Правила ровно те, что у сервера (`announcementRecipients`): архивный или без
- * телеграма, даже выбранный явно, попадает в пул и в `unreachable` поимённо, а
- * не пропадает молча; отправитель исключается всегда.
+ * Правила ровно те, что у сервера (`announcementRecipients`): архивный, даже
+ * выбранный явно, попадает в пул, но не в `unreachable` поимённо — только
+ * числом в `archivedCount`. Без телеграма, но активный — поимённо, а не
+ * пропадает молча. Отправитель исключается всегда.
  */
 export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
   await delay(300);
@@ -1857,9 +1864,10 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
           .filter((e): e is Employee => e != null && e.id !== MOCK_ME.id);
 
   const reachable = pool.filter((e) => e.isActive && e.telegramUserId != null);
-  const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
+  const unreachable = pool.filter((e) => e.isActive && e.telegramUserId == null).map((e) => e.displayName);
+  const archivedCount = pool.filter((e) => !e.isActive).length;
 
-  return { delivered: reachable.length, intended: reachable.length, unreachable };
+  return { delivered: reachable.length, intended: reachable.length, unreachable, archivedCount };
 }
 
 // --- Багрепорты ---------------------------------------------------------

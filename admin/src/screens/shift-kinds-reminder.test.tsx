@@ -58,6 +58,16 @@ async function openFirstKind(el: HTMLElement) {
   await settle();
 }
 
+/** Раскрывает карточку вида смены по имени — для дежурства, оно не первое. */
+async function openKindByName(el: HTMLElement, name: string) {
+  const head = [...el.querySelectorAll<HTMLButtonElement>(".kind-card-head")].find((b) =>
+    (b.textContent ?? "").includes(name),
+  );
+  if (!head) throw new Error(`не нашёл карточку «${name}»`);
+  await act(async () => head.click());
+  await settle();
+}
+
 function reminderBox(el: HTMLElement): HTMLTextAreaElement {
   const area = el.querySelector("textarea.kind-reminder-text");
   if (!area) throw new Error("поля текста напоминания нет на экране");
@@ -116,6 +126,19 @@ describe("напоминание вида смены в консоли", () => {
 
     expect(save).not.toHaveBeenCalled();
     expect(el.textContent ?? "").toContain("погода");
+  });
+
+  // Баг из ledger (гигиена): предпросмотр раньше всегда показывал пример
+  // соседей («Игорь, Марк»), даже когда правят текст дежурства — а в проде у
+  // дежурства и прочей не-рутины соседей никогда не считают (`isNonShiftKind`
+  // в `reminder-service.ts`), независимо от часов.
+  it("у дежурства предпросмотр не обещает соседей — их нет и в проде", async () => {
+    const el = await mount();
+    await openKindByName(el, "Дежурство · Поклонка");
+
+    await type(reminderBox(el), "Завтра {время}. С тобой: {с кем}.");
+
+    expect(el.textContent ?? "").not.toContain("Игорь, Марк");
   });
 
   it("сохраняет свой текст и говорит, что пустое поле вернёт стандартный", async () => {

@@ -70,7 +70,10 @@ export function formatDayLabel(iso: string): string {
  * "Сегодня, Ср 29 июля" on the current day, "Чт, 30 июля" on any other.
  *
  * `today` is passed in rather than read from the clock so the function stays
- * pure and testable — the screens hand it `toISODate(new Date())`.
+ * pure and testable — the screens hand it the team's date from the server
+ * (`myShifts.today` from bootstrap), not the phone's clock: near midnight the
+ * two disagree, and the boundary of "today" has to follow the team, not
+ * wherever the phone happens to be.
  */
 export function formatDayLabelRelative(iso: string, today: string): string {
   if (iso !== today) return formatDayLabel(iso);

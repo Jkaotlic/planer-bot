@@ -27,7 +27,7 @@ export function testConfig(patch: Partial<Config> = {}): Config {
       TEAM_TZ: "Europe/Moscow",
       DATABASE_URL: ":memory:",
       JWT_SECRET: "test-jwt-secret-that-is-long-enough-0123",
-      PUBLIC_URL: "https://x.keenetic.pro",
+      PUBLIC_URL: "https://example.com",
     }),
     ...patch,
   };

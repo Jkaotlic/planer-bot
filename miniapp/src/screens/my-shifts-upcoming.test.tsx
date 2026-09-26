@@ -42,6 +42,7 @@ async function renderScreen(shifts: Shift[]) {
     me, today: WEDNESDAY, shifts, templates: [],
     onProposeSwap: () => {}, onSelfEntry: () => {}, onRemindersChanged: () => {},
     onSelfScheduleChanged: () => {}, onStartTabChanged: () => {}, onAddressChanged: () => {},
+    openDay: null, openDayLoading: false, openDayError: null, onToggleCoworkers: () => {},
   });
   await act(async () => root!.render(createElement(AppRoot, null, screen)));
   return host.textContent ?? "";

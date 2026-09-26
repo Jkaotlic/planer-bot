@@ -82,7 +82,7 @@ async function open(payments = PAYMENTS, row = ROW) {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminCollections)));
+    root!.render(createElement(AppRoot, null, createElement(AdminCollections, { today: "2026-01-01" })));
   });
   await settle();
   await act(async () => button(host!, "Открыть")!.click());

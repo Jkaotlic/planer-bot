@@ -26,7 +26,6 @@ import {
   formatWeekRangeLabel,
   isCurrentPeriod,
   parseISODate,
-  toISODate,
 } from "../lib/week";
 import { TeamRangeNav } from "./team/TeamRangeNav";
 import { TeamTodayView } from "./team/TeamTodayView";
@@ -37,9 +36,13 @@ import "./team/team-schedule.css";
 
 /** `initialMode` — личная настройка «открывать сразу»: тому, кто ведёт график,
  *  нужна неделя, и до сих пор её приходилось выбирать руками при каждом входе.
- *  Внутри экрана вид по-прежнему переключается свободно. */
-export function TeamScreen({ templates, initialMode = "today" }: { templates: readonly Template[]; initialMode?: TeamMode }) {
-  const [view, setView] = useState(() => createTeamScreenState(toISODate(new Date()), initialMode));
+ *  Внутри экрана вид по-прежнему переключается свободно.
+ *
+ *  `today` — командная дата с сервера (`myShifts.today` из bootstrap), не часы
+ *  телефона: рядом с полуночью они расходятся, и раньше «Сегодня» здесь
+ *  показывало день телефона, а не тот, что команда считает сегодняшним. */
+export function TeamScreen({ templates, initialMode = "today", today }: { templates: readonly Template[]; initialMode?: TeamMode; today: string }) {
+  const [view, setView] = useState(() => createTeamScreenState(today, initialMode));
   const [tabFocusMode, setTabFocusMode] = useState<TeamMode>(view.displayMode);
   const viewRef = useRef(view);
   const gate = useRef(createLatestRequestGate());
@@ -109,7 +112,6 @@ export function TeamScreen({ templates, initialMode = "today" }: { templates: re
   }
 
   const displayRange = teamRange(view.displayMode, view.displayDate);
-  const today = toISODate(new Date());
   const isDayMode = view.displayMode === "today";
   const label = isDayMode
     ? formatDayLabelRelative(view.displayDate, today)

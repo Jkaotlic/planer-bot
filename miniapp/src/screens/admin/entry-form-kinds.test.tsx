@@ -38,6 +38,10 @@ const EMPLOYEE: Employee = {
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
+/** Реальный «сегодня» — компонент больше не вычисляет его сам, но эти тесты
+ *  не про дату, и им подходит любое настоящее значение. */
+const TODAY = new Date().toISOString().slice(0, 10);
+
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   host?.remove();
@@ -62,7 +66,7 @@ async function openForm() {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen)));
+    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY })));
   });
   await settle();
 
@@ -172,7 +176,7 @@ describe("форма записи в мини-аппе — правка отре
     document.body.appendChild(host);
     root = createRoot(host);
     await act(async () => {
-      root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen)));
+      root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY })));
     });
     await settle();
 

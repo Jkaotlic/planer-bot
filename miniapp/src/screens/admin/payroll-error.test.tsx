@@ -46,7 +46,7 @@ async function mount() {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminWeekendScreen)));
+    root!.render(createElement(AppRoot, null, createElement(AdminWeekendScreen, { today: "2026-01-01" })));
   });
   await settle();
   return host;

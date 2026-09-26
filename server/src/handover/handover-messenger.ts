@@ -33,8 +33,8 @@ export function createHandoverMessenger(bot: Bot | null, db: Db): HandoverMessen
     async admins(text) {
       if (bot) await notifyAdmins(bot, db, "handovers", text);
     },
-    async adminsAlways(text) {
-      return bot ? notifyAdminsAlways(bot, db, text) : { attempted: 0, delivered: 0 };
+    async adminsAlways(text, action) {
+      return bot ? notifyAdminsAlways(bot, db, text, action) : { attempted: 0, delivered: 0 };
     },
   };
 }

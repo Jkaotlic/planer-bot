@@ -94,7 +94,7 @@ async function openCard(el: HTMLElement) {
 
 describe("блокер рассылки не прячет кнопку (консоль)", () => {
   it("кнопка на месте, погашена, и причина написана рядом", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([row({ collection: collection() })]);
     vi.spyOn(apiClient, "getCollectionPreview").mockResolvedValue(preview({ blocker: NO_LINK }));
@@ -116,7 +116,7 @@ describe("блокер рассылки не прячет кнопку (конс
   });
 
   it("без блокера кнопка живая и взводится", async () => {
-    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
     vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([
       row({ collection: collection({ collectUrl: "https://sber.ru/x" }) }),

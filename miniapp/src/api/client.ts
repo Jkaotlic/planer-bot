@@ -496,11 +496,19 @@ export const ANNOUNCEMENT_TEXT_MAX = 2000;
 /** Кому уйдёт анонс: вся команда или выбранные id — контракт `POST /api/announcements`. */
 export type AnnouncementAudience = "all" | number[];
 
-/** Кому реально ушло и кто не получил ничего, поимённо — отчёт после отправки. */
+/**
+ * Кому реально ушло и кто не получил ничего — отчёт после отправки.
+ *
+ * `unreachable` — только активные без Telegram, поимённо: это ныне работающие
+ * люди, и админ должен узнать, кто именно не привязан. Архивные — числом в
+ * `archivedCount`, без имени: отчёт про рассылку не место, где всплывает, кто
+ * из бывших сотрудников был выбран получателем (решение от 2026-09-25).
+ */
 export interface AnnouncementResult {
   delivered: number;
   intended: number;
   unreachable: string[];
+  archivedCount: number;
 }
 
 /** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
@@ -706,7 +714,13 @@ export interface NewCollectionInput {
  *
  *  `autoSendOn` — не поле создания (`NewCollectionInput`): его не задают при
  *  заведении кастомного сбора, только тумблером на уже существующем раунде ДР. */
-export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null };
+/**
+ * `armAutoSend` — только для раунда дня рождения: «включи автоотправку
+ * обратно», без готовой даты. Дату всегда считает сервер по командному «сейчас»
+ * (`asOf`) — клиент, вычисливший её сам браузерными часами, однажды поставил
+ * бы дату не по той временной зоне (баг из ledger).
+ */
+export type CollectionPatch = Partial<NewCollectionInput> & { autoSendOn?: string | null; armAutoSend?: boolean };
 
 /** Активный сбор глазами работника — то, что видно во вкладке «Команда». */
 export interface WorkerCollection {

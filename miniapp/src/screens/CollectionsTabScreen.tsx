@@ -20,16 +20,19 @@ const AdminCollections = lazy(() => import("./admin/AdminCollections"));
  */
 export interface CollectionsTabScreenProps {
   isAdmin: boolean;
+  /** Командная дата из bootstrap — для админской ветки; работнику она не
+   *  нужна, `TeamCollections` её не берёт. */
+  today: string;
   /** Только для работника — у админа своя отметка «Я перевёл» этому экрану
    *  не показывается, и метки на «Сборах» у него вовсе нет (см. `tabBadges`). */
   onPaidChanged?: (id: number, paid: boolean) => void;
 }
 
-export function CollectionsTabScreen({ isAdmin, onPaidChanged }: CollectionsTabScreenProps) {
+export function CollectionsTabScreen({ isAdmin, today, onPaidChanged }: CollectionsTabScreenProps) {
   if (isAdmin) {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю сборы…</div>}>
-        <AdminCollections />
+        <AdminCollections today={today} />
       </Suspense>
     );
   }

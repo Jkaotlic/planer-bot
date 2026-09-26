@@ -43,7 +43,7 @@ async function settle(times = 12) {
 }
 
 async function mount(rows: CollectionRow[]) {
-  vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+  vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
   vi.spyOn(apiClient, "getEmployees").mockResolvedValue([]);
   vi.spyOn(apiClient, "getCollections").mockResolvedValue(rows);
   host = document.createElement("div");

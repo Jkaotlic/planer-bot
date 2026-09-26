@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  autoSendDateFor,
   autoSendLabel,
   collectionStatus,
   describeDaysUntil,
@@ -166,14 +165,20 @@ function moneyValue(raw: string): number | null {
   return Number.isFinite(parsed) ? Math.round(parsed) : null;
 }
 
-/** Today, as the rules want it: `YYYY-MM-DD`, compared as a string. */
+/**
+ * Часы браузера — только запасной вариант для самого первого кадра, пока
+ * `GET /api/admin/birthdays` ещё не ответил своим `asOf` (команднАЯ дата,
+ * `teamNow` на сервере). Разошедшиеся часы админа держали бы статус карточки
+ * и минимум даты напоминания неверными вплоть до первой перезагрузки списка —
+ * баг из ledger.
+ */
 function todayIso(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 export function CollectionsScreen() {
-  const today = todayIso();
+  const [today, setToday] = useState<string>(() => todayIso());
   const [birthdays, setBirthdays] = useState<UpcomingBirthday[] | null>(null);
   const [rows, setRows] = useState<CollectionRow[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -185,7 +190,9 @@ export function CollectionsScreen() {
 
   async function reloadBirthdays() {
     try {
-      setBirthdays(await apiClient.getBirthdays());
+      const { asOf, birthdays } = await apiClient.getBirthdays();
+      setToday(asOf);
+      setBirthdays(birthdays);
     } catch (err) {
       if (err instanceof AuthRequiredError) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить дни рождения");
@@ -1131,10 +1138,11 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
   const status = roundStatus(birthday.campaign, today);
 
   async function toggleAutoSend(birthday: UpcomingBirthday) {
-    // Дату считает `shared`, а не экран: та же арифметика на сервере и в
-    // мини-аппе, и три копии означали бы три разные даты.
-    const next = birthday.campaign?.autoSendOn ? null : autoSendDateFor(birthday.celebratedOn, today);
-    await apiClient.saveBirthdayRound(birthday.employeeId, { autoSendOn: next });
+    // Включить — флагом `armAutoSend`, а не готовой датой: дату считает сервер
+    // по командному «сейчас», а не браузер по своим часам (баг из ledger — у
+    // админа в другом часовом поясе дата в базе расходилась с командной).
+    const patch = birthday.campaign?.autoSendOn ? { autoSendOn: null } : { armAutoSend: true };
+    await apiClient.saveBirthdayRound(birthday.employeeId, patch);
     await onChanged();
   }
 
@@ -1155,8 +1163,13 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
       {/* Только пока сбор не ушёл. После рассылки `autoSendOn` в базе остаётся
           (гасить его нечем и незачем), и строка обещала бы вторую рассылку рядом
           с чипом «Разослано · 14» — все три дня, пока команда скидывается.
-          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам. */}
-      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && (
+          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам.
+          И только пока раунд активен: закрытый (`closedAt`) сервер вооружить
+          отказывается («у сборов на день рождения этот случай ловит только
+          явное закрытие — сам `celebratedOn` у найденного раунда всегда
+          впереди `asOf`»), и без этой проверки тумблер молча ничего не делал
+          бы 200-м ответом без единой правки — баг из ledger. */}
+      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && isCollectionActive(birthday.campaign, today) && (
         <label className="birthday-autosend">
           <input
             type="checkbox"

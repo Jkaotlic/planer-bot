@@ -10,7 +10,7 @@ import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { adminSectionFromSearch } from "./screens/admin-section";
+import { adminSectionFromSearch, scheduleDateFromSearch } from "./screens/admin-section";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -36,7 +36,7 @@ import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
 import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
-import { swapCandidates } from "./lib/swap-candidates";
+import { nowOnTeamDay, swapCandidates } from "./lib/swap-candidates";
 import { tabBadges } from "./lib/tab-badges";
 
 interface AppData {
@@ -74,6 +74,10 @@ export function App() {
   // аннулирует всё, что в полёте.
   const reloadGate = useRef(createLatestRequestGate());
   const [proposingFor, setProposingFor] = useState<Shift | null>(null);
+  // Тап по своей смене в «Моих сменах» раскрывает «Кто ещё работает» под ней.
+  // Живёт здесь, не в `MyShiftsScreen`: данные дня грузятся тем же запросом,
+  // что и для «Предложить обмен» (см. эффект ниже), а сеть — забота App.
+  const [openCoworkersFor, setOpenCoworkersFor] = useState<Shift | null>(null);
   // Форма больничного/мероприятия — такой же оверлей, как «Предложить обмен».
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
   // «📌 Мероприятие» в боте открывают мини-апп сразу на нужной форме.
@@ -224,13 +228,19 @@ export function App() {
   }, [data]);
 
   useEffect(() => {
-    if (!proposingFor) {
+    // Один и тот же загрузчик обслуживает «Предложить обмен» и «Кто ещё
+    // работает»: оба спрашивают ровно один день. Совпасть по времени они не
+    // могут — `MyShiftsScreen` (где раскрывают строку) не рендерится, пока
+    // `proposingFor` задан (см. return ниже), так что активен всегда только
+    // один из двух.
+    const activeShift = proposingFor ?? openCoworkersFor;
+    if (!activeShift) {
       setDayShifts(null);
       setDayError(null);
       return;
     }
     let cancelled = false;
-    const date = proposingFor.date;
+    const date = activeShift.date;
     setDayLoading(true);
     setDayError(null);
     apiClient
@@ -248,7 +258,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [proposingFor]);
+  }, [proposingFor, openCoworkersFor]);
 
   async function refreshSwaps() {
     const swaps = await apiClient.getSwaps();
@@ -497,7 +507,10 @@ export function App() {
     const day = dayShifts?.date === proposingFor.date ? dayShifts.shifts : [];
     const dayEmployees = dayShifts?.date === proposingFor.date ? dayShifts.employees : [];
     const excludedIds = new Set(dayEmployees.filter((e) => e.excludedFromSwaps).map((e) => e.id));
-    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, new Date(), excludedIds);
+    // Командный день (`data.today`), а не часы телефона: баг из ledger — на
+    // расходящихся часах уже начавшаяся смена могла выглядеть будущей и
+    // предлагалась кандидатом на обмен, или наоборот.
+    const { candidates, sameKindCount } = swapCandidates(proposingFor, day, data.me.id, nowOnTeamDay(data.today), excludedIds);
     return (
       <ProposeSwapScreen
         fromShift={proposingFor}
@@ -525,7 +538,13 @@ export function App() {
           today={data.today}
           shifts={data.myShifts}
           templates={data.templates}
-          onProposeSwap={setProposingFor}
+          // Обмен и «Кто ещё работает» не бывают открыты вместе (см. эффект
+          // загрузки дня выше) — уход в обмен закрывает раскрытую строку, а не
+          // оставляет её висеть на дне, которое эффект уже переключил.
+          onProposeSwap={(shift) => {
+            setOpenCoworkersFor(null);
+            setProposingFor(shift);
+          }}
           onSelfEntry={setSelfEntryMode}
           onRemindersChanged={(remindersEnabled) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
@@ -539,17 +558,26 @@ export function App() {
           onAddressChanged={({ preferredName, address }) =>
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))
           }
+          openDay={
+            openCoworkersFor && dayShifts?.date === openCoworkersFor.date
+              ? { date: dayShifts.date, shifts: dayShifts.shifts }
+              : null
+          }
+          openDayLoading={openCoworkersFor != null && dayLoading}
+          openDayError={openCoworkersFor != null ? dayError : null}
+          onToggleCoworkers={setOpenCoworkersFor}
         />
       )}
       {/* «Команда — неделя» открывает эту вкладку недельной сеткой — и в первый
           раз, и когда на неё возвращаются: выбор человека про то, каким видом
           он смотрит график, а не только про первый экран за сеанс. */}
       {tab === "team" && (
-        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} />
+        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} today={data.today} />
       )}
       {tab === "collections" && (
         <CollectionsTabScreen
           isAdmin={data.me.isAdmin}
+          today={data.today}
           onPaidChanged={(id, paid) =>
             setCollections((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, paid } : c)) : prev))
           }
@@ -592,7 +620,11 @@ export function App() {
         // Заглушка — на секунду и только у админа: кусок кэшируется как
         // `immutable`, поэтому платится один раз на устройство.
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю админку…</div>}>
-          <AdminScreen initialSection={adminSectionFromSearch(window.location.search) ?? undefined} />
+          <AdminScreen
+            initialSection={adminSectionFromSearch(window.location.search) ?? undefined}
+            initialDate={scheduleDateFromSearch(window.location.search) ?? undefined}
+            today={data.today}
+          />
         </Suspense>
       )}
       {tab === "announce" && data.me.canAnnounce && !data.me.isAdmin && (
@@ -623,6 +655,11 @@ export function App() {
           setSwapErrors(new Map());
           setSlotErrors(new Map());
           setOfferErrors(new Map());
+          // «Моих смен» больше не видно — раскрытая строка и её лог всё равно
+          // пропадут при следующем входе (`MyShiftsScreen` монтируется заново),
+          // но без этого эффект загрузки дня продолжал бы держать её день в
+          // памяти и гонять на него запрос при каждом возврате в приложение.
+          setOpenCoworkersFor(null);
           // Leaving the Админ tab (or any switch) re-pulls data so edits show immediately.
           void reloadData();
         }}

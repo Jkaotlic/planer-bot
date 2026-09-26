@@ -10,6 +10,8 @@ import {
   buildReminderText,
   renderReminderText,
   addressOf,
+  coworkersEnumeration,
+  shiftsOverlap,
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsInRange, listDatesHolding } from "../repo/shifts";
@@ -102,6 +104,36 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
 }
 
 /**
+ * Кто ещё работает в этот день — для строки «Завтра с тобой».
+ *
+ * Только записи с другим `employeeId` и заданными часами (отсутствия — вроде
+ * отпуска Семёна — часов не имеют и не попадают в список), чьё время
+ * пересекается со сменой владельца (`shiftsOverlap`, а не просто «тот же
+ * день»: сосед с 18:00 не «с тобой», если твоя смена кончилась в 17:00).
+ * Имя — через `addressOf`, как и у самого адресата письма.
+ *
+ * Дедуп по `employeeId`, а не по имени: у одного человека в этот день может
+ * стоять больше одной пересекающейся записи (например, дежурство и подработка
+ * рядом), и без дедупа он попал бы в перечень дважды под одним и тем же именем.
+ */
+function coworkerNamesFor(db: Db, shift: { date: string; start: string; end: string; employeeId: number | null }): string[] {
+  const dayShifts = listShiftsInRange(db, shift.date, shift.date);
+  const seen = new Set<number>();
+  const names: string[] = [];
+  for (const other of dayShifts) {
+    if (other.employeeId == null || other.employeeId === shift.employeeId) continue;
+    if (other.start == null || other.end == null) continue;
+    if (seen.has(other.employeeId)) continue;
+    if (!shiftsOverlap({ date: shift.date, start: shift.start, end: shift.end }, { date: other.date, start: other.start, end: other.end })) continue;
+    const person = getEmployeeById(db, other.employeeId);
+    if (!person) continue;
+    seen.add(other.employeeId);
+    names.push(addressOf(person));
+  }
+  return names;
+}
+
+/**
  * Отрезок дежурства, в который попадает эта запись, — или `undefined`, если
  * запись не дежурство и отрезка у неё нет.
  *
@@ -147,9 +179,28 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
     // формулировках его нет ни у одного вида смены — распоряжаться чужим
     // будильником письмо не должно.
     const location = shift.location;
+    // «Завтра с тобой» — только у смен категории «смена» (не у дежурств и
+    // прочей не-рутины) и только для ранней, утренней, вечерней и ночной
+    // (решение владельца от 2026-09-25).
+    //
+    // Дежурство НЕ всегда день: Поклонка в 07:00–16:00 — то же дежурство, что и
+    // 09:00–18:00, и по одним часам их не отличить (`kind` для первого — уже
+    // "early", а не "day"). Гейта по `kind === "day"` одного было недостаточно —
+    // дежурство в ранние или поздние часы получало бы список соседей, которые
+    // для дежурного не новость: он и так каждый раз выходит в те же часы, что и
+    // обычная смена. Категорию решает сама запись (`shift.category`) — она есть
+    // всегда, даже без шаблона (импорт ростера, ручная запись); вид смены
+    // (`template.category`) проверяется вторым условием и может ТОЛЬКО сузить
+    // список дальше (шаблон дежурства над записью без своей категории), а не
+    // расширить его обратно до «смена», если сама запись — не смена.
+    const isNonShiftKind = shift.category !== "shift" || (template != null && template.category !== "shift");
+    const coworkers =
+      kind === "day" || isNonShiftKind
+        ? []
+        : coworkerNamesFor(db, { date: shift.date, start, end, employeeId: shift.employeeId });
     const text = custom
-      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "" })
-      : buildReminderText({ name, kind, timeRange, what, until, location });
+      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers) }, kind)
+      : buildReminderText({ name, kind, timeRange, what, until, location, coworkers });
 
     const appUrl = publicUrl ? `${publicUrl}/app/` : undefined;
     const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl);

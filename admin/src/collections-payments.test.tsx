@@ -81,7 +81,7 @@ async function click(el: HTMLElement) {
 }
 
 async function open(payments = PAYMENTS) {
-  vi.spyOn(apiClient, "getBirthdays").mockResolvedValue([]);
+  vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
   vi.spyOn(apiClient, "getCollections").mockResolvedValue([ROW]);
   vi.spyOn(apiClient, "getCollectionPreview").mockResolvedValue(PREVIEW);
   vi.spyOn(apiClient, "getCollectionPayments").mockResolvedValue(payments);

@@ -16,11 +16,14 @@ export interface ShiftRowProps {
   /** Почему обмен сейчас недоступен. Кнопка остаётся на месте, но гаснет и несёт
    *  эту фразу: пропавшая кнопка читается как поломка, погашенная — как правило. */
   swapBlockedReason?: string;
+  /** Тап по строке (не по «Обменять» — та сама гасит клик `stopPropagation`) —
+   *  раскрывает под ней «Кто ещё работает». Опущен — строка не реагирует на тап. */
+  onOpen?: (shift: Shift) => void;
 }
 
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
-export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason }: ShiftRowProps) {
+export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen }: ShiftRowProps) {
   // По той же причине, что в `swap-candidates.ts`: одно правило, один источник.
   // Локальной копии «category === shift» здесь больше нет — с 2026-08-10 ответ
   // на этот вопрос знает только shared.
@@ -28,6 +31,8 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason 
 
   return (
     <Cell
+      data-testid="shift-row"
+      onClick={onOpen ? () => onOpen(shift) : undefined}
       // Styled on the `Cell` itself, not on a wrapper `div`: `Section` reads its
       // own children to decide where dividers go, and an extra element between
       // them changes that. `CellProps` extends `AllHTMLAttributes`, so `style`

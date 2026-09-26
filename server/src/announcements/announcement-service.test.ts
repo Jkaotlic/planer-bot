@@ -150,6 +150,30 @@ describe("анонс", () => {
 
     const picked = announcementRecipients(db, { kind: "picked", employeeIds: [marc.id] }, anya.id);
     expect(picked.reachable).toEqual([]);
-    expect(picked.unreachable).toEqual(["Марк"]);
+    expect(picked.archivedCount).toBe(1);
+  });
+
+  // Баг из ledger: архивный, выбранный явно, попадал в `unreachable` по имени —
+  // отчёт «Не получили: Семён» рассказывал бывшим коллегам, кто из ушедших
+  // когда-то был выбран получателем. Теперь он идёт числом, а не именем.
+  it("выбранный архивный не называется по имени — только счётчиком", async () => {
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const semyon = linked(db, "Семён", 555);
+    const { archiveEmployee } = await import("../repo/employees");
+    archiveEmployee(db, semyon.id, "2026-08-17");
+
+    const picked = announcementRecipients(db, { kind: "picked", employeeIds: [semyon.id] }, anya.id);
+    expect(picked.unreachable).not.toContain("Семён");
+    expect(picked.archivedCount).toBe(1);
+
+    const { bot } = testBot();
+    const res = await sendAnnouncement(bot, db, {
+      senderId: anya.id,
+      text: "Переезд",
+      audience: { kind: "picked", employeeIds: [semyon.id] },
+    });
+    expect(res.unreachable).not.toContain("Семён");
+    expect(res.archivedCount).toBe(1);
   });
 });

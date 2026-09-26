@@ -12,6 +12,7 @@ import {
   previewReminderText,
   remindsByDefault,
   dutyRun,
+  coworkersLine,
 } from "./reminder";
 
 describe("reminderKind", () => {
@@ -118,6 +119,48 @@ describe("buildReminderText", () => {
   it("без места строки 📍 нет", () => {
     expect(buildReminderText({ name: "Аня", kind: "morning", timeRange: "08:00–17:00" })).not.toContain("📍");
   });
+
+  it("утренняя с соседями кончается строкой «Завтра с тобой» после места", () => {
+    const t = buildReminderText({
+      name: "Аня",
+      kind: "morning",
+      timeRange: "08:00–17:00",
+      location: "Поклонка",
+      coworkers: ["Игорь", "Марк"],
+    });
+    expect(t.endsWith("\n👥 Завтра с тобой: Игорь, Марк")).toBe(true);
+    expect(t).toContain("\n📍 Поклонка\n👥 Завтра с тобой: Игорь, Марк");
+  });
+
+  it("kind: day — без «Завтра с тобой», даже если соседи переданы", () => {
+    // Решение владельца от 2026-09-25: строка только у ранней, утренней,
+    // вечерней и ночной. Дежурство сюда не привязано напрямую — оно может
+    // получить и «early»/«evening»/«night» по часам (гейт по категории — на
+    // сервере, см. server/src/reminders/reminder.test.ts); этот тест — про сам
+    // гейт по `kind`, который в этом модуле единственный.
+    const t = buildReminderText({
+      name: "Аня",
+      kind: "day",
+      timeRange: "09:00–18:00",
+      coworkers: ["Игорь", "Марк"],
+    });
+    expect(t).not.toContain("👥");
+  });
+});
+
+describe("coworkersLine", () => {
+  it("пустой список — строки нет", () => {
+    expect(coworkersLine([])).toBeNull();
+  });
+
+  it("два имени через запятую", () => {
+    expect(coworkersLine(["Игорь", "Марк"])).toBe("👥 Завтра с тобой: Игорь, Марк");
+  });
+
+  it("больше шести — первые шесть и «и ещё N»", () => {
+    const names = ["Аня", "Игорь", "Марк", "Семён", "Олег", "Вера", "Юля", "Ольга"];
+    expect(coworkersLine(names)).toBe("👥 Завтра с тобой: Аня, Игорь, Марк, Семён, Олег, Вера, и ещё 2");
+  });
 });
 
 describe("validateReminderTemplate", () => {
@@ -150,7 +193,7 @@ describe("validateReminderTemplate", () => {
 });
 
 describe("renderReminderText", () => {
-  const vars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "" };
+  const vars = { name: "Аня", timeRange: "08:00–17:00", wake: "07:00", location: "", coworkers: "" };
 
   it("подставляет имя, время и подъём", () => {
     expect(renderReminderText("{имя}, завтра {время}, подъём в {подъём}", vars)).toBe(
@@ -172,21 +215,61 @@ describe("renderReminderText", () => {
   });
 
   it("{место} подставляется и не дублируется в конце", () => {
-    const t = renderReminderText("Завтра {время}, {Место}", { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "Поклонка" });
+    const t = renderReminderText("Завтра {время}, {Место}", { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "Поклонка", coworkers: "" });
     expect(t).toBe("Завтра 08:00–17:00, Поклонка");
   });
 
   it("свой текст без {место} получает строку с местом в конце", () => {
-    const t = renderReminderText("Завтра {время}", { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "Поклонка" });
+    const t = renderReminderText("Завтра {время}", { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "Поклонка", coworkers: "" });
     expect(t).toBe("Завтра 08:00–17:00\n📍 Поклонка");
   });
 
   it("{место} при пустом месте — пустая строка, без 📍", () => {
-    expect(renderReminderText("Где: {место}.", { name: "Аня", timeRange: "x", wake: "y", location: "" })).toBe("Где: .");
+    expect(renderReminderText("Где: {место}.", { name: "Аня", timeRange: "x", wake: "y", location: "", coworkers: "" })).toBe("Где: .");
   });
 
   it("validateReminderTemplate принимает {место}", () => {
     expect(() => validateReminderTemplate("Завтра в {место}")).not.toThrow();
+  });
+
+  it("validateReminderTemplate принимает {с кем} в любом регистре", () => {
+    expect(() => validateReminderTemplate("{С кем}")).not.toThrow();
+  });
+
+  it("свой текст без {с кем} у утренней получает строку «Завтра с тобой» в конце", () => {
+    const t = renderReminderText(
+      "Завтра {время}",
+      { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "", coworkers: "Игорь, Марк" },
+      "morning",
+    );
+    expect(t).toBe("Завтра 08:00–17:00\n👥 Завтра с тобой: Игорь, Марк");
+  });
+
+  it("свой текст с {с кем} — подстановка на месте, без дубля в конце", () => {
+    const t = renderReminderText(
+      "Завтра {время}. С тобой: {с кем}.",
+      { name: "Аня", timeRange: "08:00–17:00", wake: "06:30", location: "", coworkers: "Игорь, Марк" },
+      "evening",
+    );
+    expect(t).toBe("Завтра 08:00–17:00. С тобой: Игорь, Марк.");
+  });
+
+  it("{с кем} у дневного вида (kind: day) — пустая строка, даже если соседи переданы", () => {
+    const t = renderReminderText(
+      "С тобой: {с кем}.",
+      { name: "Аня", timeRange: "09:00–18:00", wake: "08:00", location: "", coworkers: "Игорь, Марк" },
+      "day",
+    );
+    expect(t).toBe("С тобой: .");
+  });
+
+  it("kind: day — строка «Завтра с тобой» не добавляется сама, даже с непустыми соседями", () => {
+    const t = renderReminderText(
+      "Завтра {время}",
+      { name: "Аня", timeRange: "09:00–18:00", wake: "08:00", location: "", coworkers: "Игорь, Марк" },
+      "day",
+    );
+    expect(t).not.toContain("👥");
   });
 });
 
@@ -216,15 +299,25 @@ describe("previewReminderText", () => {
   it("показывает письмо на примере, а не сырые подстановки", () => {
     const preview = previewReminderText("{имя}, завтра {время}");
     expect(preview.ok).toBe(true);
-    // Место в примере непустое («Поклонка»), а шаблон его не упоминает — та же
-    // строка `📍 …` в конце, что увидит и настоящая смена.
-    expect(preview.ok && preview.text).toBe("Аня, завтра 08:00–17:00\n📍 Поклонка");
+    // Место и соседи в примере непустые («Поклонка», «Игорь, Марк»), а шаблон
+    // их не упоминает — те же строки `📍 …`/`👥 …` в конце, что увидит и
+    // настоящая утренняя/вечерняя/ночная смена (kind фиксирован как "morning",
+    // см. previewReminderText).
+    expect(preview.ok && preview.text).toBe("Аня, завтра 08:00–17:00\n📍 Поклонка\n👥 Завтра с тобой: Игорь, Марк");
   });
 
   it("показывает пример места, когда шаблон сам его упоминает — не дублирует строкой", () => {
     const preview = previewReminderText("Место сбора: {место}.");
     expect(preview.ok).toBe(true);
-    expect(preview.ok && preview.text).toBe("Место сбора: Поклонка.");
+    // {место} подставлен на месте — 📍 не дублируется; 👥 всё равно
+    // автодобавляется в конец, потому что {с кем} шаблон не упоминает.
+    expect(preview.ok && preview.text).toBe("Место сбора: Поклонка.\n👥 Завтра с тобой: Игорь, Марк");
+  });
+
+  it("показывает пример соседей, когда шаблон сам упоминает {с кем} — не дублирует строкой", () => {
+    const preview = previewReminderText("Завтра {время}. С тобой: {с кем}.");
+    expect(preview.ok).toBe(true);
+    expect(preview.ok && preview.text).toBe("Завтра 08:00–17:00. С тобой: Игорь, Марк.\n📍 Поклонка");
   });
 
   it("вместо предпросмотра отдаёт причину, по которой текст не сохранится", () => {
@@ -233,6 +326,30 @@ describe("previewReminderText", () => {
     const preview = previewReminderText("Завтра {погода}");
     expect(preview.ok).toBe(false);
     expect(!preview.ok && preview.error).toMatch(/погода/);
+  });
+
+  // Баг из ledger (гигиена): превью всегда рисовалось с `kind === "morning"` и
+  // непустым примером соседей, даже когда админ правит текст дежурства или
+  // прочей не-рутины. В проде `reminder-service.ts` для таких видов смены
+  // (`template.category !== "shift"`) считает соседей всегда пустым списком —
+  // независимо от часов, — и строка «👥 Завтра с тобой» у дежурства никогда не
+  // появляется. Превью дежурства не должно её обещать.
+  it("у дежурства и прочей не-рутины превью не обещает соседей — их нет и в проде", () => {
+    const shift = previewReminderText("Завтра {время}. С тобой: {с кем}.", "shift");
+    expect(shift.ok && shift.text).toContain("Игорь, Марк");
+
+    const duty = previewReminderText("Завтра {время}. С тобой: {с кем}.", "duty");
+    expect(duty.ok && duty.text).toBe("Завтра 08:00–17:00. С тобой: .\n📍 Поклонка");
+    expect(duty.ok && duty.text).not.toContain("Игорь");
+
+    // Без явного `{с кем}` — автодобавленной строки тоже нет.
+    const dutyAuto = previewReminderText("{имя}, завтра {время}", "duty");
+    expect(dutyAuto.ok && dutyAuto.text).not.toContain("👥");
+  });
+
+  it("категория по умолчанию — «смена»: старые вызовы без второго аргумента не меняются", () => {
+    const preview = previewReminderText("{имя}, завтра {время}");
+    expect(preview.ok && preview.text).toContain("👥 Завтра с тобой: Игорь, Марк");
   });
 });
 

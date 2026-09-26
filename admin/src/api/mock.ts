@@ -855,9 +855,15 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
   if (patch.deadline !== undefined) collection.deadline = patch.deadline ?? null;
   if (patch.amountPerPerson !== undefined) collection.amountPerPerson = patch.amountPerPerson ?? null;
   if (patch.totalGoal !== undefined) collection.totalGoal = patch.totalGoal ?? null;
-  // Чекбокс шлёт `null`, чтобы выключить, или уже посчитанную дату, чтобы
-  // включить обратно — сервер такую же дату не пересчитывает, а просто пишет.
+  // Чекбокс шлёт `null`, чтобы выключить, или флаг `armAutoSend`, чтобы включить
+  // обратно, — без готовой даты: дату считает сервер (здесь — мок) сам, тем же
+  // правилом, что и при вставке ссылки, а не браузер клиента (баг из ledger).
+  // Те же условия, что у сервера (`arming` в app.ts): разосланный или закрытый
+  // раунд не вооружаем — иначе тумблер обещал бы рассылку, которой не будет.
   if (patch.autoSendOn !== undefined) collection.autoSendOn = patch.autoSendOn ?? null;
+  else if (patch.armAutoSend && collection.celebratedOn && collection.sendCount === 0 && isCollectionActive(collection, today)) {
+    collection.autoSendOn = autoSendDateFor(collection.celebratedOn, today);
+  }
   if (patch.scheduledSendOn !== undefined) {
     const value = patch.scheduledSendOn ?? null;
     if (value !== null) {
@@ -930,12 +936,12 @@ function ensureBirthdayRound(employeeId: number, today: string): Collection | nu
   return created;
 }
 
-export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
+export async function mockGetBirthdays(): Promise<{ asOf: string; birthdays: UpcomingBirthday[] }> {
   await delay(200);
   const today = toISODate(new Date());
   // Сюрприз-правило: тикающий раз в неделю пуш видят все админы, кроме
   // именинника — даже когда именинник сам админ и смотрит список.
-  return EMPLOYEES.filter((e) => e.isActive && e.birthDate && e.id !== viewerEmployeeId())
+  const birthdays = EMPLOYEES.filter((e) => e.isActive && e.birthDate && e.id !== viewerEmployeeId())
     .flatMap((employee) => {
       const occurrence = birthdayOccurrence(employee, today);
       const daysUntil = daysUntilBirthday(employee.birthDate!, today);
@@ -951,6 +957,7 @@ export async function mockGetBirthdays(): Promise<UpcomingBirthday[]> {
       }];
     })
     .sort((a, b) => a.daysUntil - b.daysUntil || a.displayName.localeCompare(b.displayName, "ru"));
+  return { asOf: today, birthdays };
 }
 
 export async function mockGetBirthdayPreview(employeeId: number): Promise<CollectionPreview> {
@@ -1306,8 +1313,10 @@ export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecip
 /**
  * Считает адресатов по тому же `EMPLOYEES`, которым отвечает `getAdminEmployees`
  * — иначе экран в DEV показал бы одних людей, а мок отчитывался бы про других.
- * Архивный или без телеграма, даже выбранный явно, попадает в пул и в
- * `unreachable` поимённо, а не пропадает молча; отправитель исключается всегда.
+ * Архивный, даже выбранный явно, попадает в пул, но не в `unreachable`
+ * поимённо — только числом в `archivedCount` (то же правило, что у сервера,
+ * см. `announcementRecipients`). Без телеграма, но активный — поимённо, а не
+ * пропадает молча. Отправитель исключается всегда.
  */
 export async function mockSendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult> {
   await delay(300);
@@ -1322,9 +1331,10 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
           .filter((e): e is Employee => e != null && e.id !== self);
 
   const reachable = pool.filter((e) => e.isActive && e.telegramUserId != null);
-  const unreachable = pool.filter((e) => !e.isActive || e.telegramUserId == null).map((e) => e.displayName);
+  const unreachable = pool.filter((e) => e.isActive && e.telegramUserId == null).map((e) => e.displayName);
+  const archivedCount = pool.filter((e) => !e.isActive).length;
 
-  return { delivered: reachable.length, intended: reachable.length, unreachable };
+  return { delivered: reachable.length, intended: reachable.length, unreachable, archivedCount };
 }
 
 // --- Баги ------------------------------------------------------------------

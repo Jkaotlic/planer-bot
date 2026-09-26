@@ -10,12 +10,20 @@ import { useIsDark } from "../../lib/theme";
 import { categoryLabel, useCategoryPalette, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
 
-/** First & last calendar day of the month containing `d`, as "YYYY-MM-DD". */
-function monthRange(d: Date): { from: string; to: string } {
+/**
+ * First & last calendar day of the month containing `today` ("YYYY-MM-DD" —
+ * команднАЯ дата, не часы браузера), as "YYYY-MM-DD".
+ *
+ * Разбирает строку вручную, а не через `new Date(today)`: дата без времени
+ * парсится как UTC-полночь, а `getFullYear`/`getMonth` ниже читают её
+ * локальными часами — в поясах западнее UTC результат съезжал бы на день
+ * назад. Локальный `Date` строится только для арифметики «последний день
+ * месяца» (`new Date(y, m, 0)`), где он и безопасен.
+ */
+function monthRange(today: string): { from: string; to: string } {
   const iso = (day: Date) => `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
+  const [y, m] = today.split("-").map(Number) as [number, number];
+  return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
 }
 
 /**
@@ -35,7 +43,14 @@ export function reachNotice(delivered: number, intended: number): string {
   return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
 }
 
-export function AdminWeekendScreen() {
+export function AdminWeekendScreen({
+  /** Командная дата из bootstrap (`data.today`), а не часы телефона: без неё
+   *  учёт часов по умолчанию открывался на месяце браузера, а не команды —
+   *  баг из ledger, тот же, что и в «Сборах». */
+  today,
+}: {
+  today: string;
+}) {
   const [slots, setSlots] = useState<AdminSlotView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // One slot's assign/unassign in flight must not re-enable another slot's
@@ -146,7 +161,7 @@ export function AdminWeekendScreen() {
           )}
         </Section>
 
-        <PayrollSection />
+        <PayrollSection today={today} />
       </List>
     </ScreenScroll>
   );
@@ -341,8 +356,8 @@ function hoursLabel(hours: number): string {
  * края. Нажал, ничего не обновилось, почему — не сказано нигде. Ответ живёт
  * здесь же. Зеркалится в консоли — см. `admin/src/screens/WeekendAdminScreen.tsx`.
  */
-function PayrollSection() {
-  const initial = monthRange(new Date());
+function PayrollSection({ today }: { today: string }) {
+  const initial = monthRange(today);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [rows, setRows] = useState<PayrollRow[] | null>(null);

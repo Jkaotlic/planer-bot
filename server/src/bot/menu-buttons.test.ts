@@ -348,9 +348,9 @@ describe("вход в мини-апп", () => {
 
     const reply = calls.find((c) => c.method === "sendMessage")!;
     expect(webAppUrls(reply.payload)).toEqual([
-      "https://x.keenetic.pro/app/",
-      "https://x.keenetic.pro/app/?screen=sick",
-      "https://x.keenetic.pro/app/?screen=event",
+      "https://example.com/app/",
+      "https://example.com/app/?screen=sick",
+      "https://example.com/app/?screen=event",
     ]);
   });
 
