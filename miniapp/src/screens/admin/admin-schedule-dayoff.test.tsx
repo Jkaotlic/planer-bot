@@ -45,7 +45,10 @@ function everyDay(kind: "holiday" | "workday", source: "auto" | "manual", note: 
   };
 }
 
-const TODAY = new Date().toISOString().slice(0, 10);
+// Будний день, а не сегодняшний: на субботе или воскресенье экран честно
+// предлагает «Сделать рабочим», и тест про «Сделать выходным» падал бы по
+// календарю, а не по коду (упал 2026-09-26, в субботу).
+const TODAY = "2026-09-23";
 
 async function mount() {
   host = document.createElement("div");
