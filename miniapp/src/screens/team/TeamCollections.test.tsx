@@ -206,3 +206,45 @@ describe("TeamCollections", () => {
     expect(el.textContent ?? "").toContain("Не получилось отметить");
   });
 });
+
+describe("TeamCollections на своей вкладке (с emptyLabel)", () => {
+  // «Сейчас сборов нет» стояло, пока данные ещё грузились, и навсегда — если
+  // загрузка упала. Человек, у которого сбор есть, читал, что его нет.
+  const EMPTY = "Сейчас сборов нет.";
+  async function mountTab() {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<AppRoot><TeamCollections emptyLabel={EMPTY} /></AppRoot>);
+    });
+    await settle();
+    return host;
+  }
+
+  it("пока грузится — не говорит «сборов нет»", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockReturnValue(new Promise(() => {}));
+    const el = await mountTab();
+    expect(el.textContent).not.toContain(EMPTY);
+    expect(el.textContent).toContain("Загружаю");
+  });
+
+  it("загрузка упала — говорит об этом и даёт повторить", async () => {
+    const load = vi.spyOn(apiClient, "getMyCollections").mockRejectedValue(new Error("boom"));
+    const el = await mountTab();
+    expect(el.textContent).not.toContain(EMPTY);
+    expect(el.textContent).toContain("Не удалось загрузить сборы");
+
+    load.mockResolvedValue([COFFEE]);
+    const retry = [...el.querySelectorAll("button")].find((b) => b.textContent?.includes("Повторить"))!;
+    await act(async () => retry.click());
+    await settle();
+    expect(el.textContent).toContain("Кофемашина");
+  });
+
+  it("пусто по-настоящему — говорит «сборов нет»", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([]);
+    const el = await mountTab();
+    expect(el.textContent).toContain(EMPTY);
+  });
+});

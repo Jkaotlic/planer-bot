@@ -28,34 +28,52 @@ export interface TeamCollectionsProps {
 }
 
 export function TeamCollections({ emptyLabel, onPaidChanged }: TeamCollectionsProps = {}) {
-  const [rows, setRows] = useState<WorkerCollection[]>([]);
+  // `null` — ещё грузится, `"error"` — не загрузилось. Раньше оба состояния
+  // были пустым списком, и своя вкладка говорила «сборов нет», пока данные
+  // шли, и навсегда — если запрос упал.
+  const [rows, setRows] = useState<WorkerCollection[] | null | "error">(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    setRows(null);
     apiClient
       .getMyCollections()
       .then((loaded) => { if (alive) setRows(loaded); })
-      .catch(() => { if (alive) setRows([]); });
+      .catch(() => { if (alive) setRows("error"); });
     return () => { alive = false; };
-  }, []);
+  }, [attempt]);
 
-  // Пустой список: во вкладке «Команда» секции нет вовсе (`emptyLabel` не
-  // передан), а на своей вкладке молчать нельзя — пустой экран читался бы как
-  // «не загрузилось».
-  if (rows.length === 0) {
+  const hint = { color: "var(--tgui--hint_color)", fontSize: 13.5, padding: "12px 4px", lineHeight: 1.45 } as const;
+
+  // Во вкладке «Команда» (`emptyLabel` не передан) секции нет ни пока грузится,
+  // ни при отказе: сбор там не главное, и отказ не должен уносить с экрана
+  // график команды.
+  if (rows === null) return emptyLabel ? <div style={hint}>Загружаю сборы…</div> : null;
+  if (rows === "error") {
     return emptyLabel ? (
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5, padding: "12px 4px", lineHeight: 1.45 }}>
-        {emptyLabel}
+      <div style={hint}>
+        Не удалось загрузить сборы.{" "}
+        <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>
+          Повторить
+        </Button>
       </div>
     ) : null;
   }
 
+  // Пустой список: во вкладке «Команда» секции нет вовсе, а на своей вкладке
+  // молчать нельзя — пустой экран читался бы как «не загрузилось».
+  if (rows.length === 0) {
+    return emptyLabel ? <div style={hint}>{emptyLabel}</div> : null;
+  }
+  const loaded = rows;
+
   return (
     <CardStack>
       <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)", padding: "0 4px" }}>
-        {rows.length === 1 ? "Идёт сбор" : "Идут сборы"}
+        {loaded.length === 1 ? "Идёт сбор" : "Идут сборы"}
       </div>
-      {rows.map((row) => (
+      {loaded.map((row) => (
         <CollectionCard key={row.id} row={row} onPaidChanged={onPaidChanged} />
       ))}
     </CardStack>
