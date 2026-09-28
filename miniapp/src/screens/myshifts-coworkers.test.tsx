@@ -203,3 +203,21 @@ describe("«Кто ещё работает» под своей сменой", ()
     expect(el.textContent).not.toContain("Кто ещё работает");
   });
 });
+
+/**
+ * «Обменять» гаснет у сегодняшней смены, которая уже началась (`swapBlockedFor`
+ * в `../lib/swaps`) — сервер такой обмен всё равно отклонит, и кнопка не должна
+ * обещать то, что закончится отказом в конце формы.
+ */
+describe("«Обменять» гаснет у уже начавшейся сегодняшней смены", () => {
+  // Системное время в этом файле — 2026-09-10, 08:00 (см. верхний `beforeEach`).
+  const STARTED_SHIFT: Shift = { ...MY_SHIFT, start: "07:00", end: "16:00" };
+
+  it("кнопка недоступна и называет причину", async () => {
+    const el = await mount({ shifts: [STARTED_SHIFT] });
+
+    const btn = swapButton(el) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(el.textContent).toContain("Смена уже началась");
+  });
+});
