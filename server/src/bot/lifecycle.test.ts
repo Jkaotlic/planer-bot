@@ -53,4 +53,31 @@ describe("stopBotSafely", () => {
 
     expect(events).toEqual(["bot", "http", "db", "exit:0"]);
   });
+
+  // Письма об изменениях графика копятся в буфере по минуте. Рестарт в эту
+  // минуту терял их молча: человеку переставили смену, а он не узнал.
+  it("перед закрытием базы отправляет накопленные письма", async () => {
+    const events: string[] = [];
+    await lifecycle.shutdownSafely({
+      bot: { stop: async () => { events.push("bot"); } },
+      closeHttp: async () => { events.push("http"); },
+      flushPending: async () => { events.push("flush"); },
+      closeDb: () => { events.push("db"); },
+      exit: (code) => { events.push(`exit:${code}`); },
+    });
+    expect(events).toEqual(["bot", "http", "flush", "db", "exit:0"]);
+  });
+
+  it("зависшая отправка не держит остановку дольше таймаута", async () => {
+    const events: string[] = [];
+    await lifecycle.shutdownSafely({
+      bot: { stop: async () => {} },
+      closeHttp: async () => {},
+      flushPending: () => new Promise(() => {}),
+      flushTimeoutMs: 20,
+      closeDb: () => { events.push("db"); },
+      exit: (code) => { events.push(`exit:${code}`); },
+    });
+    expect(events).toEqual(["db", "exit:0"]);
+  });
 });

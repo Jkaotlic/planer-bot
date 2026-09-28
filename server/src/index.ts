@@ -81,7 +81,8 @@ const tickRound = createTickScheduler([
 ]);
 setInterval(tickRound, REMINDER_TICK_MS);
 
-const app = createApp({ db, config, bot });
+let flushPending: (() => Promise<void>) | undefined;
+const app = createApp({ db, config, bot, onFlushPending: (flush) => { flushPending = flush; } });
 
 // Serve the built mini app (/app) and admin (/admin) SPAs from this same process.
 // This file lives at <repoRoot>/server/src/index.ts, so the repo root is always two
@@ -121,6 +122,7 @@ const shutdown = () => {
           else resolveShutdown();
         });
       }),
+    flushPending: () => flushPending?.() ?? Promise.resolve(),
     closeDb: () => sqlite.close(),
     exit: (code) => process.exit(code),
   });

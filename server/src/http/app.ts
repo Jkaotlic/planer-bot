@@ -167,6 +167,12 @@ export interface AppDeps {
    * Подменяется в тестах; в проде это тот же загрузчик, что у суточного тика.
    */
   fetchHolidays?: FetchYear;
+  /**
+   * Сюда `createApp` отдаёт «отправь всё, что ждёт» — для остановки процесса.
+   * Колбэк, а не поле возвращаемого значения: `createApp` возвращает Hono, и
+   * все вызывающие (десятки тестов) получают его как есть.
+   */
+  onFlushPending?: (flush: () => Promise<void>) => void;
 }
 
 function displayNameOf(u: TelegramUser): string {
@@ -230,6 +236,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // timers. A hand edit waits in it for a few seconds so a series of edits
   // reaches the worker as one letter instead of one message per entry.
   const noticeBuffer = createNoticeBuffer({ db, bot });
+  deps.onFlushPending?.(() => noticeBuffer.flushNow());
   /** Объявления, которые рассылаются прямо сейчас: «отправитель + текст». */
   const announcementsInFlight = new Set<string>();
 
