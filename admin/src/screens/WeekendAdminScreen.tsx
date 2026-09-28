@@ -42,6 +42,8 @@ export function WeekendAdminScreen() {
   const [busy, setBusy] = useState(false);
   const [showPost, setShowPost] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** «Не дошло» — красным, а не зелёной строкой успеха: зелёный читался как «всё хорошо». */
+  const [warning, setWarning] = useState<string | null>(null);
 
   async function reloadSlots() {
     setSlots(await apiClient.getWeekendSlots());
@@ -67,7 +69,8 @@ export function WeekendAdminScreen() {
     setError(null);
     try {
       const { notified } = await apiClient.assignSlot(slotId, employeeId);
-      setNotice(assignNotice(notified));
+      setNotice(null);
+      setWarning(assignNotice(notified));
       await reloadSlots();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось назначить");
@@ -100,6 +103,7 @@ export function WeekendAdminScreen() {
 
       {error && <div className="error-text">{error}</div>}
       {notice && <div className="roster-notice roster-notice-success" role="status">{notice}</div>}
+      {warning && <div className="roster-notice roster-notice-error" role="status">{warning}</div>}
 
       <section className="employees-section">
         <h3 className="employees-section-title">Открытые смены</h3>
@@ -123,6 +127,7 @@ export function WeekendAdminScreen() {
           onCancel={() => setShowPost(false)}
           onCreated={async (reach) => {
             setShowPost(false);
+            setWarning(null);
             setNotice(reachNotice(reach.delivered, reach.intended));
             await reloadSlots();
           }}

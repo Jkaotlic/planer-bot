@@ -536,6 +536,27 @@ export function App() {
     // под шапку клиента, и 100vh поверх этого дало бы лишний скролл ровно на её
     // высоту — страница «пружинила» бы, не имея что показать.
     <div style={{ minHeight: "100%", boxSizing: "border-box" }}>
+      {/* Сверху и прилипает: снизу, как `refreshError`, строка оказывалась в
+          конце длинной прокрутки под панелью вкладок — в DOM есть, глазу нет
+          (замер 2026-09-28: top 2000 при экране 844). */}
+      {swapNotice && (
+        <div
+          role="status"
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+            padding: "10px 16px",
+            textAlign: "center",
+            fontSize: 13,
+            color: "var(--tgui--destructive_text_color)",
+            background: "var(--tgui--secondary_bg_color)",
+            borderBottom: "1px solid var(--tgui--divider)",
+          }}
+        >
+          {swapNotice}
+        </div>
+      )}
       {tab === "mine" && (
         <MyShiftsScreen
           me={data.me}
@@ -635,20 +656,6 @@ export function App() {
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю анонс…</div>}>
           <AnnounceScreen />
         </Suspense>
-      )}
-      {swapNotice && (
-        <div
-          role="status"
-          style={{
-            padding: "8px 16px",
-            textAlign: "center",
-            fontSize: 13,
-            color: "var(--tgui--destructive_text_color)",
-            background: "var(--tgui--secondary_bg_color)",
-          }}
-        >
-          {swapNotice}
-        </div>
       )}
       {refreshError && (
         <div

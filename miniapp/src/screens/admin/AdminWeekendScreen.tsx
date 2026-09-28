@@ -70,6 +70,8 @@ export function AdminWeekendScreen({
   const [busySlotIds, setBusySlotIds] = useState<ReadonlySet<number>>(new Set());
   const [showPost, setShowPost] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** «Не дошло» — красным, а не серой строкой рядом с обычными отчётами. */
+  const [warning, setWarning] = useState<string | null>(null);
 
   async function reload() {
     setSlots(await apiClient.getAdminWeekendSlots());
@@ -95,7 +97,8 @@ export function AdminWeekendScreen({
     setError(null);
     try {
       const { notified } = await apiClient.assignSlot(slotId, employeeId);
-      setNotice(assignNotice(notified));
+      setNotice(null);
+      setWarning(assignNotice(notified));
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось назначить");
@@ -127,6 +130,7 @@ export function AdminWeekendScreen({
                 onCancel={() => setShowPost(false)}
                 onCreated={async (reach) => {
                   setShowPost(false);
+                  setWarning(null);
                   setNotice(reachNotice(reach.delivered, reach.intended));
                   await reload();
                 }}
@@ -148,6 +152,11 @@ export function AdminWeekendScreen({
         {notice && (
           <Section>
             <div style={{ padding: "8px 20px", color: "var(--tgui--hint_color)", fontSize: 14 }} role="status">{notice}</div>
+          </Section>
+        )}
+        {warning && (
+          <Section>
+            <div style={{ padding: "8px 20px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }} role="status">{warning}</div>
           </Section>
         )}
 
