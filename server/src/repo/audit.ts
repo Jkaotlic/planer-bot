@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { HONOUREE_AUDIT_TYPES, addDaysIso, shiftStartMs, type AuditType } from "@planer/shared";
 import type { Db } from "../db/client";
 import { auditLog, employees, type AuditLog } from "../db/schema";
