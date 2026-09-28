@@ -258,6 +258,12 @@ function rotationLabel(v: unknown): string {
 // ——— таблица описателей ———
 // `Partial` снят: с этого момента полноту стережёт компилятор, а не зеркальный
 // тест в каждом консоле.
+/** Как вкладка старта читается в журнале; `null` — «Смены», как было всегда. */
+const START_TAB_LABEL: Record<string, string> = {
+  mine: "«Смены»", team: "«Команда»", team_week: "«Команда · неделя»", swaps: "«Обмены»",
+  weekend: "«Выходные»", collections: "«Сборы»", admin: "«Админ»",
+};
+
 const DESCRIBERS: Record<AuditType, Describer> = {
   entry_created: (p) => ({ icon: "＋", title: entryTitle("created", p), lines: entryView(p) }),
   entry_deleted: (p) => ({ icon: "🗑", title: entryTitle("deleted", p), lines: entryView(p) }),
@@ -401,6 +407,12 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     }
     if (p.preferredName !== undefined) {
       lines.push(`обращение: ${str(p.preferredName) ?? "по умолчанию"}`);
+    }
+    if (p.startTab !== undefined) {
+      lines.push(`открывать с вкладки: ${START_TAB_LABEL[str(p.startTab) ?? ""] ?? "«Смены»"}`);
+    }
+    if (typeof p.selfScheduleEnabled === "boolean") {
+      lines.push(p.selfScheduleEnabled ? "ведёт график сам" : "больше не ведёт график сам");
     }
     return { icon: "⚙", title: "Работник изменил настройки", lines };
   },

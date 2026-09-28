@@ -172,6 +172,18 @@ describe("describeAuditEvent — остальные события", () => {
       contains: "напоминания выключены",
     },
     {
+      type: "settings_changed",
+      payload: { employeeId: 9, displayName: "Света Орлова", startTab: "team" },
+      title: "Работник изменил настройки",
+      contains: "открывать с вкладки",
+    },
+    {
+      type: "settings_changed",
+      payload: { employeeId: 9, displayName: "Света Орлова", selfScheduleEnabled: true },
+      title: "Работник изменил настройки",
+      contains: "ведёт график сам",
+    },
+    {
       type: "template_roles_changed",
       payload: { templateId: 3, templateName: "Ночь", poolSize: 7, preferred: 2 },
       title: "Изменено «кто что может»",

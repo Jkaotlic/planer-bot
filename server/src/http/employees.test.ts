@@ -1161,6 +1161,23 @@ describe("preferred name", () => {
     expect((event?.payload as { remindersEnabled: boolean }).remindersEnabled).toBe(false);
   });
 
+  // Одно и то же значение повторно — не событие: строка «изменил настройки»
+  // без единого изменения только засоряла журнал.
+  it("повтор того же значения строку журнала не пишет; вкладка старта — пишет", async () => {
+    const db = makeTestDb();
+    worker(db, "Марк Волков", 202);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 202);
+
+    await app.request("/api/me/settings", authedJson(token, { remindersEnabled: true }, "PATCH"));
+    expect(listRecentAudit(db, 10).filter((row) => row.type === "settings_changed")).toHaveLength(0);
+
+    await app.request("/api/me/settings", authedJson(token, { startTab: "team" }, "PATCH"));
+    const rows = listRecentAudit(db, 10).filter((row) => row.type === "settings_changed");
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.payload as { startTab?: string }).startTab).toBe("team");
+  });
+
   it("lets an admin set it for somebody who never will", async () => {
     // The case this exists for: workers linked before tgFirstName was stored have
     // nothing to fall back to but «Кузнецов Михаил».

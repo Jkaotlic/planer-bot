@@ -547,6 +547,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = c.get("auth").employeeId;
     let employee = getEmployeeById(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
+    const before = employee;
     if (hasSelfSchedule) {
       // Не 400: поле существует и понято — его просто некому применить.
       // Иначе тумблер стал бы способом обойти роль.
@@ -570,13 +571,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // Одно действие человека — одна строка журнала: маршрут принимает несколько
     // полей разом, и делить его на несколько событий значило бы врать о том,
     // что он сделал.
-    recordAudit(db, "settings_changed", id, {
-      employeeId: id,
-      displayName: employee.displayName,
-      ...(hasReminders ? { remindersEnabled: employee.remindersEnabled } : {}),
-      ...(preferred?.ok ? { preferredName: employee.preferredName } : {}),
-      ...(hasSelfSchedule ? { selfScheduleEnabled: employee.selfScheduleEnabled } : {}),
-    });
+    // Только то, что правда поменялось: повтор того же значения — не событие,
+    // и строка «изменил настройки» без изменений лишь засоряла журнал.
+    // Вкладка старта раньше не писалась вовсе.
+    const changed = {
+      ...(hasReminders && employee.remindersEnabled !== before.remindersEnabled ? { remindersEnabled: employee.remindersEnabled } : {}),
+      ...(preferred?.ok && employee.preferredName !== before.preferredName ? { preferredName: employee.preferredName } : {}),
+      ...(hasSelfSchedule && employee.selfScheduleEnabled !== before.selfScheduleEnabled ? { selfScheduleEnabled: employee.selfScheduleEnabled } : {}),
+      ...(hasStartTab && employee.startTab !== before.startTab ? { startTab: employee.startTab } : {}),
+    };
+    if (Object.keys(changed).length > 0) {
+      recordAudit(db, "settings_changed", id, { employeeId: id, displayName: employee.displayName, ...changed });
+    }
 
     return c.json({
       remindersEnabled: employee.remindersEnabled,
