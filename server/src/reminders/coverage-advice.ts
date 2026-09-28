@@ -3,10 +3,10 @@ import { addDaysIso, coverageAdviceText, eachDayIso, parseCoverage, scheduleGaps
 import type { Db } from "../db/client";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { coverageAdviceSentOn, markCoverageAdviceSent, reminderHour, restoreCoverageAdviceSent } from "../repo/settings";
+import { acknowledgedCoverageDates, coverageAdviceSentOn, markCoverageAdviceSent, reminderHour, restoreCoverageAdviceSent } from "../repo/settings";
 import { loadCalendar } from "../repo/calendar-days";
 import { recordAudit } from "../repo/audit";
-import { notifyAdmins, reachedNobody, scheduleLink } from "../bot/notify";
+import { notifyAdmins, reachedNobody, scheduleLink, type AdminAction } from "../bot/notify";
 
 /**
  * Насколько вперёд смотрит совет.
@@ -51,7 +51,10 @@ export async function runCoverageAdviceTick(
   }));
   // Праздник не пуст: в него не выходят. Рабочая суббота, наоборот, обычный
   // день, и оставленная без смен она — тот самый пробел.
-  const gaps = scheduleGaps(entries, templates, eachDayIso(from, to), loadCalendar(db, from, to));
+  const allGaps = scheduleGaps(entries, templates, eachDayIso(from, to), loadCalendar(db, from, to));
+  // Даты, про которые админ нажал «Знаю про этот день», в совет не попадают.
+  const acked = acknowledgedCoverageDates(db, [...new Set(allGaps.map((g) => g.date))]);
+  const gaps = allGaps.filter((g) => !acked.has(g.date));
   const text = coverageAdviceText(gaps);
 
   // Отметка ставится и когда сказать нечего: иначе тик пересчитывал бы неделю
@@ -62,8 +65,14 @@ export async function runCoverageAdviceTick(
 
   // Кнопка ведёт на первый день с пробелом — открывать всю неделю ради него
   // незачем: `gaps` уже упорядочен по датам (`eachDayIso` идёт по возрастанию).
-  const action = publicUrl ? { text: "📅 Открыть график", webApp: scheduleLink(publicUrl, gaps[0]!.date) } : undefined;
-  const reach = await notifyAdmins(bot, db, "coverage", text, action);
+  const open: AdminAction[] = publicUrl ? [{ text: "📅 Открыть график", webApp: scheduleLink(publicUrl, gaps[0]!.date) }] : [];
+  // «Знаю про дд.мм» — на каждую дату, не больше пяти: длиннее клавиатура
+  // закрывает само письмо на экране телефона.
+  const acks: AdminAction[] = [...new Set(gaps.map((g) => g.date))].slice(0, 5).map((date) => ({
+    text: `✓ Знаю про ${date.slice(8, 10)}.${date.slice(5, 7)}`,
+    data: `coverage:ack:${date}`,
+  }));
+  const reach = await notifyAdmins(bot, db, "coverage", text, [...open, ...acks]);
   // Не дошло ни до кого — обрыв сети, а не решение админов: вернуть прежнюю
   // отметку, и следующий тик того же вечера попробует снова.
   if (reachedNobody(reach)) {

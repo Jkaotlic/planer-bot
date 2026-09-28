@@ -25,7 +25,7 @@ import { collectionsForWorker, getCollection, previewCollection, setCollectionCl
 import { setPaid } from "../collections/payment-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
-import { reminderHour } from "../repo/settings";
+import { ackCoverageDate, reminderHour } from "../repo/settings";
 import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
@@ -1480,6 +1480,21 @@ export function createBot(deps: BotDeps): Bot {
    * кто нажал: чужие уведомления выключить нечем. Проверка на админа нужна
    * отдельно — кнопка живёт в чате вечно, а админа могли разжаловать.
    */
+  /**
+   * «Знаю про дд.мм» под советом о пробелах — дата больше в совет не попадает,
+   * для всех админов (решение владельца от 2026-09-28).
+   */
+  bot.callbackQuery(/^coverage:ack:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это для администратора" });
+      return;
+    }
+    const date = ctx.match[1]!;
+    ackCoverageDate(db, date, who.me.id);
+    await ctx.answerCallbackQuery({ text: `Понял, про ${date.slice(8, 10)}.${date.slice(5, 7)} больше не напомню` });
+  });
+
   bot.callbackQuery(/^notice:mute:([a-z_]+)$/, async (ctx) => {
     const kind = ADMIN_NOTICE_KINDS.find((k) => k === ctx.match[1]);
     const who = acting(ctx.from.id);

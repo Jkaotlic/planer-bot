@@ -403,7 +403,7 @@ export async function notifyAdmins(
   db: Db,
   kind: AdminNoticeKind,
   text: string,
-  action?: AdminAction,
+  action?: AdminAction | readonly AdminAction[],
   opts: {
     /** Сообщение, которое уходит следом за текстом копией (скриншот в жалобе). */
     attachment?: { fromChatId: number; messageId: number };
@@ -418,8 +418,10 @@ export async function notifyAdmins(
   // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
   // него на экране.
   const kb = new InlineKeyboard();
-  if (action) {
-    addActionButton(kb, action);
+  // Несколько действий — каждое своей строкой (совет о пробелах: «Открыть
+  // график» и «Знаю про дд.мм» на каждую дату).
+  for (const one of action == null ? [] : Array.isArray(action) ? action : [action]) {
+    addActionButton(kb, one);
     kb.row();
   }
   kb.text("🔕 Не писать мне про это", `notice:mute:${kind}`);
