@@ -624,3 +624,51 @@ describe("«Передумал» — отзыв «Хочу»", () => {
     expect((await res.json()).error).toBe("already_assigned");
   });
 });
+
+describe("«Набрали, закрыть» — закрытие вакантного выходного", () => {
+  // Закрыть слот было нельзя: набранный или ошибочный оставался открытым до
+  // своей даты, «🙋 Хочу» у всей команды было живым, а сказать «отбой» нечем.
+  // Решение владельца от 2026-09-28: назначенные выходят как были, желающим,
+  // кого не назначили, — «отбой».
+  it("закрыт: назначенный остаётся, желающему — «отбой», журнал; повтор — без писем", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 601);
+    const igor = await worker(db, app, "Игорь", 602);
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(igor.token));
+    await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
+    const before = sent.length;
+
+    const res = await app.request(`/api/admin/weekend/slots/${slotId}/close`, authed(admin));
+
+    expect(res.status).toBe(200);
+    const after = sent.slice(before);
+    expect(after.some((m) => m.chat_id === 602 && String(m.text).includes("набрали"))).toBe(true);
+    expect(after.some((m) => m.chat_id === 601)).toBe(false);
+    expect(listRecentAudit(db, 10).some((r) => r.type === "weekend_slot_closed")).toBe(true);
+    expect(listShiftsInRange(db, nextSaturday(), nextSaturday()).some((s) => s.employeeId === anya.w.id)).toBe(true);
+
+    const again = sent.length;
+    expect((await app.request(`/api/admin/weekend/slots/${slotId}/close`, authed(admin))).status).toBe(200);
+    expect(sent.length).toBe(again);
+  });
+
+  it("после закрытия «Хочу» не принимается; работник слот не видит, админ видит закрытым", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = await worker(db, app, "Марк", 603);
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }))).json()).slot.id as number;
+    await app.request(`/api/admin/weekend/slots/${slotId}/close`, authed(admin));
+
+    expect((await app.request(`/api/weekend/slots/${slotId}/interest`, authed(mark.token))).status).toBe(400);
+    const workerSlots = (await (await app.request("/api/weekend/slots", bearer(mark.token))).json()).slots;
+    expect(workerSlots.some((s: { slot: { id: number } }) => s.slot.id === slotId)).toBe(false);
+    const adminSlots = (await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots;
+    expect(adminSlots.find((s: { slot: { id: number } }) => s.slot.id === slotId)?.slot.status).toBe("closed");
+  });
+});

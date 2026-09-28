@@ -39,7 +39,7 @@ export const AUDIT_TYPES = [
   // Час рассылки — не `settings_changed`: тот тип про замок обменов, и одна
   // строка на две разные ручки не отвечала бы, что именно поменяли.
   "reminder_hour_changed",
-  "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
+  "weekend_slot_created", "weekend_slot_closed", "weekend_assigned", "weekend_unassigned",
   "weekend_interest", "weekend_interest_withdrawn", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
   "birthday_campaign_updated",
@@ -472,6 +472,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   }),
   weekend_assigned: (p) => weekendView(p, "🎯", "Выходная смена назначена"),
   weekend_unassigned: (p) => weekendView(p, "↩", "Назначение на выходной снято"),
+  weekend_slot_closed: (p) => weekendView(p, "✅", "Выходную смену набрали — закрыта"),
   weekend_interest: (p) => weekendView(p, "🙋", "Отклик на выходную смену"),
   weekend_interest_withdrawn: (p) => weekendView(p, "↩", "Отозвал(а) отклик на выходную смену"),
   weekend_offer_confirmed: (p) => weekendView(p, "✅", "Выходная смена подтверждена"),

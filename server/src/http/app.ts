@@ -119,6 +119,7 @@ import {
   expressInterest,
   interestedForSlot,
   withdrawInterest,
+  closeSlot,
   assignSlot,
   unassign,
   assigneesForSlot,
@@ -129,7 +130,7 @@ import {
   openSlotsForWorker,
   myOffers,
 } from "../weekend/weekend-service";
-import { listOpenSlots, getVacantSlot, findOpenSlotLike } from "../repo/weekend";
+import { getVacantSlot, findOpenSlotLike, listAdminSlots } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
@@ -2265,12 +2266,33 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Admin: open slots with their ranked interested list (fairness hint: confirmedThisMonth asc)
   app.get("/api/admin/weekend/slots", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? teamNow(config.teamTz).date;
-    const slots = listOpenSlots(db, from).map((slot) => ({
+    // Открытые и закрытые («набрали»): закрытый админ видит до его даты — кто
+    // выходит, — но без «Назначить».
+    const slots = listAdminSlots(db, from).map((slot) => ({
       slot,
       interested: interestedForSlot(db, slot.id),
       assignees: assigneesForSlot(db, slot.id),
     }));
     return c.json({ slots });
+  });
+
+  // Admin: «Набрали, закрыть» — слот больше не принимает «Хочу»; назначенные
+  // выходят, желающим без назначения — «отбой».
+  app.post("/api/admin/weekend/slots/:id/close", requireAdmin(db, config.jwtSecret), async (c) => {
+    const slotId = Number(c.req.param("id"));
+    const res = closeSlot(db, slotId);
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (!res.changed) return c.json({ ok: true, toldOff: 0 });
+    const slot = getVacantSlot(db, slotId);
+    const line = slot ? slotLineOf(slot) : "выходную смену";
+    recordAudit(db, "weekend_slot_closed", c.get("auth").employeeId, { slotId, slot: slot ? line : null, toldOff: res.toldOff.length });
+    if (bot) {
+      for (const employeeId of res.toldOff) {
+        const tg = tgOf(employeeId);
+        if (tg != null) await notifyUser(bot, tg, `Смену уже набрали — ${line}. Спасибо, что откликнулся(ась)! 🙌`);
+      }
+    }
+    return c.json({ ok: true, toldOff: res.toldOff.length });
   });
 
   // Admin: assign a slot to an interested worker -> creates an offered assignment

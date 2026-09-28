@@ -56,6 +56,19 @@ export function listOpenSlots(db: Db, fromDate: string): VacantSlot[] {
     .all();
 }
 
+/**
+ * Слоты для админа: открытые и закрытые («набрали») — закрытый виден до своей
+ * даты, чтобы админ видел, кто выходит, но без «Назначить».
+ */
+export function listAdminSlots(db: Db, fromDate: string): VacantSlot[] {
+  return db
+    .select()
+    .from(vacantSlots)
+    .where(and(inArray(vacantSlots.status, ["open", "closed"]), gte(vacantSlots.date, fromDate)))
+    .orderBy(vacantSlots.date)
+    .all();
+}
+
 export function getVacantSlot(db: Db, id: number): VacantSlot | undefined {
   return db.select().from(vacantSlots).where(eq(vacantSlots.id, id)).get();
 }

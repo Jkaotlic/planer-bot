@@ -10,6 +10,7 @@ import {
   addInterest,
   removeInterest,
   listInterestedEmployeeIds,
+  setSlotStatus,
   listMyInterestSlotIds,
   createAssignment,
   confirmAssignment,
@@ -104,6 +105,28 @@ export function expressInterest(db: Db, slotId: number, employeeId: number, toda
   if (!requester || !takesPartInAssignment(requester)) return { ok: false, reason: "excluded" };
   addInterest(db, slotId, employeeId);
   return { ok: true };
+}
+
+/**
+ * «Набрали, закрыть» — вакантный выходной больше не принимает «Хочу».
+ *
+ * Назначенные выходят как были (решение владельца от 2026-09-28): закрытие —
+ * это «людей хватит», а не отмена смены. `toldOff` — кто хотел и не назначен:
+ * им вызывающий пишет «отбой». Повторное закрытие ничего не меняет и никому
+ * не пишет.
+ */
+export function closeSlot(
+  db: Db, slotId: number,
+): { ok: true; changed: boolean; toldOff: number[] } | { ok: false; reason: string } {
+  const slot = getVacantSlot(db, slotId);
+  if (!slot) return { ok: false, reason: "not_found" };
+  if (slot.status === "closed") return { ok: true, changed: false, toldOff: [] };
+  const assigned = new Set(
+    listAssignmentsForSlot(db, slotId).filter((a) => a.status !== "declined").map((a) => a.employeeId),
+  );
+  const toldOff = listInterestedEmployeeIds(db, slotId).filter((id) => !assigned.has(id));
+  setSlotStatus(db, slotId, "closed");
+  return { ok: true, changed: true, toldOff };
 }
 
 /**
