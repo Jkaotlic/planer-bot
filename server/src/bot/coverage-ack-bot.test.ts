@@ -5,6 +5,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
 import { acknowledgedCoverageDates } from "../repo/settings";
+import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -39,6 +40,10 @@ describe("«Знаю про этот день»", () => {
     await tap(bot, 111, "coverage:ack:2026-09-07");
     expect(acknowledgedCoverageDates(db, ["2026-09-07"]).has("2026-09-07")).toBe(true);
     expect(api.answers.join(" ")).toContain("07.09");
+    // Заглушка — для всех админов, поэтому кто её поставил, видно в журнале.
+    const row = listRecentAudit(db, 5).find((r) => r.type === "coverage_acknowledged");
+    expect(row?.payload).toMatchObject({ date: "2026-09-07" });
+    expect(row?.actorEmployeeId).not.toBeNull();
   });
 
   it("работник нажать не может — совет админский", async () => {

@@ -3,7 +3,7 @@ import { addDaysIso, coverageAdviceText, eachDayIso, parseCoverage, scheduleGaps
 import type { Db } from "../db/client";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
-import { acknowledgedCoverageDates, coverageAdviceSentOn, markCoverageAdviceSent, reminderHour, restoreCoverageAdviceSent } from "../repo/settings";
+import { acknowledgedCoverageDates, coverageAdviceSentOn, pruneCoverageAcks, markCoverageAdviceSent, reminderHour, restoreCoverageAdviceSent } from "../repo/settings";
 import { loadCalendar } from "../repo/calendar-days";
 import { recordAudit } from "../repo/audit";
 import { notifyAdmins, reachedNobody, scheduleLink, type AdminAction } from "../bot/notify";
@@ -38,6 +38,7 @@ export async function runCoverageAdviceTick(
 ): Promise<number> {
   if (now.time < reminderHour(db)) return 0;
   if (coverageAdviceSentOn(db) === now.date) return 0;
+  pruneCoverageAcks(db, now.date);
 
   const from = addDaysIso(now.date, 1);
   const to = addDaysIso(now.date, ADVICE_DAYS);

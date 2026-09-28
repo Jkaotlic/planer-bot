@@ -1493,6 +1493,8 @@ export function createBot(deps: BotDeps): Bot {
     }
     const date = ctx.match[1]!;
     ackCoverageDate(db, date, who.me.id);
+    // Заглушка — для всех админов, поэтому кто её поставил, видно в журнале.
+    recordAudit(db, "coverage_acknowledged", who.me.id, { date });
     await ctx.answerCallbackQuery({ text: `Понял, про ${date.slice(8, 10)}.${date.slice(5, 7)} больше не напомню` });
   });
 
