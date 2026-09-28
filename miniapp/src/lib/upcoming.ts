@@ -1,4 +1,4 @@
-import { addDaysIso, formatWeekRangeLabelIso, mondayOfIso } from "@planer/shared";
+import { addDaysIso, countsForBalance, formatWeekRangeLabelIso, mondayOfIso } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { durationHours } from "./shift";
 
@@ -60,11 +60,13 @@ export function groupUpcomingByWeek(shifts: readonly Shift[], today: string): Up
 /**
  * Сколько рабочих смен и часов осталось до конца текущей недели.
  *
- * Только `category === "shift"`: отпуск — это не смена и не часы, а сводка
- * отвечает на вопрос «сколько мне ещё работать».
+ * Всё рабочее (`countsForBalance`: смена, дежурство, выезд, выход в выходной),
+ * без отсутствий — сводка отвечает на вопрос «сколько мне ещё работать». До
+ * 2026-09-28 считалась одна «смена», и у дежурного неделя выглядела пустой;
+ * его решение — считать всё рабочее.
  */
 export function remainingThisWeek(shifts: readonly Shift[], today: string): { count: number; hours: number } {
   const sunday = addDaysIso(mondayOfIso(today), 6);
-  const mine = shifts.filter((s) => s.category === "shift" && s.date >= today && s.date <= sunday);
+  const mine = shifts.filter((s) => countsForBalance(s.category) && s.date >= today && s.date <= sunday);
   return { count: mine.length, hours: mine.reduce((sum, s) => sum + durationHours(s), 0) };
 }

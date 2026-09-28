@@ -109,4 +109,18 @@ describe("remainingThisWeek", () => {
   it("на пустой неделе даёт нули, а не NaN", () => {
     expect(remainingThisWeek([], WEDNESDAY)).toEqual({ count: 0, hours: 0 });
   });
+
+  // Его решение от 2026-09-28: «сколько мне ещё работать» — это всё рабочее,
+  // а не одна категория «смена». Дежурство, выезд и выход в выходной — тоже работа.
+  it("считает дежурство, выезд и выход в выходной", () => {
+    const res = remainingThisWeek(
+      [
+        entry({ date: "2026-08-06", category: "duty" }),
+        entry({ date: "2026-08-07", category: "offsite" }),
+        entry({ date: "2026-08-08", category: "weekend_work" }),
+      ],
+      WEDNESDAY,
+    );
+    expect(res.count).toBe(3);
+  });
 });
