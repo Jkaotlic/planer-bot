@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { REMINDER_HOUR_DEFAULT } from "@planer/shared";
 import { appSettings, type AppSetting } from "../db/schema";
@@ -116,6 +116,17 @@ export function acknowledgedCoverageDates(db: Db, dates: readonly string[]): Set
   const rows = db.select({ key: appSettings.key }).from(appSettings)
     .where(inArray(appSettings.key, dates.map((d) => `${COVERAGE_ACK_PREFIX}${d}`))).all();
   return new Set(rows.map((r) => r.key.slice(COVERAGE_ACK_PREFIX.length)));
+}
+
+/**
+ * Убрать заглушки дат раньше `today`: совет смотрит только вперёд, и прошедшая
+ * заглушка ничего больше не глушит — без чистки они копились бы в настройках.
+ */
+export function pruneCoverageAcks(db: Db, today: string): void {
+  const rows = db.select({ key: appSettings.key }).from(appSettings)
+    .where(like(appSettings.key, `${COVERAGE_ACK_PREFIX}%`)).all();
+  const stale = rows.map((r) => r.key).filter((key) => key.slice(COVERAGE_ACK_PREFIX.length) < today);
+  if (stale.length > 0) db.delete(appSettings).where(inArray(appSettings.key, stale)).run();
 }
 
 /** Вернуть отметку, какой она была до попытки: письмо не дошло ни до кого. */

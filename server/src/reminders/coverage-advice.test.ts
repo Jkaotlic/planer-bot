@@ -9,7 +9,7 @@ import { listRecentAudit } from "../repo/audit";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { setCoverage } from "../repo/templates";
 import { setManualDay } from "../repo/calendar-days";
-import { ackCoverageDate } from "../repo/settings";
+import { ackCoverageDate, acknowledgedCoverageDates } from "../repo/settings";
 import { runCoverageAdviceTick } from "./coverage-advice";
 import type { Db } from "../db/client";
 
@@ -214,6 +214,17 @@ describe("«Знаю про этот день»", () => {
     expect(buttons).toContain("coverage:ack:2026-09-07");
     expect(buttons).toContain("Знаю про 07.09");
     expect((buttons.match(/coverage:ack:/g) ?? []).length).toBeLessThanOrEqual(5);
+  });
+
+  it("заглушки прошедших дат тик убирает — они больше не нужны", async () => {
+    const { db } = stage();
+    ackCoverageDate(db, "2026-09-01");
+    ackCoverageDate(db, "2026-09-07");
+    const { bot } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    expect(acknowledgedCoverageDates(db, ["2026-09-01", "2026-09-07"])).toEqual(new Set(["2026-09-07"]));
   });
 
   it("дат с пробелами больше пяти — кнопок ровно пять", async () => {

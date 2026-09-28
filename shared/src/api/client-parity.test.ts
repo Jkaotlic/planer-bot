@@ -70,6 +70,15 @@ const CONSOLE_ONLY: Record<string, string> = {
     "календарь недели отдельным методом: консоль берёт из ответа getTeamSchedule только записи, мини-апп — ответ целиком с calendar",
 };
 
+/**
+ * Имена членов интерфейса: методы `x(`, дженерики `x<T>(`, необязательные `x?(`
+ * и свойства-функции `x: () => …`. Раньше разбор видел только первые — метод,
+ * записанный свойством или с дженериком, проходил мимо сторожа.
+ */
+export function interfaceMembers(body: string): string[] {
+  return [...body.matchAll(/^ {2}([A-Za-z]\w*)\??\s*(?:<[^>\n]*>)?\s*[(:]/gm)].map((m) => m[1]!);
+}
+
 function apiClientMethods(relPath: string): Set<string> {
   const text = readFileSync(resolve(repoRoot, relPath), "utf8");
   const start = text.indexOf("export interface ApiClient {");
@@ -78,13 +87,30 @@ function apiClientMethods(relPath: string): Set<string> {
   // оформлен в обоих файлах, вложенные типы стоят с отступом.
   const end = text.indexOf("\n}", start);
   const body = text.slice(start, end);
-  const names = [...body.matchAll(/^ {2}([A-Za-z]\w*)\??\(/gm)].map((m) => m[1]!);
+  const names = interfaceMembers(body);
   if (names.length < 20) throw new Error(`${relPath}: нашёл ${names.length} методов — разбор сломался, а не клиенты сошлись`);
   return new Set(names);
 }
 
 const miniapp = apiClientMethods("miniapp/src/api/client.ts");
 const consoleApi = apiClientMethods("admin/src/api/client.ts");
+
+describe("разбор членов интерфейса", () => {
+  it("видит методы, дженерики, необязательные и свойства-функции; вложенное — нет", () => {
+    const body = [
+      "export interface ApiClient {",
+      "  plain(a: number): Promise<void>;",
+      "  generic<T>(a: T): Promise<T>;",
+      "  optional?(): void;",
+      "  asProp: (a: number) => Promise<void>;",
+      "  optProp?: () => void;",
+      "  nested: {",
+      "    inner(): void;",
+      "  };",
+    ].join("\n");
+    expect(interfaceMembers(body)).toEqual(["plain", "generic", "optional", "asProp", "optProp", "nested"]);
+  });
+});
 
 describe("паритет apiClient консоли и мини-аппа", () => {
   it("всё, что есть только в мини-аппе, записано с причиной", () => {
