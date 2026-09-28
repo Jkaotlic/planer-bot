@@ -398,6 +398,76 @@ export function detachHandoversFromEntry(db: Db, sickEntryId: number): void {
 }
 
 /**
+ * «Выходить не нужно» — тому, кто ждал решения по этой передаче.
+ *
+ * Кто ждал: адресат личного предложения или, если уже спросили всех, каждый, кто
+ * ещё мог её взять. Круг веера пересчитывается, а не хранится: кто с тех пор
+ * стал занят, про предложение, которое уже не мог принять, не услышит.
+ */
+async function tellCancelled(deps: HandoverDeps, handover: Handover, shift: Shift): Promise<void> {
+  const { db } = deps;
+  const text = handoverCancelledText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift));
+  if (handover.status === "offered" && handover.offeredToEmployeeId != null) {
+    await deps.messenger.plain(handover.offeredToEmployeeId, text);
+  } else if (handover.status === "fanned") {
+    const declined = listDeclines(db, handover.id);
+    for (const employee of handoverCandidates(db, shift, { excludeIds: declined })) {
+      await deps.messenger.plain(employee.id, text);
+    }
+  }
+}
+
+/** Почему передача больше не имеет смысла; `null` — жива. */
+export type VoidReason = "gone" | "reassigned" | "uncovered";
+
+/**
+ * Передача жива, только пока её смена есть, смена всё ещё у дающего, а
+ * больничный, ради которого её отдают, существует и покрывает её день.
+ *
+ * Правило у самой передачи, а не в путях, меняющих смену: таких путей восемь
+ * (правка и удаление админом, диапазон, обмен в API и в боте, архивация,
+ * выходные, импорт), часть из них синхронна и без бота. Пока «Беру» верило
+ * передаче на слово, кнопка под старым сообщением отбирала смену у того, кому
+ * админ её уже поставил. Девятый путь, добавленный позже, забыл бы про вызов —
+ * а спросить у передачи не может забыть никто.
+ *
+ * Вернуть смену больной — значит вернуть передаче смысл: правило смотрит на то,
+ * что есть сейчас, а не на историю правок.
+ */
+export function handoverVoidReason(db: Db, handover: Handover): VoidReason | null {
+  const shift = shiftOf(db, handover);
+  if (!shift) return "gone";
+  if (shift.employeeId !== handover.fromEmployeeId) return "reassigned";
+  const sick = handover.sickEntryId == null ? undefined : getShift(db, handover.sickEntryId);
+  if (!sick) return "gone";
+  if (shift.date < sick.date || shift.date > (sick.endDate ?? sick.date)) return "uncovered";
+  return null;
+}
+
+/** Что сказать нажавшему «Беру» или «предложить», когда передача мертва. */
+export const VOID_REFUSAL: Record<VoidReason, string> = {
+  gone: "Смены больше нет — её изменил админ",
+  reassigned: "Смену уже переназначили",
+  uncovered: "Больничный на этот день сняли — смена снова у коллеги",
+};
+
+/**
+ * Погасить мёртвую передачу и сказать «отбой» тем, кто ждал.
+ *
+ * У `"gone"` писем нет: назвать удалённую смену нечем, а «Беру» под старым
+ * сообщением само ответит, что смены больше нет.
+ */
+export async function voidHandover(deps: HandoverDeps, handoverId: number, reason: VoidReason): Promise<void> {
+  const { db } = deps;
+  const handover = getHandover(db, handoverId);
+  if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) return;
+  const shift = shiftOf(db, handover);
+  const updated = updateHandover(db, handoverId, { status: "cancelled", resolvedAt: new Date() })!;
+  recordAudit(db, "handover_cancelled", handover.fromEmployeeId, { ...auditPayload(db, updated, shift, null), reason });
+  if (shift && reason !== "gone") await tellCancelled(deps, handover, shift);
+}
+
+/**
  * The sick leave went away, or shrank — kill the handovers it no longer justifies.
  *
  * `stillCoveredDates` is what the sick leave covers NOW: empty when it was
@@ -427,19 +497,7 @@ export async function cancelHandoversForEntry(
     killed += 1;
     if (!shift) continue;
 
-    const text = handoverCancelledText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift));
-    // Who is told: the one person waiting on a decision, or — if it had already
-    // gone wide — everybody who could still have taken it. The fanned set is
-    // recomputed rather than stored, so somebody who became busy meanwhile is not
-    // told about an offer they could no longer have accepted anyway.
-    if (handover.status === "offered" && handover.offeredToEmployeeId != null) {
-      await deps.messenger.plain(handover.offeredToEmployeeId, text);
-    } else if (handover.status === "fanned") {
-      const declined = listDeclines(db, handover.id);
-      for (const employee of handoverCandidates(db, shift, { excludeIds: declined })) {
-        await deps.messenger.plain(employee.id, text);
-      }
-    }
+    await tellCancelled(deps, handover, shift);
   }
   return killed;
 }
