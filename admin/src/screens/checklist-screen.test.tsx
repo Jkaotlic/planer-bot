@@ -353,3 +353,21 @@ describe("экран «Чек-листы»", () => {
     expect(el.textContent).not.toContain("Пока в списке нет пунктов, бот по нему ничего не присылает");
   });
 });
+
+/**
+ * «Удалить чек-лист» — необратимое действие: дежурные перестанут его получать.
+ * Прямая кнопка срабатывала бы с одного клика — отсюда `ConfirmButton`.
+ */
+describe("«Удалить чек-лист» в консоли — спрашивает, а не срабатывает сразу", () => {
+  it("одно нажатие не удаляет чек-лист, а сперва спрашивает", async () => {
+    const del = vi.spyOn(apiClient, "deleteChecklist");
+    const el = await mount([checklist({ id: 1, name: "С 07:00" })]);
+    await openCard(el, "С 07:00");
+
+    const btn = buttonByText(el, "Удалить чек-лист");
+    await act(async () => btn.click());
+
+    expect(del).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("со всеми пунктами?");
+  });
+});

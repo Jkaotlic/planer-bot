@@ -233,3 +233,21 @@ describe("«Чек-листы» в мини-аппе: что сохранено"
     expect(el.textContent).toContain("сохраняются сразу");
   });
 });
+
+/**
+ * «Удалить чек-лист» — необратимое действие: дежурные перестанут его получать.
+ * Прямая кнопка срабатывала бы с одного тапа — отсюда `ConfirmButton`.
+ */
+describe("«Удалить чек-лист» в мини-аппе — спрашивает, а не срабатывает сразу", () => {
+  it("одно нажатие не удаляет чек-лист, а сперва спрашивает", async () => {
+    const del = vi.spyOn(apiClient, "deleteChecklist");
+    const el = await mount(checklist({}));
+    await openCard(el);
+
+    const btn = buttonByText(el, "Удалить чек-лист");
+    await act(async () => btn.click());
+
+    expect(del).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("со всеми пунктами?");
+  });
+});
