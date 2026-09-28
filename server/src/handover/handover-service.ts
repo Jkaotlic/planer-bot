@@ -1,4 +1,4 @@
-import { shiftsOverlap, canSwap } from "@planer/shared";
+import { shiftsOverlap, canSwap, shiftStartMs } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
@@ -50,6 +50,30 @@ export interface HandoverDeps {
   db: Db;
   config: { teamTz: string; publicUrl: string };
   messenger: HandoverMessenger;
+  /** Часы — ради тестов: «смена уже началась» зависит от момента, а не от даты. */
+  now?: () => number;
+}
+
+/**
+ * Однодневная смена уже началась — отдавать и брать её поздно.
+ *
+ * Только однодневная: у недельного дежурства «начало» — понедельник, и в среду
+ * оно формально «идёт», но остаток недели ещё можно передать (это решает
+ * проверка «уже прошла» по `endDate` в `takeHandover`).
+ */
+/**
+ * Отдавать уже нечего: однодневная смена началась, у многодневной начался
+ * последний день.
+ */
+function isPast(deps: HandoverDeps, shift: Shift): boolean {
+  if (shift.start == null) return false;
+  const lastDay = { ...shift, date: shift.endDate ?? shift.date };
+  return shiftStartMs(lastDay, deps.config.teamTz) <= (deps.now ?? Date.now)();
+}
+
+function hasStarted(deps: HandoverDeps, shift: Shift): boolean {
+  if (shift.start == null || (shift.endDate != null && shift.endDate !== shift.date)) return false;
+  return shiftStartMs(shift, deps.config.teamTz) <= (deps.now ?? Date.now)();
 }
 
 /** Кнопка «Открыть график» на дату этой смены — у обеих эскалаций ниже. */
@@ -125,7 +149,10 @@ export async function startHandovers(
       entry.category !== "sick_leave" &&
       entry.category !== "vacation" &&
       entry.category !== "business_trip" &&
-      entry.category !== "offsite",
+      entry.category !== "offsite" &&
+      // Больничный задним числом: прошедшую или уже идущую смену не отдать никому,
+      // а тревога админу «смена без человека» про прошлую среду — шум.
+      !isPast(deps, entry),
   );
 
   // Extending a sick leave runs this again over days that already have offers.
@@ -171,8 +198,10 @@ export async function offerTo(deps: HandoverDeps, handoverId: number, toEmployee
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
     return { ok: false, reason: "Передача уже закрыта" };
   }
-  const shift = shiftOf(db, handover);
-  if (!shift) return { ok: false, reason: "Смены больше нет — её изменил админ" };
+  const voided = handoverVoidReason(db, handover);
+  if (voided) return { ok: false, reason: VOID_REFUSAL[voided] };
+  const shift = shiftOf(db, handover)!;
+  if (hasStarted(deps, shift)) return { ok: false, reason: STARTED_REFUSAL };
   // The screen filters candidates already; checking again here is not
   // belt-and-braces but the actual guard — the screen is not a defence, it is a
   // convenience, and the request can arrive from anywhere.
@@ -283,8 +312,12 @@ export async function takeHandover(
     if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
       return { ok: false as const, reason: "Уже забрали или предложение отменили" };
     }
-    const shift = shiftOf(db, handover);
-    if (!shift) return { ok: false as const, reason: "Смены больше нет — её изменил админ" };
+    // Смена могла уйти от дающего, пока сообщение висело в чате: админ поставил
+    // её другому, обмен, укороченный больничный. Без этой проверки «Беру»
+    // отбирало смену у нового хозяина молча — письма уходили дающему.
+    const voided = handoverVoidReason(db, handover);
+    if (voided) return { ok: false as const, reason: VOID_REFUSAL[voided] };
+    const shift = shiftOf(db, handover)!;
 
     // «Беру» живёт в чате вечно. Без этих двух проверок кнопка под старым
     // сообщением брала смену человеку, которого админ тем временем вывел из
@@ -300,6 +333,7 @@ export async function takeHandover(
     if ((shift.endDate ?? shift.date) < today) {
       return { ok: false as const, reason: "Эта смена уже прошла" };
     }
+    if (hasStarted(deps, shift)) return { ok: false as const, reason: STARTED_REFUSAL };
 
     const clash = listShiftsOverlapping(db, shift.date, shift.endDate ?? shift.date).some(
       (mine) =>
@@ -446,6 +480,8 @@ export function handoverVoidReason(db: Db, handover: Handover): VoidReason | nul
   if ((shift.endDate ?? shift.date) < sick.date || shift.date > (sick.endDate ?? sick.date)) return "uncovered";
   return null;
 }
+
+const STARTED_REFUSAL = "Эта смена уже началась";
 
 /** Что сказать нажавшему «Беру» или «предложить», когда передача мертва. */
 export const VOID_REFUSAL: Record<VoidReason, string> = {

@@ -17,6 +17,9 @@ function deps(db: Db) {
   return {
     db,
     config: { teamTz: "Europe/Moscow", publicUrl: "https://example.com", handoverFanHours: 3, handoverEscalateHours: 12 },
+    // Передачи рождаются ночью 12-го (03:00 МСК) — до самой ранней фикстуры (05:00);
+    // «сейчас» самого тика задаёт его второй аргумент.
+    now: () => NOW - 6 * HOUR,
     messenger: {
       offer: async (employeeId: number, _h: number, text: string) => {
         sent.push({ to: `employee:${employeeId}`, text });
