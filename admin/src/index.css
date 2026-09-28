@@ -636,6 +636,23 @@ button {
   white-space: nowrap;
 }
 
+/* Имя и «Бот зовёт» столбиком: обращение — подпись к имени, а не ещё один
+   чип в ряду, иначе его читали бы как статус. */
+.employee-row-name-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.employee-row-address {
+  color: var(--hint);
+  font-size: 12px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .employee-row-spacer {
   flex: 1 1 auto;
 }

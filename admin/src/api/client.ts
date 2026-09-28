@@ -92,9 +92,8 @@ import {
  * Работник — DTO из контракта.
  *
  * Форма была объявлена здесь своими словами и не знала `preferredName`, хотя
- * сервер его отдаёт: консоль поле не читает — «обращение» человек задаёт себе
- * сам в мини-аппе. Теперь оно просто есть и остаётся непрочитанным, а тип один
- * на сервер и на оба фронта.
+ * сервер его отдаёт. Теперь тип один на сервер и на оба фронта, и консоль, как
+ * и мини-апп, показывает и правит обращение в карточке работника.
  */
 export type Employee = AdminEmployeeDto;
 
@@ -653,6 +652,8 @@ export interface ApiClient {
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   renameEmployee(id: number, displayName: string): Promise<void>;
+  /** Как бот зовёт человека. `null` — снова «по умолчанию» (`addressOf`). */
+  setEmployeePreferredName(id: number, preferredName: string | null): Promise<void>;
   /** `null` clears the birthday. */
   setBirthDate(id: number, birthDate: string | null): Promise<void>;
   /** Sets one or both exclusion flags. Turning on `excludedFromSwaps` cancels
@@ -1040,8 +1041,8 @@ export const realClient: ApiClient = {
   deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
   // Методы перечислены, а не спреднуты: у консоли этот домен уже своего имени
-  // ручке (`getEmployees` вместо `getAdminEmployees`), и «обращение» она не
-  // трогает вовсе. Общий слой несёт объединение, консоль берёт своё.
+  // ручке (`getEmployees` вместо `getAdminEmployees`). Общий слой несёт
+  // объединение, консоль берёт своё.
   createEmployee: (name) => employeesApi.createEmployee(name),
   archiveEmployee: (id) => employeesApi.archiveEmployee(id),
   restoreEmployee: (id) => employeesApi.restoreEmployee(id),
@@ -1049,6 +1050,7 @@ export const realClient: ApiClient = {
   reorderEmployee: (id, position) => employeesApi.reorderEmployee(id, position),
   setBirthDate: (id, birthDate) => employeesApi.setBirthDate(id, birthDate),
   renameEmployee: (id, displayName) => employeesApi.renameEmployee(id, displayName),
+  setEmployeePreferredName: (id, preferredName) => employeesApi.setEmployeePreferredName(id, preferredName),
   setEmployeeRestrictions: (id, patch) => employeesApi.setEmployeeRestrictions(id, patch),
   setEmployeeObserver: (id, isObserver) => employeesApi.setEmployeeObserver(id, isObserver),
   getEmployeeInvite: (id, regenerate) => employeesApi.getEmployeeInvite(id, regenerate),
@@ -1324,6 +1326,7 @@ const devClient: ApiClient = {
   restoreEmployee: (id) => employeesMock.restoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => employeesMock.setEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => employeesMock.renameEmployee(id, displayName),
+  setEmployeePreferredName: (id, preferredName) => employeesMock.setEmployeePreferredName(id, preferredName),
   setBirthDate: (id, birthDate) => employeesMock.setBirthDate(id, birthDate),
   setEmployeeRestrictions: (id, patch) => employeesMock.setEmployeeRestrictions(id, patch),
   setEmployeeObserver: (id, isObserver) => employeesMock.setEmployeeObserver(id, isObserver),

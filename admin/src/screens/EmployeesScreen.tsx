@@ -153,6 +153,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
         onToggleAdmin={(id, makeAdmin) => withBusy(id, () => apiClient.setEmployeeAdmin(id, makeAdmin))}
         onRename={(id, name) => withBusy(id, () => apiClient.renameEmployee(id, name))}
+        onPreferredName={(id, preferredName) => withBusy(id, () => apiClient.setEmployeePreferredName(id, preferredName))}
         onReorder={(id, position) => withBusy(id, () => apiClient.reorderEmployee(id, position).then(() => {}))}
         onBirthDate={(id, birthDate) => withBusy(id, () => apiClient.setBirthDate(id, birthDate))}
         onShowInvite={(employee) => void showInvite(employee)}
@@ -175,6 +176,9 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
                 error={rowError?.employeeId === employee.id ? rowError.message : null}
                 onAction={() => withBusy(employee.id, () => apiClient.restoreEmployee(employee.id))}
                 onRename={(name) => withBusy(employee.id, () => apiClient.renameEmployee(employee.id, name))}
+                onPreferredName={(preferredName) =>
+                  withBusy(employee.id, () => apiClient.setEmployeePreferredName(employee.id, preferredName))
+                }
                 onSetRestrictions={(patch) => setRestriction(employee.id, patch)}
                 onSetObserver={(isObserver) => void setObserver(employee.id, isObserver)}
               />
@@ -223,6 +227,8 @@ interface EmployeesSectionProps {
   onToggleAdmin?: (id: number, makeAdmin: boolean) => void;
   /** When provided, each row can rename the worker inline. */
   onRename?: (id: number, name: string) => void;
+  /** When provided, each row can set how the bot addresses the worker. */
+  onPreferredName?: (id: number, preferredName: string | null) => void;
   /** When provided, an unlinked worker's row can re-show its invite link. */
   onShowInvite?: (employee: Employee) => void;
   /** When provided (active section), each row can be moved to a position in the list. */
@@ -236,7 +242,7 @@ interface EmployeesSectionProps {
   onSetObserver: (id: number, isObserver: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onPreferredName, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -265,6 +271,7 @@ function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel
               onAction={() => onAction(employee.id)}
               onToggleAdmin={onToggleAdmin ? () => onToggleAdmin(employee.id, !employee.isAdmin) : undefined}
               onRename={onRename ? (name) => onRename(employee.id, name) : undefined}
+              onPreferredName={onPreferredName ? (preferredName) => onPreferredName(employee.id, preferredName) : undefined}
               onShowInvite={onShowInvite ? () => onShowInvite(employee) : undefined}
               onSetRestrictions={(patch) => onSetRestrictions(employee.id, patch)}
               onSetObserver={(isObserver) => onSetObserver(employee.id, isObserver)}
@@ -286,6 +293,7 @@ function EmployeeRow({
   onAction,
   onToggleAdmin,
   onRename,
+  onPreferredName,
   onShowInvite,
   onReorder,
   onBirthDate,
@@ -303,6 +311,8 @@ function EmployeeRow({
   onAction: () => void;
   onToggleAdmin?: () => void;
   onRename?: (name: string) => void;
+  /** `null` — обращение стёрто, бот вернётся к имени по умолчанию. */
+  onPreferredName?: (preferredName: string | null) => void;
   onShowInvite?: () => void;
   onReorder?: (position: number) => void;
   onBirthDate?: (birthDate: string | null) => void;
@@ -318,17 +328,25 @@ function EmployeeRow({
   const linkedPalette = useCategoryPalette("weekend_work");
   const chipStyle = linked ? { background: linkedPalette.bg, color: linkedPalette.fg } : undefined;
 
-  const [editing, setEditing] = useState(false);
+  // Одно поле в строке на оба вида правки: имя и обращение — оба текст, и две
+  // открытые правки разом раздвинули бы карточку ради ничего.
+  const [editing, setEditing] = useState<"name" | "address" | null>(null);
   const [draft, setDraft] = useState(employee.displayName);
 
+  function startEditing(what: "name" | "address") {
+    setDraft(what === "name" ? employee.displayName : (employee.preferredName ?? ""));
+    setEditing(what);
+  }
   function save() {
     const trimmed = draft.trim();
-    if (trimmed && trimmed !== employee.displayName) onRename?.(trimmed);
-    setEditing(false);
+    if (editing === "name" && trimmed && trimmed !== employee.displayName) onRename?.(trimmed);
+    // Пустое обращение — не ошибка, а «как по умолчанию»: уходит null. То же
+    // значение не шлётся вовсе — иначе журнал копил бы правки, которых не было.
+    if (editing === "address" && trimmed !== (employee.preferredName ?? "")) onPreferredName?.(trimmed || null);
+    setEditing(null);
   }
   function cancel() {
-    setDraft(employee.displayName);
-    setEditing(false);
+    setEditing(null);
   }
 
   return (
@@ -344,6 +362,9 @@ function EmployeeRow({
           className="employee-name-input"
           type="text"
           value={draft}
+          aria-label={editing === "name" ? "Имя" : "Обращение"}
+          // Пустое поле обращения показывает, как бот зовёт сейчас.
+          placeholder={editing === "address" ? employee.address : undefined}
           autoFocus
           disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
@@ -353,7 +374,13 @@ function EmployeeRow({
           }}
         />
       ) : (
-        <span className="employee-row-name" title={employee.displayName}>{employee.displayName}</span>
+        <span className="employee-row-name-block">
+          <span className="employee-row-name" title={employee.displayName}>{employee.displayName}</span>
+          {/* Что бот скажет на самом деле. Всегда, а не «когда отличается от
+              первого слова ФИО»: угадывать, какое слово — имя, эта функция и
+              отказывается. Зеркало карточки мини-аппа. */}
+          <span className="employee-row-address">Бот зовёт: {employee.address}</span>
+        </span>
       )}
       {!editing && (
         <>
@@ -401,8 +428,19 @@ function EmployeeRow({
       ) : (
         <>
           {onRename && (
-            <button type="button" className="btn btn-secondary" onClick={() => setEditing(true)} disabled={busy} title="Переименовать">
+            <button type="button" className="btn btn-secondary" onClick={() => startEditing("name")} disabled={busy} title="Переименовать">
               ✎ Имя
+            </button>
+          )}
+          {onPreferredName && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => startEditing("address")}
+              disabled={busy}
+              title="Как бот обращается к человеку в сообщениях"
+            >
+              ✎ Обращение
             </button>
           )}
           {onShowInvite && !linked && (
