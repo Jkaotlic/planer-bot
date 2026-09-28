@@ -19,6 +19,14 @@ import type { HandoverDraft, Shift } from "../api/client";
 
 const TODAY = "2026-08-12";
 
+/** Своя запись, которую видно в списке «Что ты уже записал себе»: категория из
+ *  тех двух, что можно ставить самому, и дата не в прошлом (`selfEntryEditRefusal`). */
+const MY_ENTRY: Shift = {
+  id: 21, date: TODAY, start: null, end: null, endDate: null,
+  category: "offsite", title: "Конференция", location: null, note: null,
+  unrecognisedCode: null, templateId: null, employeeId: 1,
+} as Shift;
+
 const DRAFT: HandoverDraft = {
   id: 77,
   shiftLine: "Ср 12 авг · 09:00–18:00 · День",
@@ -139,5 +147,34 @@ describe("второй шаг формы", () => {
     await saveSickLeave(el);
 
     expect(el.textContent ?? "").toContain("Свободных нет");
+  });
+
+  // Кнопка называлась «Потом» и молчала — теперь она всегда «Спросить всех
+  // свободных», даже когда свободных нет: спрашивать в этом случае некого, но
+  // название не должно врать, что сделает, и «Понятно» — не то же самое действие.
+  it("свободных нет — кнопка всё равно «Понятно», а не «Спросить всех свободных»", async () => {
+    const lonely: HandoverDraft = { ...DRAFT, candidates: [] };
+    const el = await render({ onCreate: vi.fn(async () => [lonely]) });
+
+    await saveSickLeave(el);
+
+    expect(buttonWith(el, "Понятно")).toBeDefined();
+    expect(buttonWith(el, "Спросить всех свободных")).toBeUndefined();
+  });
+});
+
+describe("«Снять» свою запись — необратимое действие спрашивает", () => {
+  // Прямая кнопка убирала бы запись с одного тапа; «Снять» шлёт админам письмо,
+  // и отменить нечем — как «Не смогу» и «Удалить запись» в остальных формах.
+  it("одно нажатие не снимает запись, а сперва спрашивает", async () => {
+    const onDelete = vi.fn(async () => {});
+    const el = await render({ shifts: [MY_ENTRY], onDelete });
+
+    const btn = buttonWith(el, "Снять")!;
+    expect(btn).toBeDefined();
+    await act(async () => btn.click());
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(el.textContent ?? "").toContain("Снять эту запись?");
   });
 });
