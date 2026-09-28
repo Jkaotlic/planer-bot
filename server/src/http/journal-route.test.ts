@@ -8,6 +8,7 @@ import { recordAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { auditLog } from "../db/schema";
 
 const config = testConfig();
 const initDataFor = (id: number) =>
@@ -233,5 +234,20 @@ describe("GET /api/admin/reports/shift-counts", () => {
     expect((await app.request("/api/admin/reports/shift-counts", auth(token))).status).toBe(400);
     expect((await app.request("/api/admin/reports/shift-counts?from=2026-06-30&to=2026-06-01", auth(token))).status).toBe(400);
     expect((await app.request("/api/admin/reports/shift-counts?from=2020-01-01&to=2026-12-31", auth(token))).status).toBe(400);
+  });
+});
+
+describe("журнал «за день» — командные сутки через маршрут", () => {
+  // Маршрут обязан передать пояс команды: без него фильтр снова считает
+  // сутки по UTC, и ночная правка 5-го уезжает в 4-е.
+  it("событие в 01:30 по командному времени 5-го — в выдаче за 5-е", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    db.insert(auditLog).values({ type: "entry_created", actorEmployeeId: null, payload: { n: 1 }, createdAt: new Date("2026-08-04T22:30:00Z") }).run();
+
+    const body = await (await app.request("/api/admin/journal?from=2026-08-05&to=2026-08-05", auth(token))).json();
+
+    expect(body.events.map((e: { type: string }) => e.type)).toContain("entry_created");
   });
 });

@@ -1184,10 +1184,11 @@ export function createBot(deps: BotDeps): Bot {
    * админам, которые могли на рассылку рассчитывать. Та же строка журнала, что
    * у правки сбора в консоли (`collection_updated`).
    */
-  async function reportAutoSendChange(actorId: number, collection: { id: number; title: string | null; employeeId: number | null }, autoSendOn: string | null): Promise<void> {
+  async function reportAutoSendChange(actorId: number, collection: { id: number; title: string | null; employeeId: number | null; autoSendOn: string | null }, autoSendOn: string | null): Promise<void> {
     const what = collection.title ?? (collection.employeeId != null ? `ДР ${getEmployeeById(db, collection.employeeId)?.displayName ?? ""}`.trim() : "сбор");
     recordAudit(db, "collection_updated", actorId, {
-      collectionId: collection.id, employeeId: collection.employeeId, title: collection.title, autoSendOn,
+      collectionId: collection.id, employeeId: collection.employeeId, title: collection.title,
+      autoSendOn, autoSendOnBefore: collection.autoSendOn,
     });
     const who = getEmployeeById(db, actorId)?.displayName ?? "Админ";
     const change = autoSendOn ? `перенесена на ${formatDayMonth(autoSendOn)}` : "выключена";

@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import type { Bot } from "grammy";
 import { Hono } from "hono";
@@ -22,7 +23,7 @@ import { unassign } from "../../weekend/weekend-service";
 import { refreshAdminCommands } from "../../bot/bot";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
-import type { Employee as EmployeeRow } from "../../db/schema";
+import { swapRequests, type Employee as EmployeeRow } from "../../db/schema";
 import { recordAudit } from "../../repo/audit";
 import {
   archiveEmployee,
@@ -335,30 +336,41 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     // зомби-заявкой у второй стороны, предложение выходного — живым, а будущий
     // отпуск — «ничьим» отпуском в графике.
     //
-    // 1. Висящие обмены — гаснут, второй стороне письмо. Описание снимаем ДО
-    //    записи: оно называет смены такими, какими о них договаривались.
+    // 1. Висящие обмены — гаснут (`expired`, как у всех путей с `swap_expired`:
+    //    отменял не он и не вторая сторона), второй стороне письмо. Описание
+    //    снимаем ДО записи: оно называет смены такими, какими о них договаривались.
     const { pending, payloads } = pendingSwapsForEmployee(db, id);
-    db.transaction((tx) => cancelSwapsForEmployeeTx(tx, pending));
-    // 2. Назначения на выходные с сегодня — сняты вместе с записью в графике;
-    //    отклики «Хочу» на открытые слоты — тоже.
-    let unassignedWeekend = 0;
-    for (const assignment of listAssignmentsForEmployee(db, id)) {
-      const slot = getVacantSlot(db, assignment.slotId);
-      if (!slot || slot.date < today || assignment.status === "declined") continue;
-      if (unassign(db, assignment.id).ok) unassignedWeekend += 1;
-    }
-    removeAllInterestOf(db, id, today);
-    // 3. Отсутствия, которые ещё не начались, — удалены: отпуск ушедшего без
-    //    человека не значит ничего. Идущее сейчас не трогаем — его начало в
-    //    прошлом, и укорачивать его без решения админа незачем.
-    let removedAbsences = 0;
-    for (const entry of listShiftsByEmployee(db, id)) {
-      if (!isAbsence(entry.category) || entry.date < today) continue;
-      if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
-    }
-    // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
-    const freedShifts = listShiftsByEmployee(db, id).filter((s) => s.date >= today).length;
-    const employee = archiveEmployee(db, id, today);
+    // Всё — одной транзакцией (вложенные станут точками сохранения): сбой
+    // посередине иначе гасил обмен молча — без письма и журнала, — а человек
+    // оставался в команде. Письма и журнал — после, когда всё записано.
+    const done = db.transaction(() => {
+      for (const request of pending) {
+        db.update(swapRequests).set({ status: "expired", resolvedAt: new Date() }).where(eq(swapRequests.id, request.id)).run();
+      }
+      // 2. Назначения на выходные с сегодня — сняты вместе с записью в графике;
+      //    отклики «Хочу» на открытые слоты — тоже.
+      let unassignedWeekend = 0;
+      for (const assignment of listAssignmentsForEmployee(db, id)) {
+        const slot = getVacantSlot(db, assignment.slotId);
+        if (!slot || slot.date < today || assignment.status === "declined") continue;
+        if (unassign(db, assignment.id).ok) unassignedWeekend += 1;
+      }
+      removeAllInterestOf(db, id, today);
+      // 3. Отсутствия, которые ещё не начались, — удалены: отпуск ушедшего без
+      //    человека не значит ничего. Идущее сейчас не трогаем — его начало в
+      //    прошлом, и укорачивать его без решения админа незачем.
+      let removedAbsences = 0;
+      for (const entry of listShiftsByEmployee(db, id)) {
+        if (!isAbsence(entry.category) || entry.date < today) continue;
+        if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
+      }
+      // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
+      const freedShifts = listShiftsByEmployee(db, id).filter((s) => s.date >= today).length;
+      const archived = archiveEmployee(db, id, today);
+      return { archived, unassignedWeekend, removedAbsences, freedShifts };
+    });
+    const { unassignedWeekend, removedAbsences, freedShifts } = done;
+    const employee = done.archived;
     if (!employee) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "employee_archived", actorId, {
       employeeId: id, displayName: employee.displayName, freedShifts, expiredSwaps: pending.length, removedAbsences, unassignedWeekend,

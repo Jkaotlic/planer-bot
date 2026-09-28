@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { employees, swapRequests } from "../db/schema";
-import { createVacantSlot, addInterest, getAssignment } from "../repo/weekend";
+import { createVacantSlot, addInterest, getAssignment, listInterestedEmployeeIds } from "../repo/weekend";
 import { assignSlot } from "../weekend/weekend-service";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
@@ -1318,11 +1318,33 @@ describe("архивация гасит хвосты", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(db.select().from(swapRequests).all().find((r) => r.id === swap.id)!.status).toBe("cancelled");
+    // «expired», как у всех путей с `swap_expired`: вторая сторона видит
+    // «неактуален», а не «отменено» — отменяла не она и не он.
+    expect(db.select().from(swapRequests).all().find((r) => r.id === swap.id)!.status).toBe("expired");
+    expect(listRecentAudit(db, 20).some((r) => r.type === "swap_expired")).toBe(true);
     expect(sent.some((m) => m.chat_id === 802 && String(m.text).includes("Аня"))).toBe(true);
     expect(getShift(db, vacation.id)).toBeUndefined();
     expect(getShift(db, anyaShift.id)?.employeeId).toBeNull();
     expect(getAssignment(db, assigned.assignment.id)).toBeUndefined();
     expect(body).toMatchObject({ ok: true, expiredSwaps: 1, removedAbsences: 1, unassignedWeekend: 1 });
+  });
+
+  it("идущий отпуск и прошедший выходной не трогает; отклик «Хочу» на открытый слот снимает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня", 811);
+    const ongoing = createShift(db, { date: inDays(-2), endDate: inDays(3), category: "vacation", start: null, end: null, employeeId: anya.id });
+    const pastSlot = createVacantSlot(db, { date: inDays(-1), start: "10:00", end: "18:00" });
+    addInterest(db, pastSlot.id, anya.id);
+    const past = assignSlot(db, pastSlot.id, anya.id, inDays(-3));
+    const openSlot = createVacantSlot(db, { date: inDays(5), start: "10:00", end: "18:00" });
+    addInterest(db, openSlot.id, anya.id);
+
+    await app.request(`/api/admin/employees/${anya.id}/archive`, authedJson(admin, {}));
+
+    expect(getShift(db, ongoing.id)).toBeDefined();
+    if (past.ok) expect(getAssignment(db, past.assignment.id)).toBeDefined();
+    expect(listInterestedEmployeeIds(db, openSlot.id)).not.toContain(anya.id);
   });
 });

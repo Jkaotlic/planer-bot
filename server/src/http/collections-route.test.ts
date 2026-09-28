@@ -324,3 +324,21 @@ describe("the journal and the surprise rule", () => {
     expect(otherTitles).toContain("Про меня");
   });
 });
+
+describe("автоотправка в журнале правки сбора", () => {
+  // Смена дня автоотправки — день, когда бот напишет всей команде. В журнале
+  // должно быть видно, что стало и что было.
+  it("консоль пишет autoSendOn и прежний день", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const mark = person(db, "Марк", 1, "09-07");
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { autoSendOn: "2026-09-04" });
+
+    await app.request(`/api/admin/collections/${round.id}?asOf=2026-09-01`, send(token, { autoSendOn: null }, "PUT"));
+
+    const row = listRecentAudit(db, 10).find((r) => r.type === "collection_updated");
+    expect(row?.payload).toMatchObject({ autoSendOn: null, autoSendOnBefore: "2026-09-04" });
+  });
+});

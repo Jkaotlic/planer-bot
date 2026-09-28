@@ -262,6 +262,9 @@ describe("чек-лист: свой (работник)", () => {
     expect((await tomorrow.json()).error).toContain("сегодняшний и вчерашний");
     const weekAgo = await app.request("/api/my/checklist/mark", authedJson(token, { date: "2026-08-17", itemId, done: true }));
     expect(weekAgo.status).toBe(400);
+    // Вчера — можно: ночная смена через полночь отмечает свой вчерашний список.
+    const yesterday = await app.request("/api/my/checklist/mark", authedJson(token, { date: "2026-08-23", itemId, done: true }));
+    expect(String((await yesterday.json()).error ?? "")).not.toContain("сегодняшний и вчерашний");
   });
 
   /**

@@ -216,6 +216,23 @@ describe("«Знаю про этот день»", () => {
     expect((buttons.match(/coverage:ack:/g) ?? []).length).toBeLessThanOrEqual(5);
   });
 
+  it("дат с пробелами больше пяти — кнопок ровно пять", async () => {
+    // Длиннее клавиатура закрывает само письмо на экране телефона.
+    const { db } = stage();
+    const everyDay = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство", category: "duty", start: "09:00", end: "18:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    setCoverage(db, everyDay.id, "1,1,1,1,1,1,1");
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    const buttons = JSON.stringify(sent[0]!.reply_markup);
+    expect((buttons.match(/coverage:ack:/g) ?? []).length).toBe(5);
+  });
+
   it("заглушённая дата в совет больше не попадает; все заглушены — письма нет", async () => {
     const { db } = stage();
     ackCoverageDate(db, "2026-09-07");

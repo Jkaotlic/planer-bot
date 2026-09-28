@@ -516,7 +516,10 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     }
     // Сам текст письма в журнал не копируется — здесь только факт правки.
     if (p.messageText !== undefined) lines.push(str(p.messageText) ? "текст изменён" : "текст сброшен на стандартный");
-    if (p.autoSendOn !== undefined) lines.push(`автоотправка: ${str(p.autoSendOn) ? dayLabel(p.autoSendOn) : "выключена"}`);
+    if (p.autoSendOn !== undefined) {
+      const was = p.autoSendOnBefore === undefined ? "" : ` (было: ${str(p.autoSendOnBefore) ? dayLabel(p.autoSendOnBefore) : "выключена"})`;
+      lines.push(`автоотправка: ${str(p.autoSendOn) ? dayLabel(p.autoSendOn) : "выключена"}${was}`);
+    }
     return { icon: "💰", title: "Изменён сбор", lines };
   },
   collection_sent: (p) => {
