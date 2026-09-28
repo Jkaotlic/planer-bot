@@ -642,6 +642,19 @@ describe("дежурство напоминает один раз на отре�
     expect(sent[0]!.text).toContain("Дежурство · Поклонка");
   });
 
+  it("догоняющее во вторник утром молчит — это продолжение недели, про неё уже написали", async () => {
+    // Вторничной записи вечерняя пометка не ставится никогда (письмо было одно,
+    // в воскресенье), поэтому без проверки отрезка догоняющее писало бы каждое
+    // утро недели.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 934);
+    holdWeek(db, anya.id, dutyKind(db, "Дежурство · Поклонка").id);
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: "2026-06-02", time: "07:00" });
+    expect(sent).toEqual([]);
+  });
+
   it("в понедельник вечером молчит — про вторник уже написали", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 931);

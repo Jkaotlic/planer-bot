@@ -9,6 +9,8 @@ import { openBugPrompt, listBugReports, getBugPending } from "../bugs/bug-servic
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 import { setNoticeMuted } from "../repo/notice-prefs";
+import { createChecklist, getChecklist } from "../repo/checklists";
+import { startDocPending } from "../bugs/doc-pending";
 
 const config = testConfig();
 
@@ -380,5 +382,49 @@ describe("скриншот в «🐞 Проблема»", () => {
     await bot.handleUpdate(photoUpdate(614, "Кнопка съехала"));
 
     expect(calls.some((c) => c.payload.chat_id === 115 && (c.method === "copyMessage" || c.method === "sendMessage"))).toBe(false);
+  });
+});
+
+/** Картинка файлом (без сжатия) — `document` с mime image/*. */
+function imageDocUpdate(tgId: number, caption?: string) {
+  return {
+    update_id: tgId * 10 + 6,
+    message: {
+      message_id: tgId * 10 + 8,
+      date: 1_712_803_046,
+      chat: { id: tgId, first_name: "T", type: "private" as const },
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      document: { file_id: "doc1", file_unique_id: "d1", file_name: "screen.png", mime_type: "image/png" },
+      ...(caption ? { caption } : {}),
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
+describe("скриншот файлом", () => {
+  it("картинка документом в окно жалобы — тоже жалоба", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 621);
+    admin(db, "Игорь", 121);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(621, BTN_BUG));
+    await bot.handleUpdate(imageDocUpdate(621, "Съехала вёрстка"));
+
+    expect(listBugReports(db, "all")[0]?.report.text).toContain("Съехала вёрстка");
+    expect(calls.some((c) => c.method === "copyMessage" && c.payload.chat_id === 121)).toBe(true);
+  });
+
+  it("у админа открыто окно инструкции — файл уходит в инструкцию, а не в жалобу", async () => {
+    const db = makeTestDb();
+    const igor = admin(db, "Игорь", 122);
+    const list = createChecklist(db, "Обход 47-го");
+    const { bot } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(122, BTN_BUG));
+    startDocPending(db, igor.id, list.id);
+    await bot.handleUpdate(imageDocUpdate(122, "схема обхода"));
+
+    expect(listBugReports(db, "all")).toHaveLength(0);
+    expect(getChecklist(db, list.id)?.docFileId).toBe("doc1");
   });
 });

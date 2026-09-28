@@ -861,8 +861,6 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.replyWithPhoto(new InputFile(image.png, "qr.png"), { caption: image.caption });
   }
 
-  /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
-   *  разбираются раньше и сюда не доходят. */
   /**
    * Скриншот в открытое окно жалобы.
    *
@@ -877,6 +875,9 @@ export function createBot(deps: BotDeps): Bot {
     return captureBugReport(ctx, text, { fromChatId: ctx.chat!.id, messageId: ctx.msg!.message_id });
   }
 
+  /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
+   *  разбираются раньше и сюда не доходят. `attachment` — скриншот, который уходит
+   *  админам копией следом за текстом. */
   async function captureBugReport(
     ctx: Context, text: string, attachment?: { fromChatId: number; messageId: number },
   ): Promise<boolean> {
@@ -1213,17 +1214,19 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.reply(`«${list.name}»: инструкция снята — дежурным она больше не уходит.`);
   });
 
-  /**
-   * Файл, присланный в открытое окно ожидания, становится инструкцией.
-   *
-   * Окно, а не «любой документ от админа»: админы шлют боту файлы и по другим
-   * поводам, и молча превращать чужой PDF в инструкцию для всей смены нельзя.
-   */
+  /** Фото — только жалоба: инструкцию к чек-листу прикладывают файлом. */
   bot.on("message:photo", async (ctx) => {
     if (ctx.chat.type !== "private") return;
     await captureBugPhoto(ctx);
   });
 
+  /**
+   * Файл, присланный в открытое окно ожидания, становится инструкцией.
+   *
+   * Окно, а не «любой документ от админа»: админы шлют боту файлы и по другим
+   * поводам, и молча превращать чужой PDF в инструкцию для всей смены нельзя.
+   * Вне окна инструкции картинка файлом — возможная жалоба (скриншот без сжатия).
+   */
   bot.on("message:document", async (ctx) => {
     if (ctx.chat.type !== "private") return;
     const who = acting(ctx.from?.id ?? 0);

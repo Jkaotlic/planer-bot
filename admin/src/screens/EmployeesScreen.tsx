@@ -369,7 +369,7 @@ function EmployeeRow({
               с какого дня: «не слышит с 12-го» объясняет, почему он не ответил. */}
           {linked && employee.botBlockedAt && (
             <span className="status-chip status-chip-alert" title="Telegram отвечает, что бот заблокирован. Снимется, когда человек снова напишет боту">
-              заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
+              🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
             </span>
           )}
           {employee.isAdmin && <span className="admin-badge">админ</span>}

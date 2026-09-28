@@ -452,7 +452,7 @@ export function EmployeeRow({
             {/* Зеркало консольной метки: «привязан», а не доходит ничего. */}
             {linked && employee.botBlockedAt && (
               <span style={{ color: "var(--tgui--destructive_text_color)" }}>
-                · заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
+                · 🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
               </span>
             )}
             {employee.isAdmin && <CategoryChip category="shift">админ</CategoryChip>}
