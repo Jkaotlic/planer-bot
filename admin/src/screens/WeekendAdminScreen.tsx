@@ -3,6 +3,7 @@ import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } fro
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 import { formatDayLabel } from "../lib/week";
 import { CategoryChip } from "../categories";
+import { ConfirmButton } from "../components/ConfirmButton";
 
 /** First & last calendar day of the month containing `d`, as "YYYY-MM-DD". */
 function monthRange(d: Date): { from: string; to: string } {
@@ -34,6 +35,15 @@ export function assignNotice(notified: boolean | undefined): string | null {
 export function reachNotice(delivered: number, intended: number): string {
   if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
   return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
+}
+
+/**
+ * Что сказать после «Набрали, закрыть». Число — сколько желающих без назначения
+ * получили «уже набрали»: без него админ не знал, ушёл ли кому-то отбой.
+ * Зеркало мини-аппа — см. `miniapp/src/screens/admin/AdminWeekendScreen.tsx`.
+ */
+export function closeNotice(toldOff: number): string {
+  return `Закрыто. Написали желающим: ${toldOff}`;
 }
 
 export function WeekendAdminScreen() {
@@ -92,6 +102,26 @@ export function WeekendAdminScreen() {
     }
   }
 
+  async function handleClose(slotId: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      const { toldOff } = await apiClient.closeSlot(slotId);
+      setWarning(null);
+      setNotice(closeNotice(toldOff));
+      await reloadSlots();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось закрыть смену");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Закрытые («набрали») сервер отдаёт до их даты — кто выходит, — но
+  // отдельным блоком: среди открытых они читались бы как ждущие желающих.
+  const openSlots = slots?.filter((v) => v.slot.status !== "closed") ?? null;
+  const closedSlots = slots?.filter((v) => v.slot.status === "closed") ?? [];
+
   return (
     <div className="employees-screen">
       <div className="employees-header">
@@ -107,18 +137,36 @@ export function WeekendAdminScreen() {
 
       <section className="employees-section">
         <h3 className="employees-section-title">Открытые смены</h3>
-        {!slots ? (
+        {!openSlots ? (
           <div className="employees-empty">Загрузка…</div>
-        ) : slots.length === 0 ? (
+        ) : openSlots.length === 0 ? (
           <div className="employees-empty">Нет открытых смен. Нажми «Открыть смену», чтобы позвать желающих.</div>
         ) : (
           <div className="weekend-slot-list">
-            {slots.map((view) => (
-              <SlotCard key={view.slot.id} view={view} busy={busy} onAssign={handleAssign} onUnassign={handleUnassign} />
+            {openSlots.map((view) => (
+              <SlotCard
+                key={view.slot.id}
+                view={view}
+                busy={busy}
+                onAssign={handleAssign}
+                onUnassign={handleUnassign}
+                onClose={() => void handleClose(view.slot.id)}
+              />
             ))}
           </div>
         )}
       </section>
+
+      {closedSlots.length > 0 && (
+        <section className="employees-section">
+          <h3 className="employees-section-title">Закрытые</h3>
+          <div className="weekend-slot-list">
+            {closedSlots.map((view) => (
+              <SlotCard key={view.slot.id} view={view} busy={busy} onAssign={handleAssign} onUnassign={handleUnassign} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <PayrollSection />
 
@@ -143,15 +191,19 @@ function SlotCard({
   busy,
   onAssign,
   onUnassign,
+  onClose,
 }: {
   view: AdminSlotView;
   busy: boolean;
   onAssign: (slotId: number, employeeId: number) => void;
   onUnassign: (assignmentId: number) => void;
+  /** Нет у закрытого слота — второй раз «набрали» сказать нечего. */
+  onClose?: () => void;
 }) {
   const { slot, interested, assignees } = view;
   // Already-assigned people can't be assigned again from the volunteer list.
   const assignedIds = new Set(assignees.map((a) => a.employeeId));
+  const closed = slot.status === "closed";
   return (
     <div className="weekend-slot-card">
       <div className="weekend-slot-head">
@@ -164,7 +216,9 @@ function SlotCard({
           {slot.note && <div className="weekend-slot-meta">💬 {slot.note}</div>}
         </div>
         <span className="weekend-slot-count">
-          {interested.length} {pluralizeRu(interested.length, "желающий", "желающих", "желающих")}
+          {closed
+            ? "Закрыта — набрали"
+            : `${interested.length} ${pluralizeRu(interested.length, "желающий", "желающих", "желающих")}`}
         </span>
       </div>
 
@@ -184,7 +238,11 @@ function SlotCard({
         </div>
       )}
 
-      {interested.length === 0 ? (
+      {closed ? (
+        // Закрытая смена уже не набирает: «Назначить» обещал бы то, чего сервер
+        // не сделает, — остаются только назначенные.
+        assignees.length === 0 && <div className="weekend-slot-empty">Никого не назначили.</div>
+      ) : interested.length === 0 ? (
         <div className="weekend-slot-empty">Пока никто не откликнулся — уведомление ушло всем.</div>
       ) : (
         <div className="weekend-interest-list">
@@ -199,6 +257,18 @@ function SlotCard({
                 onAssign={() => onAssign(slot.id, person.employeeId)}
               />
             ))}
+        </div>
+      )}
+
+      {!closed && onClose && (
+        <div className="weekend-slot-actions">
+          <ConfirmButton
+            label="Набрали, закрыть"
+            question="Закрыть смену? Назначенные выходят, остальным желающим придёт «спасибо, уже набрали»."
+            confirmLabel="Закрыть"
+            disabled={busy}
+            onConfirm={onClose}
+          />
         </div>
       )}
     </div>

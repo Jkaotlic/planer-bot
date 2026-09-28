@@ -44,6 +44,7 @@ import {
   mockPostSlot,
   mockAssignSlot,
   mockUnassignSlot,
+  mockCloseSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
   mockGetRosterCsv,
@@ -636,6 +637,9 @@ export interface ApiClient {
   /** `notified: false` — письмо назначенному не дошло; `undefined` — письма не было (повтор). */
   assignSlot(slotId: number, employeeId: number): Promise<{ notified?: boolean }>;
   unassignSlot(assignmentId: number): Promise<void>;
+  /** «Набрали, закрыть»: слот перестаёт принимать «Хочу», назначенные выходят.
+   *  `toldOff` — скольким желающим без назначения ушло «уже набрали». */
+  closeSlot(slotId: number): Promise<{ toldOff: number }>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
@@ -1025,6 +1029,10 @@ export const realClient: ApiClient = {
   async unassignSlot(assignmentId) {
     await authorizedPostJson(`/api/admin/weekend/assignments/${assignmentId}/unassign`, {});
   },
+  async closeSlot(slotId) {
+    const { toldOff } = await authorizedPostJson<{ ok: boolean; toldOff: number }>(`/api/admin/weekend/slots/${slotId}/close`, {});
+    return { toldOff };
+  },
 
   async getPayroll(from, to) {
     const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -1261,6 +1269,7 @@ const devClient: ApiClient = {
     return { notified: true };
   },
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
+  closeSlot: (slotId) => mockCloseSlot(slotId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),

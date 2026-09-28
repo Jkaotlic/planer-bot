@@ -933,7 +933,8 @@ const PAYROLL: PayrollRow[] = [
 
 export async function mockGetAdminWeekendSlots(): Promise<AdminSlotView[]> {
   await delay(250);
-  return ADMIN_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
+  // Закрытые («набрали») админ видит до их даты — как на сервере.
+  return ADMIN_SLOTS.filter((s) => s.slot.status === "open" || s.slot.status === "closed").map((s) => ({
     slot: s.slot,
     interested: [...s.interested].sort(
       (a, b) => a.confirmedThisMonth - b.confirmedThisMonth || b.passedOver - a.passedOver,
@@ -983,6 +984,19 @@ export async function mockUnassignSlot(assignmentId: number): Promise<void> {
       return;
     }
   }
+}
+
+/**
+ * Демо «Набрали, закрыть»: как сервер — статус closed, назначенные остаются,
+ * «отбой» получают желающие без назначения. Повтор — ноль писем.
+ */
+export async function mockCloseSlot(slotId: number): Promise<{ toldOff: number }> {
+  await delay(200);
+  const view = ADMIN_SLOTS.find((s) => s.slot.id === slotId);
+  if (!view || view.slot.status === "closed") return { toldOff: 0 };
+  view.slot.status = "closed";
+  const assigned = new Set(view.assignees.map((a) => a.employeeId));
+  return { toldOff: view.interested.filter((p) => !assigned.has(p.employeeId)).length };
 }
 
 function slotDurationHours(start: string, end: string): number {

@@ -9,6 +9,7 @@ import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import { categoryLabel, useCategoryPalette, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
+import { ConfirmButton } from "../../components/ConfirmButton";
 
 /**
  * First & last calendar day of the month containing `today` ("YYYY-MM-DD" —
@@ -52,6 +53,15 @@ export function assignNotice(notified: boolean | undefined): string | null {
 export function reachNotice(delivered: number, intended: number): string {
   if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
   return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
+}
+
+/**
+ * Что сказать после «Набрали, закрыть». Число — сколько желающих без назначения
+ * получили «уже набрали»: без него админ не знал, ушёл ли кому-то отбой, и
+ * отписывался в чат команды руками. Зеркало — в консоли.
+ */
+export function closeNotice(toldOff: number): string {
+  return `Закрыто. Написали желающим: ${toldOff}`;
 }
 
 export function AdminWeekendScreen({
@@ -120,6 +130,27 @@ export function AdminWeekendScreen({
     }
   }
 
+  async function handleClose(slotId: number) {
+    setBusySlotIds((prev) => withBusy(prev, slotId));
+    setError(null);
+    try {
+      const { toldOff } = await apiClient.closeSlot(slotId);
+      setWarning(null);
+      setNotice(closeNotice(toldOff));
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось закрыть смену");
+    } finally {
+      setBusySlotIds((prev) => withoutBusy(prev, slotId));
+    }
+  }
+
+  // Закрытые («набрали») сервер отдаёт до их даты, чтобы было видно, кто
+  // выходит, — но отдельным блоком: в «Открытых» они читались бы как ещё
+  // ждущие желающих.
+  const openSlots = slots?.filter((v) => v.slot.status !== "closed") ?? null;
+  const closedSlots = slots?.filter((v) => v.slot.status === "closed") ?? [];
+
   return (
     <ScreenScroll>
       <List>
@@ -161,26 +192,43 @@ export function AdminWeekendScreen({
         )}
 
         <Section header="Открытые смены">
-          {!slots ? (
+          {!openSlots ? (
             <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
               <Spinner size="m" />
             </div>
-          ) : slots.length === 0 ? (
+          ) : openSlots.length === 0 ? (
             <Placeholder description="Нет открытых смен. Открой смену, чтобы позвать желающих." />
           ) : (
             <CardStack>
-              {slots.map((view) => (
+              {openSlots.map((view) => (
                 <SlotCard
                 key={view.slot.id}
                 view={view}
                 busy={busySlotIds.has(view.slot.id)}
                 onAssign={handleAssign}
                 onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
+                onClose={() => void handleClose(view.slot.id)}
               />
               ))}
             </CardStack>
           )}
         </Section>
+
+        {closedSlots.length > 0 && (
+          <Section header="Закрытые">
+            <CardStack>
+              {closedSlots.map((view) => (
+                <SlotCard
+                  key={view.slot.id}
+                  view={view}
+                  busy={busySlotIds.has(view.slot.id)}
+                  onAssign={handleAssign}
+                  onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
+                />
+              ))}
+            </CardStack>
+          </Section>
+        )}
 
         <PayrollSection today={today} />
       </List>
@@ -193,20 +241,26 @@ function SlotCard({
   busy,
   onAssign,
   onUnassign,
+  onClose,
 }: {
   view: AdminSlotView;
   busy: boolean;
   onAssign: (slotId: number, employeeId: number) => void;
   onUnassign: (assignmentId: number) => void;
+  /** Нет у закрытого слота — второй раз «набрали» сказать нечего. */
+  onClose?: () => void;
 }) {
   const { slot, interested, assignees } = view;
   const assignedIds = new Set(assignees.map((a) => a.employeeId));
+  const closed = slot.status === "closed";
   return (
     <CardShell>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ fontWeight: 600, fontSize: 15.5 }}>{slot.title ?? "Работа в выходной"}</div>
         <span style={{ flex: "none", fontSize: 12.5, color: "var(--tgui--hint_color)", whiteSpace: "nowrap" }}>
-          {interested.length} {pluralizeRu(interested.length, "желающий", "желающих", "желающих")}
+          {closed
+            ? "Закрыта — набрали"
+            : `${interested.length} ${pluralizeRu(interested.length, "желающий", "желающих", "желающих")}`}
         </span>
       </div>
       <div style={{ fontSize: 14.5, fontWeight: 500 }}>
@@ -232,7 +286,13 @@ function SlotCard({
         </div>
       )}
 
-      {interested.filter((p) => !assignedIds.has(p.employeeId)).length === 0 ? (
+      {closed ? (
+        // Закрытая смена уже не набирает: список желающих с «Назначить» здесь
+        // обещал бы то, чего сервер не сделает, — остаются только назначенные.
+        assignees.length === 0 && (
+          <div style={{ marginTop: 6, fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Никого не назначили.</div>
+        )
+      ) : interested.filter((p) => !assignedIds.has(p.employeeId)).length === 0 ? (
         <div style={{ marginTop: 6, fontSize: 13.5, color: "var(--tgui--hint_color)" }}>
           {assignees.length > 0 ? "Других желающих нет." : "Пока никто не откликнулся — уведомление ушло всем."}
         </div>
@@ -249,6 +309,19 @@ function SlotCard({
                 onAssign={() => onAssign(slot.id, person.employeeId)}
               />
             ))}
+        </div>
+      )}
+
+      {!closed && onClose && (
+        <div style={{ marginTop: 8 }}>
+          <ConfirmButton
+            label="Набрали, закрыть"
+            question="Закрыть смену? Назначенные выходят, остальным желающим придёт «спасибо, уже набрали»."
+            confirmLabel="Закрыть"
+            loading={busy}
+            disabled={busy}
+            onConfirm={onClose}
+          />
         </div>
       )}
     </CardShell>

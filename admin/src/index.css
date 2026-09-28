@@ -1635,6 +1635,12 @@ input[type="search"] {
   color: var(--hint);
 }
 
+/* «Набрали, закрыть» — отдельной строкой под списком, а не в шапке: рядом с
+   «Назначить» её легко нажать вместо него. */
+.weekend-slot-actions {
+  margin-top: 12px;
+}
+
 .weekend-interest-list {
   margin-top: 12px;
   display: flex;
