@@ -2143,6 +2143,15 @@ export async function mockRemoveChecklistItem(itemId: number): Promise<Checklist
   return { ...list };
 }
 
+export async function mockReorderChecklistItem(itemId: number, to: number): Promise<Checklist> {
+  await delay(140);
+  const list = findByItem(itemId);
+  const from = list.items.findIndex((i) => i.id === itemId);
+  const [moved] = list.items.splice(from, 1);
+  if (moved) list.items.splice(Math.max(0, Math.min(to, list.items.length)), 0, moved);
+  return { ...list };
+}
+
 export async function mockSetTemplateChecklists(templateId: number, checklistIds: readonly number[]): Promise<void> {
   await delay(150);
   for (const list of CHECKLISTS) {

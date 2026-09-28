@@ -57,6 +57,7 @@ import {
   mockAddChecklistItem,
   mockUpdateChecklistItem,
   mockRemoveChecklistItem,
+  mockReorderChecklistItem,
   mockCreateEntries,
   mockUpdateEntry,
   mockDeleteEntry,
@@ -864,6 +865,8 @@ export interface ApiClient {
   addChecklistItem(checklistId: number, title: string): Promise<Checklist>;
   updateChecklistItem(itemId: number, patch: { title?: string; note?: string | null }): Promise<Checklist>;
   removeChecklistItem(itemId: number): Promise<Checklist>;
+  /** Переставить пункт на позицию `to` (с нуля) — как в консоли. */
+  reorderChecklistItem(itemId: number, to: number): Promise<Checklist>;
   /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
    *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
   createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
@@ -1417,6 +1420,8 @@ export const realClient: ApiClient = {
     authorizedPatchJson<{ checklist: Checklist }>(`/api/admin/checklist/items/${itemId}`, patch).then((r) => r.checklist),
   removeChecklistItem: (itemId) =>
     authorizedDelete<{ checklist: Checklist }>(`/api/admin/checklist/items/${itemId}`).then((r) => r.checklist),
+  reorderChecklistItem: (itemId, to) =>
+    authorizedPostJson<{ checklist: Checklist }>(`/api/admin/checklist/items/${itemId}/order`, { to }).then((r) => r.checklist),
   createEntries: (inputs) =>
     authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
   updateEntry: (id, input) =>
@@ -1704,6 +1709,7 @@ const devClient: ApiClient = {
   addChecklistItem: (checklistId, title) => mockAddChecklistItem(checklistId, title),
   updateChecklistItem: (itemId, patch) => mockUpdateChecklistItem(itemId, patch),
   removeChecklistItem: (itemId) => mockRemoveChecklistItem(itemId),
+  reorderChecklistItem: (itemId, to) => mockReorderChecklistItem(itemId, to),
   createEntries: (inputs) => mockCreateEntries(inputs),
   updateEntry: (id, input) => mockUpdateEntry(id, input),
   deleteEntry: (id) => mockDeleteEntry(id),
