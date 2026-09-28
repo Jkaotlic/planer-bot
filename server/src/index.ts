@@ -20,7 +20,7 @@ import { createHandoverMessenger } from "./handover/handover-messenger";
 import { teamNow } from "./util/team-time";
 import { installFatalHandlers } from "./util/fatal-log";
 import { installLogTimestamps } from "./util/log-time";
-import { runTicksIndependently } from "./util/ticks";
+import { createTickScheduler } from "./util/ticks";
 
 // Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
 // печатает Node сам и несёт в логе токен бота открытым текстом.
@@ -47,8 +47,8 @@ void keepPolling({
 });
 
 // Soft evening-before reminders and the birthday nudges — polled every 5 minutes;
-// a failed tick must not crash the server, and a slow batch must not overlap the
-// next one. The two ticks run independently (see runTicksIndependently) so a
+// a failed tick must not crash the server, and a slow tick must not overlap
+// itself. The ticks run independently (see createTickScheduler) so a
 // failure in one — e.g. the reminder tick throwing — cannot suppress the other;
 // previously they were chained with `.then()`, which skipped the birthday tick
 // entirely whenever the reminder tick rejected.
@@ -56,11 +56,9 @@ const REMINDER_TICK_MS = 5 * 60 * 1000;
 // Один загрузчик на весь процесс: у него нет состояния, но и создавать его
 // каждые пять минут незачем.
 const fetchHolidays = xmlcalendarFetcher();
-let ticking = false;
-setInterval(() => {
-  if (ticking) return;
-  ticking = true;
-  runTicksIndependently([
+// У каждого тика свой флаг «идёт» (`createTickScheduler`): медленный пропускает
+// свои круги сам, а не держит соседей.
+const tickRound = createTickScheduler([
     { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
     // В тот же массив: чек-лист уходит с началом смены дежурного, а не по
     // общему часу, поэтому ему нужен тот же пятиминутный тик.
@@ -70,7 +68,7 @@ setInterval(() => {
     { name: "holidays", run: () => runHolidayTick(db, fetchHolidays, teamNow(config.teamTz)) },
     // Совет про пробелы графика — по тому же вечернему часу, что и напоминания.
     { name: "coverage", run: () => runCoverageAdviceTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
-    // В тот же массив, а не своим setInterval: `runTicksIndependently`
+    // В тот же массив, а не своим setInterval: `createTickScheduler`
     // и написан затем, чтобы падение одного тика не гасило соседей.
     {
       name: "handover",
@@ -80,10 +78,8 @@ setInterval(() => {
     // соседей: заявка, на которую никто не ответил, не должна ждать своего
     // отдельного таймера, чтобы погаснуть, когда её смена уже прошла.
     { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
-  ]).finally(() => {
-    ticking = false;
-  });
-}, REMINDER_TICK_MS);
+]);
+setInterval(tickRound, REMINDER_TICK_MS);
 
 const app = createApp({ db, config, bot });
 
