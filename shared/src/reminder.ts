@@ -173,6 +173,19 @@ export function buildReminderText(p: {
   return text;
 }
 
+/**
+ * Догоняющее напоминание: вечернее не ушло (бот лежал, не было сети), а смена
+ * сегодня и ещё не началась.
+ *
+ * Коротко и без «ложись пораньше»: оно может прийти в два часа ночи или в семь
+ * утра, и совет про вечер в нём был бы про вечер, который уже прошёл.
+ */
+export function buildCatchUpText(p: { name: string; timeRange: string; location?: string | null }): string {
+  const text = `⏰ Привет, ${p.name}! Сегодня смена — ${p.timeRange}.`;
+  const loc = p.location?.trim();
+  return loc ? `${text}\n📍 ${loc}` : text;
+}
+
 export class ReminderTextError extends Error {
   constructor(message: string) {
     super(message);

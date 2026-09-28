@@ -984,3 +984,80 @@ describe("пометка «ушло» — на человека, а не на з
     expect(sent).toHaveLength(0);
   });
 });
+
+describe("догоняющее напоминание", () => {
+  // Решение владельца от 2026-09-28: вечернее не ушло (бот лежал, нет сети) —
+  // пишем сразу, как ожили, даже ночью, лишь бы до начала смены.
+  it("вечером не ушло — ночью бот ожил и пишет «Сегодня смена»", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1101);
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("Сегодня смена — 08:00–17:00");
+  });
+
+  it("второй тик не повторяет", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1102);
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
+    await runReminderTick(db, bot, { date: TODAY, time: "02:05" });
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it("вечернее ушло (и по старой пометке тоже) — догоняющего нет", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1103);
+    const igor = linkedEmployee(db, "Игорь", 1104);
+    const a = createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id });
+    const i = createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: igor.id });
+    addReminder(db, a.id, `evening_before:${anya.id}`);
+    addReminder(db, i.id, "evening_before");
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it("смена уже идёт — поздно", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1105);
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "08:30" });
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it("на больничном — тишина", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1106);
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TODAY, endDate: TODAY, category: "sick_leave", start: null, end: null, employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it("обычная дневная смена догоняющего не получает — её и вечером не напоминают", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1107);
+    createShift(db, { date: TODAY, start: "09:00", end: "18:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
+
+    expect(sent).toHaveLength(0);
+  });
+});
