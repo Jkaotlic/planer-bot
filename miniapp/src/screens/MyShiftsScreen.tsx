@@ -1,3 +1,5 @@
+import { swapBlockedFor } from "../lib/swaps";
+import { nowOnTeamDay } from "../lib/swap-candidates";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, isAbsence, swapBlockReason } from "@planer/shared";
@@ -180,7 +182,7 @@ export function MyShiftsScreen({
                       onSwap={onProposeSwap}
                       onOpen={coworkersOpenable(shift) ? handleRowOpen : undefined}
                       isToday={shift.date === today}
-                      swapBlockedReason={swapBlockedReason}
+                      swapBlockedReason={swapBlockedFor(shift, today, nowOnTeamDay(today), swapBlockedReason)}
                     />
                     {expandedShiftId === shift.id && (
                       <CoworkersPanel

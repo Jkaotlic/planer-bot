@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SwapRequest } from "../api/client";
-import { splitSwaps, hasStarted } from "./swaps";
+import { splitSwaps, hasStarted, swapBlockedFor } from "./swaps";
 
 const swap = (id: number, direction: SwapRequest["direction"], status: SwapRequest["status"]): SwapRequest => ({
   id,
@@ -61,5 +61,24 @@ describe("hasStarted", () => {
 
   it("treats a timeless entry as untradeable — the server calls it not_swappable", () => {
     expect(hasStarted({ date: "2026-12-31", start: null }, now)).toBe(true);
+  });
+});
+
+describe("swapBlockedFor", () => {
+  // «Обменять» на сегодняшней смене, которая уже идёт, было активным: человек
+  // выбирал коллегу, писал сообщение — и получал отказ только в самом конце.
+  const shift = { date: "2026-09-28", start: "08:00" };
+
+  it("сегодняшняя смена уже началась — кнопка гаснет с причиной", () => {
+    expect(swapBlockedFor(shift, "2026-09-28", new Date(2026, 8, 28, 9, 30), undefined)).toBe("Смена уже началась");
+  });
+  it("ещё не началась — можно", () => {
+    expect(swapBlockedFor(shift, "2026-09-28", new Date(2026, 8, 28, 7, 30), undefined)).toBeUndefined();
+  });
+  it("завтрашняя — можно в любое время", () => {
+    expect(swapBlockedFor({ ...shift, date: "2026-09-29" }, "2026-09-28", new Date(2026, 8, 28, 23, 0), undefined)).toBeUndefined();
+  });
+  it("общий запрет (обмены закрыты) важнее", () => {
+    expect(swapBlockedFor(shift, "2026-09-28", new Date(2026, 8, 28, 9, 30), "Обмены закрыты")).toBe("Обмены закрыты");
   });
 });

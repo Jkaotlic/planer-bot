@@ -46,3 +46,22 @@ export function hasStarted(shift: { date: string; start: string | null }, now: D
   if (!shift.start) return true;
   return new Date(`${shift.date}T${shift.start}`).getTime() <= now.getTime();
 }
+
+/**
+ * Почему «Обменять» у этой смены погашена — или `undefined`, если можно.
+ *
+ * Общая причина (обмены закрыты, человек вне обменов) важнее. Иначе —
+ * сегодняшняя смена, чьё начало уже прошло: сервер её не примет, и без этой
+ * проверки человек проходил весь выбор коллеги и сообщение, чтобы получить
+ * отказ в самом конце. `now` — время на командной дате (`nowOnTeamDay`).
+ */
+export function swapBlockedFor(
+  shift: { date: string; start: string | null },
+  today: string,
+  now: Date,
+  globalReason: string | undefined,
+): string | undefined {
+  if (globalReason) return globalReason;
+  if (shift.date === today && hasStarted(shift, now)) return "Смена уже началась";
+  return undefined;
+}

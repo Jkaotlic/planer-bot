@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import type { Me, Shift } from "../api/client";
 import { MyShiftsScreen, type MyShiftsScreenProps } from "./MyShiftsScreen";
@@ -45,7 +45,16 @@ const VACATION: Shift = {
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
+// «Обменять» гаснет у сегодняшней смены, которая уже идёт (`swapBlockedFor`),
+// поэтому время суток в этих тестах — утро, до начала их смен в 09:00–10:00.
+// Только `Date`: таймеры React и `settle` остаются настоящими.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 10, 8, 0));
+});
+
 afterEach(async () => {
+  vi.useRealTimers();
   if (root) await act(async () => root!.unmount());
   host?.remove();
   root = null;
