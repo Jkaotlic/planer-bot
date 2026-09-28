@@ -263,6 +263,23 @@ describe("обрыв сети не съедает письма админам", 
   });
 });
 
+describe("«пора дожать сбор» при вечном отказе", () => {
+  it("403 — отмечается, чтобы не стучать в закрытую дверь каждые пять минут", async () => {
+    const db = makeTestDb();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
+    const send = vi.fn(async () => { throw blocked(); });
+    const bot = { api: { sendMessage: send } } as unknown as Bot;
+
+    await runBirthdayNoticeTick(db, bot, NOW);
+    await runBirthdayNoticeTick(db, bot, NOW);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
   it("reminds admins on the day they picked, with the link they saved", async () => {
     const db = makeTestDb();

@@ -43,8 +43,8 @@ export interface NoticeBuffer {
  * Collects hand edits per worker and sends one letter instead of one per entry.
  *
  * In memory on purpose, the same call `rate-limit.ts` makes: one process, one
- * database, no second replica. The cost is named in the spec — an edit made in
- * the last twenty seconds before a restart never reaches its worker.
+ * database, no second replica. A graceful restart sends what is held
+ * (`flushNow` from `shutdownSafely`); only a crash loses the last twenty seconds.
  *
  * Known limit, deliberately not solved: creating an entry and deleting it again
  * inside one window reports «+1, −1» rather than staying silent. Cancelling out

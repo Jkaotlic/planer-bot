@@ -7,6 +7,7 @@ import { createApp } from "./app";
 import { ANNOUNCEMENT_TEXT_MAX, ANNOUNCEMENT_RECIPIENTS_MAX } from "../announcements/announcement-service";
 import { listRecentAudit } from "../repo/audit";
 import type { Db } from "../db/client";
+import { auditLog } from "../db/schema";
 
 const config = { jwtSecret: "s", teamTz: "Europe/Moscow", publicUrl: "http://x", adminTelegramIds: [] } as any;
 
@@ -341,6 +342,21 @@ describe("POST /api/announcements — без двойной рассылки", (
     const app = createApp({ db, config, bot });
     expect((await post(app, token, "Планёрка в 10")).status).toBe(200);
     expect(sent.filter((m) => m.to === 722)).toHaveLength(1);
+  });
+
+  it("через десять минут тот же текст снова уходит — окно, а не запрет навсегда", async () => {
+    const db = makeTestDb();
+    const admin = linked(db, "Аня", 741, true);
+    linked(db, "Игорь", 742);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(admin.id, true);
+    expect((await post(app, token, "Планёрка в 10")).status).toBe(200);
+    // Время строки журнала ставит база, а не часы теста, — сдвигаем её саму.
+    db.update(auditLog).set({ createdAt: new Date(Date.now() - 11 * 60 * 1000) }).run();
+
+    expect((await post(app, token, "Планёрка в 10")).status).toBe(200);
+    expect(sent.filter((m) => m.to === 742)).toHaveLength(2);
   });
 
   it("другой текст — уходит", async () => {
