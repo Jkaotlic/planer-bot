@@ -95,14 +95,31 @@ describe("второй шаг формы", () => {
     expect(onOfferHandover).toHaveBeenCalledWith(77, 3);
   });
 
-  it("«Потом» не оставляет смену молча на больном", async () => {
+  // Кнопка называлась «Потом», а сервер по ней сразу пишет всем свободным —
+  // название обещало обратное тому, что происходит.
+  it("«Спросить всех свободных» — название говорит, что сделает", async () => {
     const onSkipHandover = vi.fn(async () => {});
     const el = await render({ onSkipHandover });
 
     await saveSickLeave(el);
-    await act(async () => buttonWith(el, "Потом")!.click());
+    expect(buttonWith(el, "Потом")).toBeUndefined();
+    await act(async () => buttonWith(el, "Спросить всех свободных")!.click());
 
     expect(onSkipHandover).toHaveBeenCalledWith(77);
+  });
+
+  it("«Назад» с неотданной сменой сначала предупреждает, второе нажатие уходит", async () => {
+    const onCancel = vi.fn();
+    const el = await render({ onCancel });
+
+    await saveSickLeave(el);
+    const back = el.querySelector<HTMLButtonElement>('button[aria-label="Назад"]')!;
+    await act(async () => back.click());
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(el.textContent ?? "").toContain("через три часа спросим всех свободных");
+
+    await act(async () => back.click());
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it("больничный без смен закрывает форму сразу, как раньше", async () => {
