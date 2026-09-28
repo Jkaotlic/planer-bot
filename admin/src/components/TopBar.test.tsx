@@ -10,6 +10,7 @@ describe("TopBar roster controls", () => {
         onPrevWeek={() => {}}
         onNextWeek={() => {}}
         onAddEntry={() => {}}
+        onFillWeek={() => {}}
         onImportRoster={() => {}}
         onExportRoster={() => {}}
       />,

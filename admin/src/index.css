@@ -214,6 +214,40 @@ button {
   margin-left: auto;
 }
 
+/* «Заполнить неделю» и «Добавить смену» — одной группой: на узком окне они
+   переносятся вместе, а не разъезжаются по разным строкам. */
+.topbar-entry-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Заполнить неделю ---------- */
+
+.fill-week-panel {
+  width: 520px;
+}
+
+.fill-week-days {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+/* День и выбор одной строкой: семь полей столбиком с подписью над каждым
+   растянули бы панель вдвое. */
+.fill-week-day {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.fill-week-day-name.off {
+  color: var(--hint);
+}
+
 .visually-hidden {
   position: absolute !important;
   width: 1px !important;

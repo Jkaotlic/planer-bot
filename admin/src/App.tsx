@@ -14,6 +14,7 @@ import {
   type Viewer,
 } from "./api/client";
 import { AddEntryPanel } from "./components/AddEntryPanel";
+import { FillWeekPanel } from "./components/FillWeekPanel";
 import { EventsFeed } from "./components/EventsFeed";
 import { PersonSearch } from "./components/PersonSearch";
 import { ScheduleGrid } from "./components/ScheduleGrid";
@@ -106,6 +107,8 @@ export function App() {
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
+  /** «Заполнить неделю» открыта — на показанную неделю. */
+  const [fillOpen, setFillOpen] = useState(false);
   const [rosterImport, setRosterImport] = useState<RosterImportState | null>(null);
   const [screenNotice, setScreenNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   /** Filters `ScheduleGrid`'s rows — see `PersonSearch` there for why `BalanceRail` doesn't get it. */
@@ -452,6 +455,10 @@ export function App() {
               onPrevWeek={() => setWeekMonday((m) => addDays(m, -7))}
               onNextWeek={() => setWeekMonday((m) => addDays(m, 7))}
               onAddEntry={() => openAddPanel(activeEmployees[0]?.id ?? 1, weekDates[0]!)}
+              onFillWeek={() => {
+                setScreenNotice(null);
+                setFillOpen(true);
+              }}
               onImportRoster={() => rosterFileInput.current?.click()}
               onExportRoster={() => void exportRoster()}
             />
@@ -549,6 +556,32 @@ export function App() {
                 }
               : undefined
           }
+        />
+      )}
+
+      {fillOpen && activeEmployees && templates && (
+        <FillWeekPanel
+          // Неделя берётся один раз при открытии: переключатель недель стоит
+          // под затемнением, и панель, съехавшая на другую неделю под рукой,
+          // заполнила бы не те дни.
+          key={weekDates[0]}
+          employees={activeEmployees}
+          templates={templates}
+          weekDates={weekDates}
+          calendar={dayCalendar}
+          onCancel={() => setFillOpen(false)}
+          onFilled={async (count, notified) => {
+            setFillOpen(false);
+            // Итог вслух, как у расстановки диапазоном: молча закрытая панель
+            // читалась бы как «встало всё», даже если письмо дошло не до всех.
+            setScreenNotice({ kind: "success", text: withNotifyNotice(`Заполнено дней: ${count}.`, notified) });
+            try {
+              await refreshSchedule();
+            } catch (err) {
+              if (err instanceof AuthRequiredError) setNeedLogin(true);
+              else setScheduleError(err instanceof Error ? err.message : "Неделя заполнена, но не удалось обновить график");
+            }
+          }}
         />
       )}
 

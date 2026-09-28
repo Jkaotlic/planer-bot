@@ -22,6 +22,7 @@ import {
   employeesMock,
   mockCreateEntry,
   mockCreateEntryRange,
+  mockCreateEntries,
   mockGetChecklists,
   mockCreateChecklist,
   mockPatchChecklist,
@@ -632,6 +633,9 @@ export interface ApiClient {
   getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
+  /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
+   *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
+  createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
   getChecklists(): Promise<Checklist[]>;
   createChecklist(name: string): Promise<Checklist>;
   patchChecklist(id: number, patch: { name?: string; note?: string | null; docUrl?: string | null }): Promise<Checklist>;
@@ -998,6 +1002,9 @@ export const realClient: ApiClient = {
 
   createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
 
+  createEntries: (inputs) =>
+    authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
+
   getChecklists: () => authorizedGet<{ checklists: Checklist[] }>("/api/admin/checklists").then((r) => r.checklists),
   createChecklist: (name) =>
     authorizedPostJson<{ checklist: Checklist }>("/api/admin/checklists", { name }).then((r) => r.checklist),
@@ -1307,6 +1314,7 @@ const devClient: ApiClient = {
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
   createEntryRange: (input) => mockCreateEntryRange(input),
+  createEntries: (inputs) => mockCreateEntries(inputs),
   getChecklists: () => mockGetChecklists(),
   createChecklist: (name) => mockCreateChecklist(name),
   patchChecklist: (id, patch) => mockPatchChecklist(id, patch),

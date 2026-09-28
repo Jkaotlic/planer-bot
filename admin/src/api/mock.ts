@@ -297,6 +297,30 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
   return { entry: created, notified: mockReach(input.employeeId != null ? [input.employeeId] : []) };
 }
 
+/** Один запрос вместо цикла — DEV-мок отвечает так же, чтобы «Заполнить неделю»
+ *  вела себя в разработке, как на живом сервере: одно письмо на человека, а не
+ *  письмо на каждый созданный день. Зеркало `mockCreateEntries` мини-аппа. */
+export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: { delivered: number; intended: number } }> {
+  await delay(300);
+  const employeeIds: number[] = [];
+  for (const input of inputs) {
+    ENTRIES.push(
+      entry({
+        date: input.date,
+        start: input.start ?? null,
+        end: input.end ?? null,
+        endDate: input.endDate ?? null,
+        category: input.category,
+        title: input.title ?? null,
+        templateId: input.templateId ?? null,
+        employeeId: input.employeeId ?? null,
+      }),
+    );
+    if (input.employeeId != null) employeeIds.push(input.employeeId);
+  }
+  return { created: inputs.length, notified: mockReach(employeeIds) };
+}
+
 /**
  * Демо-расстановка диапазоном.
  *
