@@ -18,6 +18,7 @@ import { entryLineOf, nameOf } from "../util/message-lines";
 import { handoverCandidates } from "./candidates";
 import {
   handoverCancelledText,
+  handoverClosedText,
   handoverEscalationText,
   handoverFanText,
   handoverOfferText,
@@ -55,13 +56,6 @@ export interface HandoverDeps {
 }
 
 /**
- * Однодневная смена уже началась — отдавать и брать её поздно.
- *
- * Только однодневная: у недельного дежурства «начало» — понедельник, и в среду
- * оно формально «идёт», но остаток недели ещё можно передать (это решает
- * проверка «уже прошла» по `endDate` в `takeHandover`).
- */
-/**
  * Отдавать уже нечего: однодневная смена началась, у многодневной начался
  * последний день.
  */
@@ -71,6 +65,13 @@ function isPast(deps: HandoverDeps, shift: Shift): boolean {
   return shiftStartMs(lastDay, deps.config.teamTz) <= (deps.now ?? Date.now)();
 }
 
+/**
+ * Однодневная смена уже началась — отдавать и брать её поздно.
+ *
+ * Только однодневная: у недельного дежурства «начало» — понедельник, и в среду
+ * оно формально «идёт», но остаток недели ещё можно передать (это решает
+ * проверка «уже прошла» по `endDate` в `takeHandover`).
+ */
 function hasStarted(deps: HandoverDeps, shift: Shift): boolean {
   if (shift.start == null || (shift.endDate != null && shift.endDate !== shift.date)) return false;
   return shiftStartMs(shift, deps.config.teamTz) <= (deps.now ?? Date.now)();
@@ -458,18 +459,28 @@ export function detachHandoversFromEntry(db: Db, sickEntryId: number): void {
  * Кто ждал: адресат личного предложения или, если уже спросили всех, каждый, кто
  * ещё мог её взять. Круг веера пересчитывается, а не хранится: кто с тех пор
  * стал занят, про предложение, которое уже не мог принять, не услышит.
+ *
+ * Нынешнему хозяину смены не пишем никогда: если админ поставил её тому самому
+ * человеку, которому её предлагали, «выходить не нужно» было бы ровно обратным
+ * правде. `text` — какой «отбой»: больной снял больничный или смену закрыл админ.
  */
-async function tellCancelled(deps: HandoverDeps, handover: Handover, shift: Shift): Promise<void> {
+async function tellCancelled(deps: HandoverDeps, handover: Handover, shift: Shift, text: string): Promise<void> {
   const { db } = deps;
-  const text = handoverCancelledText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift));
-  if (handover.status === "offered" && handover.offeredToEmployeeId != null) {
-    await deps.messenger.plain(handover.offeredToEmployeeId, text);
-  } else if (handover.status === "fanned") {
-    const declined = listDeclines(db, handover.id);
-    for (const employee of handoverCandidates(db, shift, { excludeIds: declined })) {
-      await deps.messenger.plain(employee.id, text);
-    }
+  const waiting =
+    handover.status === "offered" && handover.offeredToEmployeeId != null
+      ? [handover.offeredToEmployeeId]
+      : handover.status === "fanned"
+        ? handoverCandidates(db, shift, { excludeIds: listDeclines(db, handover.id) }).map((e) => e.id)
+        : [];
+  for (const employeeId of waiting) {
+    if (employeeId === shift.employeeId) continue;
+    await deps.messenger.plain(employeeId, text);
   }
+}
+
+/** «Отбой» по отменённому больничному — от лица больного. */
+function sickCancelledText(db: Db, handover: Handover, shift: Shift): string {
+  return handoverCancelledText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift));
 }
 
 /** Почему передача больше не имеет смысла; `null` — жива. */
@@ -524,7 +535,10 @@ export async function voidHandover(deps: HandoverDeps, handoverId: number, reaso
   const shift = shiftOf(db, handover);
   const updated = updateHandover(db, handoverId, { status: "cancelled", resolvedAt: new Date() })!;
   recordAudit(db, "handover_cancelled", handover.fromEmployeeId, { ...auditPayload(db, updated, shift, null), reason });
-  if (shift && reason !== "gone") await tellCancelled(deps, handover, shift);
+  if (!shift || reason === "gone") return;
+  // «Больничный сняли» — правда только у `uncovered`; переназначение — дело админа.
+  const text = reason === "uncovered" ? sickCancelledText(db, handover, shift) : handoverClosedText(lineOf(shift));
+  await tellCancelled(deps, handover, shift, text);
 }
 
 /**
@@ -557,7 +571,7 @@ export async function cancelHandoversForEntry(
     killed += 1;
     if (!shift) continue;
 
-    await tellCancelled(deps, handover, shift);
+    await tellCancelled(deps, handover, shift, sickCancelledText(db, handover, shift));
   }
   return killed;
 }

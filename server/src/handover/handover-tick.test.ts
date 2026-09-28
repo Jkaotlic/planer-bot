@@ -260,6 +260,35 @@ describe("передача гаснет сама, когда смена ушла
     expect(sent.map((m) => m.to)).toEqual([`employee:${igor}`]);
   });
 
+  it("админ поставил смену тому самому Игорю, которому её предложили, — Игорю «отбоя» нет", async () => {
+    // Найдено проверяющим: «выходить не нужно» уходило новому хозяину смены.
+    const db = makeTestDb();
+    const { igor, work, handover } = await scene(db);
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, work.id, { employeeId: igor });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+    expect(sent).toEqual([]);
+  });
+
+  it("при переназначении «отбой» не говорит, что сняли больничный — его не снимали", async () => {
+    const db = makeTestDb();
+    const { igor, work, handover } = await scene(db);
+    const mark = person(db, "Марк");
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, work.id, { employeeId: mark });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).not.toContain("больничный");
+    expect(sent[0]!.text).toContain("Смену выходить не нужно");
+  });
+
   it("смену переназначили и вернули больной — передача жива", async () => {
     const db = makeTestDb();
     const { anya, work, handover } = await scene(db);
