@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { checklistDelivery, checklistHasContent, checklistsDueToday, dateStr, isChecklistComplete } from "@planer/shared";
+import { checklistDelivery, checklistHasContent, checklistsDueToday, dateStr, isChecklistComplete, prevDate } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import {
@@ -329,6 +329,13 @@ export function createChecklistRoutes(db: Db, config: Config) {
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     const employeeId = c.get("auth").employeeId;
     const { date, itemId, done } = parsed.data;
+    // Только сегодня и вчера по командной дате (его решение от 2026-09-28):
+    // отметка ставилась на любую дату — заранее на завтра или задним числом
+    // на прошлую неделю. Вчера — ради ночной смены через полночь.
+    const today = teamNow(config.teamTz).date;
+    if (date !== today && date !== prevDate(today)) {
+      return c.json({ error: "Отмечать можно только сегодняшний и вчерашний чек-лист" }, 400);
+    }
 
     const item = getChecklistItem(db, itemId);
     if (!item?.checklistId || !item.isActive) return c.json({ error: "unknown_item" }, 400);
