@@ -409,6 +409,8 @@ export async function notifyAdmins(
   kind: AdminNoticeKind,
   text: string,
   action?: AdminAction,
+  /** Сообщение, которое уходит следом за текстом копией (скриншот в жалобе). */
+  attachment?: { fromChatId: number; messageId: number },
 ): Promise<AdminReach> {
   const reach: AdminReach = { attempted: 0, delivered: 0 };
   // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
@@ -431,6 +433,9 @@ export async function notifyAdmins(
     try {
       await bot.api.sendMessage(admin.telegramUserId, text, { reply_markup: kb });
       reach.delivered += 1;
+      // Копия, а не пересылка: у пересланного видно чужое имя и его можно
+      // «открыть в чате», а админу нужна сама картинка рядом с текстом жалобы.
+      if (attachment) await bot.api.copyMessage(admin.telegramUserId, attachment.fromChatId, attachment.messageId);
     } catch (err) {
       console.error(`notifyAdmins(${kind}): failed for ${admin.telegramUserId}:`, safeErrorMessage(err));
     }
@@ -440,8 +445,10 @@ export async function notifyAdmins(
 
 /** Багрепорт админам, с кнопкой «Разобрал». Через `notifyAdmins`, а не своим
  *  циклом, — чтобы выключатель вида `bug_reports` работал и здесь. */
-export async function notifyBugReport(bot: Bot, db: Db, reportId: number, text: string): Promise<void> {
-  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` });
+export async function notifyBugReport(
+  bot: Bot, db: Db, reportId: number, text: string, attachment?: { fromChatId: number; messageId: number },
+): Promise<void> {
+  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` }, attachment);
 }
 
 /**

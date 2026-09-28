@@ -849,7 +849,23 @@ export function createBot(deps: BotDeps): Bot {
 
   /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
    *  разбираются раньше и сюда не доходят. */
-  async function captureBugReport(ctx: Context, text: string): Promise<boolean> {
+  /**
+   * Скриншот в открытое окно жалобы.
+   *
+   * Раньше бот фото молча выбрасывал, а окно оставалось открытым: человек думал,
+   * что отправил, админы не получали ничего. Подпись становится текстом жалобы,
+   * картинка уходит админам копией следом. В базе картинки нет — только пометка
+   * «[скриншот]»: сама она живёт в Telegram, и админ видит её там.
+   */
+  async function captureBugPhoto(ctx: Context): Promise<boolean> {
+    const caption = ctx.msg?.caption?.trim();
+    const text = caption ? `${caption} [скриншот]` : "📷 скриншот без подписи";
+    return captureBugReport(ctx, text, { fromChatId: ctx.chat!.id, messageId: ctx.msg!.message_id });
+  }
+
+  async function captureBugReport(
+    ctx: Context, text: string, attachment?: { fromChatId: number; messageId: number },
+  ): Promise<boolean> {
     const from = ctx.from;
     if (!from) return false;
     const who = acting(from.id);
@@ -870,7 +886,7 @@ export function createBot(deps: BotDeps): Bot {
     // `force_reply`, и раскладку у человека Telegram на это время убрал. Обычный
     // путь «нажал → написал → отправил» обязан возвращать её сам, без лишнего тапа.
     await replyWithMenu(ctx, "Записал, спасибо 🙏 Разберёмся.");
-    await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
+    await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`, attachment);
     return true;
   }
 
@@ -1189,12 +1205,23 @@ export function createBot(deps: BotDeps): Bot {
    * Окно, а не «любой документ от админа»: админы шлют боту файлы и по другим
    * поводам, и молча превращать чужой PDF в инструкцию для всей смены нельзя.
    */
+  bot.on("message:photo", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+    await captureBugPhoto(ctx);
+  });
+
   bot.on("message:document", async (ctx) => {
     if (ctx.chat.type !== "private") return;
     const who = acting(ctx.from?.id ?? 0);
-    if (!who.ok || !actsAsAdmin(who.me, ctx.from!.id)) return;
-    const pending = docPendingFor(db, who.me.id, new Date());
-    if (pending == null) return;
+    // Окно инструкции проверяется первым: файл админа, которого попросили
+    // приложить инструкцию, — инструкция, даже если окно жалобы тоже открыто.
+    const pending = who.ok && actsAsAdmin(who.me, ctx.from!.id) ? docPendingFor(db, who.me.id, new Date()) : null;
+    if (pending == null) {
+      // Скриншот, отправленный «файлом» (без сжатия), — та же жалоба.
+      if (ctx.msg.document.mime_type?.startsWith("image/")) await captureBugPhoto(ctx);
+      return;
+    }
+    if (!who.ok) return;
     const list = getChecklist(db, pending);
     if (!list) {
       clearDocPending(db, who.me.id);

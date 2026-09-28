@@ -8,6 +8,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { openBugPrompt, listBugReports, getBugPending } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { setNoticeMuted } from "../repo/notice-prefs";
 
 const config = testConfig();
 
@@ -303,5 +304,81 @@ describe("выход из багрепорта", () => {
     const reports = listBugReports(db, "all");
     expect(reports).toHaveLength(1);
     expect(reports[0]!.report.employeeId).toBe(anya.id);
+  });
+});
+
+/** Фото с подписью (или без) — так Telegram присылает скриншот. */
+function photoUpdate(tgId: number, caption?: string) {
+  return {
+    update_id: tgId * 10 + 5,
+    message: {
+      message_id: tgId * 10 + 7,
+      date: 1_712_803_046,
+      chat: { id: tgId, first_name: "T", type: "private" as const },
+      from: { id: tgId, is_bot: false, first_name: "T" },
+      photo: [{ file_id: "small", file_unique_id: "s", width: 90, height: 90 }, { file_id: "big", file_unique_id: "b", width: 900, height: 900 }],
+      ...(caption ? { caption } : {}),
+    },
+  } as unknown as Parameters<Bot["handleUpdate"]>[0];
+}
+
+describe("скриншот в «🐞 Проблема»", () => {
+  // Бот выбрасывал фото молча, а окно жалобы оставалось открытым: человек
+  // думал, что отправил, а админы не получали ничего.
+  it("фото с подписью → жалоба с текстом подписи, админу текст и сама картинка", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 611);
+    admin(db, "Игорь", 112);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(611, BTN_BUG));
+    await bot.handleUpdate(photoUpdate(611, "Кнопка съехала"));
+
+    const reports = listBugReports(db, "all");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.report.text).toContain("Кнопка съехала");
+    expect(reports[0]!.report.text).toContain("[скриншот]");
+    expect(calls.some((c) => c.method === "sendMessage" && c.payload.chat_id === 112 && String(c.payload.text).includes("Кнопка съехала"))).toBe(true);
+    const copy = calls.find((c) => c.method === "copyMessage" && c.payload.chat_id === 112);
+    expect(copy?.payload.from_chat_id).toBe(611);
+    expect(copy?.payload.message_id).toBe(611 * 10 + 7);
+    expect(getBugPending(db, reports[0]!.report.employeeId)).toBeFalsy();
+  });
+
+  it("фото без подписи — жалоба всё равно записана", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 612);
+    admin(db, "Игорь", 113);
+    const { bot } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(612, BTN_BUG));
+    await bot.handleUpdate(photoUpdate(612));
+
+    expect(listBugReports(db, "all")[0]?.report.text).toContain("скриншот без подписи");
+  });
+
+  it("окно жалобы не открыто — фото не становится жалобой", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 613);
+    admin(db, "Игорь", 114);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(photoUpdate(613, "просто фото"));
+
+    expect(listBugReports(db, "all")).toHaveLength(0);
+    expect(calls.some((c) => c.method === "copyMessage")).toBe(false);
+  });
+
+  it("админ, выключивший жалобы, не получает и картинку", async () => {
+    const db = makeTestDb();
+    worker(db, "Аня", 614);
+    const igor = admin(db, "Игорь", 115);
+    setNoticeMuted(db, igor.id, "bug_reports", true);
+    const { bot, calls } = testBot(db);
+
+    await bot.handleUpdate(textUpdate(614, BTN_BUG));
+    await bot.handleUpdate(photoUpdate(614, "Кнопка съехала"));
+
+    expect(calls.some((c) => c.payload.chat_id === 115 && (c.method === "copyMessage" || c.method === "sendMessage"))).toBe(false);
   });
 });
