@@ -44,7 +44,7 @@ import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
 import { createNoticeBuffer } from "../schedule/notice-buffer";
 import { listSwapsForEmployee, listPendingSwapsForShift } from "../repo/swaps";
-import { listRecentAudit, recordAudit, queryAudit } from "../repo/audit";
+import { listRecentAudit, recordAudit, queryAudit, lastDeliveredAnnouncementAt } from "../repo/audit";
 import { listBugReports, resolveBugReport } from "../bugs/bug-service";
 import {
   notifyUser,
@@ -209,6 +209,13 @@ function tradeFieldsChanged(before: TradeFields, after: TradeFields): boolean {
  */
 let holidaysRefreshing = false;
 
+/**
+ * Окно, в котором тот же текст от того же отправителя считается повтором, а не
+ * новым объявлением. Десять минут перекрывают обрыв релея с запасом и не мешают
+ * через полчаса честно напомнить то же самое.
+ */
+const ANNOUNCEMENT_REPEAT_WINDOW_MS = 10 * 60 * 1000;
+
 export function createApp(deps: AppDeps): Hono<Env> {
   const { db, config, bot } = deps;
   const fetchHolidays = deps.fetchHolidays ?? xmlcalendarFetcher();
@@ -223,6 +230,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // timers. A hand edit waits in it for a few seconds so a series of edits
   // reaches the worker as one letter instead of one message per entry.
   const noticeBuffer = createNoticeBuffer({ db, bot });
+  /** Объявления, которые рассылаются прямо сейчас: «отправитель + текст». */
+  const announcementsInFlight = new Set<string>();
 
   app.use("*", securityHeaders());
 
@@ -606,7 +615,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     const senderId = c.get("auth").employeeId;
-    const result = await sendAnnouncement(bot, db, { senderId, text, audience });
+    // Рассылка идёт внутри запроса — до двадцати секунд на человека при плохой
+    // сети. Релей обрывал долгий ответ, отправитель видел ошибку и жал ещё раз,
+    // и команда получала объявление дважды. У сборов и вакантных выходных такой
+    // замок заведён после тех же двойных рассылок.
+    const key = `${senderId}\u0000${text}`;
+    if (announcementsInFlight.has(key)) {
+      return c.json({ error: "Это объявление ещё рассылается — дождись, пока оно уйдёт" }, 409);
+    }
+    const recent = lastDeliveredAnnouncementAt(db, senderId, text, new Date(Date.now() - ANNOUNCEMENT_REPEAT_WINDOW_MS));
+    if (recent) {
+      return c.json({ error: "Такое объявление уже ушло — повтор разрешён через 10 минут" }, 409);
+    }
+    announcementsInFlight.add(key);
+    let result: Awaited<ReturnType<typeof sendAnnouncement>>;
+    try {
+      result = await sendAnnouncement(bot, db, { senderId, text, audience });
+    } finally {
+      announcementsInFlight.delete(key);
+    }
     recordAudit(db, "announcement_sent", senderId, {
       text,
       audience: audience.kind === "all" ? "all" : "picked",

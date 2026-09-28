@@ -280,3 +280,79 @@ describe("GET /api/announcements/recipients", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("POST /api/announcements — без двойной рассылки", () => {
+  // Рассылка идёт внутри запроса, до 20 с на человека при плохой сети. Релей
+  // обрывал долгий ответ, админ видел ошибку, жал ещё раз — и команда получала
+  // объявление дважды.
+  const post = async (app: ReturnType<typeof createApp>, token: string, text: string) =>
+    app.request("/api/announcements", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ text, audience: "all" }),
+    });
+
+  it("тот же текст от того же отправителя сразу после — 409, второй раз не уходит", async () => {
+    const db = makeTestDb();
+    const admin = linked(db, "Аня", 701, true);
+    linked(db, "Игорь", 702);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(admin.id, true);
+
+    expect((await post(app, token, "Планёрка в 10")).status).toBe(200);
+    const again = await post(app, token, "Планёрка в 10");
+
+    expect(again.status).toBe(409);
+    expect((await again.json()).error).toContain("уже ушло");
+    expect(sent.filter((m) => m.to === 702)).toHaveLength(1);
+  });
+
+  it("пока первая рассылка идёт, вторая с тем же текстом — 409", async () => {
+    const db = makeTestDb();
+    const admin = linked(db, "Аня", 711, true);
+    linked(db, "Игорь", 712);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const sent: number[] = [];
+    const bot = { api: { sendMessage: vi.fn(async (to: number) => { await gate; sent.push(to); }) } } as unknown as Bot;
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(admin.id, true);
+
+    const first = post(app, token, "Планёрка в 10");
+    await new Promise((r) => setTimeout(r, 10));
+    const second = await post(app, token, "Планёрка в 10");
+    release();
+
+    expect(second.status).toBe(409);
+    expect((await first).status).toBe(200);
+    expect(sent.filter((to) => to === 712)).toHaveLength(1);
+  });
+
+  it("если прошлая не дошла ни до кого — повтор разрешён", async () => {
+    const db = makeTestDb();
+    const admin = linked(db, "Аня", 721, true);
+    linked(db, "Игорь", 722);
+    const app0 = createApp({ db, config }); // без бота — не дошло ни до кого
+    const token = await tokenFor(admin.id, true);
+    expect((await post(app0, token, "Планёрка в 10")).status).toBe(200);
+
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    expect((await post(app, token, "Планёрка в 10")).status).toBe(200);
+    expect(sent.filter((m) => m.to === 722)).toHaveLength(1);
+  });
+
+  it("другой текст — уходит", async () => {
+    const db = makeTestDb();
+    const admin = linked(db, "Аня", 731, true);
+    linked(db, "Игорь", 732);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(admin.id, true);
+
+    await post(app, token, "Планёрка в 10");
+    expect((await post(app, token, "Планёрка переносится на 11")).status).toBe(200);
+    expect(sent.filter((m) => m.to === 732)).toHaveLength(2);
+  });
+});

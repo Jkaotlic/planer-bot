@@ -139,3 +139,24 @@ export function listRecentAudit(db: Db, limit: number, viewerEmployeeId?: number
     .limit(limit)
     .all();
 }
+
+/**
+ * Когда этот отправитель последний раз разослал ровно этот текст хоть кому-то —
+ * или `null`, если за окно такого не было.
+ *
+ * «Хоть кому-то»: рассылка, не дошедшая ни до кого (нет связи), не рассылка, и
+ * её повтор — не дубль, а вторая попытка.
+ */
+export function lastDeliveredAnnouncementAt(db: Db, senderId: number, text: string, since: Date): Date | null {
+  const rows = db
+    .select()
+    .from(auditLog)
+    .where(and(eq(auditLog.type, "announcement_sent"), eq(auditLog.actorEmployeeId, senderId), gte(auditLog.createdAt, since)))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
+    .all();
+  const hit = rows.find((row) => {
+    const payload = row.payload as { text?: unknown; delivered?: unknown };
+    return payload.text === text && typeof payload.delivered === "number" && payload.delivered > 0;
+  });
+  return hit ? hit.createdAt : null;
+}
