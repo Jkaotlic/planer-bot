@@ -1,3 +1,4 @@
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import { Button, Input, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import {
@@ -438,15 +439,14 @@ function ChecklistCard({
             </Button>
           )}
 
-          <Button
-            size="s"
+          <ConfirmButton
+            label="Удалить чек-лист"
+            question={`Удалить «${list.name}» со всеми пунктами? Дежурные перестанут его получать.`}
+            confirmLabel="Да, удалить"
             mode="plain"
             disabled={busy}
-            style={{ color: "var(--tgui--destructive_text_color)" }}
-            onClick={() => void run(() => apiClient.deleteChecklist(list.id))}
-          >
-            Удалить чек-лист
-          </Button>
+            onConfirm={() => void run(() => apiClient.deleteChecklist(list.id))}
+          />
         </div>
       )}
     </CardShell>

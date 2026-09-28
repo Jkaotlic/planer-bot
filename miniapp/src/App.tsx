@@ -10,7 +10,7 @@ import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { adminSectionFromSearch, scheduleDateFromSearch } from "./screens/admin-section";
+import { adminSectionFromSearch, scheduleDateFromSearch, type AdminSection } from "./screens/admin-section";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -114,6 +114,25 @@ export function App() {
   // instead of a per-screen error — nothing to retry by hand, it just says the
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  // Раздел админки — здесь, а не в `AdminScreen`: тот размонтируется при уходе
+  // на другую вкладку, и раздел сбрасывался на «Расписание» при каждом
+  // возвращении. Первое значение — из ссылки бота (`?screen=…`).
+  const [adminSection, setAdminSection] = useState<AdminSection>(
+    () => adminSectionFromSearch(window.location.search) ?? "schedule",
+  );
+  // Дата из ссылки бота — на один показ. Раньше её перечитывали из адреса при
+  // каждом входе во вкладку, и график навсегда открывался на дате тревоги.
+  const [adminDeepDate, setAdminDeepDate] = useState<string | undefined>(
+    () => scheduleDateFromSearch(window.location.search) ?? undefined,
+  );
+  function consumeAdminDeepDate() {
+    setAdminDeepDate(undefined);
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("date")) return;
+    params.delete("date");
+    const rest = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+  }
   /** «Коллега не получит сообщение» после обмена — до следующей смены вкладки. */
   const [swapNotice, setSwapNotice] = useState<string | null>(null);
   // Сборы для меток «ждёт тебя» на вкладках (`tabBadges`). `null` — ещё не
@@ -367,7 +386,9 @@ export function App() {
       const teamShifts = teamSchedule.shifts;
       setData((prev) =>
         prev
-          ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
+          ? // `me` тоже: права и запреты, поменянные админом, иначе не доходили
+            // до открытого приложения, пока его не закроешь совсем.
+            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
           : prev,
       );
       setRefreshError(null);
@@ -414,6 +435,27 @@ export function App() {
     // reloadData only closes over stable refs (apiClient/setData); safe to bind once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleWithdrawInterest(slotId: number) {
+    setBusySlotIds((prev) => withBusy(prev, slotId));
+    setSlotErrors((prev) => withoutError(prev, slotId));
+    await runRowAction({
+      action: () => apiClient.withdrawInterest(slotId),
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshWeekend();
+      },
+      onActionFailed: (err) => {
+        console.error("Withdraw interest failed:", err);
+        setSlotErrors((prev) => withError(prev, slotId, "Не получилось снять отклик — возможно, тебя уже назначили. Обнови экран."));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusySlotIds((prev) => withoutBusy(prev, slotId));
+  }
 
   async function handleInterest(slotId: number) {
     setBusySlotIds((prev) => withBusy(prev, slotId));
@@ -536,25 +578,40 @@ export function App() {
     // под шапку клиента, и 100vh поверх этого дало бы лишний скролл ровно на её
     // высоту — страница «пружинила» бы, не имея что показать.
     <div style={{ minHeight: "100%", boxSizing: "border-box" }}>
-      {/* Сверху и прилипает: снизу, как `refreshError`, строка оказывалась в
-          конце длинной прокрутки под панелью вкладок — в DOM есть, глазу нет
-          (замер 2026-09-28: top 2000 при экране 844). */}
-      {swapNotice && (
-        <div
-          role="status"
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            padding: "10px 16px",
-            textAlign: "center",
-            fontSize: 13,
-            color: "var(--tgui--destructive_text_color)",
-            background: "var(--tgui--secondary_bg_color)",
-            borderBottom: "1px solid var(--tgui--divider)",
-          }}
-        >
-          {swapNotice}
+      {/* Сообщения — сверху и прилипают. Снизу они стояли в конце длинной
+          прокрутки под панелью вкладок: в DOM есть, глазу нет (замер
+          2026-09-28: top 2000 при экране 844). Один блок на оба, чтобы при
+          обоих сразу они не легли друг на друга. */}
+      {(swapNotice || refreshError) && (
+        <div style={{ position: "sticky", top: 0, zIndex: 10, borderBottom: "1px solid var(--tgui--divider)" }}>
+          {swapNotice && (
+            <div
+              role="status"
+              style={{
+                padding: "10px 16px",
+                textAlign: "center",
+                fontSize: 13,
+                color: "var(--tgui--destructive_text_color)",
+                background: "var(--tgui--secondary_bg_color)",
+              }}
+            >
+              {swapNotice}
+            </div>
+          )}
+          {refreshError && (
+            <div
+              role="status"
+              style={{
+                padding: "8px 16px",
+                textAlign: "center",
+                fontSize: 12.5,
+                color: "var(--tgui--hint_color)",
+                background: "var(--tgui--secondary_bg_color)",
+              }}
+            >
+              {refreshError}
+            </div>
+          )}
         </div>
       )}
       {tab === "mine" && (
@@ -597,7 +654,7 @@ export function App() {
           раз, и когда на неё возвращаются: выбор человека про то, каким видом
           он смотрит график, а не только про первый экран за сеанс. */}
       {tab === "team" && (
-        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} today={data.today} />
+        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} today={data.today} meId={data.me.id} />
       )}
       {tab === "collections" && (
         <CollectionsTabScreen
@@ -633,6 +690,7 @@ export function App() {
           slotErrors={slotErrors}
           offerErrors={offerErrors}
           onInterest={(id) => void handleInterest(id)}
+          onWithdrawInterest={(id) => void handleWithdrawInterest(id)}
           onConfirm={(id) =>
             void runOfferAction(id, apiClient.confirmOffer, "Не получилось подтвердить смену — возможно, её уже забрали. Обнови экран и попробуй снова.")
           }
@@ -646,8 +704,10 @@ export function App() {
         // `immutable`, поэтому платится один раз на устройство.
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю админку…</div>}>
           <AdminScreen
-            initialSection={adminSectionFromSearch(window.location.search) ?? undefined}
-            initialDate={scheduleDateFromSearch(window.location.search) ?? undefined}
+            section={adminSection}
+            onSectionChange={setAdminSection}
+            initialDate={adminDeepDate}
+            onInitialDateUsed={consumeAdminDeepDate}
             today={data.today}
           />
         </Suspense>
@@ -656,20 +716,6 @@ export function App() {
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю анонс…</div>}>
           <AnnounceScreen />
         </Suspense>
-      )}
-      {refreshError && (
-        <div
-          role="status"
-          style={{
-            padding: "8px 16px",
-            textAlign: "center",
-            fontSize: 12.5,
-            color: "var(--tgui--hint_color)",
-            background: "var(--tgui--secondary_bg_color)",
-          }}
-        >
-          {refreshError}
-        </div>
       )}
       <TabBar
         active={tab}

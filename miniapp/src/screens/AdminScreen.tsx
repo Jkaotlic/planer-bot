@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminScheduleScreen } from "./admin/AdminScheduleScreen";
 import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
@@ -31,17 +31,33 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
  */
 export function AdminScreen({
   initialSection,
+  section: sectionProp,
+  onSectionChange,
   initialDate,
+  onInitialDateUsed,
   today,
 }: {
   initialSection?: AdminSection;
+  /** Управляемый раздел — `App` держит его, чтобы он пережил смену вкладки. */
+  section?: AdminSection;
+  onSectionChange?: (section: AdminSection) => void;
   initialDate?: string;
+  /** Дата из ссылки показана — `App` уберёт её, чтобы не прилипла. */
+  onInitialDateUsed?: () => void;
   /** Командная дата с сервера (`myShifts.today` из bootstrap) — часы телефона
    *  расходятся с ней рядом с полуночью, и расписание/журнал не должны решать
    *  «какой сегодня день» сами. */
   today: string;
 }) {
-  const [section, setSection] = useState<AdminSection>(initialSection ?? "schedule");
+  const [localSection, setLocalSection] = useState<AdminSection>(initialSection ?? "schedule");
+  const section = sectionProp ?? localSection;
+  const setSection = onSectionChange ?? setLocalSection;
+  // Дата нужна графику только при первом монтировании (`useState` внутри);
+  // сразу после — отдаём, что использовали.
+  useEffect(() => {
+    if (initialDate) onInitialDateUsed?.();
+    // Пустые зависимости намеренно: дата — одна, на монтирование.
+  }, []);
 
   return (
     <div>

@@ -37,6 +37,7 @@ import {
   mockProposeSwap,
   mockGetWeekendSlots,
   mockExpressInterest,
+  mockWithdrawInterest,
   mockGetWeekendOffers,
   mockConfirmOffer,
   mockDeclineOffer,
@@ -809,6 +810,7 @@ export interface ApiClient {
   skipHandover(handoverId: number): Promise<void>;
   getWeekendSlots(): Promise<WeekendSlotView[]>;
   expressInterest(slotId: number): Promise<void>;
+  withdrawInterest(slotId: number): Promise<void>;
   getWeekendOffers(): Promise<WeekendOffer[]>;
   confirmOffer(id: number): Promise<void>;
   declineOffer(id: number): Promise<void>;
@@ -1356,6 +1358,9 @@ export const realClient: ApiClient = {
     return slots;
   },
   expressInterest: (slotId) => authorizedPostAction(`/api/weekend/slots/${slotId}/interest`),
+  withdrawInterest: async (slotId) => {
+    await authorizedDelete(`/api/weekend/slots/${slotId}/interest`);
+  },
   async getWeekendOffers() {
     const { offers } = await authorizedGet<{ offers: WeekendOffer[] }>("/api/weekend/offers");
     return offers;
@@ -1669,6 +1674,7 @@ const devClient: ApiClient = {
   skipHandover: (handoverId) => mockSkipHandover(handoverId),
   getWeekendSlots: () => mockGetWeekendSlots(),
   expressInterest: (slotId) => mockExpressInterest(slotId),
+  withdrawInterest: (slotId) => mockWithdrawInterest(slotId),
   getWeekendOffers: () => mockGetWeekendOffers(),
   confirmOffer: (id) => mockConfirmOffer(id),
   declineOffer: (id) => mockDeclineOffer(id),

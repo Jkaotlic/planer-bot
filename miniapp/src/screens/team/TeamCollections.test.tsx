@@ -77,6 +77,23 @@ describe("TeamCollections", () => {
     expect(el.textContent).toBe("");
   });
 
+  // Без `emptyLabel` (вкладка «Команда») секции нет НИ ПОКА ГРУЗИТСЯ, ни при
+  // отказе: сбор там не главное, и «Загружаю сборы…» на каждом входе в команду
+  // занимал бы место ради события раз в месяц.
+  it("пока грузится, во вкладке «Команда» не рисует вообще ничего", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockReturnValue(new Promise(() => {}));
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(TeamCollections)));
+    });
+    // Без `settle()`: пока промис не разрешился, компонент застрял в состоянии
+    // загрузки — том самом, что и проверяется.
+    expect(host.textContent).toBe("");
+  });
+
   it("показывает повод, сумму, срок и ссылку", async () => {
     vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([COFFEE]);
 
@@ -204,5 +221,47 @@ describe("TeamCollections", () => {
     await settle();
 
     expect(el.textContent ?? "").toContain("Не получилось отметить");
+  });
+});
+
+describe("TeamCollections на своей вкладке (с emptyLabel)", () => {
+  // «Сейчас сборов нет» стояло, пока данные ещё грузились, и навсегда — если
+  // загрузка упала. Человек, у которого сбор есть, читал, что его нет.
+  const EMPTY = "Сейчас сборов нет.";
+  async function mountTab() {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<AppRoot><TeamCollections emptyLabel={EMPTY} /></AppRoot>);
+    });
+    await settle();
+    return host;
+  }
+
+  it("пока грузится — не говорит «сборов нет»", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockReturnValue(new Promise(() => {}));
+    const el = await mountTab();
+    expect(el.textContent).not.toContain(EMPTY);
+    expect(el.textContent).toContain("Загружаю");
+  });
+
+  it("загрузка упала — говорит об этом и даёт повторить", async () => {
+    const load = vi.spyOn(apiClient, "getMyCollections").mockRejectedValue(new Error("boom"));
+    const el = await mountTab();
+    expect(el.textContent).not.toContain(EMPTY);
+    expect(el.textContent).toContain("Не удалось загрузить сборы");
+
+    load.mockResolvedValue([COFFEE]);
+    const retry = [...el.querySelectorAll("button")].find((b) => b.textContent?.includes("Повторить"))!;
+    await act(async () => retry.click());
+    await settle();
+    expect(el.textContent).toContain("Кофемашина");
+  });
+
+  it("пусто по-настоящему — говорит «сборов нет»", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([]);
+    const el = await mountTab();
+    expect(el.textContent).toContain(EMPTY);
   });
 });

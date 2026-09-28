@@ -40,7 +40,7 @@ export const AUDIT_TYPES = [
   // строка на две разные ручки не отвечала бы, что именно поменяли.
   "reminder_hour_changed",
   "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
-  "weekend_interest", "weekend_offer_confirmed", "weekend_offer_declined",
+  "weekend_interest", "weekend_interest_withdrawn", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
   "birthday_campaign_updated",
   "collection_created", "collection_updated", "collection_sent",
@@ -461,6 +461,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   weekend_assigned: (p) => weekendView(p, "🎯", "Выходная смена назначена"),
   weekend_unassigned: (p) => weekendView(p, "↩", "Назначение на выходной снято"),
   weekend_interest: (p) => weekendView(p, "🙋", "Отклик на выходную смену"),
+  weekend_interest_withdrawn: (p) => weekendView(p, "↩", "Отозвал(а) отклик на выходную смену"),
   weekend_offer_confirmed: (p) => weekendView(p, "✅", "Выходная смена подтверждена"),
   weekend_offer_declined: (p) => weekendView(p, "🚫", "От выходной смены отказались"),
 

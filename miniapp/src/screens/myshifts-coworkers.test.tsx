@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import type { Me, Shift } from "../api/client";
 import { MyShiftsScreen, type MyShiftsScreenProps } from "./MyShiftsScreen";
@@ -45,7 +45,16 @@ const VACATION: Shift = {
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
+// «Обменять» гаснет у сегодняшней смены, которая уже идёт (`swapBlockedFor`),
+// поэтому время суток в этих тестах — утро, до начала их смен в 09:00–10:00.
+// Только `Date`: таймеры React и `settle` остаются настоящими.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 10, 8, 0));
+});
+
 afterEach(async () => {
+  vi.useRealTimers();
   if (root) await act(async () => root!.unmount());
   host?.remove();
   root = null;
@@ -192,5 +201,23 @@ describe("«Кто ещё работает» под своей сменой", ()
 
     expect(onToggle).not.toHaveBeenCalled();
     expect(el.textContent).not.toContain("Кто ещё работает");
+  });
+});
+
+/**
+ * «Обменять» гаснет у сегодняшней смены, которая уже началась (`swapBlockedFor`
+ * в `../lib/swaps`) — сервер такой обмен всё равно отклонит, и кнопка не должна
+ * обещать то, что закончится отказом в конце формы.
+ */
+describe("«Обменять» гаснет у уже начавшейся сегодняшней смены", () => {
+  // Системное время в этом файле — 2026-09-10, 08:00 (см. верхний `beforeEach`).
+  const STARTED_SHIFT: Shift = { ...MY_SHIFT, start: "07:00", end: "16:00" };
+
+  it("кнопка недоступна и называет причину", async () => {
+    const el = await mount({ shifts: [STARTED_SHIFT] });
+
+    const btn = swapButton(el) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(el.textContent).toContain("Смена уже началась");
   });
 });

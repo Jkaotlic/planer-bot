@@ -539,6 +539,11 @@ export async function mockExpressInterest(slotId: number): Promise<void> {
   WEEKEND_SLOTS.find((s) => s.slot.id === slotId)?.interestedIds.add(MOCK_ME.id);
 }
 
+export async function mockWithdrawInterest(slotId: number): Promise<void> {
+  await delay(250);
+  WEEKEND_SLOTS.find((s) => s.slot.id === slotId)?.interestedIds.delete(MOCK_ME.id);
+}
+
 export async function mockGetWeekendOffers(): Promise<WeekendOffer[]> {
   await delay(200);
   return OFFERS.filter((o) => o.assignment.status !== "declined");

@@ -1,3 +1,4 @@
+import { useTelegramBack } from "../lib/telegram-back";
 import { useState } from "react";
 import { Avatar, Button, Cell, IconButton, Input, List, Placeholder, Section, Selectable, Spinner, Textarea, Title } from "@telegram-apps/telegram-ui";
 import { matchesPerson, SWAP_MESSAGE_MAX } from "@planer/shared";
@@ -84,6 +85,9 @@ export function ProposeSwapScreen({
   onCancel,
   onConfirm,
 }: ProposeSwapScreenProps) {
+  // Системный «назад» Telegram закрывал всё приложение вместе с выбранным
+  // коллегой и сообщением — теперь он ведёт туда же, куда стрелка.
+  useTelegramBack(onCancel);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");

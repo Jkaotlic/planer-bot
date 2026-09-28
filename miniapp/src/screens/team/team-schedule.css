@@ -201,6 +201,14 @@
   display: contents;
 }
 
+/* Своя строка: человек ищет себя среди ~26 фамилий каждый раз. Подсвечено
+   имя, а не вся строка: у строки `display: contents`, фона у неё нет. */
+.team-week__name--me {
+  /* Фон имени и так `secondary_bg` — одной полоски слева на снимке было
+     мало, отличается рамка. */
+  box-shadow: inset 3px 0 0 var(--tgui--link_color), inset 0 0 0 1px var(--tgui--link_color);
+}
+
 .team-week__name {
   display: flex;
   min-width: 0;

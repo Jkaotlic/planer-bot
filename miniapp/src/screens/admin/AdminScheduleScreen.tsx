@@ -1,3 +1,4 @@
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
@@ -842,9 +843,15 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
         </Button>
       </div>
       {existing && (
-        <Button size="s" mode="plain" stretched loading={deleting} disabled={busy} onClick={() => void handleDelete()} style={{ color: "var(--tgui--destructive_text_color)" }}>
-          Удалить запись
-        </Button>
+        <ConfirmButton
+          label="Удалить запись"
+          question="Удалить эту запись из графика? Человеку придёт письмо об изменении."
+          confirmLabel="Да, удалить"
+          mode="plain"
+          loading={deleting}
+          disabled={busy}
+          onConfirm={() => void handleDelete()}
+        />
       )}
     </CardShell>
   );

@@ -107,6 +107,18 @@ describe("карточка чек-листа", () => {
     expect(el.textContent).toContain("Сеть недоступна");
   });
 
+  // Сервер отвечает кодами — «not_your_day», «unknown_item» — и они уходили
+  // на экран дежурного как есть.
+  it("код отказа сервера становится фразой по-русски", async () => {
+    vi.spyOn(apiClient, "getMyChecklists").mockResolvedValue(state());
+    vi.spyOn(apiClient, "markChecklistItem").mockRejectedValue(new Error("not_your_day"));
+    const el = await mount();
+    await act(async () => [...el.querySelectorAll<HTMLButtonElement>(".checklist-item")][0]!.click());
+    await settle();
+    expect(el.textContent).not.toContain("not_your_day");
+    expect(el.textContent).toContain("Сегодня этот чек-лист не твой");
+  });
+
   it("показывает пояснение к пункту под ним, а не в подписи", async () => {
     vi.spyOn(apiClient, "getMyChecklists").mockResolvedValue(state());
     const el = await mount();

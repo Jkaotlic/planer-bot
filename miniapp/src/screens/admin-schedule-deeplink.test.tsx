@@ -83,3 +83,40 @@ describe("?screen=schedule&date=… открывает график админа
     expect(text(el)).not.toContain("5–11 октября");
   });
 });
+
+/** Нажать вкладку нижней панели: telegram-ui рисует `Tabbar.Item` кнопкой с подписью. */
+async function goTab(el: HTMLElement, label: string) {
+  const item = [...el.querySelectorAll(".tab-bar-fit button, .tab-bar-fit [role=button]")]
+    .find((n) => (n.textContent ?? "").trim() === label) as HTMLElement | undefined;
+  if (!item) throw new Error(`нет вкладки «${label}»`);
+  await act(async () => item.click());
+  await settle(10);
+}
+
+describe("админка помнит раздел, а дата из ссылки не прилипает", () => {
+  it("дата из ссылки — только в первый раз: вернулся во вкладку — текущая неделя", async () => {
+    const el = await mount({ isAdmin: true }, "?screen=schedule&date=2026-11-18");
+    expect(text(el)).toContain("16–22 ноября");
+    expect(window.location.search).not.toContain("date=");
+
+    await goTab(el, "Смены");
+    await goTab(el, "Админ");
+
+    expect(text(el)).toContain("5–11 октября");
+    expect(text(el)).not.toContain("16–22 ноября");
+  });
+
+  it("выбранный раздел переживает уход на другую вкладку", async () => {
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([] as never);
+    const el = await mount({ isAdmin: true }, "?screen=schedule");
+    const chip = [...el.querySelectorAll('[role="tab"]')].find((n) => (n.textContent ?? "").includes("Работники")) as HTMLElement;
+    await act(async () => chip.click());
+    await settle(10);
+
+    await goTab(el, "Смены");
+    await goTab(el, "Админ");
+
+    const selected = [...el.querySelectorAll('[role="tab"][aria-selected="true"]')].map((n) => n.textContent ?? "");
+    expect(selected.join()).toContain("Работники");
+  });
+});

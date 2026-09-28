@@ -80,8 +80,9 @@ export function createMyHandoverRoutes(deps: { db: Db; config: Config; bot?: Bot
     const handover = mine(Number(c.req.param("id")), employeeId);
     if (!handover) return c.json({ error: "not_found" }, 404);
 
-    // «Потом» is not «никому»: skipping the choice must not leave the shift
-    // quietly sitting on a sick person, so it goes straight to everybody free.
+    // «Спросить всех свободных» (была «Потом» — название обещало обратное):
+    // не выбрать коллегу не значит оставить смену на больном, она сразу
+    // уходит всем свободным.
     const res = await fanOut(serviceDeps(), handover.id);
     if (!res.ok) return c.json({ error: res.reason }, 400);
     return c.json({ ok: true });

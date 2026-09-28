@@ -54,7 +54,7 @@ export function ChecklistCard({ today }: { today: string }) {
         }),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось сохранить отметку");
+      setError(markErrorText(err));
     } finally {
       setBusyIds((prev) => withoutBusy(prev, itemId));
     }
@@ -143,4 +143,26 @@ function ChecklistSection({
       </Section>
     </List>
   );
+}
+
+/**
+ * Отказ сервера на отметку — фразой, а не кодом.
+ *
+ * Сервер отвечает кодами (`not_your_day`, `unknown_item`, `invalid`), и они
+ * уходили на экран дежурного как есть. Готовую русскую фразу (сеть и прочее)
+ * пропускаем насквозь.
+ */
+export function markErrorText(err: unknown): string {
+  const code = err instanceof Error ? err.message : "";
+  switch (code) {
+    case "not_your_day":
+      return "Сегодня этот чек-лист не твой — обнови экран.";
+    case "unknown_item":
+      return "Этот пункт убрали — обнови экран.";
+    case "invalid":
+    case "":
+      return "Не удалось сохранить отметку — попробуй ещё раз.";
+    default:
+      return code;
+  }
 }

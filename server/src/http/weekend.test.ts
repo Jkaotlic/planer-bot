@@ -574,3 +574,53 @@ describe("назначение на выходной: дошло ли", () => {
     expect(toIgor.notified).toBe(false);
   });
 });
+
+describe("«Передумал» — отзыв «Хочу»", () => {
+  // «🙋 Хочу» нельзя было отозвать: передумавший оставался в списке желающих,
+  // и админ мог назначить его, потратив день на отказ.
+  const del = (t: string) => ({ method: "DELETE", headers: { Authorization: `Bearer ${t}` } });
+
+  it("пока не назначили — отзыв убирает из желающих и пишет журнал", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 501);
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+
+    const res = await app.request(`/api/weekend/slots/${slotId}/interest`, del(anya.token));
+
+    expect(res.status).toBe(200);
+    const mine = (await (await app.request("/api/weekend/slots", bearer(anya.token))).json()).slots.find((s: { slot: { id: number } }) => s.slot.id === slotId);
+    expect(mine.interested).toBe(false);
+    expect(listRecentAudit(db, 10).some((r) => r.type === "weekend_interest_withdrawn")).toBe(true);
+  });
+
+  it("отклика не было — ответ ok, но журнал не пишется: снимать было нечего", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 503);
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }))).json()).slot.id as number;
+
+    const res = await app.request(`/api/weekend/slots/${slotId}/interest`, del(anya.token));
+
+    expect(res.status).toBe(200);
+    expect(listRecentAudit(db, 10).some((r) => r.type === "weekend_interest_withdrawn")).toBe(false);
+  });
+
+  it("уже назначили — отзыв не проходит: отказываются через «Не смогу»", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 502);
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+    await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
+
+    const res = await app.request(`/api/weekend/slots/${slotId}/interest`, del(anya.token));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("already_assigned");
+  });
+});

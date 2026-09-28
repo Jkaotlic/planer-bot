@@ -1,3 +1,5 @@
+import { useTelegramBack } from "../lib/telegram-back";
+import { ConfirmButton } from "../components/ConfirmButton";
 import { useState } from "react";
 import { Button, Cell, IconButton, Input, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
 import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
@@ -140,6 +142,22 @@ export function SelfEntryScreen({
   // это единственный момент, когда человек ещё помнит, кого можно попросить.
   const [drafts, setDrafts] = useState<HandoverDraft[]>([]);
   const [handoverBusy, setHandoverBusy] = useState(false);
+  // «Назад» с неотданной сменой сначала говорит, что будет, — второе нажатие
+  // уходит. Смена не пропадёт (через три часа спросим всех), но человек должен
+  // это знать, а не думать, что просто закрыл форму.
+  const [leaveWarned, setLeaveWarned] = useState(false);
+  function handleBack() {
+    if (drafts.length > 0 && !leaveWarned) {
+      setLeaveWarned(true);
+      return;
+    }
+    onCancel();
+  }
+
+  // Системный «назад» Telegram — туда же, куда стрелка, с тем же
+  // предупреждением о неотданной смене.
+  useTelegramBack(handleBack);
+
   const [editingId, setEditingId] = useState<number | null>(null);
   // Категория формы: у правки — та, что у самой записи, иначе та, ради которой
   // экран открыли. Иначе, начав править мероприятие из формы больничного,
@@ -261,7 +279,7 @@ export function SelfEntryScreen({
   return (
     <ScreenScroll>
       <header style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 4px 16px" }}>
-        <IconButton mode="plain" size="m" aria-label="Назад" onClick={onCancel}>
+        <IconButton mode="plain" size="m" aria-label="Назад" onClick={handleBack}>
           <BackIcon />
         </IconButton>
         <Title level="2" weight="2">
@@ -353,6 +371,11 @@ export function SelfEntryScreen({
         )}
       </div>
 
+      {drafts.length > 0 && leaveWarned && (
+        <div role="status" style={{ padding: "0 16px 12px", fontSize: 13.5, color: "var(--tgui--destructive_text_color)" }}>
+          Смена ещё не отдана. Если выйти — через три часа спросим всех свободных. Нажми «Назад» ещё раз, чтобы выйти.
+        </div>
+      )}
       {drafts.length > 0 && (
         <List>
           {drafts.map((draft) => (
@@ -387,7 +410,10 @@ export function SelfEntryScreen({
                   disabled={handoverBusy}
                   onClick={() => void resolveDraft(draft.id, () => onSkipHandover(draft.id))}
                 >
-                  Потом
+                  {/* Называлась «Потом», а сервер сразу пишет всем свободным —
+                      название обещало обратное тому, что делает. Без свободных
+                      спрашивать некого: админы уже знают, остаётся закрыть. */}
+                  {draft.candidates.length === 0 ? "Понятно" : "Спросить всех свободных"}
                 </Button>
               </div>
             </Section>
@@ -416,15 +442,15 @@ export function SelfEntryScreen({
                     <Button size="s" mode="bezeled" onClick={() => startEditing(entry)}>
                       Изменить
                     </Button>
-                    <Button
-                      size="s"
+                    <ConfirmButton
+                      label="Снять"
+                      question="Снять эту запись? Админам придёт письмо."
+                      confirmLabel="Да, снять"
                       mode="plain"
                       loading={busyId === entry.id}
                       disabled={busyId != null}
-                      onClick={() => void handleDelete(entry.id)}
-                    >
-                      Снять
-                    </Button>
+                      onConfirm={() => void handleDelete(entry.id)}
+                    />
                   </span>
                 }
               >

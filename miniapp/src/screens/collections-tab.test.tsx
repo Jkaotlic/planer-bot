@@ -68,9 +68,11 @@ describe("вкладка «Сборы»", () => {
 
   it("не роняет экран, когда сборы не загрузились", async () => {
     // График команды раньше не пропадал из-за упавшего сбора; вкладка тем более
-    // не должна показывать пустой белый лист.
+    // не должна показывать пустой белый лист. И не должна врать «сборов нет»:
+    // до 2026-09-28 отказ читался именно так.
     vi.spyOn(apiClient, "getMyCollections").mockRejectedValue(new Error("Failed to fetch"));
     const el = await mount(false);
-    expect(el.textContent ?? "").toContain("Сейчас сборов нет");
+    expect(el.textContent ?? "").toContain("Не удалось загрузить сборы");
+    expect(el.textContent ?? "").not.toContain("Сейчас сборов нет");
   });
 });

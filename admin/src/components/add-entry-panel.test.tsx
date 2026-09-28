@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { EMPTY_CALENDAR } from "@planer/shared";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AddEntryPanel, type AddEntryPanelProps } from "./AddEntryPanel";
 import type { Employee, NewEntryInput, NewEntryRangeInput, Shift, Template } from "../api/client";
 
@@ -262,5 +262,28 @@ describe("AddEntryPanel — правка отрезком", () => {
 
     expect(ranged).toBe(0);
     expect(saved).toMatchObject({ category: "vacation", date: "2026-06-08", endDate: "2026-06-22" });
+  });
+});
+
+/**
+ * «Удалить» — необратимое действие: снимает запись из графика, и вернуть её
+ * нечем. Прямая кнопка срабатывала бы с одного клика — отсюда `ConfirmButton`
+ * (см. его комментарий в `admin/src/components/ConfirmButton.tsx`).
+ */
+describe("AddEntryPanel — «Удалить» спрашивает, а не срабатывает сразу", () => {
+  const shift: Shift = {
+    ...longVacation, endDate: null, category: "shift", start: "09:00", end: "18:00", templateId: 1, title: "Утро",
+  };
+
+  it("одно нажатие не удаляет запись, а сперва спрашивает", async () => {
+    const onDelete = vi.fn(async () => {});
+    const el = await mount({ existing: shift, onDelete });
+
+    const btn = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Удалить");
+    expect(btn).toBeDefined();
+    await act(async () => btn!.click());
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("Удалить запись из графика?");
   });
 });

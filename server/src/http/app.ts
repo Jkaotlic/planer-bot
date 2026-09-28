@@ -118,6 +118,7 @@ import {
   postSlot,
   expressInterest,
   interestedForSlot,
+  withdrawInterest,
   assignSlot,
   unassign,
   assigneesForSlot,
@@ -2094,6 +2095,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
       employeeName: nameOf(c.get("auth").employeeId) ?? null,
     });
     return c.json({ ok: true }, 201);
+  });
+
+  // Worker: «Передумал» — снять свой «Хочу», пока не назначили.
+  app.delete("/api/weekend/slots/:id/interest", requireAuth(db, config.jwtSecret), (c) => {
+    const slotId = Number(c.req.param("id"));
+    const res = withdrawInterest(db, slotId, c.get("auth").employeeId);
+    if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (!res.removed) return c.json({ ok: true });
+    const slot = getVacantSlot(db, slotId);
+    recordAudit(db, "weekend_interest_withdrawn", c.get("auth").employeeId, {
+      slotId,
+      slot: slot ? slotLineOf(slot) : null,
+      employeeId: c.get("auth").employeeId,
+      employeeName: nameOf(c.get("auth").employeeId) ?? null,
+    });
+    return c.json({ ok: true });
   });
 
   // Worker: my offered/confirmed weekend assignments

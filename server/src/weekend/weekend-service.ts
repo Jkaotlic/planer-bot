@@ -8,6 +8,7 @@ import {
   listOpenSlots,
   getVacantSlot,
   addInterest,
+  removeInterest,
   listInterestedEmployeeIds,
   listMyInterestSlotIds,
   createAssignment,
@@ -103,6 +104,25 @@ export function expressInterest(db: Db, slotId: number, employeeId: number, toda
   if (!requester || !takesPartInAssignment(requester)) return { ok: false, reason: "excluded" };
   addInterest(db, slotId, employeeId);
   return { ok: true };
+}
+
+/**
+ * «Передумал» — снять свой «Хочу».
+ *
+ * Пока не назначили: передумавший иначе оставался в списке желающих, и админ
+ * мог назначить его, потратив день на отказ. Назначенному — нет: для него
+ * есть «Не смогу», и оно сразу говорит админу, что место снова свободно.
+ */
+export function withdrawInterest(
+  db: Db, slotId: number, employeeId: number,
+): { ok: true; removed: boolean } | { ok: false; reason: string } {
+  const slot = getVacantSlot(db, slotId);
+  if (!slot) return { ok: false, reason: "not_found" };
+  const assigned = findAssignment(db, slotId, employeeId);
+  if (assigned && assigned.status !== "declined") return { ok: false, reason: "already_assigned" };
+  // `removed` — был ли отклик: повторный тап или устаревший экран не должны
+  // писать в журнал «отозвал(а)» то, чего не было.
+  return { ok: true, removed: removeInterest(db, slotId, employeeId) };
 }
 
 /**
