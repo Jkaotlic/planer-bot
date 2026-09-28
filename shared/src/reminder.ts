@@ -332,8 +332,8 @@ export function coworkersEnumeration(names: readonly string[]): string {
 }
 
 /**
- * Строка «Завтра с тобой: …» для напоминания — только те, чьи часы
- * пересекаются со сменой. `null` при пустом списке: строки вида «Завтра с
+ * Строка «Завтра с тобой: …» для напоминания — только те, у кого тот же вид
+ * смены (отбирает `reminder-service.ts`). `null` при пустом списке: строки вида «Завтра с
  * тобой: (никого)» не бывает — её просто нет.
  */
 export function coworkersLine(names: readonly string[]): string | null {
