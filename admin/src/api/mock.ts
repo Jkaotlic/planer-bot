@@ -14,6 +14,7 @@ import type {
   FeedEvent,
   HolidayRefreshYear,
   NewEntryInput,
+  NoticePrefs,
   NewEntryRangeInput,
   NewSlotInput,
   PayrollRow,
@@ -56,6 +57,8 @@ import {
   REMINDER_HOUR_DEFAULT,
   validateReminderHour,
   autoSendDateFor,
+  ADMIN_NOTICE_KINDS,
+  ADMIN_NOTICE_LABELS,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1346,6 +1349,31 @@ export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult>
     delivered: team.filter((e) => e.telegramUserId != null).length,
     intended: team.length,
   };
+}
+
+// --- Настройки: что писать админу --------------------------------------------
+
+/** Живёт между вызовами, как `swapsLock` выше: нажал тумблер — и следующий
+ *  getNoticePrefs помнит об этом без перезагрузки. Зеркало мока мини-аппа. */
+const mutedKinds = new Set<string>();
+
+export async function mockGetNoticePrefs(): Promise<NoticePrefs> {
+  await delay(150);
+  return {
+    kinds: ADMIN_NOTICE_KINDS.map((kind) => ({
+      kind,
+      title: ADMIN_NOTICE_LABELS[kind].title,
+      hint: ADMIN_NOTICE_LABELS[kind].hint,
+      enabled: !mutedKinds.has(kind),
+    })),
+  };
+}
+
+export async function mockSetNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }> {
+  await delay(200);
+  if (enabled) mutedKinds.delete(kind);
+  else mutedKinds.add(kind);
+  return { kind, enabled };
 }
 
 // --- Анонсы ---------------------------------------------------------------

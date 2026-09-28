@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { calendarFrom, dayOffLabel, formatAuditMoment, isDayOff, validateReminderHour } from "@planer/shared";
-import { apiClient, AuthRequiredError, type AdminSettings, type CalendarDayDto, type SwapLockResult } from "../api/client";
+import { apiClient, AuthRequiredError, type AdminSettings, type CalendarDayDto, type NoticePref, type SwapLockResult } from "../api/client";
 import { withNotifyNotice } from "../lib/notify-text";
 
 /**
  * «Настройки»: тумблер замка обменов, час, в который уходят напоминания, и
- * праздники (`HolidaysCard` ниже).
+ * праздники (`HolidaysCard` ниже) и какие письма получает сам админ
+ * (`NoticesCard`).
  *
  * Раньше — только тумблер — общий замок обменов сменами. Он пишет сразу
  * всей команде и отменяет чужие незакрытые заявки, поэтому первое нажатие
@@ -186,6 +187,8 @@ export function SettingsScreen() {
       </div>
 
       <HolidaysCard settings={settings} onChanged={reload} />
+
+      <NoticesCard />
     </div>
   );
 }
@@ -337,6 +340,76 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * «Что мне писать»: какие письма получает этот админ. Поведение и тексты — из
+ * мини-аппа (`AdminSettings.tsx`).
+ *
+ * Своя загрузка и своя ошибка: список приходит другой ручкой (`/api/me/…`), и
+ * её отказ не должен гасить замок обменов и час рассылки выше.
+ */
+function NoticesCard() {
+  const [prefs, setPrefs] = useState<NoticePref[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // По виду письма, а не одна общая: переключение «Обмены сменами» не должно
+  // гасить ошибку, оставшуюся от неудачной попытки на «Дни рождения».
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    apiClient
+      .getNoticePrefs()
+      .then(({ kinds }) => setPrefs(kinds))
+      .catch((err: unknown) => {
+        if (err instanceof AuthRequiredError) return;
+        setLoadError(err instanceof Error ? err.message : "Не удалось загрузить список уведомлений");
+      });
+  }, []);
+
+  function setEnabled(kind: string, enabled: boolean) {
+    setPrefs((prev) => prev?.map((p) => (p.kind === kind ? { ...p, enabled } : p)) ?? prev);
+  }
+
+  async function toggle(kind: string, next: boolean) {
+    // Оптимистично: тумблер, отстающий от клика, читается как сломанный. Catch
+    // ниже возвращает его назад, если сервер не согласился.
+    setEnabled(kind, next);
+    setErrors((prev) => {
+      const rest = { ...prev };
+      delete rest[kind];
+      return rest;
+    });
+    try {
+      const saved = await apiClient.setNoticePref(kind, next);
+      setEnabled(kind, saved.enabled);
+    } catch (err) {
+      setEnabled(kind, !next);
+      setErrors((prev) => ({ ...prev, [kind]: err instanceof Error ? err.message : "Не удалось сохранить" }));
+    }
+  }
+
+  return (
+    <div className="settings-card" data-settings="notices">
+      <div className="settings-state">Что мне писать</div>
+      {prefs === null ? (
+        loadError ? <div className="employees-error">{loadError}</div> : <div className="settings-who">Загрузка…</div>
+      ) : (
+        <>
+          {prefs.map((pref) => (
+            <div key={pref.kind} className="settings-notice">
+              <label className="settings-toggle">
+                <input type="checkbox" checked={pref.enabled} onChange={(e) => void toggle(pref.kind, e.target.checked)} />
+                {pref.title}
+              </label>
+              <span className="settings-reminder-note">{pref.hint}</span>
+              {errors[pref.kind] && <div className="error-text">{errors[pref.kind]}</div>}
+            </div>
+          ))}
+          <span className="settings-reminder-note">Письмо «смену никто не взял» приходит всегда — его выключить нельзя.</span>
+        </>
+      )}
     </div>
   );
 }

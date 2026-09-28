@@ -80,6 +80,8 @@ import {
   mockSetHolidaysAuto,
   mockRefreshHolidays,
   mockSetCalendarDay,
+  mockGetNoticePrefs,
+  mockSetNoticePref,
   mockGetAnnouncementRecipients,
   mockSendAnnouncement,
   mockGetBugReports,
@@ -546,6 +548,18 @@ export interface HolidayYearView {
   days: number;
 }
 
+/** Один вид админского письма и его тумблер — «Настройки» → «Что мне писать». */
+export interface NoticePref {
+  kind: string;
+  title: string;
+  hint: string;
+  enabled: boolean;
+}
+
+export interface NoticePrefs {
+  kinds: NoticePref[];
+}
+
 /** Итог кнопки «Обновить сейчас» по одному году. */
 export interface HolidayRefreshYear {
   year: number;
@@ -712,6 +726,9 @@ export interface ApiClient {
   refreshHolidays(): Promise<HolidayRefreshYear[]>;
   /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
   setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
+  /** Какие письма получает этот админ — адресат из токена, чужие не выключить. */
+  getNoticePrefs(): Promise<NoticePrefs>;
+  setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Кому уйдёт анонс, глазами того, кто его пишет — сервер уже исключил
    *  самого отправителя и архивных. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
@@ -1258,6 +1275,10 @@ export const realClient: ApiClient = {
     return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
   },
 
+  getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
+  setNoticePref: (kind, enabled) =>
+    authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
+
   async getAnnouncementRecipients() {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
@@ -1351,6 +1372,8 @@ const devClient: ApiClient = {
   setHolidaysAuto: (enabled) => mockSetHolidaysAuto(enabled),
   refreshHolidays: () => mockRefreshHolidays(),
   setCalendarDay: (date, kind, note) => mockSetCalendarDay(date, kind, note ?? null),
+  getNoticePrefs: () => mockGetNoticePrefs(),
+  setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getBugReports: (status) => mockGetBugReports(status),
