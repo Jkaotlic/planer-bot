@@ -22,6 +22,8 @@ const SETTINGS: AdminSettings = {
   swapsLockUpdatedBy: "Игорь Петров",
   reminderHour: "20:00",
   reminderHourUpdatedBy: "Марк Ильин",
+  holidaysAuto: true,
+  holidays: [],
 };
 
 let root: Root | null = null;

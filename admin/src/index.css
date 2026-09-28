@@ -2557,6 +2557,39 @@ input[type="search"] {
   font-size: 12.5px;
 }
 
+/* Карточки «Настроек» идут столбиком; без зазора их рамки слипались в одну. */
+.settings-card + .settings-card {
+  margin-top: 16px;
+}
+
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.settings-years {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Отметка дня отделена чертой: это другое действие, чем загрузка календаря, и
+   слитое с ним читалось бы как «обновить только этот день». */
+.settings-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--separator);
+}
+
+.settings-day-field {
+  max-width: 220px;
+}
+
 /* Ярлык чек-листа: «Уходит» или «Не уходит».
    Цветом, а не серым текстом в общей строке, — до 2026-08-28 статус был написан
    правильно, но не читался: глаз проходил мимо, и вопрос «уходит ли оно вообще»

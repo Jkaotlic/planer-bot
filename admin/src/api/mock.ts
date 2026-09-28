@@ -12,6 +12,7 @@ import type {
   Employee,
   EntryRangeResult,
   FeedEvent,
+  HolidayRefreshYear,
   NewEntryInput,
   NewEntryRangeInput,
   NewSlotInput,
@@ -221,7 +222,49 @@ export async function mockGetTeamSchedule(from: string, to: string): Promise<Shi
 
 export async function mockGetDayCalendar(from: string, to: string): Promise<CalendarDayDto[]> {
   const { calendar } = await readMock.getTeamSchedule(from, to);
-  return calendar;
+  // Общий мок чтения календаря не ведёт — отметки из «Настроек» живут здесь,
+  // чтобы отмеченный день сразу красился в графике DEV-консоли.
+  return [...calendar, ...mockCalendar.filter((day) => day.date >= from && day.date <= to)];
+}
+
+/**
+ * Праздники DEV-мока: один день, чтобы блоку «Праздники» было что показать.
+ *
+ * Живёт между вызовами: отметив день рабочим, следующий `getDayCalendar`
+ * отдаёт его уже таким. Зеркало `mockCalendar` мини-аппа.
+ */
+const mockCalendar: CalendarDayDto[] = [{ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" }];
+
+/** DEV-рычаг автозагрузки: ведёт себя как настоящий между вызовами. */
+let mockHolidaysAuto = true;
+
+export async function mockSetHolidaysAuto(enabled: boolean): Promise<void> {
+  await delay(150);
+  mockHolidaysAuto = enabled;
+}
+
+/** «Обновить сейчас» в DEV: текущий год загружен, следующий ещё не опубликован. */
+export async function mockRefreshHolidays(): Promise<HolidayRefreshYear[]> {
+  await delay(300);
+  const year = new Date().getUTCFullYear();
+  return [
+    { year, status: "ok", added: mockCalendar.length, removed: 0 },
+    { year: year + 1, status: "missing", added: 0, removed: 0 },
+  ];
+}
+
+export async function mockSetCalendarDay(
+  date: string,
+  kind: "holiday" | "workday" | null,
+  note: string | null,
+): Promise<CalendarDayDto | null> {
+  await delay(150);
+  const at = mockCalendar.findIndex((day) => day.date === date);
+  if (at >= 0) mockCalendar.splice(at, 1);
+  if (kind === null) return null;
+  const row: CalendarDayDto = { date, kind, note, source: "manual" };
+  mockCalendar.push(row);
+  return row;
 }
 
 export function mockGetTemplates(): Promise<Template[]> {
@@ -1274,6 +1317,8 @@ export async function mockGetSettings(): Promise<AdminSettings> {
     swapsLockUpdatedBy: swapsLock.updatedByEmployeeId != null ? nameOf(swapsLock.updatedByEmployeeId) : null,
     reminderHour,
     reminderHourUpdatedBy: reminderHourUpdatedBy,
+    holidaysAuto: mockHolidaysAuto,
+    holidays: [{ year: new Date().getUTCFullYear(), refreshedAt: new Date().toISOString(), source: "xmlcalendar", days: mockCalendar.length }],
   };
 }
 

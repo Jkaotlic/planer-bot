@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { formatAuditMoment, validateReminderHour } from "@planer/shared";
-import { apiClient, AuthRequiredError, type AdminSettings, type SwapLockResult } from "../api/client";
+import { calendarFrom, dayOffLabel, formatAuditMoment, isDayOff, validateReminderHour } from "@planer/shared";
+import { apiClient, AuthRequiredError, type AdminSettings, type CalendarDayDto, type SwapLockResult } from "../api/client";
 import { withNotifyNotice } from "../lib/notify-text";
 
 /**
- * «Настройки»: тумблер замка обменов и час, в который уходят напоминания.
+ * «Настройки»: тумблер замка обменов, час, в который уходят напоминания, и
+ * праздники (`HolidaysCard` ниже).
  *
  * Раньше — только тумблер — общий замок обменов сменами. Он пишет сразу
  * всей команде и отменяет чужие незакрытые заявки, поэтому первое нажатие
@@ -182,6 +183,159 @@ export function SettingsScreen() {
             {savingHour ? "Сохраняю…" : "Сохранить час"}
           </button>
         </div>
+      </div>
+
+      <HolidaysCard settings={settings} onChanged={reload} />
+    </div>
+  );
+}
+
+/**
+ * «Праздники»: рычаг автозагрузки, что уже загружено, «Обновить сейчас» и
+ * ручная отметка одного дня. Поведение и тексты — из мини-аппа
+ * (`AdminSettings.tsx` и отметка дня в `AdminScheduleScreen.tsx`).
+ *
+ * Отметка дня здесь, а не в шапке сетки, как в мини-аппе: у консоли в шапке
+ * семь колонок, и три кнопки на каждую раздвинули бы сетку ради действия,
+ * которое делают несколько раз в год. Цена — день выбирают полем даты, а не
+ * тапом по дню; зато после отметки сетка красит его сама (тот же календарь).
+ *
+ * Год, которого нет в ответе, подписан «ещё не опубликован»: 404 источника —
+ * это «Правительство пока не утвердило», и пустота читалась бы как сбой.
+ */
+function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [day, setDay] = useState("");
+  // `undefined` — день ещё не прочитан; пустой массив — прочитан, отметок нет.
+  const [dayRows, setDayRows] = useState<CalendarDayDto[] | undefined>(undefined);
+
+  const nextYear = new Date().getUTCFullYear() + 1;
+  const known = new Map(settings.holidays.map((year) => [year.year, year]));
+  const years = [...known.keys(), ...(known.has(nextYear) ? [] : [nextYear])].sort();
+
+  async function run(action: () => Promise<void>, fallback: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : fallback);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function readDay(date: string) {
+    setDayRows(undefined);
+    if (!date) return;
+    // Один день через ту же ручку, что красит сетку: отдельной «прочитать день»
+    // у сервера нет, а своя логика «праздник ли это» разошлась бы с сеткой.
+    setDayRows(await apiClient.getDayCalendar(date, date));
+  }
+
+  function toggleAuto() {
+    void run(async () => {
+      await apiClient.setHolidaysAuto(!settings.holidaysAuto);
+      await onChanged();
+    }, "Не удалось переключить");
+  }
+
+  /** Итог по каждому году словами: «ещё не опубликован» — не ошибка. */
+  function refresh() {
+    setNotice(null);
+    void run(async () => {
+      const result = await apiClient.refreshHolidays();
+      setNotice(
+        result
+          .map((year) =>
+            year.status === "ok" ? `${year.year}: загружено ${year.added}`
+            : year.status === "bundled" ? `${year.year}: источник не ответил, взята зашитая копия`
+            : year.status === "missing" ? `${year.year}: ещё не опубликован`
+            : `${year.year}: не загрузился`,
+          )
+          .join(" · "),
+      );
+      await onChanged();
+    }, "Не удалось обновить");
+  }
+
+  function mark(kind: "holiday" | "workday" | null) {
+    const date = day;
+    void run(async () => {
+      await apiClient.setCalendarDay(date, kind);
+      await Promise.all([readDay(date), onChanged()]);
+    }, "Не удалось отметить день");
+  }
+
+  const row = dayRows?.find((r) => r.date === day);
+  const off = day ? isDayOff(day, calendarFrom(dayRows ?? [])) : false;
+  const dayState = !day
+    ? "Выберите день, чтобы отметить его"
+    : dayRows === undefined
+      ? "Загрузка…"
+      : `${dayOffLabel(day, row?.kind, row?.note ?? null) ?? (off ? "Обычный выходной" : "Обычный рабочий день")}${row?.source === "manual" ? " (вручную)" : ""}`;
+
+  return (
+    <div className="settings-card" data-settings="holidays">
+      <div className="settings-state">Праздники</div>
+      <label className="settings-toggle">
+        <input type="checkbox" checked={settings.holidaysAuto} disabled={busy} onChange={toggleAuto} />
+        Брать праздники из календаря
+      </label>
+      <span className="settings-reminder-note">
+        Производственный календарь РФ с xmlcalendar.ru. Дни, отмеченные руками, автозагрузка не трогает.
+      </span>
+      <div className="settings-years">
+        {years.map((year) => {
+          const loaded = known.get(year);
+          return (
+            <div key={year} className="settings-who">
+              {loaded
+                ? `${year}: ${loaded.days} дн., обновлено ${formatAuditMoment(loaded.refreshedAt)}${loaded.source === "bundled" ? " (зашитая копия)" : ""}`
+                : `${year}: ещё не опубликован`}
+            </div>
+          );
+        })}
+      </div>
+      {notice && <div className="settings-result">{notice}</div>}
+      {error && <div className="employees-error">{error}</div>}
+      <div className="settings-actions">
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={refresh}>
+          {busy ? "Обновляю…" : "Обновить сейчас"}
+        </button>
+      </div>
+
+      <div className="settings-day">
+        <label className="settings-day-field">
+          <span className="field-label">Отметить день</span>
+          <input
+            type="date"
+            value={day}
+            disabled={busy}
+            onChange={(e) => {
+              setDay(e.target.value);
+              setError(null);
+              void readDay(e.target.value).catch((err: unknown) =>
+                setError(err instanceof Error ? err.message : "Не удалось прочитать день"),
+              );
+            }}
+          />
+        </label>
+        <span className="settings-who">{dayState}</span>
+        {day && dayRows !== undefined && (
+          <div className="settings-actions">
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => mark(off ? "workday" : "holiday")}>
+              {off ? "Сделать рабочим" : "Сделать выходным"}
+            </button>
+            {row?.source === "manual" && (
+              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => mark(null)}>
+                Как в календаре
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

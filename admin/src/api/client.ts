@@ -77,6 +77,9 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  mockSetHolidaysAuto,
+  mockRefreshHolidays,
+  mockSetCalendarDay,
   mockGetAnnouncementRecipients,
   mockSendAnnouncement,
   mockGetBugReports,
@@ -529,6 +532,26 @@ export interface AdminSettings {
   /** ISO-строка или null, если тумблер ни разу не трогали. */
   swapsLockUpdatedAt: string | null;
   swapsLockUpdatedBy: string | null;
+  /** Тянет ли бот производственный календарь сам. */
+  holidaysAuto: boolean;
+  /** Что уже загружено, по годам — для строки «2026: 22 дн., обновлено …». */
+  holidays: HolidayYearView[];
+}
+
+/** Один загруженный год календаря на экране настроек. Зеркало мини-аппа. */
+export interface HolidayYearView {
+  year: number;
+  refreshedAt: string;
+  source: "xmlcalendar" | "bundled";
+  days: number;
+}
+
+/** Итог кнопки «Обновить сейчас» по одному году. */
+export interface HolidayRefreshYear {
+  year: number;
+  status: "ok" | "missing" | "error" | "bundled";
+  added: number;
+  removed: number;
 }
 
 /** Итог переключения замка: что стало, и какой ценой (кому дошло уведомление). */
@@ -685,6 +708,10 @@ export interface ApiClient {
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
   setReminderHour(hour: string): Promise<void>;
+  setHolidaysAuto(enabled: boolean): Promise<void>;
+  refreshHolidays(): Promise<HolidayRefreshYear[]>;
+  /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
+  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
   /** Кому уйдёт анонс, глазами того, кто его пишет — сервер уже исключил
    *  самого отправителя и архивных. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
@@ -1212,6 +1239,25 @@ export const realClient: ApiClient = {
     return authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked });
   },
 
+  async setHolidaysAuto(enabled) {
+    await authorizedPutJson("/api/admin/settings/holidays-auto", { enabled });
+  },
+
+  async refreshHolidays() {
+    const { years } = await authorizedPostJson<{ years: HolidayRefreshYear[] }>("/api/admin/holidays/refresh", {});
+    return years;
+  },
+
+  async setCalendarDay(date, kind, note = null) {
+    // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
+    // про день, а не про строку, которой больше нет.
+    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "manual" | null }>(
+      `/api/admin/calendar/${date}`,
+      { kind, note },
+    );
+    return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+  },
+
   async getAnnouncementRecipients() {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
@@ -1302,6 +1348,9 @@ const devClient: ApiClient = {
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
+  setHolidaysAuto: (enabled) => mockSetHolidaysAuto(enabled),
+  refreshHolidays: () => mockRefreshHolidays(),
+  setCalendarDay: (date, kind, note) => mockSetCalendarDay(date, kind, note ?? null),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getBugReports: (status) => mockGetBugReports(status),
