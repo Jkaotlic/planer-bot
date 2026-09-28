@@ -505,12 +505,15 @@ function PayrollSection({ today }: { today: string }) {
     <Section header="Учёт часов (для оплаты)">
       <CardStack>
         <CardShell>
+          {/* `minWidth: 0` у обёрток и у полей: поле даты в WebKit не сжимается
+              ниже своей встроенной ширины, и два в ряд раздвигали страницу вбок
+              до 478px на экране 390 (замер 2026-09-28). */}
           <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ minWidth: 0, width: "100%" }} />
             </div>
-            <div style={{ flex: 1 }}>
-              <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ minWidth: 0, width: "100%" }} />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
