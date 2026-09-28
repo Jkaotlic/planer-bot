@@ -10,7 +10,7 @@ import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { adminSectionFromSearch, scheduleDateFromSearch } from "./screens/admin-section";
+import { adminSectionFromSearch, scheduleDateFromSearch, type AdminSection } from "./screens/admin-section";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -114,6 +114,25 @@ export function App() {
   // instead of a per-screen error — nothing to retry by hand, it just says the
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  // Раздел админки — здесь, а не в `AdminScreen`: тот размонтируется при уходе
+  // на другую вкладку, и раздел сбрасывался на «Расписание» при каждом
+  // возвращении. Первое значение — из ссылки бота (`?screen=…`).
+  const [adminSection, setAdminSection] = useState<AdminSection>(
+    () => adminSectionFromSearch(window.location.search) ?? "schedule",
+  );
+  // Дата из ссылки бота — на один показ. Раньше её перечитывали из адреса при
+  // каждом входе во вкладку, и график навсегда открывался на дате тревоги.
+  const [adminDeepDate, setAdminDeepDate] = useState<string | undefined>(
+    () => scheduleDateFromSearch(window.location.search) ?? undefined,
+  );
+  function consumeAdminDeepDate() {
+    setAdminDeepDate(undefined);
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("date")) return;
+    params.delete("date");
+    const rest = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+  }
   /** «Коллега не получит сообщение» после обмена — до следующей смены вкладки. */
   const [swapNotice, setSwapNotice] = useState<string | null>(null);
   // Сборы для меток «ждёт тебя» на вкладках (`tabBadges`). `null` — ещё не
@@ -685,8 +704,10 @@ export function App() {
         // `immutable`, поэтому платится один раз на устройство.
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю админку…</div>}>
           <AdminScreen
-            initialSection={adminSectionFromSearch(window.location.search) ?? undefined}
-            initialDate={scheduleDateFromSearch(window.location.search) ?? undefined}
+            section={adminSection}
+            onSectionChange={setAdminSection}
+            initialDate={adminDeepDate}
+            onInitialDateUsed={consumeAdminDeepDate}
             today={data.today}
           />
         </Suspense>
