@@ -1,3 +1,4 @@
+import { useTelegramBack } from "../lib/telegram-back";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useState } from "react";
 import { Button, Cell, IconButton, Input, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
@@ -152,6 +153,11 @@ export function SelfEntryScreen({
     }
     onCancel();
   }
+
+  // Системный «назад» Telegram — туда же, куда стрелка, с тем же
+  // предупреждением о неотданной смене.
+  useTelegramBack(handleBack);
+
   const [editingId, setEditingId] = useState<number | null>(null);
   // Категория формы: у правки — та, что у самой записи, иначе та, ради которой
   // экран открыли. Иначе, начав править мероприятие из формы больничного,
