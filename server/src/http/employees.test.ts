@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
+import { employees } from "../db/schema";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
@@ -100,6 +102,19 @@ describe("состояние напоминаний в карточке", () => 
 
     const body = await (await app.request("/api/admin/employees", bearer(admin))).json();
     expect(body.employees.find((e: { id: number }) => e.id === anya.id).remindersEnabled).toBe(true);
+  });
+});
+
+describe("заблокировал бота — в карточке", () => {
+  it("админ видит дату, с которой бот не может достучаться", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const mark = worker(db, "Марк", 779);
+    db.update(employees).set({ botBlockedAt: new Date("2026-09-12T10:00:00Z") }).where(eq(employees.id, mark.id)).run();
+
+    const body = await (await app.request("/api/admin/employees", bearer(admin))).json();
+    expect(body.employees.find((e: { id: number }) => e.id === mark.id).botBlockedAt).toBe("2026-09-12T10:00:00.000Z");
   });
 });
 

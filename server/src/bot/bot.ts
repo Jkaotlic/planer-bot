@@ -26,6 +26,7 @@ import { setPaid } from "../collections/payment-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { reminderHour } from "../repo/settings";
+import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
@@ -309,6 +310,19 @@ export function createBot(deps: BotDeps): Bot {
   // Первым перехватчиком: тестовые `recordApi` встают снаружи и в сеть не ходят,
   // а настоящий вызов получает свой срок.
   installApiTimeouts(bot, { ...DEFAULT_API_TIMEOUTS, ...deps.apiTimeouts });
+  installBlockedTracker(bot, db);
+
+  // Написал или нажал — значит, бот ему снова доступен (см. `installBlockedTracker`).
+  bot.use(async (ctx, next) => {
+    if (ctx.from && !ctx.from.is_bot) {
+      try {
+        clearBotBlocked(db, ctx.from.id);
+      } catch (err) {
+        console.error("clearBotBlocked failed:", safeErrorMessage(err));
+      }
+    }
+    return next();
+  });
 
   /**
    * Нажатие, на которое никто не ответил, у человека выглядит как «кнопка не

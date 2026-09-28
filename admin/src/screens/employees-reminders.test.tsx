@@ -85,3 +85,13 @@ describe("«Работники»: видно, доходят ли сообщен
     expect(rowOf(el, 3).textContent).not.toContain("напоминания выключены");
   });
 });
+
+describe("«Работники»: заблокировал бота", () => {
+  // Заблокировавший везде считался достижимым: ему «уходили» напоминания,
+  // обмены и объявления, а админ не мог этого увидеть.
+  it("у заблокировавшего — метка с датой", async () => {
+    const el = await mountWith([person(1, "Аня"), person(2, "Игорь", { botBlockedAt: "2026-09-12T10:00:00.000Z" })]);
+    expect(rowOf(el, 2).textContent).toContain("заблокировал бота");
+    expect(rowOf(el, 1).textContent).not.toContain("заблокировал бота");
+  });
+});

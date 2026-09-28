@@ -449,6 +449,12 @@ export function EmployeeRow({
             {linked && !employee.remindersEnabled && (
               <span style={{ color: "var(--tgui--destructive_text_color)" }}>· напоминания выключены</span>
             )}
+            {/* Зеркало консольной метки: «привязан», а не доходит ничего. */}
+            {linked && employee.botBlockedAt && (
+              <span style={{ color: "var(--tgui--destructive_text_color)" }}>
+                · заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
+              </span>
+            )}
             {employee.isAdmin && <CategoryChip category="shift">админ</CategoryChip>}
           </div>
         </div>
@@ -799,4 +805,10 @@ function BirthDateField({
       </select>
     </span>
   );
+}
+
+/** «12.09» — день, с которого бот не может достучаться. */
+function formatBlockedSince(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
