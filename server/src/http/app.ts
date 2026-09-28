@@ -749,6 +749,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const body = (await c.req.json().catch(() => ({}))) as { locked?: unknown };
     if (typeof body.locked !== "boolean") return c.json({ error: "locked должен быть true или false" }, 400);
 
+    // То же значение — ничего не произошло: без этой проверки двойной тап или
+    // повтор после таймаута релея рассылал всей команде второе «закрыты».
+    if (body.locked === isSwapsLocked(db)) {
+      return c.json({ locked: body.locked, cancelled: 0, delivered: 0, intended: 0 });
+    }
     const actorId = c.get("auth").employeeId;
     const cancelled = setSwapLock(db, body.locked, actorId);
 
