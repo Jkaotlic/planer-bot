@@ -365,6 +365,13 @@ function EmployeeRow({
               напоминания выключены
             </span>
           )}
+          {/* Заблокировал бота — не доходит ничего, хотя он «привязан». Дата —
+              с какого дня: «не слышит с 12-го» объясняет, почему он не ответил. */}
+          {linked && employee.botBlockedAt && (
+            <span className="status-chip status-chip-alert" title="Telegram отвечает, что бот заблокирован. Снимется, когда человек снова напишет боту">
+              🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
+            </span>
+          )}
           {employee.isAdmin && <span className="admin-badge">админ</span>}
         </>
       )}
@@ -702,3 +709,9 @@ function BirthDateField({
 
 /** February gets 29: a birthday on the 29th is real, whatever the year holds. */
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** «12.09» — день, с которого бот не может достучаться. */
+function formatBlockedSince(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+}

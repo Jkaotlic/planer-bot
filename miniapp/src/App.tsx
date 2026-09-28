@@ -38,6 +38,7 @@ import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
 import { nowOnTeamDay, swapCandidates } from "./lib/swap-candidates";
 import { tabBadges } from "./lib/tab-badges";
+import { swapUndeliveredNotice } from "./lib/swap-notice";
 
 interface AppData {
   me: Me;
@@ -113,6 +114,8 @@ export function App() {
   // instead of a per-screen error — nothing to retry by hand, it just says the
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  /** «Коллега не получит сообщение» после обмена — до следующей смены вкладки. */
+  const [swapNotice, setSwapNotice] = useState<string | null>(null);
   // Сборы для меток «ждёт тебя» на вкладках (`tabBadges`). `null` — ещё не
   // пришли или запрос упал: метка на «Сборах» тогда просто молчит, а не
   // врёт нулём. Не в `AppData`/bootstrap намеренно — см. комментарий в
@@ -267,7 +270,8 @@ export function App() {
 
   async function handleConfirmSwap(toShiftId: number, message: string) {
     if (!proposingFor) return;
-    await apiClient.proposeSwap(proposingFor.id, toShiftId, message || undefined);
+    const created = await apiClient.proposeSwap(proposingFor.id, toShiftId, message || undefined);
+    setSwapNotice(swapUndeliveredNotice(created.notified, created.counterpartyName));
     setProposingFor(null);
     setTab("mine");
     await refreshSwaps();
@@ -532,6 +536,27 @@ export function App() {
     // под шапку клиента, и 100vh поверх этого дало бы лишний скролл ровно на её
     // высоту — страница «пружинила» бы, не имея что показать.
     <div style={{ minHeight: "100%", boxSizing: "border-box" }}>
+      {/* Сверху и прилипает: снизу, как `refreshError`, строка оказывалась в
+          конце длинной прокрутки под панелью вкладок — в DOM есть, глазу нет
+          (замер 2026-09-28: top 2000 при экране 844). */}
+      {swapNotice && (
+        <div
+          role="status"
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+            padding: "10px 16px",
+            textAlign: "center",
+            fontSize: 13,
+            color: "var(--tgui--destructive_text_color)",
+            background: "var(--tgui--secondary_bg_color)",
+            borderBottom: "1px solid var(--tgui--divider)",
+          }}
+        >
+          {swapNotice}
+        </div>
+      )}
       {tab === "mine" && (
         <MyShiftsScreen
           me={data.me}
@@ -653,6 +678,7 @@ export function App() {
           // A stale action error from wherever we're leaving shouldn't greet us
           // on the next visit to that tab.
           setSwapErrors(new Map());
+          setSwapNotice(null);
           setSlotErrors(new Map());
           setOfferErrors(new Map());
           // «Моих смен» больше не видно — раскрытая строка и её лог всё равно

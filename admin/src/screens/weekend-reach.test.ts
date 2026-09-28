@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reachNotice } from "./WeekendAdminScreen";
+import { assignNotice, reachNotice } from "./WeekendAdminScreen";
 
 /**
  * Mirrored in miniapp/src/screens/admin/weekend-reach.test.ts — the two consoles
@@ -16,5 +16,15 @@ describe("reachNotice", () => {
     expect(reachNotice(9, 28)).toBe(
       "Смена открыта, но уведомление дошло до 9 из 28: остальные ещё не подключили телеграм.",
     );
+  });
+});
+
+describe("assignNotice", () => {
+  it("письмо не дошло — просит предупредить лично", () => {
+    expect(assignNotice(false)).toContain("предупреди человека лично");
+  });
+  it("дошло или письма не было — молчит", () => {
+    expect(assignNotice(true)).toBeNull();
+    expect(assignNotice(undefined)).toBeNull();
   });
 });

@@ -74,6 +74,7 @@ function toAdminEmployee(employee: EmployeeRow): AdminEmployeeDto {
     isObserver: employee.isObserver,
     selfScheduleEnabled: employee.selfScheduleEnabled,
     remindersEnabled: employee.remindersEnabled,
+    botBlockedAt: employee.botBlockedAt?.toISOString() ?? null,
   };
 }
 

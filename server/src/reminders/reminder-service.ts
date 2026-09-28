@@ -9,6 +9,7 @@ import {
   wakeTime,
   buildReminderText,
   renderReminderText,
+  buildCatchUpText,
   addressOf,
   coworkersEnumeration,
   isAbsentOn,
@@ -60,21 +61,20 @@ function wantsReminder(
   return remindsByDefault({ start: shift.start, end: shift.end, category: shift.category });
 }
 
-/** Sends soft evening-before reminders for tomorrow's morning/night shifts. Returns the number sent. */
-export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }, publicUrl?: string): Promise<number> {
-  // Час — настройка админа, а не константа. Строки нет — те же 20:00, что и до неё.
-  if (now.time < reminderHour(db)) return 0;
-
-  const tomorrow = nextDate(now.date);
-  // Отпуск и больничный, начатые раньше, завтрашний день покрывают, а не
-  // начинают — `listShiftsInRange` их не видит.
-  const dayEntries = listShiftsOverlapping(db, tomorrow, tomorrow);
-  const shifts = listShiftsInRange(db, tomorrow, tomorrow).filter(
+/**
+ * Смены этого дня, про которые хотят напоминания и чей хозяин на месте.
+ *
+ * Больной не получает «Завтра смена» про смену, которую отдаёт (решение
+ * владельца от 2026-09-28): до решения по передаче она стоит на нём. Отпуск и
+ * больничный, начатые раньше, этот день покрывают, а не начинают —
+ * `listShiftsInRange` их не видит, поэтому отсутствия читаются с пересечением.
+ */
+function remindableOn(db: Db, date: string): Shift[] {
+  const dayEntries = listShiftsOverlapping(db, date, date);
+  return listShiftsInRange(db, date, date).filter(
     (s) =>
       s.employeeId != null &&
-      // Больной не получает «Завтра смена» про смену, которую отдаёт (решение
-      // владельца от 2026-09-28): до решения по передаче она стоит на нём.
-      !isAbsentOn(dayEntries, s.employeeId, tomorrow) &&
+      !isAbsentOn(dayEntries, s.employeeId, date) &&
       s.start != null &&
       s.end != null &&
       wantsReminder(
@@ -82,11 +82,28 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
         templateOf(db, s),
       ),
   );
+}
 
-  let count = 0;
+/**
+ * Вечерние напоминания про завтра — и догоняющие про сегодня.
+ *
+ * Догоняющая ветка работает в любое время суток (решение владельца от
+ * 2026-09-28: «сразу, как бот ожил», даже ночью): вечернее не ушло — бот лежал,
+ * не было сети, смену поставили поздно, — а смена сегодня и ещё не началась.
+ * Пометка у обеих веток одна, `evening_before:<id>`, так что дубля не бывает.
+ * Returns the number sent.
+ */
+export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }, publicUrl?: string): Promise<number> {
+  let count = await catchUpPass(db, bot, now, publicUrl);
+  // Час — настройка админа, а не константа. Строки нет — те же 20:00, что и до неё.
+  if (now.time < reminderHour(db)) return count;
+
+  const tomorrow = nextDate(now.date);
+  const shifts = remindableOn(db, tomorrow);
+  const before = count;
   for (const shift of shifts) {
     try {
-      count += await remindFor(db, bot, shift, publicUrl);
+      count += await remindFor(db, bot, shift, publicUrl, "evening");
     } catch (err) {
       // The list of shifts was read once, up front, and each send below awaits
       // Telegram — an admin deleting tomorrow's shift in that gap leaves the
@@ -102,8 +119,25 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
   // вечер, и поштучные записи утопили бы всё остальное в журнале. Молчим, когда
   // ушло ноль — «ничего не произошло» не событие, а `hasEveningReminder` дедуплицирует
   // отправку, так что второй тик за вечер сюда уже не дойдёт.
+  if (count > before) {
+    recordAudit(db, "reminders_dispatched", null, { forDate: tomorrow, sent: count - before, considered: shifts.length });
+  }
+  return count;
+}
+
+/** Догоняющие про сегодняшние смены, которые ещё не начались. */
+async function catchUpPass(db: Db, bot: Bot, now: { date: string; time: string }, publicUrl?: string): Promise<number> {
+  const shifts = remindableOn(db, now.date).filter((s) => now.time < s.start!);
+  let count = 0;
+  for (const shift of shifts) {
+    try {
+      count += await remindFor(db, bot, shift, publicUrl, "catchUp");
+    } catch (err) {
+      console.error(`runReminderTick: catch-up for shift ${shift.id} skipped:`, safeErrorMessage(err));
+    }
+  }
   if (count > 0) {
-    recordAudit(db, "reminders_dispatched", null, { forDate: tomorrow, sent: count, considered: shifts.length });
+    recordAudit(db, "reminders_dispatched", null, { forDate: now.date, sent: count, considered: shifts.length, catchUp: true });
   }
   return count;
 }
@@ -183,7 +217,7 @@ function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
 }
 
 /** One shift's reminder. Returns 1 if it went out, 0 otherwise. */
-async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Promise<number> {
+async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl: string | undefined, mode: "evening" | "catchUp"): Promise<number> {
     if (hasEveningReminder(db, shift.id, shift.employeeId!)) return 0;
     const owner = getEmployeeById(db, shift.employeeId!);
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) return 0;
@@ -227,7 +261,9 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
       kind === "day" || isNonShiftKind(shift, template)
         ? []
         : coworkerNamesFor(db, { date: shift.date, kind, employeeId: shift.employeeId });
-    const text = custom
+    const text = mode === "catchUp"
+      ? buildCatchUpText({ name, timeRange, location })
+      : custom
       ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers) }, kind)
       : buildReminderText({ name, kind, timeRange, what, until, location, coworkers });
 

@@ -20,6 +20,17 @@ function monthRange(d: Date): { from: string; to: string } {
  * bare «смена открыта» reads as «спросил команду» even when it asked a third of
  * it. Mirrored in the other console — see the twin of this file.
  */
+/**
+ * Что сказать после назначения на выходной. `null` — всё дошло или письма не
+ * было (повторное назначение) — говорить не о чем.
+ *
+ * Запись в графике появляется сразу, и без этой строки админ считал человека
+ * предупреждённым, хотя письмо не дошло (нет Telegram, бот заблокирован).
+ */
+export function assignNotice(notified: boolean | undefined): string | null {
+  return notified === false ? "Назначено, но сообщение в Telegram не дошло — предупреди человека лично." : null;
+}
+
 export function reachNotice(delivered: number, intended: number): string {
   if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
   return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
@@ -31,6 +42,8 @@ export function WeekendAdminScreen() {
   const [busy, setBusy] = useState(false);
   const [showPost, setShowPost] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** «Не дошло» — красным, а не зелёной строкой успеха: зелёный читался как «всё хорошо». */
+  const [warning, setWarning] = useState<string | null>(null);
 
   async function reloadSlots() {
     setSlots(await apiClient.getWeekendSlots());
@@ -55,7 +68,9 @@ export function WeekendAdminScreen() {
     setBusy(true);
     setError(null);
     try {
-      await apiClient.assignSlot(slotId, employeeId);
+      const { notified } = await apiClient.assignSlot(slotId, employeeId);
+      setNotice(null);
+      setWarning(assignNotice(notified));
       await reloadSlots();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось назначить");
@@ -88,6 +103,7 @@ export function WeekendAdminScreen() {
 
       {error && <div className="error-text">{error}</div>}
       {notice && <div className="roster-notice roster-notice-success" role="status">{notice}</div>}
+      {warning && <div className="roster-notice roster-notice-error" role="status">{warning}</div>}
 
       <section className="employees-section">
         <h3 className="employees-section-title">Открытые смены</h3>
@@ -111,6 +127,7 @@ export function WeekendAdminScreen() {
           onCancel={() => setShowPost(false)}
           onCreated={async (reach) => {
             setShowPost(false);
+            setWarning(null);
             setNotice(reachNotice(reach.delivered, reach.intended));
             await reloadSlots();
           }}

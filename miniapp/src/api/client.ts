@@ -790,7 +790,8 @@ export interface ApiClient {
   getMyShifts(): Promise<{ shifts: Shift[]; today: string }>;
   getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
-  proposeSwap(fromShiftId: number, toShiftId: number, message?: string): Promise<SwapRequest>;
+  /** `notified` — дошло ли письмо второй стороне (нет Telegram, бот заблокирован → false). */
+  proposeSwap(fromShiftId: number, toShiftId: number, message?: string): Promise<SwapRequest & { notified: boolean }>;
   acceptSwap(id: number): Promise<void>;
   declineSwap(id: number): Promise<void>;
   cancelSwap(id: number): Promise<void>;
@@ -869,7 +870,8 @@ export interface ApiClient {
   /** The slot, plus how many of the team the «нужен человек» broadcast reached —
    *  only people who linked Telegram can be told at all. */
   postSlot(input: NewSlotInput): Promise<VacantSlot & { delivered: number; intended: number }>;
-  assignSlot(slotId: number, employeeId: number): Promise<void>;
+  /** `notified: false` — письмо назначенному не дошло; `undefined` — письма не было (повтор). */
+  assignSlot(slotId: number, employeeId: number): Promise<{ notified?: boolean }>;
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
@@ -990,6 +992,7 @@ interface SwapsResponse {
 
 /** `POST /api/swaps` only echoes back the raw inserted row; the id is all this client needs from it. */
 interface CreateSwapResponse {
+  notified?: boolean;
   request: { id: number };
 }
 
@@ -1314,7 +1317,7 @@ export const realClient: ApiClient = {
   getSwaps: () => fetchSwaps(),
 
   async proposeSwap(fromShiftId, toShiftId, message) {
-    const { request } = await authorizedPostJson<CreateSwapResponse>("/api/swaps", {
+    const { request, notified } = await authorizedPostJson<CreateSwapResponse>("/api/swaps", {
       fromShiftId,
       toShiftId,
       message,
@@ -1322,7 +1325,8 @@ export const realClient: ApiClient = {
     const swaps = await fetchSwaps();
     const created = swaps.find((s) => s.id === request.id);
     if (!created) throw new Error("Created swap request not found in /api/swaps response");
-    return created;
+    // Старый сервер поля не знает — тогда не пугаем «не дошло».
+    return { ...created, notified: notified ?? true };
   },
 
   acceptSwap: (id) => authorizedPostAction(`/api/swaps/${id}/accept`),
@@ -1423,7 +1427,8 @@ export const realClient: ApiClient = {
     return { ...slot, delivered, intended };
   },
   async assignSlot(slotId, employeeId) {
-    await authorizedPostJson(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
+    const res = await authorizedPostJson<{ notified?: boolean }>(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
+    return { notified: res?.notified };
   },
   async unassignSlot(assignmentId) {
     await authorizedPostJson(`/api/admin/weekend/assignments/${assignmentId}/unassign`, {});
@@ -1653,7 +1658,7 @@ const devClient: ApiClient = {
   getMyShifts: () => mockGetMyShifts(),
   getTeamSchedule: async (from, to) => withEmployeeNames(await mockGetTeamSchedule(from, to)),
   getSwaps: () => mockGetSwaps(),
-  proposeSwap: (fromShiftId, toShiftId, message) => mockProposeSwap(fromShiftId, toShiftId, message),
+  proposeSwap: async (fromShiftId, toShiftId, message) => ({ ...(await mockProposeSwap(fromShiftId, toShiftId, message)), notified: true }),
   acceptSwap: (id) => mockAcceptSwap(id),
   declineSwap: (id) => mockDeclineSwap(id),
   cancelSwap: (id) => mockCancelSwap(id),
@@ -1690,7 +1695,10 @@ const devClient: ApiClient = {
   deleteEntry: (id) => mockDeleteEntry(id),
   getAdminWeekendSlots: () => mockGetAdminWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
-  assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
+  assignSlot: async (slotId, employeeId) => {
+    await mockAssignSlot(slotId, employeeId);
+    return { notified: true };
+  },
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),

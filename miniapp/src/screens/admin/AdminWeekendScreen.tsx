@@ -38,6 +38,17 @@ function monthRange(today: string): { from: string; to: string } {
  * bare «смена открыта» reads as «спросил команду» even when it asked a third of
  * it. Mirrored in the desktop console — see WeekendAdminScreen.tsx.
  */
+/**
+ * Что сказать после назначения на выходной. `null` — всё дошло или письма не
+ * было (повторное назначение) — говорить не о чем.
+ *
+ * Запись в графике появляется сразу, и без этой строки админ считал человека
+ * предупреждённым, хотя письмо не дошло (нет Telegram, бот заблокирован).
+ */
+export function assignNotice(notified: boolean | undefined): string | null {
+  return notified === false ? "Назначено, но сообщение в Telegram не дошло — предупреди человека лично." : null;
+}
+
 export function reachNotice(delivered: number, intended: number): string {
   if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
   return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
@@ -59,6 +70,8 @@ export function AdminWeekendScreen({
   const [busySlotIds, setBusySlotIds] = useState<ReadonlySet<number>>(new Set());
   const [showPost, setShowPost] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** «Не дошло» — красным, а не серой строкой рядом с обычными отчётами. */
+  const [warning, setWarning] = useState<string | null>(null);
 
   async function reload() {
     setSlots(await apiClient.getAdminWeekendSlots());
@@ -83,7 +96,9 @@ export function AdminWeekendScreen({
     setBusySlotIds((prev) => withBusy(prev, slotId));
     setError(null);
     try {
-      await apiClient.assignSlot(slotId, employeeId);
+      const { notified } = await apiClient.assignSlot(slotId, employeeId);
+      setNotice(null);
+      setWarning(assignNotice(notified));
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось назначить");
@@ -115,6 +130,7 @@ export function AdminWeekendScreen({
                 onCancel={() => setShowPost(false)}
                 onCreated={async (reach) => {
                   setShowPost(false);
+                  setWarning(null);
                   setNotice(reachNotice(reach.delivered, reach.intended));
                   await reload();
                 }}
@@ -136,6 +152,11 @@ export function AdminWeekendScreen({
         {notice && (
           <Section>
             <div style={{ padding: "8px 20px", color: "var(--tgui--hint_color)", fontSize: 14 }} role="status">{notice}</div>
+          </Section>
+        )}
+        {warning && (
+          <Section>
+            <div style={{ padding: "8px 20px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }} role="status">{warning}</div>
           </Section>
         )}
 

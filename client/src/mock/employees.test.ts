@@ -23,4 +23,16 @@ describe("мок домена employees", () => {
     await mock.getAdminEmployees();
     expect(Date.now() - started).toBeLessThan(50);
   });
+
+  // Проекция перечисляет поля — новое поле контракта терялось в ней молча, и
+  // метка «заблокировал бота» не появлялась в dev-режиме ни одной морды.
+  it("отдаёт botBlockedAt, как и сервер", async () => {
+    const mock = createEmployeesMock({ delayMs: 0, state: { employees: [{
+      id: 9, displayName: "Марк", preferredName: null, address: "Марк", isAdmin: false, isActive: true,
+      telegramUserId: 9, birthDate: null, excludedFromAssignment: false, excludedFromSwaps: false,
+      isObserver: false, selfScheduleEnabled: false, remindersEnabled: true, botBlockedAt: "2026-09-12T10:00:00.000Z",
+    }] } });
+    const [row] = await mock.getAdminEmployees();
+    expect(row!.botBlockedAt).toBe("2026-09-12T10:00:00.000Z");
+  });
 });

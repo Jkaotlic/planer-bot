@@ -40,6 +40,7 @@ const toDto = (employee: AdminEmployeeDto): AdminEmployeeDto => ({
   excludedFromSwaps: employee.excludedFromSwaps,
   isObserver: employee.isObserver,
   selfScheduleEnabled: employee.selfScheduleEnabled,
+  botBlockedAt: employee.botBlockedAt ?? null,
 });
 
 export function createEmployeesMock(opts: EmployeesMockOptions) {

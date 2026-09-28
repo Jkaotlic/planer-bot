@@ -56,6 +56,10 @@ export const adminEmployeeSchema = z
     /** Личная галочка «пиши мне вечером про завтрашнюю смену». Чек-лист
      *  дежурного она не глушит — это рабочая инструкция, см. `checklist-tick`. */
     remindersEnabled: z.boolean(),
+    /** Когда Telegram впервые ответил «бот заблокирован» (ISO), `null` —
+     *  достижим. Необязательное в типе, чтобы старые фикстуры не ломались;
+     *  сервер отдаёт его всегда. */
+    botBlockedAt: z.string().nullable().optional(),
   })
   .strict();
 export type AdminEmployeeDto = z.infer<typeof adminEmployeeSchema>;

@@ -1778,6 +1778,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // The initiator proposed it — record before notifying, since the notification is
     // best-effort and shouldn't gate the journal entry either way.
     recordAudit(db, "swap_proposed", c.get("auth").employeeId, swapAuditPayload(res.request));
+    // Дошло ли до второй стороны — экран говорит инициатору «скажи лично», если нет.
+    let notified = false;
     if (bot) {
       const tg = tgOf(res.counterpartyId);
       if (tg != null) {
@@ -1785,10 +1787,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // пуле — она должна прочитать об этом ДО нажатия «Принять», а не потом.
         const fact = outsidePoolFact(db, { shiftId: res.request.fromShiftId, receiverId: res.counterpartyId });
         const notices = fact ? [dutyNoticeForReceiver(fact)] : [];
-        await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices, res.request.message));
+        notified = await notifySwapProposal(bot, tg, res.request.id, swapProposalText(swapAuditPayload(res.request), notices, res.request.message));
       }
     }
-    return c.json({ request: res.request }, 201);
+    return c.json({ request: res.request, notified }, 201);
   });
 
   app.post("/api/swaps/:id/accept", requireAuth(db, config.jwtSecret), async (c) => {
@@ -2269,13 +2271,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // A repeat assign of someone already on the slot is a no-op (see assignSlot) —
     // nothing changed, so nudging them again would just be a duplicate ping for the
     // same offer they've already seen.
-    if (bot && res.changed) {
+    // `notified` есть, только когда письмо и правда уходило: повторное
+    // назначение ничего не шлёт, и «не дошло» про него было бы неправдой.
+    let notified: boolean | undefined;
+    if (res.changed) {
+      notified = false;
       const tg = tgOf(body.employeeId);
-      if (tg != null && slot) {
-        await notifyWeekendOffer(bot, tg, res.assignment.id, `Тебе предложили работу в выходной:\n${slotLineOf(slot)}\n\nПодтвердишь?`);
+      if (bot && tg != null && slot) {
+        notified = await notifyWeekendOffer(bot, tg, res.assignment.id, `Тебе предложили работу в выходной:\n${slotLineOf(slot)}\n\nПодтвердишь?`);
       }
     }
-    return c.json({ assignment: res.assignment }, 201);
+    return c.json({ assignment: res.assignment, notified }, 201);
   });
 
   // Admin: take someone off a slot (also removes their schedule entry).

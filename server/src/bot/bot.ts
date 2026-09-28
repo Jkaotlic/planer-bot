@@ -26,6 +26,7 @@ import { setPaid } from "../collections/payment-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
 import { reminderHour } from "../repo/settings";
+import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
@@ -309,6 +310,19 @@ export function createBot(deps: BotDeps): Bot {
   // Первым перехватчиком: тестовые `recordApi` встают снаружи и в сеть не ходят,
   // а настоящий вызов получает свой срок.
   installApiTimeouts(bot, { ...DEFAULT_API_TIMEOUTS, ...deps.apiTimeouts });
+  installBlockedTracker(bot, db);
+
+  // Написал или нажал — значит, бот ему снова доступен (см. `installBlockedTracker`).
+  bot.use(async (ctx, next) => {
+    if (ctx.from && !ctx.from.is_bot) {
+      try {
+        clearBotBlocked(db, ctx.from.id);
+      } catch (err) {
+        console.error("clearBotBlocked failed:", safeErrorMessage(err));
+      }
+    }
+    return next();
+  });
 
   /**
    * Нажатие, на которое никто не ответил, у человека выглядит как «кнопка не
@@ -847,9 +861,26 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.replyWithPhoto(new InputFile(image.png, "qr.png"), { caption: image.caption });
   }
 
+  /**
+   * Скриншот в открытое окно жалобы.
+   *
+   * Раньше бот фото молча выбрасывал, а окно оставалось открытым: человек думал,
+   * что отправил, админы не получали ничего. Подпись становится текстом жалобы,
+   * картинка уходит админам копией следом. В базе картинки нет — только пометка
+   * «[скриншот]»: сама она живёт в Telegram, и админ видит её там.
+   */
+  async function captureBugPhoto(ctx: Context): Promise<boolean> {
+    const caption = ctx.msg?.caption?.trim();
+    const text = caption ? `${caption} [скриншот]` : "📷 скриншот без подписи";
+    return captureBugReport(ctx, text, { fromChatId: ctx.chat!.id, messageId: ctx.msg!.message_id });
+  }
+
   /** Текст, пришедший после нажатия кнопки. Вызывается последним — метки кнопок
-   *  разбираются раньше и сюда не доходят. */
-  async function captureBugReport(ctx: Context, text: string): Promise<boolean> {
+   *  разбираются раньше и сюда не доходят. `attachment` — скриншот, который уходит
+   *  админам копией следом за текстом. */
+  async function captureBugReport(
+    ctx: Context, text: string, attachment?: { fromChatId: number; messageId: number },
+  ): Promise<boolean> {
     const from = ctx.from;
     if (!from) return false;
     const who = acting(from.id);
@@ -870,7 +901,7 @@ export function createBot(deps: BotDeps): Bot {
     // `force_reply`, и раскладку у человека Telegram на это время убрал. Обычный
     // путь «нажал → написал → отправил» обязан возвращать её сам, без лишнего тапа.
     await replyWithMenu(ctx, "Записал, спасибо 🙏 Разберёмся.");
-    await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`);
+    await notifyBugReport(bot, db, res.report.id, `🐞 ${who.me.displayName}: ${res.report.text}`, attachment);
     return true;
   }
 
@@ -1183,18 +1214,31 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.reply(`«${list.name}»: инструкция снята — дежурным она больше не уходит.`);
   });
 
+  /** Фото — только жалоба: инструкцию к чек-листу прикладывают файлом. */
+  bot.on("message:photo", async (ctx) => {
+    if (ctx.chat.type !== "private") return;
+    await captureBugPhoto(ctx);
+  });
+
   /**
    * Файл, присланный в открытое окно ожидания, становится инструкцией.
    *
    * Окно, а не «любой документ от админа»: админы шлют боту файлы и по другим
    * поводам, и молча превращать чужой PDF в инструкцию для всей смены нельзя.
+   * Вне окна инструкции картинка файлом — возможная жалоба (скриншот без сжатия).
    */
   bot.on("message:document", async (ctx) => {
     if (ctx.chat.type !== "private") return;
     const who = acting(ctx.from?.id ?? 0);
-    if (!who.ok || !actsAsAdmin(who.me, ctx.from!.id)) return;
-    const pending = docPendingFor(db, who.me.id, new Date());
-    if (pending == null) return;
+    // Окно инструкции проверяется первым: файл админа, которого попросили
+    // приложить инструкцию, — инструкция, даже если окно жалобы тоже открыто.
+    const pending = who.ok && actsAsAdmin(who.me, ctx.from!.id) ? docPendingFor(db, who.me.id, new Date()) : null;
+    if (pending == null) {
+      // Скриншот, отправленный «файлом» (без сжатия), — та же жалоба.
+      if (ctx.msg.document.mime_type?.startsWith("image/")) await captureBugPhoto(ctx);
+      return;
+    }
+    if (!who.ok) return;
     const list = getChecklist(db, pending);
     if (!list) {
       clearDocPending(db, who.me.id);

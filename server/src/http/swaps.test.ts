@@ -703,3 +703,51 @@ describe("swap endpoints", () => {
   });
 
 });
+
+describe("предложение обмена: дошло ли", () => {
+  // Инициатор ждал ответа, которого не могло быть: второй стороне письмо не
+  // уходило (нет Telegram, бот заблокирован), а экран говорил «отправлено».
+  it("письмо дошло — notified: true", async () => {
+    const db = makeTestDb();
+    const { bot } = testBot();
+    const app = createApp({ db, config, bot });
+    const anya = await worker(db, app, "Аня", 301);
+    const igor = await worker(db, app, "Игорь", 302);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
+
+    const res = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    expect((await res.json()).notified).toBe(true);
+  });
+
+  it("у второй стороны нет Telegram — notified: false", async () => {
+    const db = makeTestDb();
+    const { bot } = testBot();
+    const app = createApp({ db, config, bot });
+    const anya = await worker(db, app, "Аня", 303);
+    const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "i-no-tg" });
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.id });
+
+    const res = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).notified).toBe(false);
+  });
+
+  it("бот заблокирован — notified: false", async () => {
+    const db = makeTestDb();
+    const bot = stubBotInfo(new Bot("12345:tok"), { id: 1, first_name: "P", username: "p_bot" });
+    bot.api.config.use((_prev, method) =>
+      (method === "sendMessage"
+        ? { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" }
+        : { ok: true, result: {} }) as never);
+    const app = createApp({ db, config, bot });
+    const anya = await worker(db, app, "Аня", 305);
+    const igor = await worker(db, app, "Игорь", 306);
+    const sa = createShift(db, { date: daysFromNow(2), start: "08:00", end: "17:00", employeeId: anya.w.id });
+    const sb = createShift(db, { date: daysFromNow(2), start: "11:00", end: "20:00", employeeId: igor.w.id });
+
+    const res = await app.request("/api/swaps", authed(anya.token, { fromShiftId: sa.id, toShiftId: sb.id }));
+    expect((await res.json()).notified).toBe(false);
+  });
+});
