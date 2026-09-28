@@ -66,3 +66,12 @@ export function handoverEscalationText(
 export function handoverCancelledText(fromName: string, shiftLine: string): string {
   return [`Смену выходить не нужно — ${fromName} снял(а) больничный.`, shiftLine].join("\n");
 }
+
+/**
+ * «Отбой», когда смену закрыл админ, а не больной: переназначил другому или
+ * поменял. Про больничный здесь ни слова — его никто не снимал, и «снял(а)
+ * больничный» в этом письме было бы неправдой о коллеге.
+ */
+export function handoverClosedText(shiftLine: string): string {
+  return ["Смену выходить не нужно — её уже закрыли.", shiftLine].join("\n");
+}

@@ -928,3 +928,26 @@ describe("«Завтра с тобой»: кто ещё работает в эт
     expect(anyaMsg.text).not.toContain("Игорь, Игорь");
   });
 });
+
+describe("отсутствующему хозяину — тишина", () => {
+  // Решение владельца от 2026-09-28: больной вечером накануне смены, которую
+  // отдаёт, не получает ничего, а коллеги не видят его в «Завтра с тобой».
+  // Больничный начат СЕГОДНЯ и тянется на завтра — запись завтрашнего дня не
+  // начинается, а покрывает его.
+  it("больничный на завтра — ни «Завтра смена», ни места в перечне коллег", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 990);
+    const igor = linkedEmployee(db, "Игорь", 991);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id });
+    createShift(db, { date: TODAY, endDate: TOMORROW, category: "sick_leave", start: null, end: null, employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    expect(sent.find((s) => s.chat_id === 990)).toBeUndefined();
+    const igorMsg = sent.find((s) => s.chat_id === 991)!;
+    expect(igorMsg.text).not.toContain("Аня");
+    expect(igorMsg.text).not.toContain("👥");
+  });
+});

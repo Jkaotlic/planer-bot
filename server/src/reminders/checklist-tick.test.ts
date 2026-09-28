@@ -46,6 +46,17 @@ function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: bo
 }
 
 describe("runChecklistTick", () => {
+  // Решение владельца от 2026-09-28: дежурному на больничном чек-лист не нужен —
+  // он не на этаже, а смена до решения по передаче всё ещё стоит на нём.
+  it("дежурный на больничном сегодня — чек-лист не уходит", async () => {
+    const { db, igor } = stage();
+    createShift(db, { date: TODAY, endDate: TODAY, category: "sick_leave", start: null, end: null, employeeId: igor.id });
+
+    const { bot, sent } = fakeBot();
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);
+    expect(sent).toHaveLength(0);
+  });
+
   /**
    * Ровно то, ради чего правка 2026-09-01: дежурному с 07:00 положены и общая
    * инструкция этажа, и отдельная задача на ту же смену. Пока связь была

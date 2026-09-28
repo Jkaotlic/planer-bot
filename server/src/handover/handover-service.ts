@@ -1,4 +1,4 @@
-import { shiftsOverlap, canSwap } from "@planer/shared";
+import { shiftsOverlap, canSwap, shiftStartMs } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
@@ -18,6 +18,7 @@ import { entryLineOf, nameOf } from "../util/message-lines";
 import { handoverCandidates } from "./candidates";
 import {
   handoverCancelledText,
+  handoverClosedText,
   handoverEscalationText,
   handoverFanText,
   handoverOfferText,
@@ -50,6 +51,30 @@ export interface HandoverDeps {
   db: Db;
   config: { teamTz: string; publicUrl: string };
   messenger: HandoverMessenger;
+  /** Часы — ради тестов: «смена уже началась» зависит от момента, а не от даты. */
+  now?: () => number;
+}
+
+/**
+ * Отдавать уже нечего: однодневная смена началась, у многодневной начался
+ * последний день.
+ */
+function isPast(deps: HandoverDeps, shift: Shift): boolean {
+  if (shift.start == null) return false;
+  const lastDay = { ...shift, date: shift.endDate ?? shift.date };
+  return shiftStartMs(lastDay, deps.config.teamTz) <= (deps.now ?? Date.now)();
+}
+
+/**
+ * Однодневная смена уже началась — отдавать и брать её поздно.
+ *
+ * Только однодневная: у недельного дежурства «начало» — понедельник, и в среду
+ * оно формально «идёт», но остаток недели ещё можно передать (это решает
+ * проверка «уже прошла» по `endDate` в `takeHandover`).
+ */
+function hasStarted(deps: HandoverDeps, shift: Shift): boolean {
+  if (shift.start == null || (shift.endDate != null && shift.endDate !== shift.date)) return false;
+  return shiftStartMs(shift, deps.config.teamTz) <= (deps.now ?? Date.now)();
 }
 
 /** Кнопка «Открыть график» на дату этой смены — у обеих эскалаций ниже. */
@@ -125,7 +150,10 @@ export async function startHandovers(
       entry.category !== "sick_leave" &&
       entry.category !== "vacation" &&
       entry.category !== "business_trip" &&
-      entry.category !== "offsite",
+      entry.category !== "offsite" &&
+      // Больничный задним числом: прошедшую или уже идущую смену не отдать никому,
+      // а тревога админу «смена без человека» про прошлую среду — шум.
+      !isPast(deps, entry),
   );
 
   // Extending a sick leave runs this again over days that already have offers.
@@ -171,8 +199,10 @@ export async function offerTo(deps: HandoverDeps, handoverId: number, toEmployee
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
     return { ok: false, reason: "Передача уже закрыта" };
   }
-  const shift = shiftOf(db, handover);
-  if (!shift) return { ok: false, reason: "Смены больше нет — её изменил админ" };
+  const voided = handoverVoidReason(db, handover);
+  if (voided) return { ok: false, reason: VOID_REFUSAL[voided] };
+  const shift = shiftOf(db, handover)!;
+  if (hasStarted(deps, shift)) return { ok: false, reason: STARTED_REFUSAL };
   // The screen filters candidates already; checking again here is not
   // belt-and-braces but the actual guard — the screen is not a defence, it is a
   // convenience, and the request can arrive from anywhere.
@@ -283,8 +313,12 @@ export async function takeHandover(
     if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
       return { ok: false as const, reason: "Уже забрали или предложение отменили" };
     }
-    const shift = shiftOf(db, handover);
-    if (!shift) return { ok: false as const, reason: "Смены больше нет — её изменил админ" };
+    // Смена могла уйти от дающего, пока сообщение висело в чате: админ поставил
+    // её другому, обмен, укороченный больничный. Без этой проверки «Беру»
+    // отбирало смену у нового хозяина молча — письма уходили дающему.
+    const voided = handoverVoidReason(db, handover);
+    if (voided) return { ok: false as const, reason: VOID_REFUSAL[voided] };
+    const shift = shiftOf(db, handover)!;
 
     // «Беру» живёт в чате вечно. Без этих двух проверок кнопка под старым
     // сообщением брала смену человеку, которого админ тем временем вывел из
@@ -300,6 +334,7 @@ export async function takeHandover(
     if ((shift.endDate ?? shift.date) < today) {
       return { ok: false as const, reason: "Эта смена уже прошла" };
     }
+    if (hasStarted(deps, shift)) return { ok: false as const, reason: STARTED_REFUSAL };
 
     const clash = listShiftsOverlapping(db, shift.date, shift.endDate ?? shift.date).some(
       (mine) =>
@@ -374,9 +409,30 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
   return { ok: true };
 }
 
-/** The shift started and nobody took it. Silent by design — the admins already know. */
+/**
+ * The shift started and nobody took it. Silent by design — the admins already know.
+ *
+ * Однодневная смена, всё ещё стоящая на дающем, с него снимается — «Не
+ * назначено» (решение владельца от 2026-09-28). Иначе больной числился
+ * отработавшим в отчёте, а в сетке не было дыры, которую админ ищет глазами.
+ * Многодневную не трогаем: снять неделю из-за одного дня больничного значило
+ * бы оставить без человека и дни, которые он отработает.
+ */
 export function expireHandover(deps: HandoverDeps, handoverId: number): void {
-  updateHandover(deps.db, handoverId, { status: "expired", resolvedAt: new Date() });
+  const { db } = deps;
+  const unassigned = db.transaction(() => {
+    const handover = getHandover(db, handoverId);
+    if (!handover) return undefined;
+    updateHandover(db, handoverId, { status: "expired", resolvedAt: new Date() });
+    const shift = shiftOf(db, handover);
+    if (!shift || shift.employeeId !== handover.fromEmployeeId) return undefined;
+    if (shift.endDate != null && shift.endDate !== shift.date) return undefined;
+    updateShift(db, shift.id, { employeeId: null });
+    return { handover, shift };
+  });
+  if (unassigned) {
+    recordAudit(db, "handover_unassigned", null, auditPayload(db, unassigned.handover, unassigned.shift, null));
+  }
 }
 
 /**
@@ -395,6 +451,94 @@ export function detachHandoversFromEntry(db: Db, sickEntryId: number): void {
   for (const handover of listHandoversForEntry(db, sickEntryId)) {
     updateHandover(db, handover.id, { sickEntryId: null });
   }
+}
+
+/**
+ * «Выходить не нужно» — тому, кто ждал решения по этой передаче.
+ *
+ * Кто ждал: адресат личного предложения или, если уже спросили всех, каждый, кто
+ * ещё мог её взять. Круг веера пересчитывается, а не хранится: кто с тех пор
+ * стал занят, про предложение, которое уже не мог принять, не услышит.
+ *
+ * Нынешнему хозяину смены не пишем никогда: если админ поставил её тому самому
+ * человеку, которому её предлагали, «выходить не нужно» было бы ровно обратным
+ * правде. `text` — какой «отбой»: больной снял больничный или смену закрыл админ.
+ */
+async function tellCancelled(deps: HandoverDeps, handover: Handover, shift: Shift, text: string): Promise<void> {
+  const { db } = deps;
+  const waiting =
+    handover.status === "offered" && handover.offeredToEmployeeId != null
+      ? [handover.offeredToEmployeeId]
+      : handover.status === "fanned"
+        ? handoverCandidates(db, shift, { excludeIds: listDeclines(db, handover.id) }).map((e) => e.id)
+        : [];
+  for (const employeeId of waiting) {
+    if (employeeId === shift.employeeId) continue;
+    await deps.messenger.plain(employeeId, text);
+  }
+}
+
+/** «Отбой» по отменённому больничному — от лица больного. */
+function sickCancelledText(db: Db, handover: Handover, shift: Shift): string {
+  return handoverCancelledText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift));
+}
+
+/** Почему передача больше не имеет смысла; `null` — жива. */
+export type VoidReason = "gone" | "reassigned" | "uncovered";
+
+/**
+ * Передача жива, только пока её смена есть, смена всё ещё у дающего, а
+ * больничный, ради которого её отдают, существует и покрывает её день.
+ *
+ * Правило у самой передачи, а не в путях, меняющих смену: таких путей восемь
+ * (правка и удаление админом, диапазон, обмен в API и в боте, архивация,
+ * выходные, импорт), часть из них синхронна и без бота. Пока «Беру» верило
+ * передаче на слово, кнопка под старым сообщением отбирала смену у того, кому
+ * админ её уже поставил. Девятый путь, добавленный позже, забыл бы про вызов —
+ * а спросить у передачи не может забыть никто.
+ *
+ * Вернуть смену больной — значит вернуть передаче смысл: правило смотрит на то,
+ * что есть сейчас, а не на историю правок.
+ */
+export function handoverVoidReason(db: Db, handover: Handover): VoidReason | null {
+  const shift = shiftOf(db, handover);
+  if (!shift) return "gone";
+  if (shift.employeeId !== handover.fromEmployeeId) return "reassigned";
+  const sick = handover.sickEntryId == null ? undefined : getShift(db, handover.sickEntryId);
+  if (!sick) return "gone";
+  // Пересечение промежутков, а не «дата смены внутри больничного»: недельное
+  // дежурство с понедельника при больничном со среды — та же передача, и
+  // `shift.date` у него остаётся понедельником всю неделю.
+  if ((shift.endDate ?? shift.date) < sick.date || shift.date > (sick.endDate ?? sick.date)) return "uncovered";
+  return null;
+}
+
+const STARTED_REFUSAL = "Эта смена уже началась";
+
+/** Что сказать нажавшему «Беру» или «предложить», когда передача мертва. */
+export const VOID_REFUSAL: Record<VoidReason, string> = {
+  gone: "Смены больше нет — её изменил админ",
+  reassigned: "Смену уже переназначили",
+  uncovered: "Больничный на этот день сняли — смена снова у коллеги",
+};
+
+/**
+ * Погасить мёртвую передачу и сказать «отбой» тем, кто ждал.
+ *
+ * У `"gone"` писем нет: назвать удалённую смену нечем, а «Беру» под старым
+ * сообщением само ответит, что смены больше нет.
+ */
+export async function voidHandover(deps: HandoverDeps, handoverId: number, reason: VoidReason): Promise<void> {
+  const { db } = deps;
+  const handover = getHandover(db, handoverId);
+  if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) return;
+  const shift = shiftOf(db, handover);
+  const updated = updateHandover(db, handoverId, { status: "cancelled", resolvedAt: new Date() })!;
+  recordAudit(db, "handover_cancelled", handover.fromEmployeeId, { ...auditPayload(db, updated, shift, null), reason });
+  if (!shift || reason === "gone") return;
+  // «Больничный сняли» — правда только у `uncovered`; переназначение — дело админа.
+  const text = reason === "uncovered" ? sickCancelledText(db, handover, shift) : handoverClosedText(lineOf(shift));
+  await tellCancelled(deps, handover, shift, text);
 }
 
 /**
@@ -427,19 +571,7 @@ export async function cancelHandoversForEntry(
     killed += 1;
     if (!shift) continue;
 
-    const text = handoverCancelledText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift));
-    // Who is told: the one person waiting on a decision, or — if it had already
-    // gone wide — everybody who could still have taken it. The fanned set is
-    // recomputed rather than stored, so somebody who became busy meanwhile is not
-    // told about an offer they could no longer have accepted anyway.
-    if (handover.status === "offered" && handover.offeredToEmployeeId != null) {
-      await deps.messenger.plain(handover.offeredToEmployeeId, text);
-    } else if (handover.status === "fanned") {
-      const declined = listDeclines(db, handover.id);
-      for (const employee of handoverCandidates(db, shift, { excludeIds: declined })) {
-        await deps.messenger.plain(employee.id, text);
-      }
-    }
+    await tellCancelled(deps, handover, shift, sickCancelledText(db, handover, shift));
   }
   return killed;
 }

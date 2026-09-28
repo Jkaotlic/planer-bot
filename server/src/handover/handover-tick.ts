@@ -2,7 +2,7 @@ import { handoverActions, shiftStartMs } from "@planer/shared";
 import { getHandover, listLiveHandovers } from "../repo/handovers";
 import { getShift } from "../repo/shifts";
 import { safeErrorMessage } from "../util/safe-error";
-import { escalate, expireHandover, fanOut, type HandoverDeps } from "./handover-service";
+import { escalate, expireHandover, fanOut, handoverVoidReason, voidHandover, type HandoverDeps } from "./handover-service";
 
 export interface HandoverTickDeps extends HandoverDeps {
   config: { teamTz: string; publicUrl: string; handoverFanHours: number; handoverEscalateHours: number };
@@ -27,14 +27,15 @@ export async function runHandoverTick(deps: HandoverTickDeps, nowMs: number): Pr
 
   for (const row of listLiveHandovers(deps.db)) {
     try {
-      const shift = row.shiftId == null ? undefined : getShift(deps.db, row.shiftId);
-      if (!shift) {
-        // The entry was deleted by an admin. There is nothing left to hand over,
-        // and a row pointing at nothing would be retried on every tick forever.
-        expireHandover(deps, row.id);
+      // Смена ушла от дающего (удалена, переназначена, больничный сняли) —
+      // гасим до лестницы: веер и эскалация про такую смену — ложь.
+      const reason = handoverVoidReason(deps.db, row);
+      if (reason) {
+        await voidHandover(deps, row.id, reason);
         touched += 1;
         continue;
       }
+      const shift = getShift(deps.db, row.shiftId!)!;
 
       const actions = handoverActions(
         {

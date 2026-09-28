@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { employees, shifts, auditLog, type Shift } from "../db/schema";
-import { getShift } from "../repo/shifts";
+import { eq } from "drizzle-orm";
+import { employees, shifts, auditLog, handovers as handoversTable, type Shift } from "../db/schema";
+import { getShift, deleteShift } from "../repo/shifts";
 import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, escalate } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
@@ -24,10 +25,14 @@ let sent: { to: string; text: string }[] = [];
  * person is the most expensive defect this feature can have, and a check on
  * «ушло N сообщений» is blind to exactly that.
  */
+/** 12 авг 2026, 08:00 по Москве — до девятичасовых фикстур этого дня. */
+const NOW = Date.UTC(2026, 7, 12, 5, 0);
+
 function deps(db: Db) {
   return {
     db,
     config: CONFIG,
+    now: () => NOW,
     messenger: {
       offer: async (employeeId: number, _handoverId: number, text: string) => {
         sent.push({ to: `employee:${employeeId}`, text });
@@ -355,7 +360,8 @@ describe("taking a shift", () => {
     const igor = person(db, "Игорь");
     const sick = sickLeave(db, anya, "2026-08-11", "2026-08-11");
     const work = shift(db, anya, "2026-08-11");
-    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    // Передача родилась накануне смены, а «Беру» нажали на следующий день.
+    const [handover] = await startHandovers({ ...deps(db), now: () => NOW - 2 * 86_400_000 }, { sickEntry: sick, employeeId: anya });
 
     // "Сегодня" в этом тесте — на день позже даты смены.
     const result = await takeHandover(deps(db), handover!.id, igor, "2026-08-12");
@@ -459,7 +465,7 @@ describe("выключенный вид фильтрует «забрали», �
     setNoticeMuted(db, anya.id, "handovers", true);
 
     const { bot, wire } = testBot();
-    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db) };
+    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db), now: () => NOW };
 
     // Обычное «смену забрали»: Марк свободен 12-го, поэтому передача не
     // эскалирует при рождении — эскалация ушла бы через adminsAlways и
@@ -501,7 +507,7 @@ describe("эскалация несёт кнопку «Открыть графи
     linkTelegramAccount(db, "i-anya3", 311);
     const igor = person(db, "Игорь");
     const { bot, wire } = testBot();
-    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db) };
+    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db), now: () => NOW };
 
     // Никого свободного 14-го (Аня тоже занята) — эскалация при рождении.
     const sick = sickLeave(db, igor, "2026-08-14", "2026-08-14");
@@ -526,7 +532,7 @@ describe("эскалация несёт кнопку «Открыть графи
     const igor = person(db, "Игорь");
     person(db, "Марк"); // свободен → handover рождается «offered», не эскалирует сам
     const { bot, wire } = testBot();
-    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db) };
+    const realDeps = { db, config: CONFIG, messenger: createHandoverMessenger(bot, db), now: () => NOW };
 
     const sick = sickLeave(db, igor, "2026-08-15", "2026-08-15");
     shift(db, igor, "2026-08-15");
@@ -542,5 +548,93 @@ describe("эскалация несёт кнопку «Открыть графи
     expect((rows[0]![0] as { web_app?: { url: string } }).web_app?.url).toBe(
       "https://example.com/app/?screen=schedule&date=2026-08-15",
     );
+  });
+});
+
+describe("удаление записи, по которой была передача", () => {
+  // Спека передач обещала: «строка обязана пережить удаление смены». FK без
+  // ON DELETE делал наоборот — смена, которую хоть раз передавали, становилась
+  // неудаляемой навсегда (админское удаление, перезапись месяца, выходные).
+  for (const status of ["offered", "fanned", "taken", "expired", "cancelled"] as const) {
+    it(`смена и больничный удаляются при передаче в статусе ${status}`, async () => {
+      const db = makeTestDb();
+      const anya = person(db, "Аня");
+      person(db, "Игорь");
+      const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+      const work = shift(db, anya, "2026-08-12");
+      const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+      db.update(handoversTable).set({ status }).where(eq(handoversTable.id, handover!.id)).run();
+
+      expect(deleteShift(db, work.id).deleted).toBe(true);
+      expect(deleteShift(db, sick.id).deleted).toBe(true);
+      const row = getHandover(db, handover!.id)!;
+      expect(row.shiftId).toBeNull();
+      expect(row.sickEntryId).toBeNull();
+      expect(row.status).toBe(status);
+    });
+  }
+});
+
+describe("«Беру» и «предложить» — только по живой и не начавшейся смене", () => {
+  it("смену переназначили — «Беру» отказывает, смена остаётся у нового хозяина", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await fanOut(deps(db), handover!.id);
+    db.update(shifts).set({ employeeId: igor }).where(eq(shifts.id, work.id)).run();
+
+    const result = await takeHandover(deps(db), handover!.id, mark, TODAY);
+
+    expect(result).toEqual({ ok: false, reason: "Смену уже переназначили" });
+    expect(getShift(db, work.id)?.employeeId).toBe(igor);
+  });
+
+  it("смена сегодня с 07:00, сейчас 08:00 — «Беру» и «предложить» отказывают: смена уже идёт", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12", "07:00", "16:00");
+    const [handover] = await startHandovers({ ...deps(db), now: () => NOW - 2 * 3600_000 }, { sickEntry: sick, employeeId: anya });
+
+    expect(await offerTo(deps(db), handover!.id, igor)).toEqual({ ok: false, reason: "Эта смена уже началась" });
+    expect(await takeHandover(deps(db), handover!.id, igor, TODAY)).toEqual({ ok: false, reason: "Эта смена уже началась" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  it("предложить Марку смену, которую уже отдали Игорю, нельзя", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    db.update(shifts).set({ employeeId: igor }).where(eq(shifts.id, work.id)).run();
+    sent = [];
+
+    expect(await offerTo(deps(db), handover!.id, mark)).toEqual({ ok: false, reason: "Смену уже переназначили" });
+    expect(sent).toEqual([]);
+  });
+
+  it("больничный задним числом: прошедшие и уже начавшиеся смены не передаются, админов не будят", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-10", "2026-08-13");
+    shift(db, anya, "2026-08-10");
+    shift(db, anya, "2026-08-11");
+    shift(db, anya, "2026-08-12", "07:00", "16:00"); // уже идёт
+    const tomorrow = shift(db, anya, "2026-08-13");
+    sent = [];
+
+    const made = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+
+    // Свободных нет — у завтрашней эскалация есть, у прошедших — нет.
+    expect(made.map((h) => h.shiftId)).toEqual([tomorrow.id]);
+    expect(sent.filter((m) => m.to === "admins")).toHaveLength(1);
   });
 });

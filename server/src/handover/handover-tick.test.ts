@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
 import { getHandover, updateHandover } from "../repo/handovers";
-import { startHandovers, offerTo } from "./handover-service";
+import { updateShift, deleteShift, getShift } from "../repo/shifts";
+import { startHandovers, offerTo, handoverVoidReason } from "./handover-service";
 import { runHandoverTick } from "./handover-tick";
 import type { Db } from "../db/client";
 
@@ -16,6 +17,9 @@ function deps(db: Db) {
   return {
     db,
     config: { teamTz: "Europe/Moscow", publicUrl: "https://example.com", handoverFanHours: 3, handoverEscalateHours: 12 },
+    // Передачи рождаются ночью 12-го (03:00 МСК) — до самой ранней фикстуры (05:00);
+    // «сейчас» самого тика задаёт его второй аргумент.
+    now: () => NOW - 6 * HOUR,
     messenger: {
       offer: async (employeeId: number, _h: number, text: string) => {
         sent.push({ to: `employee:${employeeId}`, text });
@@ -165,6 +169,35 @@ describe("handover tick", () => {
     expect(sent).toEqual([]);
   });
 
+  it("невзятая смена после начала снимается с больной — «Не назначено», строка в журнале", async () => {
+    // Решение владельца от 2026-09-28: иначе больная числится отработавшей, а
+    // в сетке нет дыры, которую админ ищет глазами.
+    const db = makeTestDb();
+    const { work, handover } = await scene(db, { date: "2026-08-12", start: "05:00" });
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("expired");
+    expect(getShift(db, work.id)?.employeeId).toBeNull();
+    expect(auditTypes(db)).toContain("handover_unassigned");
+  });
+
+  it("многодневную запись не снимает — неделя без человека хуже одного пропущенного дня", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const week = db.insert(shifts).values({
+      date: "2026-08-10", endDate: "2026-08-16", start: "07:00", end: "16:00", category: "duty", employeeId: anya,
+    }).returning().get();
+    const sick = db.insert(shifts).values({ date: "2026-08-12", endDate: "2026-08-12", category: "sick_leave", employeeId: anya }).returning().get();
+    const [handover] = await startHandovers({ ...deps(db), now: () => Date.UTC(2026, 7, 9, 12, 0) }, { sickEntry: sick, employeeId: anya });
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover!.id)?.status).toBe("expired");
+    expect(getShift(db, week.id)?.employeeId).toBe(anya);
+  });
+
   it("leaves resolved handovers alone", async () => {
     const db = makeTestDb();
     const { handover } = await scene(db);
@@ -182,7 +215,8 @@ describe("handover tick", () => {
     updateHandover(db, handover.id, { shiftId: null });
 
     expect(await runHandoverTick(deps(db), NOW)).toBe(1);
-    expect(getHandover(db, handover.id)?.status).toBe("expired");
+    // «cancelled», а не «expired»: смену не «никто не взял» — её не стало.
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
     expect(work.id).toBeGreaterThan(0);
   });
 
@@ -203,5 +237,126 @@ describe("handover tick", () => {
 
     expect(getHandover(db, second!.id)?.status).toBe("fanned");
     expect(work2.id).toBeGreaterThan(0);
+  });
+});
+
+describe("передача гаснет сама, когда смена ушла от дающего", () => {
+  // Путей, меняющих смену, восемь (правка и удаление админом, диапазон,
+  // обмен в API и в боте, архивация, выходные, импорт). Правило живёт у самой
+  // передачи, чтобы девятый путь не мог его забыть.
+
+  it("админ отдал смену Марку — передача погашена, Игорю, которого спросили, «отбой», Марку ничего", async () => {
+    const db = makeTestDb();
+    const { igor, work, handover } = await scene(db);
+    const mark = person(db, "Марк");
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, work.id, { employeeId: mark });
+    sent = [];
+
+    expect(await runHandoverTick(deps(db), NOW)).toBe(1);
+
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+    expect(auditTypes(db)).toContain("handover_cancelled");
+    expect(sent.map((m) => m.to)).toEqual([`employee:${igor}`]);
+  });
+
+  it("админ поставил смену тому самому Игорю, которому её предложили, — Игорю «отбоя» нет", async () => {
+    // Найдено проверяющим: «выходить не нужно» уходило новому хозяину смены.
+    const db = makeTestDb();
+    const { igor, work, handover } = await scene(db);
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, work.id, { employeeId: igor });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+    expect(sent).toEqual([]);
+  });
+
+  it("при переназначении «отбой» не говорит, что сняли больничный — его не снимали", async () => {
+    const db = makeTestDb();
+    const { igor, work, handover } = await scene(db);
+    const mark = person(db, "Марк");
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, work.id, { employeeId: mark });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).not.toContain("больничный");
+    expect(sent[0]!.text).toContain("Смену выходить не нужно");
+  });
+
+  it("смену переназначили и вернули больной — передача жива", async () => {
+    const db = makeTestDb();
+    const { anya, work, handover } = await scene(db);
+    const mark = person(db, "Марк");
+    updateShift(db, work.id, { employeeId: mark });
+    updateShift(db, work.id, { employeeId: anya });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("offered");
+  });
+
+  it("больничный укоротили — передача на снятый день погашена, веер получил «отбой»", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = db.insert(shifts).values({ date: "2026-08-13", endDate: "2026-08-14", category: "sick_leave", employeeId: anya }).returning().get();
+    shift(db, anya, "2026-08-13");
+    shift(db, anya, "2026-08-14");
+    const [first, second] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    updateHandover(db, second!.id, { status: "fanned" });
+    updateShift(db, sick.id, { endDate: "2026-08-13" });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    // Граница `endDate` — ещё больничный: 13-е живо.
+    expect(getHandover(db, first!.id)?.status).toBe("offered");
+    expect(getHandover(db, second!.id)?.status).toBe("cancelled");
+    expect(sent.map((m) => m.to)).toEqual([`employee:${igor}`]);
+  });
+
+  it("больничный удалили — передача погашена", async () => {
+    const db = makeTestDb();
+    const { sick, handover } = await scene(db);
+    deleteShift(db, sick.id);
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+  });
+
+  it("взятую передачу не трогает ничто — у смены законный хозяин", async () => {
+    const db = makeTestDb();
+    const { sick, work, handover } = await scene(db);
+    const mark = person(db, "Марк");
+    updateHandover(db, handover.id, { status: "taken" });
+    updateShift(db, work.id, { employeeId: mark });
+    deleteShift(db, sick.id);
+
+    expect(await runHandoverTick(deps(db), NOW)).toBe(0);
+    expect(getHandover(db, handover.id)?.status).toBe("taken");
+  });
+});
+
+describe("многодневная запись и больничный посреди неё", () => {
+  it("дежурство пн–вс, больничный со среды — передача жива (промежутки пересекаются)", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    db.insert(shifts).values({
+      date: "2026-08-10", endDate: "2026-08-16", start: "07:00", end: "16:00", category: "duty", employeeId: anya,
+    }).run();
+    const sick = db.insert(shifts).values({ date: "2026-08-12", endDate: "2026-08-12", category: "sick_leave", employeeId: anya }).returning().get();
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+
+    expect(handoverVoidReason(db, getHandover(db, handover!.id)!)).toBeNull();
   });
 });

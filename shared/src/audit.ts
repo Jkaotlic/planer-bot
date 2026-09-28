@@ -28,7 +28,7 @@ export const AUDIT_TYPES = [
   // оставшаяся без человека. Один тип на оба случая не отвечал бы на первый
   // вопрос, который к строке возникает.
   "handover_offered", "handover_declined", "handover_fanned",
-  "handover_taken", "handover_escalated", "handover_cancelled",
+  "handover_taken", "handover_escalated", "handover_cancelled", "handover_unassigned",
   "distribution_applied", "entries_range_created", "entries_range_rewritten", "roster_import",
   "employee_created", "employee_updated", "employee_reordered",
   "employee_archived", "employee_restored", "employee_admin_changed",
@@ -282,6 +282,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   handover_taken: (p) => ({ icon: "✅", title: "Смену забрали", lines: handoverView(p) }),
   handover_escalated: (p) => ({ icon: "⚠️", title: "Смена без человека — нужно решение", lines: handoverView(p) }),
   handover_cancelled: (p) => ({ icon: "↩", title: "Передача больше не нужна", lines: handoverView(p) }),
+  handover_unassigned: (p) => ({ icon: "🕳", title: "Смену никто не взял — снята с заболевшего", lines: handoverView(p) }),
 
   swaps_lock_changed: (p) => ({
     icon: "🔒",

@@ -11,9 +11,10 @@ import {
   renderReminderText,
   addressOf,
   coworkersEnumeration,
+  isAbsentOn,
 } from "@planer/shared";
 import type { Db } from "../db/client";
-import { listShiftsInRange, listDatesHolding } from "../repo/shifts";
+import { listShiftsInRange, listShiftsOverlapping, listDatesHolding } from "../repo/shifts";
 import { getEmployeeById } from "../repo/employees";
 import { getTemplate } from "../repo/templates";
 import { reminderHour } from "../repo/settings";
@@ -66,9 +67,15 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
   if (now.time < reminderHour(db)) return 0;
 
   const tomorrow = nextDate(now.date);
+  // Отпуск и больничный, начатые раньше, завтрашний день покрывают, а не
+  // начинают — `listShiftsInRange` их не видит.
+  const dayEntries = listShiftsOverlapping(db, tomorrow, tomorrow);
   const shifts = listShiftsInRange(db, tomorrow, tomorrow).filter(
     (s) =>
       s.employeeId != null &&
+      // Больной не получает «Завтра смена» про смену, которую отдаёт (решение
+      // владельца от 2026-09-28): до решения по передаче она стоит на нём.
+      !isAbsentOn(dayEntries, s.employeeId, tomorrow) &&
       s.start != null &&
       s.end != null &&
       wantsReminder(
@@ -135,15 +142,22 @@ function isNonShiftKind(shift: Shift, template: ShiftTemplate | undefined): bool
  * Дедуп по `employeeId`, а не по имени: у одного человека в этот день может
  * стоять больше одной записи того же вида (например, смена и подработка
  * рядом), и без дедупа он попал бы в перечень дважды.
+ *
+ * Отсутствующего в перечне нет: смена, которую больной отдаёт, до решения по
+ * передаче стоит на нём, но «с тобой» он завтра не будет. Записи дня читаются
+ * с пересечением, чтобы увидеть больничный, начатый раньше; сами соседи — только
+ * смены, начинающиеся в этот день.
  */
 function coworkerNamesFor(db: Db, shift: { date: string; kind: ReminderKind; employeeId: number | null }): string[] {
-  const dayShifts = listShiftsInRange(db, shift.date, shift.date);
+  const dayShifts = listShiftsOverlapping(db, shift.date, shift.date);
   const seen = new Set<number>();
   const names: string[] = [];
   for (const other of dayShifts) {
     if (other.employeeId == null || other.employeeId === shift.employeeId) continue;
     if (other.start == null || other.end == null) continue;
+    if (other.date !== shift.date) continue;
     if (seen.has(other.employeeId)) continue;
+    if (isAbsentOn(dayShifts, other.employeeId, shift.date)) continue;
     if (reminderKind({ start: other.start, end: other.end }) !== shift.kind) continue;
     if (isNonShiftKind(other, templateOf(db, other))) continue;
     const person = getEmployeeById(db, other.employeeId);

@@ -6,7 +6,7 @@ import { listRecentAudit } from "../repo/audit";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "./roster-service";
 import { parseRosterCsv, decodeRoster, type DecodeResult } from "./roster-codec";
 import { listActiveTemplates } from "../repo/templates";
-import { swapRequests } from "../db/schema";
+import { swapRequests, handovers } from "../db/schema";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
   return { perPerson, unknowns: [], preserved: [], proposedHolidays: [] };
@@ -168,6 +168,32 @@ describe("applyRosterImport", () => {
     expect(rows.every((r) => r.fromShiftId === null && r.toShiftId === null)).toBe(true);
     // The line was captured before the entry went away, so the notice can still name it.
     expect(result.expiredSwaps[0]!.fromShift).not.toBe("смену");
+  });
+
+  it("overwrite проходит, когда в месяце была передача смены — строка передачи остаётся историей", () => {
+    // Перезапись падала целиком с «FOREIGN KEY constraint failed» по-английски,
+    // если в месяце был хоть один больничный с передачей: ссылки передач никто
+    // не обнулял.
+    const db = makeTestDb();
+    const w = createEmployee(db, { displayName: "Первый Работник" });
+    // Разные дни: клетку с двумя записями импорт не трогает вовсе (crowdedCells).
+    const work = createShift(db, { ...dayShift("2026-06-01"), employeeId: w.id });
+    const sick = createShift(db, { date: "2026-06-03", endDate: "2026-06-03", category: "sick_leave", start: null, end: null, employeeId: w.id });
+    const handover = db.insert(handovers)
+      .values({ shiftId: work.id, sickEntryId: sick.id, fromEmployeeId: w.id, status: "expired" })
+      .returning().all()[0]!;
+
+    const decoded = decode([{ name: "Первый Работник", entries: [dayShift("2026-06-02")] }]);
+    applyRosterImport(
+      db, decoded, [{ csvName: "Первый Работник", action: "rename", employeeId: w.id }], null,
+      { overwrite: true, span: { from: "2026-06-01", to: "2026-06-30" } },
+    );
+
+    const row = db.select().from(handovers).all().find((h) => h.id === handover.id)!;
+    expect(row.shiftId).toBeNull();
+    // Ссылка на больничный обнуляется, только если импорт его удалил.
+    const sickLeft = listShiftsInRange(db, "2026-06-03", "2026-06-03").some((s) => s.id === sick.id);
+    expect(row.sickEntryId).toBe(sickLeft ? sick.id : null);
   });
 
   it("overwrite keeps entries the CSV cannot express — weekend work survives a re-import", () => {
