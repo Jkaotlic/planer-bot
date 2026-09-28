@@ -1243,7 +1243,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       actorEmployeeId = Number(actorParam);
     }
 
-    const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId, viewerEmployeeId: c.get("auth").employeeId });
+    const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId, viewerEmployeeId: c.get("auth").employeeId, teamTz: config.teamTz });
     return c.json({
       total: page.total,
       limit,
