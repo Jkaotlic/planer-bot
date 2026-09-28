@@ -633,7 +633,8 @@ export interface ApiClient {
   /** The slot, plus how many of the team the «нужен человек» broadcast reached —
    *  only people who linked Telegram can be told at all. */
   postSlot(input: NewSlotInput): Promise<VacantSlot & { delivered: number; intended: number }>;
-  assignSlot(slotId: number, employeeId: number): Promise<void>;
+  /** `notified: false` — письмо назначенному не дошло; `undefined` — письма не было (повтор). */
+  assignSlot(slotId: number, employeeId: number): Promise<{ notified?: boolean }>;
   unassignSlot(assignmentId: number): Promise<void>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
@@ -1018,7 +1019,8 @@ export const realClient: ApiClient = {
   },
 
   async assignSlot(slotId, employeeId) {
-    await authorizedPostJson(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
+    const res = await authorizedPostJson<{ notified?: boolean }>(`/api/admin/weekend/slots/${slotId}/assign`, { employeeId });
+    return { notified: res?.notified };
   },
   async unassignSlot(assignmentId) {
     await authorizedPostJson(`/api/admin/weekend/assignments/${assignmentId}/unassign`, {});
@@ -1254,7 +1256,10 @@ const devClient: ApiClient = {
   getEmployeeInvite: (id, regenerate) => employeesMock.getEmployeeInvite(id, regenerate),
   getWeekendSlots: () => mockGetWeekendSlots(),
   postSlot: (input) => mockPostSlot(input),
-  assignSlot: (slotId, employeeId) => mockAssignSlot(slotId, employeeId),
+  assignSlot: async (slotId, employeeId) => {
+    await mockAssignSlot(slotId, employeeId);
+    return { notified: true };
+  },
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),

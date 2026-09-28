@@ -10,6 +10,7 @@ import { setManualDay } from "../repo/calendar-days";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { addInterest } from "../repo/weekend";
 
 const config = testConfig();
 function testBot() {
@@ -550,5 +551,26 @@ describe("вакантный слот проверяет время, а не п�
     await app.request(`/api/weekend/slots/${slotId}/interest`, authed(token));
     const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: w.id }));
     expect(assigned.status).toBe(201);
+  });
+});
+
+describe("назначение на выходной: дошло ли", () => {
+  it("у назначенного нет Telegram — notified: false; с Telegram — true", async () => {
+    const db = makeTestDb();
+    const { bot } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 401);
+    const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "i-no-tg-w" });
+    const date = nextSaturday();
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00" }))).json()).slot.id as number;
+    await app.request(`/api/weekend/slots/${slotId}/interest`, authed(anya.token));
+    addInterest(db, slotId, igor.id);
+
+    const toAnya = await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }))).json();
+    const toIgor = await (await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: igor.id }))).json();
+
+    expect(toAnya.notified).toBe(true);
+    expect(toIgor.notified).toBe(false);
   });
 });

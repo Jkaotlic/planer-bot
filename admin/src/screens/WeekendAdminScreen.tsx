@@ -20,6 +20,17 @@ function monthRange(d: Date): { from: string; to: string } {
  * bare «смена открыта» reads as «спросил команду» even when it asked a third of
  * it. Mirrored in the other console — see the twin of this file.
  */
+/**
+ * Что сказать после назначения на выходной. `null` — всё дошло или письма не
+ * было (повторное назначение) — говорить не о чем.
+ *
+ * Запись в графике появляется сразу, и без этой строки админ считал человека
+ * предупреждённым, хотя письмо не дошло (нет Telegram, бот заблокирован).
+ */
+export function assignNotice(notified: boolean | undefined): string | null {
+  return notified === false ? "Назначено, но сообщение в Telegram не дошло — предупреди человека лично." : null;
+}
+
 export function reachNotice(delivered: number, intended: number): string {
   if (delivered >= intended) return `Смена открыта — спросили всю команду (${intended}).`;
   return `Смена открыта, но уведомление дошло до ${delivered} из ${intended}: остальные ещё не подключили телеграм.`;
@@ -55,7 +66,8 @@ export function WeekendAdminScreen() {
     setBusy(true);
     setError(null);
     try {
-      await apiClient.assignSlot(slotId, employeeId);
+      const { notified } = await apiClient.assignSlot(slotId, employeeId);
+      setNotice(assignNotice(notified));
       await reloadSlots();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось назначить");

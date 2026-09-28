@@ -254,13 +254,11 @@ export async function notifyReminder(bot: Bot, telegramUserId: number, text: str
 }
 
 /** Sends a swap proposal with inline Принять/Отклонить buttons routed to `swap:<action>:<requestId>` callbacks. */
-export async function notifySwapProposal(bot: Bot, telegramUserId: number, requestId: number, text: string): Promise<void> {
+export async function notifySwapProposal(bot: Bot, telegramUserId: number, requestId: number, text: string): Promise<boolean> {
   const kb = new InlineKeyboard().text("✅ Принять", `swap:accept:${requestId}`).text("✖ Отклонить", `swap:decline:${requestId}`);
-  try {
-    await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
-  } catch (err) {
-    console.error(`notifySwapProposal: failed for ${telegramUserId}:`, safeErrorMessage(err));
-  }
+  // Ответ «дошло ли» — ради инициатора: без него он ждал ответа, которого не
+  // могло быть (нет Telegram, бот заблокирован), а экран говорил «отправлено».
+  return (await sendOutcome(bot, telegramUserId, text, kb)).ok;
 }
 
 /**
@@ -297,13 +295,9 @@ export async function notifyVacantSlot(
 
 /** Sends a weekend-work offer with inline Беру/Не смогу buttons routed to
  * `weekend:confirm:<assignmentId>` / `weekend:decline:<assignmentId>` callbacks. */
-export async function notifyWeekendOffer(bot: Bot, telegramUserId: number, assignmentId: number, text: string): Promise<void> {
+export async function notifyWeekendOffer(bot: Bot, telegramUserId: number, assignmentId: number, text: string): Promise<boolean> {
   const kb = new InlineKeyboard().text("✅ Беру", `weekend:confirm:${assignmentId}`).text("✖ Не смогу", `weekend:decline:${assignmentId}`);
-  try {
-    await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
-  } catch (err) {
-    console.error(`notifyWeekendOffer: failed for ${telegramUserId}:`, safeErrorMessage(err));
-  }
+  return (await sendOutcome(bot, telegramUserId, text, kb)).ok;
 }
 
 /**
