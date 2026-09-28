@@ -1,6 +1,6 @@
 import { and, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { employees, shifts, auditLog, swapRequests, reminderLog, weekendAssignments } from "../db/schema";
+import { employees, shifts, auditLog, swapRequests, reminderLog, weekendAssignments, handovers } from "../db/schema";
 import { createEntrySchema } from "../http/entry-schema";
 import { listActive, getEmployeeById, normalizeFullName } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
@@ -188,6 +188,8 @@ export function applyRosterImport(
           tx.update(swapRequests).set({ toShiftId: null }).where(inArray(swapRequests.toShiftId, ids)).run();
           tx.delete(reminderLog).where(inArray(reminderLog.shiftId, ids)).run();
           tx.update(weekendAssignments).set({ shiftId: null }).where(inArray(weekendAssignments.shiftId, ids)).run();
+          tx.update(handovers).set({ shiftId: null }).where(inArray(handovers.shiftId, ids)).run();
+          tx.update(handovers).set({ sickEntryId: null }).where(inArray(handovers.sickEntryId, ids)).run();
           tx.delete(shifts).where(inArray(shifts.id, ids)).run();
         }
         deleted = ids.length;

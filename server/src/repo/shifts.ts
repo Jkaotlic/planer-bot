@@ -1,6 +1,6 @@
 import { and, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { shifts, swapRequests, reminderLog, type Shift, type NewShift, type SwapRequest, weekendAssignments } from "../db/schema";
+import { shifts, swapRequests, reminderLog, type Shift, type NewShift, type SwapRequest, weekendAssignments, handovers } from "../db/schema";
 
 export function createShift(db: Db, data: NewShift): Shift {
   return db.insert(shifts).values(data).returning().all()[0]!;
@@ -155,6 +155,12 @@ export function deleteShift(db: Db, id: number): { deleted: boolean; expiredSwap
     // A weekend assignment points at the entry it created; drop the link (keeping the
     // assignment itself) or the delete trips the foreign key.
     tx.update(weekendAssignments).set({ shiftId: null }).where(eq(weekendAssignments.shiftId, id)).run();
+    // Передачи — та же история, что и обмены: «Аня отдавала эту смену» остаётся
+    // правдой после удаления. Живую передачу с обнулённой ссылкой погасит тик
+    // (`handoverVoidReason`), а без обнуления удаление падало на FK для ЛЮБОГО
+    // пути, кроме самоудаления больничного, которое отвязывало её само.
+    tx.update(handovers).set({ shiftId: null }).where(eq(handovers.shiftId, id)).run();
+    tx.update(handovers).set({ sickEntryId: null }).where(eq(handovers.sickEntryId, id)).run();
     const deleted = tx.delete(shifts).where(eq(shifts.id, id)).returning().all().length > 0;
     return { deleted, expiredSwaps };
   });

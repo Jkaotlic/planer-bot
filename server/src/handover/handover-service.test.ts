@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { employees, shifts, auditLog, type Shift } from "../db/schema";
-import { getShift } from "../repo/shifts";
+import { eq } from "drizzle-orm";
+import { employees, shifts, auditLog, handovers as handoversTable, type Shift } from "../db/schema";
+import { getShift, deleteShift } from "../repo/shifts";
 import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, escalate } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
@@ -543,4 +544,28 @@ describe("эскалация несёт кнопку «Открыть графи
       "https://example.com/app/?screen=schedule&date=2026-08-15",
     );
   });
+});
+
+describe("удаление записи, по которой была передача", () => {
+  // Спека передач обещала: «строка обязана пережить удаление смены». FK без
+  // ON DELETE делал наоборот — смена, которую хоть раз передавали, становилась
+  // неудаляемой навсегда (админское удаление, перезапись месяца, выходные).
+  for (const status of ["offered", "fanned", "taken", "expired", "cancelled"] as const) {
+    it(`смена и больничный удаляются при передаче в статусе ${status}`, async () => {
+      const db = makeTestDb();
+      const anya = person(db, "Аня");
+      person(db, "Игорь");
+      const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+      const work = shift(db, anya, "2026-08-12");
+      const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+      db.update(handoversTable).set({ status }).where(eq(handoversTable.id, handover!.id)).run();
+
+      expect(deleteShift(db, work.id).deleted).toBe(true);
+      expect(deleteShift(db, sick.id).deleted).toBe(true);
+      const row = getHandover(db, handover!.id)!;
+      expect(row.shiftId).toBeNull();
+      expect(row.sickEntryId).toBeNull();
+      expect(row.status).toBe(status);
+    });
+  }
 });
