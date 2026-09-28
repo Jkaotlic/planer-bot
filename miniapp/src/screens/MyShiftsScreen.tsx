@@ -141,11 +141,14 @@ export function MyShiftsScreen({
           за десятком экранов прокрутки. Те же две формы открывают кнопки бота. */}
       <List>
         <Section header="Записать себе">
-          <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
-            <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("sick")}>
+          {/* `wrap`: у наблюдателя с «Веду график сам» кнопок три, и в одну
+              строку на 390px все три резались многоточием. Третья — строкой
+              ниже на всю ширину (`flexBasis: 100%`). */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "4px 12px 12px" }}>
+            <Button size="m" stretched mode="bezeled" style={{ flex: "1 1 40%" }} onClick={() => onSelfEntry("sick")}>
               🤒 Больничный
             </Button>
-            <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("event")}>
+            <Button size="m" stretched mode="bezeled" style={{ flex: "1 1 40%" }} onClick={() => onSelfEntry("event")}>
               📌 Мероприятие
             </Button>
             {/* Эффективное право (`canAddOwnShifts`), не сырой тумблер: снятие роли
@@ -154,7 +157,7 @@ export function MyShiftsScreen({
                 на форму, которая никогда не откроется (`App.tsx`), и отвечающая 403
                 на каждое нажатие, хуже отсутствующей. */}
             {canAddOwnShifts(me) && (
-              <Button size="m" stretched mode="bezeled" onClick={() => onSelfEntry("shift")}>
+              <Button size="m" stretched mode="bezeled" style={{ flexBasis: "100%" }} onClick={() => onSelfEntry("shift")}>
                 🕒 Поставить себе смену
               </Button>
             )}

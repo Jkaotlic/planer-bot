@@ -266,8 +266,12 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <Avatar acronym={initialsOf(person.name)} size={28} style={{ background: palette.bg, color: palette.fg, flex: "none" }} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontWeight: 500, fontSize: 14.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{person.name}</span>
+        {/* `wrap`: плашки «реже всех работал» / «Отпуск» не сжимаются
+            (`flex: none`), и без переноса имя уходило в одну букву — замер
+            2026-09-28 на 390×844: «И», «Д». Теперь плашка уходит строкой ниже,
+            а имя режется многоточием, только если не влезает само по себе. */}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+          <span style={{ fontWeight: 500, fontSize: 14.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{person.name}</span>
           {recommended && <FairBadge />}
           {person.absence && <AbsenceBadge category={person.absence} />}
         </div>
@@ -290,7 +294,7 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
 function AbsenceBadge({ category }: { category: Category }) {
   const palette = useCategoryPalette(category);
   return (
-    <span style={{ flex: "none", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap" }}>
+    <span style={{ flex: "0 1 auto", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap", boxSizing: "border-box" }}>
       {categoryLabel(category)}
     </span>
   );
@@ -301,7 +305,7 @@ function FairBadge() {
   const isDark = useIsDark();
   const palette = isDark ? { bg: "rgba(240,170,60,0.22)", fg: "#F4C169" } : { bg: "#FCEEDA", fg: "#8A5700" };
   return (
-    <span style={{ flex: "none", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap" }}>
+    <span style={{ flex: "0 1 auto", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap", boxSizing: "border-box" }}>
       ★ реже всех работал
     </span>
   );
