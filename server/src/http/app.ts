@@ -1065,6 +1065,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.deadline !== undefined ? { deadline: parsed.value.deadline } : {}),
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
+      ...(patch.autoSendOn !== undefined ? { autoSendOn: patch.autoSendOn } : {}),
     });
     if (linkChanged && bot) {
       await notifyLinkReady(db, bot, result.collection, c.get("auth").employeeId, asOf);

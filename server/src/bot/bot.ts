@@ -29,7 +29,7 @@ import { reminderHour } from "../repo/settings";
 import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
@@ -1174,8 +1174,25 @@ export function createBot(deps: BotDeps): Bot {
     const autoSendOn = autoSendDateFor(collection.celebratedOn, today, Number(ctx.match[2]));
     updateCollection(db, collection.id, { autoSendOn });
     await ctx.answerCallbackQuery({ text: "Переставил" });
+    await reportAutoSendChange(who.me.id, collection, autoSendOn);
     await ctx.reply(autoSendLabel(autoSendOn, today) ?? "Автоотправка выключена.");
   });
+
+  /**
+   * Автоотправка — письмо всей команде в назначенный день. Её выключение или
+   * перенос из бота не оставлял следа: ни строки журнала, ни слова другим
+   * админам, которые могли на рассылку рассчитывать. Та же строка журнала, что
+   * у правки сбора в консоли (`collection_updated`).
+   */
+  async function reportAutoSendChange(actorId: number, collection: { id: number; title: string | null; employeeId: number | null }, autoSendOn: string | null): Promise<void> {
+    const what = collection.title ?? (collection.employeeId != null ? `ДР ${getEmployeeById(db, collection.employeeId)?.displayName ?? ""}`.trim() : "сбор");
+    recordAudit(db, "collection_updated", actorId, {
+      collectionId: collection.id, employeeId: collection.employeeId, title: collection.title, autoSendOn,
+    });
+    const who = getEmployeeById(db, actorId)?.displayName ?? "Админ";
+    const change = autoSendOn ? `перенесена на ${formatDayMonth(autoSendOn)}` : "выключена";
+    await notifyAdmins(bot, db, "celebrations", `💰 Автоотправка сбора «${what}» ${change} — ${who}.`, undefined, { exceptEmployeeId: actorId });
+  }
 
   bot.callbackQuery(/^collection:autooff:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
@@ -1192,6 +1209,7 @@ export function createBot(deps: BotDeps): Bot {
     // значит наказывать за нажатие кнопки «подожди».
     updateCollection(db, collection.id, { autoSendOn: null });
     await ctx.answerCallbackQuery({ text: "Не разошлю" });
+    await reportAutoSendChange(who.me.id, collection, null);
     await ctx.reply("Не разошлю сам. Сбор остался в «Днях рождения» — разошлёшь, когда решишь.");
   });
 

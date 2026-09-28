@@ -515,6 +515,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     }
     // Сам текст письма в журнал не копируется — здесь только факт правки.
     if (p.messageText !== undefined) lines.push(str(p.messageText) ? "текст изменён" : "текст сброшен на стандартный");
+    if (p.autoSendOn !== undefined) lines.push(`автоотправка: ${str(p.autoSendOn) ? dayLabel(p.autoSendOn) : "выключена"}`);
     return { icon: "💰", title: "Изменён сбор", lines };
   },
   collection_sent: (p) => {

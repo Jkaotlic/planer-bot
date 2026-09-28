@@ -404,9 +404,14 @@ export async function notifyAdmins(
   kind: AdminNoticeKind,
   text: string,
   action?: AdminAction,
-  /** Сообщение, которое уходит следом за текстом копией (скриншот в жалобе). */
-  attachment?: { fromChatId: number; messageId: number },
+  opts: {
+    /** Сообщение, которое уходит следом за текстом копией (скриншот в жалобе). */
+    attachment?: { fromChatId: number; messageId: number };
+    /** Кому не писать — тому, кто сам это сделал: он и так знает. */
+    exceptEmployeeId?: number;
+  } = {},
 ): Promise<AdminReach> {
+  const { attachment, exceptEmployeeId } = opts;
   const reach: AdminReach = { attempted: 0, delivered: 0 };
   // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
   // `notifyReminder`: за настройкой, о существовании которой не знаешь, не ходят.
@@ -420,6 +425,7 @@ export async function notifyAdmins(
   kb.text("🔕 Не писать мне про это", `notice:mute:${kind}`);
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
+    if (admin.id === exceptEmployeeId) continue;
     // Единственное место на весь проект, где эта проверка делается. Если она
     // понадобится где-то ещё — значит, письмо шлют мимо `notifyAdmins`, и чинить
     // надо это, а не копировать условие.
@@ -443,7 +449,7 @@ export async function notifyAdmins(
 export async function notifyBugReport(
   bot: Bot, db: Db, reportId: number, text: string, attachment?: { fromChatId: number; messageId: number },
 ): Promise<void> {
-  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` }, attachment);
+  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` }, { attachment });
 }
 
 /**
