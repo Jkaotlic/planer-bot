@@ -217,3 +217,15 @@ export function countConfirmedByEmployeeInMonth(db: Db, employeeId: number, mont
     ))
     .all().length;
 }
+
+/** Назначения, на которые человек ещё не ответил, у слотов в [from, to]. */
+export function listUnansweredAssignments(
+  db: Db, from: string, to: string,
+): { assignment: WeekendAssignment; slot: VacantSlot }[] {
+  return db
+    .select({ assignment: weekendAssignments, slot: vacantSlots })
+    .from(weekendAssignments)
+    .innerJoin(vacantSlots, eq(vacantSlots.id, weekendAssignments.slotId))
+    .where(and(eq(weekendAssignments.status, "offered"), gte(vacantSlots.date, from), lte(vacantSlots.date, to)))
+    .all();
+}

@@ -21,6 +21,7 @@ import { teamNow } from "./util/team-time";
 import { installFatalHandlers } from "./util/fatal-log";
 import { installLogTimestamps } from "./util/log-time";
 import { createTickScheduler } from "./util/ticks";
+import { runWeekendNudgeTick } from "./weekend/weekend-nudge";
 
 // Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
 // печатает Node сам и несёт в логе токен бота открытым текстом.
@@ -78,6 +79,8 @@ const tickRound = createTickScheduler([
     // соседей: заявка, на которую никто не ответил, не должна ждать своего
     // отдельного таймера, чтобы погаснуть, когда её смена уже прошла.
     { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
+    // Выходной без ответа за два дня до слота — админам одно письмо.
+    { name: "weekend-nudge", run: () => runWeekendNudgeTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
 ]);
 setInterval(tickRound, REMINDER_TICK_MS);
 
