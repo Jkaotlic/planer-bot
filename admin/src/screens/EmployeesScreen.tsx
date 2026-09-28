@@ -147,7 +147,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
         fullOrder={active}
         emptyLabel="Пока нет активных работников"
         actionLabel="Архивировать"
-        confirmQuestionFor={(e) => `${e.displayName} — в архив? Его будущие смены станут «Не назначено».`}
+        confirmQuestionFor={(e) => `${e.displayName} — в архив? Будущие смены станут «Не назначено», отпуска впереди удалятся, обмены и выходные снимутся.`}
         busyId={busyId}
         rowError={rowError}
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}

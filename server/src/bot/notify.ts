@@ -81,7 +81,7 @@ export function swapAutoCancelledText(p: SwapAuditPayload): string {
 /** Why a pending swap stopped being possible without its initiator doing
  *  anything — an admin removed the entry under it, replaced the whole month, or
  *  the shift changed hands so the trade no longer adds up. */
-export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed" | "date_passed";
+export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed" | "date_passed" | "employee_archived";
 
 /**
  * Sent to *both* sides of a pending swap an admin's edit just invalidated —
@@ -102,6 +102,7 @@ export function swapExpiredText(p: SwapAuditPayload, cause: SwapExpiryCause): st
   const why =
     cause === "entry_deleted" ? "смену удалили из расписания"
     : cause === "roster_reimported" ? "график за этот период загрузили заново"
+    : cause === "employee_archived" ? "одного из вас убрали в архив"
     : "смена изменилась, и обмен больше невозможен";
   return `Обмен неактуален: ${why}. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
 }

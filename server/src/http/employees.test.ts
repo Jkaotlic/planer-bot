@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
-import { employees } from "../db/schema";
+import { employees, swapRequests } from "../db/schema";
+import { createVacantSlot, addInterest, getAssignment } from "../repo/weekend";
+import { assignSlot } from "../weekend/weekend-service";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
@@ -1265,5 +1267,45 @@ describe("контракт домена employees", () => {
     const parsed = adminEmployeesResponseSchema.safeParse(await res.json());
     expect(parsed.error?.issues ?? []).toEqual([]);
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("архивация гасит хвосты", () => {
+  // Архивация снимала человека с будущих смен — и только. Висящий обмен с ним
+  // оставался зомби-заявкой у второй стороны, предложение выходного — живым,
+  // а будущий отпуск становился «ничьим» отпуском в графике. Решение владельца
+  // от 2026-09-28: отсутствия удалять, обмены гасить с письмом, выходные снимать.
+  const inDays = (n: number): string => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + n);
+    return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
+  };
+
+  it("обмен гаснет с письмом второй стороне, будущий отпуск удалён, выходной снят, смена — «Не назначено»", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня", 801);
+    const igor = worker(db, "Игорь", 802);
+    const anyaShift = createShift(db, { date: inDays(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: inDays(3), start: "12:00", end: "21:00", employeeId: igor.id });
+    const swap = createSwapRequest(db, { fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id });
+    const vacation = createShift(db, { date: inDays(10), endDate: inDays(14), category: "vacation", start: null, end: null, employeeId: anya.id });
+    const slot = createVacantSlot(db, { date: inDays(12), start: "10:00", end: "18:00" });
+    addInterest(db, slot.id, anya.id);
+    const assigned = assignSlot(db, slot.id, anya.id, inDays(0));
+    if (!assigned.ok) throw new Error(String(assigned.reason));
+
+    const res = await app.request(`/api/admin/employees/${anya.id}/archive`, authedJson(admin, {}));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(db.select().from(swapRequests).all().find((r) => r.id === swap.id)!.status).toBe("cancelled");
+    expect(sent.some((m) => m.chat_id === 802 && String(m.text).includes("Аня"))).toBe(true);
+    expect(getShift(db, vacation.id)).toBeUndefined();
+    expect(getShift(db, anyaShift.id)?.employeeId).toBeNull();
+    expect(getAssignment(db, assigned.assignment.id)).toBeUndefined();
+    expect(body).toMatchObject({ ok: true, expiredSwaps: 1, removedAbsences: 1, unassignedWeekend: 1 });
   });
 });

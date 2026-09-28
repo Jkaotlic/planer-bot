@@ -261,7 +261,7 @@ export function AdminEmployeesScreen() {
                 onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
                 onBirthDate={(birthDate) => withBusy(e.id, () => apiClient.setBirthDate(e.id, birthDate))}
                 actionLabel="В архив"
-                confirmQuestion={`${e.displayName} — в архив? Его будущие смены станут «Не назначено».`}
+                confirmQuestion={`${e.displayName} — в архив? Будущие смены станут «Не назначено», отпуска впереди удалятся, обмены и выходные снимутся.`}
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
                 onToggleAdmin={() => withBusy(e.id, () => apiClient.setEmployeeAdmin(e.id, !e.isAdmin))}

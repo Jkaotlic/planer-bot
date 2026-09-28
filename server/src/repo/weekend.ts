@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, lte, like, notInArray } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, like, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   shifts,
@@ -82,6 +82,15 @@ export function removeInterest(db: Db, slotId: number, employeeId: number): bool
       .where(and(eq(slotInterest.slotId, slotId), eq(slotInterest.employeeId, employeeId)))
       .run().changes > 0
   );
+}
+
+/** Снять все отклики человека на слоты с `fromDate` — при архивации. */
+export function removeAllInterestOf(db: Db, employeeId: number, fromDate: string): void {
+  const slotIds = db.select({ id: vacantSlots.id }).from(vacantSlots).where(gte(vacantSlots.date, fromDate)).all().map((r) => r.id);
+  if (slotIds.length === 0) return;
+  db.delete(slotInterest)
+    .where(and(eq(slotInterest.employeeId, employeeId), inArray(slotInterest.slotId, slotIds)))
+    .run();
 }
 
 export function listInterestedEmployeeIds(db: Db, slotId: number): number[] {
