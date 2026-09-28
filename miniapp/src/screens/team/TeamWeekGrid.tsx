@@ -32,7 +32,10 @@ export function TeamWeekGrid({
   today,
   isDark,
   calendar,
+  meId,
 }: {
+  /** Чья строка — своя: её подсвечиваем, чтобы не искать себя среди ~26. */
+  meId?: number;
   model: WeekModel;
   today: string;
   isDark: boolean;
@@ -79,7 +82,11 @@ export function TeamWeekGrid({
               role="row"
               key={row.employeeId ?? "unassigned"}
             >
-              <div className="team-week__name" role="rowheader">
+              <div
+                className={row.employeeId != null && row.employeeId === meId ? "team-week__name team-week__name--me" : "team-week__name"}
+                role="rowheader"
+                aria-current={row.employeeId != null && row.employeeId === meId ? "true" : undefined}
+              >
                 <b>{name.surname}</b>
                 <span>{name.rest}</span>
               </div>

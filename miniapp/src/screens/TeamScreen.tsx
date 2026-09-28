@@ -41,7 +41,7 @@ import "./team/team-schedule.css";
  *  `today` — командная дата с сервера (`myShifts.today` из bootstrap), не часы
  *  телефона: рядом с полуночью они расходятся, и раньше «Сегодня» здесь
  *  показывало день телефона, а не тот, что команда считает сегодняшним. */
-export function TeamScreen({ templates, initialMode = "today", today }: { templates: readonly Template[]; initialMode?: TeamMode; today: string }) {
+export function TeamScreen({ templates, initialMode = "today", today, meId }: { templates: readonly Template[]; initialMode?: TeamMode; today: string; meId?: number }) {
   const [view, setView] = useState(() => createTeamScreenState(today, initialMode));
   const [tabFocusMode, setTabFocusMode] = useState<TeamMode>(view.displayMode);
   const viewRef = useRef(view);
@@ -170,7 +170,7 @@ export function TeamScreen({ templates, initialMode = "today", today }: { templa
             />
           )}
           {view.schedule && view.displayMode === "week" && (
-            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} today={today} />
+            <WeekView schedule={view.schedule} from={displayRange.from} templates={templates} isDark={isDark} today={today} meId={meId} />
           )}
         </TeamViewPanel>
       </div>
@@ -185,8 +185,10 @@ function WeekView({
   templates,
   isDark,
   today,
+  meId,
 }: {
   schedule: TeamSchedule;
+  meId?: number;
   from: string;
   templates: readonly Template[];
   isDark: boolean;
@@ -198,7 +200,7 @@ function WeekView({
   const model = buildWeekModel(from, schedule, templates);
   return (
     <>
-      <TeamWeekGrid model={model} today={today} isDark={isDark} calendar={calendarFrom(schedule.calendar)} />
+      <TeamWeekGrid model={model} today={today} isDark={isDark} calendar={calendarFrom(schedule.calendar)} meId={meId} />
       <TeamWeekLegend items={buildWeekLegend(model)} isDark={isDark} />
     </>
   );

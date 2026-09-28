@@ -654,7 +654,7 @@ export function App() {
           раз, и когда на неё возвращаются: выбор человека про то, каким видом
           он смотрит график, а не только про первый экран за сеанс. */}
       {tab === "team" && (
-        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} today={data.today} />
+        <TeamScreen templates={data.templates} initialMode={startTabTeamWeek(data.me.startTab) ? "week" : "today"} today={data.today} meId={data.me.id} />
       )}
       {tab === "collections" && (
         <CollectionsTabScreen
