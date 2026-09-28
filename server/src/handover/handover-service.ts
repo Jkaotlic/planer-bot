@@ -408,9 +408,30 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
   return { ok: true };
 }
 
-/** The shift started and nobody took it. Silent by design — the admins already know. */
+/**
+ * The shift started and nobody took it. Silent by design — the admins already know.
+ *
+ * Однодневная смена, всё ещё стоящая на дающем, с него снимается — «Не
+ * назначено» (решение владельца от 2026-09-28). Иначе больной числился
+ * отработавшим в отчёте, а в сетке не было дыры, которую админ ищет глазами.
+ * Многодневную не трогаем: снять неделю из-за одного дня больничного значило
+ * бы оставить без человека и дни, которые он отработает.
+ */
 export function expireHandover(deps: HandoverDeps, handoverId: number): void {
-  updateHandover(deps.db, handoverId, { status: "expired", resolvedAt: new Date() });
+  const { db } = deps;
+  const unassigned = db.transaction(() => {
+    const handover = getHandover(db, handoverId);
+    if (!handover) return undefined;
+    updateHandover(db, handoverId, { status: "expired", resolvedAt: new Date() });
+    const shift = shiftOf(db, handover);
+    if (!shift || shift.employeeId !== handover.fromEmployeeId) return undefined;
+    if (shift.endDate != null && shift.endDate !== shift.date) return undefined;
+    updateShift(db, shift.id, { employeeId: null });
+    return { handover, shift };
+  });
+  if (unassigned) {
+    recordAudit(db, "handover_unassigned", null, auditPayload(db, unassigned.handover, unassigned.shift, null));
+  }
 }
 
 /**

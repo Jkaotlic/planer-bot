@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
 import { getHandover, updateHandover } from "../repo/handovers";
-import { updateShift, deleteShift } from "../repo/shifts";
+import { updateShift, deleteShift, getShift } from "../repo/shifts";
 import { startHandovers, offerTo, handoverVoidReason } from "./handover-service";
 import { runHandoverTick } from "./handover-tick";
 import type { Db } from "../db/client";
@@ -167,6 +167,35 @@ describe("handover tick", () => {
     expect(getHandover(db, handover.id)?.status).toBe("expired");
     // Админам писали на эскалации; второе письмо о том же ничего не добавляет.
     expect(sent).toEqual([]);
+  });
+
+  it("невзятая смена после начала снимается с больной — «Не назначено», строка в журнале", async () => {
+    // Решение владельца от 2026-09-28: иначе больная числится отработавшей, а
+    // в сетке нет дыры, которую админ ищет глазами.
+    const db = makeTestDb();
+    const { work, handover } = await scene(db, { date: "2026-08-12", start: "05:00" });
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("expired");
+    expect(getShift(db, work.id)?.employeeId).toBeNull();
+    expect(auditTypes(db)).toContain("handover_unassigned");
+  });
+
+  it("многодневную запись не снимает — неделя без человека хуже одного пропущенного дня", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const week = db.insert(shifts).values({
+      date: "2026-08-10", endDate: "2026-08-16", start: "07:00", end: "16:00", category: "duty", employeeId: anya,
+    }).returning().get();
+    const sick = db.insert(shifts).values({ date: "2026-08-12", endDate: "2026-08-12", category: "sick_leave", employeeId: anya }).returning().get();
+    const [handover] = await startHandovers({ ...deps(db), now: () => Date.UTC(2026, 7, 9, 12, 0) }, { sickEntry: sick, employeeId: anya });
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover!.id)?.status).toBe("expired");
+    expect(getShift(db, week.id)?.employeeId).toBe(anya);
   });
 
   it("leaves resolved handovers alone", async () => {
