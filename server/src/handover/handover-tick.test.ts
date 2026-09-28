@@ -3,7 +3,7 @@ import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
 import { getHandover, updateHandover } from "../repo/handovers";
 import { updateShift, deleteShift } from "../repo/shifts";
-import { startHandovers, offerTo } from "./handover-service";
+import { startHandovers, offerTo, handoverVoidReason } from "./handover-service";
 import { runHandoverTick } from "./handover-tick";
 import type { Db } from "../db/client";
 
@@ -282,5 +282,20 @@ describe("передача гаснет сама, когда смена ушла
 
     expect(await runHandoverTick(deps(db), NOW)).toBe(0);
     expect(getHandover(db, handover.id)?.status).toBe("taken");
+  });
+});
+
+describe("многодневная запись и больничный посреди неё", () => {
+  it("дежурство пн–вс, больничный со среды — передача жива (промежутки пересекаются)", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    db.insert(shifts).values({
+      date: "2026-08-10", endDate: "2026-08-16", start: "07:00", end: "16:00", category: "duty", employeeId: anya,
+    }).run();
+    const sick = db.insert(shifts).values({ date: "2026-08-12", endDate: "2026-08-12", category: "sick_leave", employeeId: anya }).returning().get();
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+
+    expect(handoverVoidReason(db, getHandover(db, handover!.id)!)).toBeNull();
   });
 });

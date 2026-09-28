@@ -440,7 +440,10 @@ export function handoverVoidReason(db: Db, handover: Handover): VoidReason | nul
   if (shift.employeeId !== handover.fromEmployeeId) return "reassigned";
   const sick = handover.sickEntryId == null ? undefined : getShift(db, handover.sickEntryId);
   if (!sick) return "gone";
-  if (shift.date < sick.date || shift.date > (sick.endDate ?? sick.date)) return "uncovered";
+  // Пересечение промежутков, а не «дата смены внутри больничного»: недельное
+  // дежурство с понедельника при больничном со среды — та же передача, и
+  // `shift.date` у него остаётся понедельником всю неделю.
+  if ((shift.endDate ?? shift.date) < sick.date || shift.date > (sick.endDate ?? sick.date)) return "uncovered";
   return null;
 }
 
