@@ -417,6 +417,27 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function handleWithdrawInterest(slotId: number) {
+    setBusySlotIds((prev) => withBusy(prev, slotId));
+    setSlotErrors((prev) => withoutError(prev, slotId));
+    await runRowAction({
+      action: () => apiClient.withdrawInterest(slotId),
+      refresh: () => {
+        reloadGate.current.invalidate();
+        return refreshWeekend();
+      },
+      onActionFailed: (err) => {
+        console.error("Withdraw interest failed:", err);
+        setSlotErrors((prev) => withError(prev, slotId, "Не получилось снять отклик — возможно, тебя уже назначили. Обнови экран."));
+      },
+      onRefreshFailed: (err) => {
+        console.error("Refresh after action failed:", err);
+        setRefreshError("Не получилось обновить данные — показываем то, что уже загружено.");
+      },
+    });
+    setBusySlotIds((prev) => withoutBusy(prev, slotId));
+  }
+
   async function handleInterest(slotId: number) {
     setBusySlotIds((prev) => withBusy(prev, slotId));
     setSlotErrors((prev) => withoutError(prev, slotId));
@@ -635,6 +656,7 @@ export function App() {
           slotErrors={slotErrors}
           offerErrors={offerErrors}
           onInterest={(id) => void handleInterest(id)}
+          onWithdrawInterest={(id) => void handleWithdrawInterest(id)}
           onConfirm={(id) =>
             void runOfferAction(id, apiClient.confirmOffer, "Не получилось подтвердить смену — возможно, её уже забрали. Обнови экран и попробуй снова.")
           }

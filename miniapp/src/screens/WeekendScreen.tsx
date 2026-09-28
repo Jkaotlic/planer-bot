@@ -25,12 +25,14 @@ export interface WeekendScreenProps {
   slotErrors: ReadonlyMap<number, string>;
   offerErrors: ReadonlyMap<number, string>;
   onInterest: (slotId: number) => void;
+  /** «Передумал» — снять свой «Хочу», пока не назначили. */
+  onWithdrawInterest: (slotId: number) => void;
   onConfirm: (offerId: number) => void;
   onDecline: (offerId: number) => void;
 }
 
 /** "Работа в выходные дни": weekend/holiday shifts up for grabs, and offers an admin addressed to you. */
-export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, slotErrors, offerErrors, onInterest, onConfirm, onDecline }: WeekendScreenProps) {
+export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, slotErrors, offerErrors, onInterest, onWithdrawInterest, onConfirm, onDecline }: WeekendScreenProps) {
   const liveOffers = offers.filter((o) => o.assignment.status !== "declined");
 
   return (
@@ -74,6 +76,7 @@ export function WeekendScreen({ slots, offers, busySlotIds, busyOfferIds, slotEr
                   busy={busySlotIds.has(view.slot.id)}
                   error={slotErrors.get(view.slot.id)}
                   onInterest={() => onInterest(view.slot.id)}
+                  onWithdraw={() => onWithdrawInterest(view.slot.id)}
                 />
               ))}
             </CardStack>
@@ -94,7 +97,7 @@ function hoursLabel(hours: number): string {
   return `${rounded} ${pluralizeRu(Math.round(hours), "час", "часа", "часов")}`;
 }
 
-function SlotCard({ view, busy, error, onInterest }: { view: WeekendSlotView; busy: boolean; error?: string; onInterest: () => void }) {
+function SlotCard({ view, busy, error, onInterest, onWithdraw }: { view: WeekendSlotView; busy: boolean; error?: string; onInterest: () => void; onWithdraw: () => void }) {
   const { slot, interested, assignees } = view;
   return (
     <CardShell>
@@ -115,7 +118,13 @@ function SlotCard({ view, busy, error, onInterest }: { view: WeekendSlotView; bu
       {assignees.length > 0 && <MetaLine icon="👥">Выходят: {assignees.map((a) => a.name).join(", ")}</MetaLine>}
       <div style={{ marginTop: 10 }}>
         {interested ? (
-          <InListPill />
+          // Подтверждения не нужно: «Хочу» можно нажать снова.
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <InListPill />
+            <Button size="s" mode="plain" loading={busy} disabled={busy} onClick={onWithdraw}>
+              Передумал(а)
+            </Button>
+          </div>
         ) : (
           <Button size="s" mode="filled" stretched loading={busy} disabled={busy} onClick={onInterest}>
             🙋 Хочу

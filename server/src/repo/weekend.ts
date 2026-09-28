@@ -75,6 +75,13 @@ export function addInterest(db: Db, slotId: number, employeeId: number): void {
   db.insert(slotInterest).values({ slotId, employeeId }).run();
 }
 
+/** Снять «Хочу». Нет отклика — ничего не происходит. */
+export function removeInterest(db: Db, slotId: number, employeeId: number): void {
+  db.delete(slotInterest)
+    .where(and(eq(slotInterest.slotId, slotId), eq(slotInterest.employeeId, employeeId)))
+    .run();
+}
+
 export function listInterestedEmployeeIds(db: Db, slotId: number): number[] {
   return db
     .select({ employeeId: slotInterest.employeeId })
