@@ -33,3 +33,26 @@ export async function runTicksIndependently(ticks: readonly NamedTick[]): Promis
     ),
   );
 }
+
+/**
+ * Круг тиков, где у каждого свой флаг «идёт».
+ *
+ * Раньше один общий флаг держал весь круг, пока не кончится самый медленный:
+ * напоминание с таймаутами Telegram по двадцать секунд на человека задерживало
+ * эскалацию «смену никто не взял» и заявки, которым пора погаснуть. Теперь
+ * медленный пропускает свои круги сам, а соседи идут по расписанию. Наложиться
+ * на самого себя тик по-прежнему не может — это и защищает флаг.
+ *
+ * Возвращает функцию одного круга — её зовёт `setInterval`. Круг не ждёт тиков:
+ * каждый живёт своим промисом, ошибки ловятся и пишутся с именем тика.
+ */
+export function createTickScheduler(ticks: readonly NamedTick[]): () => void {
+  const running = new Set<string>();
+  return () => {
+    for (const tick of ticks) {
+      if (running.has(tick.name)) continue;
+      running.add(tick.name);
+      void runTicksIndependently([tick]).finally(() => running.delete(tick.name));
+    }
+  };
+}

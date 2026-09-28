@@ -25,6 +25,7 @@ import { collectionsForWorker, getCollection, previewCollection, setCollectionCl
 import { setPaid } from "../collections/payment-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
+import { reminderHour } from "../repo/settings";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
@@ -220,9 +221,12 @@ export async function refreshAdminCommands(bot: Bot, telegramUserId: number, isA
  * отписались от вечерних напоминаний и на месяц потеряли инструкцию, ни разу об
  * этом не узнав (2026-08-28).
  */
-export function remindersStateText(enabled: boolean): string {
+export function remindersStateText(enabled: boolean, hour: string): string {
+  // Час — настройка админа, про какие смены писать — галочка вида смены у него
+  // же (с 0030). Перечень видов здесь врал бы: дежурства напоминание получают
+  // всегда, а любую смену админ может включить или выключить.
   return enabled
-    ? "🔔 Напоминания о сменах включены — пишу вечером накануне утренней, вечерней и ночной."
+    ? `🔔 Напоминания о сменах включены — пишу накануне в ${hour}, если смена меняет твой день: ранняя, утренняя, вечерняя, ночная, дежурство. Про какие именно — решает админ.`
     : "🔕 Напоминания о сменах выключены — про смены не пишу. Чек-лист дежурного приходит всё равно: это рабочая инструкция на смену.";
 }
 
@@ -586,7 +590,7 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
     const me = who.me;
-    await ctx.reply(remindersStateText(me.remindersEnabled), { reply_markup: remindersKeyboard(me.remindersEnabled) });
+    await ctx.reply(remindersStateText(me.remindersEnabled, reminderHour(db)), { reply_markup: remindersKeyboard(me.remindersEnabled) });
   }
 
   bot.command("notifications", (ctx) => sendReminders(ctx));

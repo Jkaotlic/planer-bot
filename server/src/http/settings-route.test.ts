@@ -7,6 +7,7 @@ import { createSwapRequest } from "../repo/swaps";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { auditLog } from "../db/schema";
 
 const config = testConfig();
 
@@ -215,6 +216,23 @@ describe("swaps lock settings", () => {
     await putLock(app, token, true);
     const res = await putLock(app, token, false);
     expect(await res.json()).toMatchObject({ locked: false, cancelled: 0 });
+  });
+
+  // Двойной тап, повтор после таймаута релея, второй админ с тем же тумблером —
+  // вся команда получала второе «🔒 Обмены смен закрыты».
+  it("PUT /api/admin/settings/swaps-lock с тем же значением никому не пишет и журнал не трогает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111, "Игорь Петров");
+    seedOpenSwap(db);
+
+    await putLock(app, token, true);
+    const again = await putLock(app, token, true);
+
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ locked: true, cancelled: 0, delivered: 0, intended: 0 });
+    const rows = db.select().from(auditLog).all().filter((r) => r.type === "swaps_lock_changed");
+    expect(rows).toHaveLength(1);
   });
 
   it("PUT /api/admin/settings/swaps-lock rejects a non-boolean body", async () => {

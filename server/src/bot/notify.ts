@@ -148,12 +148,24 @@ export function weekendUnassignedText(slotLine: string): string {
  * есть в точности прежнее поведение.
  */
 export async function notifyUser(bot: Bot, telegramUserId: number, text: string, keyboard?: InlineKeyboard): Promise<boolean> {
+  return (await sendOutcome(bot, telegramUserId, text, keyboard)).ok;
+}
+
+/**
+ * То же, что `notifyUser`, но с ответом «можно ли повторить» — для тех, кто
+ * решает, ставить ли отметку «ушло»: временный сбой сети отметку не заслуживает,
+ * а заблокированный бот — заслуживает, иначе тик стучал бы в закрытую дверь
+ * каждые пять минут.
+ */
+export async function sendOutcome(
+  bot: Bot, telegramUserId: number, text: string, keyboard?: InlineKeyboard,
+): Promise<SendOutcome> {
   try {
     await bot.api.sendMessage(telegramUserId, text, keyboard ? { reply_markup: keyboard } : undefined);
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error(`notifyUser: failed for ${telegramUserId}:`, safeErrorMessage(err));
-    return false;
+    return { ok: false, permanent: isPermanentSendFailure(err), errorCode: err instanceof GrammyError ? err.error_code : undefined };
   }
 }
 

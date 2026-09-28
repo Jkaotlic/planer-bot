@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import { COLLECTION_SEND_HOUR, collectionTitle } from "@planer/shared";
 import type { Db } from "../db/client";
-import { notifyUser, noticeMuteKeyboard, collectionPaidKeyboard } from "../bot/notify";
+import { notifyUser, sendOutcome, noticeMuteKeyboard, collectionPaidKeyboard } from "../bot/notify";
 import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
 import {
@@ -78,16 +78,21 @@ export async function runBirthdayNoticeTick(
       ? adminNoticeReadyMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil, round.autoSendOn, today)
       : adminNoticeMessage(birthday.displayName, birthday.birthDateLabel, birthday.daysUntil, round.autoSendOn, today);
     let delivered = 0;
+    let transient = 0;
     // The mute button rides along even though this loop bypasses `notifyAdmins`
     // (it has its own recipient list — `adminRecipients` — not every admin).
     // The moment an admin wants "celebrations" off is exactly now, with the
     // message on screen, not whenever they happen to find the switch.
     for (const admin of admins) {
-      if (await notifyUser(bot, admin.telegramUserId!, text, noticeMuteKeyboard("celebrations"))) delivered += 1;
+      const outcome = await sendOutcome(bot, admin.telegramUserId!, text, noticeMuteKeyboard("celebrations"));
+      if (outcome.ok) delivered += 1;
+      else if (!outcome.permanent) transient += 1;
     }
 
-    // Mark it either way: a Telegram outage must not turn into a nag loop, and
-    // the birthday is visible on the «Дни рождения» screen regardless.
+    // Не дошло ни до кого из-за сети — не отмечаем: следующий тик попробует
+    // снова. Вечный отказ (бот заблокирован) отмечаем, иначе повтор каждые пять
+    // минут в закрытую дверь.
+    if (delivered === 0 && transient > 0) continue;
     markAdminNotified(db, round.id, new Date());
     recordAudit(db, "birthday_admin_notice", null, {
       employeeId: birthday.employeeId,
@@ -205,6 +210,7 @@ export async function runBirthdayNoticeTick(
     const title = collectionTitle(round, personName);
     const text = scheduleNoticeMessage(title, round.collectUrl, round.kind);
     let delivered = 0;
+    let transient = 0;
     // See the same button above — a general collection round is `celebrations`
     // too, so the same switch covers it.
     //
@@ -214,11 +220,13 @@ export async function runBirthdayNoticeTick(
     // мутабелен, и общий экземпляр копил бы по кнопке на админа.
     for (const admin of admins) {
       const keyboard = noticeMuteKeyboard("celebrations").row().text("✅ Собрали, закрыть", `collection:close:${round.id}`);
-      if (await notifyUser(bot, admin.telegramUserId!, text, keyboard)) delivered += 1;
+      const outcome = await sendOutcome(bot, admin.telegramUserId!, text, keyboard);
+      if (outcome.ok) delivered += 1;
+      else if (!outcome.permanent) transient += 1;
     }
 
-    // Marked either way: a Telegram outage must not become a nag loop. The date
-    // is still on the screen.
+    // То же правило, что у нуджа выше: сбой сети — повтор, вечный отказ — отметка.
+    if (delivered === 0 && transient > 0) continue;
     markScheduleNotified(db, round.id, new Date());
     // Event type stays `birthday_schedule_notice` even for a custom collection:
     // renaming it would orphan the journal rows already written in production.

@@ -18,14 +18,13 @@ import { listShiftsInRange, listShiftsOverlapping, listDatesHolding } from "../r
 import { getEmployeeById } from "../repo/employees";
 import { getTemplate } from "../repo/templates";
 import { reminderHour } from "../repo/settings";
-import { hasReminder, addReminder } from "../repo/reminders";
+import { hasEveningReminder, eveningReminderKind, addReminder } from "../repo/reminders";
 import { recordAudit } from "../repo/audit";
 import { notifyReminder } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
 import type { EntryCategory, ReminderKind } from "@planer/shared";
 import type { Shift, ShiftTemplate } from "../db/schema";
 
-const REMINDER_KIND = "evening_before";
 
 /**
  * Насколько далеко вперёд ищется конец отрезка дежурства.
@@ -101,7 +100,7 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
 
   // Одна строка на прогон, а не на человека: тик крутится каждые пять минут весь
   // вечер, и поштучные записи утопили бы всё остальное в журнале. Молчим, когда
-  // ушло ноль — «ничего не произошло» не событие, а `hasReminder` дедуплицирует
+  // ушло ноль — «ничего не произошло» не событие, а `hasEveningReminder` дедуплицирует
   // отправку, так что второй тик за вечер сюда уже не дойдёт.
   if (count > 0) {
     recordAudit(db, "reminders_dispatched", null, { forDate: tomorrow, sent: count, considered: shifts.length });
@@ -185,7 +184,7 @@ function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
 
 /** One shift's reminder. Returns 1 if it went out, 0 otherwise. */
 async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Promise<number> {
-    if (hasReminder(db, shift.id, REMINDER_KIND)) return 0;
+    if (hasEveningReminder(db, shift.id, shift.employeeId!)) return 0;
     const owner = getEmployeeById(db, shift.employeeId!);
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) return 0;
 
@@ -235,7 +234,7 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
     const appUrl = publicUrl ? `${publicUrl}/app/` : undefined;
     const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl);
     if (outcome.ok) {
-      addReminder(db, shift.id, REMINDER_KIND);
+      addReminder(db, shift.id, eveningReminderKind(owner.id));
       return 1;
     }
     if (outcome.permanent) {
@@ -246,7 +245,7 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
       // where this system already tells them things. A busy Telegram (429, 5xx, a
       // dropped connection) is NOT marked and is retried on the next tick, which is
       // the behaviour the test above pins.
-      addReminder(db, shift.id, REMINDER_KIND);
+      addReminder(db, shift.id, eveningReminderKind(owner.id));
       recordAudit(db, "reminder_undeliverable", null, {
         employeeId: owner.id,
         displayName: owner.displayName,

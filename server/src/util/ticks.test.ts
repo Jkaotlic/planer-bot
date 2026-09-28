@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runTicksIndependently } from "./ticks";
+import { runTicksIndependently, createTickScheduler } from "./ticks";
 
 describe("runTicksIndependently", () => {
   it("runs every tick even when an earlier one rejects", async () => {
@@ -61,5 +61,45 @@ describe("runTicksIndependently", () => {
       { name: "ok", run: succeeding },
     ]);
     expect(succeeding).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createTickScheduler", () => {
+  // Один общий флаг «идёт» держал все тики, пока не кончится самый медленный:
+  // напоминание с таймаутами Telegram по 20 с на человека задерживало эскалацию
+  // «смену никто не взял» на следующий пятиминутный круг и дальше.
+  it("медленный тик не задерживает соседа, а сам не накладывается на себя", async () => {
+    let slowRuns = 0;
+    let fastRuns = 0;
+    let release!: () => void;
+    const slowGate = new Promise<void>((r) => { release = r; });
+    const round = createTickScheduler([
+      { name: "slow", run: async () => { slowRuns += 1; await slowGate; } },
+      { name: "fast", run: async () => { fastRuns += 1; } },
+    ]);
+
+    round();
+    await new Promise((r) => setTimeout(r, 0));
+    round();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fastRuns).toBe(2);
+    expect(slowRuns).toBe(1);
+
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    round();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(slowRuns).toBe(2);
+  });
+
+  it("упавший тик снимает свой флаг — следующий круг его запускает", async () => {
+    let runs = 0;
+    const round = createTickScheduler([{ name: "boom", run: async () => { runs += 1; throw new Error("x"); } }]);
+    round();
+    await new Promise((r) => setTimeout(r, 0));
+    round();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(runs).toBe(2);
   });
 });

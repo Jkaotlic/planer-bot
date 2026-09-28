@@ -65,3 +65,24 @@ export function reminderSentAt(db: Db, shiftId: number, kind: string): Date | nu
 export function addReminder(db: Db, shiftId: number, kind: string): void {
   db.insert(reminderLog).values({ shiftId, kind }).run();
 }
+
+/**
+ * Пометка вечернего напоминания — на пару «запись + получатель».
+ *
+ * Пока пометка висела на одной записи, обмен в 21:00 переносил смену на
+ * Игоря, а тик считал, что напоминание «уже ушло», — Игорь не получал ничего.
+ */
+export function eveningReminderKind(employeeId: number): string {
+  return `evening_before:${employeeId}`;
+}
+
+/**
+ * Уходило ли вечернее напоминание этому человеку про эту запись.
+ *
+ * Старая пометка без получателя (`evening_before`) тоже считается: иначе
+ * выкатка посреди вечера разослала бы напоминание второй раз всем, кому оно уже
+ * ушло. Её цена — прежнее поведение ровно на один вечер после выкатки.
+ */
+export function hasEveningReminder(db: Db, shiftId: number, employeeId: number): boolean {
+  return hasReminder(db, shiftId, eveningReminderKind(employeeId)) || hasReminder(db, shiftId, "evening_before");
+}

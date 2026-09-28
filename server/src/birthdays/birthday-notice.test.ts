@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import type { Bot } from "grammy";
+import { GrammyError, type Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listRecentAudit } from "../repo/audit";
@@ -20,6 +20,10 @@ import type { Db } from "../db/client";
 const TODAY = "2026-08-01";
 /** Момент после часа рассылки — «обычный» вход в тик. */
 const NOW = { date: TODAY, time: "10:00" };
+
+function blocked(): GrammyError {
+  return new GrammyError("Call failed! (403: Forbidden: bot was blocked by the user)", { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" }, "sendMessage", {});
+}
 
 function fakeBot() {
   const sent: { to: number; text: string; buttons: string[] }[] = [];
@@ -174,7 +178,8 @@ describe("runBirthdayNoticeTick", () => {
 
   it("marks the nudge even when Telegram refused, so it can't become a nag loop", async () => {
     const db = makeTestDb();
-    const bot = { api: { sendMessage: vi.fn(async () => { throw new Error("bot blocked by user"); }) } } as unknown as Bot;
+    // Вечный отказ (403 — бот заблокирован): повтор ничего не изменит.
+    const bot = { api: { sendMessage: vi.fn(async () => { throw blocked(); }) } } as unknown as Bot;
     const id = person(db, "Именинник", 1, "08-08");
     person(db, "Админ", 2, null, true);
 
@@ -221,6 +226,57 @@ describe("runBirthdayNoticeTick", () => {
     expect(ensureBirthdayRound(db, id, TODAY)!.adminNotifiedAt).not.toBeNull();
     expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("обрыв сети не съедает письма админам", () => {
+  // Отметка ставилась в любом случае, и письмо, не дошедшее из-за сети, не
+  // приходило уже никогда. Соседние пути (автоотправка, эскалация, совет о
+  // пробелах) повторяют; эти два — нет.
+  const down = () => ({ api: { sendMessage: vi.fn(async () => { throw new Error("network down"); }) } }) as unknown as Bot;
+
+  it("нудж за неделю: сеть лежала — отметки нет, следующий тик пишет", async () => {
+    const db = makeTestDb();
+    const id = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+
+    await runBirthdayNoticeTick(db, down(), NOW);
+    expect(ensureBirthdayRound(db, id, TODAY)!.adminNotifiedAt).toBeNull();
+
+    const { bot, sent } = fakeBot();
+    await runBirthdayNoticeTick(db, bot, NOW);
+    expect(sent.map((m) => m.to)).toEqual([2]);
+  });
+
+  it("«пора дожать сбор»: сеть лежала — следующий тик пишет", async () => {
+    const db = makeTestDb();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
+
+    await runBirthdayNoticeTick(db, down(), NOW);
+    const { bot, sent } = fakeBot();
+    await runBirthdayNoticeTick(db, bot, NOW);
+    expect(sent.map((m) => m.to)).toEqual([2]);
+  });
+});
+
+describe("«пора дожать сбор» при вечном отказе", () => {
+  it("403 — отмечается, чтобы не стучать в закрытую дверь каждые пять минут", async () => {
+    const db = makeTestDb();
+    const who = person(db, "Именинник", 1, "08-08");
+    person(db, "Админ", 2, null, true);
+    const round = ensureBirthdayRound(db, who, TODAY)!;
+    updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
+    markAdminNotified(db, round.id, new Date());
+    const send = vi.fn(async () => { throw blocked(); });
+    const bot = { api: { sendMessage: send } } as unknown as Bot;
+
+    await runBirthdayNoticeTick(db, bot, NOW);
+    await runBirthdayNoticeTick(db, bot, NOW);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
 

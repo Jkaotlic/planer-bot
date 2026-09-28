@@ -154,7 +154,7 @@ describe("/notifications", () => {
    * инструкцию, ни разу об этом не узнав (2026-08-28).
    */
   it("говорит, что чек-листы дежурного продолжат приходить", () => {
-    expect(remindersStateText(false)).toMatch(/чек-лист/i);
+    expect(remindersStateText(false, "20:00")).toMatch(/чек-лист/i);
   });
 
   it("reports «выключены» once they are off", async () => {
@@ -179,8 +179,8 @@ describe("/notifications", () => {
 
 describe("remindersStateText / remindersKeyboard", () => {
   it("offers the opposite of the current state — a switch, not a label", () => {
-    expect(remindersStateText(true)).toContain("включены");
-    expect(remindersStateText(false)).toContain("выключены");
+    expect(remindersStateText(true, "20:00")).toContain("включены");
+    expect(remindersStateText(false, "20:00")).toContain("выключены");
 
     const whenOn = JSON.stringify(remindersKeyboard(true).inline_keyboard);
     const whenOff = JSON.stringify(remindersKeyboard(false).inline_keyboard);
@@ -188,12 +188,14 @@ describe("remindersStateText / remindersKeyboard", () => {
     expect(whenOff).toContain("reminders:on");
   });
 
-  it("names all three shifts reminders actually cover — morning, evening and night (see shared/src/reminder.ts's isReminderWorthy)", () => {
-    // The plain day shift is the only one that's silent; morning, evening and
-    // night all get a reminder. The old wording named only two of the three.
-    const text = remindersStateText(true);
-    expect(text).toContain("утренней");
-    expect(text).toContain("вечерней");
-    expect(text).toContain("ночной");
+  // С 0030 про какие смены напоминать, решает галочка вида смены у админа, а
+  // час — его же настройка. Старый текст перечислял три вида и молчал про
+  // дежурства, которые напоминание получают всегда, и про час.
+  it("называет настоящий час рассылки и не обещает список, который решает админ", () => {
+    const text = remindersStateText(true, "21:15");
+    expect(text).toContain("21:15");
+    expect(text).toContain("накануне");
+    expect(text).toMatch(/админ/);
+    expect(text).not.toContain("утренней, вечерней и ночной");
   });
 });
