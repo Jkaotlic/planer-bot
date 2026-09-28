@@ -11,7 +11,6 @@ import {
   renderReminderText,
   addressOf,
   coworkersEnumeration,
-  shiftsOverlap,
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsInRange, listDatesHolding } from "../repo/shifts";
@@ -22,7 +21,7 @@ import { hasReminder, addReminder } from "../repo/reminders";
 import { recordAudit } from "../repo/audit";
 import { notifyReminder } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
-import type { EntryCategory } from "@planer/shared";
+import type { EntryCategory, ReminderKind } from "@planer/shared";
 import type { Shift, ShiftTemplate } from "../db/schema";
 
 const REMINDER_KIND = "evening_before";
@@ -104,19 +103,24 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
 }
 
 /**
- * Кто ещё работает в этот день — для строки «Завтра с тобой».
+ * Кто завтра в той же смене — для строки «Завтра с тобой».
  *
- * Только записи с другим `employeeId` и заданными часами (отсутствия — вроде
- * отпуска Семёна — часов не имеют и не попадают в список), чьё время
- * пересекается со сменой владельца (`shiftsOverlap`, а не просто «тот же
- * день»: сосед с 18:00 не «с тобой», если твоя смена кончилась в 17:00).
- * Имя — через `addressOf`, как и у самого адресата письма.
+ * «С тобой» — это тот же вид смены по часам (`reminderKind`): утро с утром,
+ * вечер с вечером, ночь с ночью. Раньше хватало пересечения часов, и утренний
+ * 08:00–17:00 получал почти всю команду — «День» 09:00–18:00 пересекается с
+ * ним на восемь часов. Перечень, в котором все, никому не нужен (его решение
+ * от 2026-09-28). Отсутствия часов не имеют и в список не попадают.
+ *
+ * Имя — как забито в графике (`displayName`), а не Telegram-имя из
+ * `addressOf`: «Кирюха» в перечне не опознать, человек ищет коллегу по тому
+ * же имени, что видит в расписании. Приветствие адресату остаётся на
+ * `addressOf` — там обращаются к нему самому.
  *
  * Дедуп по `employeeId`, а не по имени: у одного человека в этот день может
- * стоять больше одной пересекающейся записи (например, дежурство и подработка
- * рядом), и без дедупа он попал бы в перечень дважды под одним и тем же именем.
+ * стоять больше одной записи того же вида (например, смена и подработка
+ * рядом), и без дедупа он попал бы в перечень дважды.
  */
-function coworkerNamesFor(db: Db, shift: { date: string; start: string; end: string; employeeId: number | null }): string[] {
+function coworkerNamesFor(db: Db, shift: { date: string; kind: ReminderKind; employeeId: number | null }): string[] {
   const dayShifts = listShiftsInRange(db, shift.date, shift.date);
   const seen = new Set<number>();
   const names: string[] = [];
@@ -124,11 +128,11 @@ function coworkerNamesFor(db: Db, shift: { date: string; start: string; end: str
     if (other.employeeId == null || other.employeeId === shift.employeeId) continue;
     if (other.start == null || other.end == null) continue;
     if (seen.has(other.employeeId)) continue;
-    if (!shiftsOverlap({ date: shift.date, start: shift.start, end: shift.end }, { date: other.date, start: other.start, end: other.end })) continue;
+    if (reminderKind({ start: other.start, end: other.end }) !== shift.kind) continue;
     const person = getEmployeeById(db, other.employeeId);
     if (!person) continue;
     seen.add(other.employeeId);
-    names.push(addressOf(person));
+    names.push(person.displayName);
   }
   return names;
 }
@@ -197,7 +201,7 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
     const coworkers =
       kind === "day" || isNonShiftKind
         ? []
-        : coworkerNamesFor(db, { date: shift.date, start, end, employeeId: shift.employeeId });
+        : coworkerNamesFor(db, { date: shift.date, kind, employeeId: shift.employeeId });
     const text = custom
       ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers) }, kind)
       : buildReminderText({ name, kind, timeRange, what, until, location, coworkers });

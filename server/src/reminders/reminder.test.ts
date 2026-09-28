@@ -710,17 +710,15 @@ describe("дежурство напоминает один раз на отре�
 });
 
 describe("«Завтра с тобой»: кто ещё работает в этот день", () => {
-  it("только те, чьи часы пересекаются со сменой, по имени из addressOf", async () => {
+  it("утренний видит только утренних: дневной с пересекающимися часами не «с тобой»", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 950);
-    // Обращение — по имени из Telegram (addressOf), а не по «Фамилия Имя» ростера.
-    createEmployee(db, { displayName: "Петров Игорь", inviteToken: "i-951" });
-    const igor = linkTelegramAccount(db, "i-951", 951, "igor_tg", "Игорь")!;
+    const igor = linkedEmployee(db, "Игорь", 951);
     const mark = linkedEmployee(db, "Марк", 952);
     const semyon = linkedEmployee(db, "Семён", 953);
     createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
-    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: igor.id }); // пересекается с Аней
-    createShift(db, { date: TOMORROW, start: "18:00", end: "23:00", employeeId: mark.id }); // не пересекается
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id }); // тоже утро
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: mark.id }); // день, часы пересекаются
     createShift(db, { date: TOMORROW, category: "vacation", employeeId: semyon.id, start: null, end: null }); // отсутствие
     const { bot, sent } = testBot();
 
@@ -728,9 +726,66 @@ describe("«Завтра с тобой»: кто ещё работает в эт
 
     const anyaMsg = sent.find((s) => s.chat_id === 950)!;
     expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
-    expect(anyaMsg.text).not.toContain("Петров");
     expect(anyaMsg.text).not.toContain("Марк");
     expect(anyaMsg.text).not.toContain("Семён");
+  });
+
+  it("вечерний видит вечерних, а не утренних и не дневных", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 970);
+    const igor = linkedEmployee(db, "Игорь", 971);
+    const mark = linkedEmployee(db, "Марк", 972);
+    const semyon = linkedEmployee(db, "Семён", 973);
+    createShift(db, { date: TOMORROW, start: "12:00", end: "21:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "12:00", end: "21:00", employeeId: igor.id }); // вечер
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id }); // утро, пересекается
+    createShift(db, { date: TOMORROW, start: "09:00", end: "18:00", employeeId: semyon.id }); // день, пересекается
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 970)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
+    expect(anyaMsg.text).not.toContain("Марк");
+    expect(anyaMsg.text).not.toContain("Семён");
+  });
+
+  it("ночной видит ночных, а не вечерних", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 974);
+    const igor = linkedEmployee(db, "Игорь", 975);
+    const mark = linkedEmployee(db, "Марк", 976);
+    createShift(db, { date: TOMORROW, start: "20:00", end: "08:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "20:00", end: "08:00", employeeId: igor.id }); // ночь
+    createShift(db, { date: TOMORROW, start: "12:00", end: "21:00", employeeId: mark.id }); // вечер, пересекается
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 974)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
+    expect(anyaMsg.text).not.toContain("Марк");
+  });
+
+  it("имя соседа — как в графике, а не из Telegram", async () => {
+    // Его решение от 2026-09-28: в перечне — те имена, что забиты в графике.
+    // Приветствие адресату по-прежнему идёт через addressOf.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 977);
+    createEmployee(db, { displayName: "Петров Игорь", inviteToken: "i-978" });
+    const igor = linkTelegramAccount(db, "i-978", 978, "igor_tg", "Гоша")!;
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 977)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Петров Игорь");
+    expect(anyaMsg.text).not.toContain("Гоша");
+    // Сам Игорь в своём письме — по-прежнему «Гоша».
+    const igorMsg = sent.find((s) => s.chat_id === 978)!;
+    expect(igorMsg.text).toContain("Привет, Гоша!");
   });
 
   it("у дежурства (день) строки «Завтра с тобой» нет, даже если рядом есть пересекающаяся смена", async () => {
@@ -824,15 +879,15 @@ describe("«Завтра с тобой»: кто ещё работает в эт
     expect(anyaMsg.text).not.toContain("👥");
   });
 
-  it("сосед с двумя пересекающимися записями за день попадает в список один раз", async () => {
+  it("сосед с двумя утренними записями за день попадает в список один раз", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 960);
     const igor = linkedEmployee(db, "Игорь", 961);
     createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
-    // У Игоря две пересекающиеся с Аней записи в этот день (например, смена и
-    // подработка рядом) — без дедупа он попал бы в перечень дважды.
-    createShift(db, { date: TOMORROW, start: "09:00", end: "12:00", employeeId: igor.id });
-    createShift(db, { date: TOMORROW, start: "13:00", end: "16:00", employeeId: igor.id });
+    // У Игоря две утренние записи в этот день (например, смена и подработка
+    // рядом) — без дедупа он попал бы в перечень дважды.
+    createShift(db, { date: TOMORROW, start: "08:00", end: "12:00", employeeId: igor.id });
+    createShift(db, { date: TOMORROW, start: "08:30", end: "16:00", employeeId: igor.id });
     const { bot, sent } = testBot();
 
     await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
