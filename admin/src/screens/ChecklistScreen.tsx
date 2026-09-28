@@ -1,3 +1,4 @@
+import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import {
   CHECKLIST_RULE_TEXT,
@@ -314,14 +315,14 @@ function ChecklistCard({
           />
 
           <div className="panel-actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
-            <button
-              type="button"
+            <ConfirmButton
+              label="Удалить чек-лист"
+              question={`Удалить «${list.name}» со всеми пунктами? Дежурные перестанут его получать.`}
+              confirmLabel="Да, удалить"
               className="btn btn-danger"
               disabled={busy}
-              onClick={() => void run(() => apiClient.deleteChecklist(list.id))}
-            >
-              Удалить чек-лист
-            </button>
+              onConfirm={() => void run(() => apiClient.deleteChecklist(list.id))}
+            />
           </div>
         </div>
       )}

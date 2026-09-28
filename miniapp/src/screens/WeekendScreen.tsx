@@ -1,3 +1,4 @@
+import { ConfirmButton } from "../components/ConfirmButton";
 import type { ReactNode } from "react";
 import { Button, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
 import type { VacantSlot, WeekendOffer, WeekendSlotView } from "../api/client";
@@ -161,9 +162,13 @@ function OfferCard({ offer, busy, error, onConfirm, onDecline }: { offer: Weeken
           <Button size="s" mode="filled" stretched loading={busy} disabled={busy} onClick={onConfirm}>
             Беру
           </Button>
-          <Button size="s" mode="gray" stretched disabled={busy} onClick={onDecline}>
-            Не смогу
-          </Button>
+          <ConfirmButton
+            label="Не смогу"
+            question="Отказаться от этой смены? Передумать потом не получится — админ позовёт другого."
+            confirmLabel="Да, не смогу"
+            disabled={busy}
+            onConfirm={onDecline}
+          />
         </div>
       )}
       {error && <ActionError message={error} />}

@@ -1,3 +1,4 @@
+import { ConfirmButton } from "./ConfirmButton";
 import { useState } from "react";
 import {
   ABSENCE_CATEGORIES,
@@ -374,9 +375,14 @@ export function AddEntryPanel({
 
         <div className="panel-actions">
           {existing && onDelete && (
-            <button type="button" className="btn btn-danger" onClick={() => void handleDelete()} disabled={busy}>
-              {deleting ? "Удаление…" : "Удалить"}
-            </button>
+            <ConfirmButton
+              label={deleting ? "Удаление…" : "Удалить"}
+              question="Удалить запись из графика?"
+              confirmLabel="Да, удалить"
+              className="btn btn-danger"
+              disabled={busy}
+              onConfirm={() => void handleDelete()}
+            />
           )}
           <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
             Отмена

@@ -1,3 +1,4 @@
+import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
@@ -146,6 +147,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
         fullOrder={active}
         emptyLabel="Пока нет активных работников"
         actionLabel="Архивировать"
+        confirmQuestionFor={(e) => `${e.displayName} — в архив? Его будущие смены станут «Не назначено».`}
         busyId={busyId}
         rowError={rowError}
         onAction={(id) => withBusy(id, () => apiClient.archiveEmployee(id))}
@@ -211,6 +213,8 @@ interface EmployeesSectionProps {
   fullOrder: readonly Employee[];
   emptyLabel: string;
   actionLabel: string;
+  /** Есть — действие спрашивает подтверждение (архивация необратима по сути). */
+  confirmQuestionFor?: (employee: Employee) => string;
   busyId: number | null;
   /** Why the last action failed, and on whose row — see `rowError`. */
   rowError: { employeeId: number; message: string } | null;
@@ -232,7 +236,7 @@ interface EmployeesSectionProps {
   onSetObserver: (id: number, isObserver: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -255,6 +259,7 @@ function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel
               onReorder={onReorder ? (position) => onReorder(employee.id, position) : undefined}
               onBirthDate={onBirthDate ? (birthDate) => onBirthDate(employee.id, birthDate) : undefined}
               actionLabel={actionLabel}
+              confirmQuestion={confirmQuestionFor?.(employee)}
               busy={busyId === employee.id}
               error={rowError?.employeeId === employee.id ? rowError.message : null}
               onAction={() => onAction(employee.id)}
@@ -274,6 +279,7 @@ function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel
 function EmployeeRow({
   employee,
   actionLabel,
+  confirmQuestion,
   busy,
   error,
   position,
@@ -288,6 +294,7 @@ function EmployeeRow({
 }: {
   employee: Employee;
   actionLabel: string;
+  confirmQuestion?: string;
   busy: boolean;
   /** Why this row's last action was refused, shown right here — see `rowError`. */
   error?: string | null;
@@ -408,9 +415,19 @@ function EmployeeRow({
               {employee.isAdmin ? "Убрать из админов" : "Сделать админом"}
             </button>
           )}
-          <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
-            {busy ? "…" : actionLabel}
-          </button>
+          {confirmQuestion ? (
+            <ConfirmButton
+              label={busy ? "…" : actionLabel}
+              question={confirmQuestion}
+              confirmLabel={`Да, ${actionLabel.toLowerCase()}`}
+              disabled={busy}
+              onConfirm={onAction}
+            />
+          ) : (
+            <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
+              {busy ? "…" : actionLabel}
+            </button>
+          )}
         </>
       )}
       {!editing && (

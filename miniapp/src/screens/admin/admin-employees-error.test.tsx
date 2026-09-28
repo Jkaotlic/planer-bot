@@ -73,6 +73,19 @@ function rowOf(button: HTMLElement): HTMLElement {
   return node;
 }
 
+/**
+ * Архивация спрашивает подтверждение: первый тап — вопрос, второй — дело.
+ * Карточка берётся ДО тапа — после него кнопка заменяется вопросом.
+ */
+async function archiveConfirmed(button: HTMLButtonElement): Promise<HTMLElement> {
+  const card = rowOf(button);
+  await act(async () => button.click());
+  const yes = [...card.querySelectorAll("button")].find((b) => (b.textContent ?? "").startsWith("Да,"));
+  if (!yes) throw new Error("нет кнопки подтверждения");
+  await act(async () => yes.click());
+  return card;
+}
+
 function archiveButtons(el: HTMLElement): HTMLButtonElement[] {
   return [...el.querySelectorAll("button")].filter((b) => (b.textContent ?? "").trim() === "В архив") as HTMLButtonElement[];
 }
@@ -87,10 +100,10 @@ describe("отказ на действие в строке остаётся в �
 
     // Последняя строка: именно там верхний блок ошибки уже вне экрана.
     const target = rows[rows.length - 1]!;
-    await act(async () => target.click());
+    const card = await archiveConfirmed(target);
     await settle();
 
-    expect(rowOf(target).textContent ?? "").toContain(REFUSAL);
+    expect(card.textContent ?? "").toContain(REFUSAL);
   });
 
   it("отказ виден у нажатой строки и не появляется у соседней", async () => {
@@ -102,10 +115,10 @@ describe("отказ на действие в строке остаётся в �
 
     const target = rows[rows.length - 1]!;
     const neighbour = rows[0]!;
-    await act(async () => target.click());
+    const card = await archiveConfirmed(target);
     await settle();
 
-    expect(rowOf(target).textContent ?? "").toContain(REFUSAL);
+    expect(card.textContent ?? "").toContain(REFUSAL);
     expect(rowOf(neighbour).textContent ?? "").not.toContain(REFUSAL);
   });
 
@@ -115,16 +128,31 @@ describe("отказ на действие в строке остаётся в �
     const target = rows[rows.length - 1]!;
 
     const spy = vi.spyOn(apiClient, "archiveEmployee").mockRejectedValue(new Error(REFUSAL_CODE));
-    await act(async () => target.click());
+    const card = await archiveConfirmed(target);
     await settle();
-    expect(rowOf(target).textContent ?? "").toContain(REFUSAL);
+    expect(card.textContent ?? "").toContain(REFUSAL);
 
     // Причина отпала (админ снял права с другого) — повтор проходит, надпись уходит.
     spy.mockResolvedValue(undefined);
-    await act(async () => archiveButtons(el)[archiveButtons(el).length - 1]!.click());
+    await archiveConfirmed(archiveButtons(el)[archiveButtons(el).length - 1]!);
     await settle();
 
     expect(el.textContent ?? "").not.toContain(REFUSAL);
+  });
+});
+
+describe("архивация спрашивает подтверждение", () => {
+  // Один тап снимал человека со всех будущих смен — палец на телефоне
+  // промахивается, а вернуть смены «как было» нечем.
+  it("одно нажатие не архивирует", async () => {
+    const el = await mount();
+    const spy = vi.spyOn(apiClient, "archiveEmployee").mockResolvedValue(undefined);
+    const target = archiveButtons(el)[0]!;
+    const card = rowOf(target);
+    await act(async () => target.click());
+    await settle();
+    expect(spy).not.toHaveBeenCalled();
+    expect(card.textContent ?? "").toContain("в архив?");
   });
 });
 

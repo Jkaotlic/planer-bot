@@ -1,3 +1,4 @@
+import { ConfirmButton } from "../components/ConfirmButton";
 import { useState } from "react";
 import { Button, Cell, IconButton, Input, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
 import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
@@ -416,15 +417,15 @@ export function SelfEntryScreen({
                     <Button size="s" mode="bezeled" onClick={() => startEditing(entry)}>
                       Изменить
                     </Button>
-                    <Button
-                      size="s"
+                    <ConfirmButton
+                      label="Снять"
+                      question="Снять эту запись? Админам придёт письмо."
+                      confirmLabel="Да, снять"
                       mode="plain"
                       loading={busyId === entry.id}
                       disabled={busyId != null}
-                      onClick={() => void handleDelete(entry.id)}
-                    >
-                      Снять
-                    </Button>
+                      onConfirm={() => void handleDelete(entry.id)}
+                    />
                   </span>
                 }
               >

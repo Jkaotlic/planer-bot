@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { Avatar, Button, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
 import { CategoryChip, useCategoryPalette } from "../../categories";
@@ -260,6 +261,7 @@ export function AdminEmployeesScreen() {
                 onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
                 onBirthDate={(birthDate) => withBusy(e.id, () => apiClient.setBirthDate(e.id, birthDate))}
                 actionLabel="В архив"
+                confirmQuestion={`${e.displayName} — в архив? Его будущие смены станут «Не назначено».`}
                 busy={busyId === e.id}
                 onAction={() => withBusy(e.id, () => apiClient.archiveEmployee(e.id))}
                 onToggleAdmin={() => withBusy(e.id, () => apiClient.setEmployeeAdmin(e.id, !e.isAdmin))}
@@ -311,6 +313,7 @@ export function EmployeeRow({
   invite,
   error,
   actionLabel,
+  confirmQuestion,
   busy,
   onAction,
   onToggleAdmin,
@@ -330,6 +333,8 @@ export function EmployeeRow({
   /** Why this row's last action was refused, shown right here — see `rowError`. */
   error?: string | null;
   actionLabel: string;
+  /** Есть — действие необратимо и спрашивает подтверждение (архивация). */
+  confirmQuestion?: string;
   busy: boolean;
   onAction: () => void;
   /** 1-based place in the list, shown and editable. Absent for archived workers. */
@@ -488,9 +493,20 @@ export function EmployeeRow({
             {employee.isAdmin ? "Снять админа" : "Сделать админом"}
           </Button>
         )}
-        <Button size="s" mode="gray" loading={busy} disabled={busy} onClick={onAction}>
-          {actionLabel}
-        </Button>
+        {confirmQuestion ? (
+          <ConfirmButton
+            label={actionLabel}
+            question={confirmQuestion}
+            confirmLabel={`Да, ${actionLabel.toLowerCase()}`}
+            loading={busy}
+            disabled={busy}
+            onConfirm={onAction}
+          />
+        ) : (
+          <Button size="s" mode="gray" loading={busy} disabled={busy} onClick={onAction}>
+            {actionLabel}
+          </Button>
+        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--tgui--outline)" }}>
