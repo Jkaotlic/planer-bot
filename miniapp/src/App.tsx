@@ -367,7 +367,9 @@ export function App() {
       const teamShifts = teamSchedule.shifts;
       setData((prev) =>
         prev
-          ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
+          ? // `me` тоже: права и запреты, поменянные админом, иначе не доходили
+            // до открытого приложения, пока его не закроешь совсем.
+            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
           : prev,
       );
       setRefreshError(null);
