@@ -6,7 +6,7 @@ import { makeTestDb } from "../db/testdb";
 import { employees, shiftTemplates } from "../db/schema";
 import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
 import { createShift, updateShift, deleteShift } from "../repo/shifts";
-import { hasReminder } from "../repo/reminders";
+import { hasEveningReminder, addReminder } from "../repo/reminders";
 import { listRecentAudit } from "../repo/audit";
 import { setReminderHour } from "../repo/settings";
 import { prevDate } from "@planer/shared";
@@ -67,7 +67,7 @@ describe("runReminderTick", () => {
     // Часы смены — да, время подъёма — нет: им письмо не распоряжается.
     expect(sent[0]?.text).toContain("08:00–17:00");
     expect(sent[0]?.text).not.toContain("будильник");
-    expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
+    expect(hasEveningReminder(db, shift.id, shift.employeeId!)).toBe(true);
   });
 
   it("is idempotent: a second tick does not resend", async () => {
@@ -155,7 +155,7 @@ describe("runReminderTick", () => {
       const failedCount = await runReminderTick(db, failingBot, { date: TODAY, time: "20:30" });
 
       expect(failedCount).toBe(0);
-      expect(hasReminder(db, shift.id, "evening_before")).toBe(false);
+      expect(hasEveningReminder(db, shift.id, shift.employeeId!)).toBe(false);
       expect(errorLog).toHaveBeenCalledTimes(1);
       expect(errorLog).toHaveBeenCalledWith(
         "notifyReminder: failed for 111:",
@@ -167,7 +167,7 @@ describe("runReminderTick", () => {
 
       expect(retryCount).toBe(1);
       expect(sent).toHaveLength(1);
-      expect(hasReminder(db, shift.id, "evening_before")).toBe(true);
+      expect(hasEveningReminder(db, shift.id, shift.employeeId!)).toBe(true);
       expect(errorLog).toHaveBeenCalledTimes(1);
     } finally {
       errorLog.mockRestore();
@@ -189,7 +189,7 @@ describe("runReminderTick", () => {
       const blocked = refusingBot(403, "Forbidden: bot was blocked by the user");
       expect(await runReminderTick(db, blocked.bot, { date: TODAY, time: "20:30" })).toBe(0);
       expect(blocked.attempts).toBe(1);
-      expect(hasReminder(db, shift.id, "evening_before")).toBe(true); // won't be retried
+      expect(hasEveningReminder(db, shift.id, shift.employeeId!)).toBe(true); // won't be retried
 
       const event = listRecentAudit(db, 10).find((row) => row.type === "reminder_undeliverable");
       expect(event?.payload).toEqual({ employeeId: anya.id, displayName: "Аня", shiftId: shift.id, errorCode: 403 });
@@ -212,7 +212,7 @@ describe("runReminderTick", () => {
     try {
       const busy = refusingBot(429, "Too Many Requests: retry after 5");
       expect(await runReminderTick(db, busy.bot, { date: TODAY, time: "20:30" })).toBe(0);
-      expect(hasReminder(db, shift.id, "evening_before")).toBe(false); // still owed
+      expect(hasEveningReminder(db, shift.id, shift.employeeId!)).toBe(false); // still owed
       expect(listRecentAudit(db, 10)).toEqual([]);
 
       const { bot, sent } = testBot();
@@ -949,5 +949,38 @@ describe("отсутствующему хозяину — тишина", () => {
     const igorMsg = sent.find((s) => s.chat_id === 991)!;
     expect(igorMsg.text).not.toContain("Аня");
     expect(igorMsg.text).not.toContain("👥");
+  });
+});
+
+describe("пометка «ушло» — на человека, а не на запись", () => {
+  // Обмен в 21:00 переносит завтрашнюю смену на Игоря, а пометка «напоминание
+  // ушло» висела на записи — и Игорь своего напоминания не получал.
+  it("смену переписали на другого после напоминания — новый хозяин получает своё", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 995);
+    const igor = linkedEmployee(db, "Игорь", 996);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+    updateShift(db, shift.id, { employeeId: igor.id });
+    await runReminderTick(db, bot, { date: TODAY, time: "21:00" });
+
+    expect(sent.filter((m) => m.chat_id === 995)).toHaveLength(1);
+    expect(sent.filter((m) => m.chat_id === 996)).toHaveLength(1);
+  });
+
+  it("пометка старого вида (до выкатки) по-прежнему глушит повтор тому же вечеру", async () => {
+    // Выкатка посреди вечера не должна разослать напоминание второй раз всем,
+    // кому оно уже ушло по старой пометке.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 997);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    addReminder(db, shift.id, "evening_before");
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "21:00" });
+
+    expect(sent).toHaveLength(0);
   });
 });
