@@ -214,6 +214,42 @@ button {
   margin-left: auto;
 }
 
+/* «Заполнить неделю» и «Добавить смену» — одной группой: на узком окне они
+   переносятся вместе, а не разъезжаются по разным строкам. */
+.topbar-entry-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Заполнить неделю ---------- */
+
+/* Шире обычной панели: у дня стоит подпись и выбор с временем пресета в одну
+   строку. Два класса — иначе `.panel` ниже по файлу перебил бы ширину. */
+.panel.fill-week-panel {
+  width: 520px;
+}
+
+.fill-week-days {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+/* День и выбор одной строкой: семь полей столбиком с подписью над каждым
+   растянули бы панель вдвое. */
+.fill-week-day {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.fill-week-day-name.off {
+  color: var(--hint);
+}
+
 .visually-hidden {
   position: absolute !important;
   width: 1px !important;
@@ -634,6 +670,47 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* «Бот зовёт» — своей строкой на всю ширину карточки (`flex-basis: 100%`,
+   карточка и так переносится): в ряду с именем и кнопками места нет. */
+.employee-address-line {
+  flex-basis: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.employee-address-text {
+  min-width: 0;
+  color: var(--hint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-address-edit {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.employee-edit-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hint);
+}
+
+.employee-address-edit:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .employee-row-spacer {
@@ -1635,6 +1712,12 @@ input[type="search"] {
   color: var(--hint);
 }
 
+/* «Набрали, закрыть» — отдельной строкой под списком, а не в шапке: рядом с
+   «Назначить» её легко нажать вместо него. */
+.weekend-slot-actions {
+  margin-top: 12px;
+}
+
 .weekend-interest-list {
   margin-top: 12px;
   display: flex;
@@ -2549,6 +2632,49 @@ input[type="search"] {
   display: block;
   color: var(--hint);
   font-size: 12.5px;
+}
+
+/* Карточки «Настроек» идут столбиком; без зазора их рамки слипались в одну. */
+.settings-card + .settings-card {
+  margin-top: 16px;
+}
+
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.settings-years {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Отметка дня отделена чертой: это другое действие, чем загрузка календаря, и
+   слитое с ним читалось бы как «обновить только этот день». */
+.settings-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--separator);
+}
+
+.settings-day-field {
+  max-width: 220px;
+}
+
+/* Подсказка вида письма — под его тумблером, с отступом на ширину галочки:
+   иначе она читалась бы как подпись к следующему. */
+.settings-notice .settings-reminder-note {
+  padding-left: 24px;
+}
+
+.settings-notice .error-text {
+  margin: 4px 0 0 24px;
 }
 
 /* Ярлык чек-листа: «Уходит» или «Не уходит».

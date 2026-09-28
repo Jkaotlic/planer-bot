@@ -3,6 +3,8 @@ export interface TopBarProps {
   onPrevWeek: () => void;
   onNextWeek: () => void;
   onAddEntry: () => void;
+  /** Opens «Заполнить неделю» — per-day choices for one worker, one request. */
+  onFillWeek: () => void;
   /** Opens the safe CSV preview/reconciliation flow. */
   onImportRoster: () => void;
   /** Downloads the current month's roster as CSV (the schedule IS the roster). */
@@ -10,7 +12,7 @@ export interface TopBarProps {
 }
 
 /** Week switcher + primary actions, above the schedule grid. */
-export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onAddEntry, onImportRoster, onExportRoster }: TopBarProps) {
+export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onAddEntry, onFillWeek, onImportRoster, onExportRoster }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="week-switcher">
@@ -31,9 +33,16 @@ export function TopBar({ weekLabel, onPrevWeek, onNextWeek, onAddEntry, onImport
           ⬇ Выгрузить CSV
         </button>
       </div>
-      <button type="button" className="btn btn-primary" onClick={onAddEntry}>
-        ＋ Добавить смену
-      </button>
+      {/* Рядом с «Добавить смену», а не в CSV-группе: это тоже постановка
+          записей, только на неделю разом. */}
+      <div className="topbar-entry-actions">
+        <button type="button" className="btn btn-secondary" onClick={onFillWeek}>
+          📅 Заполнить неделю
+        </button>
+        <button type="button" className="btn btn-primary" onClick={onAddEntry}>
+          ＋ Добавить смену
+        </button>
+      </div>
     </div>
   );
 }

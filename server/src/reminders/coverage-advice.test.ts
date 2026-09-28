@@ -9,6 +9,7 @@ import { listRecentAudit } from "../repo/audit";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { setCoverage } from "../repo/templates";
 import { setManualDay } from "../repo/calendar-days";
+import { ackCoverageDate } from "../repo/settings";
 import { runCoverageAdviceTick } from "./coverage-advice";
 import type { Db } from "../db/client";
 
@@ -196,5 +197,55 @@ describe("runCoverageAdviceTick", () => {
 
     const rows = sent[0]!.reply_markup!.inline_keyboard;
     expect(rows.flat().some((b) => "web_app" in b)).toBe(false);
+  });
+});
+
+describe("«Знаю про этот день»", () => {
+  // Совет каждый вечер повторял одни и те же дыры, и его учились не читать.
+  // Решение владельца от 2026-09-28: под письмом кнопка на каждую дату, нажатие
+  // глушит дату для всех админов.
+  it("под письмом — кнопка «Знаю про дд.мм» на каждую дату с пробелом (не больше пяти)", async () => {
+    const { db } = stage();
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    const buttons = JSON.stringify(sent[0]!.reply_markup);
+    expect(buttons).toContain("coverage:ack:2026-09-07");
+    expect(buttons).toContain("Знаю про 07.09");
+    expect((buttons.match(/coverage:ack:/g) ?? []).length).toBeLessThanOrEqual(5);
+  });
+
+  it("дат с пробелами больше пяти — кнопок ровно пять", async () => {
+    // Длиннее клавиатура закрывает само письмо на экране телефона.
+    const { db } = stage();
+    const everyDay = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство", category: "duty", start: "09:00", end: "18:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    setCoverage(db, everyDay.id, "1,1,1,1,1,1,1");
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    const buttons = JSON.stringify(sent[0]!.reply_markup);
+    expect((buttons.match(/coverage:ack:/g) ?? []).length).toBe(5);
+  });
+
+  it("заглушённая дата в совет больше не попадает; все заглушены — письма нет", async () => {
+    const { db } = stage();
+    ackCoverageDate(db, "2026-09-07");
+    const { bot, sent } = testBot();
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+    expect(sent[0]!.text).not.toContain("Пн 7 сентября");
+    expect(sent[0]!.text).toContain("Вт 8 сентября");
+
+    const db2 = stage().db;
+    for (const d of WEEKDAYS) ackCoverageDate(db2, d);
+    const second = testBot();
+    expect(await runCoverageAdviceTick(db2, second.bot, EVENING)).toBe(0);
+    expect(second.sent).toHaveLength(0);
   });
 });

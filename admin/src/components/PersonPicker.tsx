@@ -17,6 +17,7 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
   onChange,
   emptyOptionLabel,
   disabled,
+  note,
 }: {
   label: string;
   people: readonly T[];
@@ -26,16 +27,27 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
   /** Подпись строки «никто», например «Общий сбор — на всех». Без неё строки нет. */
   emptyOptionLabel?: string;
   disabled?: boolean;
+  /** Пометка рядом с именем, например «· вне назначений» — кого бот сам не поставил бы. */
+  note?: (person: T) => string | null;
 }) {
   const [query, setQuery] = useState("");
 
-  const chosenName = value === 0 ? emptyOptionLabel : people.find((p) => p.id === value)?.displayName;
+  const chosenPerson = value === 0 ? null : people.find((p) => p.id === value);
+  const chosenName = value === 0 ? emptyOptionLabel : chosenPerson?.displayName;
+  // Пометка и в строке «Выбран»: в длинном списке выбранная строка со своей
+  // пометкой может уехать за край прокрутки. Зеркало мини-аппа.
+  const chosenMark = chosenPerson ? note?.(chosenPerson) : null;
   const filtered = filterPeople(people, query);
 
   return (
     <div className="person-picker">
       <span className="field-label">{label}</span>
-      {chosenName != null && <div className="person-picker-chosen">Выбран: {chosenName}</div>}
+      {chosenName != null && (
+        <div className="person-picker-chosen">
+          Выбран: {chosenName}
+          {chosenMark ? ` ${chosenMark}` : ""}
+        </div>
+      )}
       <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />
       {/* `role="group" aria-label={label}` — иначе список ничем не связан с
           подписью над ним: у заменённых `<select>` было `aria-label="Кому"` /
@@ -63,6 +75,7 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
             onClick={() => onChange(person.id)}
           >
             {person.displayName}
+            {note?.(person) ? ` ${note(person)}` : ""}
           </button>
         ))}
       </div>

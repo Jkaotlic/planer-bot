@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
-import { employees } from "../db/schema";
+import { employees, swapRequests } from "../db/schema";
+import { createVacantSlot, addInterest, getAssignment, listInterestedEmployeeIds } from "../repo/weekend";
+import { assignSlot } from "../weekend/weekend-service";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
@@ -1159,6 +1161,23 @@ describe("preferred name", () => {
     expect((event?.payload as { remindersEnabled: boolean }).remindersEnabled).toBe(false);
   });
 
+  // Одно и то же значение повторно — не событие: строка «изменил настройки»
+  // без единого изменения только засоряла журнал.
+  it("повтор того же значения строку журнала не пишет; вкладка старта — пишет", async () => {
+    const db = makeTestDb();
+    worker(db, "Марк Волков", 202);
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 202);
+
+    await app.request("/api/me/settings", authedJson(token, { remindersEnabled: true }, "PATCH"));
+    expect(listRecentAudit(db, 10).filter((row) => row.type === "settings_changed")).toHaveLength(0);
+
+    await app.request("/api/me/settings", authedJson(token, { startTab: "team" }, "PATCH"));
+    const rows = listRecentAudit(db, 10).filter((row) => row.type === "settings_changed");
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.payload as { startTab?: string }).startTab).toBe("team");
+  });
+
   it("lets an admin set it for somebody who never will", async () => {
     // The case this exists for: workers linked before tgFirstName was stored have
     // nothing to fall back to but «Кузнецов Михаил».
@@ -1265,5 +1284,67 @@ describe("контракт домена employees", () => {
     const parsed = adminEmployeesResponseSchema.safeParse(await res.json());
     expect(parsed.error?.issues ?? []).toEqual([]);
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("архивация гасит хвосты", () => {
+  // Архивация снимала человека с будущих смен — и только. Висящий обмен с ним
+  // оставался зомби-заявкой у второй стороны, предложение выходного — живым,
+  // а будущий отпуск становился «ничьим» отпуском в графике. Решение владельца
+  // от 2026-09-28: отсутствия удалять, обмены гасить с письмом, выходные снимать.
+  const inDays = (n: number): string => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + n);
+    return new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(d);
+  };
+
+  it("обмен гаснет с письмом второй стороне, будущий отпуск удалён, выходной снят, смена — «Не назначено»", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = testBot();
+    const app = createApp({ db, config, bot });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня", 801);
+    const igor = worker(db, "Игорь", 802);
+    const anyaShift = createShift(db, { date: inDays(3), start: "08:00", end: "17:00", employeeId: anya.id });
+    const igorShift = createShift(db, { date: inDays(3), start: "12:00", end: "21:00", employeeId: igor.id });
+    const swap = createSwapRequest(db, { fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id });
+    const vacation = createShift(db, { date: inDays(10), endDate: inDays(14), category: "vacation", start: null, end: null, employeeId: anya.id });
+    const slot = createVacantSlot(db, { date: inDays(12), start: "10:00", end: "18:00" });
+    addInterest(db, slot.id, anya.id);
+    const assigned = assignSlot(db, slot.id, anya.id, inDays(0));
+    if (!assigned.ok) throw new Error(String(assigned.reason));
+
+    const res = await app.request(`/api/admin/employees/${anya.id}/archive`, authedJson(admin, {}));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    // «expired», как у всех путей с `swap_expired`: вторая сторона видит
+    // «неактуален», а не «отменено» — отменяла не она и не он.
+    expect(db.select().from(swapRequests).all().find((r) => r.id === swap.id)!.status).toBe("expired");
+    expect(listRecentAudit(db, 20).some((r) => r.type === "swap_expired")).toBe(true);
+    expect(sent.some((m) => m.chat_id === 802 && String(m.text).includes("Аня"))).toBe(true);
+    expect(getShift(db, vacation.id)).toBeUndefined();
+    expect(getShift(db, anyaShift.id)?.employeeId).toBeNull();
+    expect(getAssignment(db, assigned.assignment.id)).toBeUndefined();
+    expect(body).toMatchObject({ ok: true, expiredSwaps: 1, removedAbsences: 1, unassignedWeekend: 1 });
+  });
+
+  it("идущий отпуск и прошедший выходной не трогает; отклик «Хочу» на открытый слот снимает", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = worker(db, "Аня", 811);
+    const ongoing = createShift(db, { date: inDays(-2), endDate: inDays(3), category: "vacation", start: null, end: null, employeeId: anya.id });
+    const pastSlot = createVacantSlot(db, { date: inDays(-1), start: "10:00", end: "18:00" });
+    addInterest(db, pastSlot.id, anya.id);
+    const past = assignSlot(db, pastSlot.id, anya.id, inDays(-3));
+    const openSlot = createVacantSlot(db, { date: inDays(5), start: "10:00", end: "18:00" });
+    addInterest(db, openSlot.id, anya.id);
+
+    await app.request(`/api/admin/employees/${anya.id}/archive`, authedJson(admin, {}));
+
+    expect(getShift(db, ongoing.id)).toBeDefined();
+    if (past.ok) expect(getAssignment(db, past.assignment.id)).toBeDefined();
+    expect(listInterestedEmployeeIds(db, openSlot.id)).not.toContain(anya.id);
   });
 });

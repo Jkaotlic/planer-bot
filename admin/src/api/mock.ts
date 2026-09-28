@@ -12,7 +12,9 @@ import type {
   Employee,
   EntryRangeResult,
   FeedEvent,
+  HolidayRefreshYear,
   NewEntryInput,
+  NoticePrefs,
   NewEntryRangeInput,
   NewSlotInput,
   PayrollRow,
@@ -55,6 +57,8 @@ import {
   REMINDER_HOUR_DEFAULT,
   validateReminderHour,
   autoSendDateFor,
+  ADMIN_NOTICE_KINDS,
+  ADMIN_NOTICE_LABELS,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -221,7 +225,49 @@ export async function mockGetTeamSchedule(from: string, to: string): Promise<Shi
 
 export async function mockGetDayCalendar(from: string, to: string): Promise<CalendarDayDto[]> {
   const { calendar } = await readMock.getTeamSchedule(from, to);
-  return calendar;
+  // Общий мок чтения календаря не ведёт — отметки из «Настроек» живут здесь,
+  // чтобы отмеченный день сразу красился в графике DEV-консоли.
+  return [...calendar, ...mockCalendar.filter((day) => day.date >= from && day.date <= to)];
+}
+
+/**
+ * Праздники DEV-мока: один день, чтобы блоку «Праздники» было что показать.
+ *
+ * Живёт между вызовами: отметив день рабочим, следующий `getDayCalendar`
+ * отдаёт его уже таким. Зеркало `mockCalendar` мини-аппа.
+ */
+const mockCalendar: CalendarDayDto[] = [{ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" }];
+
+/** DEV-рычаг автозагрузки: ведёт себя как настоящий между вызовами. */
+let mockHolidaysAuto = true;
+
+export async function mockSetHolidaysAuto(enabled: boolean): Promise<void> {
+  await delay(150);
+  mockHolidaysAuto = enabled;
+}
+
+/** «Обновить сейчас» в DEV: текущий год загружен, следующий ещё не опубликован. */
+export async function mockRefreshHolidays(): Promise<HolidayRefreshYear[]> {
+  await delay(300);
+  const year = new Date().getUTCFullYear();
+  return [
+    { year, status: "ok", added: mockCalendar.length, removed: 0 },
+    { year: year + 1, status: "missing", added: 0, removed: 0 },
+  ];
+}
+
+export async function mockSetCalendarDay(
+  date: string,
+  kind: "holiday" | "workday" | null,
+  note: string | null,
+): Promise<CalendarDayDto | null> {
+  await delay(150);
+  const at = mockCalendar.findIndex((day) => day.date === date);
+  if (at >= 0) mockCalendar.splice(at, 1);
+  if (kind === null) return null;
+  const row: CalendarDayDto = { date, kind, note, source: "manual" };
+  mockCalendar.push(row);
+  return row;
 }
 
 export function mockGetTemplates(): Promise<Template[]> {
@@ -249,6 +295,30 @@ export async function mockCreateEntry(input: NewEntryInput): Promise<{ entry: Sh
   });
   ENTRIES.push(created);
   return { entry: created, notified: mockReach(input.employeeId != null ? [input.employeeId] : []) };
+}
+
+/** Один запрос вместо цикла — DEV-мок отвечает так же, чтобы «Заполнить неделю»
+ *  вела себя в разработке, как на живом сервере: одно письмо на человека, а не
+ *  письмо на каждый созданный день. Зеркало `mockCreateEntries` мини-аппа. */
+export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: { delivered: number; intended: number } }> {
+  await delay(300);
+  const employeeIds: number[] = [];
+  for (const input of inputs) {
+    ENTRIES.push(
+      entry({
+        date: input.date,
+        start: input.start ?? null,
+        end: input.end ?? null,
+        endDate: input.endDate ?? null,
+        category: input.category,
+        title: input.title ?? null,
+        templateId: input.templateId ?? null,
+        employeeId: input.employeeId ?? null,
+      }),
+    );
+    if (input.employeeId != null) employeeIds.push(input.employeeId);
+  }
+  return { created: inputs.length, notified: mockReach(employeeIds) };
 }
 
 /**
@@ -422,7 +492,8 @@ const PAYROLL: PayrollRow[] = [
 
 export async function mockGetWeekendSlots(): Promise<AdminSlotView[]> {
   await delay(250);
-  return WEEKEND_SLOTS.filter((s) => s.slot.status === "open").map((s) => ({
+  // Закрытые («набрали») админ видит до их даты — как на сервере.
+  return WEEKEND_SLOTS.filter((s) => s.slot.status === "open" || s.slot.status === "closed").map((s) => ({
     slot: s.slot,
     interested: [...s.interested].sort(
       (a, b) => a.confirmedThisMonth - b.confirmedThisMonth || b.passedOver - a.passedOver,
@@ -471,6 +542,19 @@ export async function mockUnassignSlot(assignmentId: number): Promise<void> {
       return;
     }
   }
+}
+
+/**
+ * Демо «Набрали, закрыть»: как сервер — статус closed, назначенные остаются,
+ * «отбой» получают желающие без назначения. Повтор — ноль писем.
+ */
+export async function mockCloseSlot(slotId: number): Promise<{ toldOff: number }> {
+  await delay(200);
+  const view = WEEKEND_SLOTS.find((s) => s.slot.id === slotId);
+  if (!view || view.slot.status === "closed") return { toldOff: 0 };
+  view.slot.status = "closed";
+  const assigned = new Set(view.assignees.map((a) => a.employeeId));
+  return { toldOff: view.interested.filter((p) => !assigned.has(p.employeeId)).length };
 }
 
 function durationHoursOf(start: string, end: string): number {
@@ -1260,6 +1344,8 @@ export async function mockGetSettings(): Promise<AdminSettings> {
     swapsLockUpdatedBy: swapsLock.updatedByEmployeeId != null ? nameOf(swapsLock.updatedByEmployeeId) : null,
     reminderHour,
     reminderHourUpdatedBy: reminderHourUpdatedBy,
+    holidaysAuto: mockHolidaysAuto,
+    holidays: [{ year: new Date().getUTCFullYear(), refreshedAt: new Date().toISOString(), source: "xmlcalendar", days: mockCalendar.length }],
   };
 }
 
@@ -1287,6 +1373,31 @@ export async function mockSetSwapsLock(locked: boolean): Promise<SwapLockResult>
     delivered: team.filter((e) => e.telegramUserId != null).length,
     intended: team.length,
   };
+}
+
+// --- Настройки: что писать админу --------------------------------------------
+
+/** Живёт между вызовами, как `swapsLock` выше: нажал тумблер — и следующий
+ *  getNoticePrefs помнит об этом без перезагрузки. Зеркало мока мини-аппа. */
+const mutedKinds = new Set<string>();
+
+export async function mockGetNoticePrefs(): Promise<NoticePrefs> {
+  await delay(150);
+  return {
+    kinds: ADMIN_NOTICE_KINDS.map((kind) => ({
+      kind,
+      title: ADMIN_NOTICE_LABELS[kind].title,
+      hint: ADMIN_NOTICE_LABELS[kind].hint,
+      enabled: !mutedKinds.has(kind),
+    })),
+  };
+}
+
+export async function mockSetNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }> {
+  await delay(200);
+  if (enabled) mutedKinds.delete(kind);
+  else mutedKinds.add(kind);
+  return { kind, enabled };
 }
 
 // --- Анонсы ---------------------------------------------------------------

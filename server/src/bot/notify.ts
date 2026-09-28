@@ -81,7 +81,7 @@ export function swapAutoCancelledText(p: SwapAuditPayload): string {
 /** Why a pending swap stopped being possible without its initiator doing
  *  anything — an admin removed the entry under it, replaced the whole month, or
  *  the shift changed hands so the trade no longer adds up. */
-export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed" | "date_passed";
+export type SwapExpiryCause = "entry_deleted" | "roster_reimported" | "shift_changed" | "date_passed" | "employee_archived";
 
 /**
  * Sent to *both* sides of a pending swap an admin's edit just invalidated —
@@ -102,6 +102,7 @@ export function swapExpiredText(p: SwapAuditPayload, cause: SwapExpiryCause): st
   const why =
     cause === "entry_deleted" ? "смену удалили из расписания"
     : cause === "roster_reimported" ? "график за этот период загрузили заново"
+    : cause === "employee_archived" ? "одного из вас убрали в архив"
     : "смена изменилась, и обмен больше невозможен";
   return `Обмен неактуален: ${why}. Было: ${p.fromName} (${p.fromShift}) ↔ ${p.toName} (${p.toShift}).`;
 }
@@ -402,23 +403,31 @@ export async function notifyAdmins(
   db: Db,
   kind: AdminNoticeKind,
   text: string,
-  action?: AdminAction,
-  /** Сообщение, которое уходит следом за текстом копией (скриншот в жалобе). */
-  attachment?: { fromChatId: number; messageId: number },
+  action?: AdminAction | readonly AdminAction[],
+  opts: {
+    /** Сообщение, которое уходит следом за текстом копией (скриншот в жалобе). */
+    attachment?: { fromChatId: number; messageId: number };
+    /** Кому не писать — тому, кто сам это сделал: он и так знает. */
+    exceptEmployeeId?: number;
+  } = {},
 ): Promise<AdminReach> {
+  const { attachment, exceptEmployeeId } = opts;
   const reach: AdminReach = { attempted: 0, delivered: 0 };
   // Кнопка едет с каждым выключаемым письмом по причине, уже записанной у
   // `notifyReminder`: за настройкой, о существовании которой не знаешь, не ходят.
   // Момент, когда админ хочет это выключить, наступает ровно тогда, когда оно у
   // него на экране.
   const kb = new InlineKeyboard();
-  if (action) {
-    addActionButton(kb, action);
+  // Несколько действий — каждое своей строкой (совет о пробелах: «Открыть
+  // график» и «Знаю про дд.мм» на каждую дату).
+  for (const one of action == null ? [] : Array.isArray(action) ? action : [action]) {
+    addActionButton(kb, one);
     kb.row();
   }
   kb.text("🔕 Не писать мне про это", `notice:mute:${kind}`);
   for (const admin of listAdmins(db)) {
     if (admin.telegramUserId == null) continue;
+    if (admin.id === exceptEmployeeId) continue;
     // Единственное место на весь проект, где эта проверка делается. Если она
     // понадобится где-то ещё — значит, письмо шлют мимо `notifyAdmins`, и чинить
     // надо это, а не копировать условие.
@@ -442,7 +451,7 @@ export async function notifyAdmins(
 export async function notifyBugReport(
   bot: Bot, db: Db, reportId: number, text: string, attachment?: { fromChatId: number; messageId: number },
 ): Promise<void> {
-  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` }, attachment);
+  await notifyAdmins(bot, db, "bug_reports", text, { text: "✅ Разобрал", data: `bug:resolve:${reportId}` }, { attachment });
 }
 
 /**

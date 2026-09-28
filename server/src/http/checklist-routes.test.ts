@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
@@ -33,6 +33,16 @@ function worker(db: Db, name: string, tgId: number) {
 }
 
 const TODAY = "2026-08-24";
+
+// Отметка принимается только за командные «сегодня» и «вчера», поэтому часы
+// файла стоят на 24 августа, 10:00 МСК. Только `Date` — таймеры настоящие.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-24T07:00:00Z"));
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /** Пресет по имени — тесты говорят «с 07:00», а не «id 6». */
 function preset(db: Db, name: string) {
@@ -238,6 +248,23 @@ describe("чек-лист: свой (работник)", () => {
 
     await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId, done: false }));
     expect(listMarksFor(db, TODAY, igor.id)).toEqual([]);
+  });
+
+  // Отметка ставилась на любую дату — заранее на завтра или на прошлую неделю.
+  // Его решение от 2026-09-28: сегодня и вчера (ночная смена через полночь).
+  it("отметка — только за сегодня и вчера", async () => {
+    const { app } = await stage();
+    const token = await tokenFor(app, 333);
+    const itemId = (await (await app.request(`/api/my/checklist?date=${TODAY}`, bearer(token))).json()).checklists[0].items[0].id;
+
+    const tomorrow = await app.request("/api/my/checklist/mark", authedJson(token, { date: "2026-08-25", itemId, done: true }));
+    expect(tomorrow.status).toBe(400);
+    expect((await tomorrow.json()).error).toContain("сегодняшний и вчерашний");
+    const weekAgo = await app.request("/api/my/checklist/mark", authedJson(token, { date: "2026-08-17", itemId, done: true }));
+    expect(weekAgo.status).toBe(400);
+    // Вчера — можно: ночная смена через полночь отмечает свой вчерашний список.
+    const yesterday = await app.request("/api/my/checklist/mark", authedJson(token, { date: "2026-08-23", itemId, done: true }));
+    expect(String((await yesterday.json()).error ?? "")).not.toContain("сегодняшний и вчерашний");
   });
 
   /**

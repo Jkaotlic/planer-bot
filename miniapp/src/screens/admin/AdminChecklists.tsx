@@ -10,7 +10,7 @@ import {
   checklistDispatchState,
   checklistHasContent,
 } from "@planer/shared";
-import { apiClient, type Checklist, type ChecklistDay, type Template } from "../../api/client";
+import { apiClient, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
 
@@ -338,18 +338,16 @@ function ChecklistCard({
             <span style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Пунктов пока нет.</span>
           ) : (
             list.items.map((item, index) => (
-              <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", minWidth: 16 }}>{index + 1}</span>
-                <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>
-                  {item.title}
-                  {item.note && (
-                    <span style={{ display: "block", fontSize: 12.5, color: "var(--tgui--hint_color)" }}>{item.note}</span>
-                  )}
-                </span>
-                <Button size="s" mode="plain" disabled={busy} onClick={() => void run(() => apiClient.removeChecklistItem(item.id))}>
-                  Убрать
-                </Button>
-              </div>
+              <ItemRow
+                key={item.id}
+                item={item}
+                index={index}
+                total={list.items.length}
+                busy={busy}
+                onSave={(patch) => run(() => apiClient.updateChecklistItem(item.id, patch))}
+                onMove={(to) => void run(() => apiClient.reorderChecklistItem(item.id, to))}
+                onRemove={() => void run(() => apiClient.removeChecklistItem(item.id))}
+              />
             ))
           )}
 
@@ -450,5 +448,107 @@ function ChecklistCard({
         </div>
       )}
     </CardShell>
+  );
+}
+
+/**
+ * Пункт чек-листа: правка названия и пояснения, перестановка, «Убрать».
+ *
+ * Раньше в мини-аппе пункт можно было только убрать: опечатку в названии
+ * чинили «убрать и добавить заново», и пункт уезжал в конец списка, а порядок
+ * обхода — это порядок пунктов в сообщении дежурному. Консоль это умела всегда
+ * (`admin/src/screens/ChecklistScreen.tsx`).
+ *
+ * Название и пояснение правятся одной формой, а не двумя кнопками, как в
+ * консоли: на телефоне в строке нет места под «Переименовать» и «Пояснение»
+ * рядом со стрелками. В запрос уходит только изменённое — нетронутое поле не
+ * должно перезаписываться тем, что было на экране при открытии формы.
+ */
+function ItemRow({
+  item,
+  index,
+  total,
+  busy,
+  onSave,
+  onMove,
+  onRemove,
+}: {
+  item: ChecklistItem;
+  index: number;
+  total: number;
+  busy: boolean;
+  onSave: (patch: { title?: string; note?: string | null }) => Promise<boolean>;
+  onMove: (to: number) => void;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(item.title);
+  const [note, setNote] = useState(item.note ?? "");
+
+  function open() {
+    setTitle(item.title);
+    setNote(item.note ?? "");
+    setEditing(true);
+  }
+
+  const patch: { title?: string; note?: string | null } = {};
+  if (title.trim() && title.trim() !== item.title) patch.title = title.trim();
+  if ((note.trim() || null) !== (item.note ?? null)) patch.note = note.trim() || null;
+  const changed = Object.keys(patch).length > 0;
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <Input header={`Пункт ${index + 1}`} value={title} disabled={busy} onChange={(e) => setTitle(e.target.value)} />
+        <Textarea
+          header="Пояснение — как именно проверять"
+          placeholder="Необязательно"
+          value={note}
+          disabled={busy}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button
+            size="s"
+            mode="filled"
+            disabled={busy || !changed}
+            onClick={() => void onSave(patch).then((ok) => ok && setEditing(false))}
+          >
+            Сохранить
+          </Button>
+          <Button size="s" mode="plain" disabled={busy} onClick={() => setEditing(false)}>
+            Отмена
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+      <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", minWidth: 16 }}>{index + 1}</span>
+      {/* Базис 140px: на узком экране кнопки уходят строкой ниже, а не
+          сжимают название до пары букв. */}
+      <span style={{ flex: "1 1 140px", fontSize: 14, minWidth: 0, overflowWrap: "anywhere" }}>
+        {item.title}
+        {item.note && (
+          <span style={{ display: "block", fontSize: 12.5, color: "var(--tgui--hint_color)" }}>{item.note}</span>
+        )}
+      </span>
+      <span style={{ display: "inline-flex", gap: 2, marginLeft: "auto", flex: "none" }}>
+        <Button size="s" mode="plain" aria-label="Выше" disabled={busy || index === 0} onClick={() => onMove(index - 1)}>
+          ↑
+        </Button>
+        <Button size="s" mode="plain" aria-label="Ниже" disabled={busy || index === total - 1} onClick={() => onMove(index + 1)}>
+          ↓
+        </Button>
+        <Button size="s" mode="plain" aria-label="Изменить пункт" disabled={busy} onClick={open}>
+          ✎
+        </Button>
+        <Button size="s" mode="plain" disabled={busy} onClick={onRemove}>
+          Убрать
+        </Button>
+      </span>
+    </div>
   );
 }

@@ -22,6 +22,7 @@ import {
   employeesMock,
   mockCreateEntry,
   mockCreateEntryRange,
+  mockCreateEntries,
   mockGetChecklists,
   mockCreateChecklist,
   mockPatchChecklist,
@@ -44,6 +45,7 @@ import {
   mockPostSlot,
   mockAssignSlot,
   mockUnassignSlot,
+  mockCloseSlot,
   mockGetPayroll,
   mockGetPayrollCsv,
   mockGetRosterCsv,
@@ -76,6 +78,11 @@ import {
   mockApplyRosterImport,
   mockGetSettings,
   mockSetSwapsLock,
+  mockSetHolidaysAuto,
+  mockRefreshHolidays,
+  mockSetCalendarDay,
+  mockGetNoticePrefs,
+  mockSetNoticePref,
   mockGetAnnouncementRecipients,
   mockSendAnnouncement,
   mockGetBugReports,
@@ -86,9 +93,8 @@ import {
  * Работник — DTO из контракта.
  *
  * Форма была объявлена здесь своими словами и не знала `preferredName`, хотя
- * сервер его отдаёт: консоль поле не читает — «обращение» человек задаёт себе
- * сам в мини-аппе. Теперь оно просто есть и остаётся непрочитанным, а тип один
- * на сервер и на оба фронта.
+ * сервер его отдаёт. Теперь тип один на сервер и на оба фронта, и консоль, как
+ * и мини-апп, показывает и правит обращение в карточке работника.
  */
 export type Employee = AdminEmployeeDto;
 
@@ -528,6 +534,38 @@ export interface AdminSettings {
   /** ISO-строка или null, если тумблер ни разу не трогали. */
   swapsLockUpdatedAt: string | null;
   swapsLockUpdatedBy: string | null;
+  /** Тянет ли бот производственный календарь сам. */
+  holidaysAuto: boolean;
+  /** Что уже загружено, по годам — для строки «2026: 22 дн., обновлено …». */
+  holidays: HolidayYearView[];
+}
+
+/** Один загруженный год календаря на экране настроек. Зеркало мини-аппа. */
+export interface HolidayYearView {
+  year: number;
+  refreshedAt: string;
+  source: "xmlcalendar" | "bundled";
+  days: number;
+}
+
+/** Один вид админского письма и его тумблер — «Настройки» → «Что мне писать». */
+export interface NoticePref {
+  kind: string;
+  title: string;
+  hint: string;
+  enabled: boolean;
+}
+
+export interface NoticePrefs {
+  kinds: NoticePref[];
+}
+
+/** Итог кнопки «Обновить сейчас» по одному году. */
+export interface HolidayRefreshYear {
+  year: number;
+  status: "ok" | "missing" | "error" | "bundled";
+  added: number;
+  removed: number;
 }
 
 /** Итог переключения замка: что стало, и какой ценой (кому дошло уведомление). */
@@ -595,6 +633,9 @@ export interface ApiClient {
   getEvents(): Promise<FeedEvent[]>;
   createEntry(input: NewEntryInput): Promise<{ entry: Shift; notified: NotifyReach }>;
   createEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult>;
+  /** Одним запросом вместо цикла — «Заполнить неделю» писала бы письмо на каждый
+   *  день иначе. Один POST, одно письмо на человека независимо от числа дней. */
+  createEntries(inputs: NewEntryInput[]): Promise<{ created: number; notified: NotifyReach }>;
   getChecklists(): Promise<Checklist[]>;
   createChecklist(name: string): Promise<Checklist>;
   patchChecklist(id: number, patch: { name?: string; note?: string | null; docUrl?: string | null }): Promise<Checklist>;
@@ -615,6 +656,8 @@ export interface ApiClient {
   restoreEmployee(id: number): Promise<void>;
   setEmployeeAdmin(id: number, isAdmin: boolean): Promise<void>;
   renameEmployee(id: number, displayName: string): Promise<void>;
+  /** Как бот зовёт человека. `null` — снова «по умолчанию» (`addressOf`). */
+  setEmployeePreferredName(id: number, preferredName: string | null): Promise<void>;
   /** `null` clears the birthday. */
   setBirthDate(id: number, birthDate: string | null): Promise<void>;
   /** Sets one or both exclusion flags. Turning on `excludedFromSwaps` cancels
@@ -636,6 +679,9 @@ export interface ApiClient {
   /** `notified: false` — письмо назначенному не дошло; `undefined` — письма не было (повтор). */
   assignSlot(slotId: number, employeeId: number): Promise<{ notified?: boolean }>;
   unassignSlot(assignmentId: number): Promise<void>;
+  /** «Набрали, закрыть»: слот перестаёт принимать «Хочу», назначенные выходят.
+   *  `toldOff` — скольким желающим без назначения ушло «уже набрали». */
+  closeSlot(slotId: number): Promise<{ toldOff: number }>;
   getPayroll(from: string, to: string): Promise<PayrollRow[]>;
   getPayrollCsv(from: string, to: string): Promise<string>;
   getRosterCsv(from: string, to: string): Promise<string>;
@@ -681,6 +727,13 @@ export interface ApiClient {
   getSettings(): Promise<AdminSettings>;
   setSwapsLock(locked: boolean): Promise<SwapLockResult>;
   setReminderHour(hour: string): Promise<void>;
+  setHolidaysAuto(enabled: boolean): Promise<void>;
+  refreshHolidays(): Promise<HolidayRefreshYear[]>;
+  /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
+  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
+  /** Какие письма получает этот админ — адресат из токена, чужие не выключить. */
+  getNoticePrefs(): Promise<NoticePrefs>;
+  setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Кому уйдёт анонс, глазами того, кто его пишет — сервер уже исключил
    *  самого отправителя и архивных. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
@@ -949,6 +1002,9 @@ export const realClient: ApiClient = {
 
   createEntryRange: (input) => authorizedPostJson<EntryRangeResult>("/api/admin/entries/range", input),
 
+  createEntries: (inputs) =>
+    authorizedPostJson<{ created: number; notified: NotifyReach }>("/api/admin/entries/bulk", { entries: inputs }),
+
   getChecklists: () => authorizedGet<{ checklists: Checklist[] }>("/api/admin/checklists").then((r) => r.checklists),
   createChecklist: (name) =>
     authorizedPostJson<{ checklist: Checklist }>("/api/admin/checklists", { name }).then((r) => r.checklist),
@@ -992,8 +1048,8 @@ export const realClient: ApiClient = {
   deleteEntry: (id) => authorizedDelete<{ notified: NotifyReach }>(`/api/admin/entries/${id}`),
 
   // Методы перечислены, а не спреднуты: у консоли этот домен уже своего имени
-  // ручке (`getEmployees` вместо `getAdminEmployees`), и «обращение» она не
-  // трогает вовсе. Общий слой несёт объединение, консоль берёт своё.
+  // ручке (`getEmployees` вместо `getAdminEmployees`). Общий слой несёт
+  // объединение, консоль берёт своё.
   createEmployee: (name) => employeesApi.createEmployee(name),
   archiveEmployee: (id) => employeesApi.archiveEmployee(id),
   restoreEmployee: (id) => employeesApi.restoreEmployee(id),
@@ -1001,6 +1057,7 @@ export const realClient: ApiClient = {
   reorderEmployee: (id, position) => employeesApi.reorderEmployee(id, position),
   setBirthDate: (id, birthDate) => employeesApi.setBirthDate(id, birthDate),
   renameEmployee: (id, displayName) => employeesApi.renameEmployee(id, displayName),
+  setEmployeePreferredName: (id, preferredName) => employeesApi.setEmployeePreferredName(id, preferredName),
   setEmployeeRestrictions: (id, patch) => employeesApi.setEmployeeRestrictions(id, patch),
   setEmployeeObserver: (id, isObserver) => employeesApi.setEmployeeObserver(id, isObserver),
   getEmployeeInvite: (id, regenerate) => employeesApi.getEmployeeInvite(id, regenerate),
@@ -1024,6 +1081,10 @@ export const realClient: ApiClient = {
   },
   async unassignSlot(assignmentId) {
     await authorizedPostJson(`/api/admin/weekend/assignments/${assignmentId}/unassign`, {});
+  },
+  async closeSlot(slotId) {
+    const { toldOff } = await authorizedPostJson<{ ok: boolean; toldOff: number }>(`/api/admin/weekend/slots/${slotId}/close`, {});
+    return { toldOff };
   },
 
   async getPayroll(from, to) {
@@ -1204,6 +1265,29 @@ export const realClient: ApiClient = {
     return authorizedPutJson<SwapLockResult>("/api/admin/settings/swaps-lock", { locked });
   },
 
+  async setHolidaysAuto(enabled) {
+    await authorizedPutJson("/api/admin/settings/holidays-auto", { enabled });
+  },
+
+  async refreshHolidays() {
+    const { years } = await authorizedPostJson<{ years: HolidayRefreshYear[] }>("/api/admin/holidays/refresh", {});
+    return years;
+  },
+
+  async setCalendarDay(date, kind, note = null) {
+    // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
+    // про день, а не про строку, которой больше нет.
+    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "manual" | null }>(
+      `/api/admin/calendar/${date}`,
+      { kind, note },
+    );
+    return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+  },
+
+  getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
+  setNoticePref: (kind, enabled) =>
+    authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
+
   async getAnnouncementRecipients() {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
@@ -1230,6 +1314,7 @@ const devClient: ApiClient = {
   getEvents: () => mockGetEvents(),
   createEntry: (input) => mockCreateEntry(input),
   createEntryRange: (input) => mockCreateEntryRange(input),
+  createEntries: (inputs) => mockCreateEntries(inputs),
   getChecklists: () => mockGetChecklists(),
   createChecklist: (name) => mockCreateChecklist(name),
   patchChecklist: (id, patch) => mockPatchChecklist(id, patch),
@@ -1249,6 +1334,7 @@ const devClient: ApiClient = {
   restoreEmployee: (id) => employeesMock.restoreEmployee(id),
   setEmployeeAdmin: (id, isAdmin) => employeesMock.setEmployeeAdmin(id, isAdmin),
   renameEmployee: (id, displayName) => employeesMock.renameEmployee(id, displayName),
+  setEmployeePreferredName: (id, preferredName) => employeesMock.setEmployeePreferredName(id, preferredName),
   setBirthDate: (id, birthDate) => employeesMock.setBirthDate(id, birthDate),
   setEmployeeRestrictions: (id, patch) => employeesMock.setEmployeeRestrictions(id, patch),
   setEmployeeObserver: (id, isObserver) => employeesMock.setEmployeeObserver(id, isObserver),
@@ -1261,6 +1347,7 @@ const devClient: ApiClient = {
     return { notified: true };
   },
   unassignSlot: (assignmentId) => mockUnassignSlot(assignmentId),
+  closeSlot: (slotId) => mockCloseSlot(slotId),
   getPayroll: (from, to) => mockGetPayroll(from, to),
   getPayrollCsv: (from, to) => mockGetPayrollCsv(from, to),
   getRosterCsv: (from, to) => mockGetRosterCsv(from, to),
@@ -1293,6 +1380,11 @@ const devClient: ApiClient = {
   applyRosterImport: (csv, resolutions, overwrite) => mockApplyRosterImport(csv, resolutions, overwrite),
   getSettings: () => mockGetSettings(),
   setSwapsLock: (locked) => mockSetSwapsLock(locked),
+  setHolidaysAuto: (enabled) => mockSetHolidaysAuto(enabled),
+  refreshHolidays: () => mockRefreshHolidays(),
+  setCalendarDay: (date, kind, note) => mockSetCalendarDay(date, kind, note ?? null),
+  getNoticePrefs: () => mockGetNoticePrefs(),
+  setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getBugReports: (status) => mockGetBugReports(status),

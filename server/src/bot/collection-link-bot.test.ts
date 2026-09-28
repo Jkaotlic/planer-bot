@@ -3,6 +3,7 @@ import { Bot } from "grammy";
 import { createBot, FALLBACK_TEXT } from "./bot";
 import { recordApi, stubBotInfo, type SentMessage } from "./testbot";
 import { makeTestDb } from "../db/testdb";
+import { listRecentAudit } from "../repo/audit";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { ensureBirthdayRound, upcomingBirthdays } from "../birthdays/birthday-service";
 import { getCollection, updateCollection } from "../collections/collection-service";
@@ -369,6 +370,35 @@ describe("кнопки под подтверждением", () => {
     expect(after.autoSendOn).toBeNull();
     expect(after.collectUrl).toBe("https://example.com/sbor");
     expect(api.sent.at(-1)!.text).toContain("Не разошлю сам");
+  });
+
+  // Автоотправка — письмо всей команде в назначенный день. Её выключение или
+  // перенос из бота не оставлял следа: ни строки в журнале, ни слова другим
+  // админам, которые могли рассчитывать на рассылку.
+  it("выключение из бота — строка журнала и одна строка другим админам, нажавшему — нет", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 444, null, true);
+    const before = api.sent.length;
+
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+
+    const row = listRecentAudit(db, 20).find((r) => r.type === "collection_updated");
+    expect(row).toBeDefined();
+    expect((row!.payload as { autoSendOn?: unknown }).autoSendOn).toBeNull();
+    const after = api.sent.slice(before);
+    expect(after.some((m) => m.chat_id === 444 && m.text.includes("Автоотправка"))).toBe(true);
+    expect(after.filter((m) => m.chat_id === 222 && m.text.includes("Автоотправка"))).toHaveLength(0);
+  });
+
+  it("перенос из бота — тоже в журнал", async () => {
+    const { db, bot } = stage();
+    const round = await withLink(db, bot);
+
+    await tap(bot, 222, `collection:autoday:${round.id}:1`);
+
+    const row = listRecentAudit(db, 20).find((r) => r.type === "collection_updated");
+    expect((row?.payload as { autoSendOn?: unknown } | undefined)?.autoSendOn).toBeTypeOf("string");
   });
 
   it("«другой день» показывает варианты", async () => {

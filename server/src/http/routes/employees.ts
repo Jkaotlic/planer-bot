@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import type { Bot } from "grammy";
 import { Hono } from "hono";
@@ -11,14 +12,18 @@ import {
   PREFERRED_NAME_MAX,
   addressOf,
   canSwap,
+  isAbsence,
   isBirthDate,
   normalizePreferredName,
 } from "@planer/shared";
-import { notifyUser } from "../../bot/notify";
+import { notifyUser, swapExpiredText } from "../../bot/notify";
+import { deleteShift, listShiftsByEmployee } from "../../repo/shifts";
+import { getVacantSlot, listAssignmentsForEmployee, removeAllInterestOf } from "../../repo/weekend";
+import { unassign } from "../../weekend/weekend-service";
 import { refreshAdminCommands } from "../../bot/bot";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
-import type { Employee as EmployeeRow } from "../../db/schema";
+import { swapRequests, type Employee as EmployeeRow } from "../../db/schema";
 import { recordAudit } from "../../repo/audit";
 import {
   archiveEmployee,
@@ -316,17 +321,70 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
   // Guarded exactly like the /role demote below: archiving an admin reaches the same
   // "no active admin left" dead end, and — unlike a demote — there is no undo button
   // for it anywhere in the app.
-  routes.post("/api/admin/employees/:id/archive", requireAdmin(db, config.jwtSecret), (c) => {
+  routes.post("/api/admin/employees/:id/archive", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const target = getEmployeeById(db, id);
     if (!target) return c.json({ error: "not_found" }, 404);
     if (target.isAdmin && countActiveAdmins(db) <= 1) {
       return c.json({ error: "last_admin" }, 400);
     }
-    const employee = archiveEmployee(db, id, teamNow(config.teamTz).date);
+    const today = teamNow(config.teamTz).date;
+    const actorId = c.get("auth").employeeId;
+
+    // Хвосты — до самой архивации (решение владельца от 2026-09-28). Раньше
+    // архивация только снимала человека со смен: висящий обмен оставался
+    // зомби-заявкой у второй стороны, предложение выходного — живым, а будущий
+    // отпуск — «ничьим» отпуском в графике.
+    //
+    // 1. Висящие обмены — гаснут (`expired`, как у всех путей с `swap_expired`:
+    //    отменял не он и не вторая сторона), второй стороне письмо. Описание
+    //    снимаем ДО записи: оно называет смены такими, какими о них договаривались.
+    const { pending, payloads } = pendingSwapsForEmployee(db, id);
+    // Всё — одной транзакцией (вложенные станут точками сохранения): сбой
+    // посередине иначе гасил обмен молча — без письма и журнала, — а человек
+    // оставался в команде. Письма и журнал — после, когда всё записано.
+    const done = db.transaction(() => {
+      for (const request of pending) {
+        db.update(swapRequests).set({ status: "expired", resolvedAt: new Date() }).where(eq(swapRequests.id, request.id)).run();
+      }
+      // 2. Назначения на выходные с сегодня — сняты вместе с записью в графике;
+      //    отклики «Хочу» на открытые слоты — тоже.
+      let unassignedWeekend = 0;
+      for (const assignment of listAssignmentsForEmployee(db, id)) {
+        const slot = getVacantSlot(db, assignment.slotId);
+        if (!slot || slot.date < today || assignment.status === "declined") continue;
+        if (unassign(db, assignment.id).ok) unassignedWeekend += 1;
+      }
+      removeAllInterestOf(db, id, today);
+      // 3. Отсутствия, которые ещё не начались, — удалены: отпуск ушедшего без
+      //    человека не значит ничего. Идущее сейчас не трогаем — его начало в
+      //    прошлом, и укорачивать его без решения админа незачем.
+      let removedAbsences = 0;
+      for (const entry of listShiftsByEmployee(db, id)) {
+        if (!isAbsence(entry.category) || entry.date < today) continue;
+        if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
+      }
+      // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
+      const freedShifts = listShiftsByEmployee(db, id).filter((s) => s.date >= today).length;
+      const archived = archiveEmployee(db, id, today);
+      return { archived, unassignedWeekend, removedAbsences, freedShifts };
+    });
+    const { unassignedWeekend, removedAbsences, freedShifts } = done;
+    const employee = done.archived;
     if (!employee) return c.json({ error: "not_found" }, 404);
-    recordAudit(db, "employee_archived", c.get("auth").employeeId, { employeeId: id, displayName: employee.displayName });
-    return c.json({ ok: true });
+    recordAudit(db, "employee_archived", actorId, {
+      employeeId: id, displayName: employee.displayName, freedShifts, expiredSwaps: pending.length, removedAbsences, unassignedWeekend,
+    });
+    for (const payload of payloads) recordAudit(db, "swap_expired", actorId, payload);
+    if (bot) {
+      for (const request of pending) {
+        const other = request.fromEmployeeId === id ? request.toEmployeeId : request.fromEmployeeId;
+        const tg = getEmployeeById(db, other)?.telegramUserId;
+        const payload = payloads.find((p) => p.requestId === request.id);
+        if (tg != null && payload) await notifyUser(bot, tg, swapExpiredText(payload, "employee_archived"));
+      }
+    }
+    return c.json({ ok: true, freedShifts, expiredSwaps: pending.length, removedAbsences, unassignedWeekend });
   });
 
   routes.post("/api/admin/employees/:id/restore", requireAdmin(db, config.jwtSecret), (c) => {

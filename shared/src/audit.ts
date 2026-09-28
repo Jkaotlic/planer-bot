@@ -39,7 +39,7 @@ export const AUDIT_TYPES = [
   // Час рассылки — не `settings_changed`: тот тип про замок обменов, и одна
   // строка на две разные ручки не отвечала бы, что именно поменяли.
   "reminder_hour_changed",
-  "weekend_slot_created", "weekend_assigned", "weekend_unassigned",
+  "weekend_slot_created", "weekend_slot_closed", "weekend_assigned", "weekend_unassigned",
   "weekend_interest", "weekend_interest_withdrawn", "weekend_offer_confirmed", "weekend_offer_declined",
   "birthday_sent", "birthday_admin_notice", "birthday_schedule_notice",
   "birthday_campaign_updated",
@@ -258,6 +258,12 @@ function rotationLabel(v: unknown): string {
 // ——— таблица описателей ———
 // `Partial` снят: с этого момента полноту стережёт компилятор, а не зеркальный
 // тест в каждом консоле.
+/** Как вкладка старта читается в журнале; `null` — «Смены», как было всегда. */
+const START_TAB_LABEL: Record<string, string> = {
+  mine: "«Смены»", team: "«Команда»", team_week: "«Команда · неделя»", swaps: "«Обмены»",
+  weekend: "«Выходные»", collections: "«Сборы»", admin: "«Админ»",
+};
+
 const DESCRIBERS: Record<AuditType, Describer> = {
   entry_created: (p) => ({ icon: "＋", title: entryTitle("created", p), lines: entryView(p) }),
   entry_deleted: (p) => ({ icon: "🗑", title: entryTitle("deleted", p), lines: entryView(p) }),
@@ -402,6 +408,12 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     if (p.preferredName !== undefined) {
       lines.push(`обращение: ${str(p.preferredName) ?? "по умолчанию"}`);
     }
+    if (p.startTab !== undefined) {
+      lines.push(`открывать с вкладки: ${START_TAB_LABEL[str(p.startTab) ?? ""] ?? "«Смены»"}`);
+    }
+    if (typeof p.selfScheduleEnabled === "boolean") {
+      lines.push(p.selfScheduleEnabled ? "ведёт график сам" : "больше не ведёт график сам");
+    }
     return { icon: "⚙", title: "Работник изменил настройки", lines };
   },
 
@@ -460,6 +472,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   }),
   weekend_assigned: (p) => weekendView(p, "🎯", "Выходная смена назначена"),
   weekend_unassigned: (p) => weekendView(p, "↩", "Назначение на выходной снято"),
+  weekend_slot_closed: (p) => weekendView(p, "✅", "Выходную смену набрали — закрыта"),
   weekend_interest: (p) => weekendView(p, "🙋", "Отклик на выходную смену"),
   weekend_interest_withdrawn: (p) => weekendView(p, "↩", "Отозвал(а) отклик на выходную смену"),
   weekend_offer_confirmed: (p) => weekendView(p, "✅", "Выходная смена подтверждена"),
@@ -503,6 +516,10 @@ const DESCRIBERS: Record<AuditType, Describer> = {
     }
     // Сам текст письма в журнал не копируется — здесь только факт правки.
     if (p.messageText !== undefined) lines.push(str(p.messageText) ? "текст изменён" : "текст сброшен на стандартный");
+    if (p.autoSendOn !== undefined) {
+      const was = p.autoSendOnBefore === undefined ? "" : ` (было: ${str(p.autoSendOnBefore) ? dayLabel(p.autoSendOnBefore) : "выключена"})`;
+      lines.push(`автоотправка: ${str(p.autoSendOn) ? dayLabel(p.autoSendOn) : "выключена"}${was}`);
+    }
     return { icon: "💰", title: "Изменён сбор", lines };
   },
   collection_sent: (p) => {

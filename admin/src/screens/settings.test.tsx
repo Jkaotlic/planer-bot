@@ -24,6 +24,8 @@ const OPEN: AdminSettings = {
   swapsLockUpdatedBy: "Игорь Петров",
   reminderHour: "20:00",
   reminderHourUpdatedBy: null,
+  holidaysAuto: true,
+  holidays: [],
 };
 
 let root: Root | null = null;

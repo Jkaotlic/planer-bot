@@ -25,11 +25,11 @@ import { collectionsForWorker, getCollection, previewCollection, setCollectionCl
 import { setPaid } from "../collections/payment-service";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { recordAudit } from "../repo/audit";
-import { reminderHour } from "../repo/settings";
+import { ackCoverageDate, reminderHour } from "../repo/settings";
 import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive } from "@planer/shared";
+import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
@@ -1174,8 +1174,26 @@ export function createBot(deps: BotDeps): Bot {
     const autoSendOn = autoSendDateFor(collection.celebratedOn, today, Number(ctx.match[2]));
     updateCollection(db, collection.id, { autoSendOn });
     await ctx.answerCallbackQuery({ text: "Переставил" });
+    await reportAutoSendChange(who.me.id, collection, autoSendOn);
     await ctx.reply(autoSendLabel(autoSendOn, today) ?? "Автоотправка выключена.");
   });
+
+  /**
+   * Автоотправка — письмо всей команде в назначенный день. Её выключение или
+   * перенос из бота не оставлял следа: ни строки журнала, ни слова другим
+   * админам, которые могли на рассылку рассчитывать. Та же строка журнала, что
+   * у правки сбора в консоли (`collection_updated`).
+   */
+  async function reportAutoSendChange(actorId: number, collection: { id: number; title: string | null; employeeId: number | null; autoSendOn: string | null }, autoSendOn: string | null): Promise<void> {
+    const what = collection.title ?? (collection.employeeId != null ? `ДР ${getEmployeeById(db, collection.employeeId)?.displayName ?? ""}`.trim() : "сбор");
+    recordAudit(db, "collection_updated", actorId, {
+      collectionId: collection.id, employeeId: collection.employeeId, title: collection.title,
+      autoSendOn, autoSendOnBefore: collection.autoSendOn,
+    });
+    const who = getEmployeeById(db, actorId)?.displayName ?? "Админ";
+    const change = autoSendOn ? `перенесена на ${formatDayMonth(autoSendOn)}` : "выключена";
+    await notifyAdmins(bot, db, "celebrations", `💰 Автоотправка сбора «${what}» ${change} — ${who}.`, undefined, { exceptEmployeeId: actorId });
+  }
 
   bot.callbackQuery(/^collection:autooff:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
@@ -1192,6 +1210,7 @@ export function createBot(deps: BotDeps): Bot {
     // значит наказывать за нажатие кнопки «подожди».
     updateCollection(db, collection.id, { autoSendOn: null });
     await ctx.answerCallbackQuery({ text: "Не разошлю" });
+    await reportAutoSendChange(who.me.id, collection, null);
     await ctx.reply("Не разошлю сам. Сбор остался в «Днях рождения» — разошлёшь, когда решишь.");
   });
 
@@ -1462,6 +1481,21 @@ export function createBot(deps: BotDeps): Bot {
    * кто нажал: чужие уведомления выключить нечем. Проверка на админа нужна
    * отдельно — кнопка живёт в чате вечно, а админа могли разжаловать.
    */
+  /**
+   * «Знаю про дд.мм» под советом о пробелах — дата больше в совет не попадает,
+   * для всех админов (решение владельца от 2026-09-28).
+   */
+  bot.callbackQuery(/^coverage:ack:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok || !actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это для администратора" });
+      return;
+    }
+    const date = ctx.match[1]!;
+    ackCoverageDate(db, date, who.me.id);
+    await ctx.answerCallbackQuery({ text: `Понял, про ${date.slice(8, 10)}.${date.slice(5, 7)} больше не напомню` });
+  });
+
   bot.callbackQuery(/^notice:mute:([a-z_]+)$/, async (ctx) => {
     const kind = ADMIN_NOTICE_KINDS.find((k) => k === ctx.match[1]);
     const who = acting(ctx.from.id);

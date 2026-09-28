@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { REMINDER_HOUR_DEFAULT } from "@planer/shared";
 import { appSettings, type AppSetting } from "../db/schema";
@@ -97,6 +97,25 @@ export function coverageAdviceSentOn(db: Db): string | null {
 
 export function markCoverageAdviceSent(db: Db, date: string): void {
   putSetting(db, COVERAGE_ADVICE_SENT_ON, date, null);
+}
+
+const COVERAGE_ACK_PREFIX = "coverage_ack:";
+
+/**
+ * «Знаю про этот день» под советом о пробелах: дата больше в совет не
+ * попадает — для всех админов. Знает один — знает команда; совет, который
+ * каждый вечер повторял те же дыры, учил его не читать.
+ */
+export function ackCoverageDate(db: Db, date: string, actor: number | null = null): void {
+  putSetting(db, `${COVERAGE_ACK_PREFIX}${date}`, "1", actor);
+}
+
+/** Заглушённые даты из `dates`. */
+export function acknowledgedCoverageDates(db: Db, dates: readonly string[]): Set<string> {
+  if (dates.length === 0) return new Set();
+  const rows = db.select({ key: appSettings.key }).from(appSettings)
+    .where(inArray(appSettings.key, dates.map((d) => `${COVERAGE_ACK_PREFIX}${d}`))).all();
+  return new Set(rows.map((r) => r.key.slice(COVERAGE_ACK_PREFIX.length)));
 }
 
 /** Вернуть отметку, какой она была до попытки: письмо не дошло ни до кого. */

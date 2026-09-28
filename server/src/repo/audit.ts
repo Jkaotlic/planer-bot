@@ -1,5 +1,5 @@
-import { and, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { HONOUREE_AUDIT_TYPES, type AuditType } from "@planer/shared";
+import { and, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { HONOUREE_AUDIT_TYPES, addDaysIso, shiftStartMs, type AuditType } from "@planer/shared";
 import type { Db } from "../db/client";
 import { auditLog, employees, type AuditLog } from "../db/schema";
 
@@ -28,6 +28,8 @@ export interface AuditQuery {
   /** Inclusive YYYY-MM-DD bounds on when the event happened. */
   from?: string;
   to?: string;
+  /** Пояс команды: `from`/`to` — командные сутки. Без него — UTC, как было. */
+  teamTz?: string;
   limit: number;
   offset?: number;
   /** Who is looking. Events about their own collection are withheld from them —
@@ -85,8 +87,11 @@ export function queryAudit(db: Db, query: AuditQuery): AuditPage {
   // ничему не совпадёт, поэтому кастуем, а не разрешаем в `AuditQuery` любую строку.
   if (query.types && query.types.length > 0) filters.push(inArray(auditLog.type, query.types as AuditType[]));
   if (query.actorEmployeeId != null) filters.push(eq(auditLog.actorEmployeeId, query.actorEmployeeId));
-  if (query.from) filters.push(gte(auditLog.createdAt, new Date(`${query.from}T00:00:00Z`)));
-  if (query.to) filters.push(lte(auditLog.createdAt, new Date(`${query.to}T23:59:59Z`)));
+  // Сутки — командные: граница UTC сдвигала «за 5-е» на три часа при
+  // поясе Москвы, и ночная правка 5-го уезжала в 4-е.
+  const tz = query.teamTz ?? "UTC";
+  if (query.from) filters.push(gte(auditLog.createdAt, new Date(shiftStartMs({ date: query.from, start: "00:00" }, tz))));
+  if (query.to) filters.push(lt(auditLog.createdAt, new Date(shiftStartMs({ date: addDaysIso(query.to, 1), start: "00:00" }, tz))));
   const surprise = notAboutViewer(query.viewerEmployeeId);
   if (surprise) filters.push(surprise);
   const where = filters.length > 0 ? and(...filters) : undefined;
