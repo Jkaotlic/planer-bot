@@ -75,11 +75,13 @@ export function addInterest(db: Db, slotId: number, employeeId: number): void {
   db.insert(slotInterest).values({ slotId, employeeId }).run();
 }
 
-/** Снять «Хочу». Нет отклика — ничего не происходит. */
-export function removeInterest(db: Db, slotId: number, employeeId: number): void {
-  db.delete(slotInterest)
-    .where(and(eq(slotInterest.slotId, slotId), eq(slotInterest.employeeId, employeeId)))
-    .run();
+/** Снять «Хочу». Возвращает, был ли отклик: нет — ничего не произошло. */
+export function removeInterest(db: Db, slotId: number, employeeId: number): boolean {
+  return (
+    db.delete(slotInterest)
+      .where(and(eq(slotInterest.slotId, slotId), eq(slotInterest.employeeId, employeeId)))
+      .run().changes > 0
+  );
 }
 
 export function listInterestedEmployeeIds(db: Db, slotId: number): number[] {

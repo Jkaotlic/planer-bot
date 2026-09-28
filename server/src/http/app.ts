@@ -2102,6 +2102,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const slotId = Number(c.req.param("id"));
     const res = withdrawInterest(db, slotId, c.get("auth").employeeId);
     if (!res.ok) return c.json({ error: res.reason }, 400);
+    if (!res.removed) return c.json({ ok: true });
     const slot = getVacantSlot(db, slotId);
     recordAudit(db, "weekend_interest_withdrawn", c.get("auth").employeeId, {
       slotId,

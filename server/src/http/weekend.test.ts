@@ -596,6 +596,19 @@ describe("«Передумал» — отзыв «Хочу»", () => {
     expect(listRecentAudit(db, 10).some((r) => r.type === "weekend_interest_withdrawn")).toBe(true);
   });
 
+  it("отклика не было — ответ ok, но журнал не пишется: снимать было нечего", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const anya = await worker(db, app, "Аня", 503);
+    const slotId = (await (await app.request("/api/admin/weekend/slots", authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00" }))).json()).slot.id as number;
+
+    const res = await app.request(`/api/weekend/slots/${slotId}/interest`, del(anya.token));
+
+    expect(res.status).toBe(200);
+    expect(listRecentAudit(db, 10).some((r) => r.type === "weekend_interest_withdrawn")).toBe(false);
+  });
+
   it("уже назначили — отзыв не проходит: отказываются через «Не смогу»", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
