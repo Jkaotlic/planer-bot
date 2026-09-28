@@ -223,7 +223,9 @@ button {
 
 /* ---------- Заполнить неделю ---------- */
 
-.fill-week-panel {
+/* Шире обычной панели: у дня стоит подпись и выбор с временем пресета в одну
+   строку. Два класса — иначе `.panel` ниже по файлу перебил бы ширину. */
+.panel.fill-week-panel {
   width: 520px;
 }
 
@@ -670,21 +672,45 @@ button {
   white-space: nowrap;
 }
 
-/* Имя и «Бот зовёт» столбиком: обращение — подпись к имени, а не ещё один
-   чип в ряду, иначе его читали бы как статус. */
-.employee-row-name-block {
+/* «Бот зовёт» — своей строкой на всю ширину карточки (`flex-basis: 100%`,
+   карточка и так переносится): в ряду с именем и кнопками места нет. */
+.employee-address-line {
+  flex-basis: 100%;
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 10px;
   min-width: 0;
+  font-size: 12.5px;
 }
 
-.employee-row-address {
+.employee-address-text {
+  min-width: 0;
   color: var(--hint);
-  font-size: 12px;
-  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.employee-address-edit {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.employee-edit-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hint);
+}
+
+.employee-address-edit:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .employee-row-spacer {

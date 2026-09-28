@@ -357,6 +357,9 @@ function EmployeeRow({
       <span className="avatar" style={{ background: palette.bg, color: palette.fg }}>
         {initialsOf(employee.displayName)}
       </span>
+      {/* Подпись только у обращения: пустое поле с подсказкой-именем внутри
+          иначе не отличить от правки имени (замер 1024). */}
+      {editing === "address" && <span className="employee-edit-label">Обращение</span>}
       {editing ? (
         <input
           className="employee-name-input"
@@ -374,13 +377,7 @@ function EmployeeRow({
           }}
         />
       ) : (
-        <span className="employee-row-name-block">
-          <span className="employee-row-name" title={employee.displayName}>{employee.displayName}</span>
-          {/* Что бот скажет на самом деле. Всегда, а не «когда отличается от
-              первого слова ФИО»: угадывать, какое слово — имя, эта функция и
-              отказывается. Зеркало карточки мини-аппа. */}
-          <span className="employee-row-address">Бот зовёт: {employee.address}</span>
-        </span>
+        <span className="employee-row-name" title={employee.displayName}>{employee.displayName}</span>
       )}
       {!editing && (
         <>
@@ -432,17 +429,7 @@ function EmployeeRow({
               ✎ Имя
             </button>
           )}
-          {onPreferredName && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => startEditing("address")}
-              disabled={busy}
-              title="Как бот обращается к человеку в сообщениях"
-            >
-              ✎ Обращение
-            </button>
-          )}
+
           {onShowInvite && !linked && (
             <button type="button" className="btn btn-secondary" onClick={onShowInvite} disabled={busy} title="Показать ссылку-приглашение">
               🔗 Ссылка
@@ -467,6 +454,27 @@ function EmployeeRow({
             </button>
           )}
         </>
+      )}
+      {/* Что бот скажет на самом деле. Всегда, а не «когда отличается от первого
+          слова ФИО»: угадывать, какое слово — имя, эта функция и отказывается.
+          Своей строкой под рядом, а не подписью под именем: запас ширины в ряду
+          у карточки 50–70 px (замер 1280), и строка под именем расширяла блок
+          имени так, что «Архивировать» уезжало на вторую строку у каждого. */}
+      {!editing && (
+        <div className="employee-address-line">
+          <span className="employee-address-text">Бот зовёт: {employee.address}</span>
+          {onPreferredName && (
+            <button
+              type="button"
+              className="employee-address-edit"
+              onClick={() => startEditing("address")}
+              disabled={busy}
+              title="Как бот обращается к человеку в сообщениях"
+            >
+              ✎ Обращение
+            </button>
+          )}
+        </div>
       )}
       {!editing && (
         <div className="employee-restrictions">
