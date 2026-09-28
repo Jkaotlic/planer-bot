@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { InlineKeyboard, InputFile, type Bot } from "grammy";
-import { checklistHasContent, checklistText, checklistsDueToday } from "@planer/shared";
+import { checklistHasContent, checklistText, checklistsDueToday, isAbsentOn } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
@@ -46,6 +46,9 @@ export async function runChecklistTick(
   for (const shift of today) {
     const employeeId = shift.employeeId;
     if (employeeId == null) continue;
+    // Отсутствующий не на этаже: смена, которую он отдаёт, до решения по
+    // передаче остаётся на нём, но инструкция к обходу ему не нужна.
+    if (isAbsentOn(today, employeeId, now.date)) continue;
     // Списки берутся у ЭТОЙ смены, а не «какие-нибудь сегодняшние»: у человека
     // в один день бывают две записи разных видов, и каждая приносит свои списки
     // в своё время. Их может быть несколько и у одного вида смены — общая

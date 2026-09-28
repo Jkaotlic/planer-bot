@@ -5,6 +5,7 @@ export * from "./week-model";
 export * from "./overlap";
 export * from "./swap";
 export * from "./category";
+export * from "./absence";
 export * from "./entry-range";
 export * from "./entry-kinds";
 export * from "./person-identity";
