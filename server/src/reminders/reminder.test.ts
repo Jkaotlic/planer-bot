@@ -879,6 +879,37 @@ describe("«Завтра с тобой»: кто ещё работает в эт
     expect(anyaMsg.text).not.toContain("👥");
   });
 
+  it("дежурный и выездное с теми же часами — не «с тобой»", async () => {
+    // Утренний ищет в перечне свою смену, а не дежурного в 08:00: у того своё
+    // место и свои обязанности. Правило то же, что у адресата — только «смена».
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 980);
+    const igor = linkedEmployee(db, "Игорь", 981);
+    const mark = linkedEmployee(db, "Марк", 982);
+    const semyon = linkedEmployee(db, "Семён", 983);
+    const duty = db
+      .insert(shiftTemplates)
+      .values({ name: "Дежурство · Поклонка", category: "duty", start: "08:00", end: "17:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id }); // смена — «с тобой»
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", category: "duty", employeeId: mark.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", category: "offsite", employeeId: semyon.id });
+    const lena = linkedEmployee(db, "Лена", 984);
+    // Запись без своей категории-дежурства, но с видом смены «дежурство»: вид сужает.
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: lena.id, templateId: duty.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 980)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
+    expect(anyaMsg.text).not.toContain("Марк");
+    expect(anyaMsg.text).not.toContain("Семён");
+    expect(anyaMsg.text).not.toContain("Лена");
+  });
+
   it("сосед с двумя утренними записями за день попадает в список один раз", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 960);

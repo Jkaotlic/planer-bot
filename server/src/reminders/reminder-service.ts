@@ -103,6 +103,18 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
 }
 
 /**
+ * Запись — не рутинная «смена»: дежурство, выездное, выход в выходной.
+ *
+ * Категорию решает сама запись (`shift.category`) — она есть всегда, даже без
+ * вида смены (импорт ростера, ручная запись); вид смены может только сузить
+ * дальше (шаблон дежурства над записью без своей категории), но не вернуть
+ * запись обратно в «смену».
+ */
+function isNonShiftKind(shift: Shift, template: ShiftTemplate | undefined): boolean {
+  return shift.category !== "shift" || (template != null && template.category !== "shift");
+}
+
+/**
  * Кто завтра в той же смене — для строки «Завтра с тобой».
  *
  * «С тобой» — это тот же вид смены по часам (`reminderKind`): утро с утром,
@@ -110,6 +122,10 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
  * 08:00–17:00 получал почти всю команду — «День» 09:00–18:00 пересекается с
  * ним на восемь часов. Перечень, в котором все, никому не нужен (его решение
  * от 2026-09-28). Отсутствия часов не имеют и в список не попадают.
+ *
+ * Сосед — только «смена», по тому же правилу, что и адресат (`isNonShiftKind`
+ * ниже): дежурный, выездное или выход в выходной в те же часы — не «с тобой»,
+ * у них своё место и своё дело.
  *
  * Имя — как забито в графике (`displayName`), а не Telegram-имя из
  * `addressOf`: «Кирюха» в перечне не опознать, человек ищет коллегу по тому
@@ -129,6 +145,7 @@ function coworkerNamesFor(db: Db, shift: { date: string; kind: ReminderKind; emp
     if (other.start == null || other.end == null) continue;
     if (seen.has(other.employeeId)) continue;
     if (reminderKind({ start: other.start, end: other.end }) !== shift.kind) continue;
+    if (isNonShiftKind(other, templateOf(db, other))) continue;
     const person = getEmployeeById(db, other.employeeId);
     if (!person) continue;
     seen.add(other.employeeId);
@@ -192,14 +209,9 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl?: string): Pr
     // "early", а не "day"). Гейта по `kind === "day"` одного было недостаточно —
     // дежурство в ранние или поздние часы получало бы список соседей, которые
     // для дежурного не новость: он и так каждый раз выходит в те же часы, что и
-    // обычная смена. Категорию решает сама запись (`shift.category`) — она есть
-    // всегда, даже без шаблона (импорт ростера, ручная запись); вид смены
-    // (`template.category`) проверяется вторым условием и может ТОЛЬКО сузить
-    // список дальше (шаблон дежурства над записью без своей категории), а не
-    // расширить его обратно до «смена», если сама запись — не смена.
-    const isNonShiftKind = shift.category !== "shift" || (template != null && template.category !== "shift");
+    // обычная смена. Поэтому решает категория (`isNonShiftKind`), а не часы.
     const coworkers =
-      kind === "day" || isNonShiftKind
+      kind === "day" || isNonShiftKind(shift, template)
         ? []
         : coworkerNamesFor(db, { date: shift.date, kind, employeeId: shift.employeeId });
     const text = custom
