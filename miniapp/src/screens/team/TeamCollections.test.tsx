@@ -77,6 +77,23 @@ describe("TeamCollections", () => {
     expect(el.textContent).toBe("");
   });
 
+  // Без `emptyLabel` (вкладка «Команда») секции нет НИ ПОКА ГРУЗИТСЯ, ни при
+  // отказе: сбор там не главное, и «Загружаю сборы…» на каждом входе в команду
+  // занимал бы место ради события раз в месяц.
+  it("пока грузится, во вкладке «Команда» не рисует вообще ничего", async () => {
+    vi.spyOn(apiClient, "getMyCollections").mockReturnValue(new Promise(() => {}));
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(TeamCollections)));
+    });
+    // Без `settle()`: пока промис не разрешился, компонент застрял в состоянии
+    // загрузки — том самом, что и проверяется.
+    expect(host.textContent).toBe("");
+  });
+
   it("показывает повод, сумму, срок и ссылку", async () => {
     vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([COFFEE]);
 
