@@ -73,6 +73,7 @@ import {
   REMINDER_HOUR_DEFAULT,
   validateReminderHour,
   autoSendDateFor,
+  announcementRole,
   tallyShiftCounts,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
@@ -1851,6 +1852,7 @@ export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecip
     id: e.id,
     displayName: e.displayName,
     reachable: e.telegramUserId != null,
+    role: announcementRole(e),
   }));
 }
 

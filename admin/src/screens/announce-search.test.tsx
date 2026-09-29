@@ -90,12 +90,12 @@ function visibleNames(el: HTMLElement): string[] {
 }
 
 const TEAM: AnnouncementRecipient[] = [
-  { id: 1, displayName: "Иванова Анна", reachable: true },
-  { id: 2, displayName: "Петров Игорь", reachable: true },
-  { id: 3, displayName: "Семёнов Марк", reachable: true },
-  { id: 4, displayName: "Соколова Вера", reachable: true },
-  { id: 5, displayName: "Кузнецов Пётр", reachable: true },
-  { id: 6, displayName: "Орлова Ника", reachable: true },
+  { id: 1, displayName: "Иванова Анна", reachable: true, role: "worker" },
+  { id: 2, displayName: "Петров Игорь", reachable: true, role: "worker" },
+  { id: 3, displayName: "Семёнов Марк", reachable: true, role: "worker" },
+  { id: 4, displayName: "Соколова Вера", reachable: true, role: "worker" },
+  { id: 5, displayName: "Кузнецов Пётр", reachable: true, role: "worker" },
+  { id: 6, displayName: "Орлова Ника", reachable: true, role: "worker" },
 ];
 
 describe("поиск получателя в «Анонсах»", () => {

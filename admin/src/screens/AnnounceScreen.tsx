@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { announcementUnreachableLine, filterPeople } from "@planer/shared";
+import { announcementUnreachableLine, filterPeople, presetRecipientIds, type AnnouncementPreset } from "@planer/shared";
 import {
   ANNOUNCEMENT_TEXT_MAX,
   apiClient,
@@ -35,6 +35,8 @@ export function AnnounceScreen() {
   const [text, setText] = useState("");
   const [audienceMode, setAudienceMode] = useState<"all" | "picked">("all");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
+  /** Какая кнопка-подборка горит. Сбрасывается ручной галочкой: список уже не «все админы». */
+  const [preset, setPreset] = useState<AnnouncementPreset | null>(null);
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -83,6 +85,16 @@ export function AnnounceScreen() {
       else next.add(id);
       return next;
     });
+    setPreset(null);
+    setConfirming(false);
+  }
+
+  /** Подборка — это обычный выбор галочками, только отмеченный за отправителя:
+   *  он видит, кому уйдёт, и может поправить. */
+  function pickPreset(next: AnnouncementPreset) {
+    setAudienceMode("picked");
+    setSelectedIds(new Set(presetRecipientIds(recipients ?? [], next)));
+    setPreset(next);
     setConfirming(false);
   }
 
@@ -142,17 +154,30 @@ export function AnnounceScreen() {
           disabled={sending}
           onClick={() => {
             setAudienceMode("all");
+            setPreset(null);
             setConfirming(false);
           }}
         >
           Всем
         </button>
+        {(["admins", "workers"] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            className={`btn ${audienceMode === "picked" && preset === p ? "btn-primary" : "btn-secondary"}`}
+            disabled={sending}
+            onClick={() => pickPreset(p)}
+          >
+            {p === "admins" ? "Админам" : "Работникам"}
+          </button>
+        ))}
         <button
           type="button"
-          className={`btn ${audienceMode === "picked" ? "btn-primary" : "btn-secondary"}`}
+          className={`btn ${audienceMode === "picked" && preset === null ? "btn-primary" : "btn-secondary"}`}
           disabled={sending}
           onClick={() => {
             setAudienceMode("picked");
+            setPreset(null);
             setConfirming(false);
           }}
         >

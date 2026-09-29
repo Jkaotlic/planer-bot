@@ -2,6 +2,7 @@ import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 export type { CalendarDayDto };
 
+import type { AnnouncementRecipient } from "@planer/shared";
 import type { ShiftCountsReport } from "@planer/shared";
 import type {
   AdminEmployeeDto,
@@ -592,11 +593,8 @@ export interface AnnouncementResult {
 
 /** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
  *  Без телефонов и инвайт-токенов: экрану «Анонсы» нужны ровно имя и «дойдёт ли». */
-export interface AnnouncementRecipient {
-  id: number;
-  displayName: string;
-  reachable: boolean;
-}
+// Тип общий с сервером: роль нужна кнопкам «Админам» / «Работникам».
+export type { AnnouncementRecipient } from "@planer/shared";
 
 /**
  * Кто вошёл в консоль — ровно столько, сколько нужно подписи в сайдбаре.

@@ -33,3 +33,4 @@ export * from "./access";
 export * from "./person-search";
 export * from "./shift-counts";
 export * from "./shift-counts-view";
+export * from "./announce-audience";

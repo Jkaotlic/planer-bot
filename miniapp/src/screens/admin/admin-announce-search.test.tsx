@@ -9,12 +9,12 @@ import { AdminAnnounce } from "./AdminAnnounce";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const TEAM: AnnouncementRecipient[] = [
-  { id: 1, displayName: "Иванова Анна", reachable: true },
-  { id: 2, displayName: "Петров Игорь", reachable: true },
-  { id: 3, displayName: "Семёнов Марк", reachable: true },
-  { id: 4, displayName: "Соколова Вера", reachable: true },
-  { id: 5, displayName: "Кузнецов Пётр", reachable: true },
-  { id: 6, displayName: "Орлова Ника", reachable: true },
+  { id: 1, displayName: "Иванова Анна", reachable: true, role: "worker" },
+  { id: 2, displayName: "Петров Игорь", reachable: true, role: "worker" },
+  { id: 3, displayName: "Семёнов Марк", reachable: true, role: "worker" },
+  { id: 4, displayName: "Соколова Вера", reachable: true, role: "worker" },
+  { id: 5, displayName: "Кузнецов Пётр", reachable: true, role: "worker" },
+  { id: 6, displayName: "Орлова Ника", reachable: true, role: "worker" },
 ];
 
 let root: Root | null = null;
@@ -164,5 +164,26 @@ describe("поиск получателя в мини-апповском ано�
     await settle();
 
     expect(el.textContent).toContain("Не дошло: 2 — в архиве");
+  });
+});
+
+describe("кнопки «Админам» / «Работникам» в мини-апповском анонсе", () => {
+  it.each([
+    ["Админам", [1]],
+    ["Работникам", [2]],
+  ])("«%s» отмечает свою роль, наблюдатель не попадает никуда", async (button, ids) => {
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 1, intended: 1, unreachable: [], archivedCount: 0 });
+    const el = await mount([
+      { id: 1, displayName: "Иванова Анна", reachable: true, role: "admin" },
+      { id: 2, displayName: "Петров Игорь", reachable: true, role: "worker" },
+      { id: 3, displayName: "Орлова Ника", reachable: true, role: "observer" },
+    ]);
+    await typeInto(el.querySelector("textarea")!, "Новое в журнале");
+    await act(async () => { byText(el, button).click(); });
+    expect(rowByName(el, "Орлова Ника").querySelector("input")!.checked).toBe(false);
+    await act(async () => { byText(el, "Отправить").click(); });
+    await act(async () => { byText(el, "Да, отправить").click(); });
+    await settle();
+    expect(send).toHaveBeenCalledWith("Новое в журнале", ids);
   });
 });

@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { addressOf } from "@planer/shared";
+import { addressOf, announcementRole, type AnnouncementRecipient } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
 import { getEmployeeById, listActive } from "../repo/employees";
@@ -93,10 +93,12 @@ export function announcementRecipients(
 export function announcementRoster(
   db: Db,
   senderId: number,
-): { id: number; displayName: string; reachable: boolean }[] {
+): AnnouncementRecipient[] {
   return listActive(db)
     .filter((e) => e.id !== senderId)
-    .map((e) => ({ id: e.id, displayName: e.displayName, reachable: e.telegramUserId != null }));
+    // Роль — ради кнопок «Админам» / «Работникам»: отбор делает экран, чтобы
+    // отправитель видел галочки и мог поправить список до отправки.
+    .map((e) => ({ id: e.id, displayName: e.displayName, reachable: e.telegramUserId != null, role: announcementRole(e) }));
 }
 
 export async function sendAnnouncement(

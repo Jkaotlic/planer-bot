@@ -59,6 +59,7 @@ import {
   autoSendDateFor,
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
+  announcementRole,
   tallyShiftCounts,
   shiftCountsCsv,
 } from "@planer/shared";
@@ -1404,6 +1405,7 @@ export async function mockGetAnnouncementRecipients(): Promise<AnnouncementRecip
     id: e.id,
     displayName: e.displayName,
     reachable: e.telegramUserId != null,
+    role: announcementRole(e),
   }));
 }
 

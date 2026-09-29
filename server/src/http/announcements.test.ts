@@ -263,12 +263,28 @@ describe("GET /api/announcements/recipients", () => {
 
     expect(body.recipients).toEqual(
       expect.arrayContaining([
-        { id: mate.id, displayName: "Игорь", reachable: true },
-        { id: noTelegram.id, displayName: "Марк", reachable: false },
+        { id: mate.id, displayName: "Игорь", reachable: true, role: "worker" },
+        { id: noTelegram.id, displayName: "Марк", reachable: false, role: "worker" },
       ]),
     );
     expect(body.recipients).toHaveLength(2);
     expect(body.recipients.map((r) => r.id)).not.toContain(me.id);
+  });
+
+  it("у каждого роль для кнопок «Админам» / «Работникам»", async () => {
+    const db = makeTestDb();
+    const me = linked(db, "Аня", 640, true);
+    const boss = linked(db, "Игорь", 641, true);
+    const watcher = observerLinked(db, "Лена", 642);
+    const mate = linked(db, "Марк", 643);
+    const app = createApp({ db, config });
+
+    const res = await app.request("/api/announcements/recipients", {
+      headers: { Authorization: `Bearer ${await tokenFor(me.id, true)}` },
+    });
+    const body = (await res.json()) as { recipients: { id: number; role: string }[] };
+    const roleOf = (id: number) => body.recipients.find((r) => r.id === id)?.role;
+    expect([roleOf(boss.id), roleOf(watcher.id), roleOf(mate.id)]).toEqual(["admin", "observer", "worker"]);
   });
 
   it("работнику список не показывают", async () => {
