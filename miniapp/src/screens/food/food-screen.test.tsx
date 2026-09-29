@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { apiClient, type PlaceView } from "../../api/client";
+import { apiClient, type OrderView, type PlaceView } from "../../api/client";
 import { FoodScreen } from "./FoodScreen";
 import type { FoodRoute } from "./food-route";
 
@@ -27,23 +27,39 @@ async function mount(initial: FoodRoute) {
 
 const DODO: PlaceView = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 500 }] };
 
-describe("FoodScreen", () => {
-  // Кнопка «🍱 Новый заказ» в боте (Задача 14 её ещё не реализовала) вела
-  // на оверлей, вечно висящий на «Загружаю…»: `useEffect` списка выходил рано
-  // для любого маршрута, кроме «list». Экран должен откатываться на список и
-  // объяснять, почему нужного раздела нет, а не молчать пустым спиннером.
-  it("«Новый заказ» по ссылке бота откатывается на список опросов и показывает подсказку", async () => {
-    const getPolls = vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
-    const el = await mount({ view: "new-order" });
-    expect(getPolls).toHaveBeenCalled();
-    expect(el.textContent).toContain("Пока ничего не запускали.");
-    expect(el.textContent).toContain("Заказы еды появятся в следующем обновлении.");
-  });
+const ORDER: OrderView = {
+  id: 7, creatorId: 1, creatorName: "Аня", placeId: 3, placeName: "Шаурмечная",
+  menu: [{ id: 11, name: "Шаурма", price: 350 }], note: null, payHint: null,
+  closesAt: "2026-09-29T12:30", closes: "до 12:30", open: true, closed: false, cancelled: false,
+  isCreator: false, canManage: false, myItems: [], myTotal: 0, declined: false,
+  recipientCount: 3, respondedCount: 1, dishes: [], total: 0, people: null,
+};
 
-  it("обычный список опросов подсказку не показывает", async () => {
+describe("FoodScreen", () => {
+  it("список опросов и заказов грузится без подсказки про недоделанное", async () => {
     vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([]);
     const el = await mount({ view: "list" });
     expect(el.textContent).not.toContain("Заказы еды появятся в следующем обновлении.");
+    expect(el.textContent).toContain("Пока ничего не запускали.");
+  });
+
+  // Задача 14: ссылка бота на заказ (`?screen=orders&order=7`, см.
+  // `food-route.ts`) должна открывать сам заказ, а не откатываться на список.
+  it("маршрут «order» открывает OrderScreen с этим заказом", async () => {
+    const getOrder = vi.spyOn(apiClient, "getOrder").mockResolvedValue(ORDER);
+    const el = await mount({ view: "order", orderId: 7 });
+    expect(getOrder).toHaveBeenCalledWith(7);
+    expect(el.textContent).toContain("Шаурмечная");
+  });
+
+  // Кнопка «🍱 Новый заказ» в боте и в шапке списка ведёт сюда — форма
+  // заказа, а не заглушка «в следующем обновлении».
+  it("маршрут «new-order» открывает OrderForm", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([]);
+    const el = await mount({ view: "new-order" });
+    expect(el.textContent).toContain("Новый заказ");
   });
 
   // Задача 8: места готовы, и маршрут «Места» больше не откатывается на

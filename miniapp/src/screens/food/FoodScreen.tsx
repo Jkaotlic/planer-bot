@@ -1,45 +1,41 @@
 import { useEffect, useState } from "react";
 import { Button, Title } from "@telegram-apps/telegram-ui";
-import { apiClient, type PlaceView, type PollView } from "../../api/client";
+import { formatMoney } from "@planer/shared";
+import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ScreenScroll } from "../../components/ScreenScroll";
 import type { FoodRoute } from "./food-route";
+import { OrderForm } from "./OrderForm";
+import { OrderScreen } from "./OrderScreen";
 import { PlaceEditor } from "./PlaceEditor";
 import { PollCard } from "./PollCard";
 import { PollForm } from "./PollForm";
-
-/** Пока не готово (Задача 14): сам заказ. Ссылка на него из бота уже
- *  существует («🍱 Новый заказ»), а экрана — ещё нет; без этой проверки
- *  кнопка открывала оверлей, вечно висящий на «Загружаю…» — `useEffect` ниже
- *  выходит рано для всего, что не «list». Места (Задача 8) уже готовы и в
- *  этот список не входят. */
-function isNotYetReady(route: FoodRoute): boolean {
-  return route.view === "new-order" || route.view === "order";
-}
 
 /**
  * Экран «Заказы и опросы» — оверлей поверх вкладок, а не новая вкладка: в
  * таб-баре уже семь мест, а сюда приходят из бота по ссылке с `?screen=orders`.
  */
 export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose(): void }) {
-  // Замер один раз, от НАЧАЛЬНОГО маршрута: переход «Новый опрос» → «Назад»
-  // не должен внезапно показать подсказку про заказы, которых человек не просил.
-  const [notYetReadyHint] = useState(() => isNotYetReady(initial));
-  const [route, setRoute] = useState<FoodRoute>(isNotYetReady(initial) ? { view: "list" } : initial);
+  const [route, setRoute] = useState<FoodRoute>(initial);
   const [polls, setPolls] = useState<PollView[] | null | "error">(null);
+  const [orders, setOrders] = useState<OrderView[] | null | "error">(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (route.view !== "list") return;
     let alive = true;
     setPolls(null);
+    setOrders(null);
     apiClient.getPolls().then((p) => { if (alive) setPolls(p); }).catch(() => { if (alive) setPolls("error"); });
+    apiClient.getOrders().then((o) => { if (alive) setOrders(o); }).catch(() => { if (alive) setOrders("error"); });
     return () => { alive = false; };
   }, [route, attempt]);
 
   const toList = () => setRoute({ view: "list" });
   if (route.view === "new-poll") return <PollForm onDone={toList} onCancel={toList} />;
+  if (route.view === "new-order") return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} />;
+  if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} />;
   if (route.view === "places") return <PlacesScreen onBack={toList} />;
 
   return (
@@ -49,19 +45,34 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
         <Button size="s" mode="plain" onClick={onClose}>Закрыть</Button>
       </div>
       <div style={{ display: "flex", gap: 8, padding: "8px 0", flexWrap: "wrap" }}>
+        <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "new-order" })}>🍱 Новый заказ</Button>
         <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "new-poll" })}>🗳 Новый опрос</Button>
         <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "places" })}>🍴 Места и меню</Button>
       </div>
-      {notYetReadyHint && (
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, paddingBottom: 8 }}>
-          Заказы еды появятся в следующем обновлении.
-        </div>
+      {orders === "error" && (
+        <div>Заказы не загрузились. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>
       )}
-      {polls === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}
+      {Array.isArray(orders) && orders.length > 0 && (
+        <CardStack>
+          {orders.map((o) => (
+            <CardShell key={`order-${o.id}`}>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
+              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+                Собирает {o.creatorName}{o.closes ? ` · ${o.closes}` : ""}
+              </div>
+              {o.myTotal > 0 && <div style={{ fontSize: 13.5 }}>Твой заказ: {formatMoney(o.myTotal)}</div>}
+              <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "order", orderId: o.id })}>Открыть</Button>
+            </CardShell>
+          ))}
+        </CardStack>
+      )}
+      {polls === null && orders === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}
       {polls === "error" && (
         <div>Не удалось загрузить. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>
       )}
-      {Array.isArray(polls) && polls.length === 0 && <div style={{ color: "var(--tgui--hint_color)" }}>Пока ничего не запускали.</div>}
+      {Array.isArray(polls) && polls.length === 0 && Array.isArray(orders) && orders.length === 0 && (
+        <div style={{ color: "var(--tgui--hint_color)" }}>Пока ничего не запускали.</div>
+      )}
       {Array.isArray(polls) && polls.length > 0 && (
         <CardStack>{polls.map((p) => <PollCard key={p.id} poll={p} />)}</CardStack>
       )}

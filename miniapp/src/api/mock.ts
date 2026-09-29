@@ -35,6 +35,7 @@ import type {
   AudienceCandidate,
   PollView,
   PlaceView,
+  OrderView,
   BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
@@ -84,6 +85,10 @@ import {
   isOpenAt,
   pollTally,
   placeInputSchema,
+  debtOf,
+  dishSummary,
+  orderTotal,
+  orderItemInputSchema,
   type PollChoice,
   type TeamAudience,
   type PlaceInput,
@@ -2116,6 +2121,215 @@ export async function mockArchiveFoodPlace(id: number): Promise<void> {
   const place = PLACES.find((p) => p.id === id && !p.archived);
   if (!place) throw new Error("Места больше нет.");
   place.archived = true;
+}
+
+// --- Заказы еды -----------------------------------------------------------
+// Тот же приём, что у опросов и мест: правила (открыт/закрыт, срок, долг,
+// сводка блюд) считают `isOpenAt`/`debtOf`/`dishSummary`/`orderTotal` из
+// `@planer/shared` — те же функции, что и сервер, а не своя копия здесь.
+// Мок всегда играет за MOCK_ME (Аня) — как в опросах и обменах, — поэтому
+// позиции всегда её, а не произвольного employeeId.
+
+interface MockOrderItem {
+  id: number;
+  employeeId: number;
+  menuItemId: number | null;
+  name: string;
+  price: number;
+  qty: number;
+}
+
+interface MockOrder {
+  id: number;
+  createdBy: number;
+  placeId: number | null;
+  note: string | null;
+  payHint: string | null;
+  closesAt: string | null;
+  closedAt: string | null;
+  cancelledAt: string | null;
+  recipients: number[];
+  items: MockOrderItem[];
+  declines: Set<number>;
+}
+
+const ORDERS: MockOrder[] = [];
+let nextOrderId = 1;
+let nextOrderItemId = 1;
+
+function orderViewOf(o: MockOrder): OrderView {
+  const now = mockNow();
+  const place = o.placeId == null ? null : (PLACES.find((p) => p.id === o.placeId) ?? null);
+  const open = isOpenAt(o, now);
+  const manage = o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin;
+  const mine = o.items.filter((i) => i.employeeId === MOCK_ME.id);
+  const responded = new Set<number>([...o.items.map((i) => i.employeeId), ...o.declines]);
+  return {
+    id: o.id,
+    creatorId: o.createdBy,
+    creatorName: personName(o.createdBy),
+    placeId: o.placeId,
+    placeName: place?.name ?? null,
+    // Меню — только пока приём идёт: у закрытого заказа кнопки добавлять уже нечего.
+    menu: open && place ? place.menu.map((m) => ({ id: m.id, name: m.name, price: m.price })) : [],
+    note: o.note,
+    payHint: o.payHint,
+    closesAt: o.closesAt,
+    closes: closesLabel(o.closesAt, now.date),
+    open,
+    closed: o.closedAt != null,
+    cancelled: o.cancelledAt != null,
+    isCreator: o.createdBy === MOCK_ME.id,
+    canManage: manage,
+    myItems: mine.map(({ id, name, price, qty }) => ({ id, name, price, qty })),
+    myTotal: debtOf(o.items, MOCK_ME.id),
+    declined: o.declines.has(MOCK_ME.id),
+    recipientCount: o.recipients.length,
+    respondedCount: responded.size,
+    dishes: dishSummary(o.items),
+    total: orderTotal(o.items),
+    // Поимённо — только запускающему/админу, как на сервере (`orderView`):
+    // сумма коллеги — не общее знание.
+    people: manage
+      ? o.recipients.map((id) => ({ employeeId: id, displayName: personName(id), amount: debtOf(o.items, id), declined: o.declines.has(id) }))
+      : null,
+  };
+}
+
+export async function mockGetOrders(): Promise<OrderView[]> {
+  await delay(150);
+  return ORDERS.filter((o) => o.createdBy === MOCK_ME.id || o.recipients.includes(MOCK_ME.id))
+    .slice()
+    .reverse()
+    .map(orderViewOf);
+}
+
+function orderOrThrow(id: number): MockOrder {
+  const o = ORDERS.find((x) => x.id === id);
+  if (!o) throw new Error("Заказ не найден");
+  return o;
+}
+
+export async function mockGetOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  if (o.createdBy !== MOCK_ME.id && !MOCK_ME.isAdmin && !o.recipients.includes(MOCK_ME.id)) {
+    throw new Error("not_found");
+  }
+  return orderViewOf(o);
+}
+
+export async function mockCreateOrder(input: {
+  placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience;
+}): Promise<{ order: OrderView; delivered: number; unreachable: string[] }> {
+  await delay(200);
+  const now = mockNow();
+  const closesAt = closesAtFromTime(input.closesTime, now.date);
+  // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
+  if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+  if (input.placeId != null && !PLACES.some((p) => p.id === input.placeId && !p.archived)) {
+    throw new Error("Такого места больше нет.");
+  }
+  const ids = mockAudienceIds(input.audience);
+  const recipients = [...new Set([MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)])];
+  const order: MockOrder = {
+    id: nextOrderId++,
+    createdBy: MOCK_ME.id,
+    placeId: input.placeId,
+    note: input.note,
+    payHint: input.payHint,
+    closesAt,
+    closedAt: null,
+    cancelledAt: null,
+    recipients,
+    items: [],
+    declines: new Set(),
+  };
+  ORDERS.push(order);
+  // Как у опросов: «дошло» — только те, у кого в моке есть телеграм.
+  const telegramOf = (id: number) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId;
+  const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+  const unreachable = recipients.filter((id) => telegramOf(id) == null).map((id) => personName(id));
+  return { order: orderViewOf(order), delivered, unreachable };
+}
+
+/** Общий вход правки позиций: закрыт — дальше делать нечего. Мок играет
+ *  только за MOCK_ME, поэтому «чужой заказ» здесь проверять не у кого. */
+function guardOpen(o: MockOrder): void {
+  if (!isOpenAt(o, mockNow())) throw new Error("Приём закрыт.");
+}
+
+export async function mockAddOrderItem(
+  id: number,
+  input: { menuItemId: number; qty?: number } | { name: string; price: number; qty?: number },
+): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  const parsed = orderItemInputSchema.safeParse(input);
+  // Тот же отказ и тот же текст, что у ручки `POST /api/orders/:id/items`.
+  if (!parsed.success) throw new Error("Проверь блюдо и цену (целые рубли, до 100 000).");
+  const data = parsed.data;
+  if ("menuItemId" in data) {
+    const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
+    const dish = place?.menu.find((m) => m.id === data.menuItemId);
+    if (!dish) throw new Error("Этого блюда нет в меню.");
+    // Прибавляем к строке с той же ценой — как `addMenuItem` на сервере.
+    const same = o.items.find((i) => i.employeeId === MOCK_ME.id && i.menuItemId === data.menuItemId && i.price === dish.price);
+    if (same) same.qty += 1;
+    else o.items.push({ id: nextOrderItemId++, employeeId: MOCK_ME.id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1 });
+  } else {
+    o.items.push({ id: nextOrderItemId++, employeeId: MOCK_ME.id, menuItemId: null, name: data.name, price: data.price, qty: data.qty });
+  }
+  o.declines.delete(MOCK_ME.id);
+  return orderViewOf(o);
+}
+
+/** Своя позиция или отказ — мок играет только за MOCK_ME, чужих позиций тут нет. */
+function ownItem(o: MockOrder, itemId: number): MockOrderItem {
+  const item = o.items.find((i) => i.id === itemId);
+  if (!item || item.employeeId !== MOCK_ME.id) throw new Error("Это не твоя позиция.");
+  return item;
+}
+
+export async function mockSetOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  ownItem(o, itemId).qty = qty;
+  return orderViewOf(o);
+}
+
+export async function mockRemoveOrderItem(id: number, itemId: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  const item = ownItem(o, itemId);
+  o.items.splice(o.items.indexOf(item), 1);
+  return orderViewOf(o);
+}
+
+export async function mockDeclineOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  o.items = o.items.filter((i) => i.employeeId !== MOCK_ME.id);
+  o.declines.add(MOCK_ME.id);
+  return orderViewOf(o);
+}
+
+export async function mockCloseOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  o.closedAt = new Date().toISOString();
+  return orderViewOf(o);
+}
+
+export async function mockCancelOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  o.cancelledAt = new Date().toISOString();
+  return orderViewOf(o);
 }
 
 // --- Багрепорты ---------------------------------------------------------

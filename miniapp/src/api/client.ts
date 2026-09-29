@@ -128,6 +128,15 @@ import {
   mockGetFoodPlaces,
   mockSaveFoodPlace,
   mockArchiveFoodPlace,
+  mockGetOrders,
+  mockGetOrder,
+  mockCreateOrder,
+  mockAddOrderItem,
+  mockSetOrderItemQty,
+  mockRemoveOrderItem,
+  mockDeclineOrder,
+  mockCloseOrder,
+  mockCancelOrder,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -573,6 +582,36 @@ export interface PlaceView {
   menu: { id: number; name: string; price: number }[];
 }
 
+/** Заказ еды глазами того, кто его открыл — контракт GET /api/orders,
+ *  GET /api/orders/:id (см. OrderView в server/src/orders/order-service.ts).
+ *  canManage и people уже посчитаны сервером: запускающий или админ, и
+ *  список «кто сколько» только им — экран не повторяет ни то, ни другое. */
+export interface OrderView {
+  id: number;
+  creatorId: number;
+  creatorName: string;
+  placeId: number | null;
+  placeName: string | null;
+  menu: { id: number; name: string; price: number }[];
+  note: string | null;
+  payHint: string | null;
+  closesAt: string | null;
+  closes: string | null;
+  open: boolean;
+  closed: boolean;
+  cancelled: boolean;
+  isCreator: boolean;
+  canManage: boolean;
+  myItems: { id: number; name: string; price: number; qty: number }[];
+  myTotal: number;
+  declined: boolean;
+  recipientCount: number;
+  respondedCount: number;
+  dishes: { name: string; price: number; qty: number }[];
+  total: number;
+  people: { employeeId: number; displayName: string; amount: number; declined: boolean }[] | null;
+}
+
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
  *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */
 export interface BugReportRow {
@@ -994,6 +1033,23 @@ export interface ApiClient {
   saveFoodPlace(id: number | null, input: PlaceInput): Promise<PlaceView>;
   /** Архивирует место — блюда с ним не удаляются, на них ссылаются заказы. */
   archiveFoodPlace(id: number): Promise<void>;
+
+  // --- Заказы еды («Заказы и опросы») -----------------------------------------
+  /** Заказы: список своих — экран «Заказы и опросы». */
+  getOrders(): Promise<OrderView[]>;
+  getOrder(id: number): Promise<OrderView>;
+  /** Заводит заказ и сразу шлёт приглашения адресатам. */
+  createOrder(input: { placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[] }>;
+  /** Своя позиция: из меню места или своим блюдом с ценой. */
+  addOrderItem(id: number, input: { menuItemId: number; qty?: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
+  setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;
+  removeOrderItem(id: number, itemId: number): Promise<OrderView>;
+  /** «Не буду» — снимает свои позиции и отмечает отказ. */
+  declineOrder(id: number): Promise<OrderView>;
+  /** «Набрали, закрыть»: приём позиций останавливается, всем уходит «сдай». */
+  closeOrder(id: number): Promise<OrderView>;
+  /** Отменяет заказ без «сдай» — запускающему передумалось. */
+  cancelOrder(id: number): Promise<OrderView>;
 
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
@@ -1740,6 +1796,33 @@ export const realClient: ApiClient = {
     await authorizedDelete<{ ok: true }>(`/api/food-places/${id}`);
   },
 
+  async getOrders() {
+    return (await authorizedGet<{ orders: OrderView[] }>("/api/orders")).orders;
+  },
+  async getOrder(id) {
+    return (await authorizedGet<{ order: OrderView }>(`/api/orders/${id}`)).order;
+  },
+  createOrder: (input) =>
+    authorizedPostJson<{ order: OrderView; delivered: number; unreachable: string[] }>("/api/orders", input),
+  async addOrderItem(id, input) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/items`, input)).order;
+  },
+  async setOrderItemQty(id, itemId, qty) {
+    return (await authorizedPatchJson<{ order: OrderView }>(`/api/orders/${id}/items/${itemId}`, { qty })).order;
+  },
+  async removeOrderItem(id, itemId) {
+    return (await authorizedDelete<{ order: OrderView }>(`/api/orders/${id}/items/${itemId}`)).order;
+  },
+  async declineOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/decline`, {})).order;
+  },
+  async closeOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/close`, {})).order;
+  },
+  async cancelOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/cancel`, {})).order;
+  },
+
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
     return reports;
@@ -1865,6 +1948,15 @@ const devClient: ApiClient = {
   getFoodPlaces: () => mockGetFoodPlaces(),
   saveFoodPlace: (id, input) => mockSaveFoodPlace(id, input),
   archiveFoodPlace: (id) => mockArchiveFoodPlace(id),
+  getOrders: () => mockGetOrders(),
+  getOrder: (id) => mockGetOrder(id),
+  createOrder: (input) => mockCreateOrder(input),
+  addOrderItem: (id, input) => mockAddOrderItem(id, input),
+  setOrderItemQty: (id, itemId, qty) => mockSetOrderItemQty(id, itemId, qty),
+  removeOrderItem: (id, itemId) => mockRemoveOrderItem(id, itemId),
+  declineOrder: (id) => mockDeclineOrder(id),
+  closeOrder: (id) => mockCloseOrder(id),
+  cancelOrder: (id) => mockCancelOrder(id),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

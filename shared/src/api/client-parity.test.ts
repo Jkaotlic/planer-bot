@@ -70,6 +70,15 @@ const MINIAPP_ONLY: Record<string, string> = {
   getFoodPlaces: "места и меню для заказа еды",
   saveFoodPlace: "места и меню для заказа еды",
   archiveFoodPlace: "места и меню для заказа еды",
+  getOrders: "заказ еды работника",
+  getOrder: "заказ еды работника",
+  createOrder: "заказ еды работника",
+  addOrderItem: "заказ еды работника",
+  setOrderItemQty: "заказ еды работника",
+  removeOrderItem: "заказ еды работника",
+  declineOrder: "заказ еды работника",
+  closeOrder: "заказ еды работника",
+  cancelOrder: "заказ еды работника",
 };
 
 /** Только в консоли — и почему мини-аппу это не нужно. */
