@@ -96,6 +96,11 @@ describe("tallyShiftCounts", () => {
     expect(r.kinds).toEqual([{ name: "Вечер", group: "shift", accent: null }]);
   });
 
+  it("вид с названием свойства объекта («constructor») считается числом, а не ломается", () => {
+    const r = tally([e(10, null, { title: "constructor" }), e(10, null, { title: "constructor" })]);
+    expect(r.rows.find((x) => x.employeeId === 10)!.byKind.constructor).toBe(2);
+  });
+
   it("чужой (не в списке людей) и запись без человека не считаются", () => {
     const r = tally([e(99, 2), e(null, 2)]);
     expect(r.kinds).toEqual([]);

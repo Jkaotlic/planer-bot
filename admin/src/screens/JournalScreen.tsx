@@ -15,6 +15,7 @@ import {
 } from "@planer/shared";
 import { apiClient, AuthRequiredError, type JournalPage, type ShiftCountsReport } from "../api/client";
 import { initialsOf, personPalette } from "../lib/people";
+import { toISODate } from "../lib/week";
 
 /** Одна строка ленты «кто что менял»: значок, фраза, кто и когда, подробности.
  *  Текст целиком приходит из `describeAuditEvent` — тот же, что видит мини-апп. */
@@ -86,7 +87,9 @@ function KindSwatch({ kind }: { kind: ShiftCountsKind }) {
 }
 
 function ShiftCounts() {
-  const today = new Date().toISOString().slice(0, 10);
+  // Локальная дата, как во всей консоли (`toISODate`), а не UTC: с `toISOString`
+  // 1-го числа до трёх ночи по Москве «Этот месяц» показывал прошлый.
+  const today = toISODate(new Date());
   const initial = auditMonthRange(today);
   const presets = countsPeriodPresets(today);
   const [from, setFrom] = useState(initial.from);

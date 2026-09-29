@@ -225,7 +225,8 @@ function ByKind({
           const selected = sameKey(k.key, active.key);
           return (
             <button
-              key={countsKeyLabel(k.key)}
+              // Ключ — сам ключ, а не подпись: вид с именем «Все смены» совпал бы с итогом группы.
+              key={JSON.stringify(k.key)}
               type="button"
               onClick={() => onPick(k.key)}
               style={{

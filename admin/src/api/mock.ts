@@ -60,7 +60,7 @@ import {
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
   tallyShiftCounts,
-  SHIFT_COUNTS_GROUPS,
+  shiftCountsCsv,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1169,18 +1169,7 @@ export async function mockGetShiftCounts(from: string, to: string): Promise<Shif
 }
 
 export async function mockGetShiftCountsCsv(from: string, to: string): Promise<string> {
-  const report = await mockGetShiftCounts(from, to);
-  const totals: Record<string, string> = { shift: "Смен всего", duty: "Дежурств всего", other: "Прочего всего" };
-  const columns: { title: string; value: (row: ShiftCountsReport["rows"][number]) => number }[] = [];
-  for (const group of SHIFT_COUNTS_GROUPS) {
-    const kinds = report.kinds.filter((k) => k.group === group);
-    if (kinds.length === 0) continue;
-    for (const kind of kinds) columns.push({ title: kind.name, value: (row) => row.byKind[kind.name] ?? 0 });
-    columns.push({ title: totals[group]!, value: (row) => row.byGroup[group] });
-  }
-  const header = ["Работник", ...columns.map((c) => c.title)].join(";");
-  const lines = report.rows.map((row) => [row.displayName, ...columns.map((c) => String(c.value(row)))].join(";"));
-  return [header, ...lines].join("\r\n");
+  return shiftCountsCsv(await mockGetShiftCounts(from, to));
 }
 
 const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "rezerv", "otp", "event"]);

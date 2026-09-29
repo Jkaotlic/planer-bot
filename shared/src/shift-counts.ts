@@ -151,3 +151,31 @@ export function tallyShiftCounts(p: {
 
   return { from: p.from, to: p.to, kinds, rows: [...rows.values()] };
 }
+
+function csvField(value: string): string {
+  return /[";\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+const GROUP_TOTAL_TITLES: Record<ShiftCountsGroup, string> = {
+  shift: "Смен всего",
+  duty: "Дежурств всего",
+  other: "Прочего всего",
+};
+
+/**
+ * Та же таблица для Excel, через ';' — BOM добавляет маршрут. Итог каждой группы
+ * стоит сразу за её видами, как в консоли; общего «Всего» нет — он складывал
+ * несравнимое.
+ */
+export function shiftCountsCsv(report: ShiftCountsReport): string {
+  const columns: { title: string; value: (row: ShiftCountsReport["rows"][number]) => number }[] = [];
+  for (const group of SHIFT_COUNTS_GROUPS) {
+    const kinds = report.kinds.filter((k) => k.group === group);
+    if (kinds.length === 0) continue;
+    for (const kind of kinds) columns.push({ title: kind.name, value: (row) => row.byKind[kind.name] ?? 0 });
+    columns.push({ title: GROUP_TOTAL_TITLES[group], value: (row) => row.byGroup[group] });
+  }
+  const header = ["Работник", ...columns.map((c) => c.title)].map(csvField).join(";");
+  const lines = report.rows.map((row) => [csvField(row.displayName), ...columns.map((c) => String(c.value(row)))].join(";"));
+  return [header, ...lines].join("\r\n");
+}
