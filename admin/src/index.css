@@ -2048,18 +2048,73 @@ input[type="search"] {
   font-weight: 600;
 }
 
-.counts-name {
+.counts-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.counts-table th.sortable:hover {
+  color: var(--text);
+}
+
+/* Имя прилипает: на дюжине колонок его иначе уводит за край при прокрутке вбок,
+   и число остаётся без хозяина. Фон обязателен — иначе цветные ячейки
+   просвечивают сквозь имя. */
+.counts-table .counts-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-section);
   text-align: left !important;
 }
 
-.counts-table td.counts-name {
+/* flex — на внутреннем span, а не на td: `display: flex` на ячейке выбивает её
+   из табличной раскладки, и Safari перестаёт держать `position: sticky`. */
+.counts-person {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.counts-total {
+.counts-table thead th.counts-group {
+  color: var(--text);
+  font-size: 12.5px;
   font-weight: 700;
+  border-bottom: 2px solid var(--separator);
+}
+
+.counts-table thead th.counts-group-shift { border-bottom-color: rgb(51, 144, 236); }
+.counts-table thead th.counts-group-duty { border-bottom-color: rgb(245, 140, 30); }
+.counts-table thead th.counts-group-other { border-bottom-color: rgb(118, 123, 135); }
+
+/* Черта после итога группы: без неё «итого» одной группы сливается с первым
+   видом следующей, и таблица снова читается сплошным рядом. */
+.counts-table .counts-group-total {
+  font-weight: 700;
+  border-right: 2px solid var(--separator);
+}
+
+.counts-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+/* Выбранный период — тем же цветом, что активная вкладка журнала рядом. */
+.journal-controls .btn-secondary.active {
+  background: var(--button);
+  border-color: var(--button);
+  color: var(--button-text);
+}
+
+.counts-legend {
+  margin-top: 8px;
+  color: var(--hint);
+  font-size: 12px;
 }
 
 .counts-zero {
