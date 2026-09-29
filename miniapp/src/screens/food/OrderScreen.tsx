@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Title } from "@telegram-apps/telegram-ui";
-import { formatMoney, itemLines } from "@planer/shared";
+import { FOOD_QTY_MAX, formatMoney, itemLines } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -125,7 +125,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               {order.open && (
                 <>
                   <Button size="s" mode="gray" disabled={busy || item.qty <= 1} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty - 1))}>−</Button>
-                  <Button size="s" mode="gray" disabled={busy || item.qty >= 20} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty + 1))}>+</Button>
+                  <Button size="s" mode="gray" disabled={busy || item.qty >= FOOD_QTY_MAX} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty + 1))}>+</Button>
                   <Button size="s" mode="plain" disabled={busy} onClick={() => run(() => apiClient.removeOrderItem(order.id, item.id))}>✕</Button>
                 </>
               )}

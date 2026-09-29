@@ -1047,7 +1047,7 @@ export interface ApiClient {
   /** Заводит заказ и сразу шлёт приглашения адресатам. */
   createOrder(input: { placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[] }>;
   /** Своя позиция: из меню места или своим блюдом с ценой. */
-  addOrderItem(id: number, input: { menuItemId: number; qty?: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
+  addOrderItem(id: number, input: { menuItemId: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
   setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;
   removeOrderItem(id: number, itemId: number): Promise<OrderView>;
   /** «Не буду» — снимает свои позиции и отмечает отказ. */

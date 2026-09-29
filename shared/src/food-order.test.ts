@@ -106,16 +106,22 @@ describe("тексты заказа", () => {
 });
 
 describe("orderItemInputSchema", () => {
-  it("блюдо из меню или своё; количество по умолчанию 1 и не больше 20", () => {
-    expect(orderItemInputSchema.parse({ menuItemId: 3 })).toEqual({ menuItemId: 3, qty: 1 });
+  it("блюдо из меню или своё; у своего количество по умолчанию 1 и не больше 20", () => {
+    expect(orderItemInputSchema.parse({ menuItemId: 3 })).toEqual({ menuItemId: 3 });
     expect(orderItemInputSchema.parse({ name: " Шаурма ", price: 350 })).toEqual({ name: "Шаурма", price: 350, qty: 1 });
-    expect(orderItemInputSchema.safeParse({ menuItemId: 3, qty: 21 }).success).toBe(false);
+    expect(orderItemInputSchema.safeParse({ name: "Шаурма", price: 350, qty: 21 }).success).toBe(false);
     expect(orderItemInputSchema.safeParse({ name: "X" }).success).toBe(false);
+  });
+
+  // Ручка на блюдо из меню всегда прибавляет одну штуку (как тап в чате) —
+  // принятое и молча проигнорированное `qty` обманывало бы вызывающего.
+  it("у блюда из меню количества нет — «qty» в теле — отказ", () => {
+    expect(orderItemInputSchema.safeParse({ menuItemId: 3, qty: 2 }).success).toBe(false);
   });
 
   it("смешанная форма и нулевое количество — отказ", () => {
     expect(orderItemInputSchema.safeParse({ menuItemId: 3, name: "X", price: 1 }).success).toBe(false);
-    expect(orderItemInputSchema.safeParse({ menuItemId: 3, qty: 0 }).success).toBe(false);
+    expect(orderItemInputSchema.safeParse({ name: "X", price: 1, qty: 0 }).success).toBe(false);
   });
 });
 

@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { formatMoney } from "@planer/shared";
+import { FOOD_QTY_MAX, formatMoney } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { OrderScreen } from "./OrderScreen";
 
@@ -67,6 +67,15 @@ describe("OrderScreen — участник", () => {
     const el = await mountScreen(7);
     expect(el.textContent).toContain(`Сдать: ${formatMoney(350)} — Аня`);
     expect(el.querySelector("input[name=custom-name]")).toBeNull();
+  });
+
+  it("«+» гаснет на потолке количества (FOOD_QTY_MAX), «−» — на единице", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, myItems: [{ id: 1, name: "Шаурма", price: 350, qty: FOOD_QTY_MAX }, { id: 2, name: "Чай", price: 50, qty: 1 }], myTotal: 350 * FOOD_QTY_MAX + 50 });
+    const el = await mountScreen(7);
+    const plus = [...el.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "+") as HTMLButtonElement[];
+    const minus = [...el.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "−") as HTMLButtonElement[];
+    expect(plus.map((b) => b.disabled)).toEqual([true, false]);
+    expect(minus.map((b) => b.disabled)).toEqual([false, true]);
   });
 
   it("участник не видит список «кто сколько»", async () => {

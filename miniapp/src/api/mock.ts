@@ -2304,7 +2304,7 @@ function guardOpen(o: MockOrder): void {
 
 export async function mockAddOrderItem(
   id: number,
-  input: { menuItemId: number; qty?: number } | { name: string; price: number; qty?: number },
+  input: { menuItemId: number } | { name: string; price: number; qty?: number },
 ): Promise<OrderView> {
   await delay(150);
   const o = orderOrThrow(id);

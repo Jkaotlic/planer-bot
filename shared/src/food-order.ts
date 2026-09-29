@@ -176,8 +176,13 @@ export function payRequestText(input: { creatorName: string; placeName: string |
 
 const qty = z.number().int().min(1).max(FOOD_QTY_MAX).default(1);
 
+/**
+ * Позиция из мини-аппа. У блюда из меню количества нет: ручка, как и тап в
+ * чате, прибавляет одну штуку (`addMenuItem`), и принятое, но молча
+ * проигнорированное `qty` обманывало бы вызывающего — `strict` его отвергает.
+ */
 export const orderItemInputSchema = z.union([
-  z.object({ menuItemId: z.number().int().positive(), qty }).strict(),
+  z.object({ menuItemId: z.number().int().positive() }).strict(),
   z.object({ name: foodText, price: foodPriceSchema, qty }).strict(),
 ]);
 export type OrderItemInput = z.infer<typeof orderItemInputSchema>;
