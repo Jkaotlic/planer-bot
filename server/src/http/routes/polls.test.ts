@@ -97,4 +97,69 @@ describe("опросы по HTTP", () => {
     const { candidates } = await (await app.request(new Request("http://x/api/team-audience", get(anyaT)))).json();
     expect(candidates.map((c: { displayName: string }) => c.displayName)).toEqual(["Игорь", "Марк"]);
   });
+
+  it("срок в прошлом — 400, ничего не уходит", async () => {
+    // Системное время подделано на 09:00 UTC = 12:00 команды (MSK): 08:00 уже прошло.
+    const { app, sent, igor, anyaT } = await stage();
+    const res = await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: "08:00", audience: { kind: "picked", employeeIds: [igor] } })));
+    expect(res.status).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("битый closesTime — 400", async () => {
+    const { app, igor, anyaT } = await stage();
+    for (const closesTime of ["25:00", "9:00"]) {
+      const res = await app.request(new Request("http://x/api/polls",
+        send(anyaT, { question: "Пицца?", closesTime, audience: { kind: "picked", employeeIds: [igor] } })));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("второй раз закрыть — 409, «Итоги опроса» уходят ровно один раз", async () => {
+    const { app, sent, igor, anyaT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    const first = await app.request(new Request(`http://x/api/polls/${poll.id}/close`, send(anyaT, {})));
+    expect(first.status).toBe(200);
+    expect(sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
+    const second = await app.request(new Request(`http://x/api/polls/${poll.id}/close`, send(anyaT, {})));
+    expect(second.status).toBe(409);
+    expect(sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
+  });
+
+  it("закрыть чужой опрос — причина именно «Закрыть может только тот, кто запустил опрос.»", async () => {
+    const { app, igor, anyaT, igorT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    const denied = await app.request(new Request(`http://x/api/polls/${poll.id}/close`, send(igorT, {})));
+    expect(denied.status).toBe(409);
+    expect((await denied.json()).error).toBe("Закрыть может только тот, кто запустил опрос.");
+  });
+
+  it("отменить свой опрос — 200, адресатам уходит «Опрос отменён»", async () => {
+    const { app, sent, igor, anyaT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    const cancelled = await app.request(new Request(`http://x/api/polls/${poll.id}/cancel`, send(anyaT, {})));
+    expect(cancelled.status).toBe(200);
+    const notices = sent.filter((m) => m.text.includes("Опрос отменён"));
+    expect(notices.map((m) => m.to).sort()).toEqual([100, 101]);
+  });
+
+  it("посторонний не видит чужой опрос и по прямому GET — 404", async () => {
+    const { app, igor, anyaT, markT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    const res = await app.request(new Request(`http://x/api/polls/${poll.id}`, get(markT)));
+    expect(res.status).toBe(404);
+  });
+
+  it("голое null вместо тела голоса — 400, а не падение", async () => {
+    const { app, igor, anyaT, igorT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    const res = await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(igorT, null)));
+    expect(res.status).toBe(400);
+  });
 });

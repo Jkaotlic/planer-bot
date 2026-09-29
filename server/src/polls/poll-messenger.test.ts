@@ -32,19 +32,55 @@ describe("рассылка опроса", () => {
     expect(buttons(toAnya)).toContain("🔒 Закрыть опрос");
   });
 
-  it("при закрытии всем адресатам уходит итог с именами", async () => {
+  it("при закрытии всем адресатам уходит итог с именами и гасятся кнопки именно в их письмах", async () => {
     const db = makeTestDb();
     const anya = person(db, "Аня", 100);
     const igor = person(db, "Игорь", 101);
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
-    castVote(db, poll, igor.id, "for", now);
-    closePoll(db, poll, anya);
     const { bot } = silentBot();
     const api = recordApi(bot);
+    // Разослать приглашения — иначе у адресатов нет `messageId`, и гасить нечего.
+    await sendPollInvites(bot, db, poll, now);
+    castVote(db, poll, igor.id, "for", now);
+    closePoll(db, poll, anya);
     await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
+
     const results = api.sent.filter((m) => m.text.includes("Итоги опроса"));
     expect(results.map((m) => m.chat_id).sort()).toEqual([100, 101]);
     expect(results[0]!.text).toContain("👍 За — 1: Игорь");
-    expect(pollRecipientRows(db, poll.id)).toHaveLength(2);
+
+    // Гашение — по конкретному `message_id` каждого адресата, а не оптом: тест
+    // на пассивное «строк в базе столько же» ничего не сказал бы про сам вызов.
+    const recipients = pollRecipientRows(db, poll.id);
+    const edits = api.calls.filter((c) => c.method === "editMessageReplyMarkup");
+    expect(edits).toHaveLength(2);
+    for (const r of recipients) {
+      const edit = edits.find((e) => e.payload.chat_id === r.telegramUserId);
+      expect(edit?.payload.message_id).toBe(r.messageId);
+    }
+  });
+
+  it("итог доходит до всех, даже если гашение кнопок у одного из адресатов упало", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
+    const { bot } = silentBot();
+    await sendPollInvites(bot, db, poll, now);
+    closePoll(db, poll, anya);
+
+    // Письмо могли удалить между рассылкой и закрытием — правка кнопок тогда
+    // падает у Telegram. Свой транспорт поверх `silentBot`: он и кидает на
+    // гашении, и параллельно записывает, что реально ушло `sendMessage`.
+    const sent: { chat_id: number; text: string }[] = [];
+    bot.api.config.use((_prev, method, payload) => {
+      if (method === "editMessageReplyMarkup") throw new Error("message to edit not found");
+      if (method === "sendMessage") sent.push(payload as { chat_id: number; text: string });
+      return { ok: true, result: {} } as never;
+    });
+
+    await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
+    expect(sent.map((m) => m.chat_id).sort()).toEqual([100, 101]);
+    expect(sent.every((m) => m.text.includes("Итоги опроса"))).toBe(true);
   });
 });

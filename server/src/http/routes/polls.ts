@@ -1,7 +1,7 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
-import { POLL_QUESTION_MAX, closesAtFromTime, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
+import { POLL_QUESTION_MAX, closesAtFromTime, isFutureClose, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
@@ -16,6 +16,19 @@ const createSchema = z.object({
   closesTime: timeStr.nullable(),
   audience: teamAudienceSchema,
 }).strict();
+
+/**
+ * Тело запроса, приведённое к объекту.
+ *
+ * `c.req.json()` парсит и `null`, и массив, и число без ошибки — `.catch`
+ * ловит только неразобранный JSON. Без этой прослойки `{ choice?: ... }`,
+ * навязанный кастом на голое `null`, падал бы на чтении `body.choice`
+ * TypeError'ом (500), а не понятным 400.
+ */
+async function jsonBody(c: Context): Promise<Record<string, unknown>> {
+  const raw = await c.req.json().catch(() => null);
+  return raw != null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
 
 /**
  * Опросы. Запускает любой работник — так он решил (2026-09-29): «кто со мной
@@ -38,17 +51,22 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     c.json({ polls: listPollsFor(db, viewerOf(c), teamNow(config.teamTz)) }));
 
   app.post("/api/polls", auth, async (c) => {
-    const parsed = createSchema.safeParse(await c.req.json().catch(() => ({})));
+    const parsed = createSchema.safeParse(await jsonBody(c));
     if (!parsed.success) return c.json({ error: "Проверь вопрос, время и адресатов.", issues: parsed.error.issues }, 400);
+    const now = teamNow(config.teamTz);
+    const closesAt = closesAtFromTime(parsed.data.closesTime, now.date);
+    // Срок в прошлом рождает опрос уже закрытым: письма уйдут с погашенными
+    // кнопками, а тап на них откажет «Опрос закрыт» — человек так и не поймёт,
+    // что вопрос вообще был его.
+    if (!isFutureClose(closesAt, now)) return c.json({ error: "Время уже прошло — поставь позже или оставь пустым." }, 400);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
     const viewer = viewerOf(c);
-    const now = teamNow(config.teamTz);
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
     const poll = createPoll(db, {
       createdBy: viewer.id,
       question: parsed.data.question,
-      closesAt: closesAtFromTime(parsed.data.closesTime, now.date),
+      closesAt,
       recipientIds: reachable.map((e) => e.id),
     });
     const delivered = await sendPollInvites(bot, db, poll, now);
@@ -63,7 +81,7 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
   });
 
   app.post("/api/polls/:id/vote", auth, async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { choice?: unknown };
+    const body = await jsonBody(c);
     const choice = pollChoiceSchema.safeParse(body.choice);
     if (!choice.success) return c.json({ error: "choice должен быть for, against или abstain" }, 400);
     const viewer = viewerOf(c);

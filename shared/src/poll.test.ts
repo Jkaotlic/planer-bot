@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { closesAtFromTime, closesLabel, isOpenAt, pollInviteText, pollResultText, pollTally } from "./poll";
+import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, pollInviteText, pollResultText, pollTally } from "./poll";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -14,6 +14,22 @@ describe("isOpenAt", () => {
     expect(isOpenAt({ closesAt: "2026-09-29T12:01", closedAt: null, cancelledAt: null }, now)).toBe(true);
     expect(isOpenAt({ closesAt: "2026-09-29T12:00", closedAt: null, cancelledAt: null }, now)).toBe(false);
     expect(isOpenAt({ closesAt: "2026-09-28T18:00", closedAt: null, cancelledAt: null }, now)).toBe(false);
+  });
+});
+
+describe("isFutureClose", () => {
+  it("пустой срок всегда в будущем", () => {
+    expect(isFutureClose(null, now)).toBe(true);
+  });
+
+  it("та же минута и прошлое — уже не в будущем", () => {
+    expect(isFutureClose("2026-09-29T12:00", now)).toBe(false);
+    expect(isFutureClose("2026-09-29T08:00", now)).toBe(false);
+    expect(isFutureClose("2026-09-28T23:59", now)).toBe(false);
+  });
+
+  it("минута спустя — ещё в будущем", () => {
+    expect(isFutureClose("2026-09-29T12:01", now)).toBe(true);
   });
 });
 

@@ -49,6 +49,19 @@ export function closesAtFromTime(time: string | null, today: string): string | n
   return time ? `${today}T${time}` : null;
 }
 
+/**
+ * Срок ещё не прошёл — проверка при создании, а не только при голосовании.
+ *
+ * Без неё «08:00» в форме в полдень создаёт опрос, закрытый в момент рождения:
+ * кнопки уйдут, тап откажет, а следующий тик разошлёт пустой итог, будто
+ * никто не откликнулся, хотя откликаться было не на что. Сравнение то же
+ * строгое, что у `isOpenAt` (Задача 12 переиспользует для заказов еды).
+ */
+export function isFutureClose(closesAt: string | null, now: { date: string; time: string }): boolean {
+  if (closesAt == null) return true;
+  return closesAt > `${now.date}T${now.time}`;
+}
+
 /** «до 12:30» сегодня, «до 30 сентября, 09:00» — если срок не сегодня. */
 export function closesLabel(closesAt: string | null, today: string): string | null {
   if (!closesAt) return null;
