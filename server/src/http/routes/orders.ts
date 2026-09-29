@@ -139,9 +139,12 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
     if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
     const payerId = Number(c.req.param("employeeId"));
+    if (!Number.isInteger(payerId)) return c.json({ error: "Не тот человек." }, 400);
     const result = setOrderPaid(db, v.order, payerId, v.viewer, body.paid);
     if (!result.ok) return c.json({ error: result.error }, 409);
-    if (payerId !== v.viewer.id) {
+    // Аудит — только когда что-то реально поменялось: повторный тап по уже
+    // стоящей (или уже снятой) галочке не событие, а идемпотентный no-op.
+    if (payerId !== v.viewer.id && result.changed) {
       recordAudit(db, "order_payment_marked", v.viewer.id, { orderId: v.order.id, payerId, payerName: getEmployeeById(db, payerId)?.displayName ?? null, paid: body.paid });
     }
     return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
@@ -151,11 +154,12 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const v = visible(c);
     if (!v) return c.json({ error: "not_found" }, 404);
     if (!canManage(v.order, v.viewer)) return c.json({ error: "Напомнить может только тот, кто собирает заказ." }, 409);
+    if (v.order.cancelledAt != null) return c.json({ error: "Заказ отменён — напоминать не о чем." }, 409);
     if (v.order.closedAt == null) return c.json({ error: "Сначала закрой приём." }, 409);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
-    const delivered = await remindUnpaid(bot, db, v.order);
-    recordAudit(db, "order_reminded", v.viewer.id, { orderId: v.order.id, delivered });
-    return c.json({ delivered });
+    const outcome = await remindUnpaid(bot, db, v.order);
+    recordAudit(db, "order_reminded", v.viewer.id, { orderId: v.order.id, delivered: outcome.delivered, unreachable: outcome.unreachable.length });
+    return c.json(outcome);
   });
 
   for (const action of ["close", "cancel"] as const) {

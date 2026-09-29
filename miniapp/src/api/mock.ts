@@ -2420,17 +2420,21 @@ export async function mockSetOrderPaymentFor(id: number, employeeId: number, pai
   return orderViewOf(o);
 }
 
-/** Дожим — тот же порядок отказов, что у HTTP-ручки: права, потом «закрыт ли». */
-export async function mockRemindOrderUnpaid(id: number): Promise<{ delivered: number }> {
+/** Дожим — тот же порядок отказов, что у HTTP-ручки: права, потом «отменён
+ *  ли», потом «закрыт ли». `unpaid`/`unreachable` — тот же смысл, что у
+ *  серверного `remindUnpaid`: знаменатель и кого не достучаться поимённо. */
+export async function mockRemindOrderUnpaid(id: number): Promise<{ delivered: number; unpaid: number; unreachable: string[] }> {
   await delay(300);
   const o = orderOrThrow(id);
   if (!(o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin)) throw new Error("Напомнить может только тот, кто собирает заказ.");
+  if (o.cancelledAt != null) throw new Error("Заказ отменён — напоминать не о чем.");
   if (o.closedAt == null) throw new Error("Сначала закрой приём.");
   const paid = new Set(
     [...ORDER_PAYMENTS.keys()].filter((key) => key.startsWith(`${o.id}:`)).map((key) => Number(key.split(":")[1])),
   );
-  const delivered = orderDebtorRows(o).filter((d) => !paid.has(d.employeeId) && d.telegramUserId != null).length;
-  return { delivered };
+  const debtorsList = orderDebtorRows(o).filter((d) => !paid.has(d.employeeId));
+  const unreachable = debtorsList.filter((d) => d.telegramUserId == null).map((d) => d.displayName);
+  return { delivered: debtorsList.length - unreachable.length, unpaid: debtorsList.length, unreachable };
 }
 
 // --- Багрепорты ---------------------------------------------------------

@@ -7,7 +7,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
 import { createPlace } from "../orders/place-service";
-import { addMenuItem, cancelOrder, closeOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
+import { addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
 import { orderPayments } from "../orders/order-payment-service";
 import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
@@ -237,6 +237,16 @@ describe("деньги заказа в боте", () => {
     expect(api.calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
   });
 
+  it("двойной тап «Я сдал» не снимает отметку — paidCount остаётся 1", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
+    closeOrder(db, order, anya);
+    recordApi(bot);
+    await tap(bot, 333, `order:paid:${order.id}`);
+    await tap(bot, 333, `order:paid:${order.id}`);
+    expect(orderPayments(db, getOrder(db, order.id)!).paidCount).toBe(1);
+  });
+
   it("«Напомнить» от участника — отказ", async () => {
     const { db, bot, anya, order } = stage();
     closeOrder(db, order, anya);
@@ -250,5 +260,54 @@ describe("деньги заказа в боте", () => {
     const api = recordApi(bot);
     await tap(bot, 111, `order:remind:${order.id}`);
     expect(api.answers.at(-1)).toBe("Сначала закрой приём.");
+  });
+
+  it("«Напомнить» на отменённом заказе — «Заказ отменён — напоминать не о чем.», раньше проверки «закрыт ли»", async () => {
+    const { db, bot, anya, order } = stage();
+    cancelOrder(db, order, anya);
+    const api = recordApi(bot);
+    await tap(bot, 111, `order:remind:${order.id}`);
+    expect(api.answers.at(-1)).toBe("Заказ отменён — напоминать не о чем.");
+  });
+
+  it("«Напомнить» пишет в аудит с актором, числом дошедших и записывает недостижимых", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
+    closeOrder(db, order, anya);
+    recordApi(bot);
+    await tap(bot, 111, `order:remind:${order.id}`);
+    const entry = listRecentAudit(db, 10).find((row) => row.type === "order_reminded");
+    expect(entry?.actorEmployeeId).toBe(anya.id);
+    expect(entry?.payload).toMatchObject({ orderId: order.id, delivered: 1, unreachable: 0 });
+  });
+
+  it("«Напомнить»: должник без Telegram попадает в «Не дошло: …», дошедший считается отдельно", async () => {
+    const { db, bot, anya, igor } = stage();
+    // Своя пара получателей: Игорь (с Telegram) и Настя (без) — оба заказали.
+    const nastya = createEmployee(db, { displayName: "Настя" });
+    const order = createOrder(db, {
+      createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null,
+      recipientIds: [anya.id, igor.id, nastya.id],
+    });
+    const now = { date: "2026-09-29", time: "12:00" };
+    addCustomItem(db, order, igor.id, { name: "Суп", price: 280, qty: 1 }, now);
+    addCustomItem(db, order, nastya.id, { name: "Чай", price: 50, qty: 1 }, now);
+    closeOrder(db, order, anya);
+    const api = recordApi(bot);
+    await tap(bot, 111, `order:remind:${order.id}`);
+    expect(api.answers.at(-1)).toBe("Напомнил: 1 из 2. Не дошло: Настя");
+  });
+
+  it("второй тап «Напомнить», пока первая рассылка ещё идёт, — «Уже напоминаю — подожди.», письмо уходит одной волной", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
+    closeOrder(db, order, anya);
+    const api = recordApi(bot);
+    // Оба тапа запускаются без ожидания друг друга: второй должен застать
+    // guard уже выставленным (см. комментарий у `remindInFlight` в
+    // food-handlers.ts) — так проверяется защита от гонки, а не порядок.
+    await Promise.all([tap(bot, 111, `order:remind:${order.id}`), tap(bot, 111, `order:remind:${order.id}`)]);
+    expect(api.answers).toContain("Уже напоминаю — подожди.");
+    expect(api.sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(1);
   });
 });

@@ -83,16 +83,26 @@ export function remindKeyboard(orderId: number): InlineKeyboard {
   return new InlineKeyboard().text("⏰ Напомнить не сдавшим", `order:remind:${orderId}`);
 }
 
-/** Дожим — только не сдавшим и только по кнопке: за 300 рублей бот сам людей не долбит. */
-export async function remindUnpaid(bot: Bot, db: Db, order: FoodOrder): Promise<number> {
+/**
+ * Дожим — только не сдавшим и только по кнопке: за 300 рублей бот сам людей
+ * не долбит. `unpaid` — сколько ещё должны на момент вызова (знаменатель для
+ * «D из N», не только «дошло»); `unreachable` — кого не достучаться, поимённо:
+ * без Telegram или бот заблокирован. Нулевой `delivered` при `unreachable`
+ * непустом — не то же самое, что «все уже сдали», и вызывающий должен уметь
+ * их различить, а не рапортовать «дожал», когда никто письма не увидел.
+ */
+export async function remindUnpaid(bot: Bot, db: Db, order: FoodOrder): Promise<{ delivered: number; unpaid: number; unreachable: string[] }> {
   const creator = orderRecipientRows(db, order.id).find((r) => r.employeeId === order.createdBy)?.displayName ?? "Коллега";
+  const debtors_ = unpaidDebtors(db, order);
   let delivered = 0;
-  for (const d of unpaidDebtors(db, order)) {
-    if (d.telegramUserId == null) continue;
+  const unreachable: string[] = [];
+  for (const d of debtors_) {
+    if (d.telegramUserId == null) { unreachable.push(d.displayName); continue; }
     const text = `⏰ Напоминаю: за заказ еды сдай ${formatMoney(d.amount)} — ${creator}.${order.payHint ? `\nКуда: ${order.payHint}` : ""}`;
     if (await notifyUser(bot, d.telegramUserId, text, payKeyboard(order.id))) delivered += 1;
+    else unreachable.push(d.displayName);
   }
-  return delivered;
+  return { delivered, unpaid: debtors_.length, unreachable };
 }
 
 export async function sendOrderInvites(bot: Bot, db: Db, order: FoodOrder, now: TeamClock, publicUrl: string): Promise<number> {

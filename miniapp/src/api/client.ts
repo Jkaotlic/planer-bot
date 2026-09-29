@@ -1060,8 +1060,11 @@ export interface ApiClient {
   setOrderPaid(id: number, paid: boolean): Promise<OrderView>;
   /** Галочка за другого: наличка в руки, ставит только запускающий/админ. */
   setOrderPaymentFor(id: number, employeeId: number, paid: boolean): Promise<OrderView>;
-  /** Дожим по неотметившимся — письмо уходит только должникам. */
-  remindOrderUnpaid(id: number): Promise<{ delivered: number }>;
+  /** Дожим по неотметившимся — письмо уходит только должникам. `unpaid` —
+   *  знаменатель («D из N»), `unreachable` — кого не достучаться поимённо
+   *  (без Telegram или бот заблокирован); может быть непустым даже при
+   *  `delivered > 0`. */
+  remindOrderUnpaid(id: number): Promise<{ delivered: number; unpaid: number; unreachable: string[] }>;
 
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
@@ -1841,7 +1844,7 @@ export const realClient: ApiClient = {
     return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/payments/${employeeId}`, { paid })).order;
   },
   remindOrderUnpaid(id) {
-    return authorizedPostJson<{ delivered: number }>(`/api/orders/${id}/remind`, {});
+    return authorizedPostJson<{ delivered: number; unpaid: number; unreachable: string[] }>(`/api/orders/${id}/remind`, {});
   },
 
   async getBugReports(status) {

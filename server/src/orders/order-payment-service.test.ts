@@ -25,17 +25,17 @@ describe("кто сдал", () => {
     expect(unpaidDebtors(db, order).map((d) => d.amount)).toEqual([350, 50]);
   });
 
-  it("должник отмечает себя; повтор не даёт «3 из 2»", () => {
+  it("должник отмечает себя; повтор не даёт «3 из 2» и не считается новым изменением", () => {
     const { db, igor, order } = stage();
-    expect(setOrderPaid(db, order, igor.id, igor, true)).toEqual({ ok: true });
-    expect(setOrderPaid(db, order, igor.id, igor, true)).toEqual({ ok: true });
+    expect(setOrderPaid(db, order, igor.id, igor, true)).toEqual({ ok: true, changed: true });
+    expect(setOrderPaid(db, order, igor.id, igor, true)).toEqual({ ok: true, changed: false });
     expect(orderPayments(db, order).paidCount).toBe(1);
   });
 
   it("за другого отмечает только управляющий — наличка в руки", () => {
     const { db, anya, igor, mark, order } = stage();
     expect(setOrderPaid(db, order, mark.id, igor, true)).toEqual({ ok: false, error: "Отметить за другого может только тот, кто собирает заказ." });
-    expect(setOrderPaid(db, order, mark.id, anya, true)).toEqual({ ok: true });
+    expect(setOrderPaid(db, order, mark.id, anya, true)).toEqual({ ok: true, changed: true });
     expect(orderPayments(db, order).rows.find((r) => r.displayName === "Марк")!.markedByAdmin).toBe(true);
   });
 
@@ -52,6 +52,11 @@ describe("кто сдал", () => {
     setOrderPaid(db, order, mark.id, anya, true);
     expect(setOrderPaid(db, order, mark.id, igor, false).ok).toBe(false);
     expect(setOrderPaid(db, order, mark.id, mark, false)).toEqual({ ok: false, error: "Снять отметку может тот, кто её поставил." });
-    expect(setOrderPaid(db, order, mark.id, anya, false)).toEqual({ ok: true });
+    expect(setOrderPaid(db, order, mark.id, anya, false)).toEqual({ ok: true, changed: true });
+  });
+
+  it("снять уже снятую (или никогда не стоявшую) отметку — ok, но changed: false", () => {
+    const { db, anya, mark, order } = stage();
+    expect(setOrderPaid(db, order, mark.id, anya, false)).toEqual({ ok: true, changed: false });
   });
 });

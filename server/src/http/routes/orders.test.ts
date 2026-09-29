@@ -7,17 +7,26 @@ import { signInitData } from "../../auth/telegram";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
 import { createPlace } from "../../orders/place-service";
+import { listRecentAudit } from "../../repo/audit";
 
 function fakeBot() {
   const sent: { to: number; text: string }[] = [];
+  // Кому доставка отвечает отказом — имитирует заблокированный ботом чат,
+  // не требуя настоящей сети: `remindUnpaid` должен положить такого в
+  // `unreachable`, а не молча посчитать «дошло».
+  const failFor = new Set<number>();
   let nextId = 1;
   const bot = {
     api: {
-      sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); return { message_id: nextId++ }; }),
+      sendMessage: vi.fn(async (to: number, text: string) => {
+        if (failFor.has(to)) throw new Error("Forbidden: bot was blocked by the user");
+        sent.push({ to, text });
+        return { message_id: nextId++ };
+      }),
       editMessageReplyMarkup: vi.fn(async () => ({})),
     },
   };
-  return { bot: bot as unknown as Bot, sent };
+  return { bot: bot as unknown as Bot, sent, failFor };
 }
 
 const config = testConfig();
@@ -45,14 +54,14 @@ afterEach(() => { vi.useRealTimers(); });
 
 async function stage() {
   const db = makeTestDb();
-  const { bot, sent } = fakeBot();
+  const { bot, sent, failFor } = fakeBot();
   const app = createApp({ db, config, bot });
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   const mark = person(db, "Марк", 102);
   const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya);
   return {
-    db, app, sent, anya, igor, mark, placeId: place.id,
+    db, app, sent, failFor, anya, igor, mark, placeId: place.id,
     anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102),
   };
 }
@@ -60,6 +69,15 @@ async function stage() {
 async function newOrder(app: App, token: string, igor: number, placeId: number | null) {
   const res = await app.request(new Request("http://x/api/orders", send(token, {
     placeId, note: null, payHint: "Наличкой мне", closesTime: "12:30", audience: { kind: "picked", employeeIds: [igor] },
+  })));
+  return { status: res.status, body: await res.json() };
+}
+
+/** Та же ручка, но с несколькими адресатами — тестам про деньги нужно больше
+ *  одного должника (напомнить одному, а не другому; пометить за конкретного). */
+async function newOrderFor(app: App, token: string, employeeIds: number[], placeId: number | null) {
+  const res = await app.request(new Request("http://x/api/orders", send(token, {
+    placeId, note: null, payHint: "Наличкой мне", closesTime: "12:30", audience: { kind: "picked", employeeIds },
   })));
   return { status: res.status, body: await res.json() };
 }
@@ -160,8 +178,8 @@ describe("заказы по HTTP", () => {
 });
 
 describe("деньги заказа по HTTP", () => {
-  it("должник отмечается сам; запускающий видит «1 из 1» поимённо; участник — без списка", async () => {
-    const { app, igor, anyaT, igorT, placeId } = await stage();
+  it("должник отмечается сам; запускающий видит «1 из 1» поимённо; участник — без списка; аудита на свою отметку нет", async () => {
+    const { db, app, igor, anyaT, igorT, placeId } = await stage();
     const { body } = await newOrder(app, anyaT, igor, placeId);
     await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
     await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
@@ -169,19 +187,77 @@ describe("деньги заказа по HTTP", () => {
     expect(mine.order.payment).toEqual({ myPaid: true, paidCount: 1, total: 1, rows: null });
     const boss = await (await app.request(new Request(`http://x/api/orders/${body.order.id}`, get(anyaT)))).json();
     expect(boss.order.payment.rows[0]).toMatchObject({ displayName: "Игорь", paid: true, amount: 280 });
+    expect(listRecentAudit(db, 10).find((row) => row.type === "order_payment_marked")).toBeUndefined();
   });
 
-  it("«Напомнить» уходит только не сдавшим, и только от запускающего", async () => {
-    const { app, sent, igor, anyaT, igorT, placeId } = await stage();
+  it("за другого отмечает только управляющий; участнику — 409; у запускающего пишется аудит, а повтор — нет (changed: false)", async () => {
+    const { db, app, anya, igor, mark, anyaT, igorT, markT, placeId } = await stage();
+    const { body } = await newOrderFor(app, anyaT, [igor, mark], placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
+
+    // Марк — участник (не Игорь, не запускающий) — пробует отметить Игоря: отказ.
+    const denied = await app.request(new Request(`http://x/api/orders/${body.order.id}/payments/${igor}`, send(markT, { paid: true })));
+    expect(denied.status).toBe(409);
+    expect((await denied.json()).error).toBe("Отметить за другого может только тот, кто собирает заказ.");
+
+    const marked = await app.request(new Request(`http://x/api/orders/${body.order.id}/payments/${igor}`, send(anyaT, { paid: true })));
+    expect(marked.status).toBe(200);
+    const entries = listRecentAudit(db, 10).filter((row) => row.type === "order_payment_marked");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.actorEmployeeId).toBe(anya);
+    expect(entries[0]?.payload).toMatchObject({ orderId: body.order.id, payerId: igor, payerName: "Игорь", paid: true });
+
+    // Повтор той же отметки — changed: false, второй строки в аудите нет.
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/payments/${igor}`, send(anyaT, { paid: true })));
+    expect(listRecentAudit(db, 10).filter((row) => row.type === "order_payment_marked")).toHaveLength(1);
+  });
+
+  it("не тот id адресата — 400, а не падение", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
+    const res = await app.request(new Request(`http://x/api/orders/${body.order.id}/payments/не-число`, send(anyaT, { paid: true })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Не тот человек.");
+  });
+
+  it("«Напомнить» уходит только не сдавшим, и только от запускающего; пишет аудит", async () => {
+    const { db, app, sent, anya, igor, anyaT, igorT, placeId } = await stage();
     const { body } = await newOrder(app, anyaT, igor, placeId);
     await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
     await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
     expect((await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(igorT, {})))).status).toBe(409);
     const res = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).json();
-    expect(res.delivered).toBe(1);
+    expect(res).toEqual({ delivered: 1, unpaid: 1, unreachable: [] });
+    const reminded = listRecentAudit(db, 10).find((row) => row.type === "order_reminded");
+    expect(reminded?.actorEmployeeId).toBe(anya);
+    expect(reminded?.payload).toMatchObject({ orderId: body.order.id, delivered: 1, unreachable: 0 });
     await app.request(new Request(`http://x/api/orders/${body.order.id}/paid`, send(igorT, { paid: true })));
     const again = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).json();
-    expect(again.delivered).toBe(0);
+    expect(again).toEqual({ delivered: 0, unpaid: 0, unreachable: [] });
     expect(sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(1);
   });
+
+  it("«Напомнить»: недостижимый (бот заблокирован) — в unreachable, delivered считается отдельно от unpaid", async () => {
+    const { app, sent, failFor, igor, mark, anyaT, igorT, markT, placeId } = await stage();
+    const { body } = await newOrderFor(app, anyaT, [igor, mark], placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(markT, { name: "Чай", price: 50 })));
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
+    failFor.add(102); // Марк — «бот заблокирован»
+    const res = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).json();
+    expect(res).toEqual({ delivered: 1, unpaid: 2, unreachable: ["Марк"] });
+    expect(sent.filter((m) => m.text.startsWith("⏰")).map((m) => m.to)).toEqual([101]);
+  });
+
+  it("«Напомнить» на отменённом заказе — «Заказ отменён — напоминать не о чем.», раньше проверки «закрыт ли»", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/cancel`, send(anyaT, {})));
+    const res = await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("Заказ отменён — напоминать не о чем.");
+  });
+
 });

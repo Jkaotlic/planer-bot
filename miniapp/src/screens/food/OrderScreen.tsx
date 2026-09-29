@@ -39,6 +39,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
   async function run(action: () => Promise<OrderView>) {
     setBusy(true);
     setError(null);
+    setRemindResult(null);
     try {
       setOrder(await action());
     } catch (err) {
@@ -59,15 +60,20 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
     }
   }
 
-  /** Дожим отдаёт не заказ, а число дошедших — «Кто сдал» перечитывается сама
-   *  по себе позже (тик или открытие экрана заново); здесь только строка
-   *  результата. Отказ и гонка с тиком — тот же приём, что у `run`. */
+  /** Дожим отдаёт не заказ, а сколько дошло/сколько ждём — «Кто сдал»
+   *  перечитывается сама по себе позже (тик или открытие экрана заново);
+   *  здесь только строка результата. Отказ и гонка с тиком — тот же приём,
+   *  что у `run`. */
   async function runRemind(id: number) {
     setBusy(true);
     setError(null);
+    setRemindResult(null);
     try {
-      const { delivered } = await apiClient.remindOrderUnpaid(id);
-      setRemindResult(`Напомнил: ${delivered}`);
+      const { delivered, unpaid, unreachable } = await apiClient.remindOrderUnpaid(id);
+      const text = unpaid === 0
+        ? "Все уже сдали 🎉"
+        : `Напомнил: ${delivered} из ${unpaid}` + (unreachable.length > 0 ? `. Не дошло: ${unreachable.join(", ")}` : "");
+      setRemindResult(text);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не получилось");
       try {
@@ -189,7 +195,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           </CardShell>
         )}
 
-        {order.closed && order.payment.rows && (
+        {order.closed && order.payment.rows && order.payment.total > 0 && (
           <CardShell>
             <div style={{ fontWeight: 600 }}>Кто сдал · {order.payment.paidCount} из {order.payment.total}</div>
             {order.payment.rows.map((r) => (

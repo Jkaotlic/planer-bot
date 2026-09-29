@@ -182,7 +182,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     const who = acting(ctx.from.id);
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const order = getOrder(db, Number(ctx.match[1]));
-    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён" }); return; }
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
     // Повторный тап не снимает галочку — как у сборов: снять можно в мини-аппе,
     // а случайный второй тап по медленной сети не должен стирать «сдал».
     const result = setOrderPaid(db, order, who.me.id, viewerOf(who.me, ctx.from.id), true);
@@ -191,21 +191,44 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: payDoneKeyboard(order.id) }));
   });
 
+  // Дольше 60 символов всплывашка без `show_alert` обрезает текст — «Не
+  // дошло: Имя1, Имя2, …» на большой команде в неё не влезает, а модалка
+  // показывает целиком.
+  const ANSWER_ALERT_THRESHOLD = 60;
+  // Рассылка «Напомнить» не мгновенная: второй тап, пока первая волна ещё
+  // идёт (например, по медленной сети), не должен запускать вторую — тот же
+  // человек получил бы два одинаковых письма подряд. Ключ — id заказа, не
+  // глобальный флаг: дожим по одному заказу не блокирует дожим по другому.
+  const remindInFlight = new Set<number>();
+
   bot.callbackQuery(/^order:remind:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const order = getOrder(db, Number(ctx.match[1]));
-    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён" }); return; }
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
     if (!canManage(order, viewerOf(who.me, ctx.from.id))) {
       await ctx.answerCallbackQuery({ text: "Напомнить может только тот, кто собирает заказ." });
       return;
     }
+    if (order.cancelledAt != null) { await ctx.answerCallbackQuery({ text: "Заказ отменён — напоминать не о чем." }); return; }
     // Та же проверка, что и в HTTP-ручке: дожим до закрытия отправил бы «сдай»
     // раньше письма-сводки — человек ещё не видел, сколько должен.
     if (order.closedAt == null) { await ctx.answerCallbackQuery({ text: "Сначала закрой приём." }); return; }
-    const delivered = await remindUnpaid(bot, db, order);
-    recordAudit(db, "order_reminded", who.me.id, { orderId: order.id, delivered });
-    await ctx.answerCallbackQuery({ text: delivered === 0 ? "Все уже сдали 🎉" : `Напомнил: ${delivered}` });
+    if (remindInFlight.has(order.id)) { await ctx.answerCallbackQuery({ text: "Уже напоминаю — подожди." }); return; }
+    remindInFlight.add(order.id);
+    try {
+      const { delivered, unpaid, unreachable } = await remindUnpaid(bot, db, order);
+      recordAudit(db, "order_reminded", who.me.id, { orderId: order.id, delivered, unreachable: unreachable.length });
+      if (unpaid === 0) {
+        await ctx.answerCallbackQuery({ text: "Все уже сдали 🎉" });
+        return;
+      }
+      const base = `Напомнил: ${delivered} из ${unpaid}`;
+      const text = unreachable.length > 0 ? `${base}. Не дошло: ${unreachable.join(", ")}` : base;
+      await ctx.answerCallbackQuery({ text, show_alert: text.length > ANSWER_ALERT_THRESHOLD });
+    } finally {
+      remindInFlight.delete(order.id);
+    }
   });
 
   return { sendFoodMenu };

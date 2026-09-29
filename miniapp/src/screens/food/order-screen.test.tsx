@@ -112,6 +112,52 @@ describe("OrderScreen — деньги", () => {
     await act(async () => el.querySelector<HTMLInputElement>("input[type=checkbox]")!.click());
     expect(mark).toHaveBeenCalledWith(7, 2, true);
   });
+
+  // Решение раунда правок: должников нет (`total: 0`) — карточка «Кто сдал»
+  // не показывается вовсе, даже если `rows` почему-то не null.
+  it("должников нет — карточка «Кто сдал» не показывается", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({
+      ...BASE, open: false, closed: true, isCreator: true, canManage: true, people: [],
+      payment: { myPaid: false, paidCount: 0, total: 0, rows: [] },
+    });
+    const el = await mountScreen(7);
+    expect(el.textContent).not.toContain("Кто сдал");
+  });
+
+  it("«Напомнить не сдавшим» показывает «Напомнил: D из N. Не дошло: …»", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({
+      ...BASE, open: false, closed: true, isCreator: true, canManage: true, people: [],
+      payment: { myPaid: false, paidCount: 0, total: 2, rows: [
+        { employeeId: 2, displayName: "Игорь", paid: false, markedByAdmin: false, amount: 350 },
+        { employeeId: 3, displayName: "Марк", paid: false, markedByAdmin: false, amount: 50 },
+      ] },
+    });
+    const remind = vi.spyOn(apiClient, "remindOrderUnpaid").mockResolvedValue({ delivered: 1, unpaid: 2, unreachable: ["Марк"] });
+    const el = await mountScreen(7);
+    await act(async () => byText(el, "⏰ Напомнить не сдавшим").click());
+    await settle();
+    expect(remind).toHaveBeenCalledWith(7);
+    expect(el.textContent).toContain("Напомнил: 1 из 2. Не дошло: Марк");
+  });
+
+  it("новое действие после дожима убирает старую строку «Напомнил: …»", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({
+      ...BASE, open: false, closed: true, isCreator: true, canManage: true, people: [],
+      payment: { myPaid: false, paidCount: 0, total: 1, rows: [{ employeeId: 2, displayName: "Игорь", paid: false, markedByAdmin: false, amount: 350 }] },
+    });
+    vi.spyOn(apiClient, "remindOrderUnpaid").mockResolvedValue({ delivered: 1, unpaid: 1, unreachable: [] });
+    vi.spyOn(apiClient, "setOrderPaymentFor").mockResolvedValue({
+      ...BASE, open: false, closed: true, isCreator: true, canManage: true, people: [],
+      payment: { myPaid: false, paidCount: 1, total: 1, rows: [{ employeeId: 2, displayName: "Игорь", paid: true, markedByAdmin: true, amount: 350 }] },
+    });
+    const el = await mountScreen(7);
+    await act(async () => byText(el, "⏰ Напомнить не сдавшим").click());
+    await settle();
+    expect(el.textContent).toContain("Напомнил: 1 из 1");
+    await act(async () => el.querySelector<HTMLInputElement>("input[type=checkbox]")!.click());
+    await settle();
+    expect(el.textContent).not.toContain("Напомнил:");
+  });
 });
 
 // Ревью раунд 1, находка №4: гонка тика и тапа по меню — сервер уже закрыл

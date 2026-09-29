@@ -38,6 +38,8 @@ import {
   mockSetOrderItemQty,
   mockCloseOrder,
   mockCancelOrder,
+  mockSetOrderPaid,
+  mockRemindOrderUnpaid,
   MOCK_ME,
 } from "./mock";
 
@@ -610,6 +612,32 @@ describe("заказы еды: dev-мок", () => {
 
   it("несуществующий заказ отвечает по-русски, а не английским «not_found»", async () => {
     await expect(mockGetOrder(999_999)).rejects.toThrow("Заказ не найден или недоступен.");
+  });
+});
+
+// Раунд правок: мок должен повторять правила `setOrderPaid`/`remindUnpaid`
+// сервера тем же текстом — иначе DEV показал бы форму, которую прод отклонил
+// бы, и наоборот.
+describe("деньги заказа еды: dev-мок", () => {
+  it("сдавать рано, пока приём идёт; MOCK_ME — запускающий, долга у него нет", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await expect(mockSetOrderPaid(order.id, true)).rejects.toThrow("Сдавать рано: приём ещё идёт.");
+    await mockCloseOrder(order.id);
+    await expect(mockSetOrderPaid(order.id, true)).rejects.toThrow("Этот человек ничего не должен.");
+  });
+
+  it("«Напомнить»: до закрытия — «Сначала закрой приём.», на отменённом — «Заказ отменён — напоминать не о чем.»", async () => {
+    const { order: open } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await expect(mockRemindOrderUnpaid(open.id)).rejects.toThrow("Сначала закрой приём.");
+    const { order: cancelled } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCancelOrder(cancelled.id);
+    await expect(mockRemindOrderUnpaid(cancelled.id)).rejects.toThrow("Заказ отменён — напоминать не о чем.");
+  });
+
+  it("«Напомнить» без должников — delivered/unpaid 0, без ошибки", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCloseOrder(order.id);
+    await expect(mockRemindOrderUnpaid(order.id)).resolves.toEqual({ delivered: 0, unpaid: 0, unreachable: [] });
   });
 });
 
