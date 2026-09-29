@@ -80,6 +80,17 @@ export function archivePlace(db: Db, id: number): Result {
   return changed.changes > 0 ? { ok: true } : { ok: false, error: "Места больше нет." };
 }
 
+/**
+ * Меню для уже идущего заказа — активные блюда места, даже если само место
+ * успели архивировать. Архивация места не должна ломать заказ в процессе:
+ * `activeMenuItem` (тап по кнопке) тоже смотрит только на архивацию блюда, а
+ * не места, и вид заказа обязан показывать то же самое, что кнопки реально
+ * позволяют — иначе меню в письме разойдётся с тем, что тап примет.
+ */
+export function menuForOrder(db: Db, placeId: number): { id: number; name: string; price: number }[] {
+  return menuOf(db, placeId);
+}
+
 export function activeMenuItem(db: Db, placeId: number, menuItemId: number): FoodMenuItem | undefined {
   return db.select().from(foodMenuItems)
     .where(and(eq(foodMenuItems.id, menuItemId), eq(foodMenuItems.placeId, placeId), isNull(foodMenuItems.archivedAt)))

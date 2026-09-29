@@ -6,7 +6,7 @@ import {
   type FoodOrder, type FoodOrderItem,
 } from "../db/schema";
 import { canManage, type Result, type TeamClock } from "../polls/poll-service";
-import { activeMenuItem, getPlaceView } from "./place-service";
+import { activeMenuItem, menuForOrder } from "./place-service";
 
 type Viewer = { id: number; isAdmin: boolean };
 
@@ -59,8 +59,7 @@ function isRecipient(db: Db, orderId: number, employeeId: number): boolean {
 
 /**
  * Общий вход любой правки позиций: сначала «закрыт», потом «тебе ли» — тот же
- * порядок, что у опросов, в боте и в HTTP. Любая своя позиция снимает отказ:
- * человек передумал, и «Не буду» в сводке было бы враньём.
+ * порядок, что у опросов, в боте и в HTTP.
  */
 function guard(db: Db, order: FoodOrder, employeeId: number, now: TeamClock): Result {
   if (!isOpenAt(order, now)) return { ok: false, error: "Приём закрыт." };
@@ -68,6 +67,8 @@ function guard(db: Db, order: FoodOrder, employeeId: number, now: TeamClock): Re
   return { ok: true };
 }
 
+/** Любая своя позиция снимает отказ: человек передумал, и «Не буду» в сводке
+ *  было бы враньём. */
 function clearDecline(db: Db, orderId: number, employeeId: number): void {
   db.delete(foodOrderDeclines)
     .where(and(eq(foodOrderDeclines.orderId, orderId), eq(foodOrderDeclines.employeeId, employeeId))).run();
@@ -85,7 +86,7 @@ export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuIt
     eq(foodOrderItems.menuItemId, menuItemId), eq(foodOrderItems.price, dish.price),
   )).get();
   if (same) {
-    if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: "Больше 20 одного блюда — это уже не обед." };
+    if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: `Больше ${FOOD_QTY_MAX} одного блюда — это уже не обед.` };
     db.update(foodOrderItems).set({ qty: same.qty + 1 }).where(eq(foodOrderItems.id, same.id)).run();
   } else {
     db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId, name: dish.name, price: dish.price, qty: 1 }).run();
@@ -225,7 +226,7 @@ export function orderView(db: Db, order: FoodOrder, viewer: Viewer, now: TeamClo
       ?? db.select({ n: employees.displayName }).from(employees).where(eq(employees.id, order.createdBy)).get()?.n ?? "—",
     placeId: order.placeId,
     placeName: place?.name ?? null,
-    menu: open && order.placeId != null ? getPlaceView(db, order.placeId)?.menu ?? [] : [],
+    menu: open && order.placeId != null ? menuForOrder(db, order.placeId) : [],
     note: order.note,
     payHint: order.payHint,
     closesAt: order.closesAt,

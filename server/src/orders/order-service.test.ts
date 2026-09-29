@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee } from "../repo/employees";
-import { createPlace, updatePlace } from "./place-service";
+import { archivePlace, createPlace, updatePlace } from "./place-service";
 import {
   addCustomItem, addMenuItem, cancelOrder, closeDueOrders, closeOrder, createOrder, declineOrder, getOrder,
-  itemsOf, orderView, removeItem, removeLastItem, setItemQty,
+  itemsOf, listOrdersFor, orderView, removeItem, removeLastItem, setItemQty,
 } from "./order-service";
 import { debtOf } from "@planer/shared";
 
@@ -117,6 +117,15 @@ describe("закрытие", () => {
     expect(closeDueOrders(db, now)).toHaveLength(1);
     expect(closeDueOrders(db, now)).toHaveLength(0);
   });
+
+  it("closeDueOrders не трогает заказ со сроком в будущем и заказ без срока", () => {
+    const { db, anya } = stage();
+    const future = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: "2026-09-29T13:00", recipientIds: [anya.id] });
+    const noDeadline = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null, recipientIds: [anya.id] });
+    expect(closeDueOrders(db, now)).toHaveLength(0);
+    expect(getOrder(db, future.id)!.closedAt).toBeNull();
+    expect(getOrder(db, noDeadline.id)!.closedAt).toBeNull();
+  });
 });
 
 describe("вид заказа", () => {
@@ -138,5 +147,22 @@ describe("вид заказа", () => {
   it("посторонний не видит заказ", () => {
     const { db, mark, order } = stage();
     expect(orderView(db, order, mark, now)).toBeNull();
+  });
+
+  it("место архивировано — заказ всё равно видит меню, и тап по блюду работает", () => {
+    const { db, igor, order, place, shawarma } = stage();
+    archivePlace(db, place.id);
+    expect(orderView(db, order, igor, now)!.menu.map((m) => m.name)).toEqual(["Шаурма", "Чай"]);
+    expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: true });
+  });
+});
+
+describe("listOrdersFor", () => {
+  it("адресат и создатель-не-адресат видят заказ, посторонний — нет", () => {
+    const { db, anya, igor, mark, order } = stage();
+    expect(listOrdersFor(db, igor, now).map((v) => v.id)).toContain(order.id);
+    const creatorOnly = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null, recipientIds: [igor.id] });
+    expect(listOrdersFor(db, anya, now).map((v) => v.id)).toContain(creatorOnly.id);
+    expect(listOrdersFor(db, mark, now)).toEqual([]);
   });
 });
