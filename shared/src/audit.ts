@@ -54,6 +54,7 @@ export const AUDIT_TYPES = [
   "poll_created", "poll_closed", "poll_cancelled",
   "food_place_changed",
   "order_created", "order_closed", "order_cancelled",
+  "order_payment_marked", "order_reminded",
   "checklist_completed", "checklist_doc_changed", "checklist_changed",
   "bug_report_created", "bug_report_resolved",
 ] as const;
@@ -658,6 +659,12 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   order_created: (p) => ({ icon: "🍱", title: "Запущен заказ еды", lines: [str(p.placeName) ?? "без меню", `адресатов: ${num(p.recipients) ?? 0}`] }),
   order_closed: (p) => ({ icon: "🍱", title: "Приём заказа закрыт", lines: [str(p.placeName) ?? "без меню", `итого: ${num(p.total) ?? 0} ₽`] }),
   order_cancelled: (p) => ({ icon: "🍱", title: "Заказ еды отменён", lines: [str(p.placeName) ?? "без меню"] }),
+  order_payment_marked: (p) => ({
+    icon: "💸",
+    title: p.paid === true ? "Отмечено: сдал(а) за заказ еды" : "Снята отметка о сдаче за заказ еды",
+    lines: [str(p.payerName) ?? "—"],
+  }),
+  order_reminded: (p) => ({ icon: "⏰", title: "Напоминание о деньгах за заказ еды", lines: [`дошло: ${num(p.delivered) ?? 0}`] }),
 
   // Одна строка на пройденный чек-лист, а не на каждый тап: интересен факт
   // «прошёл», а по строке на пункт журнал утопило бы на день вперёд.

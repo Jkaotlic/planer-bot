@@ -1,11 +1,12 @@
 import { and, desc, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
-import { FOOD_QTY_MAX, closesLabel, debtOf, dishSummary, isOpenAt, orderTotal } from "@planer/shared";
+import { FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal, type PaymentRow } from "@planer/shared";
 import type { Db } from "../db/client";
 import {
   employees, foodOrderDeclines, foodOrderItems, foodOrderRecipients, foodOrders, foodPlaces,
   type FoodOrder, type FoodOrderItem,
 } from "../db/schema";
 import { canManage, type Result, type TeamClock } from "../polls/poll-service";
+import { orderPayments } from "./order-payment-service";
 import { activeMenuItem, menuForOrder } from "./place-service";
 
 type Viewer = { id: number; isAdmin: boolean };
@@ -201,6 +202,12 @@ export interface OrderView {
   dishes: { name: string; price: number; qty: number }[];
   total: number;
   people: { employeeId: number; displayName: string; amount: number; declined: boolean }[] | null;
+  payment: {
+    myPaid: boolean;
+    paidCount: number;
+    total: number;
+    rows: (PaymentRow & { amount: number })[] | null;
+  };
 }
 
 /**
@@ -246,6 +253,16 @@ export function orderView(db: Db, order: FoodOrder, viewer: Viewer, now: TeamClo
     people: manage
       ? recipients.map((r) => ({ employeeId: r.employeeId, displayName: r.displayName, amount: debtOf(items, r.employeeId), declined: declines.has(r.employeeId) }))
       : null,
+    payment: (() => {
+      const progress = orderPayments(db, order);
+      const amounts = new Map(debtors(items, order.createdBy).map((d) => [d.employeeId, d.amount]));
+      return {
+        myPaid: progress.rows.some((r) => r.employeeId === viewer.id && r.paid),
+        paidCount: progress.paidCount,
+        total: progress.total,
+        rows: manage ? progress.rows.map((r) => ({ ...r, amount: amounts.get(r.employeeId) ?? 0 })) : null,
+      };
+    })(),
   };
 }
 

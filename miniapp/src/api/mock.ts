@@ -86,6 +86,7 @@ import {
   pollTally,
   placeInputSchema,
   debtOf,
+  debtors,
   dishSummary,
   orderTotal,
   orderItemInputSchema,
@@ -2158,6 +2159,28 @@ const ORDERS: MockOrder[] = [];
 let nextOrderId = 1;
 let nextOrderItemId = 1;
 
+/**
+ * Отметки «сдал» за заказ еды: ключ `${orderId}:${employeeId}` → чья рука
+ * поставила. Тот же приём, что `PAYMENTS` у сборов чуть выше, и тот же счёт
+ * через `paymentProgress`, что и на сервере, — мок не считает по-своему.
+ */
+const ORDER_PAYMENTS = new Map<string, number>();
+
+/** Должники заказа — те же правила, что серверный `debtorRows`. */
+function orderDebtorRows(o: MockOrder) {
+  return debtors(o.items, o.createdBy).map((d) => {
+    const emp = EMPLOYEES.find((e) => e.id === d.employeeId);
+    return { employeeId: d.employeeId, displayName: emp?.displayName ?? "—", telegramUserId: emp?.telegramUserId ?? null, amount: d.amount };
+  });
+}
+
+function orderPaymentProgress(o: MockOrder) {
+  const marks = [...ORDER_PAYMENTS.entries()]
+    .filter(([key]) => key.startsWith(`${o.id}:`))
+    .map(([key, markedBy]) => ({ employeeId: Number(key.split(":")[1]), markedBy }));
+  return paymentProgress(orderDebtorRows(o), marks);
+}
+
 function orderViewOf(o: MockOrder): OrderView {
   const now = mockNow();
   const place = o.placeId == null ? null : (PLACES.find((p) => p.id === o.placeId) ?? null);
@@ -2194,6 +2217,16 @@ function orderViewOf(o: MockOrder): OrderView {
     people: manage
       ? o.recipients.map((id) => ({ employeeId: id, displayName: personName(id), amount: debtOf(o.items, id), declined: o.declines.has(id) }))
       : null,
+    payment: (() => {
+      const progress = orderPaymentProgress(o);
+      const amounts = new Map(debtors(o.items, o.createdBy).map((d) => [d.employeeId, d.amount]));
+      return {
+        myPaid: progress.rows.some((r) => r.employeeId === MOCK_ME.id && r.paid),
+        paidCount: progress.paidCount,
+        total: progress.total,
+        rows: manage ? progress.rows.map((r) => ({ ...r, amount: amounts.get(r.employeeId) ?? 0 })) : null,
+      };
+    })(),
   };
 }
 
@@ -2349,6 +2382,55 @@ export async function mockCancelOrder(id: number): Promise<OrderView> {
   if (o.closedAt != null || o.cancelledAt != null) throw new Error("Приём уже закрыт.");
   o.cancelledAt = new Date().toISOString();
   return orderViewOf(o);
+}
+
+/**
+ * Отметка «сдал» за заказ еды — те же отказы и тот же текст, что у серверного
+ * `setOrderPaid`. Мок играет только за MOCK_ME, поэтому «виновник» отметки —
+ * всегда он: своя галочка ставит его же рукой, чужая — рукой управляющего.
+ */
+function markOrderPaid(o: MockOrder, employeeId: number, paid: boolean): void {
+  if (o.cancelledAt != null) throw new Error("Заказ отменён — сдавать нечего.");
+  if (o.closedAt == null) throw new Error("Сдавать рано: приём ещё идёт.");
+  if (!orderDebtorRows(o).some((d) => d.employeeId === employeeId)) throw new Error("Этот человек ничего не должен.");
+  const manage = o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin;
+  const key = `${o.id}:${employeeId}`;
+  if (paid) {
+    if (employeeId !== MOCK_ME.id && !manage) throw new Error("Отметить за другого может только тот, кто собирает заказ.");
+    if (!ORDER_PAYMENTS.has(key)) ORDER_PAYMENTS.set(key, MOCK_ME.id);
+    return;
+  }
+  const markedBy = ORDER_PAYMENTS.get(key);
+  if (markedBy == null) return;
+  if (markedBy !== MOCK_ME.id && !manage) throw new Error("Снять отметку может тот, кто её поставил.");
+  ORDER_PAYMENTS.delete(key);
+}
+
+export async function mockSetOrderPaid(id: number, paid: boolean): Promise<OrderView> {
+  await delay(200);
+  const o = orderOrThrow(id);
+  markOrderPaid(o, MOCK_ME.id, paid);
+  return orderViewOf(o);
+}
+
+export async function mockSetOrderPaymentFor(id: number, employeeId: number, paid: boolean): Promise<OrderView> {
+  await delay(200);
+  const o = orderOrThrow(id);
+  markOrderPaid(o, employeeId, paid);
+  return orderViewOf(o);
+}
+
+/** Дожим — тот же порядок отказов, что у HTTP-ручки: права, потом «закрыт ли». */
+export async function mockRemindOrderUnpaid(id: number): Promise<{ delivered: number }> {
+  await delay(300);
+  const o = orderOrThrow(id);
+  if (!(o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin)) throw new Error("Напомнить может только тот, кто собирает заказ.");
+  if (o.closedAt == null) throw new Error("Сначала закрой приём.");
+  const paid = new Set(
+    [...ORDER_PAYMENTS.keys()].filter((key) => key.startsWith(`${o.id}:`)).map((key) => Number(key.split(":")[1])),
+  );
+  const delivered = orderDebtorRows(o).filter((d) => !paid.has(d.employeeId) && d.telegramUserId != null).length;
+  return { delivered };
 }
 
 // --- Багрепорты ---------------------------------------------------------

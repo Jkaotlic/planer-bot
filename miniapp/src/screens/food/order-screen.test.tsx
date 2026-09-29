@@ -37,6 +37,7 @@ const BASE: OrderView = {
   open: true, closed: false, cancelled: false, isCreator: false, canManage: false,
   myItems: [], myTotal: 0, declined: false, recipientCount: 3, respondedCount: 1,
   dishes: [], total: 0, people: null,
+  payment: { myPaid: false, paidCount: 0, total: 0, rows: null },
 };
 
 describe("OrderScreen — участник", () => {
@@ -87,6 +88,29 @@ describe("OrderScreen — запускающий", () => {
     expect(el.textContent).toContain(`Игорь — ${formatMoney(350)}`);
     expect(el.textContent).toContain("Марк — не будет");
     expect(byText(el, "Закрыть приём")).toBeTruthy();
+  });
+});
+
+describe("OrderScreen — деньги", () => {
+  it("участник после закрытия жмёт «Я сдал»", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1 }], myTotal: 350, payment: { myPaid: false, paidCount: 0, total: 1, rows: null } });
+    const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...BASE, open: false, closed: true, payment: { myPaid: true, paidCount: 1, total: 1, rows: null } });
+    const el = await mountScreen(7);
+    await act(async () => byText(el, "💸 Я сдал").click());
+    await settle();
+    expect(paid).toHaveBeenCalledWith(7, true);
+  });
+
+  it("запускающий отмечает наличку за Игоря", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({
+      ...BASE, open: false, closed: true, isCreator: true, canManage: true, people: [],
+      payment: { myPaid: false, paidCount: 0, total: 1, rows: [{ employeeId: 2, displayName: "Игорь", paid: false, markedByAdmin: false, amount: 350 }] },
+    });
+    const mark = vi.spyOn(apiClient, "setOrderPaymentFor").mockResolvedValue(BASE);
+    const el = await mountScreen(7);
+    expect(el.textContent).toContain("Кто сдал · 0 из 1");
+    await act(async () => el.querySelector<HTMLInputElement>("input[type=checkbox]")!.click());
+    expect(mark).toHaveBeenCalledWith(7, 2, true);
   });
 });
 

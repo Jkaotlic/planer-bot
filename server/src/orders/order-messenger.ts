@@ -9,6 +9,7 @@ import { safeErrorMessage } from "../util/safe-error";
 import type { TeamClock } from "../polls/poll-service";
 import { menuForOrder } from "./place-service";
 import { hasDeclined, itemsOf, orderRecipientRows, setOrderMessageId } from "./order-service";
+import { unpaidDebtors } from "./order-payment-service";
 
 /**
  * Кнопки заказа. Одна функция на рассылку и на правку после тапа — строки
@@ -71,6 +72,29 @@ export function orderMenu(db: Db, order: FoodOrder) {
   return order.placeId == null ? [] : menuForOrder(db, order.placeId);
 }
 
+/** Одна строка колбэка на рассылку, дожим и правку после тапа — как `collectionPaidKeyboard`. */
+export function payKeyboard(orderId: number): InlineKeyboard {
+  return new InlineKeyboard().text("💸 Я сдал", `order:paid:${orderId}`);
+}
+export function payDoneKeyboard(orderId: number): InlineKeyboard {
+  return new InlineKeyboard().text("✓ Ты отметился", `order:paid:${orderId}`);
+}
+export function remindKeyboard(orderId: number): InlineKeyboard {
+  return new InlineKeyboard().text("⏰ Напомнить не сдавшим", `order:remind:${orderId}`);
+}
+
+/** Дожим — только не сдавшим и только по кнопке: за 300 рублей бот сам людей не долбит. */
+export async function remindUnpaid(bot: Bot, db: Db, order: FoodOrder): Promise<number> {
+  const creator = orderRecipientRows(db, order.id).find((r) => r.employeeId === order.createdBy)?.displayName ?? "Коллега";
+  let delivered = 0;
+  for (const d of unpaidDebtors(db, order)) {
+    if (d.telegramUserId == null) continue;
+    const text = `⏰ Напоминаю: за заказ еды сдай ${formatMoney(d.amount)} — ${creator}.${order.payHint ? `\nКуда: ${order.payHint}` : ""}`;
+    if (await notifyUser(bot, d.telegramUserId, text, payKeyboard(order.id))) delivered += 1;
+  }
+  return delivered;
+}
+
 export async function sendOrderInvites(bot: Bot, db: Db, order: FoodOrder, now: TeamClock, publicUrl: string): Promise<number> {
   const menu = orderMenu(db, order);
   let delivered = 0;
@@ -85,14 +109,12 @@ export async function sendOrderInvites(bot: Bot, db: Db, order: FoodOrder, now: 
 }
 
 /**
- * Итог заказа. Запускающему — что заказать и кто сколько; каждому, кто должен,
- * — сколько и кому. Отказавшимся и самому запускающему «сдай» не уходит: долга
- * у них нет. Клавиатуры «Я сдал» / «Напомнить» подставляет Task 15 через
- * `payKeyboard` / `remindKeyboard` — до неё письма уходят без кнопок.
+ * Итог заказа. Запускающему — что заказать и кто сколько плюс «Напомнить не
+ * сдавшим»; каждому, кто должен, — сколько, кому и «Я сдал». Отказавшимся и
+ * самому запускающему «сдай» не уходит: долга у них нет.
  */
 export async function finishOrderMessages(
   bot: Bot, db: Db, order: FoodOrder, reason: "closed" | "cancelled", _publicUrl: string,
-  keyboards: { pay?: (orderId: number) => InlineKeyboard; remind?: (orderId: number) => InlineKeyboard } = {},
 ): Promise<void> {
   const { rows, byId } = names(db, order);
   for (const r of rows) {
@@ -111,11 +133,11 @@ export async function finishOrderMessages(
   const items = itemsOf(db, order.id);
   const creator = rows.find((r) => r.employeeId === order.createdBy);
   if (creator?.telegramUserId != null) {
-    await notifyUser(bot, creator.telegramUserId, organizerSummaryText({ placeName: place, items, names: byId }), keyboards.remind?.(order.id));
+    await notifyUser(bot, creator.telegramUserId, organizerSummaryText({ placeName: place, items, names: byId }), remindKeyboard(order.id));
   }
   for (const d of debtors(items, order.createdBy)) {
     const tg = rows.find((r) => r.employeeId === d.employeeId)?.telegramUserId;
     if (tg == null) continue;
-    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", placeName: place, amount: d.amount, payHint: order.payHint }), keyboards.pay?.(order.id));
+    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", placeName: place, amount: d.amount, payHint: order.payHint }), payKeyboard(order.id));
   }
 }

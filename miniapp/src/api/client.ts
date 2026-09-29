@@ -137,6 +137,9 @@ import {
   mockDeclineOrder,
   mockCloseOrder,
   mockCancelOrder,
+  mockSetOrderPaid,
+  mockSetOrderPaymentFor,
+  mockRemindOrderUnpaid,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -610,6 +613,9 @@ export interface OrderView {
   dishes: { name: string; price: number; qty: number }[];
   total: number;
   people: { employeeId: number; displayName: string; amount: number; declined: boolean }[] | null;
+  /** Кто уже сдал деньги за заказ. `rows` — только запускающему/админу, как
+   *  и `people` выше: сумма и отметка коллеги — не общее знание. */
+  payment: { myPaid: boolean; paidCount: number; total: number; rows: (PaymentRow & { amount: number })[] | null };
 }
 
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
@@ -1050,6 +1056,12 @@ export interface ApiClient {
   closeOrder(id: number): Promise<OrderView>;
   /** Отменяет заказ без «сдай» — запускающему передумалось. */
   cancelOrder(id: number): Promise<OrderView>;
+  /** Своя отметка «Я сдал» — только для того, кто должен. */
+  setOrderPaid(id: number, paid: boolean): Promise<OrderView>;
+  /** Галочка за другого: наличка в руки, ставит только запускающий/админ. */
+  setOrderPaymentFor(id: number, employeeId: number, paid: boolean): Promise<OrderView>;
+  /** Дожим по неотметившимся — письмо уходит только должникам. */
+  remindOrderUnpaid(id: number): Promise<{ delivered: number }>;
 
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
@@ -1822,6 +1834,15 @@ export const realClient: ApiClient = {
   async cancelOrder(id) {
     return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/cancel`, {})).order;
   },
+  async setOrderPaid(id, paid) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/paid`, { paid })).order;
+  },
+  async setOrderPaymentFor(id, employeeId, paid) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/payments/${employeeId}`, { paid })).order;
+  },
+  remindOrderUnpaid(id) {
+    return authorizedPostJson<{ delivered: number }>(`/api/orders/${id}/remind`, {});
+  },
 
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
@@ -1957,6 +1978,9 @@ const devClient: ApiClient = {
   declineOrder: (id) => mockDeclineOrder(id),
   closeOrder: (id) => mockCloseOrder(id),
   cancelOrder: (id) => mockCancelOrder(id),
+  setOrderPaid: (id, paid) => mockSetOrderPaid(id, paid),
+  setOrderPaymentFor: (id, employeeId, paid) => mockSetOrderPaymentFor(id, employeeId, paid),
+  remindOrderUnpaid: (id) => mockRemindOrderUnpaid(id),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

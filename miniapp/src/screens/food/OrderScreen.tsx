@@ -24,6 +24,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
   const [error, setError] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
   const [customPrice, setCustomPrice] = useState("");
+  const [remindResult, setRemindResult] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -47,6 +48,28 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
       // чтобы погашенные кнопки исчезли сами, а не висели активными до
       // следующего открытия экрана. Отказ перечитывания не страшен: старое
       // состояние экрана остаётся, а текст ошибки уже показан.
+      try {
+        const fresh = await apiClient.getOrder(orderId);
+        if (fresh) setOrder(fresh);
+      } catch {
+        /* оставляем прежний `order` — хотя бы кнопки и текст ошибки видны */
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Дожим отдаёт не заказ, а число дошедших — «Кто сдал» перечитывается сама
+   *  по себе позже (тик или открытие экрана заново); здесь только строка
+   *  результата. Отказ и гонка с тиком — тот же приём, что у `run`. */
+  async function runRemind(id: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      const { delivered } = await apiClient.remindOrderUnpaid(id);
+      setRemindResult(`Напомнил: ${delivered}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не получилось");
       try {
         const fresh = await apiClient.getOrder(orderId);
         if (fresh) setOrder(fresh);
@@ -108,6 +131,12 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           {!order.open && !order.cancelled && order.myTotal > 0 && !order.isCreator && (
             <div>Сдать: {formatMoney(order.myTotal)} — {order.creatorName}</div>
           )}
+          {order.closed && !order.isCreator && order.myTotal > 0 && (
+            <Button size="s" mode={order.payment.myPaid ? "gray" : "bezeled"} disabled={busy}
+              onClick={() => run(() => apiClient.setOrderPaid(order.id, !order.payment.myPaid))}>
+              {order.payment.myPaid ? "Ты отметился ✓" : "💸 Я сдал"}
+            </Button>
+          )}
         </CardShell>
 
         {order.open && order.menu.length > 0 && (
@@ -157,6 +186,24 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               <div key={p.employeeId}>{p.displayName} — {p.declined ? "не будет" : p.amount > 0 ? formatMoney(p.amount) : "не ответил(а)"}</div>
             ))}
             <div style={{ fontWeight: 600 }}>Итого: {formatMoney(order.total)}</div>
+          </CardShell>
+        )}
+
+        {order.closed && order.payment.rows && (
+          <CardShell>
+            <div style={{ fontWeight: 600 }}>Кто сдал · {order.payment.paidCount} из {order.payment.total}</div>
+            {order.payment.rows.map((r) => (
+              <label key={r.employeeId} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={r.paid} disabled={busy}
+                  onChange={(e) => run(() => apiClient.setOrderPaymentFor(order.id, r.employeeId, e.target.checked))} />
+                <span style={{ flex: 1 }}>{r.displayName}{r.markedByAdmin ? " · наличкой" : ""}</span>
+                <span>{formatMoney(r.amount)}</span>
+              </label>
+            ))}
+            {order.payment.paidCount < order.payment.total && (
+              <Button size="s" mode="bezeled" disabled={busy} onClick={() => runRemind(order.id)}>⏰ Напомнить не сдавшим</Button>
+            )}
+            {remindResult && <div style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>{remindResult}</div>}
           </CardShell>
         )}
       </CardStack>

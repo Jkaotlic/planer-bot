@@ -33,6 +33,7 @@ const ORDER: OrderView = {
   closesAt: "2026-09-29T12:30", closes: "до 12:30", open: true, closed: false, cancelled: false,
   isCreator: false, canManage: false, myItems: [], myTotal: 0, declined: false,
   recipientCount: 3, respondedCount: 1, dishes: [], total: 0, people: null,
+  payment: { myPaid: false, paidCount: 0, total: 0, rows: null },
 };
 
 describe("FoodScreen", () => {

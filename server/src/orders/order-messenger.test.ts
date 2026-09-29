@@ -57,9 +57,11 @@ describe("рассылка заказа", () => {
     const summary = api.sent.filter((m) => m.chat_id === 100);
     expect(summary).toHaveLength(1);
     expect(summary[0]!.text).toContain("Что заказать:");
+    expect(labels(summary[0]!)).toEqual(["⏰ Напомнить не сдавшим"]);
     const pay = api.sent.filter((m) => m.text.startsWith("💸"));
     expect(pay.map((m) => m.chat_id)).toEqual([101]);
     expect(pay[0]!.text).toContain("Сдай 550 ₽ — Аня");
+    expect(labels(pay[0]!)).toEqual(["💸 Я сдал"]);
   });
 
   it("отмена — всем «Заказ отменён», никаких «сдай»", async () => {

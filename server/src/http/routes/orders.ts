@@ -7,8 +7,10 @@ import {
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
+import { getEmployeeById } from "../../repo/employees";
 import { resolveAudience } from "../../team/audience";
 import { teamNow } from "../../util/team-time";
+import { canManage } from "../../polls/poll-service";
 import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
 import { getPlaceView } from "../../orders/place-service";
@@ -16,7 +18,8 @@ import {
   addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, itemsOf, listOrdersFor,
   orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
-import { finishOrderMessages, placeName, sendOrderInvites } from "../../orders/order-messenger";
+import { setOrderPaid } from "../../orders/order-payment-service";
+import { finishOrderMessages, placeName, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
 
 const optionalText = z.string().trim().max(FOOD_NOTE_MAX).nullable().transform((s) => (s ? s : null));
 const createSchema = z.object({
@@ -117,6 +120,42 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const result = declineOrder(db, v.order, v.viewer.id, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
     return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+  });
+
+  app.post("/api/orders/:id/paid", auth, async (c) => {
+    const v = visible(c);
+    if (!v) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+    const result = setOrderPaid(db, v.order, v.viewer.id, v.viewer, body.paid);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+  });
+
+  /** Галочка за другого: обед часто сдают наличкой в руки. */
+  app.post("/api/orders/:id/payments/:employeeId", auth, async (c) => {
+    const v = visible(c);
+    if (!v) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+    const payerId = Number(c.req.param("employeeId"));
+    const result = setOrderPaid(db, v.order, payerId, v.viewer, body.paid);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    if (payerId !== v.viewer.id) {
+      recordAudit(db, "order_payment_marked", v.viewer.id, { orderId: v.order.id, payerId, payerName: getEmployeeById(db, payerId)?.displayName ?? null, paid: body.paid });
+    }
+    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+  });
+
+  app.post("/api/orders/:id/remind", auth, async (c) => {
+    const v = visible(c);
+    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!canManage(v.order, v.viewer)) return c.json({ error: "Напомнить может только тот, кто собирает заказ." }, 409);
+    if (v.order.closedAt == null) return c.json({ error: "Сначала закрой приём." }, 409);
+    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+    const delivered = await remindUnpaid(bot, db, v.order);
+    recordAudit(db, "order_reminded", v.viewer.id, { orderId: v.order.id, delivered });
+    return c.json({ delivered });
   });
 
   for (const action of ["close", "cancel"] as const) {

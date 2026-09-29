@@ -79,6 +79,9 @@ const MINIAPP_ONLY: Record<string, string> = {
   declineOrder: "заказ еды работника",
   closeOrder: "заказ еды работника",
   cancelOrder: "заказ еды работника",
+  setOrderPaid: "деньги за заказ еды работника",
+  setOrderPaymentFor: "деньги за заказ еды работника",
+  remindOrderUnpaid: "деньги за заказ еды работника",
 };
 
 /** Только в консоли — и почему мини-аппу это не нужно. */

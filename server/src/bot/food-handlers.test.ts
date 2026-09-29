@@ -7,7 +7,8 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
 import { createPlace } from "../orders/place-service";
-import { cancelOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
+import { addMenuItem, cancelOrder, closeOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
+import { orderPayments } from "../orders/order-payment-service";
 import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
@@ -222,5 +223,32 @@ describe("колбэки заказа", () => {
     const text = api.sent.at(-1)!.text;
     expect(text).toContain("🍱 Аня: Шаурмечная");
     expect(text).toContain("🗳 Пицца?");
+  });
+});
+
+describe("деньги заказа в боте", () => {
+  it("«Я сдал» после закрытия ставит отметку и меняет кнопку", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
+    closeOrder(db, order, anya);
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:paid:${order.id}`);
+    expect(orderPayments(db, getOrder(db, order.id)!).paidCount).toBe(1);
+    expect(api.calls.some((c) => c.method === "editMessageReplyMarkup")).toBe(true);
+  });
+
+  it("«Напомнить» от участника — отказ", async () => {
+    const { db, bot, anya, order } = stage();
+    closeOrder(db, order, anya);
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:remind:${order.id}`);
+    expect(api.answers.at(-1)).toMatch(/только тот, кто собирает/);
+  });
+
+  it("«Напомнить» до закрытия приёма — «Сначала закрой приём.»", async () => {
+    const { bot, order } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 111, `order:remind:${order.id}`);
+    expect(api.answers.at(-1)).toBe("Сначала закрой приём.");
   });
 });

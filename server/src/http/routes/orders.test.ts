@@ -158,3 +158,30 @@ describe("заказы по HTTP", () => {
     expect(qty.status).toBe(400);
   });
 });
+
+describe("деньги заказа по HTTP", () => {
+  it("должник отмечается сам; запускающий видит «1 из 1» поимённо; участник — без списка", async () => {
+    const { app, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
+    const mine = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/paid`, send(igorT, { paid: true })))).json();
+    expect(mine.order.payment).toEqual({ myPaid: true, paidCount: 1, total: 1, rows: null });
+    const boss = await (await app.request(new Request(`http://x/api/orders/${body.order.id}`, get(anyaT)))).json();
+    expect(boss.order.payment.rows[0]).toMatchObject({ displayName: "Игорь", paid: true, amount: 280 });
+  });
+
+  it("«Напомнить» уходит только не сдавшим, и только от запускающего", async () => {
+    const { app, sent, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
+    expect((await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(igorT, {})))).status).toBe(409);
+    const res = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).json();
+    expect(res.delivered).toBe(1);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/paid`, send(igorT, { paid: true })));
+    const again = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).json();
+    expect(again.delivered).toBe(0);
+    expect(sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(1);
+  });
+});

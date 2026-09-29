@@ -6,10 +6,11 @@ import type { Employee } from "../db/schema";
 import { teamNow } from "../util/team-time";
 import { safeErrorMessage } from "../util/safe-error";
 import { recordAudit } from "../repo/audit";
-import { castVote, closePoll, getPoll, listPollsFor, pollView } from "../polls/poll-service";
+import { castVote, closePoll, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
 import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
 import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem } from "../orders/order-service";
-import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, placeName } from "../orders/order-messenger";
+import { setOrderPaid } from "../orders/order-payment-service";
+import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, payDoneKeyboard, placeName, remindUnpaid } from "../orders/order-messenger";
 
 export interface FoodHandlerDeps {
   db: Db;
@@ -175,6 +176,36 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
       text: who.me.id === fresh.createdBy ? "Приём закрыт, сводка у тебя в чате" : "Приём закрыт, сводка ушла тому, кто собирал заказ",
     });
     await finishOrderMessages(bot, db, fresh, "closed", config.publicUrl);
+  });
+
+  bot.callbackQuery(/^order:paid:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён" }); return; }
+    // Повторный тап не снимает галочку — как у сборов: снять можно в мини-аппе,
+    // а случайный второй тап по медленной сети не должен стирать «сдал».
+    const result = setOrderPaid(db, order, who.me.id, viewerOf(who.me, ctx.from.id), true);
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    await ctx.answerCallbackQuery({ text: "Отметил ✓" });
+    await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: payDoneKeyboard(order.id) }));
+  });
+
+  bot.callbackQuery(/^order:remind:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён" }); return; }
+    if (!canManage(order, viewerOf(who.me, ctx.from.id))) {
+      await ctx.answerCallbackQuery({ text: "Напомнить может только тот, кто собирает заказ." });
+      return;
+    }
+    // Та же проверка, что и в HTTP-ручке: дожим до закрытия отправил бы «сдай»
+    // раньше письма-сводки — человек ещё не видел, сколько должен.
+    if (order.closedAt == null) { await ctx.answerCallbackQuery({ text: "Сначала закрой приём." }); return; }
+    const delivered = await remindUnpaid(bot, db, order);
+    recordAudit(db, "order_reminded", who.me.id, { orderId: order.id, delivered });
+    await ctx.answerCallbackQuery({ text: delivered === 0 ? "Все уже сдали 🎉" : `Напомнил: ${delivered}` });
   });
 
   return { sendFoodMenu };
