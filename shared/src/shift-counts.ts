@@ -87,6 +87,7 @@ export function tallyShiftCounts(p: {
     ]),
   );
   const seen = new Map<string, ShiftCountsKind>();
+  const counts = new Map<number, Map<string, number>>();
 
   for (const entry of p.entries) {
     // Отсутствие — не работа: отпуск не «вид, которого у него меньше».
@@ -105,13 +106,33 @@ export function tallyShiftCounts(p: {
     } else if (template) {
       kind = { name: template.name, group: groupOf(template.category, true), accent: template.accent };
     } else {
-      kind = { name: entry.title ?? CUSTOM_KIND, group: groupOf(entry.category, false), accent: null };
+      // Вид есть, но упразднён (его нет среди действующих) — это всё равно смена
+      // по виду, а не «своё время»: иначе прошлые «Смены» задним числом худели бы.
+      kind = { name: entry.title ?? CUSTOM_KIND, group: groupOf(entry.category, entry.templateId != null), accent: null };
     }
-    // Первое появление имени решает его группу: одно имя — одна колонка.
-    const known = seen.get(kind.name) ?? kind;
-    seen.set(known.name, known);
-    row.byKind[known.name] = (row.byKind[known.name] ?? 0) + 1;
-    row.byGroup[known.group] += 1;
+    // Ключ — группа и имя вместе: «Своё время» в сменах и в дежурствах — разные
+    // колонки. С ключом по одному имени группу обоим решала бы первая попавшаяся
+    // запись, и дежурство могло пропасть из «Дежурств».
+    const key = `${kind.group}\u0000${kind.name}`;
+    if (!seen.has(key)) seen.set(key, kind);
+    counts.set(row.employeeId, counts.get(row.employeeId) ?? new Map());
+    const own = counts.get(row.employeeId)!;
+    own.set(key, (own.get(key) ?? 0) + 1);
+    row.byGroup[kind.group] += 1;
+  }
+
+  // Имя, встретившееся в двух группах, получает приписку группы — только тогда:
+  // у обычной колонки название остаётся тем, что админ видит в графике.
+  const groupsByName = new Map<string, number>();
+  for (const k of seen.values()) groupsByName.set(k.name, (groupsByName.get(k.name) ?? 0) + 1);
+  for (const [key, k] of seen) {
+    if ((groupsByName.get(k.name) ?? 0) > 1) {
+      seen.set(key, { ...k, name: `${k.name} (${SHIFT_COUNTS_GROUP_TITLES[k.group].toLowerCase()})` });
+    }
+  }
+  for (const [employeeId, own] of counts) {
+    const row = rows.get(employeeId)!;
+    for (const [key, n] of own) row.byKind[seen.get(key)!.name] = n;
   }
 
   // Внутри группы — пресеты в том порядке, что админ видит везде, потом

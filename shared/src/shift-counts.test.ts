@@ -77,6 +77,25 @@ describe("tallyShiftCounts", () => {
     expect(r.kinds.map((k) => k.name)).toEqual(["Ночь", "Дежурство · Поклонка"]);
   });
 
+  it("одно имя в двух группах — две колонки, и дежурство не теряется, в каком порядке ни шли бы записи", () => {
+    for (const entries of [
+      [e(10, null), e(11, null, { category: "duty" })],
+      [e(11, null, { category: "duty" }), e(10, null)],
+    ]) {
+      const r = tally(entries);
+      expect(r.rows.find((x) => x.employeeId === 11)!.byGroup).toEqual({ shift: 0, duty: 1, other: 0 });
+      expect(r.rows.find((x) => x.employeeId === 10)!.byGroup).toEqual({ shift: 0, duty: 0, other: 1 });
+      expect(new Set(r.kinds.map((k) => k.name)).size).toBe(2);
+    }
+  });
+
+  it("смена упразднённого вида — всё ещё «Смены», а не «Прочее»", () => {
+    // listActiveTemplates не отдаёт упразднённые виды, а записи на них остаются в
+    // прошлых периодах: без этого правила итог «Смен» задним числом проседал бы.
+    const r = tally([e(10, 99, { title: "Вечер" })]);
+    expect(r.kinds).toEqual([{ name: "Вечер", group: "shift", accent: null }]);
+  });
+
   it("чужой (не в списке людей) и запись без человека не считаются", () => {
     const r = tally([e(99, 2), e(null, 2)]);
     expect(r.kinds).toEqual([]);
