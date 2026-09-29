@@ -7,12 +7,23 @@ import type { FoodRoute } from "./food-route";
 import { PollCard } from "./PollCard";
 import { PollForm } from "./PollForm";
 
+/** Пока не готово (Задачи 8 и 14): заказы и список мест. Ссылка на них из
+ *  бота уже существует («🍱 Новый заказ»), а экрана — ещё нет; без этой
+ *  проверки кнопка открывала оверлей, вечно висящий на «Загружаю…» —
+ *  `useEffect` ниже выходит рано для всего, что не «list». */
+function isNotYetReady(route: FoodRoute): boolean {
+  return route.view === "new-order" || route.view === "order" || route.view === "places";
+}
+
 /**
  * Экран «Заказы и опросы» — оверлей поверх вкладок, а не новая вкладка: в
  * таб-баре уже семь мест, а сюда приходят из бота по ссылке с `?screen=orders`.
  */
 export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose(): void }) {
-  const [route, setRoute] = useState<FoodRoute>(initial);
+  // Замер один раз, от НАЧАЛЬНОГО маршрута: переход «Новый опрос» → «Назад»
+  // не должен внезапно показать подсказку про заказы, которых человек не просил.
+  const [notYetReadyHint] = useState(() => isNotYetReady(initial));
+  const [route, setRoute] = useState<FoodRoute>(isNotYetReady(initial) ? { view: "list" } : initial);
   const [polls, setPolls] = useState<PollView[] | null | "error">(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -36,6 +47,11 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
       <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
         <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "new-poll" })}>🗳 Новый опрос</Button>
       </div>
+      {notYetReadyHint && (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, paddingBottom: 8 }}>
+          Заказы еды появятся в следующем обновлении.
+        </div>
+      )}
       {polls === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}
       {polls === "error" && (
         <div>Не удалось загрузить. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>

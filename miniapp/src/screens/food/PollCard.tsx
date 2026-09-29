@@ -16,9 +16,22 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
   async function run(action: () => Promise<PollView>) {
     setBusy(true);
     setError(null);
-    try { setPoll(await action()); }
-    catch (err) { setError(err instanceof Error ? err.message : "Не получилось"); }
-    finally { setBusy(false); }
+    try {
+      setPoll(await action());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не получилось";
+      setError(message);
+      // Гонка тика и ручного действия (Review Focus №1): сервер уже закрыл
+      // опрос между рендером карточки и тапом — «Опрос закрыт.» ловит именно
+      // эту причину отказа голоса. Без этого кнопки голосования оставались бы
+      // на карточке до следующей полной перезагрузки списка, и человек мог
+      // бы тыкать в них ещё раз с тем же отказом. Простейший верный вариант:
+      // погасить `open` локально по тексту отказа, а не тащить в `FoodScreen`
+      // колбэк перезагрузки списка ради одной строки.
+      if (message === "Опрос закрыт.") setPoll((prev) => ({ ...prev, open: false }));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const status = poll.cancelled ? "отменён" : poll.open ? (poll.closes ?? "идёт") : "закрыт";

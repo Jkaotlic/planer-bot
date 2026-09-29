@@ -28,6 +28,8 @@ import {
   mockSendAnnouncement,
   mockGetBugReports,
   mockResolveBugReport,
+  mockGetTeamAudience,
+  mockCreatePoll,
   MOCK_ME,
 } from "./mock";
 
@@ -509,5 +511,39 @@ describe("мок отметок о сдаче", () => {
 
     const remind = await mockRemindUnpaid(round.id);
     expect(remind.intended).toBe(waiting - 1);
+  });
+});
+
+describe("опросы: dev-мок", () => {
+  // «На смене» у кандидата и «кого позовёт „на смене“» должны считаться одной
+  // функцией (`mockOnShift`) — иначе форма показывает «уйдёт Марку», а создание
+  // опроса зовёт кого-то другого. Марк (id 3, нечётный) — на смене по обеим.
+  it("«на смене» у кандидата и в адресатах опроса — одно и то же правило", async () => {
+    const candidates = await mockGetTeamAudience();
+    const igor = candidates.find((c) => c.displayName === "Игорь Петров")!;
+    const mark = candidates.find((c) => c.displayName === "Марк Волков")!;
+    expect(igor.onShift).toBe(false); // id 2, чётный
+    expect(mark.onShift).toBe(true); // id 3, нечётный
+
+    const { poll } = await mockCreatePoll({ question: "Обед?", closesTime: null, audience: { kind: "on_shift" } });
+    // Нечётные id: создатель Аня (1, сама на смене или нет — неважно, она
+    // всегда в списке), Марк (3), Олег (5), Нина (7). Игорь (2) и Даша (4) —
+    // чётные, не на смене, в список не попали.
+    expect(poll.recipientCount).toBe(4);
+  });
+
+  it("«дошло» считает только тех, у кого есть Telegram — Марк без него не входит в delivered", async () => {
+    const { delivered, unreachable } = await mockCreatePoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    // Команда: id 1,2,3,4,5,7 (6 — архивный, исключён). Без Telegram — только Марк.
+    expect(unreachable).toEqual(["Марк Волков"]);
+    expect(delivered).toBe(5);
+  });
+
+  it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
+    const past = new Date(Date.now() - 5 * 60_000);
+    const pastTime = past.toTimeString().slice(0, 5);
+    await expect(
+      mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } }),
+    ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
   });
 });

@@ -8,10 +8,17 @@ import { AudiencePicker } from "./AudiencePicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// Пять карточек — специально бьют оба фильтра порознь: Марк не на смене (ловит
+// пропавший `onShift`-фильтр), Лена — наблюдатель на смене (ловит пропавший
+// фильтр роли), Вера — админ на смене (админы, в отличие от наблюдателей, в
+// «на смене»/«все» ВХОДЯТ — без неё регресс «выкинули и админов» остался бы
+// незамеченным), Дима — на смене, но без Telegram (строка «Не дойдёт»).
 const TEAM: AudienceCandidate[] = [
   { id: 1, displayName: "Игорь", reachable: true, role: "worker", onShift: true },
   { id: 2, displayName: "Марк", reachable: true, role: "worker", onShift: false },
-  { id: 3, displayName: "Лена", reachable: false, role: "observer", onShift: true },
+  { id: 3, displayName: "Лена", reachable: true, role: "observer", onShift: true },
+  { id: 4, displayName: "Вера", reachable: true, role: "admin", onShift: true },
+  { id: 5, displayName: "Дима", reachable: false, role: "worker", onShift: true },
 ];
 
 let root: Root | null = null;
@@ -50,16 +57,24 @@ async function mount() {
 }
 
 describe("AudiencePicker", () => {
-  it("по умолчанию «Сегодня на смене» и показывает, кто это, — без наблюдателя", async () => {
+  it("по умолчанию «На смене»: считает только тех, кто сегодня работает, наблюдателя исключает, админа — нет", async () => {
     const el = await mount();
-    expect(el.textContent).toContain("Уйдёт: Игорь");
+    // Точная строка, а не «contains»: «contains» не поймал бы ни пропавший
+    // `onShift`-фильтр (Марк тогда попал бы в список), ни пропавший
+    // фильтр роли (Лена), ни лишний фильтр по роли админа (Вера бы исчезла).
+    expect(el.textContent).toContain("Уйдёт: Игорь, Вера и тебе");
+    expect(el.textContent).not.toContain("Марк");
     expect(el.textContent).not.toContain("Лена");
+    expect(el.textContent).toContain("Не дойдёт: Дима — не привязан(а) к боту");
   });
 
-  it("«Вся команда» отдаёт kind team", async () => {
+  it("«Все» отдаёт kind team, наблюдателя исключает, работника не на смене и админа — нет", async () => {
     const el = await mount();
-    await act(async () => byText(el, "Вся команда").click());
+    await act(async () => byText(el, "Все").click());
     expect(last).toEqual({ kind: "team" });
+    expect(el.textContent).toContain("Уйдёт: Игорь, Марк, Вера и тебе");
+    expect(el.textContent).not.toContain("Лена");
+    expect(el.textContent).toContain("Не дойдёт: Дима — не привязан(а) к боту");
   });
 
   it("«Выбрать» даёт галочки, и отмеченные уходят списком id; без Telegram помечен", async () => {

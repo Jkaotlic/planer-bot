@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { SegmentedControl } from "@telegram-apps/telegram-ui";
+import { Button } from "@telegram-apps/telegram-ui";
 import { filterPeople } from "@planer/shared";
 import { apiClient, type AudienceCandidate, type TeamAudience } from "../api/client";
 import { PersonSearch } from "./PersonSearch";
@@ -39,8 +39,7 @@ export function AudiencePicker({ value, onChange, disabled }: {
     if (!people) return [];
     if (value.kind === "team") return people.filter((p) => p.role !== "observer");
     if (value.kind === "on_shift") return people.filter((p) => p.onShift && p.role !== "observer");
-    return people.filter((p) => picked.has(p.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return people.filter((p) => value.kind === "picked" && value.employeeIds.includes(p.id));
   }, [people, value]);
 
   function setMode(mode: Mode) {
@@ -58,13 +57,21 @@ export function AudiencePicker({ value, onChange, disabled }: {
   if (!people) return <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>Загружаю команду…</div>;
 
   const reachable = preview.filter((p) => p.reachable).map((p) => p.displayName);
+  // Отдельной строкой, а не молча: запускающий иначе узнаёт про недошедших
+  // только из отчёта после отправки — а решить «позвать по-другому» до
+  // отправки может только здесь.
+  const unreachable = preview.filter((p) => !p.reachable).map((p) => p.displayName);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <SegmentedControl>
-        <SegmentedControl.Item selected={value.kind === "on_shift"} onClick={() => !disabled && setMode("on_shift")}>Сегодня на смене</SegmentedControl.Item>
-        <SegmentedControl.Item selected={value.kind === "team"} onClick={() => !disabled && setMode("team")}>Вся команда</SegmentedControl.Item>
-        <SegmentedControl.Item selected={value.kind === "picked"} onClick={() => !disabled && setMode("picked")}>Выбрать</SegmentedControl.Item>
-      </SegmentedControl>
+      {/* Ряд кнопок, а не `SegmentedControl`: тот делит ширину на три равные
+          части и режет «На смене» троеточием уже на 360px (замер 2026-09-29,
+          110 > 108) — тот же изъян, что увёл подборки анонса в свой ряд
+          (`AdminAnnounce.tsx:186-187`). Кнопка по содержимому не режется. */}
+      <div style={{ display: "flex", gap: 6 }}>
+        <Button size="s" mode={value.kind === "on_shift" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("on_shift")}>На смене</Button>
+        <Button size="s" mode={value.kind === "team" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("team")}>Все</Button>
+        <Button size="s" mode={value.kind === "picked" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("picked")}>Выбрать</Button>
+      </div>
       {value.kind === "picked" && (
         <div>
           <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />
@@ -80,6 +87,11 @@ export function AudiencePicker({ value, onChange, disabled }: {
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
         {reachable.length === 0 ? "Пока никого, кроме тебя." : `Уйдёт: ${reachable.join(", ")} и тебе`}
       </div>
+      {unreachable.length > 0 && (
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 12.5 }}>
+          Не дойдёт: {unreachable.join(", ")} — не привязан(а) к боту
+        </div>
+      )}
     </div>
   );
 }

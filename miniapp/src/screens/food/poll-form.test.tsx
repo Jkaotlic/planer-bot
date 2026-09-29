@@ -56,4 +56,19 @@ describe("PollForm", () => {
     expect(el.textContent).toContain("Некому отправить");
     expect(onDone).not.toHaveBeenCalled();
   });
+
+  // Недостижимые есть — `onDone` не срабатывает сам собой: запускающий должен
+  // прочитать, кто не получит опрос, а не потерять эту строку в закрывшемся
+  // экране. `onDone` откладывается до явного «ОК».
+  it("недостижимые в ответе — отчёт «Отправлено/Не дошло» и onDone только по «ОК»", async () => {
+    vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: {} as never, delivered: 2, unreachable: ["Марк"] });
+    const { el, onDone } = await mount();
+    await act(async () => type(el.querySelector("textarea")!, "Корпоратив в пятницу?"));
+    await act(async () => byText(el, "Отправить").click());
+    await settle();
+    expect(el.textContent).toContain("Отправлено: 2. Не дошло: Марк");
+    expect(onDone).not.toHaveBeenCalled();
+    await act(async () => byText(el, "ОК").click());
+    expect(onDone).toHaveBeenCalled();
+  });
 });

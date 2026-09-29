@@ -79,6 +79,7 @@ import {
   tallyShiftCounts,
   closesAtFromTime,
   closesLabel,
+  isFutureClose,
   isOpenAt,
   pollTally,
   type PollChoice,
@@ -1915,6 +1916,18 @@ function mockNow(): { date: string; time: string } {
   return { date: d.toISOString().slice(0, 10), time: d.toTimeString().slice(0, 5) };
 }
 
+/**
+ * Детерминированная по id «занятость на сегодня» — DEV-мок живёт без графика,
+ * выдумывать его нечем. Одна функция на обе ручки (`mockGetTeamAudience` и
+ * `mockCreatePoll`): раньше «на смене» в списке кандидатов считалось по
+ * индексу отфильтрованного массива (`i % 2`), а в заказе опроса — вообще
+ * никак («на смене» слало всем активным) — форма и подсказка под ней
+ * молчаливо расходились в том, кому реально уйдёт опрос.
+ */
+function mockOnShift(employeeId: number): boolean {
+  return employeeId % 2 === 1;
+}
+
 function pollViewOf(p: MockPoll): PollView {
   const now = mockNow();
   const people = p.recipients.map((id) => ({ employeeId: id, displayName: EMPLOYEES.find((e) => e.id === id)?.displayName ?? "—" }));
@@ -1939,14 +1952,12 @@ function pollViewOf(p: MockPoll): PollView {
  *  (`audienceCandidates`): себя выбирать незачем, он в рассылке всегда. */
 export async function mockGetTeamAudience(): Promise<AudienceCandidate[]> {
   await delay(150);
-  return EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id).map((e, i) => ({
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id).map((e) => ({
     id: e.id,
     displayName: e.displayName,
     reachable: e.telegramUserId != null,
     role: announcementRole(e),
-    // Дев-мок без графика — не пришлось бы отдельно заводить занятость на
-    // сегодня, каждый второй в ростере «на смене» ради разнообразия карточки.
-    onShift: i % 2 === 0,
+    onShift: mockOnShift(e.id),
   }));
 }
 
@@ -1955,22 +1966,52 @@ export async function mockGetPolls(): Promise<PollView[]> {
   return [...POLLS].reverse().map(pollViewOf);
 }
 
+/**
+ * Кого мок реально позовёт — те же правила, что серверный `resolveAudience`:
+ * «команда» и «на смене» не берут наблюдателя, «на смене» вдобавок фильтрует
+ * по `mockOnShift`. Раньше «на смене» в DEV слало вообще всем активным —
+ * форма спрашивала одно, а получал бы другое.
+ */
+function mockAudienceIds(audience: TeamAudience): number[] {
+  if (audience.kind === "picked") return audience.employeeIds;
+  const active = EMPLOYEES.filter((e) => e.isActive && !e.isObserver);
+  if (audience.kind === "team") return active.map((e) => e.id);
+  return active.filter((e) => mockOnShift(e.id)).map((e) => e.id);
+}
+
 export async function mockCreatePoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }> {
   await delay(200);
   if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
-  const ids = input.audience.kind === "picked" ? input.audience.employeeIds : EMPLOYEES.filter((e) => e.isActive).map((e) => e.id);
+  const now = mockNow();
+  const closesAt = closesAtFromTime(input.closesTime, now.date);
+  // Тот же отказ и тот же текст, что у ручки `POST /api/polls` на сервере —
+  // иначе DEV показал бы опрос, у которого приём голосов кончился в момент
+  // рождения, и кнопки на карточке были бы погашены с первого рендера.
+  if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+
+  const ids = mockAudienceIds(input.audience);
+  const recipients = [...new Set([MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)])];
   const poll: MockPoll = {
     id: nextPollId++,
     question: input.question.trim(),
     createdBy: MOCK_ME.id,
-    closesAt: closesAtFromTime(input.closesTime, mockNow().date),
+    closesAt,
     closedAt: null,
     cancelledAt: null,
-    recipients: [MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)],
+    recipients,
     votes: new Map<number, PollChoice>(),
   };
   POLLS.push(poll);
-  return { poll: pollViewOf(poll), delivered: poll.recipients.length, unreachable: [] };
+  // Как на сервере: «дошло» считает только тех, у кого есть Telegram — а не
+  // всех адресатов. Мок без бота не умеет ронять отдельную отправку, поэтому
+  // «дошло» здесь равно «мог дойти технически» — тот же потолок, что у
+  // `resolveAudience.reachable`.
+  const telegramOf = (id: number) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId;
+  const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+  const unreachable = recipients
+    .filter((id) => telegramOf(id) == null)
+    .map((id) => EMPLOYEES.find((e) => e.id === id)?.displayName ?? "—");
+  return { poll: pollViewOf(poll), delivered, unreachable };
 }
 
 function pollOrThrow(id: number): MockPoll {

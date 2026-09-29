@@ -14,6 +14,11 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
   const [audience, setAudience] = useState<TeamAudience>({ kind: "on_shift" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Отчёт после отправки — кто не получил опрос. `AudiencePicker` уже
+  // показывает недостижимых ДО отправки (та же строка «Не дойдёт»), но
+  // список могло изменить состояние гонки (кого-то как раз отвязали от
+  // Telegram) — точный ответ даёт только сервер, в самом ответе создания.
+  const [summary, setSummary] = useState<{ delivered: number; unreachable: string[] } | null>(null);
 
   const ready = question.trim().length > 0 && !(audience.kind === "picked" && audience.employeeIds.length === 0);
 
@@ -21,13 +26,29 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
     setBusy(true);
     setError(null);
     try {
-      await apiClient.createPoll({ question: question.trim(), closesTime: closesTime || null, audience });
-      onDone();
+      const result = await apiClient.createPoll({ question: question.trim(), closesTime: closesTime || null, audience });
+      // Недостижимых нет — закрывать нечего показывать, форма закрывается
+      // сразу, как раньше. Есть — держим экран с отчётом и явным «ОК», иначе
+      // «дошло не всем» проскочило бы мимо того, кто как раз это должен знать.
+      if (result.unreachable.length > 0) setSummary({ delivered: result.delivered, unreachable: result.unreachable });
+      else onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось отправить опрос");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (summary) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
+        <Title level="2" weight="2">Опрос отправлен</Title>
+        <div style={{ fontSize: 14, lineHeight: 1.45 }}>
+          Отправлено: {summary.delivered}. Не дошло: {summary.unreachable.join(", ")}
+        </div>
+        <Button size="m" mode="filled" onClick={onDone}>ОК</Button>
+      </div>
+    );
   }
 
   return (
