@@ -8,6 +8,7 @@ import type {
   CollectionKind,
   HandoverStatus,
   AdminNoticeKind,
+  PollChoice,
 } from "@planer/shared";
 
 const createdAt = () =>
@@ -690,6 +691,53 @@ export const collectionPayments = sqliteTable(
 export type CollectionPayment = typeof collectionPayments.$inferSelect;
 export type NewCollectionPayment = typeof collectionPayments.$inferInsert;
 
+/**
+ * Опрос «За / Против / Воздержался», который запускает любой работник.
+ *
+ * `closesAt` — строка командного времени `YYYY-MM-DDTHH:MM`, а не момент UTC:
+ * её сравнивают строкой с `teamNow`, и граница «до 12:30» не должна зависеть
+ * от того, в каком поясе стоит машина.
+ */
+export const polls = sqliteTable("polls", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  createdBy: integer().notNull().references(() => employees.id),
+  question: text().notNull(),
+  closesAt: text(),
+  closedAt: integer({ mode: "timestamp" }),
+  cancelledAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/**
+ * Кому опрос ушёл — список фиксируется в момент рассылки.
+ *
+ * Хранится, а не вычисляется заново: «сегодня на смене» завтра значит других
+ * людей, и итог опроса не должен переписываться графиком. `messageId` — чтобы
+ * после закрытия погасить кнопки в письме; `null`, если письмо не дошло.
+ */
+export const pollRecipients = sqliteTable(
+  "poll_recipients",
+  {
+    pollId: integer().notNull().references(() => polls.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    messageId: integer(),
+  },
+  (t) => [primaryKey({ columns: [t.pollId, t.employeeId] })],
+);
+
+/** Голос. Один на человека: переголосование — перезапись, а не вторая строка. */
+export const pollVotes = sqliteTable(
+  "poll_votes",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    pollId: integer().notNull().references(() => polls.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    choice: text().$type<PollChoice>().notNull(),
+    votedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("poll_vote_unique").on(t.pollId, t.employeeId)],
+);
+
 export type Checklist = typeof checklists.$inferSelect;
 export type NewChecklist = typeof checklists.$inferInsert;
 export type ChecklistTemplate = typeof checklistTemplates.$inferSelect;
@@ -714,3 +762,7 @@ export type CalendarDay = typeof calendarDays.$inferSelect;
 export type NewCalendarDay = typeof calendarDays.$inferInsert;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type NewAppSetting = typeof appSettings.$inferInsert;
+
+export type Poll = typeof polls.$inferSelect;
+export type PollRecipient = typeof pollRecipients.$inferSelect;
+export type PollVote = typeof pollVotes.$inferSelect;
