@@ -22,6 +22,7 @@ import { installFatalHandlers } from "./util/fatal-log";
 import { installLogTimestamps } from "./util/log-time";
 import { createTickScheduler } from "./util/ticks";
 import { runWeekendNudgeTick } from "./weekend/weekend-nudge";
+import { runFoodTick } from "./food/food-tick";
 
 // Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
 // печатает Node сам и несёт в логе токен бота открытым текстом.
@@ -81,6 +82,9 @@ const tickRound = createTickScheduler([
     { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
     // Выходной без ответа за два дня до слота — админам одно письмо.
     { name: "weekend-nudge", run: () => runWeekendNudgeTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
+    // Закрытие просроченных опросов (и, с Задачи 13, заказов) — тем же
+    // пятиминутным тиком, что и остальные: своего таймера не заводит.
+    { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz)) },
 ]);
 setInterval(tickRound, REMINDER_TICK_MS);
 
