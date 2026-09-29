@@ -797,3 +797,79 @@ export const foodMenuItems = sqliteTable("food_menu_items", {
 
 export type FoodPlace = typeof foodPlaces.$inferSelect;
 export type FoodMenuItem = typeof foodMenuItems.$inferSelect;
+
+/**
+ * Общий заказ еды. Деньги сдают тому, кто его запустил (`createdBy`).
+ *
+ * `placeId` — null у заказа без меню: тогда каждый пишет своё блюдо и цену сам.
+ * `closesAt` — командное время строкой, как у опросов.
+ */
+export const foodOrders = sqliteTable("food_orders", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  createdBy: integer().notNull().references(() => employees.id),
+  placeId: integer().references(() => foodPlaces.id),
+  note: text(),
+  payHint: text(),
+  closesAt: text(),
+  closedAt: integer({ mode: "timestamp" }),
+  cancelledAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/** Кому заказ ушёл, с письмом — чтобы погасить кнопки после закрытия. */
+export const foodOrderRecipients = sqliteTable(
+  "food_order_recipients",
+  {
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    messageId: integer(),
+  },
+  (t) => [primaryKey({ columns: [t.orderId, t.employeeId] })],
+);
+
+/**
+ * Позиция. Имя и цена КОПИРУЮТСЯ из меню в момент заказа: правка меню после
+ * этого не должна менять чужой долг. `menuItemId` остаётся только затем,
+ * чтобы повторный тап по той же кнопке прибавлял количество, а не строку.
+ */
+export const foodOrderItems = sqliteTable(
+  "food_order_items",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    menuItemId: integer().references(() => foodMenuItems.id),
+    name: text().notNull(),
+    price: integer().notNull(),
+    qty: integer().notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [index("food_order_items_order").on(t.orderId, t.employeeId)],
+);
+
+/** «Не буду» — чтобы отличить «отказался» от «не ответил» в сводке запускающего. */
+export const foodOrderDeclines = sqliteTable(
+  "food_order_declines",
+  {
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+  },
+  (t) => [primaryKey({ columns: [t.orderId, t.employeeId] })],
+);
+
+/** «Сдал» — тот же приём, что `collection_payments`: кто и чьей рукой. */
+export const foodOrderPayments = sqliteTable(
+  "food_order_payments",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    markedBy: integer().notNull().references(() => employees.id),
+    markedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("food_order_payment_unique").on(t.orderId, t.employeeId)],
+);
+
+export type FoodOrder = typeof foodOrders.$inferSelect;
+export type FoodOrderItem = typeof foodOrderItems.$inferSelect;
+export type FoodOrderPayment = typeof foodOrderPayments.$inferSelect;
