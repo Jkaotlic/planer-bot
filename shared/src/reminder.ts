@@ -133,8 +133,10 @@ export function buildReminderText(p: {
   until?: string;
   location?: string | null;
   coworkers?: readonly string[];
+  /** Вечерние того же дня — только для ночной, см. `eveningCoworkersLine`. */
+  eveningCoworkers?: readonly string[];
 }): string {
-  const { name, kind, timeRange, what, until, coworkers } = p;
+  const { name, kind, timeRange, what, until, coworkers, eveningCoworkers } = p;
   function baseText(): string {
     switch (kind) {
       case "early":
@@ -168,6 +170,10 @@ export function buildReminderText(p: {
   // передавая пустой `coworkers`, если строка не нужна независимо от часов.
   if (coworkers && coworkers.length > 0 && COWORKER_REMINDER_KINDS.has(kind)) {
     const line = coworkersLine(coworkers);
+    if (line) text += `\n${line}`;
+  }
+  if (kind === "night" && eveningCoworkers) {
+    const line = eveningCoworkersLine(eveningCoworkers);
     if (line) text += `\n${line}`;
   }
   return text;
@@ -218,6 +224,11 @@ export interface ReminderVars {
   location: string;
   /** Готовый текст перечисления без префикса «👥 …»: «Игорь, Марк» или «». */
   coworkers: string;
+  /**
+   * Вечерние того же дня для ночной, тем же перечислением. Необязательное: у
+   * всех видов, кроме ночной, его нет, и превью обходится без него.
+   */
+  eveningCoworkers?: string;
 }
 
 /**
@@ -305,6 +316,13 @@ export function renderReminderText(template: string, vars: ReminderVars, kind?: 
   if (coworkersAllowed && coworkers && !mentions("с кем")) {
     result = `${result}\n👥 Завтра с тобой: ${coworkers}`;
   }
+
+  // «До вечера» дописывается всегда, подстановки у неё нет: ночной узнаёт,
+  // кого застанет, даже если админ написал свой текст до появления строки.
+  const evening = vars.eveningCoworkers?.trim();
+  if (kind === "night" && evening) {
+    result = `${result}\n🌆 Завтра с тобой до вечера: ${evening}`;
+  }
   return result;
 }
 
@@ -352,6 +370,19 @@ export function coworkersEnumeration(names: readonly string[]): string {
 export function coworkersLine(names: readonly string[]): string | null {
   const text = coworkersEnumeration(names);
   return text ? `👥 Завтра с тобой: ${text}` : null;
+}
+
+/**
+ * Строка «Завтра с тобой до вечера: …» для ночной — вечерние того же дня.
+ *
+ * Отдельная строка, а не имена в «Завтра с тобой»: вечерние не в той же смене,
+ * они уходят, когда ночь ещё идёт, и в общем перечне ночной не отличил бы
+ * напарника на всю ночь от того, кого застанет только в начале (его решение
+ * от 2026-09-29).
+ */
+export function eveningCoworkersLine(names: readonly string[]): string | null {
+  const text = coworkersEnumeration(names);
+  return text ? `🌆 Завтра с тобой до вечера: ${text}` : null;
 }
 
 /**
