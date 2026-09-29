@@ -64,11 +64,15 @@ export interface ApiRecorder {
  */
 export function recordApi(bot: Bot): ApiRecorder {
   const recorder: ApiRecorder = { calls: [], sent: [], answers: [] };
+  // Растущий `message_id` — опросы и заказы еды запоминают его (`sendTracked`),
+  // чтобы потом погасить кнопки именно в этом письме; отдавать всем одно и то
+  // же число значило бы, что правка одного письма гасит кнопки во всех сразу.
+  let nextMessageId = 1;
   bot.api.config.use((_prev, method, payload) => {
     recorder.calls.push({ method, payload });
     if (method === "sendMessage") recorder.sent.push(payload as unknown as SentMessage);
     if (method === "answerCallbackQuery") recorder.answers.push((payload as { text?: string }).text ?? "");
-    return { ok: true, result: {} } as never;
+    return { ok: true, result: method === "sendMessage" ? { message_id: nextMessageId++ } : {} } as never;
   });
   return recorder;
 }
