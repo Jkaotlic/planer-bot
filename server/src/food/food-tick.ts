@@ -16,8 +16,11 @@ import { finishPollMessages } from "../polls/poll-messenger";
 export async function runFoodTick(db: Db, bot: Bot, now: TeamClock): Promise<number> {
   const closed = closeDuePolls(db, now);
   for (const poll of closed) {
-    recordAudit(db, "poll_closed", null, { pollId: poll.id, question: poll.question, byTick: true });
+    // И audit, и рассылка — в одном try: опрос уже закрыт UPDATE'ом выше, и
+    // сбой на любом из двух шагов не должен стопорить цикл — иначе один
+    // упавший опрос оставил бы остальные закрытыми, но без записи и без итога.
     try {
+      recordAudit(db, "poll_closed", null, { pollId: poll.id, question: poll.question, byTick: true });
       await finishPollMessages(bot, db, poll, "closed");
     } catch (err) {
       console.error(`food tick: poll ${poll.id} finish failed:`, safeErrorMessage(err));

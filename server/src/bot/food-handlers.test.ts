@@ -5,7 +5,8 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
+import { cancelPoll, castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
+import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 
@@ -86,6 +87,15 @@ describe("колбэки опроса", () => {
     expect(api.answers.join(" ")).toMatch(/Опрос закрыт/);
   });
 
+  it("голос на отменённом опросе — «Опрос закрыт.», без записи в базу", async () => {
+    const { db, bot, anya, igor, poll } = stage();
+    cancelPoll(db, poll, anya);
+    const api = recordApi(bot);
+    await tap(bot, 333, `poll:v:${poll.id}:for`);
+    expect(voteOf(db, poll.id, igor.id)).toBeNull();
+    expect(api.answers.join(" ")).toMatch(/Опрос закрыт\./);
+  });
+
   it("«Итоги» показывает счёт всплывашкой", async () => {
     const { db, bot, igor, poll } = stage();
     castVote(db, poll, igor.id, "for", { date: "2026-09-29", time: "12:00" });
@@ -95,12 +105,24 @@ describe("колбэки опроса", () => {
   });
 
   it("«Закрыть опрос» у запускающего закрывает и рассылает итог, у участника — отказ", async () => {
-    const { db, bot, poll } = stage();
+    const { db, bot, anya, poll } = stage();
     const api = recordApi(bot);
+    // Участник (не запускающий, не админ) — отказ, без изменений в базе.
     await tap(bot, 333, `poll:close:${poll.id}`);
     expect(getPoll(db, poll.id)!.closedAt).toBeNull();
+    expect(api.answers.join(" ")).toMatch(/Закрыть может только тот, кто запустил опрос\./);
+
+    // Запускающий — закрывает, итог уходит обоим адресатам, и это попадает в аудит.
     await tap(bot, 111, `poll:close:${poll.id}`);
     expect(getPoll(db, poll.id)!.closedAt).not.toBeNull();
+    expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
+    const closedEntry = listRecentAudit(db, 10).find((row) => row.type === "poll_closed");
+    expect(closedEntry?.actorEmployeeId).toBe(anya.id);
+    expect(closedEntry?.payload).toMatchObject({ pollId: poll.id, question: poll.question });
+
+    // Повторный тап уже закрывшего — «Опрос уже закрыт.», без второй рассылки итога.
+    await tap(bot, 111, `poll:close:${poll.id}`);
+    expect(api.answers.join(" ")).toMatch(/Опрос уже закрыт\./);
     expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
   });
 });

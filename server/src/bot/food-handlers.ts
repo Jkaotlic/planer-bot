@@ -5,6 +5,7 @@ import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
 import { teamNow } from "../util/team-time";
 import { safeErrorMessage } from "../util/safe-error";
+import { recordAudit } from "../repo/audit";
 import { castVote, closePoll, getPoll, listPollsFor, pollView } from "../polls/poll-service";
 import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
 
@@ -40,8 +41,10 @@ async function safeEdit(fn: () => Promise<unknown>): Promise<void> {
  * Кнопки опросов и заказов еды.
  *
  * Вынесено из `bot.ts`, который и так больше полутора тысяч строк, но правила
- * те же: сначала «кто ты» (`acting`), потом «закрыто ли», потом «тебе ли» — в
- * том же порядке, что в HTTP, чтобы бот и мини-апп отказывали одинаково.
+ * те же: сервисные функции (`castVote`, `closePoll`) сами проверяют «закрыто
+ * ли» и «тебе ли» в одном порядке что тут, что в HTTP-ручках — здесь только
+ * транслируется их отказ в ответ на тап. Посторонний с пересланной кнопкой
+ * получает тот же текст отказа, что вернул бы сервис.
  *
  * Подключается ДО общего `callback_query:data` в `createBot`: тот отвечает
  * «Кнопка устарела» на всё, что до него не поймали.
@@ -70,7 +73,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     const who = acting(ctx.from.id);
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const poll = getPoll(db, Number(ctx.match[1]));
-    if (!poll) { await ctx.answerCallbackQuery({ text: "Опрос удалён" }); return; }
+    if (!poll) { await ctx.answerCallbackQuery({ text: "Опрос удалён." }); return; }
     const choice = pollChoiceSchema.parse(ctx.match[2]);
     const now = teamNow(config.teamTz);
     const result = castVote(db, poll, who.me.id, choice, now);
@@ -101,9 +104,10 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     const who = acting(ctx.from.id);
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const poll = getPoll(db, Number(ctx.match[1]));
-    if (!poll) { await ctx.answerCallbackQuery({ text: "Опрос удалён" }); return; }
+    if (!poll) { await ctx.answerCallbackQuery({ text: "Опрос удалён." }); return; }
     const result = closePoll(db, poll, viewerOf(who.me, ctx.from.id));
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    recordAudit(db, "poll_closed", who.me.id, { pollId: poll.id, question: poll.question });
     await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог разослан" });
     await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
   });
