@@ -9,12 +9,14 @@ import { closeDueOrders, itemsOf } from "../orders/order-service";
 import { finishOrderMessages, placeName } from "../orders/order-messenger";
 
 /**
- * Закрытие по сроку. Принимать ли голос, тик не решает — это делает
- * `isOpenAt` на каждом тапе; тик только рассылает итог. Поэтому пропущенный
- * тик стоит опоздания итога на пять минут, а не голосов после срока.
+ * Закрытие по сроку — опросов и заказов еды. Принимать ли голос или позицию,
+ * тик не решает — это делает `isOpenAt` на каждом тапе (`castVote`,
+ * `addMenuItem` и остальные); тик только рассылает итог. Поэтому пропущенный
+ * тик стоит опоздания итога на пять минут, а не голосов или позиций после
+ * срока.
  *
- * Закрывает условным UPDATE (`closeDuePolls`), поэтому ручное закрытие в ту же
- * секунду не даст второй рассылки.
+ * Закрывает условным UPDATE (`closeDuePolls` / `closeDueOrders`), поэтому
+ * ручное закрытие в ту же секунду не даст второй рассылки.
  */
 export async function runFoodTick(db: Db, bot: Bot, now: TeamClock, publicUrl: string): Promise<number> {
   const closed = closeDuePolls(db, now);

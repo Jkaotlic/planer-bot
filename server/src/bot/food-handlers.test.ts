@@ -35,6 +35,14 @@ function stage() {
   return { db, bot, anya, igor, mark, poll, order, shawarmaId: place.menu[0]!.id };
 }
 
+/** Отдельно от `person()`: этому человеку нужен `isAdmin` в базе, а не просто
+ *  связанный Telegram, чтобы закрыть чужой приём. */
+function admin(db: Db, name: string, tg: number) {
+  const e = createEmployee(db, { displayName: name, inviteToken: `inv-${tg}`, isAdmin: true });
+  linkTelegramAccount(db, `inv-${tg}`, tg);
+  return { id: e.id, isAdmin: true };
+}
+
 async function tap(bot: Bot, from: number, data: string) {
   await bot.handleUpdate({
     update_id: updateId++,
@@ -164,13 +172,13 @@ describe("колбэки заказа", () => {
     expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
     await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
     expect(api.answers.at(-1)).toMatch(/Приём закрыт/);
+    expect(itemsOf(db, order.id)).toEqual([]);
   });
 
   it("«Закрыть приём» пишет в аудит с актором и именем места", async () => {
     const { db, bot, anya, order } = stage();
-    const api = recordApi(bot);
+    recordApi(bot);
     await tap(bot, 111, `order:close:${order.id}`);
-    void api;
     const entry = listRecentAudit(db, 10).find((row) => row.type === "order_closed");
     expect(entry?.actorEmployeeId).toBe(anya.id);
     expect(entry?.payload).toMatchObject({ orderId: order.id, placeName: "Шаурмечная" });
@@ -187,12 +195,24 @@ describe("колбэки заказа", () => {
     expect(api.sent.filter((m) => m.text.includes("Что заказать:"))).toHaveLength(summaryCount);
   });
 
+  it("админ закрывает чужой приём — «сводка ушла тому, кто собирал заказ»", async () => {
+    const { db, bot, order } = stage();
+    const lena = admin(db, "Лена", 555);
+    const api = recordApi(bot);
+    await tap(bot, 555, `order:close:${order.id}`);
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    expect(api.answers.at(-1)).toBe("Приём закрыт, сводка ушла тому, кто собирал заказ");
+    const entry = listRecentAudit(db, 10).find((row) => row.type === "order_closed");
+    expect(entry?.actorEmployeeId).toBe(lena.id);
+  });
+
   it("тап по блюду в отменённом заказе — «Приём закрыт»", async () => {
     const { db, bot, anya, order, shawarmaId } = stage();
     cancelOrder(db, order, anya);
     const api = recordApi(bot);
     await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
     expect(api.answers.join(" ")).toMatch(/Приём закрыт/);
+    expect(itemsOf(db, order.id)).toEqual([]);
   });
 
   it("кнопка «🍱 Заказы» показывает и заказы, и опросы", async () => {

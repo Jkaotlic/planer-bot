@@ -168,7 +168,12 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     const fresh = getOrder(db, order.id)!;
     recordAudit(db, "order_closed", who.me.id, { orderId: fresh.id, placeName: placeName(db, fresh), total: orderTotal(itemsOf(db, fresh.id)) });
-    await ctx.answerCallbackQuery({ text: "Приём закрыт, сводка у тебя в чате" });
+    // Сводка всегда уходит тому, кто собирал заказ (`finishOrderMessages`), а
+    // закрыть может ещё и админ — за него самого. «У тебя в чате» врало бы
+    // админу, закрывшему чужой приём: сводка появится не у него.
+    await ctx.answerCallbackQuery({
+      text: who.me.id === fresh.createdBy ? "Приём закрыт, сводка у тебя в чате" : "Приём закрыт, сводка ушла тому, кто собирал заказ",
+    });
     await finishOrderMessages(bot, db, fresh, "closed", config.publicUrl);
   });
 
