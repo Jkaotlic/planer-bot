@@ -68,6 +68,15 @@ describe("tallyShiftCounts", () => {
     expect(r.kinds.map((k) => k.name)).toEqual(["Утро", "Ночь", "Дежурство · Поклонка", "Дежурство · Архив", "Яблоко"]);
   });
 
+  it("группа важнее порядка видов: дежурство, стоящее в списке первым, всё равно после смен", () => {
+    const r = tallyShiftCounts({
+      from: "2026-06-01", to: "2026-06-30", employees: PEOPLE,
+      templates: [T[3]!, T[2]!], // «Дежурство · Поклонка» раньше «Ночи»
+      entries: [e(10, 4, { category: "duty" }), e(10, 3)],
+    });
+    expect(r.kinds.map((k) => k.name)).toEqual(["Ночь", "Дежурство · Поклонка"]);
+  });
+
   it("чужой (не в списке людей) и запись без человека не считаются", () => {
     const r = tally([e(99, 2), e(null, 2)]);
     expect(r.kinds).toEqual([]);
