@@ -121,6 +121,7 @@ import {
   mockGetAnnouncementRecipients,
   mockGetTeamAudience,
   mockGetPolls,
+  mockGetPoll,
   mockCreatePoll,
   mockVotePoll,
   mockClosePoll,
@@ -1023,6 +1024,8 @@ export interface ApiClient {
   getTeamAudience(): Promise<AudienceCandidate[]>;
   /** Опросы: список своих — экран «Заказы и опросы». */
   getPolls(): Promise<PollView[]>;
+  /** Один опрос — карточка перечитывает его после отказа действия. */
+  getPoll(id: number): Promise<PollView>;
   /** Заводит опрос и сразу шлёт приглашения адресатам. */
   createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }>;
   /** Свой голос — «За» / «Против» / «Воздержался». */
@@ -1786,6 +1789,9 @@ export const realClient: ApiClient = {
     const { polls } = await authorizedGet<{ polls: PollView[] }>("/api/polls");
     return polls;
   },
+  async getPoll(id) {
+    return (await authorizedGet<{ poll: PollView }>(`/api/polls/${id}`)).poll;
+  },
   createPoll: (input) =>
     authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[] }>("/api/polls", input),
   async votePoll(id, choice) {
@@ -1965,6 +1971,7 @@ const devClient: ApiClient = {
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
   getTeamAudience: () => mockGetTeamAudience(),
   getPolls: () => mockGetPolls(),
+  getPoll: (id) => mockGetPoll(id),
   createPoll: (input) => mockCreatePoll(input),
   votePoll: (id, choice) => mockVotePoll(id, choice),
   closePoll: (id) => mockClosePoll(id),

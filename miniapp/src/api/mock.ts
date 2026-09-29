@@ -2031,6 +2031,11 @@ function pollOrThrow(id: number): MockPoll {
   return p;
 }
 
+export async function mockGetPoll(id: number): Promise<PollView> {
+  await delay(100);
+  return pollViewOf(pollOrThrow(id));
+}
+
 export async function mockVotePoll(id: number, choice: PollChoice): Promise<PollView> {
   await delay(150);
   const p = pollOrThrow(id);
