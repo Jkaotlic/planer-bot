@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { pollChoiceSchema } from "@planer/shared";
+import { orderTotal, pollChoiceSchema } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -8,6 +8,8 @@ import { safeErrorMessage } from "../util/safe-error";
 import { recordAudit } from "../repo/audit";
 import { castVote, closePoll, getPoll, listPollsFor, pollView } from "../polls/poll-service";
 import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
+import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem } from "../orders/order-service";
+import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, placeName } from "../orders/order-messenger";
 
 export interface FoodHandlerDeps {
   db: Db;
@@ -63,10 +65,27 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     }
     const now = teamNow(config.teamTz);
     const open = listPollsFor(db, viewerOf(who.me, from.id), now).filter((p) => p.open);
-    const lines = open.length === 0
-      ? ["Сейчас ничего не идёт."]
-      : ["Сейчас идёт:", ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`)];
+    const orders = listOrdersFor(db, viewerOf(who.me, from.id), now).filter((o) => o.open);
+    const rows = [
+      ...orders.map((o) => `🍱 ${o.creatorName}: ${o.placeName ?? "заказ без меню"}${o.closes ? ` (${o.closes})` : ""}`),
+      ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`),
+    ];
+    const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows];
     await ctx.reply(lines.join("\n"), { reply_markup: foodMenuKeyboard(config.publicUrl) });
+  }
+
+  /**
+   * После любого тапа письмо перерисовывается целиком: текст «Твой заказ» и
+   * кнопки. Правка — косметика (`safeEdit`): ответ всплывашкой уже сказал,
+   * что случилось, даже если письмо удалено.
+   */
+  async function redrawOrder(ctx: Context, orderId: number, me: Employee): Promise<void> {
+    const order = getOrder(db, orderId);
+    if (!order) return;
+    const now = teamNow(config.teamTz);
+    await safeEdit(() => ctx.editMessageText(orderTextFor(db, order, me.id, now.date), {
+      reply_markup: orderKeyboard(order, orderMenu(db, order), config.publicUrl, order.createdBy === me.id),
+    }));
   }
 
   bot.callbackQuery(/^poll:v:(\d+):(for|against|abstain)$/, async (ctx) => {
@@ -110,6 +129,47 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     recordAudit(db, "poll_closed", who.me.id, { pollId: poll.id, question: poll.question });
     await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог разослан" });
     await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
+  });
+
+  bot.callbackQuery(/^order:add:(\d+):(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+    const result = addMenuItem(db, order, who.me.id, Number(ctx.match[2]), teamNow(config.teamTz));
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    const last = itemsOf(db, order.id).filter((i) => i.employeeId === who.me.id && i.menuItemId === Number(ctx.match[2])).at(-1);
+    await ctx.answerCallbackQuery({ text: last ? `＋ ${last.name} (×${last.qty})` : "Добавил" });
+    await redrawOrder(ctx, order.id, who.me);
+  });
+
+  for (const [pattern, run, done] of [
+    [/^order:undo:(\d+)$/, removeLastItem, "Убрал"],
+    [/^order:no:(\d+)$/, declineOrder, "Понял, без тебя"],
+  ] as const) {
+    bot.callbackQuery(pattern, async (ctx) => {
+      const who = acting(ctx.from.id);
+      if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+      const order = getOrder(db, Number(ctx.match[1]));
+      if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+      const result = run(db, order, who.me.id, teamNow(config.teamTz));
+      if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+      await ctx.answerCallbackQuery({ text: done });
+      await redrawOrder(ctx, order.id, who.me);
+    });
+  }
+
+  bot.callbackQuery(/^order:close:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+    const result = closeOrder(db, order, viewerOf(who.me, ctx.from.id));
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    const fresh = getOrder(db, order.id)!;
+    recordAudit(db, "order_closed", who.me.id, { orderId: fresh.id, placeName: placeName(db, fresh), total: orderTotal(itemsOf(db, fresh.id)) });
+    await ctx.answerCallbackQuery({ text: "Приём закрыт, сводка у тебя в чате" });
+    await finishOrderMessages(bot, db, fresh, "closed", config.publicUrl);
   });
 
   return { sendFoodMenu };

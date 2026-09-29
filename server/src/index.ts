@@ -84,7 +84,7 @@ const tickRound = createTickScheduler([
     { name: "weekend-nudge", run: () => runWeekendNudgeTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
     // Закрытие просроченных опросов (и, с Задачи 13, заказов) — тем же
     // пятиминутным тиком, что и остальные: своего таймера не заводит.
-    { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz)) },
+    { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
 ]);
 setInterval(tickRound, REMINDER_TICK_MS);
 

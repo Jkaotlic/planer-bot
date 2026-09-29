@@ -16,7 +16,7 @@ import {
   addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, itemsOf, listOrdersFor,
   orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
-import { finishOrderMessages, sendOrderInvites } from "../../orders/order-messenger";
+import { finishOrderMessages, placeName, sendOrderInvites } from "../../orders/order-messenger";
 
 const optionalText = z.string().trim().max(FOOD_NOTE_MAX).nullable().transform((s) => (s ? s : null));
 const createSchema = z.object({
@@ -127,7 +127,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
       if (!result.ok) return c.json({ error: result.error }, 409);
       const fresh = getOrder(db, v.order.id)!;
       recordAudit(db, action === "close" ? "order_closed" : "order_cancelled", v.viewer.id, {
-        orderId: fresh.id, placeName: getPlaceView(db, fresh.placeId ?? 0)?.name ?? null, total: orderTotal(itemsOf(db, fresh.id)),
+        orderId: fresh.id, placeName: placeName(db, fresh), total: orderTotal(itemsOf(db, fresh.id)),
       });
       if (bot) await finishOrderMessages(bot, db, fresh, action === "close" ? "closed" : "cancelled", config.publicUrl);
       return c.json({ order: orderView(db, fresh, v.viewer, v.now) });

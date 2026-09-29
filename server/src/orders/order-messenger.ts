@@ -38,7 +38,12 @@ function names(db: Db, order: FoodOrder) {
   return { rows, byId: new Map(rows.map((r) => [r.employeeId, r.displayName])) };
 }
 
-function placeName(db: Db, order: FoodOrder): string | null {
+/**
+ * Имя места для письма и для аудита — без фильтра архивации: место могли
+ * заархивировать посреди приёма, но заказ из него не перестаёт быть из него,
+ * и запись в журнале не должна вдруг стать «без меню».
+ */
+export function placeName(db: Db, order: FoodOrder): string | null {
   return order.placeId == null ? null : db.select({ n: foodPlaces.name }).from(foodPlaces).where(eq(foodPlaces.id, order.placeId)).get()?.n ?? null;
 }
 

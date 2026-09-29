@@ -4,7 +4,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { archivePlace, createPlace } from "./place-service";
-import { addCustomItem, addMenuItem, closeOrder, createOrder, getOrder } from "./order-service";
+import { addCustomItem, addMenuItem, closeOrder, createOrder, declineOrder, getOrder } from "./order-service";
 import { finishOrderMessages, orderMenu, sendOrderInvites } from "./order-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
@@ -43,10 +43,13 @@ describe("рассылка заказа", () => {
   });
 
   it("при закрытии: сводка запускающему, «сдай» только должникам — не ему и не отказавшимся", async () => {
-    const { db, anya, igor, place, order } = stage();
+    const { db, anya, igor, mark, place, order } = stage();
     addMenuItem(db, order, anya.id, place.menu[0]!.id, now);
     addMenuItem(db, order, igor.id, place.menu[0]!.id, now);
     addCustomItem(db, order, igor.id, { name: "Суп", price: 200, qty: 1 }, now);
+    // Марк заказывал, но передумал и отказался — долга у него быть не должно.
+    addMenuItem(db, order, mark.id, place.menu[0]!.id, now);
+    declineOrder(db, order, mark.id, now);
     closeOrder(db, order, anya);
     const { bot } = silentBot();
     const api = recordApi(bot);

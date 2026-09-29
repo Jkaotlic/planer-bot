@@ -6,6 +6,8 @@ import { BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
+import { createPlace } from "../orders/place-service";
+import { cancelOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
 import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
@@ -25,8 +27,12 @@ function stage() {
   const igor = person(db, "Игорь", 333);
   const mark = person(db, "Марк", 444);
   const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya.id);
+  const order = createOrder(db, {
+    createdBy: anya.id, placeId: place.id, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+  });
   const bot = stubBotInfo(createBot({ db, config }), { id: 1, first_name: "P", username: "p_bot" });
-  return { db, bot, anya, igor, mark, poll };
+  return { db, bot, anya, igor, mark, poll, order, shawarmaId: place.menu[0]!.id };
 }
 
 async function tap(bot: Bot, from: number, data: string) {
@@ -124,5 +130,77 @@ describe("колбэки опроса", () => {
     await tap(bot, 111, `poll:close:${poll.id}`);
     expect(api.answers.join(" ")).toMatch(/Опрос уже закрыт\./);
     expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
+  });
+});
+
+describe("колбэки заказа", () => {
+  it("тап по блюду добавляет позицию и перерисовывает письмо с «Твой заказ»", async () => {
+    const { db, bot, igor, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    expect(itemsOf(db, order.id).map((i) => [i.employeeId, i.qty])).toEqual([[igor.id, 1]]);
+    expect(api.answers.join(" ")).toMatch(/Шаурма/);
+    expect(api.calls.find((c) => c.method === "editMessageText")!.payload.text).toContain("Твой заказ:");
+  });
+
+  it("«Убрать» и «Не буду» работают; посторонний получает отказ", async () => {
+    const { db, bot, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    await tap(bot, 333, `order:undo:${order.id}`);
+    expect(itemsOf(db, order.id)).toEqual([]);
+    await tap(bot, 333, `order:no:${order.id}`);
+    expect(api.calls.filter((c) => c.method === "editMessageText").at(-1)!.payload.text).toContain("Ты не заказываешь");
+    await tap(bot, 444, `order:add:${order.id}:${shawarmaId}`);
+    expect(api.answers.at(-1)).toMatch(/не приходил/);
+  });
+
+  it("«Закрыть приём» — только запускающему; после закрытия тап по блюду отвечает «Приём закрыт»", async () => {
+    const { db, bot, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:close:${order.id}`);
+    expect(getOrder(db, order.id)!.closedAt).toBeNull();
+    await tap(bot, 111, `order:close:${order.id}`);
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    expect(api.answers.at(-1)).toMatch(/Приём закрыт/);
+  });
+
+  it("«Закрыть приём» пишет в аудит с актором и именем места", async () => {
+    const { db, bot, anya, order } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 111, `order:close:${order.id}`);
+    void api;
+    const entry = listRecentAudit(db, 10).find((row) => row.type === "order_closed");
+    expect(entry?.actorEmployeeId).toBe(anya.id);
+    expect(entry?.payload).toMatchObject({ orderId: order.id, placeName: "Шаурмечная" });
+  });
+
+  it("повторный тап «Закрыть приём» запускающим — «Приём уже закрыт.», без второй сводки", async () => {
+    const { db, bot, order } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 111, `order:close:${order.id}`);
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    const summaryCount = api.sent.filter((m) => m.text.includes("Что заказать:")).length;
+    await tap(bot, 111, `order:close:${order.id}`);
+    expect(api.answers.at(-1)).toMatch(/Приём уже закрыт\./);
+    expect(api.sent.filter((m) => m.text.includes("Что заказать:"))).toHaveLength(summaryCount);
+  });
+
+  it("тап по блюду в отменённом заказе — «Приём закрыт»", async () => {
+    const { db, bot, anya, order, shawarmaId } = stage();
+    cancelOrder(db, order, anya);
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    expect(api.answers.join(" ")).toMatch(/Приём закрыт/);
+  });
+
+  it("кнопка «🍱 Заказы» показывает и заказы, и опросы", async () => {
+    const { bot } = stage();
+    const api = recordApi(bot);
+    await say(bot, 333, BTN_FOOD);
+    const text = api.sent.at(-1)!.text;
+    expect(text).toContain("🍱 Аня: Шаурмечная");
+    expect(text).toContain("🗳 Пицца?");
   });
 });
