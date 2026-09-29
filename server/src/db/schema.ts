@@ -8,6 +8,7 @@ import type {
   CollectionKind,
   HandoverStatus,
   AdminNoticeKind,
+  PollChoice,
 } from "@planer/shared";
 
 const createdAt = () =>
@@ -690,6 +691,53 @@ export const collectionPayments = sqliteTable(
 export type CollectionPayment = typeof collectionPayments.$inferSelect;
 export type NewCollectionPayment = typeof collectionPayments.$inferInsert;
 
+/**
+ * Опрос «За / Против / Воздержался», который запускает любой работник.
+ *
+ * `closesAt` — строка командного времени `YYYY-MM-DDTHH:MM`, а не момент UTC:
+ * её сравнивают строкой с `teamNow`, и граница «до 12:30» не должна зависеть
+ * от того, в каком поясе стоит машина.
+ */
+export const polls = sqliteTable("polls", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  createdBy: integer().notNull().references(() => employees.id),
+  question: text().notNull(),
+  closesAt: text(),
+  closedAt: integer({ mode: "timestamp" }),
+  cancelledAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/**
+ * Кому опрос ушёл — список фиксируется в момент рассылки.
+ *
+ * Хранится, а не вычисляется заново: «сегодня на смене» завтра значит других
+ * людей, и итог опроса не должен переписываться графиком. `messageId` — чтобы
+ * после закрытия погасить кнопки в письме; `null`, если письмо не дошло.
+ */
+export const pollRecipients = sqliteTable(
+  "poll_recipients",
+  {
+    pollId: integer().notNull().references(() => polls.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    messageId: integer(),
+  },
+  (t) => [primaryKey({ columns: [t.pollId, t.employeeId] })],
+);
+
+/** Голос. Один на человека: переголосование — перезапись, а не вторая строка. */
+export const pollVotes = sqliteTable(
+  "poll_votes",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    pollId: integer().notNull().references(() => polls.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    choice: text().$type<PollChoice>().notNull(),
+    votedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("poll_vote_unique").on(t.pollId, t.employeeId)],
+);
+
 export type Checklist = typeof checklists.$inferSelect;
 export type NewChecklist = typeof checklists.$inferInsert;
 export type ChecklistTemplate = typeof checklistTemplates.$inferSelect;
@@ -714,3 +762,114 @@ export type CalendarDay = typeof calendarDays.$inferSelect;
 export type NewCalendarDay = typeof calendarDays.$inferInsert;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type NewAppSetting = typeof appSettings.$inferInsert;
+
+export type Poll = typeof polls.$inferSelect;
+export type PollRecipient = typeof pollRecipients.$inferSelect;
+export type PollVote = typeof pollVotes.$inferSelect;
+
+/**
+ * Место, откуда заказывают еду, — общее для всех работников.
+ *
+ * Сохраняется, чтобы меню не вбивать заново каждый обед (он выбрал это
+ * 2026-09-29). Удаление — архивом: на место ссылаются прошлые заказы.
+ */
+export const foodPlaces = sqliteTable("food_places", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  name: text().notNull(),
+  createdBy: integer().notNull().references(() => employees.id),
+  archivedAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/**
+ * Блюдо в меню места. Правка цены меняет строку, а не долг: позиция заказа
+ * копирует имя и цену в момент заказа (`food_order_items`). Убранное из меню
+ * блюдо архивируется — на него смотрят кнопки уже разосланных писем.
+ */
+export const foodMenuItems = sqliteTable("food_menu_items", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  placeId: integer().notNull().references(() => foodPlaces.id),
+  name: text().notNull(),
+  price: integer().notNull(),
+  position: integer().notNull().default(0),
+  archivedAt: integer({ mode: "timestamp" }),
+});
+
+export type FoodPlace = typeof foodPlaces.$inferSelect;
+export type FoodMenuItem = typeof foodMenuItems.$inferSelect;
+
+/**
+ * Общий заказ еды. Деньги сдают тому, кто его запустил (`createdBy`).
+ *
+ * `placeId` — null у заказа без меню: тогда каждый пишет своё блюдо и цену сам.
+ * `closesAt` — командное время строкой, как у опросов.
+ */
+export const foodOrders = sqliteTable("food_orders", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  createdBy: integer().notNull().references(() => employees.id),
+  placeId: integer().references(() => foodPlaces.id),
+  note: text(),
+  payHint: text(),
+  closesAt: text(),
+  closedAt: integer({ mode: "timestamp" }),
+  cancelledAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/** Кому заказ ушёл, с письмом — чтобы погасить кнопки после закрытия. */
+export const foodOrderRecipients = sqliteTable(
+  "food_order_recipients",
+  {
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    messageId: integer(),
+  },
+  (t) => [primaryKey({ columns: [t.orderId, t.employeeId] })],
+);
+
+/**
+ * Позиция. Имя и цена КОПИРУЮТСЯ из меню в момент заказа: правка меню после
+ * этого не должна менять чужой долг. `menuItemId` остаётся только затем,
+ * чтобы повторный тап по той же кнопке прибавлял количество, а не строку.
+ */
+export const foodOrderItems = sqliteTable(
+  "food_order_items",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    menuItemId: integer().references(() => foodMenuItems.id),
+    name: text().notNull(),
+    price: integer().notNull(),
+    qty: integer().notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [index("food_order_items_order").on(t.orderId, t.employeeId)],
+);
+
+/** «Не буду» — чтобы отличить «отказался» от «не ответил» в сводке запускающего. */
+export const foodOrderDeclines = sqliteTable(
+  "food_order_declines",
+  {
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+  },
+  (t) => [primaryKey({ columns: [t.orderId, t.employeeId] })],
+);
+
+/** «Сдал» — тот же приём, что `collection_payments`: кто и чьей рукой. */
+export const foodOrderPayments = sqliteTable(
+  "food_order_payments",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    orderId: integer().notNull().references(() => foodOrders.id),
+    employeeId: integer().notNull().references(() => employees.id),
+    markedBy: integer().notNull().references(() => employees.id),
+    markedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("food_order_payment_unique").on(t.orderId, t.employeeId)],
+);
+
+export type FoodOrder = typeof foodOrders.$inferSelect;
+export type FoodOrderItem = typeof foodOrderItems.$inferSelect;
+export type FoodOrderPayment = typeof foodOrderPayments.$inferSelect;

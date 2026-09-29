@@ -15,6 +15,7 @@ import { Keyboard } from "grammy";
  */
 export const BTN_WEEK = "📅 График";
 export const BTN_MY_SHIFTS = "📋 Мои смены";
+export const BTN_FOOD = "🍱 Заказы";
 export const BTN_REMINDERS = "🔔 Напоминания";
 export const BTN_ADMIN = "⚙️ Админка";
 export const BTN_BUG = "🐞 Проблема";
@@ -47,8 +48,13 @@ export const BTN_BUG = "🐞 Проблема";
  * служебная, поэтому едет во вторую строку рядом с «Напоминаниями», а не
  * заводит третью.
  */
-export function mainKeyboard(opts: { isAdmin: boolean }): Keyboard {
-  const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS).row().text(BTN_REMINDERS).text(BTN_BUG);
+export function mainKeyboard(opts: { isAdmin: boolean; isObserver: boolean }): Keyboard {
+  const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS);
+  // Третьей в первую строку, а не отдельной строкой: во второй уже три
+  // служебные, а лишняя строка — это снова клавиатура на пол-экрана.
+  // Наблюдателю не нужна: заказывать и голосовать ему не с кем.
+  if (!opts.isObserver) kb.text(BTN_FOOD);
+  kb.row().text(BTN_REMINDERS).text(BTN_BUG);
   if (opts.isAdmin) kb.text(BTN_ADMIN);
   // resized — иначе клавиатура занимает пол-экрана. persistent — иначе Telegram
   // сворачивает её после первого нажатия, и человек решает, что она пропала.

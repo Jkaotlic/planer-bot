@@ -28,6 +28,18 @@ import {
   mockSendAnnouncement,
   mockGetBugReports,
   mockResolveBugReport,
+  mockGetTeamAudience,
+  mockCreatePoll,
+  mockGetFoodPlaces,
+  mockSaveFoodPlace,
+  mockGetOrder,
+  mockCreateOrder,
+  mockAddOrderItem,
+  mockSetOrderItemQty,
+  mockCloseOrder,
+  mockCancelOrder,
+  mockSetOrderPaid,
+  mockRemindOrderUnpaid,
   MOCK_ME,
 } from "./mock";
 
@@ -509,5 +521,134 @@ describe("мок отметок о сдаче", () => {
 
     const remind = await mockRemindUnpaid(round.id);
     expect(remind.intended).toBe(waiting - 1);
+  });
+});
+
+describe("опросы: dev-мок", () => {
+  // «На смене» у кандидата и «кого позовёт „на смене“» должны считаться одной
+  // функцией (`mockOnShift`) — иначе форма показывает «уйдёт Марку», а создание
+  // опроса зовёт кого-то другого. Марк (id 3, нечётный) — на смене по обеим.
+  it("«на смене» у кандидата и в адресатах опроса — одно и то же правило", async () => {
+    const candidates = await mockGetTeamAudience();
+    const igor = candidates.find((c) => c.displayName === "Игорь Петров")!;
+    const mark = candidates.find((c) => c.displayName === "Марк Волков")!;
+    expect(igor.onShift).toBe(false); // id 2, чётный
+    expect(mark.onShift).toBe(true); // id 3, нечётный
+
+    const { poll } = await mockCreatePoll({ question: "Обед?", closesTime: null, audience: { kind: "on_shift" } });
+    // Нечётные id: создатель Аня (1, сама на смене или нет — неважно, она
+    // всегда в списке), Марк (3), Олег (5), Нина (7). Игорь (2) и Даша (4) —
+    // чётные, не на смене, в список не попали.
+    expect(poll.recipientCount).toBe(4);
+  });
+
+  it("«дошло» считает только тех, у кого есть Telegram — Марк без него не входит в delivered", async () => {
+    const { delivered, unreachable } = await mockCreatePoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    // Команда: id 1,2,3,4,5,7 (6 — архивный, исключён). Без Telegram — только Марк.
+    expect(unreachable).toEqual(["Марк Волков"]);
+    expect(delivered).toBe(5);
+  });
+
+  it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
+    const past = new Date(Date.now() - 5 * 60_000);
+    const pastTime = past.toTimeString().slice(0, 5);
+    await expect(
+      mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } }),
+    ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+  });
+});
+
+// Ревью раунд 1 (Задача 14), находка №5: мок применял правила сервера только
+// частично — двойное закрытие/отмена, границы количества, отказ «некому
+// отправить» и текст «заказ не найден» либо отсутствовали, либо были по-
+// английски. Тесты ниже фиксируют, что мок теперь отвечает тем же текстом,
+// что и `server/src/orders/order-service.ts`/`server/src/http/routes/orders.ts`.
+describe("заказы еды: dev-мок", () => {
+  it("«команда» считает адресатов и «дошло» так же, как у опроса — теми же mockAudienceIds", async () => {
+    const { order, delivered, unreachable } = await mockCreateOrder({
+      placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" },
+    });
+    // Команда: id 1,2,3,4,5,7 (6 — архивный). Без Telegram — только Марк.
+    expect(order.recipientCount).toBe(6);
+    expect(unreachable).toEqual(["Марк Волков"]);
+    expect(delivered).toBe(5);
+  });
+
+  it("«некому отправить» — тот же текст, что у POST /api/orders, когда достижим только сам заказчик", async () => {
+    // Марк (id 3) без Telegram — «выбрать» его одного оставляет только Аню достижимой.
+    await expect(
+      mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "picked", employeeIds: [3] } }),
+    ).rejects.toThrow("Некому отправить: в списке никого, кроме тебя.");
+  });
+
+  it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
+    const past = new Date(Date.now() - 5 * 60_000);
+    const pastTime = past.toTimeString().slice(0, 5);
+    await expect(
+      mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: pastTime, audience: { kind: "team" } }),
+    ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+  });
+
+  it("повторное закрытие и отмена закрытого заказа отклоняются тем же текстом, что и сервер", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCloseOrder(order.id);
+    await expect(mockCloseOrder(order.id)).rejects.toThrow("Приём уже закрыт.");
+    await expect(mockCancelOrder(order.id)).rejects.toThrow("Приём уже закрыт.");
+  });
+
+  it("закрытие отменённого заказа отвечает «Заказ отменён.»", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCancelOrder(order.id);
+    await expect(mockCloseOrder(order.id)).rejects.toThrow("Заказ отменён.");
+  });
+
+  it("количество своей позиции — от 1 до 20, тем же текстом, что и сервер", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    const updated = await mockAddOrderItem(order.id, { name: "Суп дня", price: 200 });
+    const itemId = updated.myItems[0]!.id;
+    await expect(mockSetOrderItemQty(order.id, itemId, 0)).rejects.toThrow("Количество — от 1 до 20.");
+    await expect(mockSetOrderItemQty(order.id, itemId, 21)).rejects.toThrow("Количество — от 1 до 20.");
+  });
+
+  it("несуществующий заказ отвечает по-русски, а не английским «not_found»", async () => {
+    await expect(mockGetOrder(999_999)).rejects.toThrow("Заказ не найден или недоступен.");
+  });
+});
+
+// Раунд правок: мок должен повторять правила `setOrderPaid`/`remindUnpaid`
+// сервера тем же текстом — иначе DEV показал бы форму, которую прод отклонил
+// бы, и наоборот.
+describe("деньги заказа еды: dev-мок", () => {
+  it("сдавать рано, пока приём идёт; MOCK_ME — запускающий, долга у него нет", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await expect(mockSetOrderPaid(order.id, true)).rejects.toThrow("Сдавать рано: приём ещё идёт.");
+    await mockCloseOrder(order.id);
+    await expect(mockSetOrderPaid(order.id, true)).rejects.toThrow("Этот человек ничего не должен.");
+  });
+
+  it("«Напомнить»: до закрытия — «Сначала закрой приём.», на отменённом — «Заказ отменён — напоминать не о чем.»", async () => {
+    const { order: open } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await expect(mockRemindOrderUnpaid(open.id)).rejects.toThrow("Сначала закрой приём.");
+    const { order: cancelled } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCancelOrder(cancelled.id);
+    await expect(mockRemindOrderUnpaid(cancelled.id)).rejects.toThrow("Заказ отменён — напоминать не о чем.");
+  });
+
+  it("«Напомнить» без должников — delivered/unpaid 0, без ошибки", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCloseOrder(order.id);
+    await expect(mockRemindOrderUnpaid(order.id)).resolves.toEqual({ delivered: 0, unpaid: 0, unreachable: [] });
+  });
+});
+
+describe("места: dev-мок", () => {
+  // Тот же отказ, что и у `updatePlace` на сервере: id блюда из ДРУГОГО места
+  // (или уже пропавшего из текущего) не должен молча привязаться к этому —
+  // иначе DEV пропустил бы гонку, которую живой сервер отклоняет.
+  it("правка чужим id блюда отклоняется тем же текстом, что и сервер", async () => {
+    const [first] = await mockGetFoodPlaces();
+    await expect(
+      mockSaveFoodPlace(first!.id, { name: first!.name, menu: [{ id: 999_999, name: "Чужое блюдо", price: 100 }] }),
+    ).rejects.toThrow("Меню уже поменяли — открой место заново.");
   });
 });

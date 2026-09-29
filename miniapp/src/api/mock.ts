@@ -32,6 +32,10 @@ import type {
   AnnouncementAudience,
   AnnouncementResult,
   AnnouncementRecipient,
+  AudienceCandidate,
+  PollView,
+  PlaceView,
+  OrderView,
   BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
@@ -75,6 +79,22 @@ import {
   autoSendDateFor,
   announcementRole,
   tallyShiftCounts,
+  closesAtFromTime,
+  closesLabel,
+  isFutureClose,
+  isOpenAt,
+  pollTally,
+  placeInputSchema,
+  debtOf,
+  debtors,
+  dishSummary,
+  orderTotal,
+  orderItemInputSchema,
+  FOOD_QTY_MAX,
+  FOOD_ITEMS_PER_PERSON_MAX,
+  type PollChoice,
+  type TeamAudience,
+  type PlaceInput,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1880,6 +1900,552 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
   const archivedCount = pool.filter((e) => !e.isActive).length;
 
   return { delivered: reachable.length, intended: reachable.length, unreachable, archivedCount };
+}
+
+// --- Опросы («Заказы и опросы») ----------------------------------------------
+// Правила голосования, срока и итога — из `@planer/shared`, теми же функциями,
+// что и сервер (`closesAtFromTime`, `isOpenAt`, `pollTally`), а не переизобретены
+// здесь: иначе DEV-режим однажды показал бы опрос закрытым не в ту секунду, что прод.
+
+interface MockPoll {
+  id: number;
+  question: string;
+  createdBy: number;
+  closesAt: string | null;
+  closedAt: string | null;
+  cancelledAt: string | null;
+  recipients: number[];
+  votes: Map<number, PollChoice>;
+}
+
+const POLLS: MockPoll[] = [];
+let nextPollId = 1;
+
+/** DEV-мок живёт без `teamNow`: команда без базы, часовой пояс взять неоткуда. */
+function mockNow(): { date: string; time: string } {
+  const d = new Date();
+  return { date: d.toISOString().slice(0, 10), time: d.toTimeString().slice(0, 5) };
+}
+
+/**
+ * Детерминированная по id «занятость на сегодня» — DEV-мок живёт без графика,
+ * выдумывать его нечем. Одна функция на обе ручки (`mockGetTeamAudience` и
+ * `mockCreatePoll`): раньше «на смене» в списке кандидатов считалось по
+ * индексу отфильтрованного массива (`i % 2`), а в заказе опроса — вообще
+ * никак («на смене» слало всем активным) — форма и подсказка под ней
+ * молчаливо расходились в том, кому реально уйдёт опрос.
+ */
+function mockOnShift(employeeId: number): boolean {
+  return employeeId % 2 === 1;
+}
+
+function pollViewOf(p: MockPoll): PollView {
+  const now = mockNow();
+  const people = p.recipients.map((id) => ({ employeeId: id, displayName: EMPLOYEES.find((e) => e.id === id)?.displayName ?? "—" }));
+  return {
+    id: p.id,
+    question: p.question,
+    creatorId: p.createdBy,
+    creatorName: EMPLOYEES.find((e) => e.id === p.createdBy)?.displayName ?? "—",
+    closesAt: p.closesAt,
+    closes: closesLabel(p.closesAt, now.date),
+    open: isOpenAt(p, now),
+    cancelled: p.cancelledAt != null,
+    isCreator: p.createdBy === MOCK_ME.id,
+    canManage: p.createdBy === MOCK_ME.id || MOCK_ME.isAdmin,
+    myChoice: p.votes.get(MOCK_ME.id) ?? null,
+    tally: pollTally(people, [...p.votes].map(([employeeId, choice]) => ({ employeeId, choice }))),
+    recipientCount: p.recipients.length,
+  };
+}
+
+/** Кандидаты в адресаты опроса/заказа — сам вызывающий исключён, как на сервере
+ *  (`audienceCandidates`): себя выбирать незачем, он в рассылке всегда. */
+export async function mockGetTeamAudience(): Promise<AudienceCandidate[]> {
+  await delay(150);
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id).map((e) => ({
+    id: e.id,
+    displayName: e.displayName,
+    reachable: e.telegramUserId != null,
+    role: announcementRole(e),
+    onShift: mockOnShift(e.id),
+  }));
+}
+
+export async function mockGetPolls(): Promise<PollView[]> {
+  await delay(150);
+  return [...POLLS].reverse().map(pollViewOf);
+}
+
+/**
+ * Кого мок реально позовёт — те же правила, что серверный `resolveAudience`:
+ * «команда» и «на смене» не берут наблюдателя, «на смене» вдобавок фильтрует
+ * по `mockOnShift`. Раньше «на смене» в DEV слало вообще всем активным —
+ * форма спрашивала одно, а получал бы другое.
+ */
+function mockAudienceIds(audience: TeamAudience): number[] {
+  if (audience.kind === "picked") return audience.employeeIds;
+  const active = EMPLOYEES.filter((e) => e.isActive && !e.isObserver);
+  if (audience.kind === "team") return active.map((e) => e.id);
+  return active.filter((e) => mockOnShift(e.id)).map((e) => e.id);
+}
+
+export async function mockCreatePoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }> {
+  await delay(200);
+  if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
+  const now = mockNow();
+  const closesAt = closesAtFromTime(input.closesTime, now.date);
+  // Тот же отказ и тот же текст, что у ручки `POST /api/polls` на сервере —
+  // иначе DEV показал бы опрос, у которого приём голосов кончился в момент
+  // рождения, и кнопки на карточке были бы погашены с первого рендера.
+  if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+
+  const ids = mockAudienceIds(input.audience);
+  const recipients = [...new Set([MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)])];
+  const poll: MockPoll = {
+    id: nextPollId++,
+    question: input.question.trim(),
+    createdBy: MOCK_ME.id,
+    closesAt,
+    closedAt: null,
+    cancelledAt: null,
+    recipients,
+    votes: new Map<number, PollChoice>(),
+  };
+  POLLS.push(poll);
+  // Как на сервере: «дошло» считает только тех, у кого есть Telegram — а не
+  // всех адресатов. Мок без бота не умеет ронять отдельную отправку, поэтому
+  // «дошло» здесь равно «мог дойти технически» — тот же потолок, что у
+  // `resolveAudience.reachable`.
+  const telegramOf = (id: number) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId;
+  const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+  const unreachable = recipients
+    .filter((id) => telegramOf(id) == null)
+    .map((id) => EMPLOYEES.find((e) => e.id === id)?.displayName ?? "—");
+  return { poll: pollViewOf(poll), delivered, unreachable };
+}
+
+function pollOrThrow(id: number): MockPoll {
+  const p = POLLS.find((x) => x.id === id);
+  if (!p) throw new Error("Опрос не найден.");
+  return p;
+}
+
+export async function mockGetPoll(id: number): Promise<PollView> {
+  await delay(100);
+  return pollViewOf(pollOrThrow(id));
+}
+
+export async function mockVotePoll(id: number, choice: PollChoice): Promise<PollView> {
+  await delay(150);
+  const p = pollOrThrow(id);
+  if (!isOpenAt(p, mockNow())) throw new Error("Опрос закрыт.");
+  p.votes.set(MOCK_ME.id, choice);
+  return pollViewOf(p);
+}
+
+export async function mockClosePoll(id: number): Promise<PollView> {
+  await delay(150);
+  const p = pollOrThrow(id);
+  p.closedAt = new Date().toISOString();
+  return pollViewOf(p);
+}
+
+export async function mockCancelPoll(id: number): Promise<PollView> {
+  await delay(150);
+  const p = pollOrThrow(id);
+  p.cancelledAt = new Date().toISOString();
+  return pollViewOf(p);
+}
+
+// --- Места и меню --------------------------------------------------------
+// Тот же приём, что у опросов: правила формы (лимиты, дубли блюд) считает
+// `placeInputSchema` из `@planer/shared`, а не своя копия здесь — иначе
+// DEV-режим однажды пропустил бы то, что сервер отклонит.
+
+interface MockMenuItem {
+  id: number;
+  name: string;
+  price: number;
+}
+
+interface MockPlace {
+  id: number;
+  name: string;
+  menu: MockMenuItem[];
+  archived: boolean;
+}
+
+const PLACES: MockPlace[] = [
+  {
+    id: 1,
+    name: "Шаурмечная у метро",
+    menu: [
+      { id: 1, name: "Шаурма классическая", price: 350 },
+      { id: 2, name: "Лаваш с курицей", price: 300 },
+    ],
+    archived: false,
+  },
+];
+let nextPlaceId = 2;
+let nextMenuItemId = 3;
+
+export async function mockGetFoodPlaces(): Promise<PlaceView[]> {
+  await delay(150);
+  return PLACES.filter((p) => !p.archived)
+    .map((p) => ({ id: p.id, name: p.name, menu: p.menu.map((m) => ({ id: m.id, name: m.name, price: m.price })) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+export async function mockSaveFoodPlace(id: number | null, input: PlaceInput): Promise<PlaceView> {
+  await delay(200);
+  const parsed = placeInputSchema.safeParse(input);
+  // Тот же отказ и тот же текст, что у ручки `POST /api/food-places` на
+  // сервере — иначе DEV пропустил бы то, что живой сервер отклонит.
+  if (!parsed.success) throw new Error("Проверь название, блюда и цены (целые рубли, до 100 000).");
+  if (id == null) {
+    const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: nextMenuItemId++, name: m.name, price: m.price }));
+    const place: MockPlace = { id: nextPlaceId++, name: parsed.data.name, menu, archived: false };
+    PLACES.push(place);
+    return { id: place.id, name: place.name, menu: place.menu };
+  }
+  const place = PLACES.find((p) => p.id === id && !p.archived);
+  if (!place) throw new Error("Места больше нет.");
+  // Тот же отказ и тот же текст, что у `updatePlace` на сервере: id, которого
+  // нет среди ТЕКУЩИХ блюд ЭТОГО места (чужое место или уже архивированное
+  // кем-то другим блюдо), не должен молча привязаться правкой.
+  const currentIds = new Set(place.menu.map((m) => m.id));
+  if (parsed.data.menu.some((m) => m.id != null && !currentIds.has(m.id))) {
+    throw new Error("Меню уже поменяли — открой место заново.");
+  }
+  const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: m.id ?? nextMenuItemId++, name: m.name, price: m.price }));
+  place.name = parsed.data.name;
+  place.menu = menu;
+  return { id: place.id, name: place.name, menu: place.menu };
+}
+
+export async function mockArchiveFoodPlace(id: number): Promise<void> {
+  await delay(150);
+  const place = PLACES.find((p) => p.id === id && !p.archived);
+  if (!place) throw new Error("Места больше нет.");
+  place.archived = true;
+}
+
+// --- Заказы еды -----------------------------------------------------------
+// Тот же приём, что у опросов и мест: правила (открыт/закрыт, срок, долг,
+// сводка блюд) считают `isOpenAt`/`debtOf`/`dishSummary`/`orderTotal` из
+// `@planer/shared` — те же функции, что и сервер, а не своя копия здесь.
+// Мок всегда играет за MOCK_ME (Аня) — как в опросах и обменах, — поэтому
+// позиции всегда её, а не произвольного employeeId.
+
+interface MockOrderItem {
+  id: number;
+  employeeId: number;
+  menuItemId: number | null;
+  name: string;
+  price: number;
+  qty: number;
+}
+
+interface MockOrder {
+  id: number;
+  createdBy: number;
+  placeId: number | null;
+  note: string | null;
+  payHint: string | null;
+  closesAt: string | null;
+  closedAt: string | null;
+  cancelledAt: string | null;
+  recipients: number[];
+  items: MockOrderItem[];
+  declines: Set<number>;
+}
+
+const ORDERS: MockOrder[] = [];
+let nextOrderId = 1;
+let nextOrderItemId = 1;
+
+/**
+ * Отметки «сдал» за заказ еды: ключ `${orderId}:${employeeId}` → чья рука
+ * поставила. Тот же приём, что `PAYMENTS` у сборов чуть выше, и тот же счёт
+ * через `paymentProgress`, что и на сервере, — мок не считает по-своему.
+ */
+const ORDER_PAYMENTS = new Map<string, number>();
+
+/** Должники заказа — те же правила, что серверный `debtorRows`. */
+function orderDebtorRows(o: MockOrder) {
+  return debtors(o.items, o.createdBy).map((d) => {
+    const emp = EMPLOYEES.find((e) => e.id === d.employeeId);
+    return { employeeId: d.employeeId, displayName: emp?.displayName ?? "—", telegramUserId: emp?.telegramUserId ?? null, amount: d.amount };
+  });
+}
+
+function orderPaymentProgress(o: MockOrder) {
+  const marks = [...ORDER_PAYMENTS.entries()]
+    .filter(([key]) => key.startsWith(`${o.id}:`))
+    .map(([key, markedBy]) => ({ employeeId: Number(key.split(":")[1]), markedBy }));
+  return paymentProgress(orderDebtorRows(o), marks);
+}
+
+function orderViewOf(o: MockOrder): OrderView {
+  const now = mockNow();
+  const place = o.placeId == null ? null : (PLACES.find((p) => p.id === o.placeId) ?? null);
+  const open = isOpenAt(o, now);
+  const manage = o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin;
+  const mine = o.items.filter((i) => i.employeeId === MOCK_ME.id);
+  const responded = new Set<number>([...o.items.map((i) => i.employeeId), ...o.declines]);
+  return {
+    id: o.id,
+    creatorId: o.createdBy,
+    creatorName: personName(o.createdBy),
+    placeId: o.placeId,
+    placeName: place?.name ?? null,
+    // Меню — только пока приём идёт: у закрытого заказа кнопки добавлять уже нечего.
+    menu: open && place ? place.menu.map((m) => ({ id: m.id, name: m.name, price: m.price })) : [],
+    note: o.note,
+    payHint: o.payHint,
+    closesAt: o.closesAt,
+    closes: closesLabel(o.closesAt, now.date),
+    open,
+    closed: o.closedAt != null,
+    cancelled: o.cancelledAt != null,
+    isCreator: o.createdBy === MOCK_ME.id,
+    canManage: manage,
+    myItems: mine.map(({ id, name, price, qty }) => ({ id, name, price, qty })),
+    myTotal: debtOf(o.items, MOCK_ME.id),
+    declined: o.declines.has(MOCK_ME.id),
+    recipientCount: o.recipients.length,
+    respondedCount: responded.size,
+    dishes: dishSummary(o.items),
+    total: orderTotal(o.items),
+    // Поимённо — только запускающему/админу, как на сервере (`orderView`):
+    // сумма коллеги — не общее знание.
+    people: manage
+      ? o.recipients.map((id) => ({ employeeId: id, displayName: personName(id), amount: debtOf(o.items, id), declined: o.declines.has(id) }))
+      : null,
+    payment: (() => {
+      const progress = orderPaymentProgress(o);
+      const amounts = new Map(debtors(o.items, o.createdBy).map((d) => [d.employeeId, d.amount]));
+      return {
+        myPaid: progress.rows.some((r) => r.employeeId === MOCK_ME.id && r.paid),
+        paidCount: progress.paidCount,
+        total: progress.total,
+        rows: manage ? progress.rows.map((r) => ({ ...r, amount: amounts.get(r.employeeId) ?? 0 })) : null,
+      };
+    })(),
+  };
+}
+
+export async function mockGetOrders(): Promise<OrderView[]> {
+  await delay(150);
+  return ORDERS.filter((o) => o.createdBy === MOCK_ME.id || o.recipients.includes(MOCK_ME.id))
+    .slice()
+    .reverse()
+    .map(orderViewOf);
+}
+
+// Сервер отдаёт на оба случая («такого id нет» и «этот тебе не приходил»)
+// один 404 без различения — мок отвечает тем же одним текстом, по-русски
+// (сервер здесь отдаёт непереведённое `not_found`, но человек читает то, что
+// показывает экран, а не код ответа).
+const ORDER_NOT_FOUND = "Заказ не найден или недоступен.";
+
+function orderOrThrow(id: number): MockOrder {
+  const o = ORDERS.find((x) => x.id === id);
+  if (!o) throw new Error(ORDER_NOT_FOUND);
+  return o;
+}
+
+export async function mockGetOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  if (o.createdBy !== MOCK_ME.id && !MOCK_ME.isAdmin && !o.recipients.includes(MOCK_ME.id)) {
+    throw new Error(ORDER_NOT_FOUND);
+  }
+  return orderViewOf(o);
+}
+
+export async function mockCreateOrder(input: {
+  placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience;
+}): Promise<{ order: OrderView; delivered: number; unreachable: string[] }> {
+  await delay(200);
+  const now = mockNow();
+  const closesAt = closesAtFromTime(input.closesTime, now.date);
+  // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
+  if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+  if (input.placeId != null && !PLACES.some((p) => p.id === input.placeId && !p.archived)) {
+    throw new Error("Такого места больше нет.");
+  }
+  const ids = mockAudienceIds(input.audience);
+  const recipients = [...new Set([MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)])];
+  // Тот же отказ и тот же текст, что у `resolveAudience`/`POST /api/orders`:
+  // считать надо ДО заведения заказа — иначе он рождается без адресатов.
+  const telegramOf = (id: number) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId;
+  const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+  const unreachable = recipients.filter((id) => telegramOf(id) == null).map((id) => personName(id));
+  if (delivered < 2) throw new Error("Некому отправить: в списке никого, кроме тебя.");
+  const order: MockOrder = {
+    id: nextOrderId++,
+    createdBy: MOCK_ME.id,
+    placeId: input.placeId,
+    note: input.note,
+    payHint: input.payHint,
+    closesAt,
+    closedAt: null,
+    cancelledAt: null,
+    recipients,
+    items: [],
+    declines: new Set(),
+  };
+  ORDERS.push(order);
+  return { order: orderViewOf(order), delivered, unreachable };
+}
+
+/** Общий вход правки позиций: закрыт — дальше делать нечего. Мок играет
+ *  только за MOCK_ME, поэтому «чужой заказ» здесь проверять не у кого. */
+function guardOpen(o: MockOrder): void {
+  if (!isOpenAt(o, mockNow())) throw new Error("Приём закрыт.");
+}
+
+export async function mockAddOrderItem(
+  id: number,
+  input: { menuItemId: number } | { name: string; price: number; qty?: number },
+): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  const parsed = orderItemInputSchema.safeParse(input);
+  // Тот же отказ и тот же текст, что у ручки `POST /api/orders/:id/items`.
+  if (!parsed.success) throw new Error("Проверь блюдо и цену (целые рубли, до 100 000).");
+  const data = parsed.data;
+  // Тот же потолок строк, что `addMenuItem`/`addCustomItem` на сервере.
+  const tooMany = o.items.filter((i) => i.employeeId === MOCK_ME.id).length >= FOOD_ITEMS_PER_PERSON_MAX;
+  const tooManyError = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
+  if ("menuItemId" in data) {
+    const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
+    const dish = place?.menu.find((m) => m.id === data.menuItemId);
+    if (!dish) throw new Error("Этого блюда нет в меню.");
+    // Прибавляем к строке с той же ценой — как `addMenuItem` на сервере.
+    const same = o.items.find((i) => i.employeeId === MOCK_ME.id && i.menuItemId === data.menuItemId && i.price === dish.price);
+    if (same) same.qty += 1;
+    else if (tooMany) throw new Error(tooManyError);
+    else o.items.push({ id: nextOrderItemId++, employeeId: MOCK_ME.id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1 });
+  } else {
+    if (tooMany) throw new Error(tooManyError);
+    o.items.push({ id: nextOrderItemId++, employeeId: MOCK_ME.id, menuItemId: null, name: data.name, price: data.price, qty: data.qty });
+  }
+  o.declines.delete(MOCK_ME.id);
+  return orderViewOf(o);
+}
+
+/** Своя позиция или отказ — мок играет только за MOCK_ME, чужих позиций тут нет. */
+function ownItem(o: MockOrder, itemId: number): MockOrderItem {
+  const item = o.items.find((i) => i.id === itemId);
+  if (!item || item.employeeId !== MOCK_ME.id) throw new Error("Это не твоя позиция.");
+  return item;
+}
+
+export async function mockSetOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  // Тот же отказ и тот же текст, что у `PATCH /api/orders/:id/items/:itemId`.
+  if (!Number.isInteger(qty) || qty < 1 || qty > FOOD_QTY_MAX) {
+    throw new Error(`Количество — от 1 до ${FOOD_QTY_MAX}.`);
+  }
+  ownItem(o, itemId).qty = qty;
+  return orderViewOf(o);
+}
+
+export async function mockRemoveOrderItem(id: number, itemId: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  const item = ownItem(o, itemId);
+  o.items.splice(o.items.indexOf(item), 1);
+  return orderViewOf(o);
+}
+
+export async function mockDeclineOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  guardOpen(o);
+  o.items = o.items.filter((i) => i.employeeId !== MOCK_ME.id);
+  o.declines.add(MOCK_ME.id);
+  return orderViewOf(o);
+}
+
+// Тот же порядок отказов, что у `closeOrder`/`cancelOrder` на сервере: гонка
+// двойного тапа (Review Focus №1) не должна закрывать/отменять заказ дважды
+// и не должна слать вторую сводку — второй вызов получает отказ, а не «ok».
+export async function mockCloseOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  if (o.cancelledAt != null) throw new Error("Заказ отменён.");
+  if (o.closedAt != null) throw new Error("Приём уже закрыт.");
+  o.closedAt = new Date().toISOString();
+  return orderViewOf(o);
+}
+
+export async function mockCancelOrder(id: number): Promise<OrderView> {
+  await delay(150);
+  const o = orderOrThrow(id);
+  if (o.closedAt != null || o.cancelledAt != null) throw new Error("Приём уже закрыт.");
+  o.cancelledAt = new Date().toISOString();
+  return orderViewOf(o);
+}
+
+/**
+ * Отметка «сдал» за заказ еды — те же отказы и тот же текст, что у серверного
+ * `setOrderPaid`. Мок играет только за MOCK_ME, поэтому «виновник» отметки —
+ * всегда он: своя галочка ставит его же рукой, чужая — рукой управляющего.
+ */
+function markOrderPaid(o: MockOrder, employeeId: number, paid: boolean): void {
+  if (o.cancelledAt != null) throw new Error("Заказ отменён — сдавать нечего.");
+  if (o.closedAt == null) throw new Error("Сдавать рано: приём ещё идёт.");
+  if (!orderDebtorRows(o).some((d) => d.employeeId === employeeId)) throw new Error("Этот человек ничего не должен.");
+  const manage = o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin;
+  const key = `${o.id}:${employeeId}`;
+  if (paid) {
+    if (employeeId !== MOCK_ME.id && !manage) throw new Error("Отметить за другого может только тот, кто собирает заказ.");
+    if (!ORDER_PAYMENTS.has(key)) ORDER_PAYMENTS.set(key, MOCK_ME.id);
+    return;
+  }
+  const markedBy = ORDER_PAYMENTS.get(key);
+  if (markedBy == null) return;
+  if (markedBy !== MOCK_ME.id && !manage) throw new Error("Снять отметку может тот, кто её поставил.");
+  ORDER_PAYMENTS.delete(key);
+}
+
+export async function mockSetOrderPaid(id: number, paid: boolean): Promise<OrderView> {
+  await delay(200);
+  const o = orderOrThrow(id);
+  markOrderPaid(o, MOCK_ME.id, paid);
+  return orderViewOf(o);
+}
+
+export async function mockSetOrderPaymentFor(id: number, employeeId: number, paid: boolean): Promise<OrderView> {
+  await delay(200);
+  const o = orderOrThrow(id);
+  markOrderPaid(o, employeeId, paid);
+  return orderViewOf(o);
+}
+
+/** Дожим — тот же порядок отказов, что у HTTP-ручки: права, потом «отменён
+ *  ли», потом «закрыт ли». `unpaid`/`unreachable` — тот же смысл, что у
+ *  серверного `remindUnpaid`: знаменатель и кого не достучаться поимённо. */
+export async function mockRemindOrderUnpaid(id: number): Promise<{ delivered: number; unpaid: number; unreachable: string[] }> {
+  await delay(300);
+  const o = orderOrThrow(id);
+  if (!(o.createdBy === MOCK_ME.id || MOCK_ME.isAdmin)) throw new Error("Напомнить может только тот, кто собирает заказ.");
+  if (o.cancelledAt != null) throw new Error("Заказ отменён — напоминать не о чем.");
+  if (o.closedAt == null) throw new Error("Сначала закрой приём.");
+  const paid = new Set(
+    [...ORDER_PAYMENTS.keys()].filter((key) => key.startsWith(`${o.id}:`)).map((key) => Number(key.split(":")[1])),
+  );
+  const debtorsList = orderDebtorRows(o).filter((d) => !paid.has(d.employeeId));
+  const unreachable = debtorsList.filter((d) => d.telegramUserId == null).map((d) => d.displayName);
+  return { delivered: debtorsList.length - unreachable.length, unpaid: debtorsList.length, unreachable };
 }
 
 // --- Багрепорты ---------------------------------------------------------

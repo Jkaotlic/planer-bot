@@ -11,6 +11,7 @@ import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
 import { adminSectionFromSearch, scheduleDateFromSearch, type AdminSection } from "./screens/admin-section";
+import { foodRouteFromSearch, type FoodRoute } from "./screens/food/food-route";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -31,6 +32,10 @@ const AdminScreen = lazy(() => import("./screens/AdminScreen"));
 // доезжает вместе с `AdminScreen`; для наблюдателя это отдельный, более
 // мелкий кусок.
 const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
+// «Заказы и опросы» — оверлей, открытый по ссылке бота (`?screen=orders`), а не
+// вкладка: тот же приём, что у «Анонса» наблюдателя — код не должен доезжать
+// до тех, кто ссылку не открывал.
+const FoodScreen = lazy(() => import("./screens/food/FoodScreen").then((m) => ({ default: m.FoodScreen })));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
@@ -85,6 +90,9 @@ export function App() {
   const [selfEntryMode, setSelfEntryMode] = useState<SelfEntryMode | null>(() =>
     screenFromSearch(window.location.search),
   );
+  // «Заказы и опросы» — тот же приём, что у формы больничного выше: ссылка из
+  // бота (`?screen=orders`) читается один раз при открытии, на один показ.
+  const [foodRoute, setFoodRoute] = useState<FoodRoute | null>(() => foodRouteFromSearch(window.location.search));
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Sets, not single ids: several rows (two pending swaps, two open weekend
@@ -245,7 +253,7 @@ export function App() {
     // вкладку («📣 Анонс») ставит эффект выше, форму-оверлей («🤒 Больничный»,
     // «📌 Мероприятие») — `selfEntryMode`. Настройка, перебивающая их, сделала бы
     // кнопку в боте враньём.
-    if (adminSectionFromSearch(search) || screenFromSearch(search)) return;
+    if (adminSectionFromSearch(search) || screenFromSearch(search) || foodRouteFromSearch(search)) return;
     setTab(startTabScreen(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me })));
   }, [data]);
 
@@ -518,6 +526,14 @@ export function App() {
       <div style={centeredStyle}>
         <Spinner size="l" />
       </div>
+    );
+  }
+
+  if (foodRoute) {
+    return (
+      <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю…</div>}>
+        <FoodScreen initial={foodRoute} onClose={() => setFoodRoute(null)} />
+      </Suspense>
     );
   }
 

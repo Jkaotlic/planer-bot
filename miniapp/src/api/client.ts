@@ -2,6 +2,13 @@ import { createEmployeesApi, createReadApi, createTransport } from "@planer/clie
 import { readInitData } from "./init-data";
 import type { AnnouncementRecipient } from "@planer/shared";
 import type { ShiftCountsReport } from "@planer/shared";
+// Импорт для собственного использования ниже (`PollView`, `ApiClient`) плюс
+// реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
+// `POST /api/polls/:id/vote`), — опрос считает и правами, и сроком закрытия
+// сервер, а не мини-апп заново.
+import type { TeamAudience, PollChoice, PollTally, PlaceInput } from "@planer/shared";
+export type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
+export type { PlaceInput } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -112,6 +119,28 @@ import {
   mockSetNoticePref,
   mockSendAnnouncement,
   mockGetAnnouncementRecipients,
+  mockGetTeamAudience,
+  mockGetPolls,
+  mockGetPoll,
+  mockCreatePoll,
+  mockVotePoll,
+  mockClosePoll,
+  mockCancelPoll,
+  mockGetFoodPlaces,
+  mockSaveFoodPlace,
+  mockArchiveFoodPlace,
+  mockGetOrders,
+  mockGetOrder,
+  mockCreateOrder,
+  mockAddOrderItem,
+  mockSetOrderItemQty,
+  mockRemoveOrderItem,
+  mockDeclineOrder,
+  mockCloseOrder,
+  mockCancelOrder,
+  mockSetOrderPaid,
+  mockSetOrderPaymentFor,
+  mockRemindOrderUnpaid,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -521,6 +550,75 @@ export interface AnnouncementResult {
 // Тип общий с сервером: роль нужна кнопкам «Админам» / «Работникам».
 export type { AnnouncementRecipient } from "@planer/shared";
 
+/** Один потенциальный адресат опроса или заказа — контракт `GET /api/team-audience`.
+ *  `onShift` — только для этой ручки: анонсам всё равно, кто сегодня на месте. */
+export interface AudienceCandidate {
+  id: number;
+  displayName: string;
+  reachable: boolean;
+  role: "admin" | "worker" | "observer";
+  onShift: boolean;
+}
+
+/** Опрос глазами того, кто его открыл — контракт `GET /api/polls`, `GET /api/polls/:id`.
+ *  `canManage` уже посчитан сервером (запускающий или админ) — экран не повторяет правило. */
+export interface PollView {
+  id: number;
+  question: string;
+  creatorId: number;
+  creatorName: string;
+  closesAt: string | null;
+  closes: string | null;
+  open: boolean;
+  cancelled: boolean;
+  isCreator: boolean;
+  canManage: boolean;
+  myChoice: PollChoice | null;
+  tally: PollTally;
+  recipientCount: number;
+}
+
+/** Место с меню — контракт `GET /api/food-places`, `POST /api/food-places`,
+ *  `PUT /api/food-places/:id`. Общее для всех работников, как и опрос. */
+export interface PlaceView {
+  id: number;
+  name: string;
+  menu: { id: number; name: string; price: number }[];
+}
+
+/** Заказ еды глазами того, кто его открыл — контракт GET /api/orders,
+ *  GET /api/orders/:id (см. OrderView в server/src/orders/order-service.ts).
+ *  canManage и people уже посчитаны сервером: запускающий или админ, и
+ *  список «кто сколько» только им — экран не повторяет ни то, ни другое. */
+export interface OrderView {
+  id: number;
+  creatorId: number;
+  creatorName: string;
+  placeId: number | null;
+  placeName: string | null;
+  menu: { id: number; name: string; price: number }[];
+  note: string | null;
+  payHint: string | null;
+  closesAt: string | null;
+  closes: string | null;
+  open: boolean;
+  closed: boolean;
+  cancelled: boolean;
+  isCreator: boolean;
+  canManage: boolean;
+  myItems: { id: number; name: string; price: number; qty: number }[];
+  myTotal: number;
+  declined: boolean;
+  recipientCount: number;
+  respondedCount: number;
+  dishes: { name: string; price: number; qty: number }[];
+  total: number;
+  people: { employeeId: number; displayName: string; amount: number; declined: boolean }[] | null;
+  /** Кто уже сдал деньги за заказ. `rows` — только запускающему/админу, как
+   *  и `people` выше: сумма и отметка коллеги — не общее знание. */
+  payment: { myPaid: boolean; paidCount: number; total: number; rows: (PaymentRow & { amount: number })[] | null };
+}
+
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
  *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */
 export interface BugReportRow {
@@ -920,6 +1018,57 @@ export interface ApiClient {
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
   /** Кому уйдёт анонс «всем», глазами того, кто его пишет — для выбора адресатов. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
+
+  // --- Опросы («Заказы и опросы») --------------------------------------------
+  /** Адресаты опроса и заказа еды — экран выбора «вся команда / на смене / вручную». */
+  getTeamAudience(): Promise<AudienceCandidate[]>;
+  /** Опросы: список своих — экран «Заказы и опросы». */
+  getPolls(): Promise<PollView[]>;
+  /** Один опрос — карточка перечитывает его после отказа действия. */
+  getPoll(id: number): Promise<PollView>;
+  /** Заводит опрос и сразу шлёт приглашения адресатам. */
+  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }>;
+  /** Свой голос — «За» / «Против» / «Воздержался». */
+  votePoll(id: number, choice: PollChoice): Promise<PollView>;
+  /** «Набрали, закрыть»: приём голосов останавливается, итог уходит всем. */
+  closePoll(id: number): Promise<PollView>;
+  /** Отменяет опрос без итога — запускающему передумалось. */
+  cancelPoll(id: number): Promise<PollView>;
+
+  // --- Места и меню («Заказы и опросы») --------------------------------------
+  /** Места с меню — общие для всей команды, не только для смотрящего. */
+  getFoodPlaces(): Promise<PlaceView[]>;
+  /** `id: null` — заводит новое место, иначе правит существующее. */
+  saveFoodPlace(id: number | null, input: PlaceInput): Promise<PlaceView>;
+  /** Архивирует место — блюда с ним не удаляются, на них ссылаются заказы. */
+  archiveFoodPlace(id: number): Promise<void>;
+
+  // --- Заказы еды («Заказы и опросы») -----------------------------------------
+  /** Заказы: список своих — экран «Заказы и опросы». */
+  getOrders(): Promise<OrderView[]>;
+  getOrder(id: number): Promise<OrderView>;
+  /** Заводит заказ и сразу шлёт приглашения адресатам. */
+  createOrder(input: { placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[] }>;
+  /** Своя позиция: из меню места или своим блюдом с ценой. */
+  addOrderItem(id: number, input: { menuItemId: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
+  setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;
+  removeOrderItem(id: number, itemId: number): Promise<OrderView>;
+  /** «Не буду» — снимает свои позиции и отмечает отказ. */
+  declineOrder(id: number): Promise<OrderView>;
+  /** «Набрали, закрыть»: приём позиций останавливается, всем уходит «сдай». */
+  closeOrder(id: number): Promise<OrderView>;
+  /** Отменяет заказ без «сдай» — запускающему передумалось. */
+  cancelOrder(id: number): Promise<OrderView>;
+  /** Своя отметка «Я сдал» — только для того, кто должен. */
+  setOrderPaid(id: number, paid: boolean): Promise<OrderView>;
+  /** Галочка за другого: наличка в руки, ставит только запускающий/админ. */
+  setOrderPaymentFor(id: number, employeeId: number, paid: boolean): Promise<OrderView>;
+  /** Дожим по неотметившимся — письмо уходит только должникам. `unpaid` —
+   *  знаменатель («D из N»), `unreachable` — кого не достучаться поимённо
+   *  (без Telegram или бот заблокирован); может быть непустым даже при
+   *  `delivered > 0`. */
+  remindOrderUnpaid(id: number): Promise<{ delivered: number; unpaid: number; unreachable: string[] }>;
+
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
   resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
@@ -1631,6 +1780,79 @@ export const realClient: ApiClient = {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
   },
+
+  async getTeamAudience() {
+    const { candidates } = await authorizedGet<{ candidates: AudienceCandidate[] }>("/api/team-audience");
+    return candidates;
+  },
+  async getPolls() {
+    const { polls } = await authorizedGet<{ polls: PollView[] }>("/api/polls");
+    return polls;
+  },
+  async getPoll(id) {
+    return (await authorizedGet<{ poll: PollView }>(`/api/polls/${id}`)).poll;
+  },
+  createPoll: (input) =>
+    authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[] }>("/api/polls", input),
+  async votePoll(id, choice) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/vote`, { choice })).poll;
+  },
+  async closePoll(id) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/close`, {})).poll;
+  },
+  async cancelPoll(id) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/cancel`, {})).poll;
+  },
+
+  async getFoodPlaces() {
+    return (await authorizedGet<{ places: PlaceView[] }>("/api/food-places")).places;
+  },
+  async saveFoodPlace(id, input) {
+    const res = id == null
+      ? await authorizedPostJson<{ place: PlaceView }>("/api/food-places", input)
+      : await authorizedPutJson<{ place: PlaceView }>(`/api/food-places/${id}`, input);
+    return res.place;
+  },
+  async archiveFoodPlace(id) {
+    await authorizedDelete<{ ok: true }>(`/api/food-places/${id}`);
+  },
+
+  async getOrders() {
+    return (await authorizedGet<{ orders: OrderView[] }>("/api/orders")).orders;
+  },
+  async getOrder(id) {
+    return (await authorizedGet<{ order: OrderView }>(`/api/orders/${id}`)).order;
+  },
+  createOrder: (input) =>
+    authorizedPostJson<{ order: OrderView; delivered: number; unreachable: string[] }>("/api/orders", input),
+  async addOrderItem(id, input) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/items`, input)).order;
+  },
+  async setOrderItemQty(id, itemId, qty) {
+    return (await authorizedPatchJson<{ order: OrderView }>(`/api/orders/${id}/items/${itemId}`, { qty })).order;
+  },
+  async removeOrderItem(id, itemId) {
+    return (await authorizedDelete<{ order: OrderView }>(`/api/orders/${id}/items/${itemId}`)).order;
+  },
+  async declineOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/decline`, {})).order;
+  },
+  async closeOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/close`, {})).order;
+  },
+  async cancelOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/cancel`, {})).order;
+  },
+  async setOrderPaid(id, paid) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/paid`, { paid })).order;
+  },
+  async setOrderPaymentFor(id, employeeId, paid) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/payments/${employeeId}`, { paid })).order;
+  },
+  remindOrderUnpaid(id) {
+    return authorizedPostJson<{ delivered: number; unpaid: number; unreachable: string[] }>(`/api/orders/${id}/remind`, {});
+  },
+
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
     return reports;
@@ -1747,6 +1969,28 @@ const devClient: ApiClient = {
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
+  getTeamAudience: () => mockGetTeamAudience(),
+  getPolls: () => mockGetPolls(),
+  getPoll: (id) => mockGetPoll(id),
+  createPoll: (input) => mockCreatePoll(input),
+  votePoll: (id, choice) => mockVotePoll(id, choice),
+  closePoll: (id) => mockClosePoll(id),
+  cancelPoll: (id) => mockCancelPoll(id),
+  getFoodPlaces: () => mockGetFoodPlaces(),
+  saveFoodPlace: (id, input) => mockSaveFoodPlace(id, input),
+  archiveFoodPlace: (id) => mockArchiveFoodPlace(id),
+  getOrders: () => mockGetOrders(),
+  getOrder: (id) => mockGetOrder(id),
+  createOrder: (input) => mockCreateOrder(input),
+  addOrderItem: (id, input) => mockAddOrderItem(id, input),
+  setOrderItemQty: (id, itemId, qty) => mockSetOrderItemQty(id, itemId, qty),
+  removeOrderItem: (id, itemId) => mockRemoveOrderItem(id, itemId),
+  declineOrder: (id) => mockDeclineOrder(id),
+  closeOrder: (id) => mockCloseOrder(id),
+  cancelOrder: (id) => mockCancelOrder(id),
+  setOrderPaid: (id, paid) => mockSetOrderPaid(id, paid),
+  setOrderPaymentFor: (id, employeeId, paid) => mockSetOrderPaymentFor(id, employeeId, paid),
+  remindOrderUnpaid: (id) => mockRemindOrderUnpaid(id),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

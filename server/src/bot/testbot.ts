@@ -11,8 +11,11 @@ import type { InlineKeyboardMarkup, UserFromGetMe } from "grammy/types";
  * `calls`, у одной — счётчик `message_id`), поэтому и не заменялись механически.
  *
  * Разделено на две функции нарочно: подделка `botInfo` одинакова у всех
- * девятнадцати, а вот ЧТО именно тест записывает — его дело, и у двух тестов
- * транспорт особый (падение на конкретном chat_id, растущий `message_id`).
+ * девятнадцати, а вот ЧТО именно тест записывает — его дело. `recordApi` с
+ * Задачи 5 сам отдаёт растущий `message_id` на каждый `sendMessage` (опрос
+ * должен погасить кнопки именно в своём письме, а не в чьём-то чужом) — свой
+ * транспорт нужен только тем, кому мало и этого: падение на конкретном
+ * `chat_id`, или id, которые надо вычислить по своей формуле (см. `bug-report-bot.test.ts`).
  */
 export function stubBotInfo<T extends Bot>(bot: T, patch: Partial<UserFromGetMe> = {}): T {
   bot.botInfo = {
@@ -64,11 +67,15 @@ export interface ApiRecorder {
  */
 export function recordApi(bot: Bot): ApiRecorder {
   const recorder: ApiRecorder = { calls: [], sent: [], answers: [] };
+  // Растущий `message_id` — опросы и заказы еды запоминают его (`sendTracked`),
+  // чтобы потом погасить кнопки именно в этом письме; отдавать всем одно и то
+  // же число значило бы, что правка одного письма гасит кнопки во всех сразу.
+  let nextMessageId = 1;
   bot.api.config.use((_prev, method, payload) => {
     recorder.calls.push({ method, payload });
     if (method === "sendMessage") recorder.sent.push(payload as unknown as SentMessage);
     if (method === "answerCallbackQuery") recorder.answers.push((payload as { text?: string }).text ?? "");
-    return { ok: true, result: {} } as never;
+    return { ok: true, result: method === "sendMessage" ? { message_id: nextMessageId++ } : {} } as never;
   });
   return recorder;
 }

@@ -32,7 +32,8 @@ import { teamNow } from "../util/team-time";
 import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { installFoodHandlers } from "./food-handlers";
 import {
   notifyUser,
   notifyAdmins,
@@ -385,6 +386,11 @@ export function createBot(deps: BotDeps): Bot {
     return me.isAdmin || config.adminTelegramIds.includes(tgId);
   }
 
+  // Регистрирует колбэки опроса (`poll:v:`, `poll:r:`, `poll:close:`) прямо
+  // сейчас — поэтому вызов обязан стоять выше catch-all
+  // `bot.on("callback_query:data", …)` в конце файла, иначе тот перехватит их первым.
+  const food = installFoodHandlers(bot, { db, config, acting, actsAsAdmin });
+
   /** Что можно доложить к текстовому ответу: у `/admin` это отключённое превью ссылки. */
   type MenuExtra = { link_preview_options?: { is_disabled: boolean } };
 
@@ -407,7 +413,7 @@ export function createBot(deps: BotDeps): Bot {
     if (!me) return undefined;
     const allowlisted = config.adminTelegramIds.includes(tgId);
     if (!me.isActive && !allowlisted) return undefined;
-    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted });
+    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted, isObserver: me.isObserver });
   }
 
   /**
@@ -1300,6 +1306,7 @@ export function createBot(deps: BotDeps): Bot {
     const text = ctx.msg.text;
     if (text === BTN_WEEK) await sendWeek(ctx);
     else if (text === BTN_MY_SHIFTS) await sendMiniApp(ctx);
+    else if (text === BTN_FOOD) await food.sendFoodMenu(ctx);
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
     else if (text === BTN_BUG) await startBugReport(ctx);
