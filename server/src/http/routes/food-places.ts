@@ -4,7 +4,7 @@ import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
 import { requireAuth, type Env } from "../middleware";
-import { archivePlace, createPlace, listPlaces, updatePlace } from "../../orders/place-service";
+import { archivePlace, createPlace, getPlaceView, listPlaces, updatePlace } from "../../orders/place-service";
 
 /**
  * Тело запроса, приведённое к объекту.
@@ -49,9 +49,13 @@ export function createFoodPlaceRoutes(db: Db, config: Config): Hono<Env> {
 
   app.delete("/api/food-places/:id", auth, (c) => {
     const id = Number(c.req.param("id"));
+    // Имя читается ДО архивации: `archivePlace` гасит место условным UPDATE
+    // и своего имени в ответе не несёт, а строка журнала «Изменено место…»
+    // без имени не отвечает на первый вопрос, который к ней возникает.
+    const name = getPlaceView(db, id)?.name;
     const result = archivePlace(db, id);
     if (!result.ok) return c.json({ error: result.error }, 404);
-    recordAudit(db, "food_place_changed", c.get("auth").employeeId, { placeId: id, action: "удалено" });
+    recordAudit(db, "food_place_changed", c.get("auth").employeeId, { placeId: id, name, action: "удалено" });
     return c.json({ ok: true });
   });
 

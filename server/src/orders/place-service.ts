@@ -49,8 +49,12 @@ export function createPlace(db: Db, input: PlaceInput, createdBy: number): Place
 export function updatePlace(db: Db, id: number, input: PlaceInput): Result & { place?: PlaceView } {
   if (!getPlaceView(db, id)) return { ok: false, error: "Места больше нет." };
   const current = new Map(menuOf(db, id).map((m) => [m.id, m]));
+  // Тот же отказ и для чужого блюда, и для своего, но уже архивированного
+  // кем-то другим, пока форма была открыта: id, которого нет среди текущих
+  // активных блюд места. Открывший старую версию меню должен перечитать его
+  // заново, а не тихо воскресить архивную строку своей правкой.
   if (input.menu.some((m) => m.id != null && !current.has(m.id))) {
-    return { ok: false, error: "В меню блюдо из другого места." };
+    return { ok: false, error: "Меню уже поменяли — открой место заново." };
   }
   db.transaction((tx) => {
     tx.update(foodPlaces).set({ name: input.name }).where(eq(foodPlaces.id, id)).run();

@@ -2090,14 +2090,22 @@ export async function mockSaveFoodPlace(id: number | null, input: PlaceInput): P
   // Тот же отказ и тот же текст, что у ручки `POST /api/food-places` на
   // сервере — иначе DEV пропустил бы то, что живой сервер отклонит.
   if (!parsed.success) throw new Error("Проверь название, блюда и цены (целые рубли, до 100 000).");
-  const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: m.id ?? nextMenuItemId++, name: m.name, price: m.price }));
   if (id == null) {
+    const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: nextMenuItemId++, name: m.name, price: m.price }));
     const place: MockPlace = { id: nextPlaceId++, name: parsed.data.name, menu, archived: false };
     PLACES.push(place);
     return { id: place.id, name: place.name, menu: place.menu };
   }
   const place = PLACES.find((p) => p.id === id && !p.archived);
   if (!place) throw new Error("Места больше нет.");
+  // Тот же отказ и тот же текст, что у `updatePlace` на сервере: id, которого
+  // нет среди ТЕКУЩИХ блюд ЭТОГО места (чужое место или уже архивированное
+  // кем-то другим блюдо), не должен молча привязаться правкой.
+  const currentIds = new Set(place.menu.map((m) => m.id));
+  if (parsed.data.menu.some((m) => m.id != null && !currentIds.has(m.id))) {
+    throw new Error("Меню уже поменяли — открой место заново.");
+  }
+  const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: m.id ?? nextMenuItemId++, name: m.name, price: m.price }));
   place.name = parsed.data.name;
   place.menu = menu;
   return { id: place.id, name: place.name, menu: place.menu };

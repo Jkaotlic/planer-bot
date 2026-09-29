@@ -28,6 +28,16 @@ export const placeInputSchema = z
   .refine(
     (p) => new Set(p.menu.map((m) => m.name.toLocaleLowerCase("ru"))).size === p.menu.length,
     { message: "В меню два блюда с одним названием — в чате их кнопки не различить.", path: ["menu"] },
+  )
+  // Повторный id в одном теле запроса — само по себе противоречивое тело:
+  // сервис (`updatePlace`) обновляет блюдо по id первым найденным, и вторая
+  // строка с тем же id молча потерялась бы, а не стала отдельным блюдом.
+  .refine(
+    (p) => {
+      const ids = p.menu.map((m) => m.id).filter((id): id is number => id != null);
+      return new Set(ids).size === ids.length;
+    },
+    { message: "В меню дважды указан один и тот же id блюда.", path: ["menu"] },
   );
 
 export type PlaceInput = z.infer<typeof placeInputSchema>;

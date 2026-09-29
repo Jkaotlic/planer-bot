@@ -18,6 +18,15 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
   const patch = (i: number, next: Partial<Row>) => setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...next } : r)));
 
   async function save() {
+    // Пустая строка у СУЩЕСТВУЮЩЕГО блюда (есть id) — не тихий пропуск, а
+    // ошибка: молча выбросить его значило бы стереть блюдо из меню, хотя
+    // человек мог просто не закончить правку имени. Новая пустая строка (без
+    // id) по-прежнему отбрасывается сама — это то, чем она и была «+ Блюдо»
+    // без единого символа в ней.
+    if (rows.some((r) => r.id != null && !r.name.trim())) {
+      setError("У блюда пустое название — впиши или удали строку ✕.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -35,10 +44,19 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
       <Title level="2" weight="2">{place ? "Место" : "Новое место"}</Title>
       <Input header="Название" name="place-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
       {rows.map((r, i) => (
-        <div key={r.id ?? `new-${i}`} style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
-          <Input name={`dish-name-${i}`} placeholder="Блюдо" value={r.name} onChange={(e) => patch(i, { name: e.target.value })} disabled={busy} />
-          <Input name={`dish-price-${i}`} placeholder="₽" inputMode="numeric" value={r.price}
-            onChange={(e) => patch(i, { price: e.target.value.replace(/\D/g, "") })} disabled={busy} style={{ width: 90 }} />
+        // Ширина фиксируется на ОБЁРТКЕ, а не на самом `Input`: `style`,
+        // переданный `Input`, ложится на внутренний `<input>`, а не на его
+        // враппер telegram-ui — тот держит свою ширину независимо (замерено
+        // Playwright на 320/360px, см. отчёт задачи), и без обёртки поле
+        // «Блюдо» на 320px схлопывалось до 0.
+        <div key={r.id ?? `new-${i}`} data-testid="dish-row" style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Input name={`dish-name-${i}`} placeholder="Блюдо" value={r.name} onChange={(e) => patch(i, { name: e.target.value })} disabled={busy} />
+          </div>
+          <div style={{ width: 110, flex: "none" }}>
+            <Input name={`dish-price-${i}`} placeholder="₽" inputMode="numeric" value={r.price}
+              onChange={(e) => patch(i, { price: e.target.value.replace(/\D/g, "") })} disabled={busy} />
+          </div>
           <Button size="s" mode="plain" onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))} disabled={busy}>✕</Button>
         </div>
       ))}

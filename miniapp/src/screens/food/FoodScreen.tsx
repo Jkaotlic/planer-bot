@@ -82,6 +82,7 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
   // Кто именно архивируется — а не общий флаг: иначе тап «Удалить» на одной
   // карточке гасил бы кнопки у всех остальных мест в списке.
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (view.mode !== "list") return;
@@ -103,8 +104,18 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
 
   async function archive(id: number) {
     setBusyId(id);
+    setArchiveError(null);
     try {
       await apiClient.archiveFoodPlace(id);
+      setAttempt((n) => n + 1);
+    } catch (err) {
+      // Отказ (например, место уже удалено кем-то другим между открытием
+      // списка и тапом «Удалить» — 404 «Места больше нет.») раньше терялся
+      // молча: `try/finally` без `catch` оставлял необработанный rejection и
+      // ничего не говорил человеку. Список всё равно перечитывается — если
+      // причина именно в том, что место уже пропало, реальное состояние само
+      // покажет это в перезагруженном списке.
+      setArchiveError(err instanceof Error ? err.message : "Не удалось удалить место");
       setAttempt((n) => n + 1);
     } finally {
       setBusyId(null);
@@ -120,6 +131,7 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
       <div style={{ padding: "8px 0" }}>
         <Button size="s" mode="bezeled" onClick={() => setView({ mode: "editor", place: null })}>+ Место</Button>
       </div>
+      {archiveError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, paddingBottom: 8 }}>{archiveError}</div>}
       {places === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}
       {places === "error" && (
         <div>Не удалось загрузить. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>

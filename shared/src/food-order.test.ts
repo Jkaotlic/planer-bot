@@ -24,4 +24,15 @@ describe("placeInputSchema", () => {
     const result = placeInputSchema.safeParse({ name: "X", menu: [{ name: "Шаурма", price: 300 }, { name: "шаурма", price: 350 }] });
     expect(result.success).toBe(false);
   });
+
+  // Повторный id в одном присланном меню — не то же самое, что «блюдо из
+  // другого места» (это ловит сервис): здесь тело запроса само внутренне
+  // противоречиво, и сервис не должен гадать, какая из двух строк — правда.
+  it("два блюда с одним id в одном меню — ошибка", () => {
+    const result = placeInputSchema.safeParse({
+      name: "X",
+      menu: [{ id: 1, name: "Шаурма", price: 300 }, { id: 1, name: "Лаваш", price: 200 }],
+    });
+    expect(result.success).toBe(false);
+  });
 });

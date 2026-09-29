@@ -53,4 +53,18 @@ describe("PlaceEditor", () => {
     await settle();
     expect(save).toHaveBeenCalledWith(5, { name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600 }] });
   });
+
+  // Пустое имя у СУЩЕСТВУЮЩЕГО блюда (есть id) — не то же самое, что пустая
+  // НОВАЯ строка (та тихо отбрасывается): молча выбросить блюдо с id значило
+  // бы стереть его из меню без спроса, хотя человек хотел просто поправить
+  // имя и не закончил.
+  it("пустое имя у существующего блюда — ошибка, сохранение не отправляется", async () => {
+    const save = vi.spyOn(apiClient, "saveFoodPlace");
+    const el = await mountEditor({ place: { id: 5, name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600 }] }, onSaved: vi.fn() });
+    await act(async () => type(el.querySelector<HTMLInputElement>("input[name=dish-name-0]")!, "  "));
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    expect(save).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("У блюда пустое название — впиши или удали строку ✕.");
+  });
 });

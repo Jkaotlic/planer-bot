@@ -30,8 +30,19 @@ describe("места", () => {
     const { db, anya, place } = stage();
     const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600 }] }, anya.id);
     const result = updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: other.menu[0]!.id, name: "Пицца", price: 1 }] });
-    expect(result).toEqual({ ok: false, error: "В меню блюдо из другого места." });
+    expect(result).toEqual({ ok: false, error: "Меню уже поменяли — открой место заново." });
     expect(getPlaceView(db, other.id)!.menu[0]!.price).toBe(600);
+  });
+
+  // Тот же отказ, что и у чужого блюда: id, который был в меню, но кто-то
+  // другой уже успел его архивировать (правка старого снимка формы) —
+  // человек должен перечитать место заново, а не воскресить архивную строку.
+  it("правка старым снимком меню (блюдо уже архивировано) — тот же отказ, что у чужого места", () => {
+    const { db, place } = stage();
+    const [shawarma] = place.menu;
+    expect(updatePlace(db, place.id, { name: "Шаурмечная", menu: [] }).ok).toBe(true);
+    const stale = updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma!.id, name: "Шаурма", price: 350 }] });
+    expect(stale).toEqual({ ok: false, error: "Меню уже поменяли — открой место заново." });
   });
 
   it("архивное место пропадает из списка и не правится", () => {

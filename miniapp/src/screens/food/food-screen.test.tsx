@@ -76,4 +76,18 @@ describe("FoodScreen", () => {
     expect(archive).toHaveBeenCalledWith(1);
     expect(el.textContent).toContain("Мест ещё нет.");
   });
+
+  // Отказ архивации (например, место уже удалено кем-то другим — 404 «Места
+  // больше нет.») раньше терялся молча: `try/finally` без `catch` — отказ
+  // становился необработанным rejection'ом, а карточка ничего не говорила.
+  it("отказ архивации показывает текст ошибки, а не тонет молча", async () => {
+    const getFoodPlaces = vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([DODO]);
+    vi.spyOn(apiClient, "archiveFoodPlace").mockRejectedValue(new Error("Места больше нет."));
+    const el = await mount({ view: "places" });
+    await act(async () => byText(el, "Удалить").click());
+    getFoodPlaces.mockResolvedValue([]);
+    await act(async () => byText(el, "Удалить").click());
+    await settle();
+    expect(el.textContent).toContain("Места больше нет.");
+  });
 });

@@ -44,6 +44,7 @@ describe("места по HTTP", () => {
     expect(list.places.map((p: { name: string }) => p.name)).toEqual(["Шаурмечная"]);
     const edited = await app.request(new Request(`http://x/api/food-places/${place.id}`,
       send(igorT, { name: "Шаурмечная", menu: [{ id: place.menu[0].id, name: "Шаурма", price: 380 }] }, "PUT")));
+    expect(edited.status).toBe(200);
     expect((await edited.json()).place.menu[0].price).toBe(380);
   });
 
@@ -60,6 +61,25 @@ describe("места по HTTP", () => {
     const { place } = await (await app.request(new Request("http://x/api/food-places", send(anyaT, { name: "Додо", menu: [] })))).json();
     expect((await app.request(new Request(`http://x/api/food-places/${place.id}`, send(anyaT, {}, "DELETE")))).status).toBe(200);
     expect((await (await app.request(new Request("http://x/api/food-places", get(anyaT)))).json()).places).toEqual([]);
+  });
+
+  it("повторное удаление — 404, архивировать нечего второй раз", async () => {
+    const { app, anyaT } = await stage();
+    const { place } = await (await app.request(new Request("http://x/api/food-places", send(anyaT, { name: "Додо", menu: [] })))).json();
+    const first = await app.request(new Request(`http://x/api/food-places/${place.id}`, send(anyaT, {}, "DELETE")));
+    expect(first.status).toBe(200);
+    const second = await app.request(new Request(`http://x/api/food-places/${place.id}`, send(anyaT, {}, "DELETE")));
+    expect(second.status).toBe(404);
+  });
+
+  it("правка архивного места — 409, а не тихое воскрешение", async () => {
+    const { app, anyaT } = await stage();
+    const { place } = await (await app.request(new Request("http://x/api/food-places", send(anyaT, { name: "Додо", menu: [] })))).json();
+    await app.request(new Request(`http://x/api/food-places/${place.id}`, send(anyaT, {}, "DELETE")));
+    const res = await app.request(new Request(`http://x/api/food-places/${place.id}`,
+      send(anyaT, { name: "Додо", menu: [] }, "PUT")));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("Места больше нет.");
   });
 
   it("голое null вместо тела — 400, а не падение", async () => {

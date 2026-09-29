@@ -30,6 +30,8 @@ import {
   mockResolveBugReport,
   mockGetTeamAudience,
   mockCreatePoll,
+  mockGetFoodPlaces,
+  mockSaveFoodPlace,
   MOCK_ME,
 } from "./mock";
 
@@ -545,5 +547,17 @@ describe("опросы: dev-мок", () => {
     await expect(
       mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } }),
     ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+  });
+});
+
+describe("места: dev-мок", () => {
+  // Тот же отказ, что и у `updatePlace` на сервере: id блюда из ДРУГОГО места
+  // (или уже пропавшего из текущего) не должен молча привязаться к этому —
+  // иначе DEV пропустил бы гонку, которую живой сервер отклоняет.
+  it("правка чужим id блюда отклоняется тем же текстом, что и сервер", async () => {
+    const [first] = await mockGetFoodPlaces();
+    await expect(
+      mockSaveFoodPlace(first!.id, { name: first!.name, menu: [{ id: 999_999, name: "Чужое блюдо", price: 100 }] }),
+    ).rejects.toThrow("Меню уже поменяли — открой место заново.");
   });
 });
