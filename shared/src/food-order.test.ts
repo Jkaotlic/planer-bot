@@ -78,6 +78,7 @@ describe("тексты заказа", () => {
     expect(text).toContain("🍱 Аня собирает заказ: Шаурмечная");
     expect(text).toContain("Приём до 12:30");
     expect(text).toContain("Без лука");
+    expect(text).toContain("Куда сдавать: Перевод по номеру");
     expect(text).toContain("Твой заказ:\nШаурма ×2 — 700 ₽\nИтого: 700 ₽");
   });
 
@@ -110,5 +111,10 @@ describe("orderItemInputSchema", () => {
     expect(orderItemInputSchema.parse({ name: " Шаурма ", price: 350 })).toEqual({ name: "Шаурма", price: 350, qty: 1 });
     expect(orderItemInputSchema.safeParse({ menuItemId: 3, qty: 21 }).success).toBe(false);
     expect(orderItemInputSchema.safeParse({ name: "X" }).success).toBe(false);
+  });
+
+  it("смешанная форма и нулевое количество — отказ", () => {
+    expect(orderItemInputSchema.safeParse({ menuItemId: 3, name: "X", price: 1 }).success).toBe(false);
+    expect(orderItemInputSchema.safeParse({ menuItemId: 3, qty: 0 }).success).toBe(false);
   });
 });
