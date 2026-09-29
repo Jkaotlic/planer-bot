@@ -101,6 +101,29 @@ describe("OrderScreen — деньги", () => {
     expect(paid).toHaveBeenCalledWith(7, true);
   });
 
+  // Раньше кнопка «Ты отметился ✓» снимала отметку одним тапом — палец,
+  // промахнувшийся по экрану, молча стирал «сдал». Теперь галочка — просто
+  // текст, а снять можно только через подтверждение.
+  it("«✓ Ты отметился» — текст, тап по нему ничего не делает; «Снять отметку» — через подтверждение", async () => {
+    const PAID: OrderView = { ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1 }], myTotal: 350, payment: { myPaid: true, paidCount: 1, total: 1, rows: null } };
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue(PAID);
+    const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...PAID, payment: { myPaid: false, paidCount: 0, total: 1, rows: null } });
+    const el = await mountScreen(7);
+    const mark = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && n.textContent?.trim() === "✓ Ты отметился");
+    expect(mark).toBeTruthy();
+    expect(mark!.closest("button")).toBeNull();
+    await act(async () => mark!.click());
+    await settle();
+    expect(paid).not.toHaveBeenCalled();
+    await act(async () => byText(el, "Снять отметку").click());
+    expect(el.textContent).toContain("Снять отметку о сдаче?");
+    expect(paid).not.toHaveBeenCalled();
+    await act(async () => byText(el, "Снять").click());
+    await settle();
+    expect(paid).toHaveBeenCalledWith(7, false);
+    expect(byText(el, "💸 Я сдал")).toBeTruthy();
+  });
+
   it("запускающий отмечает наличку за Игоря", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue({
       ...BASE, open: false, closed: true, isCreator: true, canManage: true, people: [],

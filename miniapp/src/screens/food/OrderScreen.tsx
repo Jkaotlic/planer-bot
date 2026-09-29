@@ -137,11 +137,22 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           {!order.open && !order.cancelled && order.myTotal > 0 && !order.isCreator && (
             <div>Сдать: {formatMoney(order.myTotal)} — {order.creatorName}</div>
           )}
-          {order.closed && !order.isCreator && order.myTotal > 0 && (
-            <Button size="s" mode={order.payment.myPaid ? "gray" : "bezeled"} disabled={busy}
-              onClick={() => run(() => apiClient.setOrderPaid(order.id, !order.payment.myPaid))}>
-              {order.payment.myPaid ? "Ты отметился ✓" : "💸 Я сдал"}
+          {/* Отметка — не тумблер: кнопка «Ты отметился ✓» снимала «сдал» одним
+              тапом, и промах пальцем молча стирал его. Галочка — просто текст,
+              снять — отдельно и с подтверждением, как в боте (там повторный
+              тап вообще ничего не снимает). */}
+          {order.closed && !order.isCreator && order.myTotal > 0 && !order.payment.myPaid && (
+            <Button size="s" mode="bezeled" disabled={busy}
+              onClick={() => run(() => apiClient.setOrderPaid(order.id, true))}>
+              💸 Я сдал
             </Button>
+          )}
+          {order.closed && !order.isCreator && order.myTotal > 0 && order.payment.myPaid && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span>✓ Ты отметился</span>
+              <ConfirmButton label="Снять отметку" question="Снять отметку о сдаче?" confirmLabel="Снять" mode="plain"
+                onConfirm={() => run(() => apiClient.setOrderPaid(order.id, false))} disabled={busy} />
+            </div>
           )}
         </CardShell>
 
