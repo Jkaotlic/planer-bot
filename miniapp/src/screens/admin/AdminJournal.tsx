@@ -100,7 +100,7 @@ function ShiftCounts({ today }: { today: string }) {
         {report && report.kinds.length === 0 && <Placeholder description="За этот период смен не было." />}
 
         {report?.rows
-          .filter((row) => row.total > 0)
+          .filter((row) => (row.byGroup.shift + row.byGroup.duty + row.byGroup.other) > 0)
           .map((row) => {
             const palette = personPalette(row.employeeId);
             return (
@@ -115,19 +115,19 @@ function ShiftCounts({ today }: { today: string }) {
                     {initialsOf(row.displayName)}
                   </span>
                   <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 15 }}>{row.displayName}</span>
-                  <span style={{ flex: "none", fontWeight: 700 }}>{row.total}</span>
+                  <span style={{ flex: "none", fontWeight: 700 }}>{(row.byGroup.shift + row.byGroup.duty + row.byGroup.other)}</span>
                 </div>
                 <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.5 }}>
                   {report.kinds
-                    .filter((kind) => row.byKind[kind])
-                    .map((kind) => `${kind} ${row.byKind[kind]}`)
+                    .filter((kind) => row.byKind[kind.name])
+                    .map((kind) => `${kind.name} ${row.byKind[kind.name]}`)
                     .join(" · ")}
                 </div>
               </CardShell>
             );
           })}
 
-        {report && report.rows.every((row) => row.total === 0) && report.kinds.length > 0 && (
+        {report && report.rows.every((row) => (row.byGroup.shift + row.byGroup.duty + row.byGroup.other) === 0) && report.kinds.length > 0 && (
           <Placeholder description="Ни у кого нет смен за этот период." />
         )}
       </CardStack>

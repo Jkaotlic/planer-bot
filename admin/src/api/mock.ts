@@ -59,6 +59,8 @@ import {
   autoSendDateFor,
   ADMIN_NOTICE_KINDS,
   ADMIN_NOTICE_LABELS,
+  tallyShiftCounts,
+  SHIFT_COUNTS_GROUPS,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1156,33 +1158,28 @@ export async function mockDeleteCollection(id: number): Promise<void> {
 
 export async function mockGetShiftCounts(from: string, to: string): Promise<ShiftCountsReport> {
   await delay(220);
-  const inRange = ENTRIES.filter((s) => s.date >= from && s.date <= to && s.employeeId != null);
-  const kinds: string[] = [];
-  const rows = EMPLOYEES.filter((e) => e.isActive).map((employee) => {
-    const byKind: Record<string, number> = {};
-    let total = 0;
-    for (const shift of inRange) {
-      if (shift.employeeId !== employee.id) continue;
-      // Absences are not work — same rule as the server.
-      if (shift.category === "vacation" || shift.category === "sick_leave" || shift.category === "business_trip") continue;
-      const kind = (shift.templateId != null ? TEMPLATES.find((t) => t.id === shift.templateId)?.name : undefined)
-        ?? shift.title ?? "Своё время";
-      byKind[kind] = (byKind[kind] ?? 0) + 1;
-      total += 1;
-      if (!kinds.includes(kind)) kinds.push(kind);
-    }
-    return { employeeId: employee.id, displayName: employee.displayName, byKind, total };
+  // Тот же подсчёт, что на сервере: моку незачем держать свою копию правил.
+  return tallyShiftCounts({
+    from,
+    to,
+    entries: ENTRIES.filter((s) => s.date >= from && s.date <= to),
+    templates: TEMPLATES.map((t) => ({ id: t.id, name: t.name, category: t.category, accent: t.accent ?? null })),
+    employees: EMPLOYEES.filter((e) => e.isActive),
   });
-  const ordered = TEMPLATES.map((t) => t.name).filter((name) => kinds.includes(name));
-  return { from, to, kinds: [...ordered, ...kinds.filter((k) => !ordered.includes(k))], rows };
 }
 
 export async function mockGetShiftCountsCsv(from: string, to: string): Promise<string> {
   const report = await mockGetShiftCounts(from, to);
-  const header = ["Работник", ...report.kinds, "Всего"].join(";");
-  const lines = report.rows.map((row) =>
-    [row.displayName, ...report.kinds.map((kind) => String(row.byKind[kind] ?? 0)), String(row.total)].join(";"),
-  );
+  const totals: Record<string, string> = { shift: "Смен всего", duty: "Дежурств всего", other: "Прочего всего" };
+  const columns: { title: string; value: (row: ShiftCountsReport["rows"][number]) => number }[] = [];
+  for (const group of SHIFT_COUNTS_GROUPS) {
+    const kinds = report.kinds.filter((k) => k.group === group);
+    if (kinds.length === 0) continue;
+    for (const kind of kinds) columns.push({ title: kind.name, value: (row) => row.byKind[kind.name] ?? 0 });
+    columns.push({ title: totals[group]!, value: (row) => row.byGroup[group] });
+  }
+  const header = ["Работник", ...columns.map((c) => c.title)].join(";");
+  const lines = report.rows.map((row) => [row.displayName, ...columns.map((c) => String(c.value(row)))].join(";"));
   return [header, ...lines].join("\r\n");
 }
 

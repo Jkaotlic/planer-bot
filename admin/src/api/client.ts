@@ -2,6 +2,7 @@ import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 export type { CalendarDayDto };
 
+import type { ShiftCountsReport } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -394,21 +395,8 @@ export interface TemplateQueue {
   queue: RotationTurnView[];
 }
 
-/** One row of «кто сколько отдежурил». */
-export interface ShiftCountsRow {
-  employeeId: number;
-  displayName: string;
-  byKind: Record<string, number>;
-  total: number;
-}
-
-export interface ShiftCountsReport {
-  from: string;
-  to: string;
-  /** Column order, already sorted the way the presets are shown elsewhere. */
-  kinds: string[];
-  rows: ShiftCountsRow[];
-}
+/** «Кто сколько отдежурил» — тип общий с сервером: форма отчёта живёт в shared. */
+export type { ShiftCountsReport, ShiftCountsRow } from "@planer/shared";
 
 /** One line of the «кто когда что менял» history. */
 export interface JournalEvent {

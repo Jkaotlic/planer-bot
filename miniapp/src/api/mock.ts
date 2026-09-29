@@ -73,6 +73,7 @@ import {
   REMINDER_HOUR_DEFAULT,
   validateReminderHour,
   autoSendDateFor,
+  tallyShiftCounts,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1613,24 +1614,14 @@ export async function mockGetMyCollections(): Promise<WorkerCollection[]> {
 
 export async function mockGetShiftCounts(from: string, to: string): Promise<ShiftCountsReport> {
   await delay(220);
-  const inRange = ALL_ENTRIES.filter((s) => s.date >= from && s.date <= to && s.employeeId != null);
-  const kinds: string[] = [];
-  const rows = EMPLOYEES.filter((e) => e.isActive).map((employee) => {
-    const byKind: Record<string, number> = {};
-    let total = 0;
-    for (const shift of inRange) {
-      if (shift.employeeId !== employee.id) continue;
-      if (shift.category === "vacation" || shift.category === "sick_leave" || shift.category === "business_trip") continue;
-      const kind = (shift.templateId != null ? TEMPLATES.find((t) => t.id === shift.templateId)?.name : undefined)
-        ?? shift.title ?? "Своё время";
-      byKind[kind] = (byKind[kind] ?? 0) + 1;
-      total += 1;
-      if (!kinds.includes(kind)) kinds.push(kind);
-    }
-    return { employeeId: employee.id, displayName: employee.displayName, byKind, total };
+  // Тот же подсчёт, что на сервере: моку незачем держать свою копию правил.
+  return tallyShiftCounts({
+    from,
+    to,
+    entries: ALL_ENTRIES.filter((s) => s.date >= from && s.date <= to),
+    templates: TEMPLATES.map((t) => ({ id: t.id, name: t.name, category: t.category, accent: t.accent ?? null })),
+    employees: EMPLOYEES.filter((e) => e.isActive),
   });
-  const ordered = TEMPLATES.map((t) => t.name).filter((name) => kinds.includes(name));
-  return { from, to, kinds: [...ordered, ...kinds.filter((k) => !ordered.includes(k))], rows };
 }
 
 const MOCK_ROSTER_CODES = new Set(["holiday", "k32", "k32-7", "k32-8", "k32-11", "k32-15", "dezh", "pokl", "v19", "rezerv", "otp", "event"]);

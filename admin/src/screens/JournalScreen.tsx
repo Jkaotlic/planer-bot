@@ -136,7 +136,7 @@ function ShiftCounts() {
               <tr>
                 <th className="counts-name">Работник</th>
                 {report.kinds.map((kind) => (
-                  <th key={kind}>{kind}</th>
+                  <th key={kind.name}>{kind.name}</th>
                 ))}
                 <th className="counts-total">Всего</th>
               </tr>
@@ -154,11 +154,11 @@ function ShiftCounts() {
                     </td>
                     {report.kinds.map((kind) => (
                       // A zero is written as a dash: the eye should catch the numbers.
-                      <td key={kind} className={row.byKind[kind] ? "" : "counts-zero"}>
-                        {row.byKind[kind] ?? "—"}
+                      <td key={kind.name} className={row.byKind[kind.name] ? "" : "counts-zero"}>
+                        {row.byKind[kind.name] ?? "—"}
                       </td>
                     ))}
-                    <td className="counts-total">{row.total}</td>
+                    <td className="counts-total">{row.byGroup.shift + row.byGroup.duty + row.byGroup.other}</td>
                   </tr>
                 );
               })}
