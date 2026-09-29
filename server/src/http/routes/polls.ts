@@ -12,7 +12,7 @@ import { jsonBody } from "../json-body";
 import {
   cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollView,
 } from "../../polls/poll-service";
-import { finishPollMessages, sendPollInvites } from "../../polls/poll-messenger";
+import { finishPollMessages, redrawPollMessage, sendPollInvites } from "../../polls/poll-messenger";
 
 const createSchema = z.object({
   question: z.string().trim().min(1).max(POLL_QUESTION_MAX),
@@ -101,6 +101,8 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: "not_found" }, 404);
     const result = castVote(db, poll, viewer.id, choice.data, now);
     if (!result.ok) return c.json({ error: result.error }, 409);
+    // Письмо в чате — косметика: ответ мини-аппу её не ждёт (см. `redrawPollMessage`).
+    if (bot) void redrawPollMessage(bot, db, poll, viewer.id, now);
     return c.json({ poll: pollView(db, poll, viewer, now) });
   });
 

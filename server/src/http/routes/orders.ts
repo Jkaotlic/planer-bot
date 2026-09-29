@@ -19,7 +19,7 @@ import {
   orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
 import { setOrderPaid } from "../../orders/order-payment-service";
-import { finishOrderMessages, placeName, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
+import { finishOrderMessages, placeName, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
 
 const optionalText = z.string().trim().max(FOOD_NOTE_MAX).nullable().transform((s) => (s ? s : null));
 const createSchema = z.object({
@@ -55,6 +55,16 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const viewer = viewerOf(c);
     const now = teamNow(config.teamTz);
     return order && orderView(db, order, viewer, now) ? { order, viewer, now } : null;
+  }
+
+  /**
+   * Ответ после правки своих позиций — и заодно перерисовка письма в чате,
+   * которое печатает «Твой заказ». Письмо — косметика: ответ её не ждёт
+   * (см. `redrawOrderMessage`).
+   */
+  function afterOwnEdit(c: { json(body: unknown): Response }, v: NonNullable<ReturnType<typeof visible>>) {
+    if (bot) void redrawOrderMessage(bot, db, v.order, v.viewer.id, v.now, config.publicUrl);
+    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
   }
 
   app.get("/api/orders", auth, (c) => c.json({ orders: listOrdersFor(db, viewerOf(c), teamNow(config.teamTz)) }));
@@ -113,7 +123,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
       ? addMenuItem(db, v.order, v.viewer.id, input.menuItemId, v.now)
       : addCustomItem(db, v.order, v.viewer.id, input, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
-    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+    return afterOwnEdit(c, v);
   });
 
   app.patch("/api/orders/:id/items/:itemId", auth, async (c) => {
@@ -125,7 +135,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     }
     const result = setItemQty(db, v.order, v.viewer.id, Number(c.req.param("itemId")), body.qty as number, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
-    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+    return afterOwnEdit(c, v);
   });
 
   app.delete("/api/orders/:id/items/:itemId", auth, (c) => {
@@ -133,7 +143,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     if (!v) return c.json({ error: "not_found" }, 404);
     const result = removeItem(db, v.order, v.viewer.id, Number(c.req.param("itemId")), v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
-    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+    return afterOwnEdit(c, v);
   });
 
   app.post("/api/orders/:id/decline", auth, (c) => {
@@ -141,7 +151,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     if (!v) return c.json({ error: "not_found" }, 404);
     const result = declineOrder(db, v.order, v.viewer.id, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
-    return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+    return afterOwnEdit(c, v);
   });
 
   app.post("/api/orders/:id/paid", auth, async (c) => {

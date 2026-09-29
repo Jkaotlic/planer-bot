@@ -10,7 +10,7 @@ import { sql } from "drizzle-orm";
 import { polls } from "../../db/schema";
 
 function fakeBot() {
-  const sent: { to: number; text: string }[] = [];
+  const sent: { to: number; text: string; id: number }[] = [];
   let nextId = 1;
   // Задвижка «медленной сети»: пока она стоит, каждый `sendMessage` ждёт —
   // рассылка висит внутри запроса, как на обрыве релея.
@@ -20,8 +20,9 @@ function fakeBot() {
     api: {
       sendMessage: vi.fn(async (to: number, text: string) => {
         if (gate) { waiting += 1; await gate; }
-        sent.push({ to, text });
-        return { message_id: nextId++ };
+        const id = nextId++;
+        sent.push({ to, text, id });
+        return { message_id: id };
       }),
       editMessageReplyMarkup: vi.fn(async () => ({})),
       editMessageText: vi.fn(async () => ({})),
@@ -227,5 +228,24 @@ describe("опрос не рассылается дважды", () => {
     const { app, anya, igor, anyaT, igorT } = await stage();
     expect((await app.request(new Request("http://x/api/polls", send(anyaT, body(igor))))).status).toBe(201);
     expect((await app.request(new Request("http://x/api/polls", send(igorT, body(anya))))).status).toBe(201);
+  });
+});
+
+describe("письмо опроса в чате перерисовывается после голоса в мини-аппе", () => {
+  it("голос Игоря — его письмо правится с отметкой и «✓» на выбранной кнопке", async () => {
+    const { app, api, sent, igor, anyaT, igorT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    const igorMessage = sent.find((m) => m.to === 101)!.id;
+    const res = await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(igorT, { choice: "against" })));
+    expect(res.status).toBe(200);
+    type EditCall = [number, number, string, { reply_markup: { inline_keyboard: { text: string }[][] } }];
+    await vi.waitFor(() => expect(api.editMessageText).toHaveBeenCalledTimes(1));
+    const [to, messageId, text, extra] = api.editMessageText.mock.calls[0] as unknown as EditCall;
+    expect([to, messageId]).toEqual([101, igorMessage]);
+    expect(text).toContain("Твой голос: 👎 Против");
+    const buttons = extra.reply_markup.inline_keyboard.flat().map((b) => b.text);
+    expect(buttons).toContain("✓ 👎 Против");
+    expect(buttons).not.toContain("🔒 Закрыть опрос");
   });
 });

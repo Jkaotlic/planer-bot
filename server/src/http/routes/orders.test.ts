@@ -12,7 +12,7 @@ import { sql } from "drizzle-orm";
 import { foodOrders } from "../../db/schema";
 
 function fakeBot() {
-  const sent: { to: number; text: string }[] = [];
+  const sent: { to: number; text: string; id: number }[] = [];
   // Кому доставка отвечает отказом — имитирует заблокированный ботом чат,
   // не требуя настоящей сети: `remindUnpaid` должен положить такого в
   // `unreachable`, а не молча посчитать «дошло».
@@ -27,8 +27,9 @@ function fakeBot() {
       sendMessage: vi.fn(async (to: number, text: string) => {
         if (gate) { waiting += 1; await gate; }
         if (failFor.has(to)) throw new Error("Forbidden: bot was blocked by the user");
-        sent.push({ to, text });
-        return { message_id: nextId++ };
+        const id = nextId++;
+        sent.push({ to, text, id });
+        return { message_id: id };
       }),
       editMessageReplyMarkup: vi.fn(async () => ({})),
       editMessageText: vi.fn(async () => ({})),
@@ -332,5 +333,68 @@ describe("заказ и дожим не рассылаются дважды", ()
     expect(sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(1);
     // Замок снят вместе с концом волны.
     expect((await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).status).toBe(200);
+  });
+});
+
+/**
+ * Письмо заказа в чате печатает «Твой заказ» — после правки в мини-аппе оно
+ * врало бы, пока человек не тапнет в чате. Перерисовка — косметика: ответ
+ * ручки её не ждёт и от её отказа не ломается.
+ */
+describe("письмо в чате перерисовывается после правки в мини-аппе", () => {
+  type EditCall = [number, number, string, unknown];
+  const editsTo = (api: { editMessageText: { mock: { calls: unknown[][] } } }, tg: number) =>
+    (api.editMessageText.mock.calls as EditCall[]).filter((call) => call[0] === tg);
+
+  async function staged() {
+    const s = await stage();
+    const { body } = await newOrder(s.app, s.anyaT, s.igor, s.placeId);
+    const igorMessage = s.sent.find((m) => m.to === 101)!.id;
+    return { ...s, orderId: body.order.id as number, igorMessage };
+  }
+
+  it("добавил своё блюдо — письмо Игоря правится с новой позицией и прежними кнопками", async () => {
+    const { app, api, igorT, orderId, igorMessage } = await staged();
+    const res = await app.request(new Request(`http://x/api/orders/${orderId}/items`, send(igorT, { name: "Суп дня", price: 280 })));
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(editsTo(api, 101)).toHaveLength(1));
+    const [, messageId, text, extra] = editsTo(api, 101)[0]!;
+    expect(messageId).toBe(igorMessage);
+    expect(text).toContain("Твой заказ:");
+    expect(text).toContain("Суп дня");
+    const buttons = ((extra as { reply_markup: { inline_keyboard: { text: string }[][] } }).reply_markup.inline_keyboard).flat().map((b) => b.text);
+    expect(buttons).toContain("🙅 Не буду");
+    expect(buttons).not.toContain("🔒 Закрыть приём");
+    // Письмо запускающей не трогается: правила Игорь.
+    expect(editsTo(api, 100)).toHaveLength(0);
+  });
+
+  it("количество, удаление и «Не буду» — тоже перерисовывают", async () => {
+    const { app, api, igorT, orderId } = await staged();
+    const added = await (await app.request(new Request(`http://x/api/orders/${orderId}/items`, send(igorT, { name: "Суп", price: 280 })))).json();
+    const itemId = added.order.myItems[0].id;
+    await app.request(new Request(`http://x/api/orders/${orderId}/items/${itemId}`, send(igorT, { qty: 3 }, "PATCH")));
+    await vi.waitFor(() => expect(editsTo(api, 101).at(-1)![2]).toContain("Суп ×3"));
+    await app.request(new Request(`http://x/api/orders/${orderId}/items/${itemId}`, send(igorT, {}, "DELETE")));
+    await vi.waitFor(() => expect(editsTo(api, 101).at(-1)![2]).not.toContain("Суп"));
+    await app.request(new Request(`http://x/api/orders/${orderId}/decline`, send(igorT, {})));
+    await vi.waitFor(() => expect(editsTo(api, 101).at(-1)![2]).toContain("Ты не заказываешь."));
+  });
+
+  it("отказ правки (письмо удалено) — ответ ручки всё равно 200", async () => {
+    const { app, api, igorT, orderId } = await staged();
+    api.editMessageText.mockRejectedValueOnce(new Error("Bad Request: message to edit not found"));
+    const res = await app.request(new Request(`http://x/api/orders/${orderId}/items`, send(igorT, { name: "Суп", price: 280 })));
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(editsTo(api, 101)).toHaveLength(1));
+  });
+
+  it("письмо не дошло (message_id нет) — править нечего, правки нет", async () => {
+    const { app, api, failFor, igor, anyaT, igorT, placeId } = await stage();
+    failFor.add(101);
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(editsTo(api, 101)).toHaveLength(0);
   });
 });

@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot } from "grammy";
-import { closesLabel, debtors, formatMoney, orderInviteText, organizerSummaryText, payRequestText } from "@planer/shared";
+import { closesLabel, debtors, formatMoney, isOpenAt, orderInviteText, organizerSummaryText, payRequestText } from "@planer/shared";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { foodPlaces, type FoodOrder } from "../db/schema";
@@ -70,6 +70,30 @@ export function orderTextFor(db: Db, order: FoodOrder, employeeId: number, today
  */
 export function orderMenu(db: Db, order: FoodOrder) {
   return order.placeId == null ? [] : menuForOrder(db, order.placeId);
+}
+
+/**
+ * Перерисовать письмо заказа одного человека — после его правки в мини-аппе.
+ *
+ * Письмо печатает «Твой заказ», и без правки оно врало бы до следующего тапа
+ * в чате. Косметика: ошибки (письмо удалено, «message is not modified») — в
+ * лог, наружу ничего не бросается, и вызывающий её не ждёт. Закрытый заказ
+ * не трогаем: его кнопки уже погасил `finishOrderMessages`, и правка с
+ * клавиатурой вернула бы их.
+ */
+export async function redrawOrderMessage(
+  bot: Bot, db: Db, order: FoodOrder, employeeId: number, now: TeamClock, publicUrl: string,
+): Promise<void> {
+  try {
+    if (!isOpenAt(order, now)) return;
+    const row = orderRecipientRows(db, order.id).find((r) => r.employeeId === employeeId);
+    if (row?.telegramUserId == null || row.messageId == null) return;
+    await bot.api.editMessageText(row.telegramUserId, row.messageId, orderTextFor(db, order, employeeId, now.date), {
+      reply_markup: orderKeyboard(order, orderMenu(db, order), publicUrl, order.createdBy === employeeId),
+    });
+  } catch (err) {
+    console.error("order: cosmetic redraw failed:", safeErrorMessage(err));
+  }
 }
 
 /** Одна строка колбэка на рассылку, дожим и правку после тапа — как `collectionPaidKeyboard`. */

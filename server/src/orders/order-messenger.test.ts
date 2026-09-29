@@ -5,7 +5,7 @@ import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { archivePlace, createPlace } from "./place-service";
 import { addCustomItem, addMenuItem, closeOrder, createOrder, declineOrder, getOrder } from "./order-service";
-import { finishOrderMessages, orderMenu, sendOrderInvites } from "./order-messenger";
+import { finishOrderMessages, orderMenu, redrawOrderMessage, sendOrderInvites } from "./order-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
 const URL = "https://example.com";
@@ -85,5 +85,23 @@ describe("рассылка заказа", () => {
     const { db, place, order } = stage();
     archivePlace(db, place.id);
     expect(orderMenu(db, order).map((m) => m.name)).toEqual(["Шаурма", "Чай"]);
+  });
+});
+
+describe("перерисовка письма заказа", () => {
+  it("открытый — правит письмо именно этого человека; закрытый — не трогает (кнопки уже погашены)", async () => {
+    const { db, anya, igor, order } = stage();
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await sendOrderInvites(bot, db, order, now, URL);
+    addCustomItem(db, order, igor.id, { name: "Суп", price: 280, qty: 1 }, now);
+    await redrawOrderMessage(bot, db, order, igor.id, now, URL);
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.payload.chat_id).toBe(101);
+    expect(edits[0]!.payload.text).toContain("Суп");
+    closeOrder(db, order, anya);
+    await redrawOrderMessage(bot, db, getOrder(db, order.id)!, igor.id, now, URL);
+    expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(1);
   });
 });

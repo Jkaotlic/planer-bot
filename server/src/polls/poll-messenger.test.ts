@@ -4,7 +4,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { castVote, closePoll, createPoll, getPoll, pollRecipientRows } from "./poll-service";
-import { finishPollMessages, sendPollInvites } from "./poll-messenger";
+import { finishPollMessages, redrawPollMessage, sendPollInvites } from "./poll-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -82,5 +82,25 @@ describe("рассылка опроса", () => {
     await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
     expect(sent.map((m) => m.chat_id).sort()).toEqual([100, 101]);
     expect(sent.every((m) => m.text.includes("Итоги опроса"))).toBe(true);
+  });
+});
+
+describe("перерисовка письма опроса", () => {
+  it("открытый — правит письмо именно этого человека; закрытый — не трогает (кнопки уже погашены)", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await sendPollInvites(bot, db, poll, now);
+    const igorMessage = pollRecipientRows(db, poll.id).find((r) => r.employeeId === igor.id)!.messageId;
+    castVote(db, poll, igor.id, "for", now);
+    await redrawPollMessage(bot, db, poll, igor.id, now);
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits.map((c) => [c.payload.chat_id, c.payload.message_id])).toEqual([[101, igorMessage]]);
+    closePoll(db, poll, anya);
+    await redrawPollMessage(bot, db, getPoll(db, poll.id)!, igor.id, now);
+    expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(1);
   });
 });

@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import {
-  POLL_CHOICE_LABEL, POLL_CHOICES, closesLabel, pollInviteText, pollResultText, pollTally, type PollChoice,
+  POLL_CHOICE_LABEL, POLL_CHOICES, closesLabel, isOpenAt, pollInviteText, pollResultText, pollTally, type PollChoice,
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollVotes, type Poll } from "../db/schema";
@@ -40,6 +40,25 @@ export function pollTextFor(db: Db, poll: Poll, employeeId: number, today: strin
     closes: closesLabel(poll.closesAt, today),
     myChoice: voteOf(db, poll.id, employeeId),
   });
+}
+
+/**
+ * Перерисовать письмо опроса одного человека — после его голоса в мини-аппе,
+ * чтобы «Твой голос» и «✓» на кнопке не врали до следующего тапа в чате.
+ * Косметика, как `redrawOrderMessage`: ошибки — в лог, закрытый опрос не
+ * трогаем (кнопки уже погашены `finishPollMessages`).
+ */
+export async function redrawPollMessage(bot: Bot, db: Db, poll: Poll, employeeId: number, now: TeamClock): Promise<void> {
+  try {
+    if (!isOpenAt(poll, now)) return;
+    const row = pollRecipientRows(db, poll.id).find((r) => r.employeeId === employeeId);
+    if (row?.telegramUserId == null || row.messageId == null) return;
+    await bot.api.editMessageText(row.telegramUserId, row.messageId, pollTextFor(db, poll, employeeId, now.date), {
+      reply_markup: pollKeyboard(poll.id, voteOf(db, poll.id, employeeId), employeeId === poll.createdBy),
+    });
+  } catch (err) {
+    console.error("poll: cosmetic redraw failed:", safeErrorMessage(err));
+  }
 }
 
 export async function sendPollInvites(bot: Bot, db: Db, poll: Poll, now: TeamClock): Promise<number> {
