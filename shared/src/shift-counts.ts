@@ -79,6 +79,7 @@ export function tallyShiftCounts(p: {
   employees: readonly { id: number; displayName: string }[];
 }): ShiftCountsReport {
   const templateById = new Map(p.templates.map((t) => [t.id, t] as const));
+  const templateByName = new Map(p.templates.map((t) => [t.name, t] as const));
   const rows = new Map<number, ShiftCountsRow>(
     p.employees.map((person) => [
       person.id,
@@ -93,7 +94,11 @@ export function tallyShiftCounts(p: {
     const row = rows.get(entry.employeeId);
     if (!row) continue; // архивный: история его, но в отчёте его нет
 
-    const template = entry.templateId != null ? templateById.get(entry.templateId) : undefined;
+    // Без вида, но с названием вида («День» из импорта или ручной записи) — это
+    // тот же вид: иначе такая запись заводила бы колонку-двойник в «Прочем».
+    const template =
+      (entry.templateId != null ? templateById.get(entry.templateId) : undefined) ??
+      (entry.title != null ? templateByName.get(entry.title) : undefined);
     let kind: ShiftCountsKind;
     if (entry.unrecognisedCode != null) {
       kind = { name: UNRECOGNISED_KIND, group: "other", accent: null };

@@ -73,6 +73,15 @@ describe("tallyShiftCounts", () => {
     expect(r.kinds).toEqual([]);
   });
 
+  it("запись без вида с названием вида — это тот вид, в какой бы очерёдности ни шла", () => {
+    // В проде такие есть: «День» без templateId (импорт, ручная запись). Без этого
+    // правила группу колонке решала бы первая попавшаяся запись, и все «Дни»
+    // уезжали бы в «Прочее».
+    const r = tally([e(10, null, { title: "День" }), e(11, 2)]);
+    expect(r.kinds).toEqual([{ name: "День", group: "shift", accent: "blue" }]);
+    expect(r.rows.map((x) => x.byGroup.shift)).toEqual([1, 1]);
+  });
+
   it("люди — в порядке списка, даже без смен", () => {
     expect(tally([]).rows.map((x) => x.displayName)).toEqual(["Аня", "Игорь"]);
   });
