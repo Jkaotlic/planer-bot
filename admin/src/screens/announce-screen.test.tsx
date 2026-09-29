@@ -17,7 +17,7 @@ import { AnnounceScreen } from "./AnnounceScreen";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function recipient(patch: Partial<AnnouncementRecipient> = {}): AnnouncementRecipient {
-  return { id: 1, displayName: "Аня", reachable: true, ...patch };
+  return { id: 1, displayName: "Аня", reachable: true, role: "worker", ...patch };
 }
 
 let root: Root | null = null;
@@ -98,6 +98,29 @@ describe("AnnounceScreen", () => {
     await act(async () => buttonByText(el, "Да, отправить").click());
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["Админам", [1]],
+    ["Работникам", [2]],
+  ])("«%s» отмечает свою роль, наблюдатель не попадает никуда", async (button, ids) => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue([
+      recipient({ id: 1, displayName: "Аня", role: "admin" }),
+      recipient({ id: 2, displayName: "Игорь", role: "worker" }),
+      recipient({ id: 3, displayName: "Лена", role: "observer" }),
+    ]);
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 1, intended: 1, unreachable: [], archivedCount: 0 });
+
+    const el = await mount();
+    await type(textareaByLabel(el, "Текст анонса"), "Новое в журнале");
+    act(() => buttonByText(el, button).click());
+    // Галочки видны: отправитель может поправить список до отправки.
+    expect(pickerRow(el, "Лена").querySelector("input")!.checked).toBe(false);
+
+    act(() => buttonByText(el, "Отправить").click());
+    await act(async () => buttonByText(el, "Да, отправить").click());
+    await settle();
+    expect(send).toHaveBeenCalledWith("Новое в журнале", ids);
   });
 
   it("при «Выбрать» без единой галки отправка недоступна, с одной — доступна", async () => {

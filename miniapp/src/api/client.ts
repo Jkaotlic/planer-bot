@@ -1,5 +1,6 @@
 import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 import { readInitData } from "./init-data";
+import type { AnnouncementRecipient } from "@planer/shared";
 import type { ShiftCountsReport } from "@planer/shared";
 import type {
   AdminEmployeeDto,
@@ -517,11 +518,8 @@ export interface AnnouncementResult {
 
 /** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
  *  Без телефонов и инвайт-токенов: экрану «Анонс» нужны ровно имя и «дойдёт ли». */
-export interface AnnouncementRecipient {
-  id: number;
-  displayName: string;
-  reachable: boolean;
-}
+// Тип общий с сервером: роль нужна кнопкам «Админам» / «Работникам».
+export type { AnnouncementRecipient } from "@planer/shared";
 
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
  *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */

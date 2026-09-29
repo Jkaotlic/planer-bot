@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { announcementUnreachableLine, filterPeople } from "@planer/shared";
+import { announcementUnreachableLine, filterPeople, presetRecipientIds, type AnnouncementPreset } from "@planer/shared";
 import { Button, List, Placeholder, Section, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
@@ -32,6 +32,8 @@ export function AdminAnnounce() {
   const [text, setText] = useState("");
   const [audienceMode, setAudienceMode] = useState<"all" | "picked">("all");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
+  /** Какая подборка горит. Сбрасывается ручной галочкой: список уже не «все админы». */
+  const [preset, setPreset] = useState<AnnouncementPreset | null>(null);
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -90,6 +92,16 @@ export function AdminAnnounce() {
       else next.add(id);
       return next;
     });
+    setPreset(null);
+    setConfirming(false);
+  }
+
+  /** Подборка — обычный выбор галочками, отмеченный за отправителя: он видит,
+   *  кому уйдёт, и может поправить. */
+  function pickPreset(next: AnnouncementPreset) {
+    setAudienceMode("picked");
+    setSelectedIds(new Set(presetRecipientIds(recipients ?? [], next)));
+    setPreset(next);
     setConfirming(false);
   }
 
@@ -154,6 +166,7 @@ export function AdminAnnounce() {
                   selected={audienceMode === "all"}
                   onClick={() => {
                     setAudienceMode("all");
+                    setPreset(null);
                     setConfirming(false);
                   }}
                 >
@@ -163,12 +176,23 @@ export function AdminAnnounce() {
                   selected={audienceMode === "picked"}
                   onClick={() => {
                     setAudienceMode("picked");
+                    setPreset(null);
                     setConfirming(false);
                   }}
                 >
                   Выбрать
                 </SegmentedControl.Item>
               </SegmentedControl>
+              {/* Подборки — отдельным рядом, а не сегментами: четыре сегмента на
+                  320–375px сжимались до «В… А… Р… В…» (замер 2026-09-29). */}
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <Button size="s" mode={preset === "admins" ? "filled" : "bezeled"} disabled={sending} onClick={() => pickPreset("admins")}>
+                  Админам
+                </Button>
+                <Button size="s" mode={preset === "workers" ? "filled" : "bezeled"} disabled={sending} onClick={() => pickPreset("workers")}>
+                  Работникам
+                </Button>
+              </div>
 
               {audienceMode === "picked" && (
                 <div style={{ marginTop: 10 }}>
