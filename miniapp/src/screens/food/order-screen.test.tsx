@@ -89,3 +89,37 @@ describe("OrderScreen — запускающий", () => {
     expect(byText(el, "Закрыть приём")).toBeTruthy();
   });
 });
+
+// Ревью раунд 1, находка №4: гонка тика и тапа по меню — сервер уже закрыл
+// приём между рендером и кликом. Отказ должен быть виден (наверху, а не под
+// карточками) И экран должен перечитать заказ, чтобы погашенные кнопки
+// пропали сами, а не висели активными до следующего открытия.
+describe("OrderScreen — гонка тика и ручного действия", () => {
+  it("addOrderItem отказывает «Приём закрыт.» — текст виден, заказ перечитан заново", async () => {
+    const getOrder = vi.spyOn(apiClient, "getOrder").mockResolvedValue(BASE);
+    vi.spyOn(apiClient, "addOrderItem").mockRejectedValue(new Error("Приём закрыт."));
+    const el = await mountScreen(7);
+    await act(async () => byText(el, `Шаурма · ${formatMoney(350)}`).click());
+    await settle();
+    expect(el.textContent).toContain("Приём закрыт.");
+    // Один раз на первую загрузку, второй — после провалившегося действия.
+    expect(getOrder).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Ревью раунд 1, находка №6: отказ загрузки — своим текстом сервера, а не
+// общей заглушкой, и с «Повторить», как у списка «Заказы и опросы».
+describe("OrderScreen — отказ загрузки", () => {
+  it("показывает текст сервера и «Повторить» поднимает заказ заново", async () => {
+    const getOrder = vi.spyOn(apiClient, "getOrder")
+      .mockRejectedValueOnce(new Error("Заказ не найден или недоступен."))
+      .mockResolvedValueOnce(BASE);
+    const el = await mountScreen(7);
+    expect(el.textContent).toContain("Заказ не найден или недоступен.");
+    expect(byText(el, "Повторить")).toBeTruthy();
+    await act(async () => byText(el, "Повторить").click());
+    await settle();
+    expect(getOrder).toHaveBeenCalledTimes(2);
+    expect(el.textContent).toContain("Твой заказ");
+  });
+});

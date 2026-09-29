@@ -7,12 +7,19 @@ import { AudiencePicker } from "../../components/AudiencePicker";
 /**
  * Новый заказ еды. «На смене» по умолчанию — та же причина, что у опроса
  * (Задача 7): чаще всего заказывают тех, кто сегодня рядом, позвать всех —
- * один тап. Место — из уже заведённых в «Места и меню» (кнопка есть на
- * списке «Заказы и опросы»), либо «Без меню» для разового заказа, где кнопок
- * блюд не будет и все позиции добавляются своими.
+ * один тап. Место — из уже заведённых в «Места и меню», либо «Без меню» для
+ * разового заказа, где кнопок блюд не будет и все позиции добавляются своими.
+ *
+ * `onEditPlaces` — необязательный: ревью раунда 1 решило, что ссылка «🍴 Места
+ * и меню» должна быть прямо тут, рядом с рядом кнопок места, а не только в
+ * шапке списка «Заказы и опросы» — иначе человек без единого заведённого
+ * места не видит, куда идти, до того как отменит форму.
  */
-export function OrderForm({ onDone, onCancel }: { onDone(orderId: number): void; onCancel(): void }) {
+export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: number): void; onCancel(): void; onEditPlaces?(): void }) {
   const [places, setPlaces] = useState<PlaceView[]>([]);
+  // Отдельно от `places`: пустой массив — это и «ещё грузится», и «мест
+  // правда нет», а подсказку «Мест пока нет» нельзя мигать на каждую загрузку.
+  const [placesLoaded, setPlacesLoaded] = useState(false);
   const [placeId, setPlaceId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [payHint, setPayHint] = useState("");
@@ -29,7 +36,10 @@ export function OrderForm({ onDone, onCancel }: { onDone(orderId: number): void;
     let alive = true;
     // Отказ загрузки мест — не повод класть форму: «Без меню» всё равно
     // работает, а место можно завести потом через «Места и меню».
-    apiClient.getFoodPlaces().then((p) => { if (alive) setPlaces(p); }).catch(() => { if (alive) setPlaces([]); });
+    apiClient.getFoodPlaces()
+      .then((p) => { if (alive) setPlaces(p); })
+      .catch(() => { if (alive) setPlaces([]); })
+      .finally(() => { if (alive) setPlacesLoaded(true); });
     return () => { alive = false; };
   }, []);
 
@@ -68,13 +78,21 @@ export function OrderForm({ onDone, onCancel }: { onDone(orderId: number): void;
     <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
       <Title level="2" weight="2">Новый заказ</Title>
       <div>
-        <div style={{ fontSize: 13.5, color: "var(--tgui--hint_color)", paddingBottom: 6 }}>Место</div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Место</div>
+          {onEditPlaces && <Button size="s" mode="plain" onClick={onEditPlaces}>🍴 Места и меню</Button>}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 6 }}>
           <Button size="s" mode={placeId === null ? "filled" : "bezeled"} disabled={busy} onClick={() => setPlaceId(null)}>Без меню</Button>
           {places.map((p) => (
             <Button key={p.id} size="s" mode={placeId === p.id ? "filled" : "bezeled"} disabled={busy} onClick={() => setPlaceId(p.id)}>{p.name}</Button>
           ))}
         </div>
+        {placesLoaded && places.length === 0 && (
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, paddingTop: 6 }}>
+            Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.
+          </div>
+        )}
         {/* Меню выбранного места серым — чтобы было видно, что уйдёт
             кнопками в заказ, ещё до того, как заказ заведён. */}
         {selectedPlace && (

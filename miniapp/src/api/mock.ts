@@ -89,6 +89,7 @@ import {
   dishSummary,
   orderTotal,
   orderItemInputSchema,
+  FOOD_QTY_MAX,
   type PollChoice,
   type TeamAudience,
   type PlaceInput,
@@ -2204,9 +2205,15 @@ export async function mockGetOrders(): Promise<OrderView[]> {
     .map(orderViewOf);
 }
 
+// Сервер отдаёт на оба случая («такого id нет» и «этот тебе не приходил»)
+// один 404 без различения — мок отвечает тем же одним текстом, по-русски
+// (сервер здесь отдаёт непереведённое `not_found`, но человек читает то, что
+// показывает экран, а не код ответа).
+const ORDER_NOT_FOUND = "Заказ не найден или недоступен.";
+
 function orderOrThrow(id: number): MockOrder {
   const o = ORDERS.find((x) => x.id === id);
-  if (!o) throw new Error("Заказ не найден");
+  if (!o) throw new Error(ORDER_NOT_FOUND);
   return o;
 }
 
@@ -2214,7 +2221,7 @@ export async function mockGetOrder(id: number): Promise<OrderView> {
   await delay(150);
   const o = orderOrThrow(id);
   if (o.createdBy !== MOCK_ME.id && !MOCK_ME.isAdmin && !o.recipients.includes(MOCK_ME.id)) {
-    throw new Error("not_found");
+    throw new Error(ORDER_NOT_FOUND);
   }
   return orderViewOf(o);
 }
@@ -2232,6 +2239,12 @@ export async function mockCreateOrder(input: {
   }
   const ids = mockAudienceIds(input.audience);
   const recipients = [...new Set([MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)])];
+  // Тот же отказ и тот же текст, что у `resolveAudience`/`POST /api/orders`:
+  // считать надо ДО заведения заказа — иначе он рождается без адресатов.
+  const telegramOf = (id: number) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId;
+  const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+  const unreachable = recipients.filter((id) => telegramOf(id) == null).map((id) => personName(id));
+  if (delivered < 2) throw new Error("Некому отправить: в списке никого, кроме тебя.");
   const order: MockOrder = {
     id: nextOrderId++,
     createdBy: MOCK_ME.id,
@@ -2246,10 +2259,6 @@ export async function mockCreateOrder(input: {
     declines: new Set(),
   };
   ORDERS.push(order);
-  // Как у опросов: «дошло» — только те, у кого в моке есть телеграм.
-  const telegramOf = (id: number) => EMPLOYEES.find((e) => e.id === id)?.telegramUserId;
-  const delivered = recipients.filter((id) => telegramOf(id) != null).length;
-  const unreachable = recipients.filter((id) => telegramOf(id) == null).map((id) => personName(id));
   return { order: orderViewOf(order), delivered, unreachable };
 }
 
@@ -2296,6 +2305,10 @@ export async function mockSetOrderItemQty(id: number, itemId: number, qty: numbe
   await delay(150);
   const o = orderOrThrow(id);
   guardOpen(o);
+  // Тот же отказ и тот же текст, что у `PATCH /api/orders/:id/items/:itemId`.
+  if (!Number.isInteger(qty) || qty < 1 || qty > FOOD_QTY_MAX) {
+    throw new Error(`Количество — от 1 до ${FOOD_QTY_MAX}.`);
+  }
   ownItem(o, itemId).qty = qty;
   return orderViewOf(o);
 }
@@ -2318,9 +2331,14 @@ export async function mockDeclineOrder(id: number): Promise<OrderView> {
   return orderViewOf(o);
 }
 
+// Тот же порядок отказов, что у `closeOrder`/`cancelOrder` на сервере: гонка
+// двойного тапа (Review Focus №1) не должна закрывать/отменять заказ дважды
+// и не должна слать вторую сводку — второй вызов получает отказ, а не «ok».
 export async function mockCloseOrder(id: number): Promise<OrderView> {
   await delay(150);
   const o = orderOrThrow(id);
+  if (o.cancelledAt != null) throw new Error("Заказ отменён.");
+  if (o.closedAt != null) throw new Error("Приём уже закрыт.");
   o.closedAt = new Date().toISOString();
   return orderViewOf(o);
 }
@@ -2328,6 +2346,7 @@ export async function mockCloseOrder(id: number): Promise<OrderView> {
 export async function mockCancelOrder(id: number): Promise<OrderView> {
   await delay(150);
   const o = orderOrThrow(id);
+  if (o.closedAt != null || o.cancelledAt != null) throw new Error("Приём уже закрыт.");
   o.cancelledAt = new Date().toISOString();
   return orderViewOf(o);
 }

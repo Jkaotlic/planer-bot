@@ -34,7 +34,15 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
 
   const toList = () => setRoute({ view: "list" });
   if (route.view === "new-poll") return <PollForm onDone={toList} onCancel={toList} />;
-  if (route.view === "new-order") return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} />;
+  if (route.view === "new-order") {
+    return (
+      <OrderForm
+        onDone={(orderId) => setRoute({ view: "order", orderId })}
+        onCancel={toList}
+        onEditPlaces={() => setRoute({ view: "places" })}
+      />
+    );
+  }
   if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} />;
   if (route.view === "places") return <PlacesScreen onBack={toList} />;
 
@@ -54,16 +62,23 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
       )}
       {Array.isArray(orders) && orders.length > 0 && (
         <CardStack>
-          {orders.map((o) => (
-            <CardShell key={`order-${o.id}`}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
-                Собирает {o.creatorName}{o.closes ? ` · ${o.closes}` : ""}
-              </div>
-              {o.myTotal > 0 && <div style={{ fontSize: 13.5 }}>Твой заказ: {formatMoney(o.myTotal)}</div>}
-              <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "order", orderId: o.id })}>Открыть</Button>
-            </CardShell>
-          ))}
+          {orders.map((o) => {
+            // Та же формула, что в OrderScreen/PollCard: `o.closes` — просто
+            // форматированный срок, он не гаснет сам, когда заказ закрыт или
+            // отменён (ревью раунд 1, находка №1) — карточка иначе показывала
+            // бы «до 12:30» и закрытому, и отменённому заказу.
+            const status = o.cancelled ? "отменён" : o.open ? (o.closes ?? "приём идёт") : "приём закрыт";
+            return (
+              <CardShell key={`order-${o.id}`}>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
+                <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+                  Собирает {o.creatorName} · {status}
+                </div>
+                {o.myTotal > 0 && <div style={{ fontSize: 13.5 }}>Твой заказ: {formatMoney(o.myTotal)}</div>}
+                <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "order", orderId: o.id })}>Открыть</Button>
+              </CardShell>
+            );
+          })}
         </CardStack>
       )}
       {polls === null && orders === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}

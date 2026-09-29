@@ -53,13 +53,37 @@ describe("FoodScreen", () => {
     expect(el.textContent).toContain("Шаурмечная");
   });
 
+  // Ревью раунд 1, находка №1: `o.closes` — просто форматированный срок, он
+  // не гаснет сам, когда заказ закрыт/отменён — карточка молча показывала бы
+  // «до 12:30» и закрытому, и отменённому заказу, будто приём ещё идёт.
+  it("карточки списка показывают статус закрытого и отменённого заказа", async () => {
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([
+      { ...ORDER, id: 8, placeName: "Закрытый", open: false, closed: true, cancelled: false },
+      { ...ORDER, id: 9, placeName: "Отменённый", open: false, closed: false, cancelled: true },
+    ]);
+    const el = await mount({ view: "list" });
+    expect(el.textContent).toContain("Закрытый");
+    expect(el.textContent).toContain("Собирает Аня · приём закрыт");
+    expect(el.textContent).toContain("Отменённый");
+    expect(el.textContent).toContain("Собирает Аня · отменён");
+    // Срок «до 12:30» из фикстуры не должен всплывать — заказ уже не открыт.
+    expect(el.textContent).not.toContain("до 12:30");
+  });
+
   // Кнопка «🍱 Новый заказ» в боте и в шапке списка ведёт сюда — форма
-  // заказа, а не заглушка «в следующем обновлении».
-  it("маршрут «new-order» открывает OrderForm", async () => {
-    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+  // заказа, а не заглушка «в следующем обновлении». `toContain("Новый заказ")`
+  // сам по себе не различает форму от списка — на списке есть кнопка «🍱 Новый
+  // заказ», та же подстрока (находка ревью раунда 1 №2: тест не мог упасть).
+  // Проверяем то, чего на списке нет вовсе: `getFoodPlaces`, которую список
+  // не дёргает, и «Разослать» — кнопку, которая есть только у формы.
+  it("маршрут «new-order» открывает OrderForm, а не список", async () => {
+    const getFoodPlaces = vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
     vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([]);
     const el = await mount({ view: "new-order" });
-    expect(el.textContent).toContain("Новый заказ");
+    expect(getFoodPlaces).toHaveBeenCalled();
+    expect(byText(el, "Разослать")).toBeTruthy();
+    expect(el.querySelector("input[name=pay-hint]")).toBeTruthy();
   });
 
   // Задача 8: места готовы, и маршрут «Места» больше не откатывается на

@@ -20,11 +20,11 @@ function type(input: HTMLInputElement | HTMLTextAreaElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-async function mountForm(onDone: (orderId: number) => void) {
+async function mountForm(onDone: (orderId: number) => void, onEditPlaces?: () => void) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(AppRoot, null, createElement(OrderForm, { onDone, onCancel: vi.fn() }))); });
+  await act(async () => { root!.render(createElement(AppRoot, null, createElement(OrderForm, { onDone, onCancel: vi.fn(), onEditPlaces }))); });
   await settle();
   return host;
 }
@@ -82,5 +82,26 @@ describe("OrderForm", () => {
     await settle();
     expect(el.textContent).toContain("Время уже прошло");
     expect(onDone).not.toHaveBeenCalled();
+  });
+
+  // Ревью раунд 1, находка №3: контракт `Interfaces` брифа называл только
+  // onDone/onCancel, но без ссылки на места человек без единого заведённого
+  // места не видит, куда идти. `onEditPlaces` — необязательный проп, шаг
+  // FoodScreen передаёт его сам.
+  it("«🍴 Места и меню» вызывает onEditPlaces; без мест — подсказка", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([{ id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true }]);
+    const onEditPlaces = vi.fn();
+    const el = await mountForm(vi.fn(), onEditPlaces);
+    expect(el.textContent).toContain("Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.");
+    await act(async () => byText(el, "🍴 Места и меню").click());
+    expect(onEditPlaces).toHaveBeenCalled();
+  });
+
+  it("с уже заведёнными местами подсказка «Мест пока нет» не показывается", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 3, name: "Шаурмечная", menu: [] }]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([{ id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true }]);
+    const el = await mountForm(vi.fn());
+    expect(el.textContent).not.toContain("Мест пока нет");
   });
 });

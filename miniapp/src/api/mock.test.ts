@@ -32,6 +32,12 @@ import {
   mockCreatePoll,
   mockGetFoodPlaces,
   mockSaveFoodPlace,
+  mockGetOrder,
+  mockCreateOrder,
+  mockAddOrderItem,
+  mockSetOrderItemQty,
+  mockCloseOrder,
+  mockCancelOrder,
   MOCK_ME,
 } from "./mock";
 
@@ -547,6 +553,63 @@ describe("опросы: dev-мок", () => {
     await expect(
       mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } }),
     ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+  });
+});
+
+// Ревью раунд 1 (Задача 14), находка №5: мок применял правила сервера только
+// частично — двойное закрытие/отмена, границы количества, отказ «некому
+// отправить» и текст «заказ не найден» либо отсутствовали, либо были по-
+// английски. Тесты ниже фиксируют, что мок теперь отвечает тем же текстом,
+// что и `server/src/orders/order-service.ts`/`server/src/http/routes/orders.ts`.
+describe("заказы еды: dev-мок", () => {
+  it("«команда» считает адресатов и «дошло» так же, как у опроса — теми же mockAudienceIds", async () => {
+    const { order, delivered, unreachable } = await mockCreateOrder({
+      placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" },
+    });
+    // Команда: id 1,2,3,4,5,7 (6 — архивный). Без Telegram — только Марк.
+    expect(order.recipientCount).toBe(6);
+    expect(unreachable).toEqual(["Марк Волков"]);
+    expect(delivered).toBe(5);
+  });
+
+  it("«некому отправить» — тот же текст, что у POST /api/orders, когда достижим только сам заказчик", async () => {
+    // Марк (id 3) без Telegram — «выбрать» его одного оставляет только Аню достижимой.
+    await expect(
+      mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "picked", employeeIds: [3] } }),
+    ).rejects.toThrow("Некому отправить: в списке никого, кроме тебя.");
+  });
+
+  it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
+    const past = new Date(Date.now() - 5 * 60_000);
+    const pastTime = past.toTimeString().slice(0, 5);
+    await expect(
+      mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: pastTime, audience: { kind: "team" } }),
+    ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+  });
+
+  it("повторное закрытие и отмена закрытого заказа отклоняются тем же текстом, что и сервер", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCloseOrder(order.id);
+    await expect(mockCloseOrder(order.id)).rejects.toThrow("Приём уже закрыт.");
+    await expect(mockCancelOrder(order.id)).rejects.toThrow("Приём уже закрыт.");
+  });
+
+  it("закрытие отменённого заказа отвечает «Заказ отменён.»", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    await mockCancelOrder(order.id);
+    await expect(mockCloseOrder(order.id)).rejects.toThrow("Заказ отменён.");
+  });
+
+  it("количество своей позиции — от 1 до 20, тем же текстом, что и сервер", async () => {
+    const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
+    const updated = await mockAddOrderItem(order.id, { name: "Суп дня", price: 200 });
+    const itemId = updated.myItems[0]!.id;
+    await expect(mockSetOrderItemQty(order.id, itemId, 0)).rejects.toThrow("Количество — от 1 до 20.");
+    await expect(mockSetOrderItemQty(order.id, itemId, 21)).rejects.toThrow("Количество — от 1 до 20.");
+  });
+
+  it("несуществующий заказ отвечает по-русски, а не английским «not_found»", async () => {
+    await expect(mockGetOrder(999_999)).rejects.toThrow("Заказ не найден или недоступен.");
   });
 });
 

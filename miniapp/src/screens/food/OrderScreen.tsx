@@ -12,7 +12,14 @@ import { ScreenScroll } from "../../components/ScreenScroll";
  * Сюда же ведёт «✍️ Своё блюдо» из письма бота (`?screen=orders&order=<id>`).
  */
 export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): void }) {
-  const [order, setOrder] = useState<OrderView | null | "error">(null);
+  const [order, setOrder] = useState<OrderView | null>(null);
+  // Отдельно от `order`: сообщение сервера («заказ не найден», офлайн) не
+  // заменяется общей заглушкой, а «Повторить» — та же кнопка, что у списка
+  // («Заказы и опросы») и у списка мест — нужна тут по той же причине: тап
+  // может провалиться из-за рестарта сервера при выкладке, а не потому, что
+  // заказа правда нет.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customName, setCustomName] = useState("");
@@ -20,20 +27,49 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
 
   useEffect(() => {
     let alive = true;
-    apiClient.getOrder(orderId).then((o) => { if (alive) setOrder(o); }).catch(() => { if (alive) setOrder("error"); });
+    setOrder(null);
+    setLoadError(null);
+    apiClient.getOrder(orderId)
+      .then((o) => { if (alive) setOrder(o); })
+      .catch((err) => { if (alive) setLoadError(err instanceof Error ? err.message : "Не удалось загрузить заказ."); });
     return () => { alive = false; };
-  }, [orderId]);
+  }, [orderId, loadAttempt]);
 
   async function run(action: () => Promise<OrderView>) {
     setBusy(true);
     setError(null);
-    try { setOrder(await action()); }
-    catch (err) { setError(err instanceof Error ? err.message : "Не получилось"); }
-    finally { setBusy(false); }
+    try {
+      setOrder(await action());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не получилось");
+      // Гонка тика и ручного действия (Review Focus №1, как в `PollCard`):
+      // сервер мог закрыть заказ между рендером и тапом — перечитываем его,
+      // чтобы погашенные кнопки исчезли сами, а не висели активными до
+      // следующего открытия экрана. Отказ перечитывания не страшен: старое
+      // состояние экрана остаётся, а текст ошибки уже показан.
+      try {
+        const fresh = await apiClient.getOrder(orderId);
+        if (fresh) setOrder(fresh);
+      } catch {
+        /* оставляем прежний `order` — хотя бы кнопки и текст ошибки видны */
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
+  if (loadError) {
+    return (
+      <ScreenScroll>
+        <div>{loadError}</div>
+        <div style={{ display: "flex", gap: 8, paddingTop: 8 }}>
+          <Button size="s" mode="plain" onClick={onBack}>‹ Назад</Button>
+          <Button size="s" mode="plain" onClick={() => setLoadAttempt((n) => n + 1)}>Повторить</Button>
+        </div>
+      </ScreenScroll>
+    );
+  }
   if (order === null) return <ScreenScroll><div style={{ color: "var(--tgui--hint_color)" }}>Загружаю заказ…</div></ScreenScroll>;
-  if (order === "error") return <ScreenScroll><div>Заказ не найден или недоступен.</div><Button size="s" mode="plain" onClick={onBack}>Назад</Button></ScreenScroll>;
 
   const status = order.cancelled ? "отменён" : order.open ? (order.closes ?? "приём идёт") : "приём закрыт";
   return (
@@ -43,6 +79,10 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
         Собирает {order.creatorName} · {status} · ответили {order.respondedCount} из {order.recipientCount}
       </div>
+      {/* Наверху, а не под кнопками управления: отказ тапа по блюду меню
+          (например, «Приём закрыт.» — гонка с закрытием) должен быть виден
+          сразу, а не после прокрутки всех карточек вниз. */}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
       {order.note && <div style={{ fontSize: 13.5 }}>{order.note}</div>}
       {order.payHint && <div style={{ fontSize: 13.5 }}>Куда сдавать: {order.payHint}</div>}
 
@@ -56,7 +96,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               {order.open && (
                 <>
                   <Button size="s" mode="gray" disabled={busy || item.qty <= 1} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty - 1))}>−</Button>
-                  <Button size="s" mode="gray" disabled={busy || item.qty >= 20} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty + 1))}>＋</Button>
+                  <Button size="s" mode="gray" disabled={busy || item.qty >= 20} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty + 1))}>+</Button>
                   <Button size="s" mode="plain" disabled={busy} onClick={() => run(() => apiClient.removeOrderItem(order.id, item.id))}>✕</Button>
                 </>
               )}
@@ -129,7 +169,6 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             onConfirm={() => run(() => apiClient.cancelOrder(order.id))} disabled={busy} />
         </div>
       )}
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
     </ScreenScroll>
   );
 }
