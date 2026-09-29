@@ -4,19 +4,8 @@ import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
 import { requireAuth, type Env } from "../middleware";
+import { jsonBody } from "../json-body";
 import { archivePlace, createPlace, getPlaceView, listPlaces, updatePlace } from "../../orders/place-service";
-
-/**
- * Тело запроса, приведённое к объекту.
- *
- * Та же прослойка, что в `polls.ts`: `c.req.json()` парсит и `null`, и массив
- * без ошибки — без неё голое тело роняло бы ручку TypeError'ом (500) вместо
- * понятного 400.
- */
-async function jsonBody(c: Context): Promise<Record<string, unknown>> {
-  const raw = await c.req.json().catch(() => null);
-  return raw != null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-}
 
 /**
  * Места и меню правит любой работник: меню общее, и если ждать админа ради

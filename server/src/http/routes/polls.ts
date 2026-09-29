@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import { POLL_QUESTION_MAX, closesAtFromTime, isFutureClose, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
@@ -8,6 +8,7 @@ import { recordAudit } from "../../repo/audit";
 import { resolveAudience } from "../../team/audience";
 import { teamNow } from "../../util/team-time";
 import { requireAuth, type Env } from "../middleware";
+import { jsonBody } from "../json-body";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, listPollsFor, pollView } from "../../polls/poll-service";
 import { finishPollMessages, sendPollInvites } from "../../polls/poll-messenger";
 
@@ -16,19 +17,6 @@ const createSchema = z.object({
   closesTime: timeStr.nullable(),
   audience: teamAudienceSchema,
 }).strict();
-
-/**
- * Тело запроса, приведённое к объекту.
- *
- * `c.req.json()` парсит и `null`, и массив, и число без ошибки — `.catch`
- * ловит только неразобранный JSON. Без этой прослойки `{ choice?: ... }`,
- * навязанный кастом на голое `null`, падал бы на чтении `body.choice`
- * TypeError'ом (500), а не понятным 400.
- */
-async function jsonBody(c: Context): Promise<Record<string, unknown>> {
-  const raw = await c.req.json().catch(() => null);
-  return raw != null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-}
 
 /**
  * Опросы. Запускает любой работник — так он решил (2026-09-29): «кто со мной
