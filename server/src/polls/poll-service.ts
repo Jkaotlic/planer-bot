@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lte, isNotNull, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, isNotNull, or, sql } from "drizzle-orm";
 import { closesLabel, isOpenAt, pollTally, type PollChoice, type PollTally } from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollRecipients, pollVotes, polls, type Poll } from "../db/schema";
@@ -29,6 +29,34 @@ export function createPoll(
     }
     return poll;
   });
+}
+
+/**
+ * Окно, в котором такой же опрос (или заказ из того же места) от того же
+ * человека — повтор, а не новый. Две минуты перекрывают обрыв релея и повторный
+ * тап; дольше — уже осознанное «спрошу ещё раз».
+ */
+export const FOOD_REPEAT_WINDOW_SEC = 120;
+
+/** Вопрос для сравнения «тот же ли»: регистр и лишние пробелы вопроса не меняют. */
+export function normalizeQuestion(question: string): string {
+  return question.trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+}
+
+/**
+ * Был ли такой опрос от того же человека за последние `FOOD_REPEAT_WINDOW_SEC`.
+ *
+ * Время — `unixepoch()` самой базы, а не `Date.now()`: `created_at` пишет
+ * SQLite, и сравнивать его надо с теми же часами. Отменённый не считается:
+ * его отменили нарочно, и новый — не повтор. Регистр сравнивается в JS:
+ * `lower()` SQLite кириллицу не понижает.
+ */
+export function hasRecentSamePoll(db: Db, createdBy: number, question: string): boolean {
+  const target = normalizeQuestion(question);
+  return db.select({ question: polls.question }).from(polls).where(and(
+    eq(polls.createdBy, createdBy), isNull(polls.cancelledAt),
+    gte(polls.createdAt, sql`unixepoch() - ${FOOD_REPEAT_WINDOW_SEC}`),
+  )).all().some((p) => normalizeQuestion(p.question) === target);
 }
 
 export function setPollMessageId(db: Db, pollId: number, employeeId: number, messageId: number | null): void {

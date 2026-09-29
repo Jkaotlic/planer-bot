@@ -1,11 +1,11 @@
-import { and, desc, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal, type PaymentRow } from "@planer/shared";
 import type { Db } from "../db/client";
 import {
   employees, foodOrderDeclines, foodOrderItems, foodOrderRecipients, foodOrders, foodPlaces,
   type FoodOrder, type FoodOrderItem,
 } from "../db/schema";
-import { canManage, type Result, type TeamClock } from "../polls/poll-service";
+import { FOOD_REPEAT_WINDOW_SEC, canManage, type Result, type TeamClock } from "../polls/poll-service";
 import { orderPayments } from "./order-payment-service";
 import { activeMenuItem, menuForOrder } from "./place-service";
 
@@ -22,6 +22,19 @@ export function createOrder(db: Db, input: {
     }
     return order;
   });
+}
+
+/**
+ * Был ли заказ из того же места (или тоже без места) от того же человека за
+ * последние `FOOD_REPEAT_WINDOW_SEC` — повтор, а не новый заказ. Правила те
+ * же, что у `hasRecentSamePoll`: часы базы, отменённый не считается.
+ */
+export function hasRecentSameOrder(db: Db, createdBy: number, placeId: number | null): boolean {
+  return db.select({ id: foodOrders.id }).from(foodOrders).where(and(
+    eq(foodOrders.createdBy, createdBy), isNull(foodOrders.cancelledAt),
+    placeId == null ? isNull(foodOrders.placeId) : eq(foodOrders.placeId, placeId),
+    gte(foodOrders.createdAt, sql`unixepoch() - ${FOOD_REPEAT_WINDOW_SEC}`),
+  )).get() != null;
 }
 
 export function getOrder(db: Db, id: number): FoodOrder | undefined {

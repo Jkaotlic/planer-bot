@@ -9,7 +9,9 @@ import { resolveAudience } from "../../team/audience";
 import { teamNow } from "../../util/team-time";
 import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
-import { cancelPoll, castVote, closePoll, createPoll, getPoll, listPollsFor, pollView } from "../../polls/poll-service";
+import {
+  cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollView,
+} from "../../polls/poll-service";
 import { finishPollMessages, sendPollInvites } from "../../polls/poll-messenger";
 
 const createSchema = z.object({
@@ -30,6 +32,13 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
   const { db, config, bot } = deps;
   const app = new Hono<Env>();
   const auth = requireAuth(db, config.jwtSecret);
+  /**
+   * Опросы, которые рассылаются прямо сейчас: «кто + вопрос». Рассылка идёт
+   * внутри запроса; релей обрывает долгий ответ, человек жмёт ещё раз — и
+   * команда получила бы опрос дважды. Тот же замок, что `announcementsInFlight`
+   * в app.ts, заведённый после таких же двойных объявлений.
+   */
+  const inFlight = new Set<string>();
   const viewerOf = (c: { get(k: "auth"): { employeeId: number; isAdmin: boolean } }) => {
     const a = c.get("auth");
     return { id: a.employeeId, isAdmin: a.isAdmin };
@@ -51,13 +60,27 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     const viewer = viewerOf(c);
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
-    const poll = createPoll(db, {
-      createdBy: viewer.id,
-      question: parsed.data.question,
-      closesAt,
-      recipientIds: reachable.map((e) => e.id),
-    });
-    const delivered = await sendPollInvites(bot, db, poll, now);
+    const key = `${viewer.id}\u0000${normalizeQuestion(parsed.data.question)}`;
+    if (inFlight.has(key)) return c.json({ error: "Рассылка уже идёт — подожди." }, 409);
+    // Замок живёт только пока идёт рассылка; повтор ПОСЛЕ неё (ответ потерялся
+    // по дороге, а письма дошли) ловит окно по базе.
+    if (hasRecentSamePoll(db, viewer.id, parsed.data.question)) {
+      return c.json({ error: "Такой уже разослан пару минут назад — проверь чат." }, 409);
+    }
+    inFlight.add(key);
+    let poll: ReturnType<typeof createPoll>;
+    let delivered: number;
+    try {
+      poll = createPoll(db, {
+        createdBy: viewer.id,
+        question: parsed.data.question,
+        closesAt,
+        recipientIds: reachable.map((e) => e.id),
+      });
+      delivered = await sendPollInvites(bot, db, poll, now);
+    } finally {
+      inFlight.delete(key);
+    }
     recordAudit(db, "poll_created", viewer.id, { pollId: poll.id, question: poll.question, recipients: reachable.length, delivered });
     return c.json({ poll: pollView(db, poll, viewer, now), delivered, unreachable }, 201);
   });

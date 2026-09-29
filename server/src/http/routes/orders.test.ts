@@ -8,6 +8,8 @@ import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
 import { createPlace } from "../../orders/place-service";
 import { listRecentAudit } from "../../repo/audit";
+import { sql } from "drizzle-orm";
+import { foodOrders } from "../../db/schema";
 
 function fakeBot() {
   const sent: { to: number; text: string }[] = [];
@@ -16,17 +18,28 @@ function fakeBot() {
   // `unreachable`, а не молча посчитать «дошло».
   const failFor = new Set<number>();
   let nextId = 1;
+  // Задвижка «медленной сети»: пока она стоит, каждый `sendMessage` ждёт —
+  // рассылка висит внутри запроса, как на обрыве релея.
+  let gate: Promise<void> | null = null;
+  let waiting = 0;
   const bot = {
     api: {
       sendMessage: vi.fn(async (to: number, text: string) => {
+        if (gate) { waiting += 1; await gate; }
         if (failFor.has(to)) throw new Error("Forbidden: bot was blocked by the user");
         sent.push({ to, text });
         return { message_id: nextId++ };
       }),
       editMessageReplyMarkup: vi.fn(async () => ({})),
+      editMessageText: vi.fn(async () => ({})),
     },
   };
-  return { bot: bot as unknown as Bot, sent, failFor };
+  function hold() {
+    let release!: () => void;
+    gate = new Promise<void>((r) => { release = r; });
+    return { release: () => { gate = null; release(); }, waiting: () => waiting };
+  }
+  return { bot: bot as unknown as Bot, sent, failFor, hold, api: bot.api };
 }
 
 const config = testConfig();
@@ -54,14 +67,14 @@ afterEach(() => { vi.useRealTimers(); });
 
 async function stage() {
   const db = makeTestDb();
-  const { bot, sent, failFor } = fakeBot();
+  const { bot, sent, failFor, hold, api } = fakeBot();
   const app = createApp({ db, config, bot });
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   const mark = person(db, "Марк", 102);
   const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya);
   return {
-    db, app, sent, failFor, anya, igor, mark, placeId: place.id,
+    db, app, sent, failFor, hold, api, anya, igor, mark, placeId: place.id,
     anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102),
   };
 }
@@ -260,4 +273,64 @@ describe("деньги заказа по HTTP", () => {
     expect((await res.json()).error).toBe("Заказ отменён — напоминать не о чем.");
   });
 
+});
+
+/**
+ * Рассылка идёт внутри запроса; релей обрывает долгий ответ, человек жмёт ещё
+ * раз — и команда получила бы заказ (или дожим) дважды. Тот же приём, что у
+ * объявлений (`announcementsInFlight` в app.ts).
+ */
+describe("заказ и дожим не рассылаются дважды", () => {
+  it("второй заказ из того же места, пока первый рассылается, — 409 «Рассылка уже идёт — подожди.»", async () => {
+    const { app, sent, hold, igor, anyaT, placeId } = await stage();
+    const gate = hold();
+    const first = newOrder(app, anyaT, igor, placeId);
+    await vi.waitFor(() => expect(gate.waiting()).toBeGreaterThan(0));
+    const second = await newOrder(app, anyaT, igor, placeId);
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe("Рассылка уже идёт — подожди.");
+    gate.release();
+    expect((await first).status).toBe(201);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("то же место (или оба без места) в течение двух минут — 409; другое место — можно; через две минуты — можно", async () => {
+    const { db, app, sent, igor, anyaT, placeId } = await stage();
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
+    const again = await newOrder(app, anyaT, igor, placeId);
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe("Такой уже разослан пару минут назад — проверь чат.");
+    expect(sent).toHaveLength(2);
+    expect((await newOrder(app, anyaT, igor, null)).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, null)).status).toBe(409);
+    // Окно считается по часам базы (`created_at` пишет SQLite), поэтому
+    // «прошло две минуты» — это состаренные строки, а не подделанный Date.
+    db.update(foodOrders).set({ createdAt: sql`unixepoch() - 121` }).run();
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
+  });
+
+  it("отменённый заказ повтору не мешает — его отменили нарочно", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/cancel`, send(anyaT, {})));
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
+  });
+
+  it("второй «Напомнить», пока первый рассылается, — 409 «Рассылка уже идёт — подожди.», дожим уходит одной волной", async () => {
+    const { app, sent, hold, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    await app.request(new Request(`http://x/api/orders/${body.order.id}/close`, send(anyaT, {})));
+    const gate = hold();
+    const first = app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})));
+    await vi.waitFor(() => expect(gate.waiting()).toBeGreaterThan(0));
+    const second = await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})));
+    expect(second.status).toBe(409);
+    expect((await second.json()).error).toBe("Рассылка уже идёт — подожди.");
+    gate.release();
+    expect((await first).status).toBe(200);
+    expect(sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(1);
+    // Замок снят вместе с концом волны.
+    expect((await app.request(new Request(`http://x/api/orders/${body.order.id}/remind`, send(anyaT, {})))).status).toBe(200);
+  });
 });

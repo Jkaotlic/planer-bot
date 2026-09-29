@@ -6,17 +6,33 @@ import { createEmployee, linkTelegramAccount } from "../../repo/employees";
 import { signInitData } from "../../auth/telegram";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
+import { sql } from "drizzle-orm";
+import { polls } from "../../db/schema";
 
 function fakeBot() {
   const sent: { to: number; text: string }[] = [];
   let nextId = 1;
+  // Задвижка «медленной сети»: пока она стоит, каждый `sendMessage` ждёт —
+  // рассылка висит внутри запроса, как на обрыве релея.
+  let gate: Promise<void> | null = null;
+  let waiting = 0;
   const bot = {
     api: {
-      sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); return { message_id: nextId++ }; }),
+      sendMessage: vi.fn(async (to: number, text: string) => {
+        if (gate) { waiting += 1; await gate; }
+        sent.push({ to, text });
+        return { message_id: nextId++ };
+      }),
       editMessageReplyMarkup: vi.fn(async () => ({})),
+      editMessageText: vi.fn(async () => ({})),
     },
   };
-  return { bot: bot as unknown as Bot, sent };
+  function hold() {
+    let release!: () => void;
+    gate = new Promise<void>((r) => { release = r; });
+    return { release: () => { gate = null; release(); }, waiting: () => waiting };
+  }
+  return { bot: bot as unknown as Bot, sent, hold, api: bot.api };
 }
 
 const config = testConfig();
@@ -42,12 +58,12 @@ afterEach(() => { vi.useRealTimers(); });
 
 async function stage() {
   const db = makeTestDb();
-  const { bot, sent } = fakeBot();
+  const { bot, sent, hold, api } = fakeBot();
   const app = createApp({ db, config, bot });
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   person(db, "Марк", 102);
-  return { db, app, sent, anya, igor, anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102) };
+  return { db, app, sent, hold, api, anya, igor, anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102) };
 }
 
 describe("опросы по HTTP", () => {
@@ -161,5 +177,55 @@ describe("опросы по HTTP", () => {
       send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
     const res = await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(igorT, null)));
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * Рассылка идёт внутри запроса; релей обрывает долгий ответ, человек жмёт ещё
+ * раз — и команда получила бы опрос дважды (так уже было с объявлениями, см.
+ * `announcementsInFlight` в app.ts).
+ */
+describe("опрос не рассылается дважды", () => {
+  const body = (igor: number, question = "Пицца?") => ({ question, closesTime: null, audience: { kind: "picked", employeeIds: [igor] } });
+
+  it("второй такой же запрос, пока первый рассылается, — 409 «Рассылка уже идёт — подожди.»", async () => {
+    const { app, sent, hold, igor, anyaT } = await stage();
+    const gate = hold();
+    const first = app.request(new Request("http://x/api/polls", send(anyaT, body(igor))));
+    await vi.waitFor(() => expect(gate.waiting()).toBeGreaterThan(0));
+    // Тот же вопрос с другим регистром и пробелами — тот же опрос.
+    const second = await app.request(new Request("http://x/api/polls", send(anyaT, body(igor, "  пицца? "))));
+    expect(second.status).toBe(409);
+    expect((await second.json()).error).toBe("Рассылка уже идёт — подожди.");
+    gate.release();
+    expect((await first).status).toBe(201);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("тот же вопрос в течение двух минут — 409 «Такой уже разослан…»; другой вопрос — можно; через две минуты — можно", async () => {
+    const { db, app, sent, igor, anyaT } = await stage();
+    expect((await app.request(new Request("http://x/api/polls", send(anyaT, body(igor))))).status).toBe(201);
+    const again = await app.request(new Request("http://x/api/polls", send(anyaT, body(igor, "ПИЦЦА?"))));
+    expect(again.status).toBe(409);
+    expect((await again.json()).error).toBe("Такой уже разослан пару минут назад — проверь чат.");
+    expect(sent).toHaveLength(2);
+    expect((await app.request(new Request("http://x/api/polls", send(anyaT, body(igor, "Суши?"))))).status).toBe(201);
+    // Окно считается по часам базы (`created_at` пишет SQLite), поэтому
+    // «прошло две минуты» — это состаренная строка, а не подделанный Date.
+    db.update(polls).set({ createdAt: sql`unixepoch() - 121` }).run();
+    expect((await app.request(new Request("http://x/api/polls", send(anyaT, body(igor))))).status).toBe(201);
+  });
+
+  it("отменённый опрос повтору не мешает — его отменили нарочно", async () => {
+    const { app, igor, anyaT } = await stage();
+    const { poll } = await (await app.request(new Request("http://x/api/polls", send(anyaT, body(igor))))).json();
+    await app.request(new Request(`http://x/api/polls/${poll.id}/cancel`, send(anyaT, {})));
+    expect((await app.request(new Request("http://x/api/polls", send(anyaT, body(igor))))).status).toBe(201);
+  });
+
+  it("тот же вопрос от другого человека — можно", async () => {
+    const { app, anya, igor, anyaT, igorT } = await stage();
+    expect((await app.request(new Request("http://x/api/polls", send(anyaT, body(igor))))).status).toBe(201);
+    expect((await app.request(new Request("http://x/api/polls", send(igorT, body(anya))))).status).toBe(201);
   });
 });

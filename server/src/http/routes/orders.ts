@@ -15,7 +15,7 @@ import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
 import { getPlaceView } from "../../orders/place-service";
 import {
-  addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, itemsOf, listOrdersFor,
+  addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, hasRecentSameOrder, itemsOf, listOrdersFor,
   orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
 import { setOrderPaid } from "../../orders/order-payment-service";
@@ -39,6 +39,14 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   const { db, config, bot } = deps;
   const app = new Hono<Env>();
   const auth = requireAuth(db, config.jwtSecret);
+  /**
+   * Рассылки, которые идут прямо сейчас: создание — «кто + место», дожим — id
+   * заказа. Рассылка идёт внутри запроса; релей обрывает долгий ответ, человек
+   * жмёт ещё раз — и команда получила бы заказ или «сдай» дважды. Тот же
+   * замок, что `announcementsInFlight` в app.ts.
+   */
+  const createsInFlight = new Set<string>();
+  const remindsInFlight = new Set<number>();
   const viewerOf = (c: { get(k: "auth"): { employeeId: number; isAdmin: boolean } }) => ({ id: c.get("auth").employeeId, isAdmin: c.get("auth").isAdmin });
 
   /** Заказ, который смотрящий вправе видеть, — или null (→ 404). */
@@ -67,11 +75,25 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     if (parsed.data.placeId != null && !place) return c.json({ error: "Такого места больше нет." }, 409);
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
-    const order = createOrder(db, {
-      createdBy: viewer.id, placeId: parsed.data.placeId, note: parsed.data.note, payHint: parsed.data.payHint,
-      closesAt, recipientIds: reachable.map((e) => e.id),
-    });
-    const delivered = await sendOrderInvites(bot, db, order, now, config.publicUrl);
+    const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}`;
+    if (createsInFlight.has(key)) return c.json({ error: "Рассылка уже идёт — подожди." }, 409);
+    // Замок живёт только пока идёт рассылка; повтор ПОСЛЕ неё (ответ потерялся
+    // по дороге, а письма дошли) ловит окно по базе.
+    if (hasRecentSameOrder(db, viewer.id, parsed.data.placeId)) {
+      return c.json({ error: "Такой уже разослан пару минут назад — проверь чат." }, 409);
+    }
+    createsInFlight.add(key);
+    let order: ReturnType<typeof createOrder>;
+    let delivered: number;
+    try {
+      order = createOrder(db, {
+        createdBy: viewer.id, placeId: parsed.data.placeId, note: parsed.data.note, payHint: parsed.data.payHint,
+        closesAt, recipientIds: reachable.map((e) => e.id),
+      });
+      delivered = await sendOrderInvites(bot, db, order, now, config.publicUrl);
+    } finally {
+      createsInFlight.delete(key);
+    }
     recordAudit(db, "order_created", viewer.id, { orderId: order.id, placeName: place?.name ?? null, recipients: reachable.length, delivered });
     return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable }, 201);
   });
@@ -157,7 +179,14 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     if (v.order.cancelledAt != null) return c.json({ error: "Заказ отменён — напоминать не о чем." }, 409);
     if (v.order.closedAt == null) return c.json({ error: "Сначала закрой приём." }, 409);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
-    const outcome = await remindUnpaid(bot, db, v.order);
+    if (remindsInFlight.has(v.order.id)) return c.json({ error: "Рассылка уже идёт — подожди." }, 409);
+    remindsInFlight.add(v.order.id);
+    let outcome: Awaited<ReturnType<typeof remindUnpaid>>;
+    try {
+      outcome = await remindUnpaid(bot, db, v.order);
+    } finally {
+      remindsInFlight.delete(v.order.id);
+    }
     recordAudit(db, "order_reminded", v.viewer.id, { orderId: v.order.id, delivered: outcome.delivered, unreachable: outcome.unreachable.length });
     return c.json(outcome);
   });
