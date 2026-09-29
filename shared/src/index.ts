@@ -31,3 +31,5 @@ export * from "./api";
 export * from "./notifications";
 export * from "./access";
 export * from "./person-search";
+export * from "./shift-counts";
+export * from "./shift-counts-view";

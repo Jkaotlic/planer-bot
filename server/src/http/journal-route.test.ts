@@ -208,9 +208,12 @@ describe("GET /api/admin/reports/shift-counts", () => {
     const res = await app.request("/api/admin/reports/shift-counts?from=2026-06-01&to=2026-06-30", auth(token));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.kinds).toEqual(["День", "Дежурство · Телефон"]);
+    expect(body.kinds.map((k: { name: string; group: string }) => [k.name, k.group])).toEqual([
+      ["День", "shift"],
+      ["Дежурство · Телефон", "duty"],
+    ]);
     const first = body.rows.find((r: { displayName: string }) => r.displayName === "Первый");
-    expect(first).toMatchObject({ total: 2, byKind: { "День": 1, "Дежурство · Телефон": 1 } });
+    expect(first).toMatchObject({ byGroup: { shift: 1, duty: 1, other: 0 }, byKind: { "День": 1, "Дежурство · Телефон": 1 } });
   });
 
   it("downloads the same table as an Excel-readable CSV", async () => {
@@ -224,7 +227,7 @@ describe("GET /api/admin/reports/shift-counts", () => {
     expect(res.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]); // BOM, or Excel mangles Cyrillic
-    expect(new TextDecoder().decode(bytes)).toContain("Работник;День;Дежурство · Телефон;Всего");
+    expect(new TextDecoder().decode(bytes)).toContain("Работник;День;Смен всего;Дежурство · Телефон;Дежурств всего");
   });
 
   it("validates the range like every other ranged report", async () => {

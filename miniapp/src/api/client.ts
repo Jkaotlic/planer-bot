@@ -1,5 +1,6 @@
 import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 import { readInitData } from "./init-data";
+import type { ShiftCountsReport } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -614,20 +615,8 @@ export interface TemplateQueue {
   queue: RotationTurnView[];
 }
 
-/** One row of «кто сколько отдежурил». */
-export interface ShiftCountsRow {
-  employeeId: number;
-  displayName: string;
-  byKind: Record<string, number>;
-  total: number;
-}
-
-export interface ShiftCountsReport {
-  from: string;
-  to: string;
-  kinds: string[];
-  rows: ShiftCountsRow[];
-}
+/** «Кто сколько отдежурил» — тип общий с сервером: форма отчёта живёт в shared. */
+export type { ShiftCountsReport, ShiftCountsRow } from "@planer/shared";
 
 /** One line of the «кто когда что менял» history. */
 export interface JournalEvent {

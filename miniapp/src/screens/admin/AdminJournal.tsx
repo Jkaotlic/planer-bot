@@ -1,6 +1,22 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Placeholder, SegmentedControl, Section, Spinner } from "@telegram-apps/telegram-ui";
-import { describeAuditEvent, formatAuditMoment, auditMonthRange } from "@planer/shared";
+import {
+  describeAuditEvent,
+  formatAuditMoment,
+  auditMonthRange,
+  countsKeyLabel,
+  countsPeriodPresets,
+  groupKinds,
+  heatBackground,
+  rankByKey,
+  sortCountsRows,
+  SCHEDULE_ACCENT_PALETTES,
+  SHIFT_COUNTS_GROUPS,
+  SHIFT_COUNTS_GROUP_TITLES,
+  type CountsKey,
+  type ShiftCountsGroup,
+  type ShiftCountsKind,
+} from "@planer/shared";
 import { apiClient, type JournalPage, type ShiftCountsReport } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { ScreenScroll } from "../../components/ScreenScroll";
@@ -54,19 +70,65 @@ export function AdminJournal({ today }: { today: string }) {
   );
 }
 
+type CountsMode = "kinds" | "people";
+
+const sameKey = (a: CountsKey, b: CountsKey) => JSON.stringify(a) === JSON.stringify(b);
+
+function Swatch({ accent }: { accent: ShiftCountsKind["accent"] }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        flex: "none", display: "inline-block", width: 8, height: 8, borderRadius: 2,
+        background: accent ? SCHEDULE_ACCENT_PALETTES[accent].bg : "var(--tgui--hint_color)",
+        boxShadow: "0 0 0 1px rgba(0,0,0,.15)",
+      }}
+    />
+  );
+}
+
+function Avatar({ employeeId, name, size }: { employeeId: number; name: string; size: number }) {
+  const palette = personPalette(employeeId);
+  return (
+    <span
+      style={{
+        flex: "none", display: "grid", placeContent: "center", width: size, height: size,
+        borderRadius: 999, fontSize: 11, fontWeight: 700, background: palette.bg, color: palette.fg,
+      }}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+/** Что можно выбрать в «По видам»: итоги групп (дежурства первыми), потом сами виды. */
+function rankKeys(report: ShiftCountsReport): { key: CountsKey; group: ShiftCountsGroup; accent: ShiftCountsKind["accent"] }[] {
+  const present = new Set(report.kinds.map((k) => k.group));
+  const groupOrder: ShiftCountsGroup[] = ["duty", "shift", "other"];
+  return [
+    ...groupOrder.filter((g) => present.has(g)).map((g) => ({ key: { group: g } as CountsKey, group: g, accent: null })),
+    ...groupKinds(report.kinds).flatMap((g) => g.kinds.map((k) => ({ key: { kind: k.name } as CountsKey, group: k.group, accent: k.accent }))),
+  ];
+}
+
 function ShiftCounts({ today }: { today: string }) {
   const initial = auditMonthRange(today);
+  const presets = countsPeriodPresets(today);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [report, setReport] = useState<ShiftCountsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // «По видам» первым: вкладку открывают проверить справедливость — кто сколько
+  // ночей и дежурств взял (его ответ от 2026-09-29).
+  const [mode, setMode] = useState<CountsMode>("kinds");
+  const [picked, setPicked] = useState<CountsKey | null>(null);
 
-  async function load() {
+  async function load(range: { from: string; to: string } = { from, to }) {
     setBusy(true);
     setError(null);
     try {
-      setReport(await apiClient.getShiftCounts(from, to));
+      setReport(await apiClient.getShiftCounts(range.from, range.to));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось построить отчёт");
     } finally {
@@ -80,58 +142,177 @@ function ShiftCounts({ today }: { today: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function pickPreset(preset: { from: string; to: string }) {
+    setFrom(preset.from);
+    setTo(preset.to);
+    void load(preset);
+  }
+
+  const keys = report ? rankKeys(report) : [];
+  // Выбранный вид мог исчезнуть в новом периоде — тогда первый доступный, а не пустой рейтинг.
+  const active = keys.find((k) => picked && sameKey(k.key, picked)) ?? keys[0];
+  const hasAny = !!report && report.rows.some((r) => r.byGroup.shift + r.byGroup.duty + r.byGroup.other > 0);
+
   return (
     <Section header="Кто сколько отдежурил">
       <CardStack>
         <CardShell>
-          {/* Stacked, not side by side: two native date fields sharing a phone's
-              width clip their own year — «07/01/2» — and the year is the part you
-              check when picking a period. */}
-          <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          <Button size="s" mode="filled" stretched loading={busy} disabled={busy} style={{ marginTop: 6 }} onClick={() => void load()}>
-            Показать
-          </Button>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {presets.map((preset) => (
+              <Button
+                key={preset.label}
+                size="s"
+                mode={preset.from === from && preset.to === to ? "filled" : "bezeled"}
+                disabled={busy}
+                onClick={() => pickPreset(preset)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+          <details style={{ marginTop: 8 }}>
+            <summary style={{ fontSize: 13, color: "var(--tgui--link_color)", cursor: "pointer" }}>Свой период</summary>
+            {/* Stacked, not side by side: two native date fields sharing a phone's
+                width clip their own year — «07/01/2» — and the year is the part you
+                check when picking a period. */}
+            <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <Button size="s" mode="filled" stretched loading={busy} disabled={busy} style={{ marginTop: 6 }} onClick={() => void load()}>
+              Показать
+            </Button>
+          </details>
           {error && (
             <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
           )}
         </CardShell>
 
-        {report && report.kinds.length === 0 && <Placeholder description="За этот период смен не было." />}
+        {report && !hasAny && <Placeholder description="За этот период смен не было." />}
 
-        {report?.rows
-          .filter((row) => row.total > 0)
-          .map((row) => {
-            const palette = personPalette(row.employeeId);
-            return (
-              <CardShell key={row.employeeId}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span
-                    style={{
-                      flex: "none", display: "grid", placeContent: "center", width: 30, height: 30,
-                      borderRadius: 999, fontSize: 11, fontWeight: 700, background: palette.bg, color: palette.fg,
-                    }}
-                  >
-                    {initialsOf(row.displayName)}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 15 }}>{row.displayName}</span>
-                  <span style={{ flex: "none", fontWeight: 700 }}>{row.total}</span>
-                </div>
-                <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.5 }}>
-                  {report.kinds
-                    .filter((kind) => row.byKind[kind])
-                    .map((kind) => `${kind} ${row.byKind[kind]}`)
-                    .join(" · ")}
-                </div>
-              </CardShell>
-            );
-          })}
+        {report && hasAny && (
+          <>
+            <SegmentedControl>
+              <SegmentedControl.Item selected={mode === "kinds"} onClick={() => setMode("kinds")}>
+                По видам
+              </SegmentedControl.Item>
+              <SegmentedControl.Item selected={mode === "people"} onClick={() => setMode("people")}>
+                По людям
+              </SegmentedControl.Item>
+            </SegmentedControl>
 
-        {report && report.rows.every((row) => row.total === 0) && report.kinds.length > 0 && (
-          <Placeholder description="Ни у кого нет смен за этот период." />
+            {mode === "kinds" && active && <ByKind report={report} keys={keys} active={active} onPick={setPicked} />}
+            {mode === "people" && <ByPerson report={report} />}
+          </>
         )}
       </CardStack>
     </Section>
+  );
+}
+
+function ByKind({
+  report, keys, active, onPick,
+}: {
+  report: ShiftCountsReport;
+  keys: ReturnType<typeof rankKeys>;
+  active: ReturnType<typeof rankKeys>[number];
+  onPick: (key: CountsKey) => void;
+}) {
+  const ranked = rankByKey(report.rows, active.key);
+  return (
+    <>
+      {/* Плашки прокручиваются своей полосой: страница вбок не едет на узком экране. */}
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", flexWrap: "nowrap", paddingBottom: 2 }}>
+        {keys.map((k) => {
+          const selected = sameKey(k.key, active.key);
+          return (
+            <button
+              // Ключ — сам ключ, а не подпись: вид с именем «Все смены» совпал бы с итогом группы.
+              key={JSON.stringify(k.key)}
+              type="button"
+              onClick={() => onPick(k.key)}
+              style={{
+                flex: "none", display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
+                borderRadius: 999, border: "1px solid var(--tgui--outline)", fontSize: 13,
+                fontWeight: "group" in k.key ? 700 : 500, cursor: "pointer",
+                background: selected ? "var(--tgui--button_color)" : "var(--tgui--bg_color)",
+                color: selected ? "var(--tgui--button_text_color)" : "var(--tgui--text_color)",
+              }}
+            >
+              {"kind" in k.key && <Swatch accent={k.accent} />}
+              {countsKeyLabel(k.key)}
+            </button>
+          );
+        })}
+      </div>
+
+      <CardShell>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>{countsKeyLabel(active.key)}</div>
+        {ranked.length === 0 ? (
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+            За этот период никто не брал «{countsKeyLabel(active.key)}».
+          </div>
+        ) : (
+          ranked.map(({ row, value, share }) => (
+            <div key={row.employeeId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+              <Avatar employeeId={row.employeeId} name={row.displayName} size={26} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {row.displayName}
+                </div>
+                <div style={{ marginTop: 4, height: 6, borderRadius: 3, background: "var(--tgui--secondary_bg_color)" }}>
+                  <div style={{ width: `${share * 100}%`, height: "100%", borderRadius: 3, background: heatBackground(active.group, 4) }} />
+                </div>
+              </div>
+              <span style={{ flex: "none", minWidth: 24, textAlign: "right", fontWeight: 700, fontSize: 15 }}>{value}</span>
+            </div>
+          ))
+        )}
+      </CardShell>
+    </>
+  );
+}
+
+function ByPerson({ report }: { report: ShiftCountsReport }) {
+  const groups = groupKinds(report.kinds);
+  return (
+    <>
+      {sortCountsRows(report.rows, { group: "duty" }, "desc").map((row) => (
+        <CardShell key={row.employeeId}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Avatar employeeId={row.employeeId} name={row.displayName} size={30} />
+            <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 15 }}>{row.displayName}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            {SHIFT_COUNTS_GROUPS.map((g) => {
+              const value = row.byGroup[g];
+              return (
+                <div key={g} style={{ flex: 1, padding: "6px 8px", borderRadius: 10, background: heatBackground(g, value ? 1 : 0) }}>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: value ? undefined : "var(--tgui--hint_color)" }}>{value}</div>
+                  <div style={{ fontSize: 11, color: "var(--tgui--hint_color)" }}>{SHIFT_COUNTS_GROUP_TITLES[g]}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {groups.flatMap((g) =>
+              g.kinds
+                .filter((kind) => row.byKind[kind.name])
+                .map((kind) => (
+                  <span
+                    key={kind.name}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", borderRadius: 999,
+                      fontSize: 12.5, background: heatBackground(g.group, 2),
+                    }}
+                  >
+                    <Swatch accent={kind.accent} />
+                    {kind.name} <b>{row.byKind[kind.name]}</b>
+                  </span>
+                )),
+            )}
+          </div>
+        </CardShell>
+      ))}
+    </>
   );
 }
 

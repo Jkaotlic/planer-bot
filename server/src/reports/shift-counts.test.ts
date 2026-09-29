@@ -33,7 +33,7 @@ describe("buildShiftCountsReport", () => {
     const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
     const row = (name: string) => report.rows.find((r) => r.displayName === name)!;
     expect(row("Первый").byKind).toEqual({ "День": 2, "Ночь": 1 });
-    expect(row("Первый").total).toBe(3);
+    expect(row("Первый").byGroup).toEqual({ shift: 3, duty: 0, other: 0 });
     expect(row("Второй").byKind).toEqual({ "Ночь": 1 });
   });
 
@@ -41,7 +41,7 @@ describe("buildShiftCountsReport", () => {
     const db = makeTestDb();
     createEmployee(db, { displayName: "Отдыхал" });
     const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
-    expect(report.rows.find((r) => r.displayName === "Отдыхал")).toMatchObject({ byKind: {}, total: 0 });
+    expect(report.rows.find((r) => r.displayName === "Отдыхал")).toMatchObject({ byKind: {}, byGroup: { shift: 0, duty: 0, other: 0 } });
   });
 
   it("does not count an absence as a kind of work", () => {
@@ -52,7 +52,7 @@ describe("buildShiftCountsReport", () => {
       templateId: null, start: null, end: null, title: null,
     });
     const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
-    expect(report.rows.find((r) => r.displayName === "Отпускник")!.total).toBe(0);
+    expect(report.rows.find((r) => r.displayName === "Отпускник")!.byGroup).toEqual({ shift: 0, duty: 0, other: 0 });
     expect(report.kinds).toEqual([]);
   });
 
@@ -86,7 +86,7 @@ describe("buildShiftCountsReport", () => {
     });
     const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
     const row = report.rows[0]!;
-    expect(row.total).toBe(1);
+    expect(row.byGroup.other).toBe(1);
     expect(row.byKind["Своё время"]).toBeUndefined();
     expect(Object.keys(row.byKind)).not.toContain("Своё время");
     // Whatever the label, it must not be the custom-time bucket, and it must carry the count.
@@ -102,7 +102,7 @@ describe("buildShiftCountsReport", () => {
     worked(db, a, day, "День", "2026-05-31");
     worked(db, a, day, "День", "2026-06-15");
     worked(db, a, day, "День", "2026-07-01");
-    expect(buildShiftCountsReport(db, JUNE.from, JUNE.to).rows[0]!.total).toBe(1);
+    expect(buildShiftCountsReport(db, JUNE.from, JUNE.to).rows[0]!.byGroup.shift).toBe(1);
   });
 
   it("leaves an archived worker off the report", () => {
@@ -126,7 +126,17 @@ describe("buildShiftCountsReport", () => {
     worked(db, a, presetId(db, "Утро"), "Утро", "2026-06-01");
 
     const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
-    expect(report.kinds).toEqual(["Утро", "Ночь", "Своё время"]);
+    expect(report.kinds.map((k) => k.name)).toEqual(["Утро", "Ночь", "Своё время"]);
+    expect(report.kinds.map((k) => k.group)).toEqual(["shift", "shift", "other"]);
+  });
+
+  it("вид из базы несёт свой цвет", () => {
+    const db = makeTestDb();
+    const a = createEmployee(db, { displayName: "Кто-то" }).id;
+    worked(db, a, presetId(db, "Ночь"), "Ночь", "2026-06-03");
+    const report = buildShiftCountsReport(db, JUNE.from, JUNE.to);
+    expect(report.kinds[0]).toMatchObject({ name: "Ночь", group: "shift" });
+    expect(report.kinds[0]!.accent).not.toBeNull();
   });
 
   it("lists people in the admin's order, so the report matches every other screen", () => {
@@ -138,14 +148,31 @@ describe("buildShiftCountsReport", () => {
 });
 
 describe("shiftCountsCsv", () => {
-  it("writes a header, a row per person, and zeroes for kinds they didn't do", () => {
+  it("колонки по группам, после группы её итог; общего «Всего» нет", () => {
     const db = makeTestDb();
     const a = createEmployee(db, { displayName: "Первый" }).id;
     createEmployee(db, { displayName: "Второй" });
     worked(db, a, presetId(db, "День"), "День", "2026-06-01");
+    worked(db, a, presetId(db, "Дежурство · Телефон"), "Дежурство · Телефон", "2026-06-02", "duty");
 
     const csv = shiftCountsCsv(buildShiftCountsReport(db, JUNE.from, JUNE.to));
-    expect(csv.split("\r\n")).toEqual(["Работник;День;Всего", "Первый;1;1", "Второй;0;0"]);
+    expect(csv.split("\r\n")).toEqual([
+      "Работник;День;Смен всего;Дежурство · Телефон;Дежурств всего",
+      "Первый;1;1;1;1",
+      "Второй;0;0;0;0",
+    ]);
+  });
+
+  it("название вида с разделителем — в кавычках", () => {
+    const db = makeTestDb();
+    const a = createEmployee(db, { displayName: "Первый" }).id;
+    createShift(db, {
+      employeeId: a, date: "2026-06-01", endDate: null, category: "shift",
+      templateId: null, start: "10:00", end: "14:00", title: "Склад; ночь",
+    });
+    expect(shiftCountsCsv(buildShiftCountsReport(db, JUNE.from, JUNE.to)).split("\r\n")[0]).toBe(
+      'Работник;"Склад; ночь";Прочего всего',
+    );
   });
 
   it("quotes a name containing the delimiter", () => {
