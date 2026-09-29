@@ -91,6 +91,7 @@ import {
   orderTotal,
   orderItemInputSchema,
   FOOD_QTY_MAX,
+  FOOD_ITEMS_PER_PERSON_MAX,
   type PollChoice,
   type TeamAudience,
   type PlaceInput,
@@ -2312,6 +2313,9 @@ export async function mockAddOrderItem(
   // Тот же отказ и тот же текст, что у ручки `POST /api/orders/:id/items`.
   if (!parsed.success) throw new Error("Проверь блюдо и цену (целые рубли, до 100 000).");
   const data = parsed.data;
+  // Тот же потолок строк, что `addMenuItem`/`addCustomItem` на сервере.
+  const tooMany = o.items.filter((i) => i.employeeId === MOCK_ME.id).length >= FOOD_ITEMS_PER_PERSON_MAX;
+  const tooManyError = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
   if ("menuItemId" in data) {
     const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
     const dish = place?.menu.find((m) => m.id === data.menuItemId);
@@ -2319,8 +2323,10 @@ export async function mockAddOrderItem(
     // Прибавляем к строке с той же ценой — как `addMenuItem` на сервере.
     const same = o.items.find((i) => i.employeeId === MOCK_ME.id && i.menuItemId === data.menuItemId && i.price === dish.price);
     if (same) same.qty += 1;
+    else if (tooMany) throw new Error(tooManyError);
     else o.items.push({ id: nextOrderItemId++, employeeId: MOCK_ME.id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1 });
   } else {
+    if (tooMany) throw new Error(tooManyError);
     o.items.push({ id: nextOrderItemId++, employeeId: MOCK_ME.id, menuItemId: null, name: data.name, price: data.price, qty: data.qty });
   }
   o.declines.delete(MOCK_ME.id);

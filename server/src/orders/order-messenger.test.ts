@@ -88,6 +88,27 @@ describe("рассылка заказа", () => {
   });
 });
 
+describe("длинная сводка запускающему", () => {
+  it("больше 4000 знаков — несколькими письмами по границам строк; «Напомнить» — под последним", async () => {
+    const { db, anya, igor, mark, order } = stage();
+    // 2 × 20 позиций со 150-знаковыми названиями — сводка далеко за лимит
+    // Telegram (4096): одним письмом она бы не ушла вовсе.
+    for (const who of [igor, mark]) {
+      for (let i = 0; i < 20; i += 1) addCustomItem(db, order, who.id, { name: `${who.id}-${i} ${"щ".repeat(150)}`, price: 100, qty: 1 }, now);
+    }
+    closeOrder(db, order, anya);
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    const summary = api.sent.filter((m) => m.chat_id === 100);
+    expect(summary.length).toBeGreaterThan(1);
+    for (const m of summary) expect(m.text.length).toBeLessThanOrEqual(4000);
+    expect(summary[0]!.text.startsWith("📋 Заказ")).toBe(true);
+    expect(summary.at(-1)!.text).toContain("Итого:");
+    expect(summary.map(labels)).toEqual([...summary.slice(1).map(() => []), ["⏰ Напомнить не сдавшим"]]);
+  });
+});
+
 describe("перерисовка письма заказа", () => {
   it("открытый — правит письмо именно этого человека; закрытый — не трогает (кнопки уже погашены)", async () => {
     const { db, anya, igor, order } = stage();

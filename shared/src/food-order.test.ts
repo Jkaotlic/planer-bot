@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   debtOf, debtors, dishSummary, itemLines, orderInviteText, orderItemInputSchema, orderTotal, organizerSummaryText, payRequestText,
-  placeInputSchema,
+  placeInputSchema, splitAtLines,
 } from "./food-order";
 
 describe("placeInputSchema", () => {
@@ -116,5 +116,30 @@ describe("orderItemInputSchema", () => {
   it("смешанная форма и нулевое количество — отказ", () => {
     expect(orderItemInputSchema.safeParse({ menuItemId: 3, name: "X", price: 1 }).success).toBe(false);
     expect(orderItemInputSchema.safeParse({ menuItemId: 3, qty: 0 }).success).toBe(false);
+  });
+});
+
+describe("splitAtLines", () => {
+  it("короткий текст — одним куском", () => {
+    expect(splitAtLines("а\nб", 10)).toEqual(["а\nб"]);
+  });
+
+  it("длинный режется по границам строк: каждый кусок не длиннее лимита, склейка даёт исходник", () => {
+    const text = Array.from({ length: 50 }, (_, i) => `строка ${i} ${"я".repeat(30)}`).join("\n");
+    const parts = splitAtLines(text, 200);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) expect(part.length).toBeLessThanOrEqual(200);
+    expect(parts.join("\n")).toBe(text);
+    // Строка не рвётся посередине: каждый кусок начинается с «строка».
+    for (const part of parts) expect(part.startsWith("строка")).toBe(true);
+  });
+
+  it("перенос строки считается в длину: «aaaaa» + «\\n» + «bbbb» = 10 уже не влезает в 9", () => {
+    expect(splitAtLines("aaaaa\nbbbb\nc", 9)).toEqual(["aaaaa", "bbbb\nc"]);
+  });
+
+  it("одна строка длиннее лимита режется жёстко — Telegram иначе откажет целиком", () => {
+    const parts = splitAtLines("я".repeat(25), 10);
+    expect(parts).toEqual(["я".repeat(10), "я".repeat(10), "я".repeat(5)]);
   });
 });

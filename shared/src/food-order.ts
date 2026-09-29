@@ -13,6 +13,15 @@ export const FOOD_NOTE_MAX = 300;
 export const FOOD_MENU_MAX = 30;
 export const FOOD_PRICE_MAX = 100_000;
 export const FOOD_QTY_MAX = 20;
+/**
+ * Строк своих позиций на человека в одном заказе. Не вкус, а сводка
+ * запускающему: 20 строк × 200 знаков названия на каждого — и так уже
+ * несколько писем (`splitAtLines`); без потолка одна кнопка «Добавить» в
+ * цикле раздула бы её до сотни.
+ */
+export const FOOD_ITEMS_PER_PERSON_MAX = 20;
+/** Потолок одного письма с запасом до лимита Telegram в 4096 знаков. */
+export const TELEGRAM_TEXT_SAFE_MAX = 4000;
 
 /** Цена — целые рубли: копейки в обеде никто не сдаёт, а дробь в долге — повод для спора. */
 export const foodPriceSchema = z.number().int().min(1).max(FOOD_PRICE_MAX);
@@ -131,6 +140,33 @@ export function organizerSummaryText(input: {
   for (const id of people) lines.push(`${input.names.get(id) ?? "—"} — ${formatMoney(debtOf(input.items, id))}`);
   lines.push("", `Итого: ${formatMoney(orderTotal(input.items))}`);
   return lines.join("\n");
+}
+
+/**
+ * Режет длинный текст на письма не длиннее `max` — по границам строк, чтобы
+ * строка «Имя — 350 ₽» не разорвалась между письмами. Telegram отказывает
+ * письму длиннее 4096 знаков целиком, и сводка большой команды не дошла бы
+ * вовсе. Строка длиннее `max` режется жёстко: при наших лимитах (название до
+ * 200 знаков) её не бывает, но и отказ всего письма из-за неё хуже.
+ */
+export function splitAtLines(text: string, max = TELEGRAM_TEXT_SAFE_MAX): string[] {
+  if (text.length <= max) return [text];
+  const lines: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.length <= max) { lines.push(line); continue; }
+    for (let i = 0; i < line.length; i += max) lines.push(line.slice(i, i + max));
+  }
+  const parts: string[] = [];
+  let current: string | null = null;
+  for (const line of lines) {
+    if (current === null) current = line;
+    else if (current.length + 1 + line.length <= max) current += `\n${line}`;
+    else { parts.push(current); current = line; }
+  }
+  if (current !== null) parts.push(current);
+  // Пустая строка-разделитель на стыке дала бы письмо, начинающееся с
+  // пустоты, или вовсе пустое — Telegram такое не отправит.
+  return parts.map((p) => p.replace(/^\n+|\n+$/g, "")).filter((p) => p.length > 0);
 }
 
 export function payRequestText(input: { creatorName: string; placeName: string | null; amount: number; payHint: string | null }): string {

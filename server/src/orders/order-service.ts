@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
-import { FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal, type PaymentRow } from "@planer/shared";
+import { FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal, type PaymentRow } from "@planer/shared";
 import type { Db } from "../db/client";
 import {
   employees, foodOrderDeclines, foodOrderItems, foodOrderRecipients, foodOrders, foodPlaces,
@@ -88,6 +88,14 @@ function clearDecline(db: Db, orderId: number, employeeId: number): void {
     .where(and(eq(foodOrderDeclines.orderId, orderId), eq(foodOrderDeclines.employeeId, employeeId))).run();
 }
 
+const TOO_MANY_ITEMS = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
+
+/** Сколько строк у человека уже есть — потолок `FOOD_ITEMS_PER_PERSON_MAX` считает строки, а не штуки. */
+function ownRowCount(db: Db, orderId: number, employeeId: number): number {
+  return db.select({ id: foodOrderItems.id }).from(foodOrderItems)
+    .where(and(eq(foodOrderItems.orderId, orderId), eq(foodOrderItems.employeeId, employeeId))).all().length;
+}
+
 export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuItemId: number, now: TeamClock): Result {
   const allowed = guard(db, order, employeeId, now);
   if (!allowed.ok) return allowed;
@@ -103,6 +111,7 @@ export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuIt
     if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: `Больше ${FOOD_QTY_MAX} одного блюда — это уже не обед.` };
     db.update(foodOrderItems).set({ qty: same.qty + 1 }).where(eq(foodOrderItems.id, same.id)).run();
   } else {
+    if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
     db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId, name: dish.name, price: dish.price, qty: 1 }).run();
   }
   clearDecline(db, order.id, employeeId);
@@ -114,6 +123,7 @@ export function addCustomItem(
 ): Result {
   const allowed = guard(db, order, employeeId, now);
   if (!allowed.ok) return allowed;
+  if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
   db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId: null, ...input }).run();
   clearDecline(db, order.id, employeeId);
   return { ok: true };

@@ -1,5 +1,7 @@
 import { InlineKeyboard, type Bot } from "grammy";
-import { closesLabel, debtors, formatMoney, isOpenAt, orderInviteText, organizerSummaryText, payRequestText } from "@planer/shared";
+import {
+  closesLabel, debtors, formatMoney, isOpenAt, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
+} from "@planer/shared";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { foodPlaces, type FoodOrder } from "../db/schema";
@@ -167,7 +169,13 @@ export async function finishOrderMessages(
   const items = itemsOf(db, order.id);
   const creator = rows.find((r) => r.employeeId === order.createdBy);
   if (creator?.telegramUserId != null) {
-    await notifyUser(bot, creator.telegramUserId, organizerSummaryText({ placeName: place, items, names: byId }), remindKeyboard(order.id));
+    // Сводка большой команды может не влезть в одно письмо (лимит Telegram —
+    // 4096 знаков): режем по строкам, «Напомнить» — под последним куском,
+    // после «Итого».
+    const parts = splitAtLines(organizerSummaryText({ placeName: place, items, names: byId }));
+    for (const [i, part] of parts.entries()) {
+      await notifyUser(bot, creator.telegramUserId, part, i === parts.length - 1 ? remindKeyboard(order.id) : undefined);
+    }
   }
   for (const d of debtors(items, order.createdBy)) {
     const tg = rows.find((r) => r.employeeId === d.employeeId)?.telegramUserId;
