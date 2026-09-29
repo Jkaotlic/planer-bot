@@ -2,6 +2,12 @@ import { createEmployeesApi, createReadApi, createTransport } from "@planer/clie
 import { readInitData } from "./init-data";
 import type { AnnouncementRecipient } from "@planer/shared";
 import type { ShiftCountsReport } from "@planer/shared";
+// Импорт для собственного использования ниже (`PollView`, `ApiClient`) плюс
+// реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
+// `POST /api/polls/:id/vote`), — опрос считает и правами, и сроком закрытия
+// сервер, а не мини-апп заново.
+import type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
+export type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -112,6 +118,12 @@ import {
   mockSetNoticePref,
   mockSendAnnouncement,
   mockGetAnnouncementRecipients,
+  mockGetTeamAudience,
+  mockGetPolls,
+  mockCreatePoll,
+  mockVotePoll,
+  mockClosePoll,
+  mockCancelPoll,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -521,6 +533,34 @@ export interface AnnouncementResult {
 // Тип общий с сервером: роль нужна кнопкам «Админам» / «Работникам».
 export type { AnnouncementRecipient } from "@planer/shared";
 
+/** Один потенциальный адресат опроса или заказа — контракт `GET /api/team-audience`.
+ *  `onShift` — только для этой ручки: анонсам всё равно, кто сегодня на месте. */
+export interface AudienceCandidate {
+  id: number;
+  displayName: string;
+  reachable: boolean;
+  role: "admin" | "worker" | "observer";
+  onShift: boolean;
+}
+
+/** Опрос глазами того, кто его открыл — контракт `GET /api/polls`, `GET /api/polls/:id`.
+ *  `canManage` уже посчитан сервером (запускающий или админ) — экран не повторяет правило. */
+export interface PollView {
+  id: number;
+  question: string;
+  creatorId: number;
+  creatorName: string;
+  closesAt: string | null;
+  closes: string | null;
+  open: boolean;
+  cancelled: boolean;
+  isCreator: boolean;
+  canManage: boolean;
+  myChoice: PollChoice | null;
+  tally: PollTally;
+  recipientCount: number;
+}
+
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
  *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */
 export interface BugReportRow {
@@ -920,6 +960,21 @@ export interface ApiClient {
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
   /** Кому уйдёт анонс «всем», глазами того, кто его пишет — для выбора адресатов. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
+
+  // --- Опросы («Заказы и опросы») --------------------------------------------
+  /** Адресаты опроса и заказа еды — экран выбора «вся команда / на смене / вручную». */
+  getTeamAudience(): Promise<AudienceCandidate[]>;
+  /** Опросы: список своих — экран «Заказы и опросы». */
+  getPolls(): Promise<PollView[]>;
+  /** Заводит опрос и сразу шлёт приглашения адресатам. */
+  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }>;
+  /** Свой голос — «За» / «Против» / «Воздержался». */
+  votePoll(id: number, choice: PollChoice): Promise<PollView>;
+  /** «Набрали, закрыть»: приём голосов останавливается, итог уходит всем. */
+  closePoll(id: number): Promise<PollView>;
+  /** Отменяет опрос без итога — запускающему передумалось. */
+  cancelPoll(id: number): Promise<PollView>;
+
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
   resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
@@ -1631,6 +1686,27 @@ export const realClient: ApiClient = {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
   },
+
+  async getTeamAudience() {
+    const { candidates } = await authorizedGet<{ candidates: AudienceCandidate[] }>("/api/team-audience");
+    return candidates;
+  },
+  async getPolls() {
+    const { polls } = await authorizedGet<{ polls: PollView[] }>("/api/polls");
+    return polls;
+  },
+  createPoll: (input) =>
+    authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[] }>("/api/polls", input),
+  async votePoll(id, choice) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/vote`, { choice })).poll;
+  },
+  async closePoll(id) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/close`, {})).poll;
+  },
+  async cancelPoll(id) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/cancel`, {})).poll;
+  },
+
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
     return reports;
@@ -1747,6 +1823,12 @@ const devClient: ApiClient = {
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
+  getTeamAudience: () => mockGetTeamAudience(),
+  getPolls: () => mockGetPolls(),
+  createPoll: (input) => mockCreatePoll(input),
+  votePoll: (id, choice) => mockVotePoll(id, choice),
+  closePoll: (id) => mockClosePoll(id),
+  cancelPoll: (id) => mockCancelPoll(id),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

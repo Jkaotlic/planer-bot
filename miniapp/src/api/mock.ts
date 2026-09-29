@@ -32,6 +32,8 @@ import type {
   AnnouncementAudience,
   AnnouncementResult,
   AnnouncementRecipient,
+  AudienceCandidate,
+  PollView,
   BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
@@ -75,6 +77,12 @@ import {
   autoSendDateFor,
   announcementRole,
   tallyShiftCounts,
+  closesAtFromTime,
+  closesLabel,
+  isOpenAt,
+  pollTally,
+  type PollChoice,
+  type TeamAudience,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -1880,6 +1888,117 @@ export async function mockSendAnnouncement(text: string, audience: AnnouncementA
   const archivedCount = pool.filter((e) => !e.isActive).length;
 
   return { delivered: reachable.length, intended: reachable.length, unreachable, archivedCount };
+}
+
+// --- Опросы («Заказы и опросы») ----------------------------------------------
+// Правила голосования, срока и итога — из `@planer/shared`, теми же функциями,
+// что и сервер (`closesAtFromTime`, `isOpenAt`, `pollTally`), а не переизобретены
+// здесь: иначе DEV-режим однажды показал бы опрос закрытым не в ту секунду, что прод.
+
+interface MockPoll {
+  id: number;
+  question: string;
+  createdBy: number;
+  closesAt: string | null;
+  closedAt: string | null;
+  cancelledAt: string | null;
+  recipients: number[];
+  votes: Map<number, PollChoice>;
+}
+
+const POLLS: MockPoll[] = [];
+let nextPollId = 1;
+
+/** DEV-мок живёт без `teamNow`: команда без базы, часовой пояс взять неоткуда. */
+function mockNow(): { date: string; time: string } {
+  const d = new Date();
+  return { date: d.toISOString().slice(0, 10), time: d.toTimeString().slice(0, 5) };
+}
+
+function pollViewOf(p: MockPoll): PollView {
+  const now = mockNow();
+  const people = p.recipients.map((id) => ({ employeeId: id, displayName: EMPLOYEES.find((e) => e.id === id)?.displayName ?? "—" }));
+  return {
+    id: p.id,
+    question: p.question,
+    creatorId: p.createdBy,
+    creatorName: EMPLOYEES.find((e) => e.id === p.createdBy)?.displayName ?? "—",
+    closesAt: p.closesAt,
+    closes: closesLabel(p.closesAt, now.date),
+    open: isOpenAt(p, now),
+    cancelled: p.cancelledAt != null,
+    isCreator: p.createdBy === MOCK_ME.id,
+    canManage: p.createdBy === MOCK_ME.id || MOCK_ME.isAdmin,
+    myChoice: p.votes.get(MOCK_ME.id) ?? null,
+    tally: pollTally(people, [...p.votes].map(([employeeId, choice]) => ({ employeeId, choice }))),
+    recipientCount: p.recipients.length,
+  };
+}
+
+/** Кандидаты в адресаты опроса/заказа — сам вызывающий исключён, как на сервере
+ *  (`audienceCandidates`): себя выбирать незачем, он в рассылке всегда. */
+export async function mockGetTeamAudience(): Promise<AudienceCandidate[]> {
+  await delay(150);
+  return EMPLOYEES.filter((e) => e.isActive && e.id !== MOCK_ME.id).map((e, i) => ({
+    id: e.id,
+    displayName: e.displayName,
+    reachable: e.telegramUserId != null,
+    role: announcementRole(e),
+    // Дев-мок без графика — не пришлось бы отдельно заводить занятость на
+    // сегодня, каждый второй в ростере «на смене» ради разнообразия карточки.
+    onShift: i % 2 === 0,
+  }));
+}
+
+export async function mockGetPolls(): Promise<PollView[]> {
+  await delay(150);
+  return [...POLLS].reverse().map(pollViewOf);
+}
+
+export async function mockCreatePoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }> {
+  await delay(200);
+  if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
+  const ids = input.audience.kind === "picked" ? input.audience.employeeIds : EMPLOYEES.filter((e) => e.isActive).map((e) => e.id);
+  const poll: MockPoll = {
+    id: nextPollId++,
+    question: input.question.trim(),
+    createdBy: MOCK_ME.id,
+    closesAt: closesAtFromTime(input.closesTime, mockNow().date),
+    closedAt: null,
+    cancelledAt: null,
+    recipients: [MOCK_ME.id, ...ids.filter((id) => id !== MOCK_ME.id)],
+    votes: new Map<number, PollChoice>(),
+  };
+  POLLS.push(poll);
+  return { poll: pollViewOf(poll), delivered: poll.recipients.length, unreachable: [] };
+}
+
+function pollOrThrow(id: number): MockPoll {
+  const p = POLLS.find((x) => x.id === id);
+  if (!p) throw new Error("Опрос не найден");
+  return p;
+}
+
+export async function mockVotePoll(id: number, choice: PollChoice): Promise<PollView> {
+  await delay(150);
+  const p = pollOrThrow(id);
+  if (!isOpenAt(p, mockNow())) throw new Error("Опрос закрыт.");
+  p.votes.set(MOCK_ME.id, choice);
+  return pollViewOf(p);
+}
+
+export async function mockClosePoll(id: number): Promise<PollView> {
+  await delay(150);
+  const p = pollOrThrow(id);
+  p.closedAt = new Date().toISOString();
+  return pollViewOf(p);
+}
+
+export async function mockCancelPoll(id: number): Promise<PollView> {
+  await delay(150);
+  const p = pollOrThrow(id);
+  p.cancelledAt = new Date().toISOString();
+  return pollViewOf(p);
 }
 
 // --- Багрепорты ---------------------------------------------------------
