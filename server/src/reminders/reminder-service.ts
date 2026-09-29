@@ -155,7 +155,8 @@ function isNonShiftKind(shift: Shift, template: ShiftTemplate | undefined): bool
 }
 
 /**
- * Кто завтра в той же смене — для строки «Завтра с тобой».
+ * Кто завтра в той же смене — для строки «Завтра с тобой». С `kind:
+ * "evening"` у ночного — для строки «до вечера»: отбор тот же, меняется вид.
  *
  * «С тобой» — это тот же вид смены по часам (`reminderKind`): утро с утром,
  * вечер с вечером, ночь с ночью. Раньше хватало пересечения часов, и утренний
@@ -261,11 +262,17 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl: string | und
       kind === "day" || isNonShiftKind(shift, template)
         ? []
         : coworkerNamesFor(db, { date: shift.date, kind, employeeId: shift.employeeId });
+    // Ночному — ещё и вечерние того же дня: их он застанет в начале ночи (его
+    // просьба от 2026-09-29). Гейт тот же, что выше: ночное дежурство — не смена.
+    const eveningCoworkers =
+      kind === "night" && !isNonShiftKind(shift, template)
+        ? coworkerNamesFor(db, { date: shift.date, kind: "evening", employeeId: shift.employeeId })
+        : [];
     const text = mode === "catchUp"
       ? buildCatchUpText({ name, timeRange, location })
       : custom
-      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers) }, kind)
-      : buildReminderText({ name, kind, timeRange, what, until, location, coworkers });
+      ? renderReminderText(custom, { name, timeRange, wake, location: location ?? "", coworkers: coworkersEnumeration(coworkers), eveningCoworkers: coworkersEnumeration(eveningCoworkers) }, kind)
+      : buildReminderText({ name, kind, timeRange, what, until, location, coworkers, eveningCoworkers });
 
     const appUrl = publicUrl ? `${publicUrl}/app/` : undefined;
     const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl);

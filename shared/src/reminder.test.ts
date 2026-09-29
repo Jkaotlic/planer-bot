@@ -13,6 +13,7 @@ import {
   remindsByDefault,
   dutyRun,
   coworkersLine,
+  eveningCoworkersLine,
 } from "./reminder";
 
 describe("reminderKind", () => {
@@ -146,6 +147,48 @@ describe("buildReminderText", () => {
     });
     expect(t).not.toContain("👥");
   });
+
+  it("ночная с вечерними — строка «до вечера» последней, после «Завтра с тобой»", () => {
+    // Его просьба от 2026-09-29: ночной видит, кто из вечерних с ним до вечера.
+    const t = buildReminderText({
+      name: "Аня",
+      kind: "night",
+      timeRange: "20:00–08:00",
+      location: "Поклонка",
+      coworkers: ["Марк"],
+      eveningCoworkers: ["Игорь", "Лена"],
+    });
+    expect(t.endsWith("\n📍 Поклонка\n👥 Завтра с тобой: Марк\n🌆 Завтра с тобой до вечера: Игорь, Лена")).toBe(true);
+  });
+
+  it("ночная без ночных соседей — строка «до вечера» всё равно есть", () => {
+    const t = buildReminderText({ name: "Аня", kind: "night", timeRange: "20:00–08:00", eveningCoworkers: ["Игорь"] });
+    expect(t).not.toContain("👥");
+    expect(t.endsWith("\n🌆 Завтра с тобой до вечера: Игорь")).toBe(true);
+  });
+
+  it("строка «до вечера» — только у ночной, даже если вечерние переданы", () => {
+    for (const kind of ["early", "morning", "day", "evening"] as const) {
+      const t = buildReminderText({ name: "Аня", kind, timeRange: "08:00–17:00", eveningCoworkers: ["Игорь"] });
+      expect(t).not.toContain("🌆 Завтра с тобой до вечера");
+    }
+  });
+
+  it("ночная без вечерних — строки «до вечера» нет", () => {
+    const t = buildReminderText({ name: "Аня", kind: "night", timeRange: "20:00–08:00", eveningCoworkers: [] });
+    expect(t).not.toContain("до вечера");
+  });
+});
+
+describe("eveningCoworkersLine", () => {
+  it("пустой список — строки нет", () => {
+    expect(eveningCoworkersLine([])).toBeNull();
+  });
+
+  it("больше шести — то же усечение, что у «Завтра с тобой»", () => {
+    const names = ["Аня", "Игорь", "Марк", "Семён", "Олег", "Вера", "Юля"];
+    expect(eveningCoworkersLine(names)).toBe("🌆 Завтра с тобой до вечера: Аня, Игорь, Марк, Семён, Олег, Вера, и ещё 1");
+  });
 });
 
 describe("coworkersLine", () => {
@@ -261,6 +304,26 @@ describe("renderReminderText", () => {
       "day",
     );
     expect(t).toBe("С тобой: .");
+  });
+
+  it("свой текст ночной получает строку «до вечера» в конце — подстановки для неё нет", () => {
+    // Своей подстановки у вечерних нет намеренно: иначе админу пришлось бы
+    // переписывать текст ночной, чтобы ночной узнал то, что узнаёт и без этого.
+    const t = renderReminderText(
+      "Ночь {время}. С тобой: {с кем}.",
+      { name: "Аня", timeRange: "20:00–08:00", wake: "19:00", location: "", coworkers: "Марк", eveningCoworkers: "Игорь" },
+      "night",
+    );
+    expect(t).toBe("Ночь 20:00–08:00. С тобой: Марк.\n🌆 Завтра с тобой до вечера: Игорь");
+  });
+
+  it("свой текст не ночной — строки «до вечера» нет", () => {
+    const t = renderReminderText(
+      "Завтра {время}",
+      { name: "Аня", timeRange: "12:00–21:00", wake: "11:00", location: "", coworkers: "", eveningCoworkers: "Игорь" },
+      "evening",
+    );
+    expect(t).toBe("Завтра 12:00–21:00");
   });
 
   it("kind: day — строка «Завтра с тобой» не добавляется сама, даже с непустыми соседями", () => {
