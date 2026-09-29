@@ -1,80 +1,49 @@
-import { countsForBalance, UNRECOGNISED_KIND } from "@planer/shared";
+import { tallyShiftCounts, SHIFT_COUNTS_GROUPS, type ShiftCountsGroup, type ShiftCountsReport } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listActive } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { listShiftsInRange } from "../repo/shifts";
 
+export type { ShiftCountsReport, ShiftCountsRow } from "@planer/shared";
+
 /**
- * «Кто сколько отдежурил» — a table of people × kinds over a period.
- *
- * Counted by KIND, not by hours, for the same reason fairness is: the question is
- * never "who worked more" but "who did more nights", and a phone duty and an
- * evening shift are not interchangeable however long each ran.
+ * «Кто сколько отдежурил». Сам подсчёт — в shared (`tallyShiftCounts`): его же
+ * зовут моки обеих морд, и три копии правила «что куда относится» разъехались бы.
  */
-
-export interface ShiftCountsRow {
-  employeeId: number;
-  displayName: string;
-  /** kind -> how many entries of it in the period. Absent kinds are simply zero. */
-  byKind: Record<string, number>;
-  total: number;
-}
-
-export interface ShiftCountsReport {
-  from: string;
-  to: string;
-  /** Column order: the presets in their own sort order, then anything one-off. */
-  kinds: string[];
-  rows: ShiftCountsRow[];
-}
-
-/** A one-off entry with no preset behind it — grouped under a single column. */
-const CUSTOM_KIND = "Своё время";
-
 export function buildShiftCountsReport(db: Db, from: string, to: string): ShiftCountsReport {
-  const templates = listActiveTemplates(db);
-  const nameById = new Map(templates.map((template) => [template.id, template.name] as const));
-  const employees = listActive(db);
-
-  const rows = new Map<number, ShiftCountsRow>(
-    employees.map((employee) => [
-      employee.id,
-      { employeeId: employee.id, displayName: employee.displayName, byKind: {}, total: 0 },
-    ]),
-  );
-  const seenKinds = new Set<string>();
-
-  for (const shift of listShiftsInRange(db, from, to)) {
-    // Absences are not work — an отпуск is not "a kind he did fewer of".
-    if (!countsForBalance(shift.category) || shift.employeeId == null) continue;
-    const row = rows.get(shift.employeeId);
-    if (!row) continue; // archived: their history stays, but they're off the report
-
-    const kind = shift.unrecognisedCode != null
-      ? UNRECOGNISED_KIND
-      : (shift.templateId != null ? nameById.get(shift.templateId) : undefined) ?? shift.title ?? CUSTOM_KIND;
-    row.byKind[kind] = (row.byKind[kind] ?? 0) + 1;
-    row.total += 1;
-    seenKinds.add(kind);
-  }
-
-  // Presets first, in the order the admin sees them everywhere else; then the
-  // leftovers (a renamed preset, a one-off) alphabetically, so the table is stable.
-  const preset = templates.map((template) => template.name).filter((name) => seenKinds.has(name));
-  const rest = [...seenKinds].filter((kind) => !preset.includes(kind)).sort((a, b) => a.localeCompare(b, "ru"));
-
-  return { from, to, kinds: [...preset, ...rest], rows: [...rows.values()] };
+  return tallyShiftCounts({
+    from,
+    to,
+    entries: listShiftsInRange(db, from, to),
+    templates: listActiveTemplates(db).map((t) => ({ id: t.id, name: t.name, category: t.category, accent: t.accent ?? null })),
+    employees: listActive(db),
+  });
 }
 
 function csvField(value: string): string {
   return /[";\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-/** The same table as a ';'-delimited CSV, for Excel — the download route adds the BOM. */
+const GROUP_TOTAL_TITLES: Record<ShiftCountsGroup, string> = {
+  shift: "Смен всего",
+  duty: "Дежурств всего",
+  other: "Прочего всего",
+};
+
+/**
+ * Та же таблица для Excel, через ';' — BOM добавляет маршрут. Итог каждой группы
+ * стоит сразу за её видами, как в консоли; общего «Всего» нет — он складывал
+ * несравнимое.
+ */
 export function shiftCountsCsv(report: ShiftCountsReport): string {
-  const header = ["Работник", ...report.kinds, "Всего"].map(csvField).join(";");
-  const lines = report.rows.map((row) =>
-    [csvField(row.displayName), ...report.kinds.map((kind) => String(row.byKind[kind] ?? 0)), String(row.total)].join(";"),
-  );
+  const columns: { title: string; value: (row: ShiftCountsReport["rows"][number]) => number }[] = [];
+  for (const group of SHIFT_COUNTS_GROUPS) {
+    const kinds = report.kinds.filter((k) => k.group === group);
+    if (kinds.length === 0) continue;
+    for (const kind of kinds) columns.push({ title: kind.name, value: (row) => row.byKind[kind.name] ?? 0 });
+    columns.push({ title: GROUP_TOTAL_TITLES[group], value: (row) => row.byGroup[group] });
+  }
+  const header = ["Работник", ...columns.map((c) => c.title)].map(csvField).join(";");
+  const lines = report.rows.map((row) => [csvField(row.displayName), ...columns.map((c) => String(c.value(row)))].join(";"));
   return [header, ...lines].join("\r\n");
 }
