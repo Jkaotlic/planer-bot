@@ -21,6 +21,9 @@ import {
 import { setOrderPaid } from "../../orders/order-payment-service";
 import { finishOrderMessages, placeName, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
 
+/** Мини-апп показывает текст ошибки как есть — код «not_found» человеку ничего не скажет. */
+const NOT_FOUND = "Заказ не найден.";
+
 const optionalText = z.string().trim().max(FOOD_NOTE_MAX).nullable().transform((s) => (s ? s : null));
 const createSchema = z.object({
   placeId: z.number().int().positive().nullable(),
@@ -110,12 +113,12 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.get("/api/orders/:id", auth, (c) => {
     const v = visible(c);
-    return v ? c.json({ order: orderView(db, v.order, v.viewer, v.now) }) : c.json({ error: "not_found" }, 404);
+    return v ? c.json({ order: orderView(db, v.order, v.viewer, v.now) }) : c.json({ error: NOT_FOUND }, 404);
   });
 
   app.post("/api/orders/:id/items", auth, async (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const parsed = orderItemInputSchema.safeParse(await jsonBody(c));
     if (!parsed.success) return c.json({ error: "Проверь блюдо и цену (целые рубли, до 100 000).", issues: parsed.error.issues }, 400);
     const input = parsed.data;
@@ -128,7 +131,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.patch("/api/orders/:id/items/:itemId", auth, async (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const body = (await jsonBody(c)) as { qty?: unknown };
     if (!Number.isInteger(body.qty) || (body.qty as number) < 1 || (body.qty as number) > FOOD_QTY_MAX) {
       return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
@@ -140,7 +143,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.delete("/api/orders/:id/items/:itemId", auth, (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const result = removeItem(db, v.order, v.viewer.id, Number(c.req.param("itemId")), v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
     return afterOwnEdit(c, v);
@@ -148,7 +151,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.post("/api/orders/:id/decline", auth, (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const result = declineOrder(db, v.order, v.viewer.id, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);
     return afterOwnEdit(c, v);
@@ -156,9 +159,9 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.post("/api/orders/:id/paid", auth, async (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
-    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+    if (typeof body.paid !== "boolean") return c.json({ error: "Не понял отметку." }, 400);
     const result = setOrderPaid(db, v.order, v.viewer.id, v.viewer, body.paid);
     if (!result.ok) return c.json({ error: result.error }, 409);
     return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
@@ -167,9 +170,9 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   /** Галочка за другого: обед часто сдают наличкой в руки. */
   app.post("/api/orders/:id/payments/:employeeId", auth, async (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
-    if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
+    if (typeof body.paid !== "boolean") return c.json({ error: "Не понял отметку." }, 400);
     const payerId = Number(c.req.param("employeeId"));
     if (!Number.isInteger(payerId)) return c.json({ error: "Не тот человек." }, 400);
     const result = setOrderPaid(db, v.order, payerId, v.viewer, body.paid);
@@ -184,7 +187,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.post("/api/orders/:id/remind", auth, async (c) => {
     const v = visible(c);
-    if (!v) return c.json({ error: "not_found" }, 404);
+    if (!v) return c.json({ error: NOT_FOUND }, 404);
     if (!canManage(v.order, v.viewer)) return c.json({ error: "Напомнить может только тот, кто собирает заказ." }, 409);
     if (v.order.cancelledAt != null) return c.json({ error: "Заказ отменён — напоминать не о чем." }, 409);
     if (v.order.closedAt == null) return c.json({ error: "Сначала закрой приём." }, 409);
@@ -204,7 +207,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   for (const action of ["close", "cancel"] as const) {
     app.post(`/api/orders/:id/${action}`, auth, async (c) => {
       const v = visible(c);
-      if (!v) return c.json({ error: "not_found" }, 404);
+      if (!v) return c.json({ error: NOT_FOUND }, 404);
       const result = action === "close" ? closeOrder(db, v.order, v.viewer) : cancelOrder(db, v.order, v.viewer);
       if (!result.ok) return c.json({ error: result.error }, 409);
       const fresh = getOrder(db, v.order.id)!;

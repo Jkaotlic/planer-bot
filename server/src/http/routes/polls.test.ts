@@ -170,6 +170,10 @@ describe("опросы по HTTP", () => {
       send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
     const res = await app.request(new Request(`http://x/api/polls/${poll.id}`, get(markT)));
     expect(res.status).toBe(404);
+    // Мини-апп показывает текст ошибки как есть — «not_found» человеку не нужен.
+    expect((await res.json()).error).toBe("Опрос не найден.");
+    const vote = await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(markT, { choice: "for" })));
+    expect((await vote.json()).error).toBe("Опрос не найден.");
   });
 
   it("голое null вместо тела голоса — 400, а не падение", async () => {
@@ -178,6 +182,7 @@ describe("опросы по HTTP", () => {
       send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
     const res = await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(igorT, null)));
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Не понял голос.");
   });
 });
 

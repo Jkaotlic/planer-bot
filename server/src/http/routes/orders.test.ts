@@ -120,11 +120,26 @@ describe("заказы по HTTP", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("посторонний — 404 на чтение и на заказ", async () => {
+  it("посторонний — 404 на чтение и на заказ, с русской причиной: мини-апп показывает её как есть", async () => {
     const { app, igor, anyaT, markT, placeId } = await stage();
     const { body } = await newOrder(app, anyaT, igor, placeId);
-    expect((await app.request(new Request(`http://x/api/orders/${body.order.id}`, get(markT)))).status).toBe(404);
-    expect((await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(markT, { name: "Суп", price: 1 })))).status).toBe(404);
+    const read = await app.request(new Request(`http://x/api/orders/${body.order.id}`, get(markT)));
+    expect(read.status).toBe(404);
+    expect((await read.json()).error).toBe("Заказ не найден.");
+    const add = await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(markT, { name: "Суп", price: 1 })));
+    expect(add.status).toBe(404);
+    expect((await add.json()).error).toBe("Заказ не найден.");
+  });
+
+  it("кривая отметка «сдал» — 400 «Не понял отметку.», и за себя, и за другого", async () => {
+    const { app, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    const mine = await app.request(new Request(`http://x/api/orders/${body.order.id}/paid`, send(igorT, { paid: "да" })));
+    expect(mine.status).toBe(400);
+    expect((await mine.json()).error).toBe("Не понял отметку.");
+    const other = await app.request(new Request(`http://x/api/orders/${body.order.id}/payments/${igor}`, send(anyaT, {})));
+    expect(other.status).toBe(400);
+    expect((await other.json()).error).toBe("Не понял отметку.");
   });
 
   it("закрытие запускающим рассылает сводку и «сдай»; участнику — 409", async () => {

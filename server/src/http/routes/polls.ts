@@ -14,6 +14,9 @@ import {
 } from "../../polls/poll-service";
 import { finishPollMessages, redrawPollMessage, sendPollInvites } from "../../polls/poll-messenger";
 
+/** Мини-апп показывает текст ошибки как есть — код «not_found» человеку ничего не скажет. */
+const NOT_FOUND = "Опрос не найден.";
+
 const createSchema = z.object({
   question: z.string().trim().min(1).max(POLL_QUESTION_MAX),
   closesTime: timeStr.nullable(),
@@ -88,17 +91,17 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
   app.get("/api/polls/:id", auth, (c) => {
     const poll = getPoll(db, Number(c.req.param("id")));
     const view = poll ? pollView(db, poll, viewerOf(c), teamNow(config.teamTz)) : null;
-    return view ? c.json({ poll: view }) : c.json({ error: "not_found" }, 404);
+    return view ? c.json({ poll: view }) : c.json({ error: NOT_FOUND }, 404);
   });
 
   app.post("/api/polls/:id/vote", auth, async (c) => {
     const body = await jsonBody(c);
     const choice = pollChoiceSchema.safeParse(body.choice);
-    if (!choice.success) return c.json({ error: "choice должен быть for, against или abstain" }, 400);
+    if (!choice.success) return c.json({ error: "Не понял голос." }, 400);
     const viewer = viewerOf(c);
     const now = teamNow(config.teamTz);
     const poll = getPoll(db, Number(c.req.param("id")));
-    if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: "not_found" }, 404);
+    if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: NOT_FOUND }, 404);
     const result = castVote(db, poll, viewer.id, choice.data, now);
     if (!result.ok) return c.json({ error: result.error }, 409);
     // Письмо в чате — косметика: ответ мини-аппу её не ждёт (см. `redrawPollMessage`).
@@ -111,7 +114,7 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
       const viewer = viewerOf(c);
       const now = teamNow(config.teamTz);
       const poll = getPoll(db, Number(c.req.param("id")));
-      if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: "not_found" }, 404);
+      if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: NOT_FOUND }, 404);
       const result = action === "close" ? closePoll(db, poll, viewer) : cancelPoll(db, poll, viewer);
       if (!result.ok) return c.json({ error: result.error }, 409);
       const fresh = getPoll(db, poll.id)!;

@@ -2026,7 +2026,7 @@ export async function mockCreatePoll(input: { question: string; closesTime: stri
 
 function pollOrThrow(id: number): MockPoll {
   const p = POLLS.find((x) => x.id === id);
-  if (!p) throw new Error("Опрос не найден");
+  if (!p) throw new Error("Опрос не найден.");
   return p;
 }
 
