@@ -63,6 +63,7 @@ const MINIAPP_ONLY: Record<string, string> = {
   // ведёт (спека 2026-09-29, «Вне рамок»).
   getTeamAudience: "адресаты опроса и заказа еды",
   getPolls: "опросы работника",
+  getPoll: "опросы работника",
   createPoll: "опросы работника",
   votePoll: "опросы работника",
   closePoll: "опросы работника",
