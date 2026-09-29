@@ -67,6 +67,9 @@ const MINIAPP_ONLY: Record<string, string> = {
   votePoll: "опросы работника",
   closePoll: "опросы работника",
   cancelPoll: "опросы работника",
+  getFoodPlaces: "места и меню для заказа еды",
+  saveFoodPlace: "места и меню для заказа еды",
+  archiveFoodPlace: "места и меню для заказа еды",
 };
 
 /** Только в консоли — и почему мини-аппу это не нужно. */

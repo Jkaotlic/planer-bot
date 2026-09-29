@@ -36,3 +36,4 @@ export * from "./shift-counts-view";
 export * from "./announce-audience";
 export * from "./team-audience";
 export * from "./poll";
+export * from "./food-order";

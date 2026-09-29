@@ -6,8 +6,9 @@ import type { ShiftCountsReport } from "@planer/shared";
 // реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
 // `POST /api/polls/:id/vote`), — опрос считает и правами, и сроком закрытия
 // сервер, а не мини-апп заново.
-import type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
+import type { TeamAudience, PollChoice, PollTally, PlaceInput } from "@planer/shared";
 export type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
+export type { PlaceInput } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -124,6 +125,9 @@ import {
   mockVotePoll,
   mockClosePoll,
   mockCancelPoll,
+  mockGetFoodPlaces,
+  mockSaveFoodPlace,
+  mockArchiveFoodPlace,
   mockGetBugReports,
   mockResolveBugReport,
   employeesMock,
@@ -561,6 +565,14 @@ export interface PollView {
   recipientCount: number;
 }
 
+/** Место с меню — контракт `GET /api/food-places`, `POST /api/food-places`,
+ *  `PUT /api/food-places/:id`. Общее для всех работников, как и опрос. */
+export interface PlaceView {
+  id: number;
+  name: string;
+  menu: { id: number; name: string; price: number }[];
+}
+
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
  *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */
 export interface BugReportRow {
@@ -974,6 +986,14 @@ export interface ApiClient {
   closePoll(id: number): Promise<PollView>;
   /** Отменяет опрос без итога — запускающему передумалось. */
   cancelPoll(id: number): Promise<PollView>;
+
+  // --- Места и меню («Заказы и опросы») --------------------------------------
+  /** Места с меню — общие для всей команды, не только для смотрящего. */
+  getFoodPlaces(): Promise<PlaceView[]>;
+  /** `id: null` — заводит новое место, иначе правит существующее. */
+  saveFoodPlace(id: number | null, input: PlaceInput): Promise<PlaceView>;
+  /** Архивирует место — блюда с ним не удаляются, на них ссылаются заказы. */
+  archiveFoodPlace(id: number): Promise<void>;
 
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
@@ -1707,6 +1727,19 @@ export const realClient: ApiClient = {
     return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/cancel`, {})).poll;
   },
 
+  async getFoodPlaces() {
+    return (await authorizedGet<{ places: PlaceView[] }>("/api/food-places")).places;
+  },
+  async saveFoodPlace(id, input) {
+    const res = id == null
+      ? await authorizedPostJson<{ place: PlaceView }>("/api/food-places", input)
+      : await authorizedPutJson<{ place: PlaceView }>(`/api/food-places/${id}`, input);
+    return res.place;
+  },
+  async archiveFoodPlace(id) {
+    await authorizedDelete<{ ok: true }>(`/api/food-places/${id}`);
+  },
+
   async getBugReports(status) {
     const { reports } = await authorizedGet<{ reports: BugReportRow[] }>(`/api/admin/bug-reports?status=${status}`);
     return reports;
@@ -1829,6 +1862,9 @@ const devClient: ApiClient = {
   votePoll: (id, choice) => mockVotePoll(id, choice),
   closePoll: (id) => mockClosePoll(id),
   cancelPoll: (id) => mockCancelPoll(id),
+  getFoodPlaces: () => mockGetFoodPlaces(),
+  saveFoodPlace: (id, input) => mockSaveFoodPlace(id, input),
+  archiveFoodPlace: (id) => mockArchiveFoodPlace(id),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
 };

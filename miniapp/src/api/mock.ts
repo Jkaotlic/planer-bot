@@ -34,6 +34,7 @@ import type {
   AnnouncementRecipient,
   AudienceCandidate,
   PollView,
+  PlaceView,
   BugReportRow,
   WorkerCollection,
   UpcomingBirthday,
@@ -82,8 +83,10 @@ import {
   isFutureClose,
   isOpenAt,
   pollTally,
+  placeInputSchema,
   type PollChoice,
   type TeamAudience,
+  type PlaceInput,
 } from "@planer/shared";
 import { inviteLinkFor } from "../lib/bot";
 
@@ -2040,6 +2043,71 @@ export async function mockCancelPoll(id: number): Promise<PollView> {
   const p = pollOrThrow(id);
   p.cancelledAt = new Date().toISOString();
   return pollViewOf(p);
+}
+
+// --- Места и меню --------------------------------------------------------
+// Тот же приём, что у опросов: правила формы (лимиты, дубли блюд) считает
+// `placeInputSchema` из `@planer/shared`, а не своя копия здесь — иначе
+// DEV-режим однажды пропустил бы то, что сервер отклонит.
+
+interface MockMenuItem {
+  id: number;
+  name: string;
+  price: number;
+}
+
+interface MockPlace {
+  id: number;
+  name: string;
+  menu: MockMenuItem[];
+  archived: boolean;
+}
+
+const PLACES: MockPlace[] = [
+  {
+    id: 1,
+    name: "Шаурмечная у метро",
+    menu: [
+      { id: 1, name: "Шаурма классическая", price: 350 },
+      { id: 2, name: "Лаваш с курицей", price: 300 },
+    ],
+    archived: false,
+  },
+];
+let nextPlaceId = 2;
+let nextMenuItemId = 3;
+
+export async function mockGetFoodPlaces(): Promise<PlaceView[]> {
+  await delay(150);
+  return PLACES.filter((p) => !p.archived)
+    .map((p) => ({ id: p.id, name: p.name, menu: p.menu.map((m) => ({ id: m.id, name: m.name, price: m.price })) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+export async function mockSaveFoodPlace(id: number | null, input: PlaceInput): Promise<PlaceView> {
+  await delay(200);
+  const parsed = placeInputSchema.safeParse(input);
+  // Тот же отказ и тот же текст, что у ручки `POST /api/food-places` на
+  // сервере — иначе DEV пропустил бы то, что живой сервер отклонит.
+  if (!parsed.success) throw new Error("Проверь название, блюда и цены (целые рубли, до 100 000).");
+  const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: m.id ?? nextMenuItemId++, name: m.name, price: m.price }));
+  if (id == null) {
+    const place: MockPlace = { id: nextPlaceId++, name: parsed.data.name, menu, archived: false };
+    PLACES.push(place);
+    return { id: place.id, name: place.name, menu: place.menu };
+  }
+  const place = PLACES.find((p) => p.id === id && !p.archived);
+  if (!place) throw new Error("Места больше нет.");
+  place.name = parsed.data.name;
+  place.menu = menu;
+  return { id: place.id, name: place.name, menu: place.menu };
+}
+
+export async function mockArchiveFoodPlace(id: number): Promise<void> {
+  await delay(150);
+  const place = PLACES.find((p) => p.id === id && !p.archived);
+  if (!place) throw new Error("Места больше нет.");
+  place.archived = true;
 }
 
 // --- Багрепорты ---------------------------------------------------------

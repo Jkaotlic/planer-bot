@@ -81,6 +81,7 @@ import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
 import { createCalendarRoutes } from "./routes/calendar";
 import { createPollRoutes } from "./routes/polls";
+import { createFoodPlaceRoutes } from "./routes/food-places";
 import { createTeamAudienceRoutes } from "./routes/team-audience";
 import {
   isStartTab,
@@ -731,6 +732,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.route("/", createTeamAudienceRoutes(db, config));
   app.route("/", createPollRoutes({ db, config, bot }));
+  app.route("/", createFoodPlaceRoutes(db, config));
 
   app.get("/api/admin/events", requireAdmin(db, config.jwtSecret), (c) => {
     const events = listRecentAudit(db, 30, c.get("auth").employeeId).map((row) => ({

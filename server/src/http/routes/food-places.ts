@@ -1,0 +1,59 @@
+import { Hono, type Context } from "hono";
+import { placeInputSchema } from "@planer/shared";
+import type { Config } from "../../config";
+import type { Db } from "../../db/client";
+import { recordAudit } from "../../repo/audit";
+import { requireAuth, type Env } from "../middleware";
+import { archivePlace, createPlace, listPlaces, updatePlace } from "../../orders/place-service";
+
+/**
+ * Тело запроса, приведённое к объекту.
+ *
+ * Та же прослойка, что в `polls.ts`: `c.req.json()` парсит и `null`, и массив
+ * без ошибки — без неё голое тело роняло бы ручку TypeError'ом (500) вместо
+ * понятного 400.
+ */
+async function jsonBody(c: Context): Promise<Record<string, unknown>> {
+  const raw = await c.req.json().catch(() => null);
+  return raw != null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+/**
+ * Места и меню правит любой работник: меню общее, и если ждать админа ради
+ * новой цены шаурмы, его просто перестанут вести.
+ */
+export function createFoodPlaceRoutes(db: Db, config: Config): Hono<Env> {
+  const app = new Hono<Env>();
+  const auth = requireAuth(db, config.jwtSecret);
+  const parse = async (c: Context) => placeInputSchema.safeParse(await jsonBody(c));
+  const invalid = (issues: unknown) => ({ error: "Проверь название, блюда и цены (целые рубли, до 100 000).", issues });
+
+  app.get("/api/food-places", auth, (c) => c.json({ places: listPlaces(db) }));
+
+  app.post("/api/food-places", auth, async (c) => {
+    const parsed = await parse(c);
+    if (!parsed.success) return c.json(invalid(parsed.error.issues), 400);
+    const place = createPlace(db, parsed.data, c.get("auth").employeeId);
+    recordAudit(db, "food_place_changed", c.get("auth").employeeId, { placeId: place.id, name: place.name, action: "создано" });
+    return c.json({ place }, 201);
+  });
+
+  app.put("/api/food-places/:id", auth, async (c) => {
+    const parsed = await parse(c);
+    if (!parsed.success) return c.json(invalid(parsed.error.issues), 400);
+    const result = updatePlace(db, Number(c.req.param("id")), parsed.data);
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    recordAudit(db, "food_place_changed", c.get("auth").employeeId, { placeId: result.place!.id, name: result.place!.name, action: "изменено" });
+    return c.json({ place: result.place });
+  });
+
+  app.delete("/api/food-places/:id", auth, (c) => {
+    const id = Number(c.req.param("id"));
+    const result = archivePlace(db, id);
+    if (!result.ok) return c.json({ error: result.error }, 404);
+    recordAudit(db, "food_place_changed", c.get("auth").employeeId, { placeId: id, action: "удалено" });
+    return c.json({ ok: true });
+  });
+
+  return app;
+}

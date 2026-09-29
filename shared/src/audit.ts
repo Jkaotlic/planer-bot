@@ -52,6 +52,7 @@ export const AUDIT_TYPES = [
   // Опросы и заказы еды запускает любой работник, а не админ — журнал должен
   // отвечать «кто это разослал всей команде», если рассылка кому-то помешала.
   "poll_created", "poll_closed", "poll_cancelled",
+  "food_place_changed",
   "checklist_completed", "checklist_doc_changed", "checklist_changed",
   "bug_report_created", "bug_report_resolved",
 ] as const;
@@ -650,6 +651,8 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   poll_created: (p) => ({ icon: "🗳", title: "Запущен опрос", lines: [str(p.question) ?? "—", `адресатов: ${num(p.recipients) ?? 0}`] }),
   poll_closed: (p) => ({ icon: "🗳", title: "Опрос закрыт", lines: [str(p.question) ?? "—"] }),
   poll_cancelled: (p) => ({ icon: "🗳", title: "Опрос отменён", lines: [str(p.question) ?? "—"] }),
+
+  food_place_changed: (p) => ({ icon: "🍱", title: "Изменено место для заказа еды", lines: [str(p.name) ?? "—", str(p.action) ?? ""] }),
 
   // Одна строка на пройденный чек-лист, а не на каждый тап: интересен факт
   // «прошёл», а по строке на пункт журнал утопило бы на день вперёд.

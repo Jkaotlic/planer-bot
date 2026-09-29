@@ -766,3 +766,34 @@ export type NewAppSetting = typeof appSettings.$inferInsert;
 export type Poll = typeof polls.$inferSelect;
 export type PollRecipient = typeof pollRecipients.$inferSelect;
 export type PollVote = typeof pollVotes.$inferSelect;
+
+/**
+ * Место, откуда заказывают еду, — общее для всех работников.
+ *
+ * Сохраняется, чтобы меню не вбивать заново каждый обед (он выбрал это
+ * 2026-09-29). Удаление — архивом: на место ссылаются прошлые заказы.
+ */
+export const foodPlaces = sqliteTable("food_places", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  name: text().notNull(),
+  createdBy: integer().notNull().references(() => employees.id),
+  archivedAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/**
+ * Блюдо в меню места. Правка цены меняет строку, а не долг: позиция заказа
+ * копирует имя и цену в момент заказа (`food_order_items`). Убранное из меню
+ * блюдо архивируется — на него смотрят кнопки уже разосланных писем.
+ */
+export const foodMenuItems = sqliteTable("food_menu_items", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  placeId: integer().notNull().references(() => foodPlaces.id),
+  name: text().notNull(),
+  price: integer().notNull(),
+  position: integer().notNull().default(0),
+  archivedAt: integer({ mode: "timestamp" }),
+});
+
+export type FoodPlace = typeof foodPlaces.$inferSelect;
+export type FoodMenuItem = typeof foodMenuItems.$inferSelect;
