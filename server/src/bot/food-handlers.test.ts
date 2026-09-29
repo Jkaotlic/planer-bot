@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createBot } from "./bot";
 import { recordApi, stubBotInfo } from "./testbot";
@@ -52,6 +52,37 @@ async function tap(bot: Bot, from: number, data: string) {
       message: { message_id: updateId, date: Math.floor(Date.now() / 1000), chat: { id: from, type: "private" }, from: { id: 1, is_bot: true, first_name: "P" }, text: "…" },
     },
   } as never);
+}
+
+/**
+ * Рассылка из обработчика идёт в фоне (не держит очередь апдейтов grammY), и
+ * тест, который смотрит на её результат, должен дождаться хвоста сам.
+ */
+async function flush() {
+  for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
+}
+
+/**
+ * Задвижка на `sendMessage`: всё, что бот шлёт, ждёт `release()`. Ставится
+ * ПОСЛЕ `recordApi` — последний установленный трансформер grammY внешний, так
+ * что запись в `api.sent` появляется только после открытия задвижки.
+ */
+function gateSends(bot: Bot) {
+  let release!: () => void;
+  const opened = new Promise<void>((r) => { release = r; });
+  bot.api.config.use(async (prev, method, payload, signal) => {
+    if (method === "sendMessage") await opened;
+    return prev(method, payload, signal);
+  });
+  return { release };
+}
+
+/** Тап, который не дождался ответа за 300 мс, — «повис»: обработчик держит очередь. */
+async function tapSettles(bot: Bot, from: number, data: string): Promise<"done" | "hung"> {
+  return Promise.race([
+    tap(bot, from, data).then(() => "done" as const),
+    new Promise<"hung">((r) => setTimeout(() => r("hung"), 300)),
+  ]);
 }
 
 async function say(bot: Bot, from: number, text: string) {
@@ -129,14 +160,17 @@ describe("колбэки опроса", () => {
 
     // Запускающий — закрывает, итог уходит обоим адресатам, и это попадает в аудит.
     await tap(bot, 111, `poll:close:${poll.id}`);
+    await flush();
     expect(getPoll(db, poll.id)!.closedAt).not.toBeNull();
     expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
     const closedEntry = listRecentAudit(db, 10).find((row) => row.type === "poll_closed");
     expect(closedEntry?.actorEmployeeId).toBe(anya.id);
     expect(closedEntry?.payload).toMatchObject({ pollId: poll.id, question: poll.question });
 
+    await flush();
     // Повторный тап уже закрывшего — «Опрос уже закрыт.», без второй рассылки итога.
     await tap(bot, 111, `poll:close:${poll.id}`);
+    await flush();
     expect(api.answers.join(" ")).toMatch(/Опрос уже закрыт\./);
     expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
   });
@@ -189,9 +223,12 @@ describe("колбэки заказа", () => {
     const { db, bot, order } = stage();
     const api = recordApi(bot);
     await tap(bot, 111, `order:close:${order.id}`);
+    await flush();
     expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
     const summaryCount = api.sent.filter((m) => m.text.includes("Что заказать:")).length;
+    expect(summaryCount).toBe(1);
     await tap(bot, 111, `order:close:${order.id}`);
+    await flush();
     expect(api.answers.at(-1)).toMatch(/Приём уже закрыт\./);
     expect(api.sent.filter((m) => m.text.includes("Что заказать:"))).toHaveLength(summaryCount);
   });
@@ -276,6 +313,7 @@ describe("деньги заказа в боте", () => {
     closeOrder(db, order, anya);
     recordApi(bot);
     await tap(bot, 111, `order:remind:${order.id}`);
+    await flush();
     const entry = listRecentAudit(db, 10).find((row) => row.type === "order_reminded");
     expect(entry?.actorEmployeeId).toBe(anya.id);
     expect(entry?.payload).toMatchObject({ orderId: order.id, delivered: 1, unreachable: 0 });
@@ -295,19 +333,85 @@ describe("деньги заказа в боте", () => {
     closeOrder(db, order, anya);
     const api = recordApi(bot);
     await tap(bot, 111, `order:remind:${order.id}`);
-    expect(api.answers.at(-1)).toBe("Напомнил: 1 из 2. Не дошло: Настя");
+    // Всплывашку можно показать один раз — и сразу: «Напоминаю…». Итог
+    // приходит отдельным письмом тому, кто нажал, когда волна дошла.
+    expect(api.answers.at(-1)).toBe("Напоминаю…");
+    await flush();
+    expect(api.sent.filter((m) => m.chat_id === 111).at(-1)!.text).toBe("Напомнил: 1 из 2. Не дошло: Настя");
   });
 
-  it("второй тап «Напомнить», пока первая рассылка ещё идёт, — «Уже напоминаю — подожди.», письмо уходит одной волной", async () => {
+  it("второй тап «Напомнить», пока первая рассылка ещё идёт, — «Уже напоминаю — подожди.», письмо уходит одной волной; после волны замок снят", async () => {
     const { db, bot, anya, igor, order, shawarmaId } = stage();
     addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
     closeOrder(db, order, anya);
     const api = recordApi(bot);
-    // Оба тапа запускаются без ожидания друг друга: второй должен застать
-    // guard уже выставленным (см. комментарий у `remindInFlight` в
-    // food-handlers.ts) — так проверяется защита от гонки, а не порядок.
-    await Promise.all([tap(bot, 111, `order:remind:${order.id}`), tap(bot, 111, `order:remind:${order.id}`)]);
-    expect(api.answers).toContain("Уже напоминаю — подожди.");
+    const gate = gateSends(bot);
+    // Первая волна висит на задвижке: второй тап застаёт замок (см.
+    // `remindInFlight` в food-handlers.ts) — проверяется защита, а не порядок.
+    expect(await tapSettles(bot, 111, `order:remind:${order.id}`)).toBe("done");
+    await tap(bot, 111, `order:remind:${order.id}`);
+    expect(api.answers).toEqual(["Напоминаю…", "Уже напоминаю — подожди."]);
+    gate.release();
+    await flush();
     expect(api.sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(1);
+    // Замок снимается в конце фоновой волны, а не навсегда.
+    await tap(bot, 111, `order:remind:${order.id}`);
+    await flush();
+    expect(api.answers.at(-1)).toBe("Напоминаю…");
+    expect(api.sent.filter((m) => m.text.startsWith("⏰"))).toHaveLength(2);
+  });
+
+  it("«Напомнить», когда все сдали, — «Все уже сдали 🎉» сразу, без волны", async () => {
+    const { db, bot, anya, order } = stage();
+    closeOrder(db, order, anya);
+    const api = recordApi(bot);
+    await tap(bot, 111, `order:remind:${order.id}`);
+    await flush();
+    expect(api.answers.at(-1)).toBe("Все уже сдали 🎉");
+    expect(api.sent).toHaveLength(0);
+  });
+});
+
+/**
+ * Один процесс — и API, и long-polling, а grammY разбирает апдейты строго по
+ * одному: обработчик, который ждёт рассылку на всю команду, держит все кнопки
+ * всех людей (см. историю в `api-timeouts.ts`). Задвижка на `sendMessage`
+ * имитирует медленную сеть: тап должен ответить, не дожидаясь волны.
+ */
+describe("массовые рассылки не держат очередь апдейтов", () => {
+  it("«Закрыть опрос» отвечает до конца рассылки итога; итог уходит, когда сеть отпустило", async () => {
+    const { db, bot, poll } = stage();
+    const api = recordApi(bot);
+    const gate = gateSends(bot);
+    expect(await tapSettles(bot, 111, `poll:close:${poll.id}`)).toBe("done");
+    expect(getPoll(db, poll.id)!.closedAt).not.toBeNull();
+    expect(api.sent).toHaveLength(0);
+    gate.release();
+    await vi.waitFor(() => expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2));
+  });
+
+  it("«Закрыть приём» отвечает до конца рассылки сводки; сводка уходит, когда сеть отпустило", async () => {
+    const { db, bot, order } = stage();
+    const api = recordApi(bot);
+    const gate = gateSends(bot);
+    expect(await tapSettles(bot, 111, `order:close:${order.id}`)).toBe("done");
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    expect(api.sent).toHaveLength(0);
+    gate.release();
+    await vi.waitFor(() => expect(api.sent.filter((m) => m.text.includes("Что заказать:"))).toHaveLength(1));
+  });
+
+  it("«Напомнить» отвечает «Напоминаю…» до конца волны; итог и аудит — после", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
+    closeOrder(db, order, anya);
+    const api = recordApi(bot);
+    const gate = gateSends(bot);
+    expect(await tapSettles(bot, 111, `order:remind:${order.id}`)).toBe("done");
+    expect(api.answers.at(-1)).toBe("Напоминаю…");
+    gate.release();
+    await vi.waitFor(() => expect(api.sent.some((m) => m.chat_id === 111 && m.text === "Напомнил: 1 из 1")).toBe(true));
+    expect(api.sent.filter((m) => m.chat_id === 333 && m.text.startsWith("⏰"))).toHaveLength(1);
+    expect(listRecentAudit(db, 10).find((row) => row.type === "order_reminded")?.payload).toMatchObject({ delivered: 1 });
   });
 });

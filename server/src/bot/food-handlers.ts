@@ -9,7 +9,8 @@ import { recordAudit } from "../repo/audit";
 import { castVote, closePoll, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
 import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
 import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem } from "../orders/order-service";
-import { setOrderPaid } from "../orders/order-payment-service";
+import { setOrderPaid, unpaidDebtors } from "../orders/order-payment-service";
+import { notifyUser } from "./notify";
 import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, payDoneKeyboard, placeName, remindUnpaid } from "../orders/order-messenger";
 
 export interface FoodHandlerDeps {
@@ -30,6 +31,21 @@ export function foodMenuKeyboard(publicUrl: string): InlineKeyboard {
     .webApp("🗳 Новый опрос", `${publicUrl}/app/?screen=orders&new=poll`)
     .row()
     .webApp("📋 Открыть", `${publicUrl}/app/?screen=orders`);
+}
+
+/**
+ * Массовая рассылка из обработчика кнопки — в фоне, без `await`.
+ *
+ * Один процесс держит и API, и long-polling, а grammY разбирает апдейты
+ * строго по одному: обработчик, который ждёт итог опроса на всю команду
+ * (десятки вызовов Telegram, до двадцати секунд каждый на плохой сети),
+ * держит кнопки всех людей — так однажды кнопки молчали восемь минут (см.
+ * `api-timeouts.ts`). Тап отвечает сразу, волна идёт следом; её отказ —
+ * только в лог: состояние в базе уже записано, а повторный тап не
+ * разошлёт второй раз (закрытие — условный UPDATE).
+ */
+function inBackground(label: string, work: Promise<unknown>): void {
+  void work.catch((err) => console.error(`bot: ${label} failed:`, safeErrorMessage(err)));
 }
 
 async function safeEdit(fn: () => Promise<unknown>): Promise<void> {
@@ -128,8 +144,8 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     const result = closePoll(db, poll, viewerOf(who.me, ctx.from.id));
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     recordAudit(db, "poll_closed", who.me.id, { pollId: poll.id, question: poll.question });
-    await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог разослан" });
-    await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
+    await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог рассылаю" });
+    inBackground("poll close fan-out", finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed"));
   });
 
   bot.callbackQuery(/^order:add:(\d+):(\d+)$/, async (ctx) => {
@@ -175,7 +191,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     await ctx.answerCallbackQuery({
       text: who.me.id === fresh.createdBy ? "Приём закрыт, сводка у тебя в чате" : "Приём закрыт, сводка ушла тому, кто собирал заказ",
     });
-    await finishOrderMessages(bot, db, fresh, "closed", config.publicUrl);
+    inBackground("order close fan-out", finishOrderMessages(bot, db, fresh, "closed", config.publicUrl));
   });
 
   bot.callbackQuery(/^order:paid:(\d+)$/, async (ctx) => {
@@ -191,10 +207,6 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     await safeEdit(() => ctx.editMessageReplyMarkup({ reply_markup: payDoneKeyboard(order.id) }));
   });
 
-  // Дольше 60 символов всплывашка без `show_alert` обрезает текст — «Не
-  // дошло: Имя1, Имя2, …» на большой команде в неё не влезает, а модалка
-  // показывает целиком.
-  const ANSWER_ALERT_THRESHOLD = 60;
   // Рассылка «Напомнить» не мгновенная: второй тап, пока первая волна ещё
   // идёт (например, по медленной сети), не должен запускать вторую — тот же
   // человек получил бы два одинаковых письма подряд. Ключ — id заказа, не
@@ -215,20 +227,31 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     // раньше письма-сводки — человек ещё не видел, сколько должен.
     if (order.closedAt == null) { await ctx.answerCallbackQuery({ text: "Сначала закрой приём." }); return; }
     if (remindInFlight.has(order.id)) { await ctx.answerCallbackQuery({ text: "Уже напоминаю — подожди." }); return; }
+    // «Все сдали» известно до волны — отвечаем сразу, без рассылки и без
+    // письма-итога, которое тут ничего бы не добавило.
+    if (unpaidDebtors(db, order).length === 0) { await ctx.answerCallbackQuery({ text: "Все уже сдали 🎉" }); return; }
     remindInFlight.add(order.id);
-    try {
-      const { delivered, unpaid, unreachable } = await remindUnpaid(bot, db, order);
-      recordAudit(db, "order_reminded", who.me.id, { orderId: order.id, delivered, unreachable: unreachable.length });
-      if (unpaid === 0) {
-        await ctx.answerCallbackQuery({ text: "Все уже сдали 🎉" });
-        return;
+    const tapperTg = ctx.from.id;
+    // Всплывашку Telegram показывает один раз на тап, а волна идёт в фоне
+    // (`inBackground`) — поэтому сейчас «Напоминаю…», а «D из N» с поимённым
+    // «Не дошло» — отдельным письмом тому, кто нажал, когда волна дошла.
+    // Замок снимается в `finally` самой волны, а не обработчика: иначе он
+    // отпускался бы раньше, чем ушло первое письмо.
+    // Отказ ответа (тап старше 15 минут) не должен оставить замок висеть:
+    // он уже выставлен, а снимает его только волна ниже.
+    await ctx.answerCallbackQuery({ text: "Напоминаю…" }).catch((err) => {
+      console.error("bot: remind answer failed:", safeErrorMessage(err));
+    });
+    inBackground("order remind fan-out", (async () => {
+      try {
+        const { delivered, unpaid, unreachable } = await remindUnpaid(bot, db, order);
+        recordAudit(db, "order_reminded", who.me.id, { orderId: order.id, delivered, unreachable: unreachable.length });
+        const base = `Напомнил: ${delivered} из ${unpaid}`;
+        await notifyUser(bot, tapperTg, unreachable.length > 0 ? `${base}. Не дошло: ${unreachable.join(", ")}` : base);
+      } finally {
+        remindInFlight.delete(order.id);
       }
-      const base = `Напомнил: ${delivered} из ${unpaid}`;
-      const text = unreachable.length > 0 ? `${base}. Не дошло: ${unreachable.join(", ")}` : base;
-      await ctx.answerCallbackQuery({ text, show_alert: text.length > ANSWER_ALERT_THRESHOLD });
-    } finally {
-      remindInFlight.delete(order.id);
-    }
+    })());
   });
 
   return { sendFoodMenu };
