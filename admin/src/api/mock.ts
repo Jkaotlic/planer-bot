@@ -763,7 +763,7 @@ function blankCollection(patch: Partial<Collection>): Collection {
     title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
     collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
     scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: null, sentCount: 0, sendCount: 0,
-    createdAt: new Date().toISOString(), ...patch,
+    recipientGroupId: null, createdAt: new Date().toISOString(), ...patch,
   };
 }
 
@@ -855,7 +855,12 @@ export async function mockRemindUnpaid(id: number) {
 /** То, что реально уйдёт команде, и кому — теми же правилами, что у сервера. */
 function previewOf(collection: Collection, today: string): CollectionPreview {
   const personName = personNameOf(collection.employeeId);
-  const recipients = mockRecipients(collection.employeeId);
+  const group = collection.recipientGroupId != null ? groupById(collection.recipientGroupId) : null;
+  const groupName = collection.recipientGroupId != null ? groupNameById(collection.recipientGroupId) : null;
+  // Группа решает только до первой рассылки, как на сервере.
+  const groupDecides = collection.sendCount === 0 && collection.recipientGroupId != null;
+  const members = groupDecides && group ? new Set(groupView(group).memberIds) : null;
+  const recipients = mockRecipients(collection.employeeId).filter((r) => !members || members.has(r.employeeId));
   const honouree = collection.employeeId != null ? EMPLOYEES.find((e) => e.id === collection.employeeId) : null;
 
   const message = outgoingCollectionMessage(
@@ -884,6 +889,8 @@ function previewOf(collection: Collection, today: string): CollectionPreview {
   } else if (collection.kind === "birthday" && collection.sendCount > 0) {
     blocker = "Уже разослано — повторная отправка отключена.";
   } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
+  else if (groupDecides && !group) blocker = `Группа «${groupName ?? ""}» удалена — выбери другую.`;
+  else if (groupDecides && recipients.length === 0) blocker = "Некому отправлять: в группе никого с Telegram.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
 
   return {
@@ -895,6 +902,7 @@ function previewOf(collection: Collection, today: string): CollectionPreview {
     collectUrl: collection.collectUrl,
     message,
     recipients,
+    recipientGroupName: groupName,
     blocker,
     sendCount: collection.sendCount,
     lastSentAt: collection.sentAt,
@@ -922,6 +930,13 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
     throw new Error("Сбор уже разослан — повод и виновника менять нельзя.");
   }
 
+  if (patch.recipientGroupId !== undefined) {
+    checkRecipientGroup(patch.recipientGroupId, collection.recipientGroupId);
+    if (collection.sendCount > 0 && patch.recipientGroupId !== collection.recipientGroupId) {
+      throw new Error("Сбор уже разослан — адресатов менять нельзя.");
+    }
+    collection.recipientGroupId = patch.recipientGroupId;
+  }
   if (patch.title !== undefined) {
     const title = patch.title.trim();
     if (!title) throw new Error("Повод не может быть пустым");
@@ -1004,6 +1019,7 @@ function birthdayRoundDraft(employeeId: number, today: string): Collection | nul
     autoSendOn: autoSendDateFor(occurrence.celebratedOn, today),
     autoSentAt: null,
     sentAt: null, sentCount: 0, sendCount: 0,
+    recipientGroupId: null,
     createdAt: new Date(0).toISOString(),
   };
 }
@@ -1093,6 +1109,7 @@ export async function mockCreateCollection(input: NewCollectionInput): Promise<C
   if (input.employeeId != null && !EMPLOYEES.some((e) => e.id === input.employeeId)) {
     throw new Error("Такого работника нет");
   }
+  checkRecipientGroup(input.recipientGroupId ?? null, null);
   if (input.collectUrl) {
     const url = input.collectUrl.trim();
     if (url && !/^https?:\/\/\S+$/i.test(url)) throw new Error("Ссылка должна начинаться с http:// или https://");
@@ -1108,6 +1125,7 @@ export async function mockCreateCollection(input: NewCollectionInput): Promise<C
     collectUrl: input.collectUrl ?? null,
     messageText: input.messageText ?? null,
     scheduledSendOn: input.scheduledSendOn ?? null,
+    recipientGroupId: input.recipientGroupId ?? null,
   });
   COLLECTIONS.push(created);
   return { ...created };
@@ -1662,6 +1680,24 @@ export async function mockGetChecklistDay(date: string): Promise<ChecklistDay> {
 const RECIPIENT_GROUPS: { id: number; name: string; rowIds: number[] }[] = [];
 let nextRecipientGroupId = 1;
 
+// Удалённая группа на сервере — архив: сбор помнит её и называет по имени в
+// блокере. Здесь имя переживает удаление в этом словаре.
+const REMOVED_GROUP_NAMES = new Map<number, string>();
+
+function groupById(id: number) {
+  return RECIPIENT_GROUPS.find((g) => g.id === id) ?? null;
+}
+
+function groupNameById(id: number): string | null {
+  return groupById(id)?.name ?? REMOVED_GROUP_NAMES.get(id) ?? null;
+}
+
+/** Как `unknownGroup` в `app.ts`: живая группа подходит всегда, а удалённая — только та, что уже стоит у сбора. */
+function checkRecipientGroup(next: number | null, current: number | null): void {
+  if (next == null || next === current) return;
+  if (!groupById(next)) throw new Error("Такой группы нет.");
+}
+
 const INVALID_GROUP = "Проверь название (до 40 символов) и состав.";
 
 function groupNameTaken(name: string, exceptId: number | null): boolean {
@@ -1724,5 +1760,6 @@ export async function mockDeleteRecipientGroup(id: number): Promise<void> {
   await delay(150);
   const at = RECIPIENT_GROUPS.findIndex((g) => g.id === id);
   if (at < 0) throw new Error("Группы больше нет.");
+  REMOVED_GROUP_NAMES.set(id, RECIPIENT_GROUPS[at]!.name);
   RECIPIENT_GROUPS.splice(at, 1);
 }

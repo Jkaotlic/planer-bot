@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mockCreateRecipientGroup, mockDeleteRecipientGroup, mockGetRecipientGroups, mockSaveRecipientGroup } from "./mock";
+import {
+  mockCreateCollection, mockCreateRecipientGroup, mockDeleteRecipientGroup, mockGetCollectionPreview, mockGetRecipientGroups,
+  mockSaveCollection, mockSaveRecipientGroup,
+} from "./mock";
 
 // Мок обязан отказывать теми же текстами, что сервис: в dev форму иначе не проверить.
 describe("мок групп адресатов", () => {
@@ -29,5 +32,24 @@ describe("мок групп адресатов", () => {
     expect(names.indexOf("Арбуз")).toBeLessThan(names.indexOf("Яблоко"));
     await mockDeleteRecipientGroup(a.id);
     await mockDeleteRecipientGroup(b.id);
+  });
+});
+
+// Сбор в моке держит группу так же, как сервер: имя удалённой не теряется, а
+// «Такой группы нет.» отказывает только чужой удалённой.
+describe("мок сборов с группой адресатов", () => {
+  it("превью называет группу, удалённая блокирует, а свою удалённую сохранить можно", async () => {
+    const g = await mockCreateRecipientGroup({ name: "Мок-группа", memberIds: [1, 2] });
+    const c = await mockCreateCollection({ title: "С группой", collectUrl: "https://example.com/x", recipientGroupId: g.id });
+    expect(c.recipientGroupId).toBe(g.id);
+    expect((await mockGetCollectionPreview(c.id)).recipientGroupName).toBe("Мок-группа");
+
+    await mockDeleteRecipientGroup(g.id);
+    const after = await mockGetCollectionPreview(c.id);
+    expect(after.recipientGroupName).toBe("Мок-группа");
+    expect(after.blocker).toBe("Группа «Мок-группа» удалена — выбери другую.");
+    await expect(mockSaveCollection(c.id, { recipientGroupId: g.id, collectUrl: "https://example.com/y" })).resolves.toBeTruthy();
+    await expect(mockCreateCollection({ title: "Чужая", recipientGroupId: g.id })).rejects.toThrow("Такой группы нет.");
+    await expect(mockSaveCollection(c.id, { recipientGroupId: 987654 })).rejects.toThrow("Такой группы нет.");
   });
 });

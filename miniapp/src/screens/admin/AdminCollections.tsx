@@ -9,6 +9,7 @@ import {
 } from "@planer/shared";
 import { Button, Cell, Input, List, Placeholder, Section, Spinner, Switch, Textarea } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
+import { RecipientGroupField } from "../../components/RecipientGroupField";
 import {
   apiClient,
   type Collection,
@@ -159,6 +160,11 @@ const DATE_INPUT_STYLE = {
   color: "var(--tgui--text_color)",
   font: "inherit",
   fontSize: 13.5,
+  // Нативное поле даты имеет собственную минимальную ширину и в узкой колонке
+  // выпирало за край: на 320px форма получала горизонтальную прокрутку страницы.
+  minWidth: 0,
+  width: "100%",
+  boxSizing: "border-box",
 } as const;
 
 export function AdminCollections({
@@ -406,6 +412,7 @@ function NewCollectionForm({
   const [totalGoal, setTotalGoal] = useState("");
   const [collectUrl, setCollectUrl] = useState("");
   const [messageText, setMessageText] = useState("");
+  const [recipientGroupId, setRecipientGroupId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -418,6 +425,7 @@ function NewCollectionForm({
     setTotalGoal("");
     setCollectUrl("");
     setMessageText("");
+    setRecipientGroupId(null);
     setError(null);
   }
 
@@ -434,6 +442,7 @@ function NewCollectionForm({
         totalGoal: moneyValue(totalGoal),
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        recipientGroupId,
       });
       reset();
       setOpen(false);
@@ -476,6 +485,7 @@ function NewCollectionForm({
         emptyOptionLabel="Общий сбор — на всех"
         disabled={busy}
       />
+      <RecipientGroupField value={recipientGroupId} onChange={setRecipientGroupId} sent={false} disabled={busy} />
 
       <CollectionFields
         busy={busy}
@@ -561,7 +571,7 @@ function CollectionFields({
   return (
     <>
       <div style={{ display: "flex", gap: 8 }}>
-        <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+        <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)" }}>Дата события</span>
           <input
             type="date"
@@ -572,7 +582,7 @@ function CollectionFields({
             onChange={(e) => onEventDate(e.target.value)}
           />
         </label>
-        <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+        <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)" }}>Скинуться до</span>
           <input
             type="date"
@@ -826,6 +836,7 @@ function CollectionEditor({
   const [totalGoal, setTotalGoal] = useState(collection.totalGoal?.toString() ?? "");
   const [collectUrl, setCollectUrl] = useState(collection.collectUrl ?? "");
   const [messageText, setMessageText] = useState(collection.messageText ?? "");
+  const [recipientGroupId, setRecipientGroupId] = useState<number | null>(collection.recipientGroupId);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -869,6 +880,7 @@ function CollectionEditor({
         totalGoal: moneyValue(totalGoal),
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        recipientGroupId,
       };
       if (!isBirthday && !subjectFrozen) {
         patch.title = title.trim();
@@ -949,6 +961,14 @@ function CollectionEditor({
           )}
         </>
       )}
+
+      <RecipientGroupField
+        value={recipientGroupId}
+        onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
+        sent={collection.sendCount > 0}
+        knownName={preview?.recipientGroupName}
+        disabled={busy}
+      />
 
       <CollectionFields
         busy={busy}
@@ -1191,7 +1211,11 @@ function SendBlock({
 
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
         Получат {recipientsSubject(preview.recipients.length)}
-        {personName ? ` — все, кроме ${personName}:` : " — вся команда:"}
+        {personName
+          ? ` — все, кроме ${personName}:`
+          : preview.recipientGroupName
+            ? ` — группа «${preview.recipientGroupName}»:`
+            : " — вся команда:"}
       </div>
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
         {preview.recipients.length === 0
@@ -1356,6 +1380,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
   const [collectUrl, setCollectUrl] = useState(birthday.campaign?.collectUrl ?? "");
   const [messageText, setMessageText] = useState(birthday.campaign?.messageText ?? "");
   const [scheduledSendOn, setScheduledSendOn] = useState(birthday.campaign?.scheduledSendOn ?? "");
+  const [recipientGroupId, setRecipientGroupId] = useState<number | null>(birthday.campaign?.recipientGroupId ?? null);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1385,6 +1410,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
         scheduledSendOn: scheduledSendOn || null,
+        recipientGroupId,
       });
       await loadPreview();
       await onChanged();
@@ -1423,6 +1449,13 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
         </div>
       ) : (
         <>
+          <RecipientGroupField
+            value={recipientGroupId}
+            onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
+            sent={false}
+            knownName={preview?.recipientGroupName}
+            disabled={busy}
+          />
           {/* Headers stay short — a phone-width `Input` ellipsises its own label,
               and «Ссылка на сбор (Сбербан…» tells you nothing the field doesn't. */}
           <Input
@@ -1472,6 +1505,15 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
             Сохранить
           </Button>
         </>
+      )}
+
+      {sent && (
+        <RecipientGroupField
+          value={birthday.campaign?.recipientGroupId ?? null}
+          onChange={() => {}}
+          sent
+          knownName={preview?.recipientGroupName}
+        />
       )}
 
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}

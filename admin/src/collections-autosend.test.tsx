@@ -19,7 +19,7 @@ const ROUND: Collection = {
   title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
   collectUrl: "https://example.com/sbor", messageText: null, closedAt: null,
   scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: "2099-09-04", autoSentAt: null,
-  sentAt: null, sentCount: 0, sendCount: 0, createdAt: "2026-09-01T10:00:00Z",
+  sentAt: null, sentCount: 0, sendCount: 0, recipientGroupId: null, createdAt: "2026-09-01T10:00:00Z",
 };
 
 const BIRTHDAY: UpcomingBirthday = {

@@ -18,7 +18,7 @@ const COLLECTION: Collection = {
   title: "Кофемашина", eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
   collectUrl: null, messageText: null, closedAt: null,
   scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: null, sentCount: 0, sendCount: 0,
-  createdAt: "2026-08-01T10:00:00Z",
+  recipientGroupId: null, createdAt: "2026-08-01T10:00:00Z",
 };
 
 const ROW: CollectionRow = { collection: COLLECTION, personName: null, title: "Кофемашина", status: "pending", active: true };

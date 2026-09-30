@@ -20,6 +20,7 @@ import {
 } from "../api/client";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
 import { PersonPicker } from "../components/PersonPicker";
+import { RecipientGroupField } from "../components/RecipientGroupField";
 import { initialsOf, personPalette } from "../lib/people";
 import { withNotifyNotice } from "../lib/notify-text";
 
@@ -398,6 +399,7 @@ function NewCollectionForm({
   const [totalGoal, setTotalGoal] = useState("");
   const [collectUrl, setCollectUrl] = useState("");
   const [messageText, setMessageText] = useState("");
+  const [recipientGroupId, setRecipientGroupId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -410,6 +412,7 @@ function NewCollectionForm({
     setTotalGoal("");
     setCollectUrl("");
     setMessageText("");
+    setRecipientGroupId(null);
     setError(null);
   }
 
@@ -426,6 +429,7 @@ function NewCollectionForm({
         totalGoal: moneyValue(totalGoal),
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        recipientGroupId,
       });
       reset();
       await onCreated(created);
@@ -460,6 +464,7 @@ function NewCollectionForm({
           emptyOptionLabel="Общий сбор — на всех"
           disabled={busy}
         />
+        <RecipientGroupField value={recipientGroupId} onChange={setRecipientGroupId} sent={false} disabled={busy} />
 
         <CollectionFields
           busy={busy}
@@ -739,6 +744,7 @@ function CollectionEditor({
   const [totalGoal, setTotalGoal] = useState(collection.totalGoal?.toString() ?? "");
   const [collectUrl, setCollectUrl] = useState(collection.collectUrl ?? "");
   const [messageText, setMessageText] = useState(collection.messageText ?? "");
+  const [recipientGroupId, setRecipientGroupId] = useState<number | null>(collection.recipientGroupId);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -783,6 +789,7 @@ function CollectionEditor({
         totalGoal: moneyValue(totalGoal),
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        recipientGroupId,
       };
       if (!isBirthday && !subjectFrozen) {
         patch.title = title.trim();
@@ -867,6 +874,14 @@ function CollectionEditor({
           )}
         </>
       )}
+
+      <RecipientGroupField
+        value={recipientGroupId}
+        onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
+        sent={collection.sendCount > 0}
+        knownName={preview?.recipientGroupName}
+        disabled={busy}
+      />
 
       <CollectionFields
         busy={busy}
@@ -1080,7 +1095,11 @@ function SendBlock({
 
       <div className="birthday-preview-title">
         Получат {recipientsSubject(preview.recipients.length)}
-        {personName ? ` — все, кроме ${personName}:` : " — вся команда:"}
+        {personName
+          ? ` — все, кроме ${personName}:`
+          : preview.recipientGroupName
+            ? ` — группа «${preview.recipientGroupName}»:`
+            : " — вся команда:"}
       </div>
       <div className="birthday-recipients">
         {preview.recipients.length === 0 ? (
@@ -1194,6 +1213,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
 function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" | "onToggle" | "today">) {
   const [collectUrl, setCollectUrl] = useState(birthday.campaign?.collectUrl ?? "");
   const [messageText, setMessageText] = useState(birthday.campaign?.messageText ?? "");
+  const [recipientGroupId, setRecipientGroupId] = useState<number | null>(birthday.campaign?.recipientGroupId ?? null);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1223,6 +1243,7 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
       await apiClient.saveBirthdayRound(birthday.employeeId, {
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        recipientGroupId,
       });
       await loadPreview();
       await onChanged();
@@ -1261,6 +1282,13 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
         </div>
       ) : (
         <>
+          <RecipientGroupField
+            value={recipientGroupId}
+            onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
+            sent={false}
+            knownName={preview?.recipientGroupName}
+            disabled={busy}
+          />
           <label className="birthday-label">
             Ссылка на сбор (Сбербанк Онлайн)
             <input
@@ -1297,6 +1325,15 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
             </button>
           </div>
         </>
+      )}
+
+      {sent && (
+        <RecipientGroupField
+          value={birthday.campaign?.recipientGroupId ?? null}
+          onChange={() => {}}
+          sent
+          knownName={preview?.recipientGroupName}
+        />
       )}
 
       {error && <div className="employees-error">{error}</div>}

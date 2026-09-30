@@ -446,6 +446,8 @@ export interface Collection {
   sentAt: string | null;
   sentCount: number;
   sendCount: number;
+  /** Группа адресатов: null — вся команда. После первой рассылки не меняется. */
+  recipientGroupId: number | null;
   createdAt: string;
 }
 
@@ -468,6 +470,8 @@ export interface CollectionPreview {
   collectUrl: string | null;
   message: string;
   recipients: { employeeId: number; displayName: string }[];
+  /** Имя группы адресатов (и удалённой тоже — блокер называет её по имени); null — вся команда. */
+  recipientGroupName: string | null;
   /** Почему рассылка сейчас невозможна, или null, если возможна. */
   blocker: string | null;
   sendCount: number;
@@ -485,6 +489,7 @@ export interface NewCollectionInput {
   collectUrl?: string | null;
   messageText?: string | null;
   scheduledSendOn?: string | null;
+  recipientGroupId?: number | null;
 }
 
 /** Правка сбора: отсутствующий ключ значит «оставить как есть». */
