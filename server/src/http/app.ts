@@ -83,6 +83,7 @@ import { createCalendarRoutes } from "./routes/calendar";
 import { createPollRoutes } from "./routes/polls";
 import { createFoodPlaceRoutes } from "./routes/food-places";
 import { createRecipientGroupRoutes } from "./routes/recipient-groups";
+import { getGroup } from "../groups/group-service";
 import { createOrderRoutes } from "./routes/orders";
 import { createTeamAudienceRoutes } from "./routes/team-audience";
 import {
@@ -149,7 +150,7 @@ import {
   setCollectionClosed,
   deleteCollection,
   markCollectionSent,
-  recipientsOf,
+  collectionAudience,
   collectionsForWorker,
   claimCollectionSend,
   releaseCollectionSend,
@@ -897,6 +898,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // по-прежнему рассылает человек.
   // Раунд заводится первым СОХРАНЕНИЕМ — просмотр карточки не пишет ничего.
 
+  /**
+   * Группа, которую нельзя поставить сбору: нет такой или уже в архиве. `null` —
+   * не группа, а «вся команда», и проверять тут нечего. Проверка в ручке, а не в
+   * `updateCollection`: сервис знает правило заморозки, а живость группы — вопрос
+   * входа, который задаёт человек, выбирающий её в форме.
+   */
+  const unknownGroup = (id: number | null | undefined) => id != null && getGroup(db, id) == null;
+
   const birthdayAsOf = (c: { req: { query(name: string): string | undefined } }) =>
     c.req.query("asOf") ?? teamNow(config.teamTz).date;
 
@@ -937,6 +946,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (parsed.value.title !== undefined || parsed.value.employeeId !== undefined) {
       return c.json({ error: "У сбора на день рождения повод и виновник заданы датой рождения." }, 400);
     }
+    if (unknownGroup(parsed.value.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
 
     const round = ensureBirthdayRound(db, employeeId, asOf);
     if (!round) return c.json({ error: "not_found" }, 404);
@@ -975,6 +985,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.collectUrl !== undefined ? { collectUrl: parsed.value.collectUrl } : {}),
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
+      ...(parsed.value.recipientGroupId !== undefined ? { recipientGroupId: parsed.value.recipientGroupId } : {}),
     });
     // Остальные админы узнают о ссылке одинаково, откуда бы её ни вставили.
     if (linkChanged && bot) {
@@ -1010,6 +1021,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (parsed.value.employeeId != null && !getEmployeeById(db, parsed.value.employeeId)) {
       return c.json({ error: "Такого работника нет" }, 400);
     }
+    if (unknownGroup(parsed.value.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
 
     const collection = createCustomCollection(db, {
       title: parsed.value.title!,
@@ -1021,11 +1033,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       collectUrl: parsed.value.collectUrl ?? null,
       messageText: parsed.value.messageText ?? null,
       scheduledSendOn: parsed.value.scheduledSendOn ?? null,
+      recipientGroupId: parsed.value.recipientGroupId ?? null,
     });
     recordAudit(db, "collection_created", c.get("auth").employeeId, {
       collectionId: collection.id,
       employeeId: collection.employeeId,
       title: collection.title,
+      ...(collection.recipientGroupId != null ? { recipientGroupId: collection.recipientGroupId } : {}),
       personName: collection.employeeId != null ? (getEmployeeById(db, collection.employeeId)?.displayName ?? null) : null,
     });
     return c.json({ collection });
@@ -1051,6 +1065,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, collection, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
+    if (unknownGroup(parsed.value.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
 
     // Тот же довод, что у ручки дней рождения выше: правило «есть ссылка → бот
     // разошлёт за три дня» одно на все входы. Только для дня рождения: у
@@ -1077,6 +1092,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(parsed.value.deadline !== undefined ? { deadline: parsed.value.deadline } : {}),
       ...(parsed.value.scheduledSendOn !== undefined ? { scheduledSendOn: parsed.value.scheduledSendOn } : {}),
       ...(parsed.value.messageText !== undefined ? { messageText: parsed.value.messageText ? "изменён" : null } : {}),
+      ...(parsed.value.recipientGroupId !== undefined ? { recipientGroupId: parsed.value.recipientGroupId } : {}),
       ...(patch.autoSendOn !== undefined && patch.autoSendOn !== collection.autoSendOn
         ? { autoSendOn: patch.autoSendOn, autoSendOnBefore: collection.autoSendOn }
         : {}),
@@ -1101,13 +1117,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     try {
       let delivered = 0;
       // «Я перевёл» под письмом: отметиться там же, где прочитал (см. `collectionPaidKeyboard`).
-      for (const recipient of recipientsOf(db, collection.employeeId)) {
+      for (const recipient of collectionAudience(db, collection)) {
         if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(collection.id))) delivered += 1;
       }
       // Only count a round that reached somebody: zero delivered is not a round,
       // it is Telegram having refused the lot. Counting it would tell the admin
       // «рассылалось 2 раза» about one real message.
-      if (delivered > 0) markCollectionSent(db, collection.id, delivered, new Date());
+      if (delivered > 0) {
+        markCollectionSent(db, collection.id, delivered, new Date(), preview.recipients.map((r) => r.employeeId));
+      }
       recordAudit(db, "collection_sent", c.get("auth").employeeId, {
         collectionId: collection.id,
         employeeId: collection.employeeId,

@@ -1,18 +1,18 @@
 import { paymentProgress, type PaymentProgress } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Collection, Employee } from "../db/schema";
-import { recipientsOf } from "./collection-service";
+import { collectionAudience } from "./collection-service";
 import { addMark, marksOf, removeMark } from "./payment-repo";
 
 /**
  * Кто сдал, кого ждём и сколько это в цифрах.
  *
- * Знаменатель — `recipientsOf`, то есть ровно те, кому уходила рассылка. Иначе
+ * Знаменатель — `collectionAudience`, то есть ровно те, кому уходила рассылка. Иначе
  * «сдали 7 из 12» отвечало бы не на тот вопрос, который задают, глядя на эту
  * строку: «всем ли я написал и все ли ответили».
  */
 export function listPayments(db: Db, collection: Collection): PaymentProgress {
-  const recipients = recipientsOf(db, collection.employeeId).map((employee) => ({
+  const recipients = collectionAudience(db, collection).map((employee) => ({
     employeeId: employee.id,
     displayName: employee.displayName,
   }));
@@ -39,7 +39,7 @@ export function setPaid(
   if (collection.closedAt != null) {
     return { ok: false, error: "Сбор закрыт — отметки больше не меняются." };
   }
-  const participates = recipientsOf(db, collection.employeeId).some((e) => e.id === employeeId);
+  const participates = collectionAudience(db, collection).some((e) => e.id === employeeId);
   if (!participates) return { ok: false, error: "Этот человек в сборе не участвует." };
 
   if (paid) addMark(db, collection.id, employeeId, markedBy);
@@ -50,5 +50,5 @@ export function setPaid(
 /** Кого ещё ждём — целиком, чтобы было чем слать: нужен `telegramUserId`. */
 export function unpaidRecipients(db: Db, collection: Collection): Employee[] {
   const paid = new Set(marksOf(db, collection.id).map((mark) => mark.employeeId));
-  return recipientsOf(db, collection.employeeId).filter((employee) => !paid.has(employee.id));
+  return collectionAudience(db, collection).filter((employee) => !paid.has(employee.id));
 }

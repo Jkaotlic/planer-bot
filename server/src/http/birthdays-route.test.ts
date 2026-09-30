@@ -214,7 +214,7 @@ describe("PUT /api/admin/birthdays/:id — ссылка вооружает ав�
     const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
     updateCollection(db, round.id, { autoSendOn: null });
     // Разослано руками — повторной рассылки дня рождения не бывает.
-    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"));
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), []);
 
     const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
       send(token, { collectUrl: "https://example.com/svezhaya" }, "PUT"));

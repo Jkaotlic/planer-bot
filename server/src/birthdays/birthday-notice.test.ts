@@ -13,7 +13,9 @@ import {
   markCollectionSent,
   releaseCollectionSend,
   updateCollection,
+  frozenAudienceIds,
 } from "../collections/collection-service";
+import { createGroup } from "../groups/group-service";
 import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
@@ -170,7 +172,7 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Админ", 2, null, true);
     const round = ensureBirthdayRound(db, id, TODAY)!;
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x" });
-    markCollectionSent(db, round.id, 1, new Date());
+    markCollectionSent(db, round.id, 1, new Date(), []);
 
     expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
     expect(sent).toEqual([]);
@@ -366,7 +368,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const round = ensureBirthdayRound(db, who, TODAY)!;
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
-    markCollectionSent(db, round.id, 4, new Date());
+    markCollectionSent(db, round.id, 4, new Date(), []);
 
     await runBirthdayNoticeTick(db, bot, NOW);
     expect(sent).toHaveLength(0);
@@ -407,7 +409,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     createCustomCollection(db, {
       title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
       amountPerPerson: null, totalGoal: null, collectUrl: "https://example.test/c/1",
-      messageText: null, scheduledSendOn: "2026-08-10",
+      messageText: null, scheduledSendOn: "2026-08-10", recipientGroupId: null,
     });
 
     expect(await runBirthdayNoticeTick(db, bot, { date: "2026-08-10", time: "10:00" })).toBe(1);
@@ -517,6 +519,22 @@ describe("автоотправка сбора", () => {
     expect(report?.text).toContain("2 из 2");
   });
 
+  it("по группе: пишет только её участникам и фиксирует их как адресатов", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    const anya = person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const group = createGroup(db, { name: "ЧИП 5-й этаж", memberIds: [anya] }, anya).group!.id;
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor", recipientGroupId: group });
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    expect(sent.filter((m) => m.text.includes("Сбор на подарок")).map((m) => m.to)).toEqual([2]);
+    expect(frozenAudienceIds(db, round.id)).toEqual([anya]);
+  });
+
   it("второй тик того же дня не рассылает второй раз", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
@@ -560,7 +578,7 @@ describe("автоотправка сбора", () => {
     person(db, "Игорь", 3, null, true);
     const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
     updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
-    markCollectionSent(db, round.id, 2, new Date());
+    markCollectionSent(db, round.id, 2, new Date(), []);
 
     await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
 
@@ -887,7 +905,7 @@ describe("автоотправка сбора", () => {
           if (!handSent && text.includes("Марк празднует")) {
             handSent = true;
             expect(claimCollectionSend(anyaRound.id)).toBe(true);
-            markCollectionSent(db, anyaRound.id, 3, new Date());
+            markCollectionSent(db, anyaRound.id, 3, new Date(), []);
             releaseCollectionSend(anyaRound.id);
           }
         }),

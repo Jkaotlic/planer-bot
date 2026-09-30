@@ -33,6 +33,14 @@ describe("parseCollectionBody", () => {
     expect(parseCollectionBody({ deadline: "2020-01-01" }, { requireTitle: false }).ok).toBe(true);
   });
 
+  it("группа адресатов — номер больше нуля или null («вся команда»)", () => {
+    expect(parseCollectionBody({ recipientGroupId: 3 }, { requireTitle: false })).toEqual({ ok: true, value: { recipientGroupId: 3 } });
+    expect(parseCollectionBody({ recipientGroupId: null }, { requireTitle: false })).toEqual({ ok: true, value: { recipientGroupId: null } });
+    for (const bad of [0, -1, 1.5, "3", true]) {
+      expect(parseCollectionBody({ recipientGroupId: bad }, { requireTitle: false }).ok).toBe(false);
+    }
+  });
+
   it("keys that were not sent stay absent — an edit touches only what it names", () => {
     const parsed = parseCollectionBody({ collectUrl: "https://example.test/c/1" }, { requireTitle: false });
     expect(parsed.ok && Object.keys(parsed.value)).toEqual(["collectUrl"]);

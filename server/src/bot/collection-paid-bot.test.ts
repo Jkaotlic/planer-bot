@@ -32,10 +32,10 @@ function stage() {
   linkTelegramAccount(db, "inv-333", 333);
   const collection = createCustomCollection(db, {
     title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
-    amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/sbor", messageText: null, scheduledSendOn: null,
+    amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/sbor", messageText: null, scheduledSendOn: null, recipientGroupId: null,
   });
   // Разослан: до рассылки сбор — черновик админа, и отметиться в нём нельзя.
-  markCollectionSent(db, collection.id, 2, new Date());
+  markCollectionSent(db, collection.id, 2, new Date(), []);
   const bot = stubBotInfo(createBot({ db, config }), { id: 1, first_name: "P", username: "p_bot" });
   return { db, bot, admin, worker, collection };
 }

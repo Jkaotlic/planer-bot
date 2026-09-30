@@ -34,6 +34,14 @@ export function parseCollectionBody(raw: unknown, opts: { requireTitle: boolean 
     value.employeeId = body.employeeId as number | null;
   }
 
+  if (body.recipientGroupId !== undefined) {
+    const id = body.recipientGroupId;
+    if (id !== null && !(Number.isInteger(id) && (id as number) > 0)) {
+      return { ok: false, error: "Группа адресатов должна быть номером группы или null" };
+    }
+    value.recipientGroupId = id as number | null;
+  }
+
   if (body.collectUrl !== undefined) {
     if (body.collectUrl !== null && typeof body.collectUrl !== "string") {
       return { ok: false, error: "collectUrl должен быть ссылкой или null" };

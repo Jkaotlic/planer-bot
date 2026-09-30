@@ -7,10 +7,10 @@ import { getEmployeeById } from "../repo/employees";
 import {
   adminRecipients,
   claimCollectionSend,
+  collectionAudience,
   getCollection,
   markCollectionSent,
   previewCollection,
-  recipientsOf,
   releaseCollectionSend,
 } from "../collections/collection-service";
 import {
@@ -167,10 +167,12 @@ export async function runBirthdayNoticeTick(
     try {
       let delivered = 0;
       // То же письмо, что уходит руками из `/send`, — и с той же кнопкой «Я перевёл».
-      for (const recipient of recipientsOf(db, round.employeeId)) {
+      for (const recipient of collectionAudience(db, round)) {
         if (await notifyUser(bot, recipient.telegramUserId!, preview.message, collectionPaidKeyboard(round.id))) delivered += 1;
       }
-      if (delivered > 0) markCollectionSent(db, round.id, delivered, new Date());
+      if (delivered > 0) {
+        markCollectionSent(db, round.id, delivered, new Date(), preview.recipients.map((r) => r.employeeId));
+      }
       // `actorEmployeeId = null` — обе консоли уже рисуют такое как «система».
       // Отдельное событие завело бы второй способ прочитать одно и то же.
       recordAudit(db, "collection_sent", null, {
