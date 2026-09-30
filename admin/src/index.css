@@ -306,6 +306,15 @@ button {
   white-space: nowrap;
 }
 
+/* Имя группы бывает длинным (до ~40 знаков): в общем .btn nowrap, и на 320px кнопка
+   уезжала бы за экран. Переносим только кнопки-группы, .btn не трогаем. */
+.announce-group-chip {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  max-width: 100%;
+}
+
 .btn-primary {
   background: var(--button);
   color: var(--button-text);

@@ -225,7 +225,7 @@ export function AdminGroups() {
         {editing.id !== null && (
           <ConfirmButton
             label="Удалить группу"
-            question={`Удалить «${editing.savedName}»? В уже разосланных сборах список адресатов не изменится.`}
+            question={`Удалить «${editing.savedName}»? В уже разосланных сборах список адресатов не изменится. Неразосланные сборы с этой группой не уйдут, пока не выберешь другую.`}
             confirmLabel="Да, удалить"
             mode="plain"
             disabled={busy}

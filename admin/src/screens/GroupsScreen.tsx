@@ -170,7 +170,7 @@ export function GroupsScreen({ employees }: { employees: readonly Employee[] }) 
           {current.id !== null && (
             <ConfirmButton
               label="Удалить группу"
-              question={`Удалить «${current.savedName}»? В уже разосланных сборах список адресатов не изменится.`}
+              question={`Удалить «${current.savedName}»? В уже разосланных сборах список адресатов не изменится. Неразосланные сборы с этой группой не уйдут, пока не выберешь другую.`}
               confirmLabel="Да, удалить"
               disabled={busy}
               onConfirm={() => {

@@ -168,7 +168,9 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
     scheduleNotifiedAt: null,
     autoSendOn: autoSendDateFor(occurrence.celebratedOn, asOf),
     autoSentAt: null,
-    // День рождения — всегда вся команда, кроме именинника: группа тут не выбирается.
+    // По умолчанию — вся команда, кроме именинника: черновик группы не знает. Админ может
+    // задать группу на карточке дня рождения (при первом сохранении), тогда строка сбора
+    // получит её id — поэтому здесь null означает «ещё не выбрана», а не «нельзя».
     recipientGroupId: null,
     sentAt: null,
     sentCount: 0,

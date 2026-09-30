@@ -218,7 +218,7 @@ export function AnnounceScreen() {
             <button
               key={g.id}
               type="button"
-              className={`btn ${audienceMode === "picked" && groupId === g.id ? "btn-primary" : "btn-secondary"}`}
+              className={`btn announce-group-chip ${audienceMode === "picked" && groupId === g.id ? "btn-primary" : "btn-secondary"}`}
               disabled={sending}
               onClick={() => pickGroup(g)}
             >
