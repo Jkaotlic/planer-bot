@@ -53,6 +53,7 @@ export const AUDIT_TYPES = [
   // отвечать «кто это разослал всей команде», если рассылка кому-то помешала.
   "poll_created", "poll_closed", "poll_cancelled",
   "food_place_changed",
+  "recipient_group_changed",
   "order_created", "order_closed", "order_cancelled",
   "order_payment_marked", "order_reminded",
   "checklist_completed", "checklist_doc_changed", "checklist_changed",
@@ -654,6 +655,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   poll_closed: (p) => ({ icon: "🗳", title: "Опрос закрыт", lines: [str(p.question) ?? "—"] }),
   poll_cancelled: (p) => ({ icon: "🗳", title: "Опрос отменён", lines: [str(p.question) ?? "—"] }),
 
+  recipient_group_changed: (p) => ({ icon: "👥", title: `Группа адресатов ${str(p.action) ?? "изменена"}`, lines: [str(p.name) ?? "—", `людей: ${num(p.members) ?? 0}`] }),
   food_place_changed: (p) => ({ icon: "🍱", title: "Изменено место для заказа еды", lines: [str(p.name) ?? "—", str(p.action) ?? ""] }),
 
   order_created: (p) => ({ icon: "🍱", title: "Запущен заказ еды", lines: [str(p.placeName) ?? "без меню", `адресатов: ${num(p.recipients) ?? 0}`] }),
