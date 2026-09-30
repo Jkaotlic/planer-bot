@@ -8,11 +8,11 @@ import { AudiencePicker } from "./AudiencePicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// Пять карточек — специально бьют оба фильтра порознь: Марк не на смене (ловит
-// пропавший `onShift`-фильтр), Лена — наблюдатель на смене (ловит пропавший
-// фильтр роли), Вера — админ на смене (админы, в отличие от наблюдателей, в
-// «на смене»/«все» ВХОДЯТ — без неё регресс «выкинули и админов» остался бы
-// незамеченным), Дима — на смене, но без Telegram (строка «Не дойдёт»).
+// Пять карточек бьют фильтры порознь: Марк не на смене (ловит пропавший
+// `onShift`-фильтр), Лена — наблюдатель на смене и Вера — админ на смене: с
+// 2026-09-30 обе роли в «на смене»/«все» ВХОДЯТ, и вернувшийся фильтр по роли
+// выкинул бы одну из них из точной строки. Дима — на смене, но без Telegram
+// (строка «Не дойдёт»).
 const TEAM: AudienceCandidate[] = [
   { id: 1, displayName: "Игорь", reachable: true, role: "worker", onShift: true },
   { id: 2, displayName: "Марк", reachable: true, role: "worker", onShift: false },
@@ -57,23 +57,21 @@ async function mount() {
 }
 
 describe("AudiencePicker", () => {
-  it("по умолчанию «На смене»: считает только тех, кто сегодня работает, наблюдателя исключает, админа — нет", async () => {
+  it("по умолчанию «На смене»: считает только тех, кто сегодня работает, наблюдателя и админа тоже", async () => {
     const el = await mount();
     // Точная строка, а не «contains»: «contains» не поймал бы ни пропавший
     // `onShift`-фильтр (Марк тогда попал бы в список), ни пропавший
     // фильтр роли (Лена), ни лишний фильтр по роли админа (Вера бы исчезла).
-    expect(el.textContent).toContain("Уйдёт: Игорь, Вера и тебе");
+    expect(el.textContent).toContain("Уйдёт: Игорь, Лена, Вера и тебе");
     expect(el.textContent).not.toContain("Марк");
-    expect(el.textContent).not.toContain("Лена");
     expect(el.textContent).toContain("Не дойдёт: Дима — не привязан(а) к боту");
   });
 
-  it("«Все» отдаёт kind team, наблюдателя исключает, работника не на смене и админа — нет", async () => {
+  it("«Все» отдаёт kind team и зовёт всех — работника не на смене, наблюдателя и админа", async () => {
     const el = await mount();
     await act(async () => byText(el, "Все").click());
     expect(last).toEqual({ kind: "team" });
-    expect(el.textContent).toContain("Уйдёт: Игорь, Марк, Вера и тебе");
-    expect(el.textContent).not.toContain("Лена");
+    expect(el.textContent).toContain("Уйдёт: Игорь, Марк, Лена, Вера и тебе");
     expect(el.textContent).toContain("Не дойдёт: Дима — не привязан(а) к боту");
   });
 

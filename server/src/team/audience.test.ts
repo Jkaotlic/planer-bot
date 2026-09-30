@@ -18,7 +18,7 @@ function shiftFor(db: Db, employeeId: number, category: "shift" | "vacation", da
 }
 
 describe("resolveAudience", () => {
-  it("«вся команда» — активные без наблюдателей, запускающий первым", () => {
+  it("«вся команда» — все активные, наблюдатель тоже; запускающий первым", () => {
     const db = makeTestDb();
     const anya = person(db, "Аня", 100);
     const igor = person(db, "Игорь", 101);
@@ -27,7 +27,7 @@ describe("resolveAudience", () => {
     const gone = person(db, "Лена", 103);
     archiveEmployee(db, gone, today);
     const { reachable } = resolveAudience(db, { kind: "team" }, igor, today);
-    expect(reachable.map((e) => e.id)).toEqual([igor, anya]);
+    expect(reachable.map((e) => e.id)).toEqual([igor, anya, mark]);
   });
 
   it("«сегодня на смене» — по графику, отпуск не считается, запускающий добавлен", () => {
@@ -40,6 +40,16 @@ describe("resolveAudience", () => {
     shiftFor(db, mark, "vacation");
     const { reachable } = resolveAudience(db, { kind: "on_shift" }, anya, today);
     expect(reachable.map((e) => e.id)).toEqual([anya, igor]);
+  });
+
+  it("«сегодня на смене» берёт и наблюдателя, если у него в графике смена", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const mark = person(db, "Марк", 102);
+    setEmployeeObserver(db, mark, true);
+    shiftFor(db, mark, "shift");
+    const { reachable } = resolveAudience(db, { kind: "on_shift" }, anya, today);
+    expect(reachable.map((e) => e.id)).toEqual([anya, mark]);
   });
 
   it("вручную — наблюдателя можно; архивного нельзя; без Telegram — в unreachable", () => {

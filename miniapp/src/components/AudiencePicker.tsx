@@ -15,7 +15,7 @@ type Mode = TeamAudience["kind"];
  *
  * Строка «Уйдёт: …» показывает поимённо, кого бот позовёт, — в режиме «на
  * смене» человек иначе не узнает, кого график посчитал работающим.
- * Наблюдатели в «команду» и «на смене» не входят — как в пресетах анонсов.
+ * Наблюдатели входят в «Все» и «На смене» наравне со всеми (решение 2026-09-30).
  */
 export function AudiencePicker({ value, onChange, disabled }: {
   value: TeamAudience;
@@ -37,8 +37,8 @@ export function AudiencePicker({ value, onChange, disabled }: {
   const picked = value.kind === "picked" ? new Set(value.employeeIds) : new Set<number>();
   const preview = useMemo(() => {
     if (!people) return [];
-    if (value.kind === "team") return people.filter((p) => p.role !== "observer");
-    if (value.kind === "on_shift") return people.filter((p) => p.onShift && p.role !== "observer");
+    if (value.kind === "team") return people;
+    if (value.kind === "on_shift") return people.filter((p) => p.onShift);
     return people.filter((p) => value.kind === "picked" && value.employeeIds.includes(p.id));
   }, [people, value]);
 

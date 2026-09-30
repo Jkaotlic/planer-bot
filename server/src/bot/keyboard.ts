@@ -48,12 +48,12 @@ export const BTN_BUG = "🐞 Проблема";
  * служебная, поэтому едет во вторую строку рядом с «Напоминаниями», а не
  * заводит третью.
  */
-export function mainKeyboard(opts: { isAdmin: boolean; isObserver: boolean }): Keyboard {
+export function mainKeyboard(opts: { isAdmin: boolean }): Keyboard {
   const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS);
   // Третьей в первую строку, а не отдельной строкой: во второй уже три
   // служебные, а лишняя строка — это снова клавиатура на пол-экрана.
-  // Наблюдателю не нужна: заказывать и голосовать ему не с кем.
-  if (!opts.isObserver) kb.text(BTN_FOOD);
+  // У всех, наблюдателя тоже: он обедает с командой (решение 2026-09-30).
+  kb.text(BTN_FOOD);
   kb.row().text(BTN_REMINDERS).text(BTN_BUG);
   if (opts.isAdmin) kb.text(BTN_ADMIN);
   // resized — иначе клавиатура занимает пол-экрана. persistent — иначе Telegram
