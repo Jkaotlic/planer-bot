@@ -68,7 +68,18 @@ describe("группы по HTTP", () => {
     const { app, db, anyaT, igor } = await stage();
     await app.request(new Request("http://x/api/admin/recipient-groups", send(anyaT, { name: "A", memberIds: [] })));
     await app.request(new Request("http://x/api/admin/recipient-groups/1", send(anyaT, { memberIds: [igor] }, "PUT")));
-    const row = listRecentAudit(db, 10).find((r) => r.type === "recipient_group_changed" && (r.payload as { action: string }).action === "изменена");
+    const row = listRecentAudit(db, 10).find((r) => r.type === "recipient_group_changed" && (r.payload as { action: string }).action === "состав");
     expect(row!.payload).toMatchObject({ groupId: 1, name: "A", members: 1 });
+  });
+
+  it("переименование пишет oldName, смена состава — «состав»", async () => {
+    const { app, db, anyaT, igor } = await stage();
+    await app.request(new Request("http://x/api/admin/recipient-groups", send(anyaT, { name: "A", memberIds: [] })));
+    await app.request(new Request("http://x/api/admin/recipient-groups/1", send(anyaT, { name: "B" }, "PUT")));
+    await app.request(new Request("http://x/api/admin/recipient-groups/1", send(anyaT, { memberIds: [igor] }, "PUT")));
+    const rows = listRecentAudit(db, 10).filter((r) => r.type === "recipient_group_changed").map((r) => r.payload as Record<string, unknown>);
+    expect(rows.find((p) => p.action === "переименована")).toMatchObject({ name: "B", oldName: "A" });
+    expect(rows.find((p) => p.action === "состав")).toMatchObject({ members: 1 });
+    expect(rows.find((p) => p.action === "состав")).not.toHaveProperty("oldName");
   });
 });

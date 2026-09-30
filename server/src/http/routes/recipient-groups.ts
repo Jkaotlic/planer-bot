@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { recipientGroupInputSchema, recipientGroupPatchSchema } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -17,12 +17,11 @@ export function createRecipientGroupRoutes(db: Db, config: Config): Hono<Env> {
   const auth = requireAuth(db, config.jwtSecret);
   const admin = requireAdmin(db, config.jwtSecret);
   const invalid = (issues: unknown) => ({ error: "Проверь название (до 40 символов) и состав.", issues });
-  const body = async (c: Context) => jsonBody(c);
 
   app.get("/api/recipient-groups", auth, (c) => c.json({ groups: listGroups(db) }));
 
   app.post("/api/admin/recipient-groups", admin, async (c) => {
-    const parsed = recipientGroupInputSchema.safeParse(await body(c));
+    const parsed = recipientGroupInputSchema.safeParse(await jsonBody(c));
     if (!parsed.success) return c.json(invalid(parsed.error.issues), 400);
     const actor = c.get("auth").employeeId;
     const result = createGroup(db, parsed.data, actor);
@@ -33,12 +32,22 @@ export function createRecipientGroupRoutes(db: Db, config: Config): Hono<Env> {
   });
 
   app.put("/api/admin/recipient-groups/:id", admin, async (c) => {
-    const parsed = recipientGroupPatchSchema.safeParse(await body(c));
+    const parsed = recipientGroupPatchSchema.safeParse(await jsonBody(c));
     if (!parsed.success) return c.json(invalid(parsed.error.issues), 400);
-    const result = updateGroup(db, Number(c.req.param("id")), parsed.data);
+    const id = Number(c.req.param("id"));
+    // Старое состояние читается ДО правки: без него не сказать, что именно
+    // изменилось — имя или состав, и каким было имя.
+    const before = getGroup(db, id);
+    const result = updateGroup(db, id, parsed.data);
     if (!result.ok) return c.json({ error: result.error }, 409);
     const group = result.group!;
-    recordAudit(db, "recipient_group_changed", c.get("auth").employeeId, { groupId: group.id, name: group.name, action: "изменена", members: group.memberIds.length });
+    const renamed = parsed.data.name !== undefined && before !== null && parsed.data.name !== before.name;
+    const membersChanged = parsed.data.memberIds !== undefined && before !== null
+      && parsed.data.memberIds.join(",") !== before.memberIds.join(",");
+    const action = renamed && membersChanged ? "переименована, состав" : renamed ? "переименована" : membersChanged ? "состав" : "изменена";
+    recordAudit(db, "recipient_group_changed", c.get("auth").employeeId, {
+      groupId: group.id, name: group.name, action, members: group.memberIds.length, ...(renamed ? { oldName: before!.name } : {}),
+    });
     return c.json({ group });
   });
 

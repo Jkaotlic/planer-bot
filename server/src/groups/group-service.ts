@@ -41,7 +41,8 @@ function nameTaken(db: Db, name: string, exceptId: number | null): boolean {
 /** В составе — только существующие сотрудники; архивного добавить можно: вернётся — будет в группе. */
 function unknownMember(db: Db, ids: number[]): boolean {
   if (ids.length === 0) return false;
-  return db.select({ id: employees.id }).from(employees).where(inArray(employees.id, ids)).all().length !== ids.length;
+  // Уникальные: повтор id из прямого вызова сервиса не должен читаться как «нет такого человека».
+  return db.select({ id: employees.id }).from(employees).where(inArray(employees.id, ids)).all().length !== new Set(ids).size;
 }
 
 function replaceMembers(db: Db, groupId: number, ids: number[]): void {
