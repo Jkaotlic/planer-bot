@@ -12,8 +12,9 @@ import { listShiftsOverlapping } from "../repo/shifts";
  * отдельно от `announcementRecipients`: там отправитель, наоборот, исключён —
  * анонс самому себе не нужен.
  *
- * Наблюдатель не входит в «вся команда» и «на смене» — так же, как в пресетах
- * анонсов (решение 2026-09-29). Отметить его руками можно.
+ * Наблюдатель входит в «вся команда» и, если у него смена, в «на смене»: он
+ * обедает и голосует вместе со всеми (решение 2026-09-30). Пресеты анонсов
+ * остаются без наблюдателей — там другой вопрос: кому адресована новость.
  */
 export function resolveAudience(
   db: Db,
@@ -26,10 +27,10 @@ export function resolveAudience(
 
   let picked: number[];
   if (audience.kind === "team") {
-    picked = active.filter((e) => !e.isObserver).map((e) => e.id);
+    picked = active.map((e) => e.id);
   } else if (audience.kind === "on_shift") {
     const working = new Set(workingOn(listShiftsOverlapping(db, today, today), today));
-    picked = active.filter((e) => working.has(e.id) && !e.isObserver).map((e) => e.id);
+    picked = active.filter((e) => working.has(e.id)).map((e) => e.id);
   } else {
     picked = audience.employeeIds;
   }

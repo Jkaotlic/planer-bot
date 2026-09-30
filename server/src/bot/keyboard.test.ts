@@ -19,24 +19,21 @@ function labels(kb: ReturnType<typeof mainKeyboard>): string[] {
 
 describe("mainKeyboard", () => {
   it("админу даёт кнопку админки", () => {
-    expect(labels(mainKeyboard({ isAdmin: true, isObserver: false }))).toContain(BTN_ADMIN);
+    expect(labels(mainKeyboard({ isAdmin: true }))).toContain(BTN_ADMIN);
   });
 
   it("обычному работнику кнопку админки не даёт — её единственный ответ был бы отказом", () => {
-    expect(labels(mainKeyboard({ isAdmin: false, isObserver: false }))).not.toContain(BTN_ADMIN);
+    expect(labels(mainKeyboard({ isAdmin: false }))).not.toContain(BTN_ADMIN);
   });
 
   it("работник получает график, вход в мини-апп, заказы, напоминания и кнопку «Проблема» — и ничего сверх того", () => {
-    expect(labels(mainKeyboard({ isAdmin: false, isObserver: false }))).toEqual([BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_BUG]);
+    expect(labels(mainKeyboard({ isAdmin: false }))).toEqual([BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_BUG]);
   });
 
-  it("наблюдателю кнопки заказов нет — он смотрит со стороны, заказывать ему не с кем", () => {
-    expect(labels(mainKeyboard({ isAdmin: false, isObserver: true }))).not.toContain(BTN_FOOD);
-  });
 
   it("«Проблема» есть и у работника, и у админа — жалуется как раз работник, не только админ", () => {
-    expect(labels(mainKeyboard({ isAdmin: false, isObserver: false }))).toContain(BTN_BUG);
-    expect(labels(mainKeyboard({ isAdmin: true, isObserver: false }))).toContain(BTN_BUG);
+    expect(labels(mainKeyboard({ isAdmin: false }))).toContain(BTN_BUG);
+    expect(labels(mainKeyboard({ isAdmin: true }))).toContain(BTN_BUG);
   });
 
   /**
@@ -56,7 +53,7 @@ describe("mainKeyboard", () => {
    * приходит подписанным.
    */
   it("не несёт ни одной web_app-кнопки — из обычной клавиатуры мини-апп открывается без подписи и падает с 401", () => {
-    const buttons = mainKeyboard({ isAdmin: true, isObserver: false }).keyboard.flat();
+    const buttons = mainKeyboard({ isAdmin: true }).keyboard.flat();
     expect(buttons.length).toBeGreaterThan(0);
     for (const btn of buttons) {
       expect(btn).not.toHaveProperty("web_app");
@@ -64,21 +61,21 @@ describe("mainKeyboard", () => {
   });
 
   it("укладывается в две строки — по одной лишней строке на «Напоминания» и «Админку» уходило пол-экрана", () => {
-    expect(mainKeyboard({ isAdmin: true, isObserver: false }).keyboard.map((row) => row.map(labelOf))).toEqual([
+    expect(mainKeyboard({ isAdmin: true }).keyboard.map((row) => row.map(labelOf))).toEqual([
       [BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD],
       [BTN_REMINDERS, BTN_BUG, BTN_ADMIN],
     ]);
   });
 
   it("у не-админа вторая строка не пустеет, а остаётся с «Напоминаниями» и «Проблемой»", () => {
-    expect(mainKeyboard({ isAdmin: false, isObserver: false }).keyboard.map((row) => row.map(labelOf))).toEqual([
+    expect(mainKeyboard({ isAdmin: false }).keyboard.map((row) => row.map(labelOf))).toEqual([
       [BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD],
       [BTN_REMINDERS, BTN_BUG],
     ]);
   });
 
   it("клавиатура сжата по кнопкам и не сворачивается после нажатия", () => {
-    const kb = mainKeyboard({ isAdmin: true, isObserver: false });
+    const kb = mainKeyboard({ isAdmin: true });
     expect(kb.resize_keyboard).toBe(true);
     expect(kb.is_persistent).toBe(true);
   });

@@ -413,7 +413,7 @@ export function createBot(deps: BotDeps): Bot {
     if (!me) return undefined;
     const allowlisted = config.adminTelegramIds.includes(tgId);
     if (!me.isActive && !allowlisted) return undefined;
-    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted, isObserver: me.isObserver });
+    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted });
   }
 
   /**

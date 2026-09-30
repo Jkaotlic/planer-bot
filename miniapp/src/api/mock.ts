@@ -1979,13 +1979,13 @@ export async function mockGetPolls(): Promise<PollView[]> {
 
 /**
  * Кого мок реально позовёт — те же правила, что серверный `resolveAudience`:
- * «команда» и «на смене» не берут наблюдателя, «на смене» вдобавок фильтрует
- * по `mockOnShift`. Раньше «на смене» в DEV слало вообще всем активным —
+ * «команда» берёт всех активных (наблюдателя тоже, с 2026-09-30), «на смене»
+ * фильтрует по `mockOnShift`. Раньше «на смене» в DEV слало вообще всем активным —
  * форма спрашивала одно, а получал бы другое.
  */
 function mockAudienceIds(audience: TeamAudience): number[] {
   if (audience.kind === "picked") return audience.employeeIds;
-  const active = EMPLOYEES.filter((e) => e.isActive && !e.isObserver);
+  const active = EMPLOYEES.filter((e) => e.isActive);
   if (audience.kind === "team") return active.map((e) => e.id);
   return active.filter((e) => mockOnShift(e.id)).map((e) => e.id);
 }
