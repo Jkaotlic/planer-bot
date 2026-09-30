@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient } from "../api/client";
+import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type RecipientGroupView } from "../api/client";
 import { AnnounceScreen } from "./AnnounceScreen";
 
 /**
@@ -212,5 +212,46 @@ describe("AnnounceScreen", () => {
     await settle();
 
     expect(el.textContent).toContain("Не дошло: 2 — в архиве");
+  });
+});
+
+describe("AnnounceScreen: кнопки групп", () => {
+  const TEAM = [
+    recipient({ id: 1, displayName: "Аня" }),
+    recipient({ id: 2, displayName: "Игорь" }),
+    recipient({ id: 3, displayName: "Марк" }),
+  ];
+  const GROUPS: RecipientGroupView[] = [{ id: 7, name: "ЧИП 5-й этаж", memberIds: [2, 3, 99] }];
+
+  it("группа отмечает свой состав (чужой id отбрасывается) и уходит списком", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue(GROUPS);
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 2, intended: 2, unreachable: [], archivedCount: 0 });
+    const el = await mount();
+    await type(textareaByLabel(el, "Текст анонса"), "Завтра сбор");
+    act(() => buttonByText(el, "ЧИП 5-й этаж").click());
+    act(() => buttonByText(el, "Отправить").click());
+    await act(async () => buttonByText(el, "Да, отправить").click());
+    await settle();
+    expect(send).toHaveBeenCalledWith("Завтра сбор", [2, 3]);
+  });
+
+  it("ручная галочка после группы снимает подсветку", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue(GROUPS);
+    const el = await mount();
+    expect(el.querySelector("[data-testid=group-row]")).not.toBeNull();
+    act(() => buttonByText(el, "ЧИП 5-й этаж").click());
+    expect(buttonByText(el, "ЧИП 5-й этаж").className).toContain("btn-primary");
+    await act(async () => checkboxIn(pickerRow(el, "Аня")).click());
+    expect(buttonByText(el, "ЧИП 5-й этаж").className).not.toContain("btn-primary");
+  });
+
+  it("без групп и при сбое загрузки ряда нет, экран работает", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    vi.spyOn(apiClient, "getRecipientGroups").mockRejectedValue(new Error("сеть"));
+    const el = await mount();
+    expect(el.querySelector("[data-testid=group-row]")).toBeNull();
+    expect(buttonByText(el, "Выбрать")).toBeTruthy();
   });
 });

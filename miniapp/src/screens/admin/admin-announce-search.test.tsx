@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { apiClient, type AnnouncementRecipient } from "../../api/client";
+import { apiClient, type AnnouncementRecipient, type RecipientGroupView } from "../../api/client";
 import { AdminAnnounce } from "./AdminAnnounce";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -31,7 +31,8 @@ async function settle(times = 10) {
   for (let i = 0; i < times; i += 1) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 }
 
-async function mount(team: AnnouncementRecipient[]) {
+async function mount(team: AnnouncementRecipient[], groups: RecipientGroupView[] = []) {
+  vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue(groups);
   vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(team);
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -185,5 +186,36 @@ describe("кнопки «Админам» / «Работникам» в мини
     await act(async () => { byText(el, "Да, отправить").click(); });
     await settle();
     expect(send).toHaveBeenCalledWith("Новое в журнале", ids);
+  });
+});
+
+describe("кнопки групп в мини-апповском анонсе", () => {
+  const GROUPS: RecipientGroupView[] = [{ id: 7, name: "ЧИП 5-й этаж", memberIds: [2, 3, 99] }];
+
+  it("группа отмечает свой состав (чужой id отбрасывается) и уходит списком", async () => {
+    const send = vi.spyOn(apiClient, "sendAnnouncement").mockResolvedValue({ delivered: 2, intended: 2, unreachable: [], archivedCount: 0 });
+    const el = await mount(TEAM, GROUPS);
+    await typeInto(el.querySelector("textarea")!, "Завтра сбор");
+    await act(async () => { byText(el, "ЧИП 5-й этаж").click(); });
+    await act(async () => { byText(el, "Отправить").click(); });
+    await act(async () => { byText(el, "Да, отправить").click(); });
+    await settle();
+    expect(send).toHaveBeenCalledWith("Завтра сбор", [2, 3]);
+  });
+
+  it("ручная галочка после группы снимает подсветку", async () => {
+    const el = await mount(TEAM, GROUPS);
+    // Классы telegram-ui хешированы — подсветку ловим сменой className.
+    expect(el.querySelector("[data-testid=group-row]")).not.toBeNull();
+    const idle = byText(el, "ЧИП 5-й этаж").className;
+    await act(async () => { byText(el, "ЧИП 5-й этаж").click(); });
+    expect(byText(el, "ЧИП 5-й этаж").className).not.toBe(idle);
+    await act(async () => { rowByName(el, "Иванова Анна").querySelector("input")!.click(); });
+    expect(byText(el, "ЧИП 5-й этаж").className).toBe(idle);
+  });
+
+  it("без групп ряда нет", async () => {
+    const el = await mount(TEAM, []);
+    expect(el.querySelector("[data-testid=group-row]")).toBeNull();
   });
 });

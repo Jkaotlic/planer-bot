@@ -6,6 +6,7 @@ import {
   AuthRequiredError,
   type AnnouncementRecipient,
   type AnnouncementResult,
+  type RecipientGroupView,
 } from "../api/client";
 import { PersonSearch } from "../components/PersonSearch";
 import { recipientsPhrase } from "./CollectionsScreen";
@@ -37,11 +38,23 @@ export function AnnounceScreen() {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
   /** Какая кнопка-подборка горит. Сбрасывается ручной галочкой: список уже не «все админы». */
   const [preset, setPreset] = useState<AnnouncementPreset | null>(null);
+  const [groups, setGroups] = useState<RecipientGroupView[]>([]);
+  const [groupId, setGroupId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<AnnouncementResult | null>(null);
+
+  // Группы — удобство: сбой загрузки (в том числе AuthRequired, его обработает
+  // основной запрос ниже) не должен ронять экран анонса.
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getRecipientGroups()
+      .then((list) => { if (!cancelled) setGroups(list); })
+      .catch(() => { /* нет ряда групп — и всё */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +99,7 @@ export function AnnounceScreen() {
       return next;
     });
     setPreset(null);
+    setGroupId(null);
     setConfirming(false);
   }
 
@@ -95,6 +109,17 @@ export function AnnounceScreen() {
     setAudienceMode("picked");
     setSelectedIds(new Set(presetRecipientIds(recipients ?? [], next)));
     setPreset(next);
+    setGroupId(null);
+    setConfirming(false);
+  }
+
+  /** Группа — тоже обычный выбор галочками; чужие id (не из этого списка) отбрасываем. */
+  function pickGroup(g: RecipientGroupView) {
+    const known = new Set((recipients ?? []).map((e) => e.id));
+    setAudienceMode("picked");
+    setSelectedIds(new Set(g.memberIds.filter((id) => known.has(id))));
+    setPreset(null);
+    setGroupId(g.id);
     setConfirming(false);
   }
 
@@ -155,6 +180,7 @@ export function AnnounceScreen() {
           onClick={() => {
             setAudienceMode("all");
             setPreset(null);
+            setGroupId(null);
             setConfirming(false);
           }}
         >
@@ -173,17 +199,34 @@ export function AnnounceScreen() {
         ))}
         <button
           type="button"
-          className={`btn ${audienceMode === "picked" && preset === null ? "btn-primary" : "btn-secondary"}`}
+          className={`btn ${audienceMode === "picked" && preset === null && groupId === null ? "btn-primary" : "btn-secondary"}`}
           disabled={sending}
           onClick={() => {
             setAudienceMode("picked");
             setPreset(null);
+            setGroupId(null);
             setConfirming(false);
           }}
         >
           Выбрать
         </button>
       </div>
+
+      {groups.length > 0 && (
+        <div className="announce-audience" data-testid="group-row" style={{ flexWrap: "wrap" }}>
+          {groups.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              className={`btn ${audienceMode === "picked" && groupId === g.id ? "btn-primary" : "btn-secondary"}`}
+              disabled={sending}
+              onClick={() => pickGroup(g)}
+            >
+              {g.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {audienceMode === "picked" && (
         <div className="announce-picker">

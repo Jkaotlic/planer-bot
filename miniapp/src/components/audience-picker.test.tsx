@@ -3,7 +3,7 @@ import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { apiClient, type AudienceCandidate, type TeamAudience } from "../api/client";
+import { apiClient, type AudienceCandidate, type RecipientGroupView, type TeamAudience } from "../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,8 +46,9 @@ function Harness() {
   return createElement(AudiencePicker, { value, onChange: (next: TeamAudience) => { last = next; setValue(next); } });
 }
 
-async function mount() {
+async function mount(groups: RecipientGroupView[] = []) {
   vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue(TEAM);
+  vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue(groups);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -82,5 +83,37 @@ describe("AudiencePicker", () => {
     const boxes = [...el.querySelectorAll<HTMLInputElement>("input[type=checkbox]")];
     await act(async () => boxes[1]!.click());
     expect(last).toEqual({ kind: "picked", employeeIds: [2] });
+  });
+
+  // memberIds группы шире списка команды (id 99 — не из этого выбора): галочки
+  // ставятся только тем, кто загружен, иначе в `employeeIds` уехал бы чужой id.
+  it("кнопка группы включает «Выбрать» с её составом и подсвечивается; ручная галочка подсветку снимает", async () => {
+    const el = await mount([{ id: 7, name: "ЧИП 5-й этаж", memberIds: [2, 3, 99] }]);
+    // Классы telegram-ui хешированы — подсветку ловим сменой className.
+    expect(el.querySelector("[data-testid=group-row]")).not.toBeNull();
+    const idle = byText(el, "ЧИП 5-й этаж").className;
+    await act(async () => byText(el, "ЧИП 5-й этаж").click());
+    expect(last).toEqual({ kind: "picked", employeeIds: [2, 3] });
+    expect(el.textContent).toContain("Уйдёт: Марк, Лена и тебе");
+    expect(byText(el, "ЧИП 5-й этаж").className).not.toBe(idle);
+    const boxes = [...el.querySelectorAll<HTMLInputElement>("input[type=checkbox]")];
+    await act(async () => boxes[0]!.click());
+    expect(byText(el, "ЧИП 5-й этаж").className).toBe(idle);
+  });
+
+  it("без групп ряда нет, и сбой загрузки групп выбор не ломает", async () => {
+    let el = await mount([]);
+    expect(el.querySelector("[data-testid=group-row]")).toBeNull();
+    await act(async () => root!.unmount()); host!.remove(); root = null;
+    vi.restoreAllMocks();
+    vi.spyOn(apiClient, "getRecipientGroups").mockRejectedValue(new Error("сеть"));
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue(TEAM);
+    host = document.createElement("div"); document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => { root!.render(createElement(AppRoot, null, createElement(Harness))); });
+    await settle();
+    el = host;
+    expect(el.querySelector("[data-testid=group-row]")).toBeNull();
+    expect(el.textContent).toContain("Уйдёт: Игорь, Лена, Вера и тебе");
   });
 });
