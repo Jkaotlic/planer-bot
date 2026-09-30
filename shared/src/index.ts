@@ -37,3 +37,4 @@ export * from "./announce-audience";
 export * from "./team-audience";
 export * from "./poll";
 export * from "./food-order";
+export * from "./recipient-group";

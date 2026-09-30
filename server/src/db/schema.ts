@@ -265,6 +265,44 @@ export const handoverDeclines = sqliteTable(
   (t) => [uniqueIndex("handover_decline_unique").on(t.handoverId, t.employeeId)],
 );
 
+
+/**
+ * Группа адресатов — список людей, который админ правит сам (его просьба
+ * 2026-09-30: «ЧИП 5-й этаж», «ЧИП 32 этаж»). Удаление — архивом: на группу
+ * может ссылаться ещё не разосланный сбор.
+ */
+export const recipientGroups = sqliteTable("recipient_groups", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  name: text().notNull(),
+  createdBy: integer().notNull().references(() => employees.id),
+  archivedAt: integer({ mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+/** Кто в группе. Архивного сотрудника строка не удаляет: восстановили — он снова тут. */
+export const recipientGroupMembers = sqliteTable(
+  "recipient_group_members",
+  {
+    groupId: integer().notNull().references(() => recipientGroups.id),
+    employeeId: integer().notNull().references(() => employees.id),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.employeeId] })],
+);
+
+/**
+ * Кому сбор ушёл — фиксируется при первой рассылке, дошедшей хоть до кого-то.
+ * Без этого «сдали 7 из 12» и видимость сбора плыли бы вслед за составом
+ * группы. Сборы, разосланные до 2026-09-30, строк не имеют и живут по-старому.
+ */
+export const collectionRecipients = sqliteTable(
+  "collection_recipients",
+  {
+    collectionId: integer().notNull().references(() => collections.id),
+    employeeId: integer().notNull().references(() => employees.id),
+  },
+  (t) => [primaryKey({ columns: [t.collectionId, t.employeeId] })],
+);
+
 export type Handover = typeof handovers.$inferSelect;
 export type NewHandover = typeof handovers.$inferInsert;
 
@@ -535,6 +573,8 @@ export const collections = sqliteTable(
     autoSendOn: text(),
     /** Когда попытка БЫЛА СДЕЛАНА — удачная или нет. Метка «не пробуй снова». */
     autoSentAt: integer({ mode: "timestamp" }),
+    /** Кому рассылать: группа или null — вся команда. После первой рассылки не меняется. */
+    recipientGroupId: integer().references(() => recipientGroups.id),
     /** The LAST send. */
     sentAt: integer({ mode: "timestamp" }),
     /** How many people the LAST send actually reached. */
@@ -873,3 +913,4 @@ export const foodOrderPayments = sqliteTable(
 export type FoodOrder = typeof foodOrders.$inferSelect;
 export type FoodOrderItem = typeof foodOrderItems.$inferSelect;
 export type FoodOrderPayment = typeof foodOrderPayments.$inferSelect;
+export type RecipientGroup = typeof recipientGroups.$inferSelect;

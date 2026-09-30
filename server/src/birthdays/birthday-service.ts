@@ -168,6 +168,8 @@ export function birthdayRoundDraft(db: Db, employeeId: number, asOf: string): Co
     scheduleNotifiedAt: null,
     autoSendOn: autoSendDateFor(occurrence.celebratedOn, asOf),
     autoSentAt: null,
+    // День рождения — всегда вся команда, кроме именинника: группа тут не выбирается.
+    recipientGroupId: null,
     sentAt: null,
     sentCount: 0,
     sendCount: 0,
