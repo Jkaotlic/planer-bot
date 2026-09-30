@@ -213,6 +213,7 @@ describe("roundsScheduledFor", () => {
     const waitingRound = ensureBirthdayRound(db, waiting, "2026-08-01")!;
     updateCollection(db, sentRound.id, { scheduledSendOn: "2026-08-10" });
     updateCollection(db, waitingRound.id, { scheduledSendOn: "2026-08-10" });
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, sentRound.id, 3, new Date("2026-08-09T09:00:00Z"), []);
 
     expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([waitingRound.id]);
@@ -226,6 +227,7 @@ describe("roundsScheduledFor", () => {
       amountPerPerson: null, totalGoal: null, collectUrl: "https://example.test/c/1",
       messageText: null, scheduledSendOn: "2026-08-10", recipientGroupId: null,
     });
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, collection.id, 2, new Date("2026-08-05T09:00:00Z"), []);
 
     expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([collection.id]);

@@ -129,6 +129,19 @@ describe("collectionAudience", () => {
     expect(previewCollection(db, c, TODAY).blocker).toBe("Некому отправлять: в группе никого с Telegram.");
   });
 
+  it("зафиксированный список, где никто больше не достижим, — свой блокер, а не «ни у кого из команды»", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 1);
+    const igor = person(db, "Игорь", 2);
+    const c = round(db);
+    markCollectionSent(db, c.id, 1, new Date("2026-09-30T09:00:00Z"), [igor]);
+    archiveEmployee(db, igor, TODAY);
+
+    expect(anya).toBeGreaterThan(0);
+    expect(previewCollection(db, fresh(db, c.id), TODAY).blocker)
+      .toBe("Некому отправлять: из адресатов сбора ни у кого нет Telegram.");
+  });
+
   it("вторая рассылка не переписывает зафиксированный список", () => {
     const db = makeTestDb();
     const anya = person(db, "Аня", 1);

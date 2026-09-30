@@ -209,12 +209,12 @@ describe("PUT /api/admin/birthdays/:id — ссылка вооружает ав�
     const { bot, sent } = fakeBot();
     const app = createApp({ db, config, bot });
     const mark = person(db, "Марк", 1, "09-07");
-    person(db, "Игорь", 2, null, true);
+    const igor = person(db, "Игорь", 2, null, true);
     const token = await tokenFor(app, 111);
     const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
     updateCollection(db, round.id, { autoSendOn: null });
     // Разослано руками — повторной рассылки дня рождения не бывает.
-    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), []);
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), [igor]);
 
     const res = await app.request(`/api/admin/birthdays/${mark}?${SEP}`,
       send(token, { collectUrl: "https://example.com/svezhaya" }, "PUT"));

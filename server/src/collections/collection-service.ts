@@ -250,9 +250,13 @@ export function frozenAudienceIds(db: Db, collectionId: number): number[] | null
  * список; сбор, разосланный до групп (2026-09-30), живёт по-старому; до рассылки
  * адресаты считаются заново из группы или всей команды.
  */
-export function collectionAudience(db: Db, collection: Collection): Employee[] {
+export function collectionAudience(
+  db: Db,
+  collection: Collection,
+  // Вызывающий, что уже прочитал список, передаёт его — не читаем второй раз.
+  frozen: number[] | null = frozenAudienceIds(db, collection.id),
+): Employee[] {
   const reachable = (e: Employee) => e.id !== collection.employeeId && e.telegramUserId != null;
-  const frozen = frozenAudienceIds(db, collection.id);
   if (frozen) {
     const ids = new Set(frozen);
     return listActive(db).filter((e) => ids.has(e.id) && reachable(e));
@@ -297,7 +301,8 @@ export function adminRecipients(db: Db, honoureeId: number | null): Employee[] {
  */
 export function previewCollection(db: Db, collection: Collection, today: string): CollectionPreview {
   const personName = personNameOf(db, collection);
-  const recipients = collectionAudience(db, collection);
+  const frozen = frozenAudienceIds(db, collection.id);
+  const recipients = collectionAudience(db, collection, frozen);
   const recipientGroupName = groupNameOf(db, collection.recipientGroupId);
   // Группа решает только до первой рассылки; после неё правда — зафиксированный список.
   const groupDecides = collection.sendCount === 0 && collection.recipientGroupId != null;
@@ -332,6 +337,7 @@ export function previewCollection(db: Db, collection: Collection, today: string)
   else if (groupDecides && !getGroup(db, collection.recipientGroupId!)) {
     blocker = `Группа «${recipientGroupName ?? ""}» удалена — выбери другую.`;
   } else if (groupDecides && recipients.length === 0) blocker = "Некому отправлять: в группе никого с Telegram.";
+  else if (frozen && recipients.length === 0) blocker = "Некому отправлять: из адресатов сбора ни у кого нет Telegram.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
 
   return {
@@ -414,9 +420,11 @@ export interface WorkerCollection {
  * призыв скинуться, а утечка чужого сюрприза. Старые сборы без списка видны всем.
  */
 export function collectionsForWorker(db: Db, today: string, employeeId: number): WorkerCollection[] {
+  const frozenById = new Map<number, number[] | null>();
   const rows = listCollections(db, today, employeeId).filter((row) => {
     if (row.collection.sendCount === 0 || !row.active) return false;
     const frozen = frozenAudienceIds(db, row.collection.id);
+    frozenById.set(row.collection.id, frozen);
     return frozen == null || frozen.includes(employeeId);
   });
   // Отметки всех показанных сборов — одним запросом, а не по запросу на карточку.
@@ -425,7 +433,7 @@ export function collectionsForWorker(db: Db, today: string, employeeId: number):
   return rows.map((row) => {
     const mine = marks.filter((mark) => mark.collectionId === row.collection.id);
     const progress = paymentProgress(
-      collectionAudience(db, row.collection).map((e) => ({
+      collectionAudience(db, row.collection, frozenById.get(row.collection.id)).map((e) => ({
         employeeId: e.id,
         displayName: e.displayName,
       })),

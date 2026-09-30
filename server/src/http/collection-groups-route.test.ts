@@ -147,9 +147,39 @@ describe("сбор по группе через HTTP", () => {
     expect(ok.status).toBe(200);
     expect((await ok.json()).collection.recipientGroupId).toBe(groupId);
 
-    archiveGroup(db, groupId);
-    const gone = await app.request(`/api/admin/birthdays/${vera}?asOf=2026-08-01`, send(adminToken, { recipientGroupId: groupId }, "PUT"));
+    // Удалённую группу, что у сбора уже стоит, можно переслать той же формой (см. тест ниже);
+    // а вот выбрать заново — нельзя. Проверяем на другой группе.
+    const dead = createGroup(db, { name: "Старый этаж", memberIds: [] }, vera).group!.id;
+    archiveGroup(db, dead);
+    const gone = await app.request(`/api/admin/birthdays/${vera}?asOf=2026-08-01`, send(adminToken, { recipientGroupId: dead }, "PUT"));
     expect(gone.status).toBe(409);
     expect(await gone.json()).toEqual({ error: "Такой группы нет." });
+  });
+
+  it("группу заархивировали после рассылки — сбор с ней всё равно правится целой формой", async () => {
+    const { db, app, groupId, adminToken } = await stage();
+    const id = (await (await create(app, adminToken, { recipientGroupId: groupId })).json()).collection.id as number;
+    await app.request(new Request(`http://x/api/admin/collections/${id}/send`, send(adminToken, { confirm: true }, "POST")));
+    archiveGroup(db, groupId);
+
+    const res = await app.request(new Request(`http://x/api/admin/collections/${id}`, send(adminToken, {
+      recipientGroupId: groupId, collectUrl: "https://example.test/c/2",
+    }, "PUT")));
+    expect(res.status).toBe(200);
+    expect(getCollection(db, id)?.collectUrl).toBe("https://example.test/c/2");
+  });
+
+  it("то же для дня рождения: удалённая группа, уже стоящая у раунда, не мешает правке ссылки", async () => {
+    const { db, app, groupId, adminToken } = await stage();
+    const vera = person(db, "Вера", 103);
+    setBirthDate(db, vera, "08-05");
+    await app.request(`/api/admin/birthdays/${vera}?asOf=2026-08-01`, send(adminToken, { recipientGroupId: groupId }, "PUT"));
+    archiveGroup(db, groupId);
+
+    const res = await app.request(`/api/admin/birthdays/${vera}?asOf=2026-08-01`, send(adminToken, {
+      recipientGroupId: groupId, collectUrl: "https://example.test/b/1",
+    }, "PUT"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).collection.collectUrl).toBe("https://example.test/b/1");
   });
 });

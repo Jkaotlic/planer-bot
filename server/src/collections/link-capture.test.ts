@@ -97,7 +97,7 @@ describe("attachLink", () => {
     const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
     updateCollection(db, round.id, { autoSendOn: null });
     // Админ разослал руками — повторной рассылки у дня рождения не бывает.
-    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), []);
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), [igor]);
 
     const updated = attachLink(db, {
       round: getCollection(db, round.id)!, url: "https://example.com/svezhaya",
@@ -232,7 +232,7 @@ describe("notifyLinkReady про разосланный раунд", () => {
     const igor = person(db, "Игорь", 2, null, true);
     person(db, "Аня", 3, null, true);
     const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
-    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), []);
+    markCollectionSent(db, round.id, 3, new Date("2026-09-01T07:00:00Z"), [igor]);
     const updated = attachLink(db, {
       round: getCollection(db, round.id)!, url: "https://example.com/svezhaya",
       asOf: "2026-09-01", actorEmployeeId: igor,

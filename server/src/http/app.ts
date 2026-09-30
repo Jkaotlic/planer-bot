@@ -902,9 +902,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * Группа, которую нельзя поставить сбору: нет такой или уже в архиве. `null` —
    * не группа, а «вся команда», и проверять тут нечего. Проверка в ручке, а не в
    * `updateCollection`: сервис знает правило заморозки, а живость группы — вопрос
-   * входа, который задаёт человек, выбирающий её в форме.
+   * входа, который задаёт человек, выбирающий её в форме. Группу, что у сбора уже
+   * стоит, не проверяем: консоли шлют все поля целиком, и после архива группы
+   * иначе нельзя было бы поправить даже ссылку.
    */
-  const unknownGroup = (id: number | null | undefined) => id != null && getGroup(db, id) == null;
+  const unknownGroup = (id: number | null | undefined, currentId: number | null = null) =>
+    id != null && id !== currentId && getGroup(db, id) == null;
 
   const birthdayAsOf = (c: { req: { query(name: string): string | undefined } }) =>
     c.req.query("asOf") ?? teamNow(config.teamTz).date;
@@ -946,10 +949,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (parsed.value.title !== undefined || parsed.value.employeeId !== undefined) {
       return c.json({ error: "У сбора на день рождения повод и виновник заданы датой рождения." }, 400);
     }
-    if (unknownGroup(parsed.value.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
 
     const round = ensureBirthdayRound(db, employeeId, asOf);
     if (!round) return c.json({ error: "not_found" }, 404);
+    if (unknownGroup(parsed.value.recipientGroupId, round.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, round, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
 
@@ -1065,7 +1068,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     const scheduleError = scheduledSendOnError(parsed.value.scheduledSendOn, collection, asOf);
     if (scheduleError) return c.json({ error: scheduleError }, 400);
-    if (unknownGroup(parsed.value.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
+    if (unknownGroup(parsed.value.recipientGroupId, collection.recipientGroupId)) return c.json({ error: "Такой группы нет." }, 409);
 
     // Тот же довод, что у ручки дней рождения выше: правило «есть ссылка → бот
     // разошлёт за три дня» одно на все входы. Только для дня рождения: у

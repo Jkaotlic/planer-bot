@@ -15,7 +15,7 @@ import {
   updateCollection,
   frozenAudienceIds,
 } from "../collections/collection-service";
-import { createGroup } from "../groups/group-service";
+import { archiveGroup, createGroup } from "../groups/group-service";
 import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
@@ -172,6 +172,7 @@ describe("runBirthdayNoticeTick", () => {
     person(db, "Админ", 2, null, true);
     const round = ensureBirthdayRound(db, id, TODAY)!;
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x" });
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, round.id, 1, new Date(), []);
 
     expect(await runBirthdayNoticeTick(db, bot, NOW)).toBe(0);
@@ -368,6 +369,7 @@ describe("runBirthdayNoticeTick — scheduled collection reminders", () => {
     const round = ensureBirthdayRound(db, who, TODAY)!;
     updateCollection(db, round.id, { collectUrl: "https://sber.ru/x", scheduledSendOn: TODAY });
     markAdminNotified(db, round.id, new Date());
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, round.id, 4, new Date(), []);
 
     await runBirthdayNoticeTick(db, bot, NOW);
@@ -535,6 +537,25 @@ describe("автоотправка сбора", () => {
     expect(frozenAudienceIds(db, round.id)).toEqual([anya]);
   });
 
+  it("группу удалили до рассылки — сбор не уходит, админы узнают причину", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "09-07");
+    const anya = person(db, "Аня", 2, null);
+    person(db, "Игорь", 3, null, true);
+    const group = createGroup(db, { name: "ЧИП 5-й этаж", memberIds: [anya] }, anya).group!.id;
+    const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+    updateCollection(db, round.id, { collectUrl: "https://example.com/sbor", recipientGroupId: group });
+    archiveGroup(db, group);
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+    expect(sent.some((m) => m.text.includes("Сбор на подарок"))).toBe(false);
+    expect(frozenAudienceIds(db, round.id)).toBeNull();
+    expect(getCollection(db, round.id)?.sendCount).toBe(0);
+    expect(sent.some((m) => m.to === 3 && m.text.includes("удалена"))).toBe(true);
+  });
+
   it("второй тик того же дня не рассылает второй раз", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
@@ -578,6 +599,7 @@ describe("автоотправка сбора", () => {
     person(db, "Игорь", 3, null, true);
     const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
     updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, round.id, 2, new Date(), []);
 
     await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
@@ -905,6 +927,7 @@ describe("автоотправка сбора", () => {
           if (!handSent && text.includes("Марк празднует")) {
             handSent = true;
             expect(claimCollectionSend(anyaRound.id)).toBe(true);
+            // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
             markCollectionSent(db, anyaRound.id, 3, new Date(), []);
             releaseCollectionSend(anyaRound.id);
           }

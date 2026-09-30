@@ -160,6 +160,7 @@ describe("previewCollection", () => {
     person(db, "Colleague", 2);
 
     const custom = createCustomCollection(db, blank({ collectUrl: "https://example.test/c/1" }));
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, custom.id, 1, new Date("2026-08-12T09:00:00Z"), []);
     const again = previewCollection(db, getCollectionOrThrow(db, custom.id), TODAY);
     expect(again.blocker).toBeNull();
@@ -170,6 +171,7 @@ describe("previewCollection", () => {
     // The same state on a birthday round is settled forever: a doubled greeting
     // is worse than one nobody re-sent.
     const birthday = birthdayRound(db, honouree);
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, birthday.id, 1, new Date("2026-08-12T09:00:00Z"), []);
     expect(previewCollection(db, getCollectionOrThrow(db, birthday.id), TODAY).blocker)
       .toContain("Уже разослано");
@@ -239,6 +241,7 @@ describe("updateCollection", () => {
     const honouree = person(db, "Honouree", 1);
     person(db, "Colleague", 2);
     const collection = createCustomCollection(db, blank({ title: "Свадьба", employeeId: honouree, collectUrl: "https://example.test/c/1" }));
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, collection.id, 1, new Date("2026-08-12T09:00:00Z"), []);
 
     const link = updateCollection(db, collection.id, { collectUrl: "https://example.test/c/2" });
@@ -255,6 +258,7 @@ describe("updateCollection", () => {
     const collection = createCustomCollection(db, blank({
       title: "Свадьба", employeeId: honouree, collectUrl: "https://example.test/c/1",
     }));
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, collection.id, 1, new Date("2026-08-12T09:00:00Z"), []);
 
     // Both consoles resubmit every field on every save. Sending back the value
@@ -297,6 +301,7 @@ describe("deleteCollection", () => {
     person(db, "Colleague", 2);
     const fresh = createCustomCollection(db, blank({ title: "Ошибка" }));
     const sent = createCustomCollection(db, blank({ title: "Ушедший", collectUrl: "https://example.test/c/1" }));
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
     markCollectionSent(db, sent.id, 1, new Date("2026-08-12T09:00:00Z"), []);
 
     expect(deleteCollection(db, fresh.id)).toEqual({ ok: true });
@@ -326,6 +331,7 @@ describe("collectionsForWorker", () => {
     const draft = createCustomCollection(db, blank({ title: "Не разослан", collectUrl: "https://example.test/3" }));
     const over = createCustomCollection(db, blank({ title: "Просроченный", deadline: "2026-08-01", collectUrl: "https://example.test/4" }));
     for (const c of [mine, theirs, draft, over]) {
+      // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
       if (c.id !== draft.id) markCollectionSent(db, c.id, 2, new Date("2026-08-05T09:00:00Z"), []);
     }
 
