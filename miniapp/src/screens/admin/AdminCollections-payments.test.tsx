@@ -20,7 +20,7 @@ const COLLECTION: Collection = {
   title: "Кофемашина", eventDate: null, deadline: null, amountPerPerson: 500, totalGoal: null,
   collectUrl: "https://example.test/c/1", messageText: null, closedAt: null,
   scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: "2026-08-20T10:00:00Z", sentCount: 3, sendCount: 1,
-  createdAt: "2026-08-01T10:00:00Z",
+  recipientGroupId: null, createdAt: "2026-08-01T10:00:00Z",
 };
 
 const ROW: CollectionRow = { collection: COLLECTION, personName: null, title: "Кофемашина", status: "sent", active: true };
@@ -33,7 +33,7 @@ const PREVIEW: CollectionPreview = {
     { employeeId: 2, displayName: "Игорь" },
     { employeeId: 3, displayName: "Марк" },
   ],
-  blocker: null, sendCount: 1, lastSentAt: "2026-08-20T10:00:00Z",
+  recipientGroupName: null, blocker: null, sendCount: 1, lastSentAt: "2026-08-20T10:00:00Z",
 };
 
 const PAYMENTS = {

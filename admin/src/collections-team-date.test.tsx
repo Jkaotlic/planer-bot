@@ -27,7 +27,7 @@ const ROUND: Collection = {
   // Между серверным и браузерным «сегодня»: по браузеру это уже прошло
   // («сегодня»), по серверу — ещё нет.
   autoSendOn: "2026-09-04", autoSentAt: null,
-  sentAt: null, sentCount: 0, sendCount: 0, createdAt: "2026-08-01T10:00:00Z",
+  sentAt: null, sentCount: 0, sendCount: 0, recipientGroupId: null, createdAt: "2026-08-01T10:00:00Z",
 };
 
 const BIRTHDAY: UpcomingBirthday = {

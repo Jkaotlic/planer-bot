@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@telegram-apps/telegram-ui";
 import { filterPeople } from "@planer/shared";
-import { apiClient, type AudienceCandidate, type TeamAudience } from "../api/client";
+import { apiClient, type AudienceCandidate, type RecipientGroupView, type TeamAudience } from "../api/client";
 import { PersonSearch } from "./PersonSearch";
 
 type Mode = TeamAudience["kind"];
@@ -25,6 +25,19 @@ export function AudiencePicker({ value, onChange, disabled }: {
   const [people, setPeople] = useState<AudienceCandidate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [groups, setGroups] = useState<RecipientGroupView[]>([]);
+  /** Какая группа горит. Сбрасывается любой другой правкой: список уже не «вся группа». */
+  const [groupId, setGroupId] = useState<number | null>(null);
+
+  // Сбой загрузки групп не ломает выбор: группы — удобство, а не необходимость,
+  // и человек всё равно может отметить всех руками.
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getRecipientGroups()
+      .then((list) => { if (!cancelled) setGroups(list); })
+      .catch(() => { /* нет ряда групп — и всё */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,11 +56,21 @@ export function AudiencePicker({ value, onChange, disabled }: {
   }, [people, value]);
 
   function setMode(mode: Mode) {
+    setGroupId(null);
     if (mode === "picked") onChange({ kind: "picked", employeeIds: value.kind === "picked" ? value.employeeIds : [] });
     else onChange({ kind: mode });
   }
 
+  /** Состав группы — только те, кто загружен в этом выборе: чужой id в
+   *  `employeeIds` не нужен, а зрителя, которого нет в списке, не отмечаем. */
+  function pickGroup(g: RecipientGroupView) {
+    const known = new Set(people?.map((p) => p.id));
+    setGroupId(g.id);
+    onChange({ kind: "picked", employeeIds: g.memberIds.filter((id) => known.has(id)) });
+  }
+
   function toggle(id: number) {
+    setGroupId(null);
     const next = new Set(picked);
     if (next.has(id)) next.delete(id); else next.add(id);
     onChange({ kind: "picked", employeeIds: [...next] });
@@ -72,6 +95,13 @@ export function AudiencePicker({ value, onChange, disabled }: {
         <Button size="s" mode={value.kind === "team" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("team")}>Все</Button>
         <Button size="s" mode={value.kind === "picked" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("picked")}>Выбрать</Button>
       </div>
+      {groups.length > 0 && (
+        <div data-testid="group-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {groups.map((g) => (
+            <Button key={g.id} className="group-chip" size="s" mode={value.kind === "picked" && groupId === g.id ? "filled" : "bezeled"} disabled={disabled} onClick={() => pickGroup(g)}>{g.name}</Button>
+          ))}
+        </div>
+      )}
       {value.kind === "picked" && (
         <div>
           <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />

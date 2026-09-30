@@ -213,7 +213,8 @@ describe("roundsScheduledFor", () => {
     const waitingRound = ensureBirthdayRound(db, waiting, "2026-08-01")!;
     updateCollection(db, sentRound.id, { scheduledSendOn: "2026-08-10" });
     updateCollection(db, waitingRound.id, { scheduledSendOn: "2026-08-10" });
-    markCollectionSent(db, sentRound.id, 3, new Date("2026-08-09T09:00:00Z"));
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
+    markCollectionSent(db, sentRound.id, 3, new Date("2026-08-09T09:00:00Z"), []);
 
     expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([waitingRound.id]);
   });
@@ -224,9 +225,10 @@ describe("roundsScheduledFor", () => {
     const collection = createCustomCollection(db, {
       title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
       amountPerPerson: null, totalGoal: null, collectUrl: "https://example.test/c/1",
-      messageText: null, scheduledSendOn: "2026-08-10",
+      messageText: null, scheduledSendOn: "2026-08-10", recipientGroupId: null,
     });
-    markCollectionSent(db, collection.id, 2, new Date("2026-08-05T09:00:00Z"));
+    // [] — тест про флаги «разослан», не про адресатов; пустой список здесь заведомо ничего не проверяет.
+    markCollectionSent(db, collection.id, 2, new Date("2026-08-05T09:00:00Z"), []);
 
     expect(roundsScheduledFor(db, "2026-08-10").map((r) => r.id)).toEqual([collection.id]);
   });
@@ -236,12 +238,12 @@ describe("roundsScheduledFor", () => {
     const gone = createCustomCollection(db, {
       title: "Просроченный", employeeId: null, eventDate: null, deadline: "2026-08-05",
       amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null,
-      scheduledSendOn: "2026-08-04",
+      scheduledSendOn: "2026-08-04", recipientGroupId: null,
     });
     const alive = createCustomCollection(db, {
       title: "Идущий", employeeId: null, eventDate: null, deadline: "2026-08-20",
       amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null,
-      scheduledSendOn: "2026-08-04",
+      scheduledSendOn: "2026-08-04", recipientGroupId: null,
     });
     // Both reminder days are in the past — the difference is only the deadline,
     // so a filter that dropped everything would not pass this.
@@ -348,7 +350,7 @@ describe("roundsToAutoSend", () => {
     createCustomCollection(db, {
       title: "Свадьба", employeeId: null, eventDate: null, deadline: null,
       amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/s",
-      messageText: null, scheduledSendOn: null,
+      messageText: null, scheduledSendOn: null, recipientGroupId: null,
     });
     // Кастомному сбору `autoSendOn` не ставит никто, но проверяем явно: если
     // однажды поставят руками, рассылать всё равно нельзя. Колонкой напрямую, а

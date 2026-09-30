@@ -15,6 +15,7 @@ export type AdminSection =
   | "employees"
   | "checklists"
   | "announce"
+  | "groups"
   | "bugs"
   | "journal"
   | "settings";

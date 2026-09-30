@@ -7,6 +7,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import {
   createCustomCollection,
+  getCollection,
   markCollectionSent,
   setCollectionClosed,
 } from "../collections/collection-service";
@@ -32,10 +33,10 @@ function stage() {
   linkTelegramAccount(db, "inv-333", 333);
   const collection = createCustomCollection(db, {
     title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
-    amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/sbor", messageText: null, scheduledSendOn: null,
+    amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/sbor", messageText: null, scheduledSendOn: null, recipientGroupId: null,
   });
   // Разослан: до рассылки сбор — черновик админа, и отметиться в нём нельзя.
-  markCollectionSent(db, collection.id, 2, new Date());
+  markCollectionSent(db, collection.id, 2, new Date(), [admin.id, worker.id]);
   const bot = stubBotInfo(createBot({ db, config }), { id: 1, first_name: "P", username: "p_bot" });
   return { db, bot, admin, worker, collection };
 }
@@ -131,6 +132,24 @@ describe("collection:paid — кнопка «Я перевёл»", () => {
 
     expect(listPayments(db, collection).paidCount).toBe(0);
     expect(api.answers.join(" ")).toMatch(/не в системе/i);
+  });
+
+  it("не адресат зафиксированного сбора: отказ, отметка не пишется", async () => {
+    const { db, bot, worker } = stage();
+    const outsider = createEmployee(db, { displayName: "Марк", inviteToken: "inv-444" });
+    linkTelegramAccount(db, "inv-444", 444);
+    const frozen = createCustomCollection(db, {
+      title: "Цветы", employeeId: null, eventDate: null, deadline: null,
+      amountPerPerson: null, totalGoal: null, collectUrl: "https://example.com/tsvety", messageText: null, scheduledSendOn: null, recipientGroupId: null,
+    });
+    markCollectionSent(db, frozen.id, 1, new Date(), [worker.id]);
+    const api = recordApi(bot);
+
+    await tap(bot, 444, `collection:paid:${frozen.id}`);
+
+    expect(api.answers.join(" ")).toMatch(/уже не идёт/i);
+    expect(listPayments(db, getCollection(db, frozen.id)!).paidCount).toBe(0);
+    expect(outsider.id).not.toBe(worker.id);
   });
 
   it("клавиатура письма ведёт ровно на этот колбэк", () => {

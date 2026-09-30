@@ -22,7 +22,7 @@ function collection(patch: Partial<Collection> = {}): Collection {
     title: "Кофемашина", eventDate: null, deadline: null,
     amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null,
     closedAt: null, scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null,
-    sentAt: null, sentCount: 0, sendCount: 0, createdAt: "2026-08-01T10:00:00Z",
+    sentAt: null, sentCount: 0, sendCount: 0, recipientGroupId: null, createdAt: "2026-08-01T10:00:00Z",
     ...patch,
   };
 }
@@ -52,7 +52,7 @@ function preview(patch: Partial<CollectionPreview> = {}): CollectionPreview {
     id: 1, kind: "custom", title: "Кофемашина", personName: null, employeeId: null,
     collectUrl: "https://sber.ru/x", message: "текст сбора",
     recipients: [{ employeeId: 2, displayName: "Кто-то" }],
-    blocker: null, sendCount: 0, lastSentAt: null,
+    recipientGroupName: null, blocker: null, sendCount: 0, lastSentAt: null,
     ...patch,
   };
 }

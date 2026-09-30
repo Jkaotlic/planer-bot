@@ -26,7 +26,7 @@ function stage() {
   linkTelegramAccount(db, "inv-333", 333);
   const collection = createCustomCollection(db, {
     title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
-    amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null, scheduledSendOn: null,
+    amountPerPerson: null, totalGoal: null, collectUrl: null, messageText: null, scheduledSendOn: null, recipientGroupId: null,
   });
   const bot = stubBotInfo(createBot({ db, config }), { id: 1, first_name: "P", username: "p_bot" });
   return { db, bot, admin, worker, collection };

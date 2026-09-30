@@ -20,7 +20,7 @@ function coffeeRound(db: Db) {
   return createCustomCollection(db, {
     title: "Кофемашина", employeeId: null, eventDate: null, deadline: null,
     amountPerPerson: 500, totalGoal: null, collectUrl: "https://example.test/c/1",
-    messageText: null, scheduledSendOn: null,
+    messageText: null, scheduledSendOn: null, recipientGroupId: null,
   });
 }
 
@@ -78,7 +78,7 @@ describe("отметки о сдаче", () => {
     const round = createCustomCollection(db, {
       title: "Свадьба", employeeId: igor, eventDate: null, deadline: null,
       amountPerPerson: 1000, totalGoal: null, collectUrl: "https://example.test/c/2",
-      messageText: null, scheduledSendOn: null,
+      messageText: null, scheduledSendOn: null, recipientGroupId: null,
     });
 
     const result = setPaid(db, round, igor, igor, true);
@@ -105,7 +105,7 @@ describe("отметки о сдаче", () => {
     const round = createCustomCollection(db, {
       title: "Кофемашина", employeeId: null, eventDate: null, deadline: "2020-01-01",
       amountPerPerson: 500, totalGoal: null, collectUrl: "https://example.test/c/1",
-      messageText: null, scheduledSendOn: null,
+      messageText: null, scheduledSendOn: null, recipientGroupId: null,
     });
     expect(setPaid(db, round, anya, anya, true)).toEqual({ ok: true });
   });

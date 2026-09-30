@@ -6,6 +6,7 @@ import { AdminAnnounce } from "./admin/AdminAnnounce";
 import { AdminBugs } from "./admin/AdminBugs";
 import { AdminJournal } from "./admin/AdminJournal";
 import { AdminSettings } from "./admin/AdminSettings";
+import { AdminGroups } from "./admin/AdminGroups";
 import { AdminChecklists } from "./admin/AdminChecklists";
 import { SectionChips, SectionPanel } from "../components/SectionChips";
 import type { AdminSection } from "./admin-section";
@@ -16,6 +17,7 @@ const SECTIONS: readonly { key: AdminSection; label: string }[] = [
   { key: "employees", label: "Работники" },
   { key: "checklists", label: "Чек-листы" },
   { key: "announce", label: "Анонсы" },
+  { key: "groups", label: "Группы" },
   { key: "bugs", label: "Баги" },
   { key: "journal", label: "Журнал" },
   { key: "settings", label: "Настройки" },
@@ -69,6 +71,7 @@ export function AdminScreen({
         {section === "employees" && <AdminEmployeesScreen />}
         {section === "checklists" && <AdminChecklists />}
         {section === "announce" && <AdminAnnounce />}
+        {section === "groups" && <AdminGroups />}
         {section === "bugs" && <AdminBugs />}
         {section === "journal" && <AdminJournal today={today} />}
         {section === "settings" && <AdminSettings />}

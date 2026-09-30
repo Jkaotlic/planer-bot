@@ -23,6 +23,7 @@ import { TopBar } from "./components/TopBar";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { ChecklistScreen } from "./screens/ChecklistScreen";
+import { GroupsScreen } from "./screens/GroupsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
@@ -430,6 +431,8 @@ export function App() {
             onRestrictionsSaved={patchEmployeeRestrictions}
             onObserverSaved={patchEmployeeObserver}
           />
+        ) : nav === "groups" ? (
+          <GroupsScreen employees={employees} />
         ) : nav === "kinds" ? (
           <ShiftKindsScreen employees={employees ?? []} />
         ) : nav === "checklist" ? (

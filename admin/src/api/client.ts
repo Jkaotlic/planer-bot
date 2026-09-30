@@ -2,7 +2,7 @@ import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 export type { CalendarDayDto };
 
-import type { AnnouncementRecipient } from "@planer/shared";
+import type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
 import type { ShiftCountsReport } from "@planer/shared";
 import type {
   AdminEmployeeDto,
@@ -86,6 +86,10 @@ import {
   mockGetNoticePrefs,
   mockSetNoticePref,
   mockGetAnnouncementRecipients,
+  mockGetRecipientGroups,
+  mockCreateRecipientGroup,
+  mockSaveRecipientGroup,
+  mockDeleteRecipientGroup,
   mockSendAnnouncement,
   mockGetBugReports,
   mockResolveBugReport,
@@ -442,6 +446,8 @@ export interface Collection {
   sentAt: string | null;
   sentCount: number;
   sendCount: number;
+  /** Группа адресатов: null — вся команда. После первой рассылки не меняется. */
+  recipientGroupId: number | null;
   createdAt: string;
 }
 
@@ -464,6 +470,8 @@ export interface CollectionPreview {
   collectUrl: string | null;
   message: string;
   recipients: { employeeId: number; displayName: string }[];
+  /** Имя группы адресатов (и удалённой тоже — блокер называет её по имени); null — вся команда. */
+  recipientGroupName: string | null;
   /** Почему рассылка сейчас невозможна, или null, если возможна. */
   blocker: string | null;
   sendCount: number;
@@ -481,6 +489,7 @@ export interface NewCollectionInput {
   collectUrl?: string | null;
   messageText?: string | null;
   scheduledSendOn?: string | null;
+  recipientGroupId?: number | null;
 }
 
 /** Правка сбора: отсутствующий ключ значит «оставить как есть». */
@@ -594,7 +603,7 @@ export interface AnnouncementResult {
 /** Один потенциальный адресат — контракт `GET /api/announcements/recipients`.
  *  Без телефонов и инвайт-токенов: экрану «Анонсы» нужны ровно имя и «дойдёт ли». */
 // Тип общий с сервером: роль нужна кнопкам «Админам» / «Работникам».
-export type { AnnouncementRecipient } from "@planer/shared";
+export type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
 
 /**
  * Кто вошёл в консоль — ровно столько, сколько нужно подписи в сайдбаре.
@@ -723,6 +732,11 @@ export interface ApiClient {
   /** Кому уйдёт анонс, глазами того, кто его пишет — сервер уже исключил
    *  самого отправителя и архивных. */
   getAnnouncementRecipients(): Promise<AnnouncementRecipient[]>;
+  /** Группы адресатов: список читает любой вошедший (кнопки выбора в рассылках), правит только админ. */
+  getRecipientGroups(): Promise<RecipientGroupView[]>;
+  createRecipientGroup(input: { name: string; memberIds: number[] }): Promise<RecipientGroupView>;
+  saveRecipientGroup(id: number, patch: { name?: string; memberIds?: number[] }): Promise<RecipientGroupView>;
+  deleteRecipientGroup(id: number): Promise<void>;
   /** Рассылает объявление команде или выбранным. Подтверждение — на
    *  вызывающем, тот же узор, что у `sendCollection`. */
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
@@ -1274,6 +1288,15 @@ export const realClient: ApiClient = {
   setNoticePref: (kind, enabled) =>
     authorizedPatchJson<{ kind: string; enabled: boolean }>("/api/me/notifications", { kind, enabled }),
 
+  getRecipientGroups: () =>
+    authorizedGet<{ groups: RecipientGroupView[] }>("/api/recipient-groups").then((r) => r.groups),
+  createRecipientGroup: (input) =>
+    authorizedPostJson<{ group: RecipientGroupView }>("/api/admin/recipient-groups", input).then((r) => r.group),
+  saveRecipientGroup: (id, patch) =>
+    authorizedPutJson<{ group: RecipientGroupView }>(`/api/admin/recipient-groups/${id}`, patch).then((r) => r.group),
+  deleteRecipientGroup: async (id) => {
+    await authorizedDelete<{ ok: true }>(`/api/admin/recipient-groups/${id}`);
+  },
   async getAnnouncementRecipients() {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
@@ -1372,6 +1395,10 @@ const devClient: ApiClient = {
   getNoticePrefs: () => mockGetNoticePrefs(),
   setNoticePref: (kind, enabled) => mockSetNoticePref(kind, enabled),
   getAnnouncementRecipients: () => mockGetAnnouncementRecipients(),
+  getRecipientGroups: () => mockGetRecipientGroups(),
+  createRecipientGroup: (input) => mockCreateRecipientGroup(input),
+  saveRecipientGroup: (id, patch) => mockSaveRecipientGroup(id, patch),
+  deleteRecipientGroup: (id) => mockDeleteRecipientGroup(id),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),

@@ -23,7 +23,7 @@ const ROUND: Collection = {
   title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
   collectUrl: "https://sber.ru/x", messageText: null, closedAt: null,
   scheduledSendOn: null, scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: null, sentCount: 0, sendCount: 0,
-  createdAt: "2026-08-01T10:00:00Z",
+  recipientGroupId: null, createdAt: "2026-08-01T10:00:00Z",
 };
 
 const BIRTHDAY: UpcomingBirthday = {
@@ -41,7 +41,7 @@ const PREVIEW: CollectionPreview = {
   personName: "Волков Илья", employeeId: 1, collectUrl: "https://sber.ru/x",
   message: "текст сбора",
   recipients: [{ employeeId: 2, displayName: "Кто-то" }],
-  blocker: null, sendCount: 0, lastSentAt: null,
+  recipientGroupName: null, blocker: null, sendCount: 0, lastSentAt: null,
 };
 
 let root: Root | null = null;

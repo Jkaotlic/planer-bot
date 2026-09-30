@@ -1,5 +1,6 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
-import type { CalendarDayDto, EntryCategory } from "@planer/shared";
+import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
+import type { CalendarDayDto, EntryCategory, RecipientGroupView } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
@@ -762,7 +763,7 @@ function blankCollection(patch: Partial<Collection>): Collection {
     title: null, eventDate: null, deadline: null, amountPerPerson: null, totalGoal: null,
     collectUrl: null, messageText: null, closedAt: null, scheduledSendOn: null,
     scheduleNotifiedAt: null, autoSendOn: null, autoSentAt: null, sentAt: null, sentCount: 0, sendCount: 0,
-    createdAt: new Date().toISOString(), ...patch,
+    recipientGroupId: null, createdAt: new Date().toISOString(), ...patch,
   };
 }
 
@@ -800,6 +801,9 @@ function personNameOf(employeeId: number | null): string | null {
   if (employeeId == null) return null;
   return EMPLOYEES.find((e) => e.id === employeeId)?.displayName ?? null;
 }
+
+/** Кому ушла первая рассылка сбора: id сбора -> адресаты. */
+const FROZEN_AUDIENCE = new Map<number, Set<number>>();
 
 function mockRecipients(employeeId: number | null): { employeeId: number; displayName: string }[] {
   return EMPLOYEES.filter((e) => e.isActive && e.id !== employeeId && e.telegramUserId != null)
@@ -854,7 +858,17 @@ export async function mockRemindUnpaid(id: number) {
 /** То, что реально уйдёт команде, и кому — теми же правилами, что у сервера. */
 function previewOf(collection: Collection, today: string): CollectionPreview {
   const personName = personNameOf(collection.employeeId);
-  const recipients = mockRecipients(collection.employeeId);
+  const group = collection.recipientGroupId != null ? groupById(collection.recipientGroupId) : null;
+  const groupName = collection.recipientGroupId != null ? groupNameById(collection.recipientGroupId) : null;
+  // Группа решает только до первой рассылки, как на сервере.
+  const groupDecides = collection.sendCount === 0 && collection.recipientGroupId != null;
+  const members = groupDecides && group ? new Set(groupView(group).memberIds) : null;
+  // После первой рассылки правда — зафиксированный список (как `collection_recipients`
+  // на сервере); у сбора, разосланного «до фиксации», его нет — тогда вся команда.
+  const frozen = collection.sendCount > 0 ? (FROZEN_AUDIENCE.get(collection.id) ?? null) : null;
+  const recipients = mockRecipients(collection.employeeId).filter(
+    (r) => (!members || members.has(r.employeeId)) && (!frozen || frozen.has(r.employeeId)),
+  );
   const honouree = collection.employeeId != null ? EMPLOYEES.find((e) => e.id === collection.employeeId) : null;
 
   const message = outgoingCollectionMessage(
@@ -883,6 +897,9 @@ function previewOf(collection: Collection, today: string): CollectionPreview {
   } else if (collection.kind === "birthday" && collection.sendCount > 0) {
     blocker = "Уже разослано — повторная отправка отключена.";
   } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
+  else if (groupDecides && !group) blocker = `Группа «${groupName ?? ""}» удалена — выбери другую.`;
+  else if (groupDecides && recipients.length === 0) blocker = "Некому отправлять: в группе никого с Telegram.";
+  else if (frozen && recipients.length === 0) blocker = "Некому отправлять: из адресатов сбора ни у кого нет Telegram.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
 
   return {
@@ -894,6 +911,7 @@ function previewOf(collection: Collection, today: string): CollectionPreview {
     collectUrl: collection.collectUrl,
     message,
     recipients,
+    recipientGroupName: groupName,
     blocker,
     sendCount: collection.sendCount,
     lastSentAt: collection.sentAt,
@@ -914,6 +932,14 @@ function rowOf(collection: Collection, today: string): CollectionRow {
 /** Применяет правку: та же логика заморозки повода/виновника после первой
  *  рассылки и то же окно дат напоминания, что у сервера. */
 function applyPatch(collection: Collection, patch: CollectionPatch, today: string): void {
+  // Сначала проверка, потом запись: отклонённая правка не должна оставить сбор
+  // наполовину изменённым (например, с уже сменённой группой).
+  const draft = { ...collection };
+  applyPatchTo(draft, patch, today);
+  Object.assign(collection, draft);
+}
+
+function applyPatchTo(collection: Collection, patch: CollectionPatch, today: string): void {
   const subjectTouched =
     (patch.title !== undefined && patch.title !== collection.title) ||
     (patch.employeeId !== undefined && patch.employeeId !== collection.employeeId);
@@ -921,6 +947,13 @@ function applyPatch(collection: Collection, patch: CollectionPatch, today: strin
     throw new Error("Сбор уже разослан — повод и виновника менять нельзя.");
   }
 
+  if (patch.recipientGroupId !== undefined) {
+    checkRecipientGroup(patch.recipientGroupId, collection.recipientGroupId);
+    if (collection.sendCount > 0 && patch.recipientGroupId !== collection.recipientGroupId) {
+      throw new Error("Сбор уже разослан — адресатов менять нельзя.");
+    }
+    collection.recipientGroupId = patch.recipientGroupId;
+  }
   if (patch.title !== undefined) {
     const title = patch.title.trim();
     if (!title) throw new Error("Повод не может быть пустым");
@@ -1003,6 +1036,7 @@ function birthdayRoundDraft(employeeId: number, today: string): Collection | nul
     autoSendOn: autoSendDateFor(occurrence.celebratedOn, today),
     autoSentAt: null,
     sentAt: null, sentCount: 0, sendCount: 0,
+    recipientGroupId: null,
     createdAt: new Date(0).toISOString(),
   };
 }
@@ -1092,6 +1126,7 @@ export async function mockCreateCollection(input: NewCollectionInput): Promise<C
   if (input.employeeId != null && !EMPLOYEES.some((e) => e.id === input.employeeId)) {
     throw new Error("Такого работника нет");
   }
+  checkRecipientGroup(input.recipientGroupId ?? null, null);
   if (input.collectUrl) {
     const url = input.collectUrl.trim();
     if (url && !/^https?:\/\/\S+$/i.test(url)) throw new Error("Ссылка должна начинаться с http:// или https://");
@@ -1107,6 +1142,7 @@ export async function mockCreateCollection(input: NewCollectionInput): Promise<C
     collectUrl: input.collectUrl ?? null,
     messageText: input.messageText ?? null,
     scheduledSendOn: input.scheduledSendOn ?? null,
+    recipientGroupId: input.recipientGroupId ?? null,
   });
   COLLECTIONS.push(created);
   return { ...created };
@@ -1134,6 +1170,9 @@ export async function mockSendCollection(id: number): Promise<{ delivered: numbe
   const preview = previewOf(collection, toISODate(new Date()));
   if (preview.blocker) throw new Error(preview.blocker);
   const delivered = preview.recipients.length;
+  if (collection.sendCount === 0 && delivered > 0) {
+    FROZEN_AUDIENCE.set(collection.id, new Set(preview.recipients.map((r) => r.employeeId)));
+  }
   collection.sentAt = new Date().toISOString();
   collection.sentCount = delivered;
   collection.sendCount += 1;
@@ -1651,4 +1690,96 @@ export async function mockGetChecklistDay(date: string): Promise<ChecklistDay> {
       { employeeId: 5, displayName: "Седов Игорь", checklistId: 1, checklistName: "Дежурство с 07:00", done: 0, total: 2, start: "07:00", delivery: "no-telegram", sentAt: null },
     ],
   };
+}
+
+// --- Группы адресатов ---------------------------------------------------------
+// Правила и тексты — те же, что у `server/src/groups/group-service.ts`: в dev
+// форма должна отказывать так же, как прод, иначе текст ошибки сверить негде.
+// Строки состава хранятся вместе с уволенными (как таблица участников на
+// сервере): читается только активная часть, а правка заменяет только её.
+const RECIPIENT_GROUPS: { id: number; name: string; rowIds: number[] }[] = [];
+let nextRecipientGroupId = 1;
+
+// Удалённая группа на сервере — архив: сбор помнит её и называет по имени в
+// блокере. Здесь имя переживает удаление в этом словаре.
+const REMOVED_GROUP_NAMES = new Map<number, string>();
+
+function groupById(id: number) {
+  return RECIPIENT_GROUPS.find((g) => g.id === id) ?? null;
+}
+
+function groupNameById(id: number): string | null {
+  return groupById(id)?.name ?? REMOVED_GROUP_NAMES.get(id) ?? null;
+}
+
+/** Как `unknownGroup` в `app.ts`: живая группа подходит всегда, а удалённая — только та, что уже стоит у сбора. */
+function checkRecipientGroup(next: number | null, current: number | null): void {
+  if (next == null || next === current) return;
+  if (!groupById(next)) throw new Error("Такой группы нет.");
+}
+
+const INVALID_GROUP = "Проверь название (до 40 символов) и состав.";
+
+function groupNameTaken(name: string, exceptId: number | null): boolean {
+  const key = name.toLocaleLowerCase("ru");
+  return RECIPIENT_GROUPS.some((g) => g.id !== exceptId && g.name.toLocaleLowerCase("ru") === key);
+}
+
+/** Как на сервере: неизвестного нет, а архивного добавить можно — вернётся, будет в группе. */
+function groupUnknownMember(ids: number[]): boolean {
+  return ids.some((id) => !EMPLOYEES.some((e) => e.id === id));
+}
+
+function groupView(g: { id: number; name: string; rowIds: number[] }): RecipientGroupView {
+  const active = new Set(EMPLOYEES.filter((e) => e.isActive).map((e) => e.id));
+  return { id: g.id, name: g.name, memberIds: g.rowIds.filter((id) => active.has(id)).sort((x, y) => x - y) };
+}
+
+function replaceGroupMembers(g: { rowIds: number[] }, ids: number[]): void {
+  const active = new Set(EMPLOYEES.filter((e) => e.isActive).map((e) => e.id));
+  const kept = g.rowIds.filter((id) => !active.has(id));
+  g.rowIds = [...kept, ...ids.filter((id) => !kept.includes(id))];
+}
+
+export async function mockGetRecipientGroups(): Promise<RecipientGroupView[]> {
+  await delay(150);
+  return [...RECIPIENT_GROUPS].sort((x, y) => x.name.localeCompare(y.name, "ru")).map(groupView);
+}
+
+export async function mockCreateRecipientGroup(input: { name: string; memberIds: number[] }): Promise<RecipientGroupView> {
+  await delay(150);
+  const parsed = recipientGroupInputSchema.safeParse(input);
+  if (!parsed.success) throw new Error(INVALID_GROUP);
+  if (RECIPIENT_GROUPS.length >= RECIPIENT_GROUPS_MAX) throw new Error(`Групп уже ${RECIPIENT_GROUPS_MAX} — удали лишнюю.`);
+  if (groupNameTaken(parsed.data.name, null)) throw new Error("Группа с таким названием уже есть.");
+  if (groupUnknownMember(parsed.data.memberIds)) throw new Error("В составе есть человек, которого нет в команде.");
+  const group = { id: nextRecipientGroupId++, name: parsed.data.name, rowIds: [...parsed.data.memberIds] };
+  RECIPIENT_GROUPS.push(group);
+  return groupView(group);
+}
+
+export async function mockSaveRecipientGroup(
+  id: number,
+  patch: { name?: string; memberIds?: number[] },
+): Promise<RecipientGroupView> {
+  await delay(150);
+  const parsed = recipientGroupPatchSchema.safeParse(patch);
+  if (!parsed.success) throw new Error(INVALID_GROUP);
+  const group = RECIPIENT_GROUPS.find((g) => g.id === id);
+  if (!group) throw new Error("Группы больше нет.");
+  if (parsed.data.name !== undefined && groupNameTaken(parsed.data.name, id)) throw new Error("Группа с таким названием уже есть.");
+  if (parsed.data.memberIds && groupUnknownMember(parsed.data.memberIds)) {
+    throw new Error("В составе есть человек, которого нет в команде.");
+  }
+  if (parsed.data.name !== undefined) group.name = parsed.data.name;
+  if (parsed.data.memberIds) replaceGroupMembers(group, parsed.data.memberIds);
+  return groupView(group);
+}
+
+export async function mockDeleteRecipientGroup(id: number): Promise<void> {
+  await delay(150);
+  const at = RECIPIENT_GROUPS.findIndex((g) => g.id === id);
+  if (at < 0) throw new Error("Группы больше нет.");
+  REMOVED_GROUP_NAMES.set(id, RECIPIENT_GROUPS[at]!.name);
+  RECIPIENT_GROUPS.splice(at, 1);
 }

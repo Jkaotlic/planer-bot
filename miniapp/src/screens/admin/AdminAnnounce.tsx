@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { announcementUnreachableLine, filterPeople, presetRecipientIds, type AnnouncementPreset } from "@planer/shared";
 import { Button, List, Placeholder, Section, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
-import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult } from "../../api/client";
+import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult, type RecipientGroupView } from "../../api/client";
 import { CardShell, CardStack } from "../../components/Card";
 import { PersonSearch } from "../../components/PersonSearch";
 import { ScreenScroll } from "../../components/ScreenScroll";
@@ -34,11 +34,22 @@ export function AdminAnnounce() {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
   /** Какая подборка горит. Сбрасывается ручной галочкой: список уже не «все админы». */
   const [preset, setPreset] = useState<AnnouncementPreset | null>(null);
+  const [groups, setGroups] = useState<RecipientGroupView[]>([]);
+  const [groupId, setGroupId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<AnnouncementResult | null>(null);
+
+  // Группы — удобство: сбой загрузки не должен ронять экран анонса.
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.getRecipientGroups()
+      .then((list) => { if (!cancelled) setGroups(list); })
+      .catch(() => { /* нет ряда групп — и всё */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +104,7 @@ export function AdminAnnounce() {
       return next;
     });
     setPreset(null);
+    setGroupId(null);
     setConfirming(false);
   }
 
@@ -102,6 +114,17 @@ export function AdminAnnounce() {
     setAudienceMode("picked");
     setSelectedIds(new Set(presetRecipientIds(recipients ?? [], next)));
     setPreset(next);
+    setGroupId(null);
+    setConfirming(false);
+  }
+
+  /** Группа — тоже обычный выбор галочками; чужие id (не из этого списка) отбрасываем. */
+  function pickGroup(g: RecipientGroupView) {
+    const known = new Set((recipients ?? []).map((e) => e.id));
+    setAudienceMode("picked");
+    setSelectedIds(new Set(g.memberIds.filter((id) => known.has(id))));
+    setPreset(null);
+    setGroupId(g.id);
     setConfirming(false);
   }
 
@@ -167,6 +190,7 @@ export function AdminAnnounce() {
                   onClick={() => {
                     setAudienceMode("all");
                     setPreset(null);
+                    setGroupId(null);
                     setConfirming(false);
                   }}
                 >
@@ -177,6 +201,7 @@ export function AdminAnnounce() {
                   onClick={() => {
                     setAudienceMode("picked");
                     setPreset(null);
+                    setGroupId(null);
                     setConfirming(false);
                   }}
                 >
@@ -193,6 +218,15 @@ export function AdminAnnounce() {
                   Работникам
                 </Button>
               </div>
+              {groups.length > 0 && (
+                <div data-testid="group-row" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {groups.map((g) => (
+                    <Button key={g.id} className="group-chip" size="s" mode={groupId === g.id ? "filled" : "bezeled"} disabled={sending} onClick={() => pickGroup(g)}>
+                      {g.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
 
               {audienceMode === "picked" && (
                 <div style={{ marginTop: 10 }}>

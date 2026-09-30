@@ -1,4 +1,4 @@
-export type NavKey = "schedule" | "employees" | "kinds" | "checklist" | "weekend" | "collections" | "announce" | "bugs" | "log" | "settings";
+export type NavKey = "schedule" | "employees" | "groups" | "kinds" | "checklist" | "weekend" | "collections" | "announce" | "bugs" | "log" | "settings";
 
 export interface SidebarProps {
   active: NavKey;
@@ -15,6 +15,7 @@ export interface SidebarProps {
 export const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
   { key: "schedule", label: "Расписание", icon: <CalendarIcon /> },
   { key: "employees", label: "Работники", icon: <PeopleIcon /> },
+  { key: "groups", label: "Группы", icon: <GroupsIcon /> },
   { key: "kinds", label: "Виды смен", icon: <KindsIcon /> },
   { key: "checklist", label: "Чек-лист", icon: <ChecklistIcon /> },
   { key: "weekend", label: "Работа в выходные", icon: <MarketIcon /> },
@@ -59,6 +60,17 @@ function ChecklistIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M9 5h10M9 12h10M9 19h10" />
       <path d="M3 5l1.6 1.6L7.5 3.6M3 12l1.6 1.6L7.5 10.6M3 19l1.6 1.6L7.5 17.6" />
+    </svg>
+  );
+}
+
+function GroupsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <rect x="3" y="3" width="8" height="8" rx="2" />
+      <rect x="13" y="3" width="8" height="8" rx="2" />
+      <rect x="3" y="13" width="8" height="8" rx="2" />
+      <path d="M13 17h8M17 13v8" />
     </svg>
   );
 }

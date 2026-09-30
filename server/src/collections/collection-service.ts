@@ -10,7 +10,8 @@ import {
   type CollectionStatus,
 } from "@planer/shared";
 import type { Db } from "../db/client";
-import { collections, type Collection, type Employee } from "../db/schema";
+import { collectionRecipients, collections, recipientGroups, type Collection, type Employee } from "../db/schema";
+import { getGroup } from "../groups/group-service";
 import { getEmployeeById, listActive } from "../repo/employees";
 import { isNoticeMuted } from "../repo/notice-prefs";
 import { marksOfMany, removeMarksOf } from "./payment-repo";
@@ -27,7 +28,7 @@ import { marksOfMany, removeMarksOf } from "./payment-repo";
  * вооружает его не код — человек, вставивший ссылку и в этот момент видевший
  * и текст письма, и кнопку «🚫 Не рассылать сам».
  *
- * Автоотправка ходит теми же `previewCollection`, `recipientsOf`,
+ * Автоотправка ходит теми же `previewCollection`, `collectionAudience`,
  * `claimCollectionSend` и `markCollectionSent`, что и кнопка админа, а не мимо
  * них: иначе у «разослано» стало бы два разных смысла в зависимости от того,
  * кто нажал.
@@ -53,6 +54,8 @@ export interface CollectionPreview {
   /** Exactly the text that will be sent, defaults filled in. */
   message: string;
   recipients: { employeeId: number; displayName: string }[];
+  /** Имя группы адресатов, в том числе удалённой, — или null, если шлём всей команде. */
+  recipientGroupName: string | null;
   /** Why sending is blocked, or null when it isn't. */
   blocker: string | null;
   sendCount: number;
@@ -69,6 +72,7 @@ export interface NewCustomCollection {
   collectUrl: string | null;
   messageText: string | null;
   scheduledSendOn: string | null;
+  recipientGroupId: number | null;
 }
 
 /** Every field an admin may edit. Absent key means «leave as is». */
@@ -83,6 +87,7 @@ export interface CollectionPatch {
   messageText?: string | null;
   scheduledSendOn?: string | null;
   autoSendOn?: string | null;
+  recipientGroupId?: number | null;
 }
 
 export type UpdateResult = { ok: true; collection: Collection } | { ok: false; error: string };
@@ -151,6 +156,12 @@ export function updateCollection(db: Db, id: number, patch: CollectionPatch): Up
   if (current.sendCount > 0 && subjectTouched) {
     return { ok: false, error: "Сбор уже разослан — повод и виновника менять нельзя." };
   }
+  // Адресаты после рассылки уже зафиксированы в `collection_recipients`; новая
+  // группа ничего бы не поменяла, кроме того, что форма начала бы врать.
+  const groupTouched = patch.recipientGroupId !== undefined && patch.recipientGroupId !== current.recipientGroupId;
+  if (current.sendCount > 0 && groupTouched) {
+    return { ok: false, error: "Сбор уже разослан — адресатов менять нельзя." };
+  }
 
   // Moving the reminder day re-arms it: an admin who pushes it back means to be
   // told on the new day, not to be told nothing because the old one fired.
@@ -204,7 +215,7 @@ export function deleteCollection(db: Db, id: number): { ok: true } | { ok: false
   if (current.sendCount > 0) return { ok: false, error: "Сбор уже разослан — удалить нельзя." };
   // Осиротевшая отметка — это строка со ссылкой в пустоту, то есть сломанный
   // внешний ключ. Через `payment-repo`, а не через `payment-service`: сервис
-  // импортирует отсюда `recipientsOf`, и обратный импорт замкнул бы круг.
+  // импортирует отсюда `collectionAudience`, и обратный импорт замкнул бы круг.
   removeMarksOf(db, id);
   db.delete(collections).where(eq(collections.id, id)).run();
   return { ok: true };
@@ -220,12 +231,57 @@ export function recipientsOf(db: Db, honoureeId: number | null): Employee[] {
   );
 }
 
+/** Кому сбор ушёл при первой рассылке, или null — не рассылался либо разослан до групп. */
+export function frozenAudienceIds(db: Db, collectionId: number): number[] | null {
+  const rows = db
+    .select({ id: collectionRecipients.employeeId })
+    .from(collectionRecipients)
+    .where(eq(collectionRecipients.collectionId, collectionId))
+    .all();
+  return rows.length > 0 ? rows.map((r) => r.id) : null;
+}
+
+/**
+ * Кому этот сбор — одно правило на превью, рассылку, автоотправку, «сдали N из M»,
+ * отметку, «Напомнить» и видимость. Раньше каждое место звало `recipientsOf` само,
+ * и с появлением групп восемь копий правила разъехались бы за первую же неделю.
+ *
+ * Порядок пунктов — порядок жизни сбора: после рассылки правда — зафиксированный
+ * список; сбор, разосланный до групп (2026-09-30), живёт по-старому; до рассылки
+ * адресаты считаются заново из группы или всей команды.
+ */
+export function collectionAudience(
+  db: Db,
+  collection: Collection,
+  // Вызывающий, что уже прочитал список, передаёт его — не читаем второй раз.
+  frozen: number[] | null = frozenAudienceIds(db, collection.id),
+): Employee[] {
+  const reachable = (e: Employee) => e.id !== collection.employeeId && e.telegramUserId != null;
+  if (frozen) {
+    const ids = new Set(frozen);
+    return listActive(db).filter((e) => ids.has(e.id) && reachable(e));
+  }
+  if (collection.sendCount > 0 || collection.recipientGroupId == null) {
+    return recipientsOf(db, collection.employeeId);
+  }
+  const group = getGroup(db, collection.recipientGroupId);
+  if (!group) return [];
+  const ids = new Set(group.memberIds);
+  return listActive(db).filter((e) => ids.has(e.id) && reachable(e));
+}
+
+/** Имя группы в обход архива: превью должно назвать удалённую группу, а не промолчать. */
+function groupNameOf(db: Db, groupId: number | null): string | null {
+  if (groupId == null) return null;
+  return db.select({ name: recipientGroups.name }).from(recipientGroups).where(eq(recipientGroups.id, groupId)).get()?.name ?? null;
+}
+
 /** Кому уходит админский нудж: достижимые админы, минус виновник торжества,
  *  минус выключившие себе этот вид.
  *
  *  Проверка здесь, а не в циклах `birthday-notice`, потому что эта функция
  *  и есть «кому писать про сборы»: все её вызывающие — а с 31.08.2026 их три —
- *  про это. Сама рассылка сбора команде идёт через `recipientsOf` и никаких
+ *  про это. Сама рассылка сбора команде идёт через `collectionAudience` и никаких
  *  выключателей не знает — от объявления о сборе не отписываются.
  *
  *  Следствие, о котором надо знать: третий вызывающий — автоотправка, и её
@@ -245,7 +301,11 @@ export function adminRecipients(db: Db, honoureeId: number | null): Employee[] {
  */
 export function previewCollection(db: Db, collection: Collection, today: string): CollectionPreview {
   const personName = personNameOf(db, collection);
-  const recipients = recipientsOf(db, collection.employeeId);
+  const frozen = frozenAudienceIds(db, collection.id);
+  const recipients = collectionAudience(db, collection, frozen);
+  const recipientGroupName = groupNameOf(db, collection.recipientGroupId);
+  // Группа решает только до первой рассылки; после неё правда — зафиксированный список.
+  const groupDecides = collection.sendCount === 0 && collection.recipientGroupId != null;
   const honouree = collection.employeeId != null ? getEmployeeById(db, collection.employeeId) : null;
 
   const message = outgoingCollectionMessage(
@@ -274,6 +334,10 @@ export function previewCollection(db: Db, collection: Collection, today: string)
   } else if (collection.kind === "birthday" && collection.sendCount > 0) {
     blocker = "Уже разослано — повторная отправка отключена.";
   } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
+  else if (groupDecides && !getGroup(db, collection.recipientGroupId!)) {
+    blocker = `Группа «${recipientGroupName ?? ""}» удалена — выбери другую.`;
+  } else if (groupDecides && recipients.length === 0) blocker = "Некому отправлять: в группе никого с Telegram.";
+  else if (frozen && recipients.length === 0) blocker = "Некому отправлять: из адресатов сбора ни у кого нет Telegram.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
 
   return {
@@ -285,18 +349,41 @@ export function previewCollection(db: Db, collection: Collection, today: string)
     collectUrl: collection.collectUrl,
     message,
     recipients: recipients.map((r) => ({ employeeId: r.id, displayName: r.displayName })),
+    recipientGroupName,
     blocker,
     sendCount: collection.sendCount,
     lastSentAt: collection.sentAt,
   };
 }
 
-/** Records that a round went out — called only after the messages were sent. */
-export function markCollectionSent(db: Db, id: number, delivered: number, when: Date): void {
-  db.update(collections)
-    .set({ sentAt: when, sentCount: delivered, sendCount: sql`${collections.sendCount} + 1` })
-    .where(eq(collections.id, id))
-    .run();
+/**
+ * Records that a round went out — called only after the messages were sent.
+ *
+ * Первая рассылка фиксирует адресатов: дальше «сдали N из M», «Напомнить» и
+ * видимость отвечают про тех, кому писали, а не про нынешний состав группы.
+ * Повторная рассылка список не трогает — она напоминание тем же людям. Проверка
+ * счётчика и вставка — в одной транзакции со счётчиком, иначе две рассылки
+ * подряд могли бы обе увидеть ноль.
+ */
+export function markCollectionSent(
+  db: Db,
+  id: number,
+  delivered: number,
+  when: Date,
+  recipientIds: number[],
+): void {
+  db.transaction((tx) => {
+    const current = tx.select({ sendCount: collections.sendCount }).from(collections).where(eq(collections.id, id)).get();
+    if (current && current.sendCount === 0) {
+      for (const employeeId of recipientIds) {
+        tx.insert(collectionRecipients).values({ collectionId: id, employeeId }).onConflictDoNothing().run();
+      }
+    }
+    tx.update(collections)
+      .set({ sentAt: when, sentCount: delivered, sendCount: sql`${collections.sendCount} + 1` })
+      .where(eq(collections.id, id))
+      .run();
+  });
 }
 
 /** A collection as a worker sees it: what it is for, how much, and the link. */
@@ -327,18 +414,26 @@ export interface WorkerCollection {
  * collection is history, not a call to chip in), and it must not be about them
  * (`listCollections` already enforces this — the one rule that governs the
  * whole feature: the honouree never sees their own collection).
+ *
+ * Четвёртое условие — с групп (2026-09-30): у сбора с зафиксированным списком
+ * адресатов его видят только адресаты. Сбор этажа, которого не звали, — не
+ * призыв скинуться, а утечка чужого сюрприза. Старые сборы без списка видны всем.
  */
 export function collectionsForWorker(db: Db, today: string, employeeId: number): WorkerCollection[] {
-  const rows = listCollections(db, today, employeeId).filter(
-    (row) => row.collection.sendCount > 0 && row.active,
-  );
+  const frozenById = new Map<number, number[] | null>();
+  const rows = listCollections(db, today, employeeId).filter((row) => {
+    if (row.collection.sendCount === 0 || !row.active) return false;
+    const frozen = frozenAudienceIds(db, row.collection.id);
+    frozenById.set(row.collection.id, frozen);
+    return frozen == null || frozen.includes(employeeId);
+  });
   // Отметки всех показанных сборов — одним запросом, а не по запросу на карточку.
   const marks = marksOfMany(db, rows.map((row) => row.collection.id));
 
   return rows.map((row) => {
     const mine = marks.filter((mark) => mark.collectionId === row.collection.id);
     const progress = paymentProgress(
-      recipientsOf(db, row.collection.employeeId).map((e) => ({
+      collectionAudience(db, row.collection, frozenById.get(row.collection.id)).map((e) => ({
         employeeId: e.id,
         displayName: e.displayName,
       })),
