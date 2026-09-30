@@ -144,7 +144,12 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     const result = closePoll(db, poll, viewerOf(who.me, ctx.from.id));
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     recordAudit(db, "poll_closed", who.me.id, { pollId: poll.id, question: poll.question });
-    await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог рассылаю" });
+    // Опрос уже закрыт в базе, и второго шанса разослать итог не будет: тик
+    // берёт только незакрытые. Поэтому отказ ответа на тап (сеть, запрос
+    // старше 15 минут) не должен оборвать обработчик до рассылки.
+    await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог рассылаю" }).catch((err) => {
+      console.error("bot: poll close answer failed:", safeErrorMessage(err));
+    });
     inBackground("poll close fan-out", finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed"));
   });
 
@@ -188,8 +193,12 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     // Сводка всегда уходит тому, кто собирал заказ (`finishOrderMessages`), а
     // закрыть может ещё и админ — за него самого. «У тебя в чате» врало бы
     // админу, закрывшему чужой приём: сводка появится не у него.
+    // Отказ ответа не обрывает рассылку — по той же причине, что у опроса выше:
+    // заказ уже закрыт, и без этой волны сводка и «сдай» не уйдут никогда.
     await ctx.answerCallbackQuery({
       text: who.me.id === fresh.createdBy ? "Приём закрыт, сводка у тебя в чате" : "Приём закрыт, сводка ушла тому, кто собирал заказ",
+    }).catch((err) => {
+      console.error("bot: order close answer failed:", safeErrorMessage(err));
     });
     inBackground("order close fan-out", finishOrderMessages(bot, db, fresh, "closed", config.publicUrl));
   });

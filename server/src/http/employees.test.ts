@@ -1309,7 +1309,12 @@ describe("архивация гасит хвосты", () => {
     const igorShift = createShift(db, { date: inDays(3), start: "12:00", end: "21:00", employeeId: igor.id });
     const swap = createSwapRequest(db, { fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id });
     const vacation = createShift(db, { date: inDays(10), endDate: inDays(14), category: "vacation", start: null, end: null, employeeId: anya.id });
-    const slot = createVacantSlot(db, { date: inDays(12), start: "10:00", end: "18:00" });
+    // Выходная смена обязана стоять на субботе или воскресенье (`assignSlot`
+    // отвечает `not_weekend`), а фиксированное «через 12 дней» попадало на
+    // выходной только в два дня недели из семи — тест падал по календарю.
+    // Берём первый выходной внутри отпуска: в пяти днях подряд он есть всегда.
+    const weekendDay = [10, 11, 12, 13, 14].map(inDays).find((d) => [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay()))!;
+    const slot = createVacantSlot(db, { date: weekendDay, start: "10:00", end: "18:00" });
     addInterest(db, slot.id, anya.id);
     const assigned = assignSlot(db, slot.id, anya.id, inDays(0));
     if (!assigned.ok) throw new Error(String(assigned.reason));

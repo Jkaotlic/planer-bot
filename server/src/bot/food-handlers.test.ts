@@ -415,3 +415,38 @@ describe("массовые рассылки не держат очередь а�
     expect(listRecentAudit(db, 10).find((row) => row.type === "order_reminded")?.payload).toMatchObject({ delivered: 1 });
   });
 });
+
+/**
+ * Telegram отказывается принять ответ на тап (сеть, запрос старше 15 минут).
+ * Ставится ПОСЛЕ `recordApi`, чтобы отказ случился раньше записи.
+ */
+function failAnswers(bot: Bot) {
+  bot.api.config.use(async (prev, method, payload, signal) => {
+    if (method === "answerCallbackQuery") throw new Error("query is too old");
+    return prev(method, payload, signal);
+  });
+}
+
+describe("закрытие, когда Telegram не принял ответ на тап", () => {
+  it("опрос: закрыт, и итог всё равно уходит адресатам", async () => {
+    const { db, bot, poll } = stage();
+    const api = recordApi(bot);
+    failAnswers(bot);
+    await tap(bot, 111, `poll:close:${poll.id}`).catch(() => {});
+    await flush();
+    expect(getPoll(db, poll.id)!.closedAt).not.toBeNull();
+    expect(api.sent.filter((m) => m.text.includes("Итоги опроса"))).toHaveLength(2);
+  });
+
+  it("заказ: закрыт, и сводка всё равно уходит тому, кто собирал", async () => {
+    const { db, bot, igor, order, shawarmaId } = stage();
+    addMenuItem(db, order, igor.id, shawarmaId, { date: "2026-09-29", time: "12:00" });
+    const api = recordApi(bot);
+    failAnswers(bot);
+    await tap(bot, 111, `order:close:${order.id}`).catch(() => {});
+    await flush();
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    expect(api.sent.some((m) => m.chat_id === 111 && m.text.includes("Что заказать:"))).toBe(true);
+    expect(api.sent.some((m) => m.chat_id === 333 && m.text.startsWith("💸"))).toBe(true);
+  });
+});
