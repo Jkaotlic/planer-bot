@@ -1,5 +1,6 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
-import type { CalendarDayDto, EntryCategory } from "@planer/shared";
+import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
+import type { CalendarDayDto, EntryCategory, RecipientGroupView } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
@@ -1651,4 +1652,64 @@ export async function mockGetChecklistDay(date: string): Promise<ChecklistDay> {
       { employeeId: 5, displayName: "Седов Игорь", checklistId: 1, checklistName: "Дежурство с 07:00", done: 0, total: 2, start: "07:00", delivery: "no-telegram", sentAt: null },
     ],
   };
+}
+
+// --- Группы адресатов ---------------------------------------------------------
+// Правила и тексты — те же, что у `server/src/groups/group-service.ts`: в dev
+// форма должна отказывать так же, как прод, иначе текст ошибки сверить негде.
+const RECIPIENT_GROUPS: RecipientGroupView[] = [];
+let nextRecipientGroupId = 1;
+
+const INVALID_GROUP = "Проверь название (до 40 символов) и состав.";
+
+function groupNameTaken(name: string, exceptId: number | null): boolean {
+  const key = name.toLowerCase();
+  return RECIPIENT_GROUPS.some((g) => g.id !== exceptId && g.name.toLowerCase() === key);
+}
+
+/** Только активные: уволенный из состава выпадает, как на сервере. */
+function groupUnknownMember(ids: number[]): boolean {
+  return ids.some((id) => !EMPLOYEES.some((e) => e.id === id && e.isActive));
+}
+
+export async function mockGetRecipientGroups(): Promise<RecipientGroupView[]> {
+  await delay(150);
+  return RECIPIENT_GROUPS.map((g) => ({ ...g, memberIds: [...g.memberIds] }));
+}
+
+export async function mockCreateRecipientGroup(input: { name: string; memberIds: number[] }): Promise<RecipientGroupView> {
+  await delay(150);
+  const parsed = recipientGroupInputSchema.safeParse(input);
+  if (!parsed.success) throw new Error(INVALID_GROUP);
+  if (RECIPIENT_GROUPS.length >= RECIPIENT_GROUPS_MAX) throw new Error(`Групп уже ${RECIPIENT_GROUPS_MAX} — удали лишнюю.`);
+  if (groupNameTaken(parsed.data.name, null)) throw new Error("Группа с таким названием уже есть.");
+  if (groupUnknownMember(parsed.data.memberIds)) throw new Error("В составе есть человек, которого нет в команде.");
+  const group: RecipientGroupView = { id: nextRecipientGroupId++, name: parsed.data.name, memberIds: parsed.data.memberIds };
+  RECIPIENT_GROUPS.push(group);
+  return { ...group, memberIds: [...group.memberIds] };
+}
+
+export async function mockSaveRecipientGroup(
+  id: number,
+  patch: { name?: string; memberIds?: number[] },
+): Promise<RecipientGroupView> {
+  await delay(150);
+  const parsed = recipientGroupPatchSchema.safeParse(patch);
+  if (!parsed.success) throw new Error(INVALID_GROUP);
+  const group = RECIPIENT_GROUPS.find((g) => g.id === id);
+  if (!group) throw new Error("Группы больше нет.");
+  if (parsed.data.name !== undefined && groupNameTaken(parsed.data.name, id)) throw new Error("Группа с таким названием уже есть.");
+  if (parsed.data.memberIds && groupUnknownMember(parsed.data.memberIds)) {
+    throw new Error("В составе есть человек, которого нет в команде.");
+  }
+  if (parsed.data.name !== undefined) group.name = parsed.data.name;
+  if (parsed.data.memberIds) group.memberIds = parsed.data.memberIds;
+  return { ...group, memberIds: [...group.memberIds] };
+}
+
+export async function mockDeleteRecipientGroup(id: number): Promise<void> {
+  await delay(150);
+  const at = RECIPIENT_GROUPS.findIndex((g) => g.id === id);
+  if (at < 0) throw new Error("Группы больше нет.");
+  RECIPIENT_GROUPS.splice(at, 1);
 }
