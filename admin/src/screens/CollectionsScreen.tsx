@@ -1095,10 +1095,10 @@ function SendBlock({
 
       <div className="birthday-preview-title">
         Получат {recipientsSubject(preview.recipients.length)}
-        {personName
-          ? ` — все, кроме ${personName}:`
-          : preview.recipientGroupName
-            ? ` — группа «${preview.recipientGroupName}»:`
+        {preview.recipientGroupName
+          ? ` — группа «${preview.recipientGroupName}»${personName ? `, кроме ${personName}` : ""}:`
+          : personName
+            ? ` — все, кроме ${personName}:`
             : " — вся команда:"}
       </div>
       <div className="birthday-recipients">

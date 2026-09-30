@@ -1254,6 +1254,9 @@ function personNameOf(employeeId: number | null): string | null {
   return EMPLOYEES.find((e) => e.id === employeeId)?.displayName ?? null;
 }
 
+/** Кому ушла первая рассылка сбора: id сбора -> адресаты. */
+const FROZEN_AUDIENCE = new Map<number, Set<number>>();
+
 function mockRecipients(employeeId: number | null): { employeeId: number; displayName: string }[] {
   return EMPLOYEES.filter((e) => e.isActive && e.id !== employeeId && e.telegramUserId != null)
     .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
@@ -1312,7 +1315,12 @@ function previewOf(collection: Collection, today: string): CollectionPreview {
   // Группа решает только до первой рассылки, как на сервере.
   const groupDecides = collection.sendCount === 0 && collection.recipientGroupId != null;
   const members = groupDecides && group ? new Set(groupView(group).memberIds) : null;
-  const recipients = mockRecipients(collection.employeeId).filter((r) => !members || members.has(r.employeeId));
+  // После первой рассылки правда — зафиксированный список (как `collection_recipients`
+  // на сервере); у сбора, разосланного «до фиксации», его нет — тогда вся команда.
+  const frozen = collection.sendCount > 0 ? (FROZEN_AUDIENCE.get(collection.id) ?? null) : null;
+  const recipients = mockRecipients(collection.employeeId).filter(
+    (r) => (!members || members.has(r.employeeId)) && (!frozen || frozen.has(r.employeeId)),
+  );
   const honouree = collection.employeeId != null ? EMPLOYEES.find((e) => e.id === collection.employeeId) : null;
 
   const message = outgoingCollectionMessage(
@@ -1343,6 +1351,7 @@ function previewOf(collection: Collection, today: string): CollectionPreview {
   } else if (!collection.collectUrl) blocker = "Нет ссылки на сбор — вставь её, прежде чем рассылать.";
   else if (groupDecides && !group) blocker = `Группа «${groupName ?? ""}» удалена — выбери другую.`;
   else if (groupDecides && recipients.length === 0) blocker = "Некому отправлять: в группе никого с Telegram.";
+  else if (frozen && recipients.length === 0) blocker = "Некому отправлять: из адресатов сбора ни у кого нет Telegram.";
   else if (recipients.length === 0) blocker = "Некому отправлять: ни у кого из команды не привязан Telegram.";
 
   return {
@@ -1375,6 +1384,14 @@ function rowOf(collection: Collection, today: string): CollectionRow {
 /** Применяет правку: та же логика заморозки повода/виновника после первой
  *  рассылки и то же окно дат напоминания, что у сервера. */
 function applyPatch(collection: Collection, patch: CollectionPatch, today: string): void {
+  // Сначала проверка, потом запись: отклонённая правка не должна оставить сбор
+  // наполовину изменённым (например, с уже сменённой группой).
+  const draft = { ...collection };
+  applyPatchTo(draft, patch, today);
+  Object.assign(collection, draft);
+}
+
+function applyPatchTo(collection: Collection, patch: CollectionPatch, today: string): void {
   const subjectTouched =
     (patch.title !== undefined && patch.title !== collection.title) ||
     (patch.employeeId !== undefined && patch.employeeId !== collection.employeeId);
@@ -1604,6 +1621,9 @@ export async function mockSendCollection(id: number): Promise<{ delivered: numbe
   const preview = previewOf(collection, toISODate(new Date()));
   if (preview.blocker) throw new Error(preview.blocker);
   const delivered = preview.recipients.length;
+  if (collection.sendCount === 0 && delivered > 0) {
+    FROZEN_AUDIENCE.set(collection.id, new Set(preview.recipients.map((r) => r.employeeId)));
+  }
   collection.sentAt = new Date().toISOString();
   collection.sentCount = delivered;
   collection.sendCount += 1;

@@ -213,4 +213,56 @@ describe("«Рассылаем» у сборов (мини-апп)", () => {
     await settle();
     expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ recipientGroupId: 1 }));
   });
+
+  it("карточка дня рождения с группой: «группа «…», кроме Марк», а не «все, кроме»", async () => {
+    const round = collection({ id: 7, kind: "birthday", employeeId: 1, title: null, year: 2026, celebratedOn: "2026-09-14", recipientGroupId: 1 });
+    const birthday: UpcomingBirthday = {
+      employeeId: 1, displayName: "Марк", birthDate: "09-14", birthDateLabel: "14 сентября",
+      celebratedOn: "2026-09-14", daysUntil: 13, campaign: round,
+    };
+    vi.spyOn(apiClient, "getBirthdayPreview").mockResolvedValue(
+      preview({ id: 7, kind: "birthday", personName: "Марк", employeeId: 1, recipientGroupName: "ЧИП 32 этаж" }),
+    );
+    const el = await mount([], [birthday]);
+    await act(async () => button(el, "Подготовить сбор").click());
+    await settle();
+    expect(el.textContent).toContain("группа «ЧИП 32 этаж», кроме Марк");
+    expect(el.textContent).not.toContain("все, кроме Марк");
+  });
+
+  it("карточка дня рождения без группы: прежнее «все, кроме Марк»", async () => {
+    const round = collection({ id: 7, kind: "birthday", employeeId: 1, title: null, year: 2026, celebratedOn: "2026-09-14" });
+    const birthday: UpcomingBirthday = {
+      employeeId: 1, displayName: "Марк", birthDate: "09-14", birthDateLabel: "14 сентября",
+      celebratedOn: "2026-09-14", daysUntil: 13, campaign: round,
+    };
+    vi.spyOn(apiClient, "getBirthdayPreview").mockResolvedValue(preview({ id: 7, kind: "birthday", personName: "Марк", employeeId: 1 }));
+    const el = await mount([], [birthday]);
+    await act(async () => button(el, "Подготовить сбор").click());
+    await settle();
+    expect(el.textContent).toContain("все, кроме Марк");
+  });
+
+  it("сохранение разосланного сбора шлёт свою группу (сервер её принимает)", async () => {
+    vi.spyOn(apiClient, "getCollectionPreview").mockResolvedValue(preview({ recipientGroupName: "ЧИП 32 этаж", sendCount: 1 }));
+    vi.spyOn(apiClient, "getCollectionPayments").mockResolvedValue({ paidCount: 0, total: 1, rows: [] } as never);
+    const save = vi.spyOn(apiClient, "saveCollection").mockResolvedValue(collection({ recipientGroupId: 1, sendCount: 1 }));
+    const el = await mount([row(collection({ recipientGroupId: 1, sendCount: 1, sentCount: 1 }))]);
+    await act(async () => button(el, "Открыть").click());
+    await settle();
+    await act(async () => button(el, "Сохранить").click());
+    await settle();
+    expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ recipientGroupId: 1 }));
+  });
+
+  it("сохранение сбора с удалённой группой шлёт её же id, а не null", async () => {
+    vi.spyOn(apiClient, "getCollectionPreview").mockResolvedValue(preview({ recipientGroupName: "Старая группа" }));
+    const save = vi.spyOn(apiClient, "saveCollection").mockResolvedValue(collection({ recipientGroupId: 77 }));
+    const el = await mount([row(collection({ recipientGroupId: 77 }))]);
+    await act(async () => button(el, "Открыть").click());
+    await settle();
+    await act(async () => button(el, "Сохранить").click());
+    await settle();
+    expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ recipientGroupId: 77 }));
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   mockCreateCollection, mockCreateRecipientGroup, mockDeleteRecipientGroup, mockGetCollectionPreview, mockGetRecipientGroups,
-  mockSaveCollection, mockSaveRecipientGroup,
+  mockSaveCollection, mockSaveRecipientGroup, mockSendCollection,
 } from "./mock";
 
 // Мок обязан отказывать теми же текстами, что сервис: в dev форму иначе не проверить.
@@ -51,5 +51,21 @@ describe("мок сборов с группой адресатов", () => {
     await expect(mockSaveCollection(c.id, { recipientGroupId: g.id, collectUrl: "https://example.com/y" })).resolves.toBeTruthy();
     await expect(mockCreateCollection({ title: "Чужая", recipientGroupId: g.id })).rejects.toThrow("Такой группы нет.");
     await expect(mockSaveCollection(c.id, { recipientGroupId: 987654 })).rejects.toThrow("Такой группы нет.");
+  });
+
+  it("отклонённая правка не меняет группу, а после рассылки «Напомнить» идёт по зафиксированному списку", async () => {
+    const g1 = await mockCreateRecipientGroup({ name: "Фикс-А", memberIds: [2] });
+    const g2 = await mockCreateRecipientGroup({ name: "Фикс-Б", memberIds: [1] });
+    const c = await mockCreateCollection({ title: "Фиксация", collectUrl: "https://example.com/z", recipientGroupId: g1.id });
+    await expect(mockSaveCollection(c.id, { recipientGroupId: g2.id, collectUrl: "не ссылка" })).rejects.toThrow();
+    expect((await mockGetCollectionPreview(c.id)).recipientGroupName).toBe("Фикс-А");
+
+    const first = await mockGetCollectionPreview(c.id);
+    await mockSendCollection(c.id);
+    // Состав группы поменяли после рассылки — «Напомнить» всё равно идёт первым адресатам.
+    await mockSaveRecipientGroup(g1.id, { memberIds: [1] });
+    const again = await mockGetCollectionPreview(c.id);
+    expect(again.recipients.map((r) => r.employeeId)).toEqual(first.recipients.map((r) => r.employeeId));
+    await expect(mockSaveCollection(c.id, { recipientGroupId: g2.id })).rejects.toThrow("Сбор уже разослан — адресатов менять нельзя.");
   });
 });

@@ -1211,10 +1211,10 @@ function SendBlock({
 
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
         Получат {recipientsSubject(preview.recipients.length)}
-        {personName
-          ? ` — все, кроме ${personName}:`
-          : preview.recipientGroupName
-            ? ` — группа «${preview.recipientGroupName}»:`
+        {preview.recipientGroupName
+          ? ` — группа «${preview.recipientGroupName}»${personName ? `, кроме ${personName}` : ""}:`
+          : personName
+            ? ` — все, кроме ${personName}:`
             : " — вся команда:"}
       </div>
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
