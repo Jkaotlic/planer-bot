@@ -16,7 +16,14 @@ import { ScreenScroll } from "../../components/ScreenScroll";
  * Правила названия (длина, уникальность, лимит групп) проверяет сервер, здесь
  * его текст просто показывается — второй копии правил в форме нет.
  */
-type Editing = { id: number | null; name: string; memberIds: Set<number> };
+type Editing = {
+  id: number | null;
+  name: string;
+  memberIds: Set<number>;
+  /** Сохранённое имя и состав: по ним видно, что менялось, и что назвать в вопросе об удалении. */
+  savedName: string;
+  savedMemberIds: number[];
+};
 
 export function AdminGroups() {
   const [groups, setGroups] = useState<RecipientGroupView[] | null>(null);
@@ -25,14 +32,17 @@ export function AdminGroups() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   async function reload() {
     try {
       const [list, team] = await Promise.all([apiClient.getRecipientGroups(), apiClient.getAdminEmployees()]);
       setGroups(list);
       setPeople(team.filter((e) => e.isActive));
+      setLoadFailed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить группы");
+      setLoadFailed(true);
       // Без этого экран остался бы на спиннере вечно: ошибку некому было бы показать.
       setGroups((prev) => prev ?? []);
     }
@@ -61,7 +71,11 @@ export function AdminGroups() {
   function open(group: RecipientGroupView | null) {
     setError(null);
     setQuery("");
-    setEditing(group ? { id: group.id, name: group.name, memberIds: new Set(group.memberIds) } : { id: null, name: "", memberIds: new Set() });
+    setEditing(
+      group
+        ? { id: group.id, name: group.name, memberIds: new Set(group.memberIds), savedName: group.name, savedMemberIds: group.memberIds }
+        : { id: null, name: "", memberIds: new Set(), savedName: "", savedMemberIds: [] },
+    );
   }
 
   function toggle(id: number) {
@@ -77,10 +91,15 @@ export function AdminGroups() {
   async function save() {
     if (!editing) return;
     const memberIds = people.filter((p) => editing.memberIds.has(p.id)).map((p) => p.id);
+    // Состав шлём, только если он менялся: переименование не должно трогать
+    // состав, а у редактора он и так неполный (уволенных в нём нет).
+    const membersChanged =
+      memberIds.length !== editing.savedMemberIds.length || memberIds.some((id) => !editing.savedMemberIds.includes(id));
+    const id = editing.id;
     const ok = await run(() =>
-      editing.id === null
+      id === null
         ? apiClient.createRecipientGroup({ name: editing.name, memberIds })
-        : apiClient.saveRecipientGroup(editing.id, { name: editing.name, memberIds }),
+        : apiClient.saveRecipientGroup(id, membersChanged ? { name: editing.name, memberIds } : { name: editing.name }),
     );
     if (ok) setEditing(null);
   }
@@ -97,6 +116,23 @@ export function AdminGroups() {
     );
   }
 
+  if (loadFailed) {
+    return (
+      <ScreenScroll>
+        <Section header="Группы">
+          <CardStack>
+            <CardShell>
+              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
+            </CardShell>
+            <Button mode="bezeled" size="m" stretched onClick={() => { setError(null); void reload(); }}>
+              Повторить
+            </Button>
+          </CardStack>
+        </Section>
+      </ScreenScroll>
+    );
+  }
+
   const visible = filterPeople(people, query);
 
   return (
@@ -106,7 +142,7 @@ export function AdminGroups() {
         footer="Список людей, который выбирается одной кнопкой в рассылках. Уволенные из группы выпадают сами и возвращаются, если их восстановить."
       >
         <CardStack>
-          {error && (
+          {error && !editing && (
             <CardShell>
               <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
             </CardShell>
@@ -149,7 +185,7 @@ export function AdminGroups() {
   function renderEditor() {
     if (!editing) return null;
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+      <div data-group-editor style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
         <Input
           name="group-name"
           aria-label="Название группы"
@@ -159,6 +195,7 @@ export function AdminGroups() {
           disabled={busy}
           onChange={(e) => setEditing({ ...editing, name: e.target.value })}
         />
+        {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
         <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
           В группе: {editing.memberIds.size}
         </div>
@@ -188,7 +225,7 @@ export function AdminGroups() {
         {editing.id !== null && (
           <ConfirmButton
             label="Удалить группу"
-            question={`Удалить «${editing.name}»? В уже разосланных сборах список адресатов не изменится.`}
+            question={`Удалить «${editing.savedName}»? В уже разосланных сборах список адресатов не изменится.`}
             confirmLabel="Да, удалить"
             mode="plain"
             disabled={busy}

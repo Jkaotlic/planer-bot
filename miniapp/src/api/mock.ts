@@ -2725,24 +2725,37 @@ export async function mockSetTemplateChecklists(templateId: number, checklistIds
 // --- Группы адресатов ---------------------------------------------------------
 // Правила и тексты — те же, что у `server/src/groups/group-service.ts`: в dev
 // форма должна отказывать так же, как прод, иначе текст ошибки сверить негде.
-const RECIPIENT_GROUPS: RecipientGroupView[] = [];
+// Строки состава хранятся вместе с уволенными (как таблица участников на
+// сервере): читается только активная часть, а правка заменяет только её.
+const RECIPIENT_GROUPS: { id: number; name: string; rowIds: number[] }[] = [];
 let nextRecipientGroupId = 1;
 
 const INVALID_GROUP = "Проверь название (до 40 символов) и состав.";
 
 function groupNameTaken(name: string, exceptId: number | null): boolean {
-  const key = name.toLowerCase();
-  return RECIPIENT_GROUPS.some((g) => g.id !== exceptId && g.name.toLowerCase() === key);
+  const key = name.toLocaleLowerCase("ru");
+  return RECIPIENT_GROUPS.some((g) => g.id !== exceptId && g.name.toLocaleLowerCase("ru") === key);
 }
 
-/** Только активные: уволенный из состава выпадает, как на сервере. */
+/** Как на сервере: неизвестного нет, а архивного добавить можно — вернётся, будет в группе. */
 function groupUnknownMember(ids: number[]): boolean {
-  return ids.some((id) => !EMPLOYEES.some((e) => e.id === id && e.isActive));
+  return ids.some((id) => !EMPLOYEES.some((e) => e.id === id));
+}
+
+function groupView(g: { id: number; name: string; rowIds: number[] }): RecipientGroupView {
+  const active = new Set(EMPLOYEES.filter((e) => e.isActive).map((e) => e.id));
+  return { id: g.id, name: g.name, memberIds: g.rowIds.filter((id) => active.has(id)).sort((x, y) => x - y) };
+}
+
+function replaceGroupMembers(g: { rowIds: number[] }, ids: number[]): void {
+  const active = new Set(EMPLOYEES.filter((e) => e.isActive).map((e) => e.id));
+  const kept = g.rowIds.filter((id) => !active.has(id));
+  g.rowIds = [...kept, ...ids.filter((id) => !kept.includes(id))];
 }
 
 export async function mockGetRecipientGroups(): Promise<RecipientGroupView[]> {
   await delay(150);
-  return RECIPIENT_GROUPS.map((g) => ({ ...g, memberIds: [...g.memberIds] }));
+  return [...RECIPIENT_GROUPS].sort((x, y) => x.name.localeCompare(y.name, "ru")).map(groupView);
 }
 
 export async function mockCreateRecipientGroup(input: { name: string; memberIds: number[] }): Promise<RecipientGroupView> {
@@ -2752,9 +2765,9 @@ export async function mockCreateRecipientGroup(input: { name: string; memberIds:
   if (RECIPIENT_GROUPS.length >= RECIPIENT_GROUPS_MAX) throw new Error(`Групп уже ${RECIPIENT_GROUPS_MAX} — удали лишнюю.`);
   if (groupNameTaken(parsed.data.name, null)) throw new Error("Группа с таким названием уже есть.");
   if (groupUnknownMember(parsed.data.memberIds)) throw new Error("В составе есть человек, которого нет в команде.");
-  const group: RecipientGroupView = { id: nextRecipientGroupId++, name: parsed.data.name, memberIds: parsed.data.memberIds };
+  const group = { id: nextRecipientGroupId++, name: parsed.data.name, rowIds: [...parsed.data.memberIds] };
   RECIPIENT_GROUPS.push(group);
-  return { ...group, memberIds: [...group.memberIds] };
+  return groupView(group);
 }
 
 export async function mockSaveRecipientGroup(
@@ -2771,8 +2784,8 @@ export async function mockSaveRecipientGroup(
     throw new Error("В составе есть человек, которого нет в команде.");
   }
   if (parsed.data.name !== undefined) group.name = parsed.data.name;
-  if (parsed.data.memberIds) group.memberIds = parsed.data.memberIds;
-  return { ...group, memberIds: [...group.memberIds] };
+  if (parsed.data.memberIds) replaceGroupMembers(group, parsed.data.memberIds);
+  return groupView(group);
 }
 
 export async function mockDeleteRecipientGroup(id: number): Promise<void> {

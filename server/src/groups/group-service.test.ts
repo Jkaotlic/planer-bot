@@ -47,6 +47,17 @@ describe("группы", () => {
     expect(getGroup(db, 1)!.memberIds).toEqual([anya, igor]);
   });
 
+  it("правка состава не теряет строку уволенного: после восстановления он снова в группе", () => {
+    const { db, anya, mark } = stage();
+    createGroup(db, { name: "X", memberIds: [anya, mark] }, anya);
+    archiveEmployee(db, mark, today);
+    expect(updateGroup(db, 1, { name: "X2" }).ok).toBe(true);
+    expect(updateGroup(db, 1, { memberIds: [anya] }).ok).toBe(true);
+    expect(getGroup(db, 1)!.memberIds).toEqual([anya]);
+    restoreEmployee(db, mark);
+    expect(getGroup(db, 1)!.memberIds).toEqual([anya, mark]);
+  });
+
   it("правка заменяет состав целиком и переименовывает; конфликт имени — отказ", () => {
     const { db, anya, igor, mark } = stage();
     createGroup(db, { name: "A", memberIds: [anya, igor] }, anya);

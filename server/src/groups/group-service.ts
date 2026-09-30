@@ -45,9 +45,19 @@ function unknownMember(db: Db, ids: number[]): boolean {
   return db.select({ id: employees.id }).from(employees).where(inArray(employees.id, ids)).all().length !== new Set(ids).size;
 }
 
+/**
+ * Заменяет состав АКТИВНЫХ. Строки уволенных остаются: редактор видит и шлёт
+ * только активных, и удаление всех строк стирало бы уволенного из группы
+ * навсегда — а восстановленный должен в неё вернуться.
+ */
 function replaceMembers(db: Db, groupId: number, ids: number[]): void {
-  db.delete(recipientGroupMembers).where(eq(recipientGroupMembers.groupId, groupId)).run();
-  for (const employeeId of ids) db.insert(recipientGroupMembers).values({ groupId, employeeId }).run();
+  const activeIds = db.select({ id: employees.id }).from(employees).where(eq(employees.isActive, true));
+  db.delete(recipientGroupMembers)
+    .where(and(eq(recipientGroupMembers.groupId, groupId), inArray(recipientGroupMembers.employeeId, activeIds)))
+    .run();
+  for (const employeeId of ids) {
+    db.insert(recipientGroupMembers).values({ groupId, employeeId }).onConflictDoNothing().run();
+  }
 }
 
 export function createGroup(db: Db, input: { name: string; memberIds: number[] }, createdBy: number): GroupResult {

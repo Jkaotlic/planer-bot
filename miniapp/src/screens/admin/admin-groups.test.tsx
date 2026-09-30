@@ -97,6 +97,52 @@ describe("AdminGroups", () => {
     expect(el.textContent).toContain("Группа с таким названием уже есть.");
   });
 
+  it("переименование без смены состава шлёт только имя", async () => {
+    const save = vi.spyOn(apiClient, "saveRecipientGroup").mockResolvedValue({ id: 1, name: "B", memberIds: [2, 3] });
+    const el = await mount([{ id: 1, name: "A", memberIds: [2, 3] }]);
+    await act(async () => byText(el, "A").click());
+    await act(async () => type(el.querySelector<HTMLInputElement>("input[name=group-name]")!, "B"));
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    expect(save).toHaveBeenCalledWith(1, { name: "B" });
+  });
+
+  it("ошибка сохранения — внутри открытого редактора", async () => {
+    vi.spyOn(apiClient, "createRecipientGroup").mockRejectedValue(new Error("Группа с таким названием уже есть."));
+    const el = await mount([]);
+    await act(async () => byText(el, "+ Новая группа").click());
+    await act(async () => type(el.querySelector<HTMLInputElement>("input[name=group-name]")!, "A"));
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    const editor = el.querySelector<HTMLElement>("input[name=group-name]")!.closest("[data-group-editor]");
+    expect(editor?.textContent).toContain("Группа с таким названием уже есть.");
+  });
+
+  it("не загрузилось — только ошибка и «Повторить», без «+ Новая группа»", async () => {
+    const get = vi.spyOn(apiClient, "getRecipientGroups").mockRejectedValueOnce(new Error("Нет связи."));
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue(PEOPLE);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => { root!.render(createElement(AppRoot, null, createElement(AdminGroups))); });
+    await settle();
+    expect(host.textContent).toContain("Нет связи.");
+    expect(host.textContent).not.toContain("+ Новая группа");
+    expect(host.textContent).not.toContain("Групп пока нет");
+    get.mockResolvedValue([]);
+    await act(async () => byText(host!, "Повторить").click());
+    await settle();
+    expect(host.textContent).toContain("+ Новая группа");
+  });
+
+  it("удаление спрашивает про сохранённое имя, а не про набранное", async () => {
+    const el = await mount([{ id: 7, name: "A", memberIds: [1] }]);
+    await act(async () => byText(el, "A").click());
+    await act(async () => type(el.querySelector<HTMLInputElement>("input[name=group-name]")!, "Черновик"));
+    await act(async () => byText(el, "Удалить группу").click());
+    expect(el.textContent).toContain("Удалить «A»?");
+  });
+
   it("уволенные в список выбора не попадают", async () => {
     const el = await mount([]);
     await act(async () => byText(el, "+ Новая группа").click());

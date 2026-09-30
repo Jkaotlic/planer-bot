@@ -21,4 +21,13 @@ describe("мок групп адресатов", () => {
     await expect(mockCreateRecipientGroup({ name: "   ", memberIds: [] })).rejects.toThrow("Проверь название");
     await expect(mockCreateRecipientGroup({ name: "Ещё", memberIds: [99999] })).rejects.toThrow("нет в команде");
   });
+
+  it("список отсортирован по названию", async () => {
+    const b = await mockCreateRecipientGroup({ name: "Яблоко", memberIds: [] });
+    const a = await mockCreateRecipientGroup({ name: "Арбуз", memberIds: [] });
+    const names = (await mockGetRecipientGroups()).map((g) => g.name);
+    expect(names.indexOf("Арбуз")).toBeLessThan(names.indexOf("Яблоко"));
+    await mockDeleteRecipientGroup(a.id);
+    await mockDeleteRecipientGroup(b.id);
+  });
 });
