@@ -76,6 +76,20 @@ describe("карточка чек-листа", () => {
    * состоянии экрана значило бы, что закрытая мини-аппа их теряет, а открытый
    * рядом чат бота показывает другое.
    */
+  it("отметку рисует свой знак с галочкой, а не эмодзи: она у сделанного и только у него", async () => {
+    vi.spyOn(apiClient, "getMyChecklists").mockResolvedValue(state({ markedItemIds: [1] }));
+    const el = await mount();
+    const [done, open] = [...el.querySelectorAll<HTMLButtonElement>(".checklist-item")];
+    expect(done!.getAttribute("aria-pressed")).toBe("true");
+    expect(done!.querySelector(".checklist-check--on svg")).not.toBeNull();
+    expect(open!.getAttribute("aria-pressed")).toBe("false");
+    expect(open!.querySelector(".checklist-check")).not.toBeNull();
+    expect(open!.querySelector(".checklist-check--on")).toBeNull();
+    // Галочка рисуется svg-ом: у несделанного пункта её быть не должно.
+    expect(open!.querySelector(".checklist-check svg")).toBeNull();
+    expect(el.textContent).not.toMatch(/[✅◻]/u);
+  });
+
   it("тап по пункту отмечает его на сервере и показывает ответ сервера", async () => {
     vi.spyOn(apiClient, "getMyChecklists").mockResolvedValue(state());
     const mark = vi.spyOn(apiClient, "markChecklistItem").mockResolvedValue({ checklistId: 1, markedItemIds: [2] });

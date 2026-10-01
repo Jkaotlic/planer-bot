@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Button, Input, Title } from "@telegram-apps/telegram-ui";
+import { Input } from "@telegram-apps/telegram-ui";
 import { FOOD_MENU_MAX } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
+import { ActionButton } from "../../ui";
 
 type Row = { id?: number; name: string; price: string };
 
@@ -40,8 +41,8 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 16 }}>
-      <Title level="2" weight="2">{place ? "Место" : "Новое место"}</Title>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
+      <h1 className="ui-screen__title">{place ? "Место" : "Новое место"}</h1>
       <Input header="Название" name="place-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
       {rows.map((r, i) => (
         // Ширина фиксируется на ОБЁРТКЕ, а не на самом `Input`: `style`,
@@ -57,16 +58,16 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
             <Input name={`dish-price-${i}`} placeholder="₽" inputMode="numeric" value={r.price}
               onChange={(e) => patch(i, { price: e.target.value.replace(/\D/g, "") })} disabled={busy} />
           </div>
-          <Button size="s" mode="plain" onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))} disabled={busy}>✕</Button>
+          <ActionButton compact kind="quiet" onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))} disabled={busy}>✕</ActionButton>
         </div>
       ))}
       {rows.length < FOOD_MENU_MAX && (
-        <Button size="s" mode="bezeled" onClick={() => setRows((prev) => [...prev, { name: "", price: "" }])} disabled={busy}>+ Блюдо</Button>
+        <ActionButton compact onClick={() => setRows((prev) => [...prev, { name: "", price: "" }])} disabled={busy}>+ Блюдо</ActionButton>
       )}
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <Button size="m" mode="filled" onClick={save} disabled={busy || !name.trim()} loading={busy}>Сохранить</Button>
-        <Button size="m" mode="plain" onClick={onCancel} disabled={busy}>Отмена</Button>
+        <ActionButton kind="primary" onClick={save} disabled={busy || !name.trim()} loading={busy}>Сохранить</ActionButton>
+        <ActionButton kind="quiet" onClick={onCancel} disabled={busy}>Отмена</ActionButton>
       </div>
     </div>
   );

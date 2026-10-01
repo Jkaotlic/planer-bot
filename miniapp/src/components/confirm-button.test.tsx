@@ -16,13 +16,13 @@ afterEach(async () => {
   host = null;
 });
 
-async function mount(onConfirm: () => void) {
+async function mount(onConfirm: () => void, extra: { compact?: boolean } = {}) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
     root!.render(createElement(AppRoot, null, createElement(ConfirmButton, {
-      label: "В архив", question: "Убрать в архив?", confirmLabel: "Да, в архив", onConfirm,
+      label: "В архив", question: "Убрать в архив?", confirmLabel: "Да, в архив", onConfirm, ...extra,
     })));
   });
   return host;
@@ -58,5 +58,20 @@ describe("ConfirmButton", () => {
     await click(el, "Отмена");
     expect(onConfirm).not.toHaveBeenCalled();
     expect(el.textContent).not.toContain("Убрать в архив?");
+  });
+
+  it("по умолчанию кнопки низкие (compact), с compact={false} — обычной высоты, и в раскрытом виде тоже", async () => {
+    const low = await mount(vi.fn());
+    expect(low.querySelector("button")!.className).toContain("ui-btn--compact");
+    await click(low, "В архив");
+    expect([...low.querySelectorAll("button")].every((b) => b.className.includes("ui-btn--compact"))).toBe(true);
+    await act(async () => root!.unmount());
+    host!.remove();
+
+    const full = await mount(vi.fn(), { compact: false });
+    expect(full.querySelector("button")!.className).not.toContain("ui-btn--compact");
+    await click(full, "В архив");
+    expect(full.querySelectorAll("button").length).toBe(2);
+    expect([...full.querySelectorAll("button")].some((b) => b.className.includes("ui-btn--compact"))).toBe(false);
   });
 });

@@ -1,10 +1,11 @@
 import { useTelegramBack } from "../lib/telegram-back";
 import { useState } from "react";
-import { Avatar, Button, Cell, IconButton, Input, List, Placeholder, Section, Selectable, Spinner, Textarea, Title } from "@telegram-apps/telegram-ui";
+import { Avatar, Cell, IconButton, Input, Placeholder, Selectable, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { matchesPerson, SWAP_MESSAGE_MAX } from "@planer/shared";
 import type { Shift, Template } from "../api/client";
 import { DayBadge } from "../components/DayBadge";
 import { EntryChip } from "../components/EntryChip";
+import { ActionButton, Card, Group } from "../ui";
 import { ScreenScroll } from "../components/ScreenScroll";
 import { initialsOf, personPalette } from "../lib/people";
 import { formatTimeRange, pluralizeRu } from "../lib/shift";
@@ -123,18 +124,21 @@ export function ProposeSwapScreen({
   }
 
   return (
-    <ScreenScroll>
-      <header style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 4px 16px" }}>
-        <IconButton mode="plain" size="m" aria-label="Назад" onClick={onCancel}>
+    <ScreenScroll style={{ padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))", display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Корень и «Назад» свои, а не `Screen onBack`: у экрана своя логика отмены, и
+          вторая подписка на системную кнопку задвоила бы её. */}
+      <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* 44px, а не 38 у `size="l"`: зона нажатия «Назад» — как у остальных кнопок. */}
+        <IconButton mode="plain" size="l" aria-label="Назад" style={{ minWidth: 44, minHeight: 44 }} onClick={onCancel}>
           <BackIcon />
         </IconButton>
-        <Title level="2" weight="2">
+        <h1 className="ui-screen__title">
           Предложить обмен
-        </Title>
+        </h1>
       </header>
 
-      <List>
-        <Section header="Отдаёшь свою смену">
+      <Group header="Отдаёшь свою смену">
+        <Card flush>
           <Cell
             before={<DayBadge date={fromShift.date} endDate={fromShift.endDate} />}
             // Тем же чипом, что рисует строку в «Моих сменах»: одна запись — одна
@@ -145,13 +149,13 @@ export function ProposeSwapScreen({
           >
             {formatTimeRange(fromShift)}
           </Cell>
-        </Section>
-      </List>
+        </Card>
+      </Group>
 
       <SwapDivider />
 
-      <List>
-        <Section header="Кто ещё работает в этот день">
+      <Group header="Кто ещё работает в этот день">
+        <Card flush>
           {candidates.length > 3 && (
             <div style={{ padding: "2px 12px 8px" }}>
               <Input
@@ -217,37 +221,35 @@ export function ProposeSwapScreen({
             })
           )}
           {!loading && !loadError && sameKindCount > 0 && candidates.length > 0 && (
-            <div style={{ padding: "6px 16px 12px", color: "var(--tgui--hint_color)", fontSize: 13 }}>
+            <div style={{ padding: "6px 16px 12px", color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
               Ещё {sameKindCount} {pluralizeRu(sameKindCount, "человек", "человека", "человек")} в этот день на такой
               же смене — с ними обмен ничего не изменит.
             </div>
           )}
-        </Section>
-      </List>
+        </Card>
+      </Group>
 
-      <List>
-        <Section header="Сообщение (необязательно)">
-          <div style={{ padding: "2px 12px 14px" }}>
-            <Textarea
-              placeholder="Например: смогу поработать в другой день"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={3}
-              maxLength={SWAP_MESSAGE_MAX}
-            />
-          </div>
-        </Section>
-      </List>
+      <Group header="Сообщение (необязательно)">
+        <Card>
+          <Textarea
+            placeholder="Например: смогу поработать в другой день"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={3}
+            maxLength={SWAP_MESSAGE_MAX}
+          />
+        </Card>
+      </Group>
 
-      <div style={{ padding: "6px 4px 4px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {error && (
-          <div style={{ padding: "0 8px 8px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
             {error}
           </div>
         )}
-        <Button size="l" stretched mode="filled" disabled={!selected || submitting} loading={submitting} onClick={handleConfirm}>
+        <ActionButton stretched kind="primary" disabled={!selected || submitting} loading={submitting} onClick={handleConfirm}>
           {confirmLabel}
-        </Button>
+        </ActionButton>
       </div>
     </ScreenScroll>
   );

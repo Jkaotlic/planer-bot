@@ -7,14 +7,14 @@
   grid-template-columns: 1fr 1fr;
   gap: 4px;
   padding: 3px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-control);
   background: var(--tgui--secondary_bg_color);
 }
 
 .team-switcher__button {
-  min-height: 38px;
+  min-height: var(--app-tap);
   border: 0;
-  border-radius: 9px;
+  border-radius: calc(var(--app-radius-control) - 3px);
   color: var(--tgui--hint_color);
   background: transparent;
   font: inherit;
@@ -32,7 +32,7 @@
 
 .team-range-nav {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  grid-template-columns: var(--app-tap) minmax(0, 1fr) var(--app-tap);
   align-items: center;
   gap: 8px;
   margin: 12px 0;
@@ -40,9 +40,9 @@
 }
 
 .team-range-nav button {
-  min-height: 40px;
+  min-height: var(--app-tap);
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--app-radius-control);
   color: var(--tgui--link_color);
   background: var(--app-card);
   font-size: 28px;
@@ -65,7 +65,7 @@
 .team-summary span,
 .team-group {
   background: var(--app-card);
-  border-radius: 14px;
+  border-radius: var(--app-radius-card);
 }
 
 .team-summary span {
@@ -152,6 +152,13 @@
 
 .team-no-time {
   margin-top: 18px;
+}
+
+/* Подпись подраздела — та же серая мелкая, что у разделов остальных вкладок
+   (`.ui-group__header`): большой чёрный `h3` выбивался из общего вида. Снизу
+   отступ тот же 8px, что между подписью и телом в `.ui-group`. */
+.team-no-time > .ui-group__header {
+  margin-bottom: 8px;
 }
 
 .team-empty,
@@ -350,7 +357,7 @@
   display: grid;
   gap: 4px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-control);
   background: var(--app-card);
 }
 

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Spinner, Title } from "@telegram-apps/telegram-ui";
+import { Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type TeamSchedule, type Template } from "../api/client";
 import { calendarFrom } from "@planer/shared";
 import { useIsDark } from "../lib/theme";
-import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
+import { Screen } from "../ui";
 import {
   applyTeamScreenLoadResult,
   beginTeamScreenLoad,
@@ -120,14 +120,9 @@ export function TeamScreen({ templates, initialMode = "today", today, meId }: { 
         parseISODate(displayRange.to),
       );
 
-  // 16px on top, not 8: at 8 the «Команда» title sat flush against the very edge
-  // of the screen, and in the real client Telegram's own header is right above it.
   return (
-    <ScreenScroll style={{ padding: `16px 12px ${TAB_BAR_CLEARANCE}` }}>
+    <Screen title="Команда">
       <div className="team-screen">
-        <Title level="2" weight="2">
-          Команда
-        </Title>
         <TeamViewSwitcher
           value={view.displayMode}
           focusValue={teamTabFocusMode(view, tabFocusMode)}
@@ -174,7 +169,7 @@ export function TeamScreen({ templates, initialMode = "today", today, meId }: { 
           )}
         </TeamViewPanel>
       </div>
-    </ScreenScroll>
+    </Screen>
   );
 }
 

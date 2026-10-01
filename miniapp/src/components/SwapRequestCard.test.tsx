@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { SwapRequest } from "../api/client";
 import { formatDayLabel } from "../lib/week";
 import { formatTimeRange } from "../lib/shift";
-import { ArchivedSwapCard, IncomingSwapCard } from "./SwapRequestCard";
+import { ArchivedSwapCard, IncomingSwapCard, SwapStatusPill } from "./SwapRequestCard";
 
 // Distinct shift summaries so a mixed-up direction shows up as the wrong text
 // in the wrong line rather than passing by coincidence.
@@ -117,5 +117,18 @@ describe("карточка обмена и дежурство", () => {
     const markup = render({ date: "2026-08-12", start: "09:00", end: "18:00", title: "Утро", category: "shift" });
     expect(markup).toContain("Утро");
     expect(markup).not.toContain("Дежурство");
+  });
+});
+
+describe("SwapStatusPill", () => {
+  const tone = (status: SwapRequest["status"]) =>
+    renderToStaticMarkup(createElement(SwapStatusPill, { status })).match(/ui-pill--(\w+)/)![1];
+
+  it("отказ красный, принятое зелёное, остальные серые", () => {
+    expect(tone("declined")).toBe("bad");
+    expect(tone("accepted")).toBe("ok");
+    expect(tone("pending")).toBe("wait");
+    expect(tone("cancelled")).toBe("wait");
+    expect(tone("expired")).toBe("wait");
   });
 });

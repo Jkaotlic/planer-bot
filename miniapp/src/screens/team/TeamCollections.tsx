@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatDayMonth, formatMoney } from "@planer/shared";
-import { Button } from "@telegram-apps/telegram-ui";
 import { apiClient, type WorkerCollection } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
+import { ActionButton, Card, Group, Hint } from "../../ui";
 
 /**
  * «Идёт сбор» — секция сверху во вкладке «Команда».
@@ -44,39 +43,34 @@ export function TeamCollections({ emptyLabel, onPaidChanged }: TeamCollectionsPr
     return () => { alive = false; };
   }, [attempt]);
 
-  const hint = { color: "var(--tgui--hint_color)", fontSize: 13.5, padding: "12px 4px", lineHeight: 1.45 } as const;
-
   // Во вкладке «Команда» (`emptyLabel` не передан) секции нет ни пока грузится,
   // ни при отказе: сбор там не главное, и отказ не должен уносить с экрана
   // график команды.
-  if (rows === null) return emptyLabel ? <div style={hint}>Загружаю сборы…</div> : null;
+  if (rows === null) return emptyLabel ? <Hint>Загружаю сборы…</Hint> : null;
   if (rows === "error") {
     return emptyLabel ? (
-      <div style={hint}>
-        Не удалось загрузить сборы.{" "}
-        <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>
+      <Group>
+        <Hint>Не удалось загрузить сборы.</Hint>
+        <ActionButton compact onClick={() => setAttempt((n) => n + 1)}>
           Повторить
-        </Button>
-      </div>
+        </ActionButton>
+      </Group>
     ) : null;
   }
 
   // Пустой список: во вкладке «Команда» секции нет вовсе, а на своей вкладке
   // молчать нельзя — пустой экран читался бы как «не загрузилось».
   if (rows.length === 0) {
-    return emptyLabel ? <div style={hint}>{emptyLabel}</div> : null;
+    return emptyLabel ? <Hint>{emptyLabel}</Hint> : null;
   }
   const loaded = rows;
 
   return (
-    <CardStack>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)", padding: "0 4px" }}>
-        {loaded.length === 1 ? "Идёт сбор" : "Идут сборы"}
-      </div>
+    <Group header={loaded.length === 1 ? "Идёт сбор" : "Идут сборы"}>
       {loaded.map((row) => (
         <CollectionCard key={row.id} row={row} onPaidChanged={onPaidChanged} />
       ))}
-    </CardStack>
+    </Group>
   );
 }
 
@@ -126,12 +120,12 @@ function CollectionCard({ row, onPaidChanged }: { row: WorkerCollection; onPaidC
   ].filter(Boolean).join(" · ");
 
   return (
-    <CardShell>
-      <div style={{ fontWeight: 600, fontSize: 15 }}>{subjectOf(row)}</div>
+    <Card>
+      <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>{subjectOf(row)}</div>
       {/* Строки нет вовсе, когда в ней нечего писать: пустая даёт зазор, который
           читается как «тут что-то не загрузилось». */}
       {meta && (
-        <div data-testid="collection-meta" style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+        <div data-testid="collection-meta" style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
           {meta}
         </div>
       )}
@@ -141,16 +135,15 @@ function CollectionCard({ row, onPaidChanged }: { row: WorkerCollection; onPaidC
             href={row.collectUrl}
             target="_blank"
             rel="noreferrer"
-            style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: "var(--tgui--link_color)" }}
+            style={{ flex: 1, fontSize: "var(--app-text-meta)", fontWeight: 600, color: "var(--tgui--link_color)" }}
           >
             Открыть сбор
           </a>
           {/* Ссылку можно и переслать — например, в семейный чат, откуда
               скидываются. Внутри Telegram открывшаяся страница банка возвращает
               не всех и не всегда. */}
-          <Button
-            size="s"
-            mode="gray"
+          <ActionButton
+            compact
             onClick={() => {
               navigator.clipboard
                 .writeText(row.collectUrl!)
@@ -164,26 +157,26 @@ function CollectionCard({ row, onPaidChanged }: { row: WorkerCollection; onPaidC
             }}
           >
             {copied ? "✓" : "Копировать"}
-          </Button>
+          </ActionButton>
         </div>
       )}
       {/* «Отметились», а не «сдали»: бот знает только то, что человек нажал
           кнопку, и подпись не должна утверждать больше, чем он проверял. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Button size="s" mode={paid ? "gray" : "bezeled"} disabled={busy} onClick={togglePaid}>
+        <ActionButton kind={paid ? "secondary" : "primary"} compact disabled={busy} onClick={togglePaid}>
           {paid ? "Вы отметились ✓" : "Я перевёл"}
-        </Button>
-        <span style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+        </ActionButton>
+        <span style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
           отметились {paidCount} из {row.recipientCount}
         </span>
       </div>
       {/* Под кнопкой, в своей карточке: отказ, нарисованный над списком, уезжает
           за край экрана (см. `error-map.ts`). */}
       {failed && (
-        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
           Не получилось отметить — возможно, сбор уже закрыли. Обнови экран.
         </div>
       )}
-    </CardShell>
+    </Card>
   );
 }

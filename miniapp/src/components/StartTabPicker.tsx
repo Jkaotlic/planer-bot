@@ -74,7 +74,7 @@ export function StartTabPicker({ me, onChanged }: { me: Me; onChanged: (next: St
         </Select>
       </div>
       {error && (
-        <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
+        <div style={{ padding: "0 24px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
       )}
     </>
   );

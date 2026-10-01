@@ -1,4 +1,3 @@
-import { Cell } from "@telegram-apps/telegram-ui";
 import { isSwappable } from "@planer/shared";
 import type { Shift, Template } from "../api/client";
 import { formatTimeRange } from "../lib/shift";
@@ -19,60 +18,74 @@ export interface ShiftRowProps {
   /** Тап по строке (не по «Обменять» — та сама гасит клик `stopPropagation`) —
    *  раскрывает под ней «Кто ещё работает». Опущен — строка не реагирует на тап. */
   onOpen?: (shift: Shift) => void;
+  /** Раскрыт ли лист под строкой. Читается только у раскрываемой строки: скринридеру
+   *  надо знать состояние кнопки, а не угадывать его по появившемуся тексту. */
+  expanded?: boolean;
 }
 
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
-export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen }: ShiftRowProps) {
+export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen, expanded }: ShiftRowProps) {
   // По той же причине, что в `swap-candidates.ts`: одно правило, один источник.
   // Локальной копии «category === shift» здесь больше нет — с 2026-08-10 ответ
   // на этот вопрос знает только shared.
   const swappable = isSwappable(shift.category);
 
+  const openable = onOpen != null;
   return (
-    <Cell
+    // Своя строка, а не `Cell`: тот несёт «андроидные» поля (24px) и рипл на
+    // весь блок, который перехватывал нажатия по «Обменять» (см. `SwapChip`).
+    <div
       data-testid="shift-row"
-      onClick={onOpen ? () => onOpen(shift) : undefined}
-      // Styled on the `Cell` itself, not on a wrapper `div`: `Section` reads its
-      // own children to decide where dividers go, and an extra element between
-      // them changes that. `CellProps` extends `AllHTMLAttributes`, so `style`
-      // lands on the row's root element.
-      style={
-        isToday
-          ? {
-              // A rail rather than a filled row: the entry chip inside already
-              // carries the preset's colour, and two backgrounds fight.
-              boxShadow: "inset 3px 0 var(--tgui--link_color)",
-              background: "color-mix(in srgb, var(--tgui--link_color) 7%, transparent)",
+      className="shift-row"
+      role={openable ? "button" : undefined}
+      tabIndex={openable ? 0 : undefined}
+      aria-expanded={openable ? (expanded ?? false) : undefined}
+      onClick={openable ? () => onOpen(shift) : undefined}
+      onKeyDown={
+        openable
+          ? (e) => {
+              // Только своё нажатие: Enter/пробел на вложенной «Обменять» всплывает
+              // сюда же и раскрыл бы строку заодно с обменом.
+              if (e.target !== e.currentTarget) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen(shift);
+              }
             }
           : undefined
       }
-      before={<DayBadge date={shift.date} endDate={shift.endDate} />}
-      // The chip already names the entry ("Утро" / "Отпуск"), so it stands in for
-      // the subtitle that used to repeat that same label right above it. Unlike
-      // the old category chip it shows on every row, since a work shift's preset
-      // is exactly what the colour is here to tell apart.
-      description={<EntryChip entry={shift} templates={templates} />}
-      // «Сегодня» стоит здесь, а не рядом со временем, потому что рядом со
-      // временем для него нет места. `Cell` режет заголовок
-      // (`overflow: hidden; text-overflow: ellipsis`), а средней колонке достаётся
-      // то, что осталось от бейджа дня и «Обменять»: на Android telegram-ui даёт
-      // «base»-метрики (gap 24, padding 24), и это 58px из 240 при ширине экрана
-      // 320 и 98px при 360 — при нужных 127. Чип рисовался за границей отсечения и
-      // просто не появлялся. Правая колонка растягивается по содержимому, а её
-      // ширину и так задаёт «Обменять» (90px), поэтому этот столбик ничего у
-      // строки не отнимает — ни на одной ширине.
-      after={
-        isToday || (swappable && onSwap) ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-            {isToday && <TodayChip />}
-            {swappable && onSwap && <SwapChip onClick={() => onSwap(shift)} blockedReason={swapBlockedReason} />}
-          </div>
-        ) : undefined
-      }
+      style={{
+        display: "grid",
+        gridTemplateColumns: "auto minmax(0, 1fr) auto",
+        alignItems: "center",
+        gap: 12,
+        padding: "12px 14px",
+        minHeight: 64,
+        cursor: openable ? "pointer" : undefined,
+        ...(isToday
+          ? {
+              // Рельс, а не залитая строка: чип внутри уже несёт цвет пресета,
+              // и два фона спорят.
+              boxShadow: "inset 3px 0 var(--tgui--link_color)",
+              background: "color-mix(in srgb, var(--tgui--link_color) 7%, transparent)",
+            }
+          : null),
+      }}
     >
-      {formatTimeRange(shift)}
-    </Cell>
+      <DayBadge date={shift.date} endDate={shift.endDate} />
+      <div style={{ minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+        <span style={{ fontSize: "var(--app-text-body)", fontWeight: 500 }}>{formatTimeRange(shift)}</span>
+        {/* Чип называет запись («Утро» / «Отпуск») цветом своего пресета. */}
+        <EntryChip entry={shift} templates={templates} />
+      </div>
+      {(isToday || (swappable && onSwap)) && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          {isToday && <TodayChip />}
+          {swappable && onSwap && <SwapChip onClick={() => onSwap(shift)} blockedReason={swapBlockedReason} />}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -111,7 +124,6 @@ interface SwapChipProps {
  *  with the dimmed styling next to it. */
 function SwapChip({ onClick, blockedReason }: SwapChipProps) {
   const blocked = blockedReason != null;
-  const tint = blocked ? "var(--tgui--hint_color)" : "var(--tgui--link_color)";
   const button = (
     <button
       type="button"
@@ -120,29 +132,8 @@ function SwapChip({ onClick, blockedReason }: SwapChipProps) {
         e.stopPropagation();
         onClick();
       }}
-      style={{
-        // `position: relative` is load-bearing, not cosmetic: `Cell`'s tap
-        // ripple is an absolutely-positioned overlay with `z-index: auto`,
-        // which paints *above* ordinary static-positioned content per CSS
-        // stacking rules — without this, the ripple silently swallows every
-        // click/tap on this chip (confirmed both in a real Chromium render
-        // and via Playwright's "element intercepts pointer events" check).
-        // telegram-ui's own interactive controls (e.g. `Selectable`) rely on
-        // this same trick internally, which is how they get away with it.
-        position: "relative",
-        display: "inline-block",
-        fontSize: 13,
-        fontWeight: 600,
-        fontFamily: "inherit",
-        color: tint,
-        background: "none",
-        border: "none",
-        boxShadow: `0 0 0 1.4px color-mix(in srgb, ${tint} 40%, transparent)`,
-        borderRadius: 999,
-        padding: "6px 12px",
-        whiteSpace: "nowrap",
-        cursor: blocked ? "default" : "pointer",
-      }}
+      className="ui-btn ui-btn--secondary ui-btn--compact"
+      style={blocked ? { color: "var(--tgui--hint_color)" } : undefined}
     >
       Обменять
     </button>

@@ -172,7 +172,8 @@ textarea {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 11px 10px;
+  padding: 12px 10px;
+  min-height: 44px;
   border: 0;
   border-radius: 10px;
   background: none;
@@ -233,6 +234,24 @@ textarea {
   justify-content: center;
 }
 
+/* Своя отметка вместо эмодзи ◻️/✅: эмодзи рисует система, и на тёмной теме
+   пустой пункт был серым квадратом без контура. */
+.checklist-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--tgui--hint_color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tgui--button_text_color, #fff);
+}
+
+.checklist-check--on {
+  border-color: var(--tgui--button_color, var(--tgui--link_color));
+  background: var(--tgui--button_color, var(--tgui--link_color));
+}
+
 /* Сделанное гасится, но не зачёркивается: зачёркнутый текст на телефоне
    читается хуже, а список ещё перечитывают — «что я уже проверил». */
 .checklist-item--done .checklist-item__title {
@@ -253,11 +272,20 @@ textarea {
    Селект стоит своей строкой под пояснением: в слоте `after` у ячейки он
    сжимался до собственных отступов, и выбранный экран не отображался вовсе. */
 .start-tab-picker {
-  padding: 0 20px 12px;
+  /* 4 + собственные 20 у `Select` = 24px, левый край текста `Cell`. */
+  padding: 0 4px 12px;
 }
 
 .start-tab-picker select {
   width: 100%;
+}
+
+/* Раскрываемая строка смены берёт фокус с клавиатуры (`tabIndex=0`), но
+   у `div[role=button]` браузер рисует его по-разному, а `Card flush` с
+   `overflow: hidden` обрезал бы внешнюю обводку — поэтому она внутри строки. */
+.shift-row:focus-visible {
+  outline: 2px solid var(--tgui--link_color);
+  outline-offset: -2px;
 }
 
 /* Кнопка группы адресатов. Название группы — до 40 символов, и telegram-ui по

@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Button } from "@telegram-apps/telegram-ui";
 import { POLL_CHOICE_LABEL, POLL_CHOICES } from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
-import { CardShell } from "../../components/Card";
+import { ActionButton, Card } from "../../ui";
 import { ConfirmButton } from "../../components/ConfirmButton";
 
 const TALLY_LABELS = [["for", "👍 За"], ["against", "👎 Против"], ["abstain", "🤷 Воздержались"], ["silent", "Не ответили"]] as const;
@@ -37,18 +36,18 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
 
   const status = poll.cancelled ? "отменён" : poll.open ? (poll.closes ?? "идёт") : "закрыт";
   return (
-    <CardShell>
-      <div style={{ fontWeight: 600, fontSize: 15 }}>🗳 {poll.question}</div>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>{poll.creatorName} · {status}</div>
+    <Card>
+      <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🗳 {poll.question}</div>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{poll.creatorName} · {status}</div>
       {poll.open && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {POLL_CHOICES.map((choice) => (
-            <Button key={choice} size="s" mode={poll.myChoice === choice ? "filled" : "bezeled"} disabled={busy}
-              onClick={() => run(() => apiClient.votePoll(poll.id, choice))}>{POLL_CHOICE_LABEL[choice]}</Button>
+            <ActionButton key={choice} compact kind={poll.myChoice === choice ? "primary" : "secondary"} aria-pressed={poll.myChoice === choice} disabled={busy}
+              onClick={() => run(() => apiClient.votePoll(poll.id, choice))}>{POLL_CHOICE_LABEL[choice]}</ActionButton>
           ))}
         </div>
       )}
-      <div style={{ fontSize: 13.5 }}>
+      <div style={{ fontSize: "var(--app-text-meta)" }}>
         {TALLY_LABELS.map(([key, label]) => poll.tally[key].length > 0 && (
           <div key={key}>{label} — {poll.tally[key].length}: {poll.tally[key].join(", ")}</div>
         ))}
@@ -61,7 +60,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
             onConfirm={() => run(() => apiClient.cancelPoll(poll.id))} disabled={busy} />
         </div>
       )}
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
-    </CardShell>
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
+    </Card>
   );
 }

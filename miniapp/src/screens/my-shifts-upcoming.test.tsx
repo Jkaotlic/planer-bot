@@ -40,8 +40,7 @@ async function renderScreen(shifts: Shift[]) {
   root = createRoot(host);
   const screen = createElement(MyShiftsScreen, {
     me, today: WEDNESDAY, shifts, templates: [],
-    onProposeSwap: () => {}, onSelfEntry: () => {}, onRemindersChanged: () => {},
-    onSelfScheduleChanged: () => {}, onStartTabChanged: () => {}, onAddressChanged: () => {},
+    onProposeSwap: () => {}, onSelfEntry: () => {}, onOpenSettings: () => {},
     openDay: null, openDayLoading: false, openDayError: null, onToggleCoworkers: () => {},
   });
   await act(async () => root!.render(createElement(AppRoot, null, screen)));
@@ -51,7 +50,8 @@ async function renderScreen(shifts: Shift[]) {
 describe("MyShiftsScreen", () => {
   it("рисует секции по неделям и не обещает диапазон, которого нет", async () => {
     const text = await renderScreen([entry("2026-08-06", "День"), entry("2026-08-11", "Утро")]);
-    expect(text).toContain("Ближайшие смены");
+    // Общий заголовок убран: над заголовком недели он говорил то же самое.
+    expect(text).not.toContain("Ближайшие смены");
     expect(text).toContain("Эта неделя");
     expect(text).toContain("Следующая неделя");
   });

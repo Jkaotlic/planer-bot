@@ -1,10 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Button, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { ActionButton } from "./ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
+import { SettingsScreen } from "./screens/SettingsScreen";
 import { SelfEntryScreen, screenFromSearch, type SelfEntryMode } from "./screens/SelfEntryScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
@@ -90,6 +92,10 @@ export function App() {
   const [selfEntryMode, setSelfEntryMode] = useState<SelfEntryMode | null>(() =>
     screenFromSearch(window.location.search),
   );
+  // «Настройки» — оверлей, как форма больничного: без таб-бара, с системной
+  // «Назад». Из ссылки бота не открывается (таких ссылок нет), поэтому
+  // начальное значение — всегда `false`.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // «Заказы и опросы» — тот же приём, что у формы больничного выше: ссылка из
   // бота (`?screen=orders`) читается один раз при открытии, на один показ.
   const [foodRoute, setFoodRoute] = useState<FoodRoute | null>(() => foodRouteFromSearch(window.location.search));
@@ -515,7 +521,7 @@ export function App() {
       <div style={centeredStyle}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <Placeholder header="Не удалось загрузить" description={error} />
-          <Button onClick={() => loadBootstrap()}>Повторить</Button>
+          <ActionButton onClick={() => loadBootstrap()}>Повторить</ActionButton>
         </div>
       </div>
     );
@@ -587,6 +593,27 @@ export function App() {
     );
   }
 
+  if (settingsOpen) {
+    return (
+      <SettingsScreen
+        me={data.me}
+        onClose={() => setSettingsOpen(false)}
+        onRemindersChanged={(remindersEnabled) =>
+          setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
+        }
+        onSelfScheduleChanged={(selfScheduleEnabled) =>
+          setData((prev) => (prev ? { ...prev, me: { ...prev.me, selfScheduleEnabled } } : prev))
+        }
+        onStartTabChanged={(startTab: StartTab | null) =>
+          setData((prev) => (prev ? { ...prev, me: { ...prev.me, startTab } } : prev))
+        }
+        onAddressChanged={({ preferredName, address }) =>
+          setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))
+        }
+      />
+    );
+  }
+
   const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin });
 
   return (
@@ -644,18 +671,7 @@ export function App() {
             setProposingFor(shift);
           }}
           onSelfEntry={setSelfEntryMode}
-          onRemindersChanged={(remindersEnabled) =>
-            setData((prev) => (prev ? { ...prev, me: { ...prev.me, remindersEnabled } } : prev))
-          }
-          onSelfScheduleChanged={(selfScheduleEnabled) =>
-            setData((prev) => (prev ? { ...prev, me: { ...prev.me, selfScheduleEnabled } } : prev))
-          }
-          onStartTabChanged={(startTab: StartTab | null) =>
-            setData((prev) => (prev ? { ...prev, me: { ...prev.me, startTab } } : prev))
-          }
-          onAddressChanged={({ preferredName, address }) =>
-            setData((prev) => (prev ? { ...prev, me: { ...prev.me, preferredName, address } } : prev))
-          }
+          onOpenSettings={() => setSettingsOpen(true)}
           openDay={
             openCoworkersFor && dayShifts?.date === openCoworkersFor.date
               ? { date: dayShifts.date, shifts: dayShifts.shifts }
