@@ -1,6 +1,6 @@
 import { ConfirmButton } from "../../components/ConfirmButton";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Avatar, Cell, Input, List, Spinner } from "@telegram-apps/telegram-ui";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Avatar, Cell, Input, Spinner } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
 import {
   ABSENCE_CATEGORIES,
@@ -351,35 +351,29 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
           />
         </Group>
       ) : kindsOpen ? (
-        <List>
-          <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
-        </List>
+        <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
       ) : settingsOpen ? (
-        <List>
-          <AdminKindSettings
-            onClose={() => {
-              setSettingsOpen(false);
-              // Норму правят там, а считают по ней здесь: без перечитывания
-              // полоска показывала бы нехватку по нормам, какими они были при
-              // открытии экрана. Не сумели — остаются прежние.
-              apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
-            }}
-          />
-        </List>
+        <AdminKindSettings
+          onClose={() => {
+            setSettingsOpen(false);
+            // Норму правят там, а считают по ней здесь: без перечитывания
+            // полоска показывала бы нехватку по нормам, какими они были при
+            // открытии экрана. Не сумели — остаются прежние.
+            apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+          }}
+        />
       ) : csvOpen ? (
-        <List>
-          <AdminRosterCsv
-            employees={employees}
-            today={selectedDate}
-            onError={setError}
-            onNotice={(message) => {
-              setNotice(message);
-              setCsvOpen(false);
-            }}
-            onImported={reloadAfterImport}
-            onClose={() => setCsvOpen(false)}
-          />
-        </List>
+        <AdminRosterCsv
+          employees={employees}
+          today={selectedDate}
+          onError={setError}
+          onNotice={(message) => {
+            setNotice(message);
+            setCsvOpen(false);
+          }}
+          onImported={reloadAfterImport}
+          onClose={() => setCsvOpen(false)}
+        />
       ) : editing !== null ? (
         <Group header={editing === "new" ? "Новая запись" : "Изменить запись"}>
           <EntryForm
@@ -638,22 +632,6 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
   );
 }
 
-/**
- * Подписанный список: `SelectField` — голый `<select>` без заголовка, а у
- * прежнего `Select` заголовок был. Подпись дублируется в `aria-label`, потому
- * что видимый текст рядом с `<select>` скринридер к нему сам не привяжет.
- */
-function SelectBlock({ header, value, onChange, children }: { header: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>{header}</span>
-      <SelectField aria-label={header} value={value} onChange={onChange}>
-        {children}
-      </SelectField>
-    </div>
-  );
-}
-
 interface EntryFormProps {
   employees: readonly Employee[];
   templates: readonly Template[];
@@ -882,7 +860,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
 
       {/* Смены и дежурства в одном списке, без шага «Категория»: до 2026-08-21
           увидеть дежурство, не сказав сперва «Дежурство», было нельзя. */}
-      <SelectBlock header={`Что ставим${isFriday ? " · пятница, сокращённый" : ""}`} value={choiceValue} onChange={selectChoice}>
+      <SelectField stretched label={`Что ставим${isFriday ? " · пятница, сокращённый" : ""}`} value={choiceValue} onChange={selectChoice}>
         {presets.map((t) => {
           const times = resolveShiftTimes(t, from);
           return (
@@ -897,20 +875,20 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
             {categoryLabel(c as Category)}
           </option>
         ))}
-      </SelectBlock>
+      </SelectField>
 
       {choice.kind === "custom" && (
         <>
           <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />
           {/* Здесь категорию всё-таки спрашиваем: у записи без пресета взять её
               неоткуда, и это единственное место, где она осталась вопросом. */}
-          <SelectBlock header="Вид" value={category} onChange={(value) => setChoice({ kind: "custom", category: value as Category })}>
+          <SelectField stretched label="Вид" value={category} onChange={(value) => setChoice({ kind: "custom", category: value as Category })}>
             {CUSTOM_TIME_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {categoryLabel(c as Category)}
               </option>
             ))}
-          </SelectBlock>
+          </SelectField>
         </>
       )}
 
@@ -1091,7 +1069,7 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
         note={(e) => (!takesPartInAssignment(e) ? "· вне назначений" : null)}
       />
 
-      <SelectBlock header="Все будни одним вариантом (Сб/Вс не трогаем)" value="" onChange={setWholeWeek}>
+      <SelectField stretched label="Все будни одним вариантом (Сб/Вс не трогаем)" value="" onChange={setWholeWeek}>
         <option value="">— по дням —</option>
         {templates.map((t) => (
           <option key={t.id} value={`p:${t.id}`}>
@@ -1103,10 +1081,10 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
             {categoryLabel(c)}
           </option>
         ))}
-      </SelectBlock>
+      </SelectField>
 
       {weekDates.map((iso) => (
-        <SelectBlock key={iso} header={formatDayLabel(iso)} value={byDay[iso] ?? ""} onChange={(value) => setDay(iso, value)}>
+        <SelectField stretched key={iso} label={formatDayLabel(iso)} value={byDay[iso] ?? ""} onChange={(value) => setDay(iso, value)}>
           <option value="">— выходной —</option>
           {templates.map((t) => {
             const times = templateTimesFor(t, iso);
@@ -1121,7 +1099,7 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
               {categoryLabel(c)}
             </option>
           ))}
-        </SelectBlock>
+        </SelectField>
       ))}
 
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
