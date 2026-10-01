@@ -7,13 +7,13 @@ import {
   togglePreference,
   type PersonKindRole,
 } from "@planer/shared";
-import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee, type TemplateRolesView } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { PersonSearch } from "../../components/PersonSearch";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useEntryPalette } from "../../categories";
 import { withError, withoutError } from "../../lib/error-map";
+import { ActionButton, Card, CheckRow, Group, Hint } from "../../ui";
 
 /**
  * «допущен к 1 из 2 · любит: 1» — строка под именем человека.
@@ -57,7 +57,7 @@ export function AdminShiftKinds({
    * Отказ по id ЧЕЛОВЕКА, а не один на экран. Экран выше окна даже свёрнутым
    * (замер на 390×844: высота 970, последняя карточка на y=747), а развёрнутая
    * карточка добавляет по строке на каждый вид смены — отказ, нарисованный
-   * родителем над `ScreenScroll`, для нажавшего в такой карточке невидим.
+   * родителем над экраном, для нажавшего в такой карточке невидим.
    */
   const [errors, setErrors] = useState<ReadonlyMap<number, string>>(new Map());
   /** Упавшая начальная загрузка: без неё показывать нечего, и «Повторить» — единственный выход. */
@@ -120,46 +120,59 @@ export function AdminShiftKinds({
     await save(kind, { preference: togglePreference(kind.preference, employeeId) }, employeeId);
   }
 
+  const back = (
+    <div style={{ alignSelf: "flex-start" }}>
+      <ActionButton kind="quiet" onClick={onClose}>
+        ← Назад к расписанию
+      </ActionButton>
+    </div>
+  );
+
   if (loadError) {
     return (
-      <Section header="Кто что может">
-        <CardStack>
-          <CardShell>
-            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{loadError}</div>
-            <Button size="s" mode="gray" stretched style={{ marginTop: 8 }} onClick={() => setAttempt((n) => n + 1)}>
+      <>
+        {back}
+        <Group header="Кто что может">
+          <Card>
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{loadError}</div>
+            <ActionButton stretched onClick={() => setAttempt((n) => n + 1)}>
               Повторить
-            </Button>
-          </CardShell>
-        </CardStack>
-      </Section>
+            </ActionButton>
+          </Card>
+        </Group>
+      </>
     );
   }
 
   if (!kinds) {
     return (
-      <Section header="Кто что может">
-        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-          <Spinner size="m" />
-        </div>
-      </Section>
+      <>
+        {back}
+        <Group header="Кто что может">
+          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+            <Spinner size="m" />
+          </div>
+        </Group>
+      </>
     );
   }
 
   const visiblePeople = filterPeople(active, query);
 
   return (
-    <Section header="Кто что может">
-      <CardStack>
-        <CardShell>
-          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+    <>
+      {back}
+      <Group header="Кто что может">
+        <Card>
+          <Hint>
             Галочка «допущен» стоит у всех, пока у вида смены никого не отметили: пустой список значит «могут все».
             Снимешь первую — список зафиксируется по остальным. «Любит» не перебивает очередь, а решает ничью.
-          </div>
-        </CardShell>
+          </Hint>
+        </Card>
 
-        <CardShell>
+        <Card>
           <PersonSearch value={query} onChange={setQuery} count={active.length} disabled={busyId !== null} />
-        </CardShell>
+        </Card>
 
         {visiblePeople.map((employee) => (
           <PersonCard
@@ -176,19 +189,13 @@ export function AdminShiftKinds({
         ))}
 
         {visiblePeople.length === 0 && active.length > 0 && (
-          <CardShell>
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Никого с таким именем нет.</div>
-          </CardShell>
+          <Card>
+            <Hint>Никого с таким именем нет.</Hint>
+          </Card>
         )}
         {active.length === 0 && <Placeholder description="Сначала добавь работников." />}
-
-        <CardShell>
-          <Button size="s" mode="gray" stretched onClick={onClose}>
-            ← Назад к расписанию
-          </Button>
-        </CardShell>
-      </CardStack>
-    </Section>
+      </Group>
+    </>
   );
 }
 
@@ -216,13 +223,15 @@ function PersonCard({
   const roles = rolesOfPerson(kinds, employee.id);
 
   return (
-    <CardShell>
+    <Card>
+      {/* Заголовок — вся полоса-кнопка не ниже 44px: стрелка ▾ в углу была
+          единственной мишенью, и мимо неё промахивались. */}
       <button
         type="button"
         onClick={onToggleOpen}
         aria-expanded={open}
         style={{
-          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: "var(--app-tap)",
           background: "transparent", border: "none", padding: 0, font: "inherit",
           color: "var(--tgui--text_color)", textAlign: "left", cursor: "pointer",
         }}
@@ -237,26 +246,16 @@ function PersonCard({
           {initialsOf(employee.displayName)}
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{employee.displayName}</span>
-          <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+          <span style={{ display: "block", fontWeight: 600, fontSize: "var(--app-text-body)" }}>{employee.displayName}</span>
+          <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
             {personSummary(roles)}
           </span>
         </span>
-        <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
+        <span aria-hidden="true" style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (
-        <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)" }}>
-          <div
-            style={{
-              display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, padding: "10px 0 6px",
-              color: "var(--tgui--hint_color)", fontSize: 11.5, fontWeight: 600, textTransform: "uppercase",
-            }}
-          >
-            <span>Вид смены</span>
-            <span style={{ justifySelf: "center" }}>Допущен</span>
-            <span style={{ justifySelf: "center" }}>Любит</span>
-          </div>
+        <div style={{ borderTop: "1px solid var(--tgui--divider, rgb(128 128 128 / 18%))" }}>
           {kinds.map((kind, index) => (
             <KindRow
               key={kind.templateId}
@@ -273,11 +272,11 @@ function PersonCard({
       {/* Свёрнутую карточку отказ тоже касается: сохранение могло не дойти уже
           после того, как её закрыли. */}
       {error && (
-        <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.35 }}>
           {error}
         </div>
       )}
-    </CardShell>
+    </Card>
   );
 }
 
@@ -304,13 +303,8 @@ function KindRow({
   const code = exactSchedulePalette(kind.accent, kind.category)?.code ?? kind.name.slice(0, 1);
 
   return (
-    <label
-      style={{
-        display: "grid", gridTemplateColumns: "1fr 64px 56px", gap: 6, alignItems: "center",
-        padding: "7px 0", borderTop: "1px solid var(--tgui--outline)",
-      }}
-    >
-      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: 14 }}>
+    <div style={{ padding: "8px 0", borderTop: "1px solid var(--tgui--divider, rgb(128 128 128 / 18%))" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: "var(--app-text-body)" }}>
         <span
           aria-hidden="true"
           style={{
@@ -322,22 +316,24 @@ function KindRow({
         </span>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{kind.name}</span>
       </span>
-      <input
-        type="checkbox"
-        checked={role.allowed}
-        disabled={busy}
-        style={{ justifySelf: "center", width: 20, height: 20 }}
-        aria-label={`${employeeName}: допущен к «${kind.name}»`}
-        onChange={onToggleAllowed}
-      />
-      <input
-        type="checkbox"
-        checked={role.preferred}
-        disabled={busy}
-        style={{ justifySelf: "center", width: 20, height: 20 }}
-        aria-label={`${employeeName}: любит «${kind.name}»`}
-        onChange={onTogglePreferred}
-      />
-    </label>
+      {/* Подпись у каждой галочки своя («Допущен»/«Любит»), а не шапка таблицы:
+          строка узкая, и колонки с шапкой над ними на телефоне разъезжались. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <CheckRow
+          checked={role.allowed}
+          disabled={busy}
+          aria-label={`${employeeName}: допущен к «${kind.name}»`}
+          label="Допущен"
+          onChange={onToggleAllowed}
+        />
+        <CheckRow
+          checked={role.preferred}
+          disabled={busy}
+          aria-label={`${employeeName}: любит «${kind.name}»`}
+          label="Любит"
+          onChange={onTogglePreferred}
+        />
+      </div>
+    </div>
   );
 }

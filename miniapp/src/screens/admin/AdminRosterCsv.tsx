@@ -1,14 +1,14 @@
 import { useRef, useState } from "react";
 import { pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
-import { Button, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
+import { Spinner } from "@telegram-apps/telegram-ui";
 import {
   apiClient,
   type Employee,
   type RosterImportPreview,
   type RosterPersonResolution,
 } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { withNotifyNotice } from "../../lib/shift";
+import { ActionButton, Card, CheckRow, Group, Hint, SelectField } from "../../ui";
 
 /** Everything the confirm step needs, held together so a stale piece can't be applied. */
 export interface RosterImportState {
@@ -189,126 +189,124 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
   if (state) {
     const blocker = importBlocker(state);
     return (
-      <Section header="Проверь, прежде чем применять">
-        <CardStack>
-          <CardShell>
-            <div style={{ fontWeight: 600 }}>{state.fileName}</div>
-            <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 4 }}>
-              {formatPeriod(state.preview.from, state.preview.to)} · {state.preview.people.length} сотрудников ·{" "}
-              {pluralRecords(state.preview.entryCount)}
+      <Group header="Проверь, прежде чем применять">
+        <Card>
+          <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)", overflowWrap: "anywhere" }}>{state.fileName}</div>
+          <Hint>
+            {formatPeriod(state.preview.from, state.preview.to)} · {state.preview.people.length} сотрудников ·{" "}
+            {pluralRecords(state.preview.entryCount)}
+          </Hint>
+          <Hint>База не меняется, пока не нажмёшь «Применить». Импорт идёт целиком, одной операцией.</Hint>
+          {state.encoding === "windows-1251" && (
+            <Hint>Файл в кодировке windows-1251 (так сохраняет Excel) — прочитал правильно, но глянь ФИО ниже.</Hint>
+          )}
+          {state.preview.unknownsMessage && (
+            // A warning, not a blocker: the month still imports and these cells
+            // land as «?», visible in the grid until somebody fixes the file.
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
+              ⚠ {state.preview.unknownsMessage}
             </div>
-            <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 8 }}>
-              База не меняется, пока не нажмёшь «Применить». Импорт идёт целиком, одной операцией.
-            </div>
-            {state.encoding === "windows-1251" && (
-              <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 8 }}>
-                Файл в кодировке windows-1251 (так сохраняет Excel) — прочитал правильно, но глянь ФИО ниже.
-              </div>
-            )}
-            {state.preview.unknownsMessage && (
-              // A warning, not a blocker: the month still imports and these cells
-              // land as «?», visible in the grid until somebody fixes the file.
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, marginTop: 8, lineHeight: 1.45 }}>
-                ⚠ {state.preview.unknownsMessage}
-              </div>
-            )}
-            {state.preview.preservedCount > 0 && (
-              <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 8 }}>
-                Клеток «?» — {state.preview.preservedCount}: работа в выходной, своё время, две записи в один день. Их
-                импорт не тронет.
-              </div>
-            )}
-          </CardShell>
+          )}
+          {state.preview.preservedCount > 0 && (
+            <Hint>
+              Клеток «?» — {state.preview.preservedCount}: работа в выходной, своё время, две записи в один день. Их
+              импорт не тронет.
+            </Hint>
+          )}
+        </Card>
 
-          {state.preview.existingCount > 0 && (
-            <CardShell>
-              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, lineHeight: 1.4 }}>
-                <input
-                  type="checkbox"
-                  checked={state.overwrite}
-                  disabled={state.busy}
-                  style={{ marginTop: 3, flex: "none" }}
-                  onChange={(event) =>
-                    setState((current) => (current ? { ...current, overwrite: event.target.checked, error: null } : current))
-                  }
-                />
-                <span>
+        {state.preview.existingCount > 0 && (
+          <Card>
+            <CheckRow
+              checked={state.overwrite}
+              disabled={state.busy}
+              onChange={(next) => setState((current) => (current ? { ...current, overwrite: next, error: null } : current))}
+              label={
+                <>
                   За этот период уже есть <b>{pluralRecords(state.preview.existingCount)}</b>. Перезаписать — старые
                   записи периода будут удалены и заменены содержимым файла.
-                </span>
-              </label>
-            </CardShell>
-          )}
+                </>
+              }
+            />
+          </Card>
+        )}
 
-          <CardShell>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Кто есть кто</div>
-            {state.preview.people.map((person, index) => {
-              const resolution = state.resolutions[index]!;
-              return (
-                <div key={`${person.csvName}-${index}`} style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 14, marginBottom: 4 }}>{person.csvName}</div>
-                  <Select
-                    value={resolution.action === "create" ? "create" : String(resolution.employeeId)}
-                    disabled={state.busy}
-                    onChange={(event) => changeResolution(index, event.target.value)}
-                  >
-                    <option value="create">＋ Создать нового</option>
-                    {employees.map((employee) => (
-                      <option value={employee.id} key={employee.id}>
-                        ↔ {employee.displayName}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              );
-            })}
-          </CardShell>
+        <Card>
+          <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>Кто есть кто</div>
+          {state.preview.people.map((person, index) => {
+            const resolution = state.resolutions[index]!;
+            return (
+              // Имя — обычным текстом, а не серой подписью поля: по нему сверяют
+              // файл с командой, и оно главное в строке.
+              <div key={`${person.csvName}-${index}`} style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+                <div style={{ fontSize: "var(--app-text-body)", overflowWrap: "anywhere" }}>{person.csvName}</div>
+                <SelectField
+                  stretched
+                  aria-label={person.csvName}
+                  value={resolution.action === "create" ? "create" : String(resolution.employeeId)}
+                  disabled={state.busy}
+                  onChange={(value) => changeResolution(index, value)}
+                >
+                  <option value="create">＋ Создать нового</option>
+                  {employees.map((employee) => (
+                    <option value={employee.id} key={employee.id}>
+                      ↔ {employee.displayName}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+            );
+          })}
+        </Card>
 
-          {state.error && (
-            <CardShell>
-              <div style={{ color: "var(--tg-theme-destructive-text-color, #e53935)", fontSize: 14 }}>{state.error}</div>
-            </CardShell>
-          )}
+        {state.error && (
+          <Card>
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{state.error}</div>
+          </Card>
+        )}
 
-          <CardShell>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button size="s" mode="gray" stretched disabled={state.busy} onClick={() => setState(null)}>
-                Отмена
-              </Button>
-              <Button
-                size="s"
-                mode="filled"
-                stretched
-                loading={state.busy}
-                disabled={state.busy || blocker !== null}
-                onClick={() => void apply()}
-              >
-                {state.overwrite ? "Перезаписать" : "Применить"}
-              </Button>
-            </div>
-            {blocker && (
-              <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginTop: 8 }}>{blocker}</div>
-            )}
-          </CardShell>
-        </CardStack>
-      </Section>
+        <Card>
+          <div style={{ display: "flex", gap: 8 }}>
+            <ActionButton stretched disabled={state.busy} onClick={() => setState(null)}>
+              Отмена
+            </ActionButton>
+            {/* Единственная primary: «Применить» меняет базу, остальное здесь — выход. */}
+            <ActionButton
+              kind="primary"
+              stretched
+              loading={state.busy}
+              disabled={state.busy || blocker !== null}
+              onClick={() => void apply()}
+            >
+              {state.overwrite ? "Перезаписать" : "Применить"}
+            </ActionButton>
+          </div>
+          {blocker && <Hint>{blocker}</Hint>}
+        </Card>
+      </Group>
     );
   }
 
   return (
-    <Section header="График файлом">
-      <CardStack>
-        <CardShell>
-          <div style={{ color: "var(--tg-theme-hint-color)", fontSize: 13, marginBottom: 8 }}>
+    <>
+      <div style={{ alignSelf: "flex-start" }}>
+        <ActionButton kind="quiet" onClick={onClose}>
+          ← Назад к расписанию
+        </ActionButton>
+      </div>
+      <Group header="График файлом">
+        <Card>
+          <Hint>
             Матрица «ФИО × даты» — та же, что открывается в Excel. Выгрузи текущий месяц, поправь и загрузи обратно.
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button size="s" mode="gray" stretched onClick={() => fileInput.current?.click()}>
+          </Hint>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <ActionButton stretched onClick={() => fileInput.current?.click()}>
               ⬆ Загрузить
-            </Button>
-            <Button size="s" mode="filled" stretched loading={exporting} disabled={exporting} onClick={() => void exportCsv()}>
+            </ActionButton>
+            {/* primary — выгрузка: она безопасна, а загрузка ведёт на шаг проверки. */}
+            <ActionButton kind="primary" stretched loading={exporting} disabled={exporting} onClick={() => void exportCsv()}>
               ⬇ Выгрузить
-            </Button>
+            </ActionButton>
           </div>
           <input
             ref={fileInput}
@@ -321,18 +319,13 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
               if (file) void pickFile(file);
             }}
           />
-        </CardShell>
+        </Card>
         {exporting && (
-          <CardShell>
+          <Card>
             <Spinner size="s" />
-          </CardShell>
+          </Card>
         )}
-        <CardShell>
-          <Button size="s" mode="gray" stretched onClick={onClose}>
-            ← Назад к расписанию
-          </Button>
-        </CardShell>
-      </CardStack>
-    </Section>
+      </Group>
+    </>
   );
 }
