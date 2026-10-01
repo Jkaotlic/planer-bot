@@ -707,6 +707,9 @@ function CollectionsList({
   );
 }
 
+/** Карточка раскрытого сбора, в которой показывается отказ его действия. */
+type ErrorPlace = "save" | "send" | "close";
+
 /**
  * Подпись сверху карточки раскрытого сбора: чей он.
  *
@@ -854,6 +857,10 @@ function CollectionEditor({
   const [recipientGroupId, setRecipientGroupId] = useState<number | null>(collection.recipientGroupId);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** В какой карточке нажали кнопку, давшую `error`: раскрытый сбор — несколько
+   *  карточек, и сообщение об отказе «Да, разослать» или «Удалить сбор» одной
+   *  карточкой выше, под «Сохранить», читается как отказ сохранения. */
+  const [errorAt, setErrorAt] = useState<ErrorPlace>("save");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -873,6 +880,7 @@ function CollectionEditor({
       setPreview(await apiClient.getCollectionPreview(collection.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
+      setErrorAt("save");
     }
   }
 
@@ -906,6 +914,7 @@ function CollectionEditor({
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setErrorAt("save");
     } finally {
       setSaving(false);
     }
@@ -920,6 +929,7 @@ function CollectionEditor({
       onSent(result.delivered, result.intended);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось разослать");
+      setErrorAt("send");
       setConfirming(false);
     } finally {
       setSending(false);
@@ -934,6 +944,7 @@ function CollectionEditor({
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось закрыть сбор");
+      setErrorAt("close");
     } finally {
       setClosing(false);
     }
@@ -947,6 +958,7 @@ function CollectionEditor({
       onDeleted();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить сбор");
+      setErrorAt("close");
       setDeleting(false);
     }
   }
@@ -957,7 +969,7 @@ function CollectionEditor({
   // рассылка живёт в другой карточке, и две главные на одной не встречаются.
   return (
     <>
-      <Card>
+      <Card data-testid="collection-form-card">
         {!isBirthday && (
           <>
             <Input
@@ -1008,11 +1020,11 @@ function CollectionEditor({
           Сохранить
         </ActionButton>
 
-        {error && <div style={ERROR_STYLE}>{error}</div>}
+        {error && errorAt === "save" && <div style={ERROR_STYLE}>{error}</div>}
       </Card>
 
       {preview && (
-        <Card>
+        <Card data-testid="collection-send-card">
           <OwnerLine>{cardSubject(row)}</OwnerLine>
           <SendBlock
             preview={preview}
@@ -1024,12 +1036,13 @@ function CollectionEditor({
             onCancel={() => setConfirming(false)}
             onSend={() => void handleSend()}
           />
+          {error && errorAt === "send" && <div style={ERROR_STYLE}>{error}</div>}
         </Card>
       )}
 
       <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} subject={cardSubject(row)} />
 
-      <Card>
+      <Card data-testid="collection-close-card">
         <OwnerLine>{cardSubject(row)}</OwnerLine>
         <ActionButton
           compact
@@ -1058,6 +1071,8 @@ function CollectionEditor({
             Удалить сбор
           </ActionButton>
         )}
+
+        {error && errorAt === "close" && <div style={ERROR_STYLE}>{error}</div>}
       </Card>
     </>
   );
@@ -1404,6 +1419,10 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
   const [recipientGroupId, setRecipientGroupId] = useState<number | null>(birthday.campaign?.recipientGroupId ?? null);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** В какой карточке нажали кнопку, давшую `error`: раскрытый сбор — несколько
+   *  карточек, и сообщение об отказе «Да, разослать» или «Удалить сбор» одной
+   *  карточкой выше, под «Сохранить», читается как отказ сохранения. */
+  const [errorAt, setErrorAt] = useState<ErrorPlace>("save");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   /** The send button arms itself first; the second tap is the one that sends. */
@@ -1414,6 +1433,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       setPreview(await apiClient.getBirthdayPreview(birthday.employeeId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
+      setErrorAt("save");
     }
   }
 
@@ -1437,6 +1457,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setErrorAt("save");
     } finally {
       setSaving(false);
     }
@@ -1452,6 +1473,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       onSent(result.delivered, result.intended);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось разослать");
+      setErrorAt("send");
       setConfirming(false);
     } finally {
       setSending(false);
@@ -1463,7 +1485,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
 
   return (
     <>
-      <Card>
+      <Card data-testid="birthday-form-card">
         {sent ? (
           <Hint>
             Уже разослано{birthday.campaign?.sentCount ? ` — ${recipientsPhrase(birthday.campaign.sentCount)}` : ""}.
@@ -1537,7 +1559,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
           />
         )}
 
-        {error && <div style={ERROR_STYLE}>{error}</div>}
+        {error && errorAt === "save" && <div style={ERROR_STYLE}>{error}</div>}
       </Card>
 
       {preview && (
@@ -1550,7 +1572,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
             <Hint>Сохрани — и появится кнопка рассылки.</Hint>
           </Card>
         ) : (
-          <Card>
+          <Card data-testid="birthday-send-card">
             <OwnerLine>{birthday.displayName}</OwnerLine>
             <SendBlock
               preview={preview}
@@ -1562,6 +1584,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
               onCancel={() => setConfirming(false)}
               onSend={() => void handleSend()}
             />
+            {error && errorAt === "send" && <div style={ERROR_STYLE}>{error}</div>}
           </Card>
         )
       )}

@@ -115,14 +115,30 @@ describe("настройки — праздники", () => {
 });
 
 describe("настройки — зоны нажатия", () => {
-  it("тумблер сидит внутри label всей строки, а не только своих 32px", async () => {
+  it("тап по названию и описанию строки НЕ переключает автозагрузку — только сам тумблер", async () => {
+    // Настройка сохраняется сразу: оборачивать строку в `label` значило бы, что
+    // случайное касание текста при прокрутке меняет её без подтверждения.
+    const setAuto = vi.spyOn(apiClient, "setHolidaysAuto").mockResolvedValue(undefined);
     const el = await mount();
     const input = el.querySelector('input[aria-label="Брать праздники из календаря"]') as HTMLInputElement;
-    // Нажимается вся строка: подпись лежит в том же label, что и тумблер.
-    // У `Switch` свой внутренний label на 32px; нужен самый внешний — строка.
-    let outer: HTMLElement | null = null;
-    for (let n = input.closest("label"); n; n = n.parentElement?.closest("label") ?? null) outer = n;
-    expect(outer!.textContent).toContain("Брать праздники из календаря");
+
+    const title = [...el.querySelectorAll<HTMLElement>("*")].find(
+      (n) => n.children.length === 0 && (n.textContent ?? "").trim() === "Брать праздники из календаря",
+    )!;
+    const description = [...el.querySelectorAll<HTMLElement>("*")].find(
+      (n) => n.children.length === 0 && (n.textContent ?? "").startsWith("Производственный календарь"),
+    )!;
+    expect(title).toBeTruthy();
+    expect(description).toBeTruthy();
+    await act(async () => title.click());
+    await act(async () => description.click());
+    await settle(4);
+    expect(setAuto).not.toHaveBeenCalled();
+
+    await act(async () => input.click());
+    await settle(4);
+    expect(setAuto).toHaveBeenCalledTimes(1);
+    expect(setAuto).toHaveBeenCalledWith(false);
   });
 
   it("поле часа не ниже нажимаемого", async () => {

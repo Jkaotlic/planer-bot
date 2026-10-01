@@ -228,8 +228,9 @@ export function AdminSettings() {
     return (
       <>
         <Card flush>
+          {/* Не `label`: сохраняет мгновенно, и случайный тап по названию при
+              прокрутке не должен менять настройку — переключает только сам тумблер. */}
           <Cell
-            Component="label"
             after={
               <Switch
                 checked={settings.holidaysAuto}
@@ -311,7 +312,6 @@ export function AdminSettings() {
             его можно исключительно через кнопки ниже (с подтверждением). */}
         <Card flush>
           <Cell
-            Component="label"
             after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
             description={whoLabel}
           >
