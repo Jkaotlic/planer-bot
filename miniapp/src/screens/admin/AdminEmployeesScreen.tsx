@@ -246,7 +246,7 @@ export function AdminEmployeesScreen() {
               // Позиция — место в РОСТЕРЕ, а не в том, что осталось после
               // поиска: считать её по видимому индексу значило бы
               // переставлять человека не туда, стоило кому-то что-нибудь
-              // набрать в поиске. Mirrors console's `EmployeesSection`.
+              // набрать в поиске. Так же считает консоль (`EmployeesSection`).
               position={active.findIndex((a) => a.id === e.id) + 1}
               onReorder={(position) => withBusy(e.id, () => apiClient.reorderEmployee(e.id, position).then(() => {}))}
               onBirthDate={(birthDate) => withBusy(e.id, () => apiClient.setBirthDate(e.id, birthDate))}
@@ -271,7 +271,7 @@ export function AdminEmployeesScreen() {
       {/* `items` — весь архив, не найденное: заголовок и сам факт наличия
           секции не должны мигать оттого, что поиск временно не нашёл
           архивного человека. Фильтр применяется только к строкам внутри —
-          Mirrors console's `EmployeesScreen`. */}
+          Так же делает консоль (`EmployeesScreen`). */}
       <CollapsibleArchive title="Архив" items={archived}>
         {(rows) =>
           filterPeople(rows, query).map((e) => (
@@ -452,9 +452,10 @@ export function EmployeeRow({
           </div>
         </div>
 
-        {/* What the bot will actually say. Shown always, not «when it differs
-            from the first word of displayName» — guessing which word is the
-            given name is exactly what this whole change refuses to do. */}
+        {/* Как бот на самом деле обратится. Показано всегда, а не «когда
+            отличается от первого слова имени»: угадывать, какое слово в
+            displayName — имя, значило бы вернуть то самое допущение, которое
+            это изменение убирает. */}
         <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", overflowWrap: "anywhere" }}>
           Бот зовёт: {employee.address}
         </div>
@@ -563,8 +564,8 @@ export function EmployeeRow({
           </div>
         )}
 
-        {/* The refusal belongs where the finger was — a message at the top of a
-            list of thirty is a message nobody sees. */}
+        {/* Отказ показывается там, где был палец: сообщение над списком из
+            тридцати человек никто не увидит. */}
         {error && (
           <div role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)", lineHeight: 1.4 }}>
             {error}
@@ -576,9 +577,10 @@ export function EmployeeRow({
   );
 }
 
-/** The invite link, in the row that asked for it. Selectable rather than only
- *  copyable: the Mini App webview has no clipboard in an insecure context, and a
- *  link nobody can get out of the screen is the same as no link. */
+/** Ссылка-приглашение в той строке, что её запросила. Её можно выделить, а не
+ *  только скопировать кнопкой: в вебвью мини-аппа нет буфера обмена без
+ *  безопасного контекста, а ссылка, которую нельзя вынуть с экрана, равна
+ *  отсутствию ссылки. */
 function RowInviteLink({ invite }: { invite: { inviteToken: string; inviteLink: string | null } }) {
   const link = invite.inviteLink ?? invite.inviteToken;
   return (

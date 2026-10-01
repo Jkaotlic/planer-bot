@@ -116,6 +116,35 @@ describe("ограничения работника под раскрытием"
     expect(observer).toHaveBeenCalledWith(1, true);
   });
 
+  it("после переключения галки сводка в свёрнутой строке меняется", async () => {
+    vi.spyOn(apiClient, "setEmployeeRestrictions").mockResolvedValue(undefined);
+    const el = await mount([person(1, "Аня")]);
+    expect(fold(el, 1).textContent).toContain("Ограничения: нет");
+    await act(async () => fold(el, 1).click());
+    await act(async () => boxes(el, 1)[2]!.click());
+    await settle();
+    // Сворачиваем и читаем именно свёрнутую строку: ради неё сводка и написана.
+    await act(async () => fold(el, 1).click());
+    expect(fold(el, 1).getAttribute("aria-expanded")).toBe("false");
+    expect(fold(el, 1).textContent).toContain("Ограничения: без обменов");
+    expect(fold(el, 1).textContent).not.toContain("нет");
+  });
+
+  it("отказ сохранения виден, когда карточка свёрнута", async () => {
+    vi.spyOn(apiClient, "setEmployeeRestrictions").mockRejectedValue(new Error("Сервер отказал"));
+    const el = await mount([person(1, "Аня")]);
+    await act(async () => fold(el, 1).click());
+    await act(async () => boxes(el, 1)[2]!.click());
+    await settle();
+    await act(async () => fold(el, 1).click());
+    expect(boxes(el, 1)).toHaveLength(0);
+    const alert = card(el, 1).querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent ?? "").not.toBe("");
+    // Сводка при этом прежняя: сохранение не прошло.
+    expect(fold(el, 1).textContent).toContain("Ограничения: нет");
+  });
+
   it("раскрытие одной карточки не трогает соседнюю", async () => {
     const el = await mount([person(1, "Аня"), person(2, "Игорь")]);
     await act(async () => fold(el, 1).click());

@@ -72,6 +72,22 @@ async function settle(times = 20) {
   }
 }
 
+/**
+ * Ждёт условия, а не фиксированное время. Экран раздела подгружается через
+ * `lazy()`, и сколько займёт этот импорт, зависит от нагрузки на машину: на
+ * занятом процессоре сотня миллисекунд «пустых» ожиданий кончалась раньше, чем
+ * раздел успевал нарисоваться, и тест падал раз в несколько прогонов.
+ */
+async function until(cond: () => boolean, what: string, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error(`не дождался: ${what}`);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    });
+  }
+}
+
 async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
   window.history.replaceState(null, "", `/${search}`);
   vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith(me) as never);
@@ -88,7 +104,8 @@ async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
   await act(async () => {
     root!.render(createElement(AppRoot, null, createElement(App)));
   });
-  await settle();
+  await until(() => host!.querySelector(".tab-bar-fit button") !== null, "нижняя панель после загрузки");
+  await settle(2);
   return host;
 }
 
@@ -105,10 +122,12 @@ async function click(node: Element) {
 }
 
 const h1 = (el: HTMLElement) => el.querySelector("h1")?.textContent ?? null;
+const untilH1 = (el: HTMLElement, title: string) => until(() => h1(el) === title, `заголовок «${title}», сейчас ${JSON.stringify(h1(el))}`);
 const backButton = (el: HTMLElement) => el.querySelector('button[aria-label="Разделы"]');
 const menuRows = (el: HTMLElement) => [...el.querySelectorAll("button.ui-menu-row")];
+const rowTitle = (row: Element) => row.querySelector(".ui-menu-row__title")?.textContent ?? "";
 function menuRow(el: HTMLElement, title: string): HTMLElement {
-  const row = menuRows(el).find((r) => (r.textContent ?? "").includes(title));
+  const row = menuRows(el).find((r) => rowTitle(r) === title);
   if (!row) throw new Error(`нет строки меню «${title}»`);
   return row as HTMLElement;
 }
@@ -117,7 +136,7 @@ describe("админка: меню разделов", () => {
   it("1. вкладка «Админ» открывается на «Расписании», с «Разделы» и без чипов", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
-    expect(h1(el)).toBe("Расписание");
+    await untilH1(el, "Расписание");
     expect(backButton(el)).not.toBeNull();
     expect(el.querySelectorAll('[role="tab"]')).toHaveLength(0);
   });
@@ -125,57 +144,76 @@ describe("админка: меню разделов", () => {
   it("2. «‹ Разделы» ведёт в меню из девяти строк по порядку", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
+    await untilH1(el, "Расписание");
     await click(backButton(el)!);
-    expect(h1(el)).toBe("Админ");
+    await untilH1(el, "Админ");
     const rows = menuRows(el);
     expect(rows).toHaveLength(9);
-    const titles = ["Расписание", "Выходные", "Работники", "Группы", "Анонсы", "Чек-листы", "Журнал", "Баги", "Настройки"];
-    rows.forEach((row, i) => expect(row.textContent ?? "").toContain(titles[i]!));
+    // Название строки — ровно из `.ui-menu-row__title`: `toContain` по тексту всей
+    // строки пропустил бы подмену названия, пока оно лежит где-то в пояснении.
+    expect(rows.map(rowTitle)).toEqual(["Расписание", "Выходные", "Работники", "Группы", "Анонсы", "Чек-листы", "Журнал", "Баги", "Настройки"]);
     expect(backButton(el)).toBeNull();
   });
 
   it("3. строка «Работники» открывает раздел", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
+    await untilH1(el, "Расписание");
     await click(backButton(el)!);
+    await untilH1(el, "Админ");
     await click(menuRow(el, "Работники"));
-    expect(h1(el)).toBe("Работники");
+    await untilH1(el, "Работники");
   });
 
   it("4. раздел переживает уход на другую вкладку", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
+    await untilH1(el, "Расписание");
     await click(backButton(el)!);
+    await untilH1(el, "Админ");
     await click(menuRow(el, "Работники"));
+    await untilH1(el, "Работники");
     await click(tabItem(el, "Команда"));
     await click(tabItem(el, "Админ"));
-    expect(h1(el)).toBe("Работники");
+    await untilH1(el, "Работники");
   });
 
   it("5. повторное нажатие «Админ» на активной вкладке — меню", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
-    expect(h1(el)).toBe("Расписание");
+    await untilH1(el, "Расписание");
     await click(tabItem(el, "Админ"));
-    expect(h1(el)).toBe("Админ");
+    await untilH1(el, "Админ");
   });
 
   it("6. ссылка ?screen=announce открывает «Анонсы» сразу, минуя меню", async () => {
     const el = await mount({ isAdmin: true }, "?screen=announce");
-    expect(h1(el)).toBe("Анонсы");
+    await untilH1(el, "Анонсы");
     expect(menuRows(el)).toHaveLength(0);
   });
 
   it("7. системная «Назад» в разделе ведёт в меню, а в меню прячется", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
+    await untilH1(el, "Расписание");
+    await until(() => sdk.listeners.length > 0, "обработчик системной «Назад»");
     expect(sdk.showBackButton).toHaveBeenCalled();
-    expect(sdk.listeners.length).toBeGreaterThan(0);
     const hideBefore = sdk.hideBackButton.mock.calls.length;
     await act(async () => sdk.listeners[sdk.listeners.length - 1]!());
-    await settle(8);
-    expect(h1(el)).toBe("Админ");
-    expect(sdk.hideBackButton.mock.calls.length).toBeGreaterThan(hideBefore);
+    await untilH1(el, "Админ");
+    await until(() => sdk.hideBackButton.mock.calls.length > hideBefore, "скрытие системной «Назад»");
+  });
+
+  it("7б. в разделе уход на другую вкладку прячет системную «Назад»", async () => {
+    const el = await mount({ isAdmin: true });
+    await click(tabItem(el, "Админ"));
+    await untilH1(el, "Расписание");
+    await until(() => sdk.showBackButton.mock.calls.length > 0, "показ системной «Назад» в разделе");
+    const hideBefore = sdk.hideBackButton.mock.calls.length;
+    await click(tabItem(el, "Команда"));
+    // Кнопка нужна только экрану, у которого есть куда вернуться: на «Команде»
+    // она остаётся висеть в шапке Telegram и ведёт в никуда.
+    await until(() => sdk.hideBackButton.mock.calls.length > hideBefore, "скрытие системной «Назад» после ухода с вкладки");
   });
 
   it("8. не-админ с canAnnounce: вкладка «Анонс» — заголовок без «Разделы»", async () => {

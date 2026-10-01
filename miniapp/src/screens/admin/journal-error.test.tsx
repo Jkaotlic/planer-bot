@@ -76,3 +76,14 @@ describe("«Кто менял» после отказа возвращается
     expect(el.querySelectorAll("select").length).toBeGreaterThan(0);
   });
 });
+
+describe("«Свой период»", () => {
+  it("строка раскрытия не ниже 44px (min-height на блочном summary)", async () => {
+    const el = await mount();
+    const summary = [...el.querySelectorAll("summary")].find((s) => (s.textContent ?? "").includes("Свой период")) as HTMLElement;
+    expect(summary).toBeTruthy();
+    expect(summary.style.minHeight).toBe("var(--app-tap)");
+    // Не flex: он убрал бы стрелку-маркер раскрытия.
+    expect(summary.style.display).not.toBe("flex");
+  });
+});

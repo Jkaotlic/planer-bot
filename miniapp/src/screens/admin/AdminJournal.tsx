@@ -177,12 +177,20 @@ function ShiftCounts({ today }: { today: string }) {
           })}
         </div>
         <details style={{ marginTop: 8 }}>
-          {/* Отступы у строки раскрытия, а не `min-height`: `display: flex` на
-              `summary` убрал бы стрелку-маркер раскрытия. */}
-          <summary style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--link_color)", cursor: "pointer", padding: "12px 0" }}>Свой период</summary>
-          {/* Stacked, not side by side: two native date fields sharing a phone's
-              width clip their own year — «07/01/2» — and the year is the part you
-              check when picking a period. */}
+          {/* Высота — `min-height` на блочном `summary`, а не `display: flex`: flex
+              убрал бы стрелку-маркер раскрытия. Отступ 14px добирает строку до
+              44px при одной строке текста; на 40px палец промахивался. */}
+          <summary
+            style={{
+              boxSizing: "border-box", minHeight: "var(--app-tap)", padding: "14px 0",
+              fontSize: "var(--app-text-meta)", color: "var(--tgui--link_color)", cursor: "pointer",
+            }}
+          >
+            Свой период
+          </summary>
+          {/* Друг под другом, а не рядом: два нативных поля даты в ширину телефона
+              режут собственный год — «07/01/2», а год как раз и проверяют, выбирая
+              период. */}
           <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           <div style={{ marginTop: 6 }}>
