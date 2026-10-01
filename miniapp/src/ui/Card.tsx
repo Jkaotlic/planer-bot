@@ -6,13 +6,16 @@ export function Card({
   children,
   flush,
   "data-testid": testId,
+  className,
 }: {
   children: ReactNode;
   flush?: boolean;
   "data-testid"?: string;
+  /** Зацепка для правила «этот вложенный `Card` — только обёртка», см. `ui.css`. */
+  className?: string;
 }) {
   return (
-    <div className={`ui-card${flush ? " ui-card--flush" : ""}`} data-testid={testId}>
+    <div className={`ui-card${flush ? " ui-card--flush" : ""}${className ? ` ${className}` : ""}`} data-testid={testId}>
       {children}
     </div>
   );

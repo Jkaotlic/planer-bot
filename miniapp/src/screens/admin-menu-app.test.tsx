@@ -77,8 +77,12 @@ async function settle(times = 20) {
  * `lazy()`, и сколько займёт этот импорт, зависит от нагрузки на машину: на
  * занятом процессоре сотня миллисекунд «пустых» ожиданий кончалась раньше, чем
  * раздел успевал нарисоваться, и тест падал раз в несколько прогонов.
+ *
+ * Свой срок — 3 с, короче 5 с у vitest: иначе vitest убивал бы тест раньше, чем
+ * появилось бы сообщение «не дождался: …», а брошенный цикл ожидания мешал бы
+ * следующим тестам.
  */
-async function until(cond: () => boolean, what: string, timeoutMs = 5000) {
+async function until(cond: () => boolean, what: string, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (!cond()) {
     if (Date.now() > deadline) throw new Error(`не дождался: ${what}`);
@@ -174,6 +178,8 @@ describe("админка: меню разделов", () => {
     await click(menuRow(el, "Работники"));
     await untilH1(el, "Работники");
     await click(tabItem(el, "Команда"));
+    // Без этого ожидания тест не доказывал бы, что вкладка вообще сменилась.
+    await untilH1(el, "Команда");
     await click(tabItem(el, "Админ"));
     await untilH1(el, "Работники");
   });

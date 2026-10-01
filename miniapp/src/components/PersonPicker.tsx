@@ -57,7 +57,7 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
 
   return (
     <Group header={label}>
-      <Card>
+      <Card className="person-picker-card">
         {chosenLabel != null && (
           <div
             className="person-picker-chosen"

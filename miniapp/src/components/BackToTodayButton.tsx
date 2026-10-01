@@ -29,7 +29,9 @@ export function BackToTodayButton({
         minHeight: "var(--app-tap)",
         margin: "-9px 0",
         border: "9px solid transparent",
-        borderInline: 0,
+        // Не `borderInline`: шорткат с iOS 14.5, а сборка целится в 14.0.
+        borderLeft: 0,
+        borderRight: 0,
         backgroundClip: "padding-box",
         borderRadius: 999,
         padding: "0 12px",

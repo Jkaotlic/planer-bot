@@ -227,14 +227,17 @@ describe("ui.css: что нельзя потерять", () => {
     expect(rule(".ui-tap-height button")).toContain("min-height: var(--app-tap)");
   });
 
-  it("карточка внутри карточки — без своих фона и отступа", () => {
-    const r = rule(".ui-card .ui-card");
+  it("карточка выбора человека внутри карточки формы — без своих фона и отступа, и только она", () => {
+    const r = rule(".ui-card .person-picker-card");
     expect(r).toContain("padding: 0");
     expect(r).toContain("background: none");
+    // Общего правила на любую вложенность больше нет.
+    expect(css).not.toMatch(/\.ui-card \.ui-card\s*\{/);
   });
 
   it("обёртка Input telegram-ui внутри карточки теряет боковой отступ 22px", () => {
-    const start = css.indexOf(".ui-card div:has(> label > input");
+    // Не в `Card flush`: там отступы задают сами строки (настройки работника).
+    const start = css.indexOf(".ui-card:not(.ui-card--flush) div:has(> label > input");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(css.slice(start, css.indexOf("}", start))).toContain("padding-inline: 0");
   });
