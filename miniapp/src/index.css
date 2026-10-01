@@ -172,7 +172,8 @@ textarea {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 11px 10px;
+  padding: 12px 10px;
+  min-height: 44px;
   border: 0;
   border-radius: 10px;
   background: none;
@@ -231,6 +232,24 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Своя отметка вместо эмодзи ◻️/✅: эмодзи рисует система, и на тёмной теме
+   пустой пункт был серым квадратом без контура. */
+.checklist-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--tgui--hint_color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tgui--button_text_color, #fff);
+}
+
+.checklist-check--on {
+  border-color: var(--tgui--button_color, var(--tgui--link_color));
+  background: var(--tgui--button_color, var(--tgui--link_color));
 }
 
 /* Сделанное гасится, но не зачёркивается: зачёркнутый текст на телефоне
