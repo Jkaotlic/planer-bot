@@ -9,6 +9,7 @@ import { isThemeParamsDark, useSignal } from "@telegram-apps/sdk-react";
 
 import "@telegram-apps/telegram-ui/dist/styles.css";
 import "./index.css";
+import "./ui/ui.css";
 
 import { App } from "./App";
 import { CrashBoundary } from "./components/CrashBoundary";
@@ -33,7 +34,7 @@ function Root() {
   }, [isDark]);
 
   return (
-    <AppRoot appearance={isDark ? "dark" : "light"}>
+    <AppRoot appearance={isDark ? "dark" : "light"} className={isDark ? "ui-dark" : undefined}>
       <App />
     </AppRoot>
   );
