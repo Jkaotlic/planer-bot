@@ -204,19 +204,20 @@ export function AdminAnnounce() {
         </TapHeight>
         {/* Подборки — отдельным рядом, а не сегментами: четыре сегмента на
             320–375px сжимались до «В… А… Р… В…» (замер 2026-09-29). Выбранная —
-            плотным тоном (`aria-pressed`), не `primary`: главная кнопка — «Отправить». */}
+            плотным тоном (`aria-pressed`), не `primary`: главная кнопка — «Отправить».
+            Невыбранные — обычные кнопки, не `quiet`: тихие читались как ссылки. */}
         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <ActionButton compact kind={preset === "admins" ? "secondary" : "quiet"} aria-pressed={preset === "admins"} disabled={sending} onClick={() => pickPreset("admins")}>
+          <ActionButton compact aria-pressed={preset === "admins"} disabled={sending} onClick={() => pickPreset("admins")}>
             Админам
           </ActionButton>
-          <ActionButton compact kind={preset === "workers" ? "secondary" : "quiet"} aria-pressed={preset === "workers"} disabled={sending} onClick={() => pickPreset("workers")}>
+          <ActionButton compact aria-pressed={preset === "workers"} disabled={sending} onClick={() => pickPreset("workers")}>
             Работникам
           </ActionButton>
         </div>
         {groups.length > 0 && (
           <div data-testid="group-row" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
             {groups.map((g) => (
-              <ActionButton key={g.id} compact kind={groupId === g.id ? "secondary" : "quiet"} aria-pressed={groupId === g.id} disabled={sending} onClick={() => pickGroup(g)}>
+              <ActionButton key={g.id} compact aria-pressed={groupId === g.id} disabled={sending} onClick={() => pickGroup(g)}>
                 {g.name}
               </ActionButton>
             ))}

@@ -88,3 +88,16 @@ describe("AdminWeekendScreen — «Набрали, закрыть»", () => {
     expect(buttons(el, "Набрали, закрыть")).toHaveLength(0);
   });
 });
+
+describe("AdminWeekendScreen — отметка об отсутствии", () => {
+  it("«Отпуск» у желающего — цветная пилюля категории, а не серая пилюля статуса", async () => {
+    const el = await mount([
+      view(304, "open", {
+        interested: [{ employeeId: 3, name: "Марк", confirmedThisMonth: 0, passedOver: 0, absence: "vacation" }],
+      }),
+    ]);
+    const label = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && n.textContent === "Отпуск");
+    expect(label).toBeTruthy();
+    expect(label!.closest(".ui-pill")).toBeNull();
+  });
+});

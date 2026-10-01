@@ -243,23 +243,28 @@ function ChecklistCard({
         onClick={onToggle}
         aria-expanded={open}
         style={{
-          display: "flex", alignItems: "center", gap: 8, width: "100%", padding: 0, minHeight: "var(--app-tap)",
-          border: 0, background: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer",
+          display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, width: "100%", padding: 0, minHeight: "var(--app-tap)",
+          justifyContent: "center", border: 0, background: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer",
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>{list.name}</span>
-        {/* Пилюлей, а не серым текстом в общей строке: до 2026-08-28 статус был
-            написан правильно, но глаз проходил мимо. Обёртка несёт класс, по
-            которому статус находят в тестах. */}
-        <span className="checklist-badge">
-          <StatusPill tone={dispatch === "sends" ? "ok" : "bad"}>{checklistDispatchBadge(dispatch)}</StatusPill>
+        {/* Название с пилюлей — первой строкой, пояснение — второй, на всю
+            ширину: в одной строке с названием оно сжималось в узкую колонку и
+            рвалось на три строки. */}
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: "var(--app-text-body)", minWidth: 0, overflowWrap: "anywhere" }}>{list.name}</span>
+          {/* Пилюлей, а не серым текстом в общей строке: до 2026-08-28 статус был
+              написан правильно, но глаз проходил мимо. Обёртка несёт класс, по
+              которому статус находят в тестах. */}
+          <span className="checklist-badge" style={{ flex: "none" }}>
+            <StatusPill tone={dispatch === "sends" ? "ok" : "bad"}>{checklistDispatchBadge(dispatch)}</StatusPill>
+          </span>
+          <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
         </span>
-        <span style={{ flex: 1, fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
+        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
           {checklistDispatchReason(dispatch, linked.map((t) => t.name))}
         </span>
-        <span style={{ color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (

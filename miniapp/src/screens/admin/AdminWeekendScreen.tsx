@@ -5,7 +5,7 @@ import { MetaLine } from "../../components/Card";
 import { formatDayLabel } from "../../lib/week";
 import { pluralizeRu } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
-import { categoryLabel, type Category } from "../../categories";
+import { CategoryChip, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, StatusPill } from "../../ui";
@@ -350,17 +350,18 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
 }
 
 /**
- * «Отпуск» / «Больничный» / «Командировка» — this volunteer is away on the day of
- * the slot. A mark, not a block: somebody can raise their hand in May and have a
- * June vacation land on it, and sometimes a person asks to come in anyway. The
- * admin decides — but only if they can see it, and the list used to say nothing.
- * Mirrored in admin/src/screens/WeekendAdminScreen.tsx.
+ * «Отпуск» / «Больничный» / «Командировка» — этот желающий в день смены в
+ * отсутствии. Отметка, а не запрет: человек мог откликнуться в мае, а отпуск в
+ * июне лёг ровно на этот день, а иногда он сам просит выйти. Решает админ — но
+ * только если видит, а раньше список молчал. Зеркало консоли
+ * (`admin/src/screens/WeekendAdminScreen.tsx`).
  *
- * Пилюля набора, а не цвет категории: отметка должна читаться одинаково с
- * остальными статусами экрана, а не мимикрировать под цвет самой отсутствующей смены.
+ * Цвет категории отсутствия, как на графике, а не серая пилюля статуса: серая
+ * сливалась с «реже всех работал» и «привязан», а по цвету отпуск узнают с
+ * первого взгляда там, где его уже видели.
  */
 function AbsenceBadge({ category }: { category: Category }) {
-  return <StatusPill tone="wait">{categoryLabel(category)}</StatusPill>;
+  return <CategoryChip category={category} />;
 }
 
 /** "★ реже всех работал" — the fairness hint on the volunteer with fewest weekends worked. */

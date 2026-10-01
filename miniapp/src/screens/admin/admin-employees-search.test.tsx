@@ -99,6 +99,11 @@ function cardTexts(el: HTMLElement): string[] {
 }
 
 describe("поиск работника в мини-аппе", () => {
+  it("поле стоит в карточке набора, а не голым прямоугольником на холсте", async () => {
+    const el = await mountWith(FOUR_ACTIVE_TWO_ARCHIVED);
+    expect(searchField(el)!.closest(".ui-card")).not.toBeNull();
+  });
+
   it("прячет несовпавшие строки активных", async () => {
     const el = await mountWith(FOUR_ACTIVE_TWO_ARCHIVED);
     const field = searchField(el)!;

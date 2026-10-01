@@ -205,17 +205,35 @@ describe("кнопки групп в мини-апповском анонсе", 
 
   it("ручная галочка после группы снимает подсветку", async () => {
     const el = await mount(TEAM, GROUPS);
-    // Классы telegram-ui хешированы — подсветку ловим сменой className.
+    // Подсветку несёт `aria-pressed`: все кнопки ряда — одного вида, и по классу
+    // выбранную от невыбранной не отличить.
     expect(el.querySelector("[data-testid=group-row]")).not.toBeNull();
-    const idle = byText(el, "ЧИП 5-й этаж").className;
+    expect(byText(el, "ЧИП 5-й этаж").getAttribute("aria-pressed")).toBe("false");
     await act(async () => { byText(el, "ЧИП 5-й этаж").click(); });
-    expect(byText(el, "ЧИП 5-й этаж").className).not.toBe(idle);
+    expect(byText(el, "ЧИП 5-й этаж").getAttribute("aria-pressed")).toBe("true");
     await act(async () => { rowByName(el, "Иванова Анна").querySelector("input")!.click(); });
-    expect(byText(el, "ЧИП 5-й этаж").className).toBe(idle);
+    expect(byText(el, "ЧИП 5-й этаж").getAttribute("aria-pressed")).toBe("false");
   });
 
   it("без групп ряда нет", async () => {
     const el = await mount(TEAM, []);
     expect(el.querySelector("[data-testid=group-row]")).toBeNull();
+  });
+});
+
+describe("подборки адресатов в анонсе", () => {
+  it("«Админам»/«Работникам» и группы — обычные кнопки: тихие читались бы как ссылки", async () => {
+    const el = await mount(TEAM, [{ id: 7, name: "Дежурные", memberIds: [1] } as unknown as RecipientGroupView]);
+    for (const label of ["Админам", "Работникам", "Дежурные"]) {
+      expect(byText(el, label).className).not.toContain("ui-btn--quiet");
+    }
+  });
+
+  it("выбранная подборка отмечена aria-pressed", async () => {
+    const el = await mount(TEAM);
+    await act(async () => { byText(el, "Админам").click(); });
+    await settle();
+    expect(byText(el, "Админам").getAttribute("aria-pressed")).toBe("true");
+    expect(byText(el, "Работникам").getAttribute("aria-pressed")).toBe("false");
   });
 });

@@ -230,7 +230,7 @@ export function AdminEmployeesScreen() {
           а не только от активных, иначе поле пропадало бы там, где в консоли
           остаётся, стоило разделить один и тот же десяток людей на активных
           и архив. Фильтрует и активных, и (см. ниже) раскрытый архив. */}
-      <PersonSearch value={query} onChange={setQuery} count={employees.length} disabled={busyId !== null} />
+      <PersonSearch card value={query} onChange={setQuery} count={employees.length} disabled={busyId !== null} />
 
       <Group header={`Активные · ${active.length}`}>
         {visibleActive.length === 0 ? (
