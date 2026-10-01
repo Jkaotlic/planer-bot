@@ -99,5 +99,7 @@ describe("AdminWeekendScreen — отметка об отсутствии", () =
     const label = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && n.textContent === "Отпуск");
     expect(label).toBeTruthy();
     expect(label!.closest(".ui-pill")).toBeNull();
+    // Цвет — из палитры категории, а не из токена набора.
+    expect(label!.closest("[data-absence-chip]")!.getAttribute("data-absence-chip")).toBe("vacation");
   });
 });

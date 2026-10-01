@@ -4,7 +4,7 @@ import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } fro
 import { formatDayLabel } from "../../lib/week";
 import { pluralizeRu } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
-import { CategoryChip, type Category } from "../../categories";
+import { categoryLabel, useCategoryPalette, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, MetaLine, StatusPill } from "../../ui";
@@ -355,12 +355,26 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
  * только если видит, а раньше список молчал. Зеркало консоли
  * (`admin/src/screens/WeekendAdminScreen.tsx`).
  *
- * Цвет категории отсутствия, как на графике, а не серая пилюля статуса: серая
+ * Цвет категории отсутствия (палитра графика, как на `main`), а не серая пилюля статуса: серая
  * сливалась с «реже всех работал» и «привязан», а по цвету отпуск узнают с
  * первого взгляда там, где его уже видели.
  */
 function AbsenceBadge({ category }: { category: Category }) {
-  return <CategoryChip category={category} />;
+  const palette = useCategoryPalette(category);
+  // Размер пилюли набора (13px), а не `Chip` telegram-ui: тот выходит в
+  // два раза выше и перетягивал на себя строку с именем и «Назначить».
+  return (
+    <span
+      data-absence-chip={category}
+      style={{
+        flex: "0 1 auto", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        boxSizing: "border-box", padding: "4px 10px", borderRadius: 999, fontSize: "var(--app-text-meta)", fontWeight: 600, lineHeight: 1.3,
+        background: palette.bg, color: palette.fg,
+      }}
+    >
+      {categoryLabel(category)}
+    </span>
+  );
 }
 
 /** "★ реже всех работал" — the fairness hint on the volunteer with fewest weekends worked. */

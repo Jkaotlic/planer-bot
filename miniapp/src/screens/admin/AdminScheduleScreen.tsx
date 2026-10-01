@@ -600,32 +600,42 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
   // The badge shows *which* preset (Утро/День/…) in that preset's own colour, so
   // the day reads at a glance instead of every shift being the same blue.
   const entryPalette = useEntryPalette(shift, templates);
+  const badge = (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: "var(--app-text-meta)",
+        fontWeight: 600,
+        borderRadius: 999,
+        padding: "4px 10px",
+        whiteSpace: "nowrap",
+        // Подстраховка: какой бы ни оказалась подпись, имя и часы сохраняют своё
+        // место — плашка обрезается раньше них.
+        maxWidth: 132,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        background: entryPalette.bg,
+        color: entryPalette.fg,
+      }}
+    >
+      {badgeLabel(shift.title, shift.category)}
+    </span>
+  );
   return (
     <Cell
       onClick={onTap}
       before={<Avatar acronym={shift.employeeId != null ? initialsOf(name) : "?"} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-      subtitle={formatTimeRange(shift)}
-      after={
-        <span
-          style={{
-            display: "inline-block",
-            fontSize: "var(--app-text-meta)",
-            fontWeight: 600,
-            borderRadius: 999,
-            padding: "4px 10px",
-            whiteSpace: "nowrap",
-            // Belt and braces: whatever the label turns out to be, the name and
-            // the hours keep their room. The badge truncates before they do.
-            maxWidth: 132,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            background: entryPalette.bg,
-            color: entryPalette.fg,
-          }}
-        >
-          {badgeLabel(shift.title, shift.category)}
+      // Плашка смены стоит справа, а на узком экране (<360px, см. `.entry-badge`
+      // в `index.css`) переезжает под имя, к часам: в 288px карточки справа она
+      // отъедала столько, что имя резалось до «Аня Сми…» — а имя важнее плашки.
+      // Узлов два, показан один из них; тексты у них одни и те же.
+      subtitle={
+        <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px 8px" }}>
+          <span>{formatTimeRange(shift)}</span>
+          <span className="entry-badge entry-badge--below">{badge}</span>
         </span>
       }
+      after={<span className="entry-badge entry-badge--after">{badge}</span>}
     >
       {name}
     </Cell>
@@ -838,8 +848,11 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
         emptyOptionLabel="— не назначен —"
       />
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
+      {/* `wrap` и `minWidth: 0`: нативное поле даты не уже ~140px, и на 320px два
+          рядом (по 126px) выпихивали «По» за край карточки и давали горизонтальную
+          прокрутку всего экрана. Узкий экран — друг под другом. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ flex: "1 1 140px", minWidth: 0 }}>
           <Input
             header={showTo ? "С" : "День"}
             type="date"
@@ -852,7 +865,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
           />
         </div>
         {showTo && (
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: "1 1 140px", minWidth: 0 }}>
             <Input header="По" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
           </div>
         )}
@@ -938,11 +951,11 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
 
 function TimeRow({ start, end, onStart, onEnd }: { start: string; end: string; onStart: (v: string) => void; onEnd: (v: string) => void }) {
   return (
-    <div style={{ display: "flex", gap: 8 }}>
-      <div style={{ flex: 1 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ flex: "1 1 120px", minWidth: 0 }}>
         <Input header="Начало" type="time" value={start} onChange={(e) => onStart(e.target.value)} />
       </div>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: "1 1 120px", minWidth: 0 }}>
         <Input header="Конец" type="time" value={end} onChange={(e) => onEnd(e.target.value)} />
       </div>
     </div>

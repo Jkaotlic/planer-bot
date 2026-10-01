@@ -227,8 +227,34 @@ describe("ui.css: что нельзя потерять", () => {
     expect(rule(".ui-tap-height button")).toContain("min-height: var(--app-tap)");
   });
 
+  it("карточка внутри карточки — без своих фона и отступа", () => {
+    const r = rule(".ui-card .ui-card");
+    expect(r).toContain("padding: 0");
+    expect(r).toContain("background: none");
+  });
+
+  it("обёртка Input telegram-ui внутри карточки теряет боковой отступ 22px", () => {
+    const start = css.indexOf(".ui-card div:has(> label > input");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(css.slice(start, css.indexOf("}", start))).toContain("padding-inline: 0");
+  });
+
   it("danger красит текст токеном destructive_text_color", () => {
     expect(rule(".ui-btn--danger")).toContain("--tgui--destructive_text_color");
+  });
+});
+
+describe("index.css: плашка смены в строке дня", () => {
+  const indexCss = readFileSync(`${import.meta.dirname}/../index.css`, "utf8");
+
+  it("на узком экране плашка справа прячется, а нижняя показывается", () => {
+    const media = indexCss.indexOf("@media (max-width: 359px)");
+    expect(media).toBeGreaterThanOrEqual(0);
+    const block = indexCss.slice(media, indexCss.indexOf("\n}\n", media));
+    expect(block).toMatch(/\.entry-badge--after\s*\{\s*display:\s*none/);
+    expect(block).toMatch(/\.entry-badge--below\s*\{\s*display:\s*inline-flex/);
+    // По умолчанию нижняя скрыта, иначе на широком экране плашка была бы дважды.
+    expect(indexCss).toMatch(/\.entry-badge--below\s*\{\s*display:\s*none/);
   });
 });
 

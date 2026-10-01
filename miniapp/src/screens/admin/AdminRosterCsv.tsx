@@ -299,12 +299,14 @@ export function AdminRosterCsv({ employees, today, onError, onNotice, onImported
           <Hint>
             Матрица «ФИО × даты» — та же, что открывается в Excel. Выгрузи текущий месяц, поправь и загрузи обратно.
           </Hint>
+          {/* `compact`: на 320px две растянутые кнопки по 126px не вмещали «⬆ Загрузить»
+              обычным кеглем, и значок отрывался от слова на отдельную строку. */}
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <ActionButton stretched onClick={() => fileInput.current?.click()}>
+            <ActionButton compact stretched onClick={() => fileInput.current?.click()}>
               ⬆ Загрузить
             </ActionButton>
             {/* primary — выгрузка: она безопасна, а загрузка ведёт на шаг проверки. */}
-            <ActionButton kind="primary" stretched loading={exporting} disabled={exporting} onClick={() => void exportCsv()}>
+            <ActionButton kind="primary" compact stretched loading={exporting} disabled={exporting} onClick={() => void exportCsv()}>
               ⬇ Выгрузить
             </ActionButton>
           </div>

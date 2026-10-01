@@ -158,7 +158,8 @@ function ShiftCounts({ today }: { today: string }) {
     <Group header="Кто сколько отдежурил">
       <Card>
         {/* Выбранный период — `aria-pressed` и плотный тон набора, не `primary`:
-            это переключатель, а не действие, и главная кнопка карточки — «Показать». */}
+            это переключатель, а не действие, и главная кнопка карточки — «Показать».
+            Невыбранные — обычные кнопки, не `quiet`: тихие читались как ссылки. */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {presets.map((preset) => {
             const selected = preset.from === from && preset.to === to;
@@ -166,7 +167,6 @@ function ShiftCounts({ today }: { today: string }) {
               <ActionButton
                 key={preset.label}
                 compact
-                kind={selected ? "secondary" : "quiet"}
                 aria-pressed={selected}
                 disabled={busy}
                 onClick={() => pickPreset(preset)}
@@ -246,7 +246,7 @@ function ByKind({
             // `flex: none`: в строке с прокруткой кнопка не должна сжиматься.
             // Ключ — сам ключ, а не подпись: вид с именем «Все смены» совпал бы с итогом группы.
             <span key={JSON.stringify(k.key)} style={{ flex: "none" }}>
-              <ActionButton compact kind={selected ? "secondary" : "quiet"} aria-pressed={selected} onClick={() => onPick(k.key)}>
+              <ActionButton compact aria-pressed={selected} onClick={() => onPick(k.key)}>
                 {"kind" in k.key && <Swatch accent={k.accent} />}
                 {"group" in k.key ? <b>{countsKeyLabel(k.key)}</b> : countsKeyLabel(k.key)}
               </ActionButton>

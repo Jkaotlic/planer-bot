@@ -287,3 +287,19 @@ textarea {
   outline: 2px solid var(--tgui--link_color);
   outline-offset: -2px;
 }
+
+/* Плашка смены в строке дня админского расписания: справа от имени, а на экране
+   уже 360px — под ним (см. `EntryRow`). Показан ровно один из двух узлов. */
+.entry-badge--below {
+  display: none;
+}
+
+@media (max-width: 359px) {
+  .entry-badge--after {
+    display: none;
+  }
+
+  .entry-badge--below {
+    display: inline-flex;
+  }
+}

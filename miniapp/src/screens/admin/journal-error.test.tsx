@@ -87,3 +87,14 @@ describe("«Свой период»", () => {
     expect(summary.style.display).not.toBe("flex");
   });
 });
+
+describe("периоды журнала", () => {
+  it("«Прошлый месяц» и «Квартал» — обычные кнопки, не тихий текст-ссылка", async () => {
+    const el = await mount();
+    for (const label of ["Прошлый месяц", "Квартал"]) {
+      const b = [...el.querySelectorAll("button")].find((n) => (n.textContent ?? "").trim() === label)!;
+      expect(b, label).toBeTruthy();
+      expect(b.className).not.toContain("ui-btn--quiet");
+    }
+  });
+});
