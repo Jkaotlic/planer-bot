@@ -62,14 +62,24 @@ describe("«Расписание»: группа «Ещё»", () => {
     ]);
   });
 
-  it("«Виды смен» открывает тот же экран, что и прежняя кнопка", async () => {
+  // У каждого вложенного экрана своя неизменная фраза-пояснение; заголовки не
+  // годятся — «Виды смен» сама ссылается на «Кто что может».
+  const SCREEN_TEXT = {
+    "График файлом (CSV)": "Матрица «ФИО × даты»",
+    "Кто что может": "пустой список значит «могут все»",
+    "Виды смен": "Здесь свойства самого вида смены",
+  } as const;
+
+  it.each(Object.keys(SCREEN_TEXT) as (keyof typeof SCREEN_TEXT)[])("«%s» открывает свой экран и только его", async (title) => {
     const el = await mount();
-    const row = menuRows(el).find((b) => (b.textContent ?? "").includes("Виды смен"))!;
+    const row = menuRows(el).find((b) => b.querySelector(".ui-menu-row__title")?.textContent === title)!;
     await act(async () => row.click());
     await settle(3);
-    // Заголовок вложенного экрана настроек видов смен; экран файла назывался бы «График файлом».
-    expect([...el.querySelectorAll("*")].some((n) => n.children.length === 0 && n.textContent === "Виды смен" && !n.closest(".ui-menu-row"))).toBe(true);
-    expect(el.textContent).not.toContain("График файлом");
+    const text = el.textContent ?? "";
+    for (const [other, marker] of Object.entries(SCREEN_TEXT)) {
+      if (other === title) expect(text).toContain(marker);
+      else expect(text).not.toContain(marker);
+    }
     expect(menuRows(el)).toHaveLength(0);
   });
 
