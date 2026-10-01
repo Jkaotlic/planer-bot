@@ -382,6 +382,8 @@ export interface TemplateRolesView {
   reminderText: string | null;
   /** Норма дня, Пн..Вс: сколько людей нужно. Ноль значит «не считаем». */
   coverage: number[];
+  /** «remainder» — вид берёт всех оставшихся, и нормы у него нет по смыслу. */
+  fillMode?: "count" | "remainder";
 }
 
 /** One person's place in the queue for a kind of shift, already worded for display. */

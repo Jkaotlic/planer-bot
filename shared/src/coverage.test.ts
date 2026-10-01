@@ -8,6 +8,7 @@ import {
   parseCoverage,
   scheduleGaps,
   serializeCoverage,
+  weekShortfall,
 } from "./coverage";
 import type { EntryCategory } from "./category";
 import { EMPTY_CALENDAR, calendarFrom } from "./calendar";
@@ -205,5 +206,54 @@ describe("coverageAdviceText", () => {
     expect(text).toContain("Пт 11 сентября — не хватает: Утро — 1");
     // Совет, а не тревога: так и подписан.
     expect(text).toMatch(/совет/i);
+  });
+});
+
+describe("weekShortfall — нехватка недели одним ответом", () => {
+  const WEEK = ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-29", "2026-08-30"];
+  const morning = { templateId: 10, name: "Утро", category: "shift" as const, coverage: [2, 0, 1, 0, 0, 0, 0] };
+  const duty = { templateId: 20, name: "Дежурство", category: "duty" as const, coverage: [1, 0, 0, 0, 0, 0, 0] };
+
+  it("закрытая неделя — ни дней, ни числа", () => {
+    const entries = [
+      { date: WEEK[0]!, employeeId: 1, templateId: 10 },
+      { date: WEEK[0]!, employeeId: 2, templateId: 10 },
+      { date: WEEK[2]!, employeeId: 1, templateId: 10 },
+    ];
+    expect(weekShortfall(entries, [morning], WEEK)).toEqual({ days: [], total: 0, withoutNorm: [] });
+  });
+
+  it("отдаёт только дни с дырой и число людей по каждому", () => {
+    const entries = [{ date: WEEK[0]!, employeeId: 1, templateId: 10 }];
+    const result = weekShortfall(entries, [morning, duty], WEEK);
+    expect(result.days.map((day) => [day.date, day.short])).toEqual([[WEEK[0], 2], [WEEK[2], 1]]);
+    expect(result.days[0]!.missing.map((kind) => kind.name)).toEqual(["Утро", "Дежурство"]);
+  });
+
+  it("итог недели — люди, а не дни", () => {
+    // Понедельник: Утро −2 и Дежурство −1, среда: Утро −1. Дней два, людей четыре.
+    expect(weekShortfall([], [morning, duty], WEEK).total).toBe(4);
+  });
+
+  it("называет смены и дежурства, которым норму не задали", () => {
+    const evening = { templateId: 30, name: "Вечер", category: "shift" as const, coverage: [0, 0, 0, 0, 0, 0, 0] };
+    const night = { templateId: 40, name: "Ночное", category: "duty" as const, coverage: [0, 0, 0, 0, 0, 0, 0] };
+    expect(weekShortfall([], [morning, evening, night], WEEK).withoutNorm).toEqual([
+      { templateId: 30, name: "Вечер" },
+      { templateId: 40, name: "Ночное" },
+    ]);
+  });
+
+  it("не требует нормы от того, что сменой не является", () => {
+    // Отпуск и больничный — тоже пресеты, но «сколько людей нужно в отпуске»
+    // вопроса не имеет.
+    const vacation = { templateId: 50, name: "Отпуск", category: "vacation" as const, coverage: [0, 0, 0, 0, 0, 0, 0] };
+    expect(weekShortfall([], [vacation], WEEK).withoutNorm).toEqual([]);
+  });
+
+  it("не требует нормы от вида «все оставшиеся»", () => {
+    // Он берёт всех, кого в этот день никуда не поставили: числа у него нет по смыслу.
+    const rest = { templateId: 60, name: "Офис", category: "shift" as const, coverage: [0, 0, 0, 0, 0, 0, 0], fillMode: "remainder" as const };
+    expect(weekShortfall([], [rest], WEEK).withoutNorm).toEqual([]);
   });
 });

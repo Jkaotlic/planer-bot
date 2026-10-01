@@ -9,6 +9,8 @@ import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { shiftTemplates } from "../db/schema";
+import { eq } from "drizzle-orm";
 
 const config = testConfig();
 const initDataFor = (id: number) =>
@@ -34,6 +36,19 @@ describe("GET /api/admin/templates/roles", () => {
     expect(templates.every((t: { pool: number[] }) => t.pool.length === 0)).toBe(true);
     // The screen needs the name and colour to render the card, not just the id.
     expect(templates[0]).toMatchObject({ name: expect.any(String), accent: expect.any(String) });
+  });
+
+  it("отдаёт способ расстановки: сводка недели не ждёт нормы от вида «все оставшиеся»", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    // В засеянной базе такого вида нет — без этой строки тест прошёл бы и на
+    // ответе, где `fillMode` зашит константой.
+    const rest = listActiveTemplates(db)[0]!.id;
+    db.update(shiftTemplates).set({ fillMode: "remainder" }).where(eq(shiftTemplates.id, rest)).run();
+    const res = await app.request("/api/admin/templates/roles", { headers: { Authorization: `Bearer ${await tokenFor(app, 111)}` } });
+    const { templates } = (await res.json()) as { templates: { templateId: number; fillMode: string }[] };
+    expect(templates.filter((t) => t.fillMode === "remainder").map((t) => t.templateId)).toEqual([rest]);
+    expect(templates.filter((t) => t.fillMode === "count")).toHaveLength(templates.length - 1);
   });
 
   it("is admin-only", async () => {

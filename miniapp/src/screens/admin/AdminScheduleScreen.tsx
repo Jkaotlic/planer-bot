@@ -17,6 +17,7 @@ import {
   planEntryRange,
   resolveShiftTimes,
   takesPartInAssignment,
+  weekShortfall,
   workPresets,
 } from "@planer/shared";
 import {
@@ -36,7 +37,7 @@ import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
 import { AdminKindSettings } from "./AdminKindSettings";
 import { ScreenScroll } from "../../components/ScreenScroll";
-import { formatTimeRange, notifyPendingNotice, withNotifyNotice } from "../../lib/shift";
+import { formatTimeRange, notifyPendingNotice, pluralizeRu, withNotifyNotice } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import { createLatestRequestGate } from "../../lib/request-gate";
@@ -101,6 +102,13 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(parseISODate(initialDate ?? today)));
   const [selectedDate, setSelectedDate] = useState<string>(() => initialDate ?? today);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
+  /**
+   * Понедельник недели, к которой относятся `shifts`. При листании записи прежней
+   * недели остаются в состоянии до ответа сервера; посчитанные против дат новой,
+   * они дают «никого нет», и закрытая неделя на время запроса открывалась бы
+   * красной. Нехватка считается только по записям показанной недели.
+   */
+  const [shiftsFrom, setShiftsFrom] = useState<string | null>(null);
   // Праздники и рабочие субботы недели — из того же ответа, что и расписание.
   const [calendar, setCalendar] = useState<TeamSchedule["calendar"]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -154,6 +162,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
       const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
       if (gate.current.isLatest(id)) {
         setShifts(schedule.shifts);
+        setShiftsFrom(fromIso);
         setCalendar(schedule.calendar);
       }
     } catch (err) {
@@ -198,6 +207,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
       .then((schedule) => {
         if (cancelled || !gate.current.isLatest(id)) return;
         setShifts(schedule.shifts);
+        setShiftsFrom(from);
         // Календарь берётся из того же ответа, что и записи: иначе неделя,
         // прочитанная этим путём, красилась бы по календарю прежней.
         setCalendar(schedule.calendar);
@@ -252,8 +262,19 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
     }
   }
 
-  // Считается по видимой неделе: `shifts` — её расписание, `selectedDate` — день.
-  const dayHint = coverageHint(missingCoverage(shifts ?? [], templateRoles, selectedDate));
+  const weekShifts = shifts && shiftsFrom === from ? shifts : null;
+  // Только по записям показанной недели; пока их нет — подсказка молчит, а не
+  // объявляет нехватку по пустому списку.
+  const dayHint = weekShifts ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate)) : null;
+
+  // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
+  // семь дней красным, и закрытая неделя открывалась бы тревогой.
+  const week = useMemo(
+    () => (weekShifts ? weekShortfall(weekShifts, templateRoles, weekDates) : null),
+    [weekShifts, templateRoles, weekDates],
+  );
+  const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
+  const unsetCount = week?.withoutNorm.length ?? 0;
 
   const dayEntries = (shifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
@@ -294,7 +315,24 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
             onPrev={() => goWeek(-1)}
             onNext={() => goWeek(1)}
           />
-          <DayStrip dates={weekDates} selected={selectedDate} today={today} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          <DayStrip dates={weekDates} selected={selectedDate} today={today} short={shortByDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          {/* Тихой строкой, а не предупреждением: вид без нормы — несделанная
+              настройка, а не дыра в графике. Без неё такой вид выглядел бы на
+              полоске так же, как закрытый. */}
+          {unsetCount > 0 && (
+            <button
+              type="button"
+              data-norm-unset
+              onClick={() => { setNotice(null); setError(null); setSettingsOpen(true); }}
+              style={{
+                display: "block", width: "100%", border: "none", background: "none", cursor: "pointer",
+                padding: "4px 4px 0", textAlign: "left", font: "inherit", fontSize: 12.5,
+                color: "var(--tgui--hint_color)",
+              }}
+            >
+              {`Без нормы: ${unsetCount} ${pluralizeRu(unsetCount, "вид", "вида", "видов")} — задать →`}
+            </button>
+          )}
         </div>
       )}
 
@@ -318,7 +356,15 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
         ) : kindsOpen ? (
           <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
         ) : settingsOpen ? (
-          <AdminKindSettings onClose={() => setSettingsOpen(false)} />
+          <AdminKindSettings
+            onClose={() => {
+              setSettingsOpen(false);
+              // Норму правят там, а считают по ней здесь: без перечитывания
+              // полоска показывала бы нехватку по нормам, какими они были при
+              // открытии экрана. Не сумели — остаются прежние.
+              apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+            }}
+          />
         ) : csvOpen ? (
           <AdminRosterCsv
             employees={employees}
@@ -445,17 +491,24 @@ function WeekBar({ label, backVisible, onBack, onPrev, onNext }: {
   );
 }
 
-function DayStrip({ dates, selected, today, onSelect }: { dates: readonly string[]; selected: string; today: string; onSelect: (iso: string) => void }) {
+function DayStrip({ dates, selected, today, short, onSelect }: {
+  dates: readonly string[];
+  selected: string;
+  today: string;
+  /** Сколько людей не хватает в дне против нормы; дня без нехватки здесь нет. */
+  short: ReadonlyMap<string, number>;
+  onSelect: (iso: string) => void;
+}) {
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
       {dates.map((iso) => (
-        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} onSelect={() => onSelect(iso)} />
+        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} short={short.get(iso) ?? 0} onSelect={() => onSelect(iso)} />
       ))}
     </div>
   );
 }
 
-function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: boolean; isToday: boolean; onSelect: () => void }) {
+function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; active: boolean; isToday: boolean; short: number; onSelect: () => void }) {
   const isDark = useIsDark();
   const weekend = weekdayIndex(iso) >= FRIDAY_INDEX + 1;
   // Невыбранный день — карточкой: холст теперь `secondary_bg_color`, и клетка
@@ -466,8 +519,11 @@ function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: bool
     <button
       type="button"
       onClick={onSelect}
+      data-day-chip
       aria-current={isToday ? "date" : undefined}
+      aria-label={`${weekdayShort(iso)} ${dayOfMonth(iso)}${short > 0 ? `, не хватает ${short}` : ""}`}
       style={{
+        position: "relative",
         flex: 1,
         border: "none",
         borderRadius: 12,
@@ -482,6 +538,25 @@ function DayChip({ iso, active, isToday, onSelect }: { iso: string; active: bool
         boxShadow: active ? (isDark ? "0 0 0 1px rgba(255,255,255,0.06)" : "0 1px 4px rgba(0,0,0,0.12)") : "none",
       }}
     >
+      {/* В углу клетки, а не третьей строкой: высота полоски не меняется от
+          того, есть ли на неделе дыры, и точка «сегодня» остаётся на месте.
+          Обводка цветом клетки отделяет метку от синей заливки выбранного дня. */}
+      {short > 0 && (
+        <span
+          data-day-short
+          aria-hidden="true"
+          style={{
+            position: "absolute", top: -4, right: -2, minWidth: 16, height: 16, padding: "0 4px", boxSizing: "border-box",
+            // Белое на «красном» клиента не дотягивает до 4.5 ни в одной теме
+            // (замер: 4.28 и 4.01), поэтому красный затемнён.
+            borderRadius: 999, background: "color-mix(in srgb, var(--tgui--destructive_text_color) 84%, #000)", color: "#fff",
+            fontSize: 10.5, fontWeight: 700, lineHeight: "16px", textAlign: "center",
+            boxShadow: "0 0 0 2px var(--app-canvas, var(--tgui--secondary_bg_color))",
+          }}
+        >
+          {short}
+        </span>
+      )}
       <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>{weekdayShort(iso)}</span>
       <span style={{ fontSize: 15, fontWeight: 600 }}>{dayOfMonth(iso)}</span>
       {/* «Выбран» and «сегодня» were the same style, so three weeks out you
