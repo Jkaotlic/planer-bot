@@ -1180,17 +1180,97 @@ button {
   font-size: 11px;
 }
 
-/* Нехватка по норме — под датой в шапке колонки дня. Мелким и приглушённым:
-   это подсказка на полях, а не заголовок. */
-.day-shortfall {
-  display: block;
-  font-size: 10px;
-  line-height: 1.2;
+/* Нехватка по норме — метка рядом с днём недели в шапке колонки. Залитая, а
+   не цветной текст: выходные в шапке уже красные буквами, и «−2» тем же
+   приёмом на субботе не читалось бы вовсе. */
+.day-short-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0;
+  vertical-align: 1px;
+  cursor: help;
+}
+
+/* Строка нехватки над сеткой. Без рамки и подложки: это строка текста под
+   поиском, а не ещё одна плашка — плашек с уведомлениями над сеткой уже две. */
+.week-shortfall {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 0 24px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.week-shortfall-total {
+  margin-right: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.week-shortfall-day,
+.week-shortfall-unset {
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 1px 6px;
+  text-align: left;
+}
+
+.week-shortfall-day {
+  color: var(--text);
+}
+
+.week-shortfall-day:hover,
+.week-shortfall-day[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+}
+
+.week-shortfall-unset {
+  margin-left: auto;
   color: var(--hint);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+}
+
+.week-shortfall-unset:hover {
+  color: var(--link);
+}
+
+/* Белое на `--destructive` не дотягивает до 4.5: замер дал 4.28 в светлой теме
+   и 2.79 в тёмной, где красный светлый. Поэтому в светлой красный затемнён, а
+   в тёмной текст метки тёмный. */
+.day-short-badge,
+.week-shortfall-total {
+  background: color-mix(in srgb, var(--destructive) 84%, #000);
+}
+
+@media (prefers-color-scheme: dark) {
+  .day-short-badge,
+  .week-shortfall-total {
+    background: var(--destructive);
+    color: #14181f;
+  }
+}
+
+/* Колонка дня, на который показали из строки нехватки. Обводкой по краям, а
+   не заливкой: заливка уже занята «сегодня» и выходными. */
+.schedule-table .pointed-col {
+  box-shadow: inset 2px 0 0 var(--destructive), inset -2px 0 0 var(--destructive);
 }
 
 .kind-coverage {

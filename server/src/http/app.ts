@@ -1929,6 +1929,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
         // Числами, а не строкой: по норме считают нехватку дня оба фронта, и
         // разбор строки на каждом экране был бы третьей копией правила.
         coverage: parseCoverage(template.coverage),
+        // Сводка недели называет виды без нормы, и вид «все оставшиеся» в неё
+        // попадать не должен: числа у него нет по смыслу, а не по недосмотру.
+        fillMode: template.fillMode,
         ...(roles.get(template.id) ?? { pool: [], preference: {} }),
       })),
     });

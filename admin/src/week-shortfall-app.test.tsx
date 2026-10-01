@@ -1,0 +1,112 @@
+// @vitest-environment jsdom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { apiClient, type TemplateRolesView } from "./api/client";
+import { App } from "./App";
+
+/**
+ * Строка нехватки в «Расписании» консоли — проводка от норм до экрана.
+ *
+ * Сама строка проверена в `week-shortfall-bar.test.tsx`. Здесь — то, что видно
+ * только на собранном экране: она стоит НАД сеткой (под сеткой её пришлось бы
+ * искать прокруткой), клик по дню доходит до колонки, а хвост «без нормы»
+ * действительно уводит в «Виды смен».
+ */
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+afterEach(async () => {
+  if (root) await act(async () => root!.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  vi.restoreAllMocks();
+});
+
+async function settle(times = 20) {
+  for (let i = 0; i < times; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+}
+
+const role = (templateId: number, name: string, coverage: number[]): TemplateRolesView => ({
+  templateId, name, category: "shift", accent: "gold", pool: [], preference: {}, checklistIds: [],
+  sendReminder: false, reminderText: null, coverage,
+});
+
+async function mount(roles: TemplateRolesView[]) {
+  vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue(roles);
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => {
+    root!.render(createElement(App));
+  });
+  await settle();
+  return host;
+}
+
+// Норма, которую мок-график заведомо не закрывает ни в один день.
+const HUGE = role(9001, "Невозможная", [99, 99, 99, 99, 99, 99, 99]);
+
+describe("строка нехватки в «Расписании»", () => {
+  it("стоит над сеткой недели", async () => {
+    const el = await mount([HUGE]);
+    const bar = el.querySelector(".week-shortfall")!;
+    const table = el.querySelector(".schedule-table")!;
+    expect(bar.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(el.querySelectorAll(".day-short-badge")).toHaveLength(7);
+  });
+
+  it("клик по дню выделяет его колонку в сетке", async () => {
+    const el = await mount([HUGE]);
+    expect(el.querySelector("th.pointed-col")).toBeNull();
+    const days = el.querySelectorAll<HTMLButtonElement>(".week-shortfall-day");
+    await act(async () => days[2]!.click());
+    const headers = [...el.querySelectorAll(".schedule-table thead th")];
+    expect(headers.findIndex((th) => th.classList.contains("pointed-col"))).toBe(3);
+  });
+
+  it("выделение не переезжает на другую неделю", async () => {
+    const el = await mount([HUGE]);
+    await act(async () => el.querySelectorAll<HTMLButtonElement>(".week-shortfall-day")[2]!.click());
+    await act(async () => (el.querySelector("[aria-label='Следующая неделя']") as HTMLElement).click());
+    await settle(6);
+    expect(el.querySelector(".pointed-col")).toBeNull();
+    expect(el.querySelector(".week-shortfall-day[aria-pressed='true']")).toBeNull();
+  });
+
+  it("нормы закрыты и заданы всем — строки нет", async () => {
+    const el = await mount([]);
+    expect(el.querySelector(".schedule-table")).not.toBeNull();
+    expect(el.querySelector(".week-shortfall")).toBeNull();
+  });
+
+  it("хвост «без нормы» открывает «Виды смен»", async () => {
+    const el = await mount([role(9002, "Без нормы", [0, 0, 0, 0, 0, 0, 0])]);
+    await act(async () => el.querySelector<HTMLButtonElement>(".week-shortfall-unset")!.click());
+    await settle(4);
+    expect(el.querySelector(".schedule-table")).toBeNull();
+    expect(el.querySelector(".kinds-intro")).not.toBeNull();
+  });
+
+  it("после возврата из «Видов смен» строка считает по свежим нормам", async () => {
+    // Нормы читались один раз при загрузке консоли: хвост вёл в настройку, а
+    // по возвращении продолжал говорить «без нормы» про вид, которому её задали.
+    const el = await mount([role(9002, "Без нормы", [0, 0, 0, 0, 0, 0, 0])]);
+    await act(async () => el.querySelector<HTMLButtonElement>(".week-shortfall-unset")!.click());
+    await settle(4);
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([HUGE]);
+    const back = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent ?? "").trim() === "Расписание")!;
+    await act(async () => back.click());
+    await settle();
+    expect(el.querySelector(".week-shortfall-unset")).toBeNull();
+    expect(el.querySelector(".week-shortfall-total")).not.toBeNull();
+  });
+});

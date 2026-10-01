@@ -219,3 +219,59 @@ export function coverageAdviceText(gaps: readonly DayGap[]): string | null {
     "Если так и задумано — просто пропусти.",
   ].join("\n");
 }
+
+/** Вид смены для сводки недели: к норме добавлено то, по чему видно, нужна ли она. */
+export interface NormTemplate extends CoverageTemplate {
+  category: EntryCategory;
+  fillMode?: "count" | "remainder";
+}
+
+/** День недели, в котором не хватает людей. */
+export interface ShortDay {
+  date: string;
+  missing: MissingKind[];
+  /** Сколько людей не хватает в этом дне по всем видам вместе. */
+  short: number;
+}
+
+export interface WeekShortfall {
+  /** Только дни с нехваткой: закрытая неделя — пустой список, и экран молчит. */
+  days: ShortDay[];
+  /** Людей, а не дней: «не хватает 4» — это сколько ещё надо поставить. */
+  total: number;
+  /** Смены и дежурства без нормы — по ним нехватку посчитать не из чего. */
+  withoutNorm: { templateId: number; name: string }[];
+}
+
+/**
+ * Нехватка недели одним ответом — для метки дня, строки над сеткой и точек на
+ * полоске дней в мини-аппе.
+ *
+ * Отдельно от `scheduleGaps`: тот про вечерний совет и знает «день пуст», а
+ * экрану графика пустой день и так виден. Здесь только счёт против нормы.
+ *
+ * `withoutNorm` существует, потому что нулевая норма молчит: вид, которому её
+ * не задали, выглядит в сетке так же, как закрытый. Нормы ждём только от смен
+ * и дежурств — у отпуска её нет по смыслу, как и у вида «все оставшиеся».
+ */
+export function weekShortfall(
+  entries: readonly CoverageEntry[],
+  templates: readonly NormTemplate[],
+  dates: readonly string[],
+): WeekShortfall {
+  const days: ShortDay[] = [];
+  for (const date of dates) {
+    const missing = missingCoverage(entries, templates, date);
+    if (missing.length === 0) continue;
+    days.push({ date, missing, short: missing.reduce((sum, kind) => sum + kind.need - kind.have, 0) });
+  }
+  const withoutNorm = templates
+    .filter(
+      (template) =>
+        (template.category === "shift" || template.category === "duty") &&
+        template.fillMode !== "remainder" &&
+        template.coverage.every((need) => need === 0),
+    )
+    .map((template) => ({ templateId: template.templateId, name: template.name }));
+  return { days, total: days.reduce((sum, day) => sum + day.short, 0), withoutNorm };
+}

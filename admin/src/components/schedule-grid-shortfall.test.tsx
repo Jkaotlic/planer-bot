@@ -7,7 +7,11 @@ import { EMPTY_CALENDAR } from "@planer/shared";
 import { ScheduleGrid } from "./ScheduleGrid";
 
 /**
- * «−1 Утро» под датой: чего в этом дне не хватает против нормы.
+ * Красная метка «−1» в шапке колонки: сколько людей не хватает в этом дне.
+ *
+ * Числом, а не перечнем видов: перечень в колонке шириной в день обрезался
+ * многоточием и читался серым примечанием. Расклад по видам — во всплывающей
+ * подсказке и в строке над сеткой.
  *
  * Молчание по умолчанию — половина смысла: норма у видов смен нулевая, пока её
  * не задали, и семь колонок с «не хватает» читались бы как поломка сетки.
@@ -43,13 +47,17 @@ function render(props: { shifts?: Shift[]; coverage?: { templateId: number; name
   );
 }
 
+function badges(html: string): string[] {
+  return [...html.matchAll(/<span class="day-short-badge"[^>]*>([^<]*)<\/span>/g)].map((m) => m[1]!);
+}
+
 describe("нехватка по норме в шапке колонки дня", () => {
   it("молчит, когда нормы нет", () => {
-    expect(render()).not.toContain("Утро");
+    expect(badges(render())).toEqual([]);
   });
 
-  it("показывает, сколько людей не хватает в этот день", () => {
-    expect(render({ coverage: [MORNING] })).toContain("−2 Утро");
+  it("показывает отдельной меткой, сколько людей не хватает в этот день", () => {
+    expect(badges(render({ coverage: [MORNING] }))).toEqual(["−2"]);
   });
 
   it("считает уже поставленных", () => {
@@ -57,13 +65,31 @@ describe("нехватка по норме в шапке колонки дня",
       id: 1, date: WEEK[0]!, endDate: null, start: "08:00", end: "17:00", employeeId: 1,
       category: "shift", templateId: 10, title: "Утро", location: null, unrecognisedCode: null,
     }];
-    expect(render({ shifts, coverage: [MORNING] })).toContain("−1 Утро");
+    expect(badges(render({ shifts, coverage: [MORNING] }))).toEqual(["−1"]);
   });
 
-  it("не рисует нехватку в дни с нулевой нормой", () => {
-    // Норма задана только на понедельник — во вторник..воскресенье подсказки нет,
+  it("складывает виды в одно число, а расклад отдаёт подсказке", () => {
+    const duty = { templateId: 20, name: "Дежурство", coverage: [1, 0, 0, 0, 0, 0, 0] };
+    const html = render({ coverage: [MORNING, duty] });
+    expect(badges(html)).toEqual(["−3"]);
+    expect(html).toContain('title="Не хватает: Утро — 2, Дежурство — 1"');
+  });
+
+  it("не рисует метку в дни с нулевой нормой", () => {
+    // Норма задана только на понедельник — во вторник..воскресенье метки нет,
     // иначе один настроенный вид смены засорил бы всю неделю.
-    const html = render({ coverage: [MORNING] });
-    expect(html.split("−2 Утро").length - 1).toBe(1);
+    const html = render({ coverage: [{ ...MORNING, coverage: [2, 0, 3, 0, 0, 0, 0] }] });
+    expect(badges(html)).toEqual(["−2", "−3"]);
+  });
+
+  it("выделяет колонку дня, на который показали из строки над сеткой", () => {
+    const html = renderToStaticMarkup(
+      createElement(ScheduleGrid, {
+        calendar: EMPTY_CALENDAR, employees: EMPLOYEES, shifts: [], templates: TEMPLATES, weekDates: WEEK,
+        onAddClick: () => {}, onEntryClick: () => {}, coverage: [MORNING], today: WEEK[6]!, highlightDate: WEEK[0]!,
+      }),
+    );
+    // Шапка и клетка единственного работника — и ни одной другой колонки.
+    expect(html.split("pointed-col").length - 1).toBe(2);
   });
 });

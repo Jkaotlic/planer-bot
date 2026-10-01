@@ -32,17 +32,24 @@ export interface ScheduleGridProps {
    * тесты, и им нужен свой «сегодня». По умолчанию — день браузера.
    */
   today?: string;
+  /** День, на который показали из строки нехватки над сеткой, — его колонка выделяется. */
+  highlightDate?: string | null;
 }
 
-/** «−2 Утро» под датой: чего в этом дне не хватает против нормы. */
+/**
+ * «−3» в шапке колонки: сколько людей не хватает в этом дне против нормы.
+ *
+ * Одно число, а не «−2 Утро · −1 Дежурство»: перечень в колонке шириной в день
+ * обрезался многоточием, и именно хвост — второй вид — терялся. Расклад по
+ * видам живёт в подсказке и в строке над сеткой (`WeekShortfallBar`).
+ */
 function DayShortfall({ date, shifts, coverage }: { date: string; shifts: Shift[]; coverage: readonly CoverageTemplate[] }) {
   const missing = missingCoverage(shifts, coverage, date);
   const hint = coverageHint(missing);
   if (!hint) return null;
+  const short = missing.reduce((sum, kind) => sum + kind.need - kind.have, 0);
   return (
-    <span className="day-shortfall" title={hint}>
-      {missing.map((kind) => `−${kind.need - kind.have} ${kind.name}`).join(" · ")}
-    </span>
+    <span className="day-short-badge" title={hint} aria-label={hint}>{`−${short}`}</span>
   );
 }
 
@@ -60,7 +67,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()) }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()), highlightDate = null }: ScheduleGridProps) {
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
   const visibleEmployees = filterPeople(employees, query ?? "");
@@ -76,16 +83,18 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
             {weekDates.map((date) => (
               <th
                 key={date}
-                className={[isDayOff(date, calendar) ? "weekend-col" : "", date === today ? "today-col" : ""].filter(Boolean).join(" ") || undefined}
+                className={[isDayOff(date, calendar) ? "weekend-col" : "", date === today ? "today-col" : "", date === highlightDate ? "pointed-col" : ""].filter(Boolean).join(" ") || undefined}
                 aria-current={date === today ? "date" : undefined}
               >
                 <span className="day-col-header">
-                  <span className="dow">{weekdayShort(date)}</span>
+                  {/* Метка рядом с днём недели, а не строкой под датой: шапка
+                      колонки с дырой остаётся той же высоты, что и без неё.
+                      Молчит, пока норма не задана. */}
+                  <span className="dow">
+                    {weekdayShort(date)}
+                    <DayShortfall date={date} shifts={shifts} coverage={coverage} />
+                  </span>
                   <span className="dom">{dayOfMonth(date)}</span>
-                  {/* Подсказка под датой, а не отдельной строкой над сеткой:
-                      она про конкретный день, и в семи колонках её место —
-                      в своей. Молчит, пока норма не задана. */}
-                  <DayShortfall date={date} shifts={shifts} coverage={coverage} />
                 </span>
               </th>
             ))}
@@ -115,6 +124,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
                   entries={entriesFor(shifts, employee.id, date)}
                   weekend={isDayOff(date, calendar)}
                   today={date === today}
+                  pointed={date === highlightDate}
                   onAdd={() => onAddClick(employee.id, date)}
                   onEntryClick={onEntryClick}
                   templates={templates}
@@ -147,6 +157,7 @@ function DayCell({
   entries,
   weekend,
   today,
+  pointed,
   onAdd,
   onEntryClick,
   templates,
@@ -154,12 +165,13 @@ function DayCell({
   entries: Shift[];
   weekend: boolean;
   today: boolean;
+  pointed: boolean;
   onAdd: () => void;
   onEntryClick: (entry: Shift) => void;
   templates: readonly Template[];
 }) {
   return (
-    <td className={`day-cell${weekend ? " weekend-col" : ""}${today ? " today-col" : ""}`}>
+    <td className={`day-cell${weekend ? " weekend-col" : ""}${today ? " today-col" : ""}${pointed ? " pointed-col" : ""}`}>
       <div className="day-cell-inner">
         {entries.length > 0 ? (
           <>
