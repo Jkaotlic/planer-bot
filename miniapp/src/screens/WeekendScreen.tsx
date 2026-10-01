@@ -146,6 +146,7 @@ function OfferCard({ offer, busy, error, onConfirm, onDecline }: { offer: Weeken
           </span>
           <ConfirmButton
             label="Не смогу"
+            compact={false}
             question="Отказаться от этой смены? Передумать потом не получится — админ позовёт другого."
             confirmLabel="Да, не смогу"
             disabled={busy}

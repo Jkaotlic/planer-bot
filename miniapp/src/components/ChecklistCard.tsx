@@ -112,44 +112,44 @@ function ChecklistSection({
 
         {/* Пункты и их ошибка — один блок, чтобы линия карточки не делила их. */}
         <div>
-        <div className="checklist">
-          {state.items.map((item) => {
-            const checked = marked.has(item.id);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`checklist-item${checked ? " checklist-item--done" : ""}`}
-                disabled={busyIds.has(item.id)}
-                aria-pressed={checked}
-                onClick={() => onToggle(item.id, !checked)}
-              >
-                <span className="checklist-item__box" aria-hidden="true">
-                  {busyIds.has(item.id) ? (
-                    <Spinner size="s" />
-                  ) : (
-                    <span className={`checklist-check${checked ? " checklist-check--on" : ""}`}>
-                      {checked && (
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M2.5 6.2 5 8.6 9.5 3.6" />
-                        </svg>
-                      )}
-                    </span>
-                  )}
-                </span>
-                <span className="checklist-item__body">
-                  <span className="checklist-item__title">{item.title}</span>
-                  {/* Пояснение под подписью, а не в скобках за ней: строка
-                      списка должна оставаться строкой, по которой ведут пальцем. */}
-                  {item.note && <span className="checklist-item__note">{item.note}</span>}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {error && (
-          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, padding: "0 16px 12px" }}>{error}</div>
-        )}
+          <div className="checklist">
+            {state.items.map((item) => {
+              const checked = marked.has(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`checklist-item${checked ? " checklist-item--done" : ""}`}
+                  disabled={busyIds.has(item.id)}
+                  aria-pressed={checked}
+                  onClick={() => onToggle(item.id, !checked)}
+                >
+                  <span className="checklist-item__box" aria-hidden="true">
+                    {busyIds.has(item.id) ? (
+                      <Spinner size="s" />
+                    ) : (
+                      <span className={`checklist-check${checked ? " checklist-check--on" : ""}`}>
+                        {checked && (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2.5 6.2 5 8.6 9.5 3.6" />
+                          </svg>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                  <span className="checklist-item__body">
+                    <span className="checklist-item__title">{item.title}</span>
+                    {/* Пояснение под подписью, а не в скобках за ней: строка
+                        списка должна оставаться строкой, по которой ведут пальцем. */}
+                    {item.note && <span className="checklist-item__note">{item.note}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {error && (
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, padding: "0 16px 12px" }}>{error}</div>
+          )}
         </div>
       </Card>
     </Group>

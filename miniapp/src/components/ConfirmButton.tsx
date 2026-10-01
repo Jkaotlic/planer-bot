@@ -17,6 +17,7 @@ export function ConfirmButton({
   onConfirm,
   disabled,
   loading,
+  compact = true,
   mode: _mode,
 }: {
   label: string;
@@ -26,13 +27,15 @@ export function ConfirmButton({
   onConfirm: () => void;
   disabled?: boolean;
   loading?: boolean;
+  /** Низкая кнопка (36px) для строк; на карточке рядом с обычной кнопкой — `false`, иначе высоты разные. */
+  compact?: boolean;
   /** Оставлен ради вызовов из вкладки «Админ»; на вид больше не влияет — необратимое действие всегда обычная кнопка с переспросом. */
   mode?: "gray" | "bezeled" | "plain" | "outline";
 }) {
   const [armed, setArmed] = useState(false);
   if (!armed) {
     return (
-      <ActionButton compact loading={loading} disabled={disabled} onClick={() => setArmed(true)}>
+      <ActionButton compact={compact} loading={loading} disabled={disabled} onClick={() => setArmed(true)}>
         {label}
       </ActionButton>
     );
@@ -43,7 +46,7 @@ export function ConfirmButton({
       {/* Не `primary`: на карточке уже есть главное действие («Беру»), а подтверждённый
           отказ не должен красться в его цвет и делать две «главные» кнопки. */}
       <ActionButton
-        compact
+        compact={compact}
         disabled={disabled}
         onClick={() => {
           setArmed(false);
@@ -52,7 +55,7 @@ export function ConfirmButton({
       >
         {confirmLabel}
       </ActionButton>
-      <ActionButton compact kind="quiet" onClick={() => setArmed(false)}>
+      <ActionButton compact={compact} kind="quiet" onClick={() => setArmed(false)}>
         Отмена
       </ActionButton>
     </span>

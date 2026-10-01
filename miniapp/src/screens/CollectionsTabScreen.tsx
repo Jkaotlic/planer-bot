@@ -31,12 +31,21 @@ export function CollectionsTabScreen({ isAdmin, today, onPaidChanged }: Collecti
   // Заголовок «Сборы» один на обе роли: у админа экран раньше начинался сразу
   // с карточек, и вкладка выглядела безымянной.
   if (isAdmin) {
+    // Не `Screen`: `AdminCollections` приносит свой `ScreenScroll` с боковым
+    // отступом и резервом под таб-бар, и в обёртке они удваивались. Пока
+    // админские вкладки не переделаны, заголовок рисуем тем же классом, а поля
+    // и низ оставляем самому экрану.
     return (
-      <Screen title="Сборы">
+      <>
+        <div style={{ padding: "16px var(--app-gutter) 0" }}>
+          <header className="ui-screen__header">
+            <h1 className="ui-screen__title">Сборы</h1>
+          </header>
+        </div>
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю сборы…</div>}>
           <AdminCollections today={today} />
         </Suspense>
-      </Screen>
+      </>
     );
   }
 

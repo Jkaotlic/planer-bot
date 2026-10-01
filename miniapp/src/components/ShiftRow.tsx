@@ -34,6 +34,7 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
     // весь блок, который перехватывал нажатия по «Обменять» (см. `SwapChip`).
     <div
       data-testid="shift-row"
+      className="shift-row"
       role={openable ? "button" : undefined}
       tabIndex={openable ? 0 : undefined}
       onClick={openable ? () => onOpen(shift) : undefined}

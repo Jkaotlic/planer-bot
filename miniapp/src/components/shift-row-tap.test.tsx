@@ -76,4 +76,25 @@ describe("строка смены: два разных нажатия", () => {
     await act(async () => swap.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  it("пробел на строке раскрывает её", async () => {
+    const onOpen = vi.fn();
+    const el = await renderRow({ onOpen });
+    const row = el.querySelector('[data-testid="shift-row"]') as HTMLElement;
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("пробел на «Обменять» не раскрывает строку заодно", async () => {
+    const onOpen = vi.fn();
+    const el = await renderRow({ onSwap: vi.fn(), onOpen });
+    const swap = [...el.querySelectorAll("button")].find((b) => b.textContent === "Обменять")!;
+    await act(async () => swap.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })));
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("раскрываемая строка несёт класс с видимой рамкой фокуса", async () => {
+    const el = await renderRow({ onOpen: vi.fn() });
+    expect(el.querySelector('[data-testid="shift-row"]')!.classList.contains("shift-row")).toBe(true);
+  });
 });
