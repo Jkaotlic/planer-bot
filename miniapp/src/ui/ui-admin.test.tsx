@@ -222,6 +222,11 @@ describe("ui.css: что нельзя потерять", () => {
     expect(rule(".ui-page")).toContain(core);
   });
 
+  it("сегменты внутри TapHeight не ниже 44px: и обёртка выше, и кнопка с min-height", () => {
+    expect(rule(".ui-tap-height")).toMatch(/height:\s*calc\(var\(--app-tap\)\s*\+\s*4px\)/);
+    expect(rule(".ui-tap-height button")).toContain("min-height: var(--app-tap)");
+  });
+
   it("danger красит текст токеном destructive_text_color", () => {
     expect(rule(".ui-btn--danger")).toContain("--tgui--destructive_text_color");
   });

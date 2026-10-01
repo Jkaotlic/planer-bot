@@ -113,3 +113,21 @@ describe("настройки — праздники", () => {
     expect(text).toContain("2027: ещё не опубликован");
   });
 });
+
+describe("настройки — зоны нажатия", () => {
+  it("тумблер сидит внутри label всей строки, а не только своих 32px", async () => {
+    const el = await mount();
+    const input = el.querySelector('input[aria-label="Брать праздники из календаря"]') as HTMLInputElement;
+    // Нажимается вся строка: подпись лежит в том же label, что и тумблер.
+    // У `Switch` свой внутренний label на 32px; нужен самый внешний — строка.
+    let outer: HTMLElement | null = null;
+    for (let n = input.closest("label"); n; n = n.parentElement?.closest("label") ?? null) outer = n;
+    expect(outer!.textContent).toContain("Брать праздники из календаря");
+  });
+
+  it("поле часа не ниже нажимаемого", async () => {
+    const el = await mount();
+    const time = el.querySelector('input[type="time"]') as HTMLInputElement;
+    expect(time.style.minHeight).toBe("var(--app-tap)");
+  });
+});

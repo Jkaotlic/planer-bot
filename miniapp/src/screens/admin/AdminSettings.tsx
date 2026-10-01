@@ -191,7 +191,7 @@ export function AdminSettings() {
                 setHourSaved(false);
               }}
               style={{
-                padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
+                minHeight: "var(--app-tap)", boxSizing: "border-box", padding: "8px 12px", borderRadius: "var(--app-radius-control)", border: "1px solid var(--tgui--outline)",
                 background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
               }}
             />
@@ -229,6 +229,7 @@ export function AdminSettings() {
       <>
         <Card flush>
           <Cell
+            Component="label"
             after={
               <Switch
                 checked={settings.holidaysAuto}
@@ -310,6 +311,7 @@ export function AdminSettings() {
             его можно исключительно через кнопки ниже (с подтверждением). */}
         <Card flush>
           <Cell
+            Component="label"
             after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
             description={whoLabel}
           >
