@@ -91,6 +91,13 @@ export function App() {
   const [templates, setTemplates] = useState<Template[] | null>(null);
   /** Нормы дня по видам смен — из них сетка рисует «чего в дне не хватает». */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
+  /**
+   * Понедельник недели, к которой относятся `shifts`. При листании записи прежней
+   * недели стоят в состоянии до ответа сервера; посчитанные против дат новой,
+   * они дают «никого нет», и закрытая неделя на время запроса открывалась бы
+   * красной. Нехватку считаем только по записям показанной недели.
+   */
+  const [shiftsFrom, setShiftsFrom] = useState<string | null>(null);
   /** День, на который показали из строки нехватки, — его колонка выделена в сетке. */
   const [pointedDate, setPointedDate] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
@@ -122,6 +129,7 @@ export function App() {
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
   // даты нет, и «нажатый» день в строке указывал бы в никуда.
+  const shortfallReady = shiftsFrom === weekDates[0];
   const pointedInWeek = pointedDate && weekDates.includes(pointedDate) ? pointedDate : null;
   const weekLabel = formatWeekRangeLabel(weekMonday, addDays(weekMonday, 6));
 
@@ -242,6 +250,7 @@ export function App() {
       const [s, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
       if (!cancelled()) {
         setShifts(s);
+        setShiftsFrom(from);
         setCalendarDays(calendar);
       }
     } catch (err) {
@@ -257,6 +266,7 @@ export function App() {
     const to = weekDates[6]!;
     const [next, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
     setShifts(next);
+    setShiftsFrom(from);
     setCalendarDays(calendar);
   }
 
@@ -527,14 +537,14 @@ export function App() {
               <>
               {/* Над сеткой, а не в правой колонке: ниже 1600px колонка уезжает
                   под сетку, и нехватку пришлось бы искать прокруткой. */}
-              <WeekShortfallBar
+              {shortfallReady && <WeekShortfallBar
                 shifts={shifts}
                 templates={templateRoles}
                 weekDates={weekDates}
                 pointedDate={pointedInWeek}
                 onPointDay={setPointedDate}
                 onOpenKinds={() => setNav("kinds")}
-              />
+              />}
               <div className="schedule-layout">
                 <ScheduleGrid
                   highlightDate={pointedInWeek}
@@ -545,7 +555,7 @@ export function App() {
                   onAddClick={openAddPanel}
                   onEntryClick={setEditingEntry}
                   query={scheduleQuery}
-                  coverage={templateRoles}
+                  coverage={shortfallReady ? templateRoles : []}
                   calendar={dayCalendar}
                 />
                 <aside className="right-rail">

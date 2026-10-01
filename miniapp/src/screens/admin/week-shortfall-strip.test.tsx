@@ -109,4 +109,47 @@ describe("нехватка на полоске дней недели", () => {
     expect(el.querySelector("[data-norm-unset]")).toBeNull();
     expect(marks(el)[0]).toBe("1");
   });
+
+  const mondayEntry = (date: string) => ({
+    id: 1, date, endDate: null, start: "08:00", end: "17:00", employeeId: 1, employeeName: "Аня",
+    category: "shift", templateId: 10, title: "Вид 10", location: null, unrecognisedCode: null,
+  });
+
+  it("норма задана и закрыта записями — ни метки, ни строки", async () => {
+    const el = await mount([kind(10, [1, 0, 0, 0, 0, 0, 0])]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [mondayEntry("2026-08-24")], employees: [], calendar: [] } as never);
+    await act(async () => el.querySelector<HTMLElement>("[aria-label='Следующая неделя']")!.click());
+    await settle();
+    await act(async () => el.querySelector<HTMLElement>("[aria-label='Прошлая неделя']")!.click());
+    await settle();
+    expect(marks(el)).toEqual([null, null, null, null, null, null, null]);
+    expect(el.querySelector("[data-norm-unset]")).toBeNull();
+  });
+
+  it("пока расписание не пришло, меток нет: пустой ответ ещё не «никто не вышел»", async () => {
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([kind(10, [1, 1, 1, 1, 1, 1, 1])]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockReturnValue(new Promise(() => {}));
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY })));
+    });
+    await settle();
+    expect(chips(host)).toHaveLength(7);
+    expect(marks(host)).toEqual([null, null, null, null, null, null, null]);
+  });
+
+  it("при листании не считает новую неделю по записям прежней", async () => {
+    // Записи прежней недели остаются в состоянии до ответа сервера. Посчитанные
+    // против дат новой, они дали бы «никого нет» — и закрытая неделя на время
+    // запроса открывалась бы красной.
+    const el = await mount([kind(10, [1, 0, 0, 0, 0, 0, 0])]);
+    expect(marks(el)[0]).toBe("1");
+    vi.spyOn(apiClient, "getTeamSchedule").mockReturnValue(new Promise(() => {}));
+    await act(async () => el.querySelector<HTMLElement>("[aria-label='Следующая неделя']")!.click());
+    await settle();
+    expect(marks(el)).toEqual([null, null, null, null, null, null, null]);
+    expect(el.textContent ?? "").not.toContain("Не хватает");
+  });
 });

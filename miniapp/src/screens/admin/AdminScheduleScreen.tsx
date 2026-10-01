@@ -102,6 +102,13 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(parseISODate(initialDate ?? today)));
   const [selectedDate, setSelectedDate] = useState<string>(() => initialDate ?? today);
   const [shifts, setShifts] = useState<Shift[] | null>(null);
+  /**
+   * Понедельник недели, к которой относятся `shifts`. При листании записи прежней
+   * недели остаются в состоянии до ответа сервера; посчитанные против дат новой,
+   * они дают «никого нет», и закрытая неделя на время запроса открывалась бы
+   * красной. Нехватка считается только по записям показанной недели.
+   */
+  const [shiftsFrom, setShiftsFrom] = useState<string | null>(null);
   // Праздники и рабочие субботы недели — из того же ответа, что и расписание.
   const [calendar, setCalendar] = useState<TeamSchedule["calendar"]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -155,6 +162,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
       const schedule = await apiClient.getTeamSchedule(fromIso, toIso);
       if (gate.current.isLatest(id)) {
         setShifts(schedule.shifts);
+        setShiftsFrom(fromIso);
         setCalendar(schedule.calendar);
       }
     } catch (err) {
@@ -199,6 +207,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
       .then((schedule) => {
         if (cancelled || !gate.current.isLatest(id)) return;
         setShifts(schedule.shifts);
+        setShiftsFrom(from);
         // Календарь берётся из того же ответа, что и записи: иначе неделя,
         // прочитанная этим путём, красилась бы по календарю прежней.
         setCalendar(schedule.calendar);
@@ -253,14 +262,16 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
     }
   }
 
-  // Считается по видимой неделе: `shifts` — её расписание, `selectedDate` — день.
-  const dayHint = coverageHint(missingCoverage(shifts ?? [], templateRoles, selectedDate));
+  const weekShifts = shifts && shiftsFrom === from ? shifts : null;
+  // Только по записям показанной недели; пока их нет — подсказка молчит, а не
+  // объявляет нехватку по пустому списку.
+  const dayHint = weekShifts ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate)) : null;
 
-  // Пока неделя грузится, меток нет: пустой `shifts` на секунду покрасил бы
-  // все семь дней красным, и закрытая неделя открывалась бы тревогой.
+  // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
+  // семь дней красным, и закрытая неделя открывалась бы тревогой.
   const week = useMemo(
-    () => (shifts ? weekShortfall(shifts, templateRoles, weekDates) : null),
-    [shifts, templateRoles, weekDates],
+    () => (weekShifts ? weekShortfall(weekShifts, templateRoles, weekDates) : null),
+    [weekShifts, templateRoles, weekDates],
   );
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
   const unsetCount = week?.withoutNorm.length ?? 0;

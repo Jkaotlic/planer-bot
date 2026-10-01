@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient, type TemplateRolesView } from "./api/client";
 import { App } from "./App";
+import { addDays, mondayOf, toISODate } from "./lib/week";
 
 /**
  * Строка нехватки в «Расписании» консоли — проводка от норм до экрана.
@@ -82,7 +83,28 @@ describe("строка нехватки в «Расписании»", () => {
     expect(el.querySelector(".week-shortfall-day[aria-pressed='true']")).toBeNull();
   });
 
-  it("нормы закрыты и заданы всем — строки нет", async () => {
+  it("норма задана и закрыта записями — ни строки, ни меток", async () => {
+    const week = Array.from({ length: 7 }, (_, i) => toISODate(addDays(mondayOf(new Date()), i)));
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue(week.map((date, i) => ({
+      id: 100 + i, date, endDate: null, start: "08:00", end: "17:00", employeeId: 1,
+      category: "shift", templateId: 9003, title: "Закрытая", location: null, unrecognisedCode: null,
+    })));
+    const el = await mount([role(9003, "Закрытая", [1, 1, 1, 1, 1, 1, 1])]);
+    expect(el.querySelector(".schedule-table")).not.toBeNull();
+    expect(el.querySelector(".week-shortfall")).toBeNull();
+    expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
+  });
+
+  it("при листании не считает новую неделю по записям прежней", async () => {
+    const el = await mount([HUGE]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockReturnValue(new Promise(() => {}));
+    await act(async () => (el.querySelector("[aria-label='Следующая неделя']") as HTMLElement).click());
+    await settle(6);
+    expect(el.querySelector(".week-shortfall")).toBeNull();
+    expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
+  });
+
+  it("видов смен нет вовсе — строки нет", async () => {
     const el = await mount([]);
     expect(el.querySelector(".schedule-table")).not.toBeNull();
     expect(el.querySelector(".week-shortfall")).toBeNull();
