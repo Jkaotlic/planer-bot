@@ -27,7 +27,7 @@ export function Screen({
   return (
     <div className={`ui-screen${onBack ? " ui-screen--overlay" : ""}`}>
       {onBack && <BackLink onBack={onBack} />}
-      {(title || action) && (
+      {(title || subtitle || action) && (
         <header className="ui-screen__header">
           <div className="ui-screen__titles">
             {title && <h1 className="ui-screen__title">{title}</h1>}

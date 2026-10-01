@@ -49,6 +49,29 @@ describe("Screen", () => {
   });
 });
 
+describe("Screen: шапка и оверлей", () => {
+  it("action стоит внутри шапки", async () => {
+    const el = await render(
+      createElement(Screen, { title: "Т", action: createElement("button", { id: "act" }, "+"), children: null }),
+    );
+    expect(el.querySelector("header #act")).not.toBeNull();
+  });
+
+  it("подзаголовок без заголовка не пропадает", async () => {
+    const el = await render(createElement(Screen, { subtitle: "Только подпись", children: null }));
+    expect(el.querySelector("header")!.textContent).toContain("Только подпись");
+  });
+
+  it("onBack делает экран оверлеем, без него класса нет", async () => {
+    const plain = await render(createElement(Screen, { title: "А", children: null }));
+    expect(plain.querySelector(".ui-screen")!.className).not.toContain("ui-screen--overlay");
+    await act(async () => root!.unmount());
+    host!.remove();
+    const el = await render(createElement(Screen, { title: "А", onBack: () => {}, children: null }));
+    expect(el.querySelector(".ui-screen")!.className).toContain("ui-screen--overlay");
+  });
+});
+
 describe("Group", () => {
   it("подпись раздела — h2, стоит перед содержимым", async () => {
     const el = await render(createElement(Group, { header: "Входящие", children: createElement("p", null, "карточка") }));
@@ -88,10 +111,27 @@ describe("ActionButton", () => {
     expect(btn.textContent).toContain("Беру");
   });
 
-  it("подпись не обрезается: у кнопки нет nowrap-обёртки h6 из telegram-ui", async () => {
+  it("без loading подпись — ровно children, без спиннера", async () => {
     const el = await render(createElement(ActionButton, { children: "Не смогу" }));
-    expect(el.querySelector("h6")).toBeNull();
     expect(el.querySelector("button")!.textContent).toBe("Не смогу");
+    expect(el.querySelector(".ui-btn__spinner")).toBeNull();
+  });
+
+  it("compact и stretched добавляют свои классы, без них классов нет", async () => {
+    const el = await render(
+      createElement("div", null,
+        createElement(ActionButton, { compact: true, children: "А" }),
+        createElement(ActionButton, { stretched: true, children: "Б" }),
+        createElement(ActionButton, { children: "В" }),
+      ),
+    );
+    const [a, b, c] = [...el.querySelectorAll("button")];
+    expect(a.className).toContain("ui-btn--compact");
+    expect(a.className).not.toContain("ui-btn--stretched");
+    expect(b.className).toContain("ui-btn--stretched");
+    expect(b.className).not.toContain("ui-btn--compact");
+    expect(c.className).not.toContain("ui-btn--compact");
+    expect(c.className).not.toContain("ui-btn--stretched");
   });
 });
 
@@ -106,6 +146,11 @@ describe("StatusPill / Card / Hint", () => {
   it("flush-карточка помечена классом — строки внутри идут от края до края", async () => {
     const el = await render(createElement(Card, { flush: true, children: "x" }));
     expect(el.querySelector(".ui-card")!.className).toContain("ui-card--flush");
+  });
+
+  it("обычная карточка не flush", async () => {
+    const el = await render(createElement(Card, { children: "x" }));
+    expect(el.querySelector(".ui-card")!.className).not.toContain("ui-card--flush");
   });
 
   it("Hint — абзац с классом ui-hint", async () => {
