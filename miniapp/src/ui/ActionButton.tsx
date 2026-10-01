@@ -11,6 +11,10 @@ export interface ActionButtonProps {
   disabled?: boolean;
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   "aria-label"?: string;
+  /** Выбран ли вариант в ряду фишек; для остальных кнопок не задаётся. */
+  "aria-pressed"?: boolean;
+  /** Ссылка вместо действия: тот же вид, но `<a>` — так iOS откроет `webcal://`. */
+  href?: string;
   children: ReactNode;
 }
 
@@ -27,11 +31,32 @@ export function ActionButton({
   disabled,
   onClick,
   "aria-label": ariaLabel,
+  "aria-pressed": ariaPressed,
+  href,
   children,
 }: ActionButtonProps) {
   const classes = ["ui-btn", `ui-btn--${kind}`];
   if (compact) classes.push("ui-btn--compact");
   if (stretched) classes.push("ui-btn--stretched");
+  const inner = (
+    <>
+      {loading && (
+        <span className="ui-btn__spinner" aria-hidden="true">
+          <Spinner size="s" />
+        </span>
+      )}
+      {children}
+    </>
+  );
+  // У ссылки нет нативного `disabled`: гасить её нечем, поэтому `href` только
+  // для кнопок, которые не бывают занятыми (см. «Добавить в календарь»).
+  if (href !== undefined) {
+    return (
+      <a className={classes.join(" ")} href={href} aria-label={ariaLabel}>
+        {inner}
+      </a>
+    );
+  }
   return (
     <button
       type="button"
@@ -39,14 +64,10 @@ export function ActionButton({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
       onClick={onClick}
     >
-      {loading && (
-        <span className="ui-btn__spinner" aria-hidden="true">
-          <Spinner size="s" />
-        </span>
-      )}
-      {children}
+      {inner}
     </button>
   );
 }

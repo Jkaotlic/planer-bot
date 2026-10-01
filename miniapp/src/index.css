@@ -272,11 +272,20 @@ textarea {
    Селект стоит своей строкой под пояснением: в слоте `after` у ячейки он
    сжимался до собственных отступов, и выбранный экран не отображался вовсе. */
 .start-tab-picker {
-  padding: 0 20px 12px;
+  /* 4 + собственные 20 у `Select` = 24px, левый край текста `Cell`. */
+  padding: 0 4px 12px;
 }
 
 .start-tab-picker select {
   width: 100%;
+}
+
+/* Раскрываемая строка смены берёт фокус с клавиатуры (`tabIndex=0`), но
+   у `div[role=button]` браузер рисует его по-разному, а `Card flush` с
+   `overflow: hidden` обрезал бы внешнюю обводку — поэтому она внутри строки. */
+.shift-row:focus-visible {
+  outline: 2px solid var(--tgui--link_color);
+  outline-offset: -2px;
 }
 
 /* Кнопка группы адресатов. Название группы — до 40 символов, и telegram-ui по

@@ -135,6 +135,30 @@ describe("ActionButton", () => {
   });
 });
 
+describe("ActionButton: href и aria-pressed", () => {
+  it("с href — ссылка с тем же видом, без button", async () => {
+    const el = await render(createElement(ActionButton, { kind: "primary", href: "webcal://x.example.com/a.ics", children: "Добавить" }));
+    const a = el.querySelector("a")!;
+    expect(a.getAttribute("href")).toBe("webcal://x.example.com/a.ics");
+    expect(a.className).toContain("ui-btn--primary");
+    expect(el.querySelector("button")).toBeNull();
+  });
+
+  it("aria-pressed доходит до кнопки; без него атрибута нет", async () => {
+    const el = await render(
+      createElement("div", null,
+        createElement(ActionButton, { "aria-pressed": true, children: "А" }),
+        createElement(ActionButton, { "aria-pressed": false, children: "Б" }),
+        createElement(ActionButton, { children: "В" }),
+      ),
+    );
+    const [a, b, c] = [...el.querySelectorAll("button")];
+    expect(a.getAttribute("aria-pressed")).toBe("true");
+    expect(b.getAttribute("aria-pressed")).toBe("false");
+    expect(c.hasAttribute("aria-pressed")).toBe(false);
+  });
+});
+
 describe("StatusPill / Card / Hint", () => {
   it("тон пилюли — в классе, текст — внутри", async () => {
     const el = await render(createElement(StatusPill, { tone: "need", children: "Нужен ответ" }));

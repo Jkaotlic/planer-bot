@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@telegram-apps/telegram-ui";
 import { filterPeople } from "@planer/shared";
 import { apiClient, type AudienceCandidate, type RecipientGroupView, type TeamAudience } from "../api/client";
+import { ActionButton } from "../ui";
 import { PersonSearch } from "./PersonSearch";
 
 type Mode = TeamAudience["kind"];
@@ -89,16 +89,17 @@ export function AudiencePicker({ value, onChange, disabled }: {
       {/* Ряд кнопок, а не `SegmentedControl`: тот делит ширину на три равные
           части и режет «На смене» троеточием уже на 360px (замер 2026-09-29,
           110 > 108) — тот же изъян, что увёл подборки анонса в свой ряд
-          (`AdminAnnounce.tsx:186-187`). Кнопка по содержимому не режется. */}
+          (`AdminAnnounce.tsx:186-187`). Кнопка по содержимому не режется; выбранная — с
+          `aria-pressed`: тон на тёмной теме едва заметен, и состояние дублирует рамка. */}
       <div style={{ display: "flex", gap: 6 }}>
-        <Button size="s" mode={value.kind === "on_shift" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("on_shift")}>На смене</Button>
-        <Button size="s" mode={value.kind === "team" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("team")}>Все</Button>
-        <Button size="s" mode={value.kind === "picked" ? "filled" : "bezeled"} disabled={disabled} onClick={() => setMode("picked")}>Выбрать</Button>
+        <ActionButton compact kind={value.kind === "on_shift" ? "secondary" : "quiet"} aria-pressed={value.kind === "on_shift"} disabled={disabled} onClick={() => setMode("on_shift")}>На смене</ActionButton>
+        <ActionButton compact kind={value.kind === "team" ? "secondary" : "quiet"} aria-pressed={value.kind === "team"} disabled={disabled} onClick={() => setMode("team")}>Все</ActionButton>
+        <ActionButton compact kind={value.kind === "picked" ? "secondary" : "quiet"} aria-pressed={value.kind === "picked"} disabled={disabled} onClick={() => setMode("picked")}>Выбрать</ActionButton>
       </div>
       {groups.length > 0 && (
         <div data-testid="group-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {groups.map((g) => (
-            <Button key={g.id} className="group-chip" size="s" mode={value.kind === "picked" && groupId === g.id ? "filled" : "bezeled"} disabled={disabled} onClick={() => pickGroup(g)}>{g.name}</Button>
+            <ActionButton key={g.id} compact kind={value.kind === "picked" && groupId === g.id ? "secondary" : "quiet"} aria-pressed={value.kind === "picked" && groupId === g.id} disabled={disabled} onClick={() => pickGroup(g)}>{g.name}</ActionButton>
           ))}
         </div>
       )}

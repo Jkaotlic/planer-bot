@@ -105,7 +105,8 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
     <ScreenScroll>
       <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
       <h1 className="ui-screen__title">🍱 {order.placeName ?? "Заказ без меню"}</h1>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
+      {/* Нижний отступ: `ScreenScroll` не ставит зазор между детьми, и строка статуса липла к первой карточке. */}
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", marginBottom: 8 }}>
         Собирает {order.creatorName} · {status} · ответили {order.respondedCount} из {order.recipientCount}
       </div>
       {/* Наверху, а не под кнопками управления: отказ тапа по блюду меню

@@ -49,7 +49,7 @@ export function RemindersSwitch({ enabled, onChanged }: { enabled: boolean; onCh
         Напоминания о сменах
       </Cell>
       {error && (
-        <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
+        <div style={{ padding: "0 24px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
       )}
     </>
   );

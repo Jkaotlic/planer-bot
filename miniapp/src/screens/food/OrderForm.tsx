@@ -3,7 +3,7 @@ import { Input, Textarea } from "@telegram-apps/telegram-ui";
 import { formatMoney } from "@planer/shared";
 import { apiClient, type PlaceView, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
-import { ActionButton } from "../../ui";
+import { ActionButton, Card } from "../../ui";
 
 /**
  * Новый заказ еды. «На смене» по умолчанию — та же причина, что у опроса
@@ -86,9 +86,9 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
         {/* Выбранное место — тонированная кнопка, остальные — без фона: `primary`
             здесь один и принадлежит «Разослать», иначе в форме две главные кнопки. */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 6 }}>
-          <ActionButton compact kind={placeId === null ? "secondary" : "quiet"} disabled={busy} onClick={() => setPlaceId(null)}>Без меню</ActionButton>
+          <ActionButton compact kind={placeId === null ? "secondary" : "quiet"} aria-pressed={placeId === null} disabled={busy} onClick={() => setPlaceId(null)}>Без меню</ActionButton>
           {places.map((p) => (
-            <ActionButton key={p.id} compact kind={placeId === p.id ? "secondary" : "quiet"} disabled={busy} onClick={() => setPlaceId(p.id)}>{p.name}</ActionButton>
+            <ActionButton key={p.id} compact kind={placeId === p.id ? "secondary" : "quiet"} aria-pressed={placeId === p.id} disabled={busy} onClick={() => setPlaceId(p.id)}>{p.name}</ActionButton>
           ))}
         </div>
         {placesLoaded && places.length === 0 && (
@@ -106,9 +106,13 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
           </div>
         )}
       </div>
-      <Textarea header="Комментарий (необязательно)" value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
-      <Input header="Куда сдавать (необязательно)" name="pay-hint" value={payHint} onChange={(e) => setPayHint(e.target.value)} disabled={busy} />
-      <Input header="Приём до (необязательно)" type="time" value={closesTime} onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
+      {/* Поля `Input`/`Textarea` красят свой фон прямоугольником без скругления;
+          в карточке он сливается с её цветом, и форма — одного вида с остальными. */}
+      <Card>
+        <Textarea header="Комментарий (необязательно)" value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
+        <Input header="Куда сдавать (необязательно)" name="pay-hint" value={payHint} onChange={(e) => setPayHint(e.target.value)} disabled={busy} />
+        <Input header="Приём до (необязательно)" type="time" value={closesTime} onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
+      </Card>
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>

@@ -61,7 +61,8 @@ export function SettingsScreen({
 
       <Group header="Календарь">
         <Card flush>
-          <div>
+          {/* Верхний отступ: `Card flush` без поля, а первая кнопка раздела иначе липнет к краю. */}
+          <div style={{ paddingTop: 10 }}>
             <CalendarSection />
           </div>
         </Card>

@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@telegram-apps/telegram-ui";
 import { apiClient } from "../api/client";
+import { ActionButton } from "../ui";
 
 /** `https://…` → `webcal://…` — так ссылка открывает подписку в приложении
  *  календаря, а не просто грузится как страница. */
@@ -9,14 +9,14 @@ function toWebcal(url: string): string {
   return url.replace(/^https?:\/\//, "webcal://");
 }
 
-// Тот же ряд, что у «Записать себе» чуть выше на этом экране (см. ROW-комментарий
-// в описании компонента) — общая ширина без урезки шрифтом, а не Cell.
-const ROW: CSSProperties = { display: "flex", gap: 8, padding: "4px 12px 12px" };
-const HINT: CSSProperties = { padding: "0 12px 12px", color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 };
-const ERROR: CSSProperties = { padding: "0 12px 12px", color: "var(--tgui--destructive_text_color)", fontSize: 13 };
+// Плоский ряд кнопок, а не Cell — общая ширина без урезки шрифтом. Боковой
+// отступ 24px — как у `Cell` из telegram-ui: у всех четырёх блоков «Настроек» один левый край.
+const ROW: CSSProperties = { display: "flex", gap: 8, padding: "4px 24px 12px" };
+const HINT: CSSProperties = { padding: "0 24px 12px", color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 };
+const ERROR: CSSProperties = { padding: "0 24px 12px", color: "var(--tgui--destructive_text_color)", fontSize: 13 };
 
 /**
- * «Календарь» на «Мои смены»: личная ICS-подписка на свои смены.
+ * «Календарь» на экране «Настройки»: личная ICS-подписка на свои смены.
  *
  * Плоские `<div>` с флексом, а не `Cell`: `Cell`/`Tappable` красит hover и
  * press собственным CSS-классом независимо от `readOnly` — тот гасит только
@@ -25,9 +25,8 @@ const ERROR: CSSProperties = { padding: "0 12px 12px", color: "var(--tgui--destr
  * большой нажимаемой строкой с серой заливкой поверх самих кнопок — то, что
  * в замере на 390px казалось «фоном скриншота», было именно этой подсветкой,
  * застрявшей от курсора headless-браузера. Тот же приём без `Cell`, что и у
- * «Записать себе» чуть выше (`MyShiftsScreen.tsx`): кнопки — прямые дети
- * `<Section>` в собственном `<div style={{display:"flex", gap:8, padding:
- * "4px 12px 12px"}}>`, без обёртки, которая давала бы кнопке шрифт-урезанную
+ * «Записать себе» на «Сменах»: кнопки лежат в собственном
+ * `<div style={{display:"flex", gap:8}}>`, без обёртки, которая давала бы кнопке шрифт-урезанную
  * ширину заголовка `Cell` (то самое «Добавить в календ…» из первой версии).
  *
  * Состояние грузится при открытии раздела своим запросом, а не приезжает с
@@ -132,9 +131,9 @@ export function CalendarSection() {
       <>
         <div style={ERROR}>{loadError}</div>
         <div style={ROW}>
-          <Button size="m" stretched mode="bezeled" onClick={load}>
+          <ActionButton stretched onClick={load}>
             Повторить
-          </Button>
+          </ActionButton>
         </div>
       </>
     );
@@ -148,9 +147,9 @@ export function CalendarSection() {
     return (
       <>
         <div style={ROW}>
-          <Button size="m" stretched mode="filled" disabled={busy} onClick={() => void connect()}>
+          <ActionButton kind="primary" stretched disabled={busy} onClick={() => void connect()}>
             {busy ? "Подключаю…" : "Подключить"}
-          </Button>
+          </ActionButton>
         </div>
         <div style={HINT}>Личная ссылка на свои смены — календарь телефона сам подтянет изменения графика.</div>
         {actionError && <div style={ERROR}>{actionError}</div>}
@@ -165,22 +164,22 @@ export function CalendarSection() {
           в календарь» + «Скопировать ссылку» вместе не помещаются, даже вне
           Cell) — те же самые полтора слова, обрезанные по-другому. */}
       <div style={ROW}>
-        <Button size="m" stretched mode="filled" Component="a" href={toWebcal(link)}>
+        <ActionButton kind="primary" stretched href={toWebcal(link)}>
           Добавить в календарь
-        </Button>
+        </ActionButton>
       </div>
       <div style={ROW}>
-        {/* `bezeled`, не `gray`: серая кнопка рядом с активной синей читается
-            как «недоступно», хотя копирование работает всегда — тем же
-            цветом, что и «Сменить ссылку»/«Отключить» ниже. `gray` остаётся
-            только у «Отмена» — там это буквально отказ от действия. */}
-        <Button size="m" stretched mode="bezeled" disabled={busy} onClick={copyLink}>
+        {/* Обычная (тонированная), не «тихая»: копирование работает всегда, и
+            кнопка без фона читалась бы как недоступная. Главная здесь одна —
+            «Добавить в календарь»; поэтому и «Да, сменить» не primary: оно
+            стоит на экране вместе с ней. «Тихая» — только «Отмена». */}
+        <ActionButton stretched disabled={busy} onClick={copyLink}>
           {copied ? "Скопировано ✓" : "Скопировать ссылку"}
-        </Button>
+        </ActionButton>
       </div>
 
       {copyFallback && (
-        <div style={{ padding: "0 12px 12px" }}>
+        <div style={{ padding: "0 24px 12px" }}>
           <input
             readOnly
             value={link}
@@ -199,14 +198,14 @@ export function CalendarSection() {
 
       {confirmingChange ? (
         <>
-          <div style={{ padding: "0 12px 4px", fontSize: 13 }}>Старая ссылка перестанет работать.</div>
+          <div style={{ padding: "0 24px 4px", fontSize: 13 }}>Старая ссылка перестанет работать.</div>
           <div style={ROW}>
-            <Button size="s" stretched mode="filled" disabled={busy} onClick={() => void connect()}>
+            <ActionButton stretched disabled={busy} onClick={() => void connect()}>
               {busy ? "Меняю…" : "Да, сменить"}
-            </Button>
-            <Button size="s" stretched mode="gray" disabled={busy} onClick={() => setConfirmingChange(false)}>
+            </ActionButton>
+            <ActionButton kind="quiet" stretched disabled={busy} onClick={() => setConfirmingChange(false)}>
               Отмена
-            </Button>
+            </ActionButton>
           </div>
         </>
       ) : confirmingDisconnect ? (
@@ -214,24 +213,24 @@ export function CalendarSection() {
         // необратимо для владельца телефона так же — подписка в его календаре
         // перестанет обновляться навсегда, а не просто отвяжется на сервере.
         <>
-          <div style={{ padding: "0 12px 4px", fontSize: 13 }}>Подписка в календаре телефона перестанет обновляться.</div>
+          <div style={{ padding: "0 24px 4px", fontSize: 13 }}>Подписка в календаре телефона перестанет обновляться.</div>
           <div style={ROW}>
-            <Button size="s" stretched mode="filled" disabled={busy} onClick={() => void disconnect()}>
+            <ActionButton stretched disabled={busy} onClick={() => void disconnect()}>
               {busy ? "Отключаю…" : "Да, отключить"}
-            </Button>
-            <Button size="s" stretched mode="gray" disabled={busy} onClick={() => setConfirmingDisconnect(false)}>
+            </ActionButton>
+            <ActionButton kind="quiet" stretched disabled={busy} onClick={() => setConfirmingDisconnect(false)}>
               Отмена
-            </Button>
+            </ActionButton>
           </div>
         </>
       ) : (
         <div style={ROW}>
-          <Button size="s" stretched mode="bezeled" disabled={busy} onClick={() => setConfirmingChange(true)}>
+          <ActionButton stretched disabled={busy} onClick={() => setConfirmingChange(true)}>
             Сменить ссылку
-          </Button>
-          <Button size="s" stretched mode="bezeled" disabled={busy} onClick={() => setConfirmingDisconnect(true)}>
+          </ActionButton>
+          <ActionButton stretched disabled={busy} onClick={() => setConfirmingDisconnect(true)}>
             Отключить
-          </Button>
+          </ActionButton>
         </div>
       )}
 

@@ -53,7 +53,7 @@ describe("экран «Настройки»", () => {
     expect(el.querySelector("h1")!.textContent).toBe("Настройки");
   });
 
-  it("«Веду график сам» есть у наблюдателя и нет у обычного работника", async () => {
+  it("«Веду свой график сам» есть у наблюдателя и нет у обычного работника", async () => {
     const plain = await renderSettings(worker);
     expect(plain.el.textContent).not.toContain("Веду свой график сам");
     await act(async () => root!.unmount());

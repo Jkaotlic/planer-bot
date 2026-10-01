@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Button, Input } from "@telegram-apps/telegram-ui";
+import { Input } from "@telegram-apps/telegram-ui";
 import { apiClient } from "../api/client";
+import { ActionButton } from "../ui";
 
 /**
  * «Как ко мне обращаться» — the one thing a worker can tell the bot about
@@ -44,7 +45,9 @@ export function AddressField({
   }
 
   return (
-    <div style={{ padding: "10px 20px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ padding: "10px 24px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* У `Input` свои боковые 20px: минус их, чтобы рамка поля встала на левый край текста. */}
+      <div style={{ margin: "0 -20px" }}>
       <Input
         header="Как ко мне обращаться"
         placeholder={address}
@@ -52,13 +55,14 @@ export function AddressField({
         disabled={busy}
         onChange={(e) => setDraft(e.target.value)}
       />
+      </div>
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 }}>
         Так бот будет здороваться и подписывать напоминания. Оставь пустым — вернётся имя из Telegram.
       </div>
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
-      <Button size="s" mode="filled" stretched loading={busy} disabled={busy || !changed} onClick={() => void save()}>
+      <ActionButton kind="primary" stretched loading={busy} disabled={busy || !changed} onClick={() => void save()}>
         Сохранить
-      </Button>
+      </ActionButton>
     </div>
   );
 }
