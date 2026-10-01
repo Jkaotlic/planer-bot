@@ -1,10 +1,9 @@
 import { ConfirmButton } from "../components/ConfirmButton";
-import type { ReactNode } from "react";
 import { Placeholder } from "@telegram-apps/telegram-ui";
 import type { VacantSlot, WeekendOffer, WeekendSlotView } from "../api/client";
 import { formatDayLabel } from "../lib/week";
 import { pluralizeRu } from "../lib/shift";
-import { ActionButton, Card, Group, Screen, StatusPill } from "../ui";
+import { ActionButton, Card, Group, MetaLine, Screen, StatusPill } from "../ui";
 
 export interface WeekendScreenProps {
   slots: WeekendSlotView[];
@@ -156,14 +155,5 @@ function OfferCard({ offer, busy, error, onConfirm, onDecline }: { offer: Weeken
       )}
       {error && <ActionError message={error} />}
     </Card>
-  );
-}
-
-function MetaLine({ icon, children }: { icon: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", gap: 6, fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.35 }}>
-      <span style={{ flex: "none" }}>{icon}</span>
-      <span>{children}</span>
-    </div>
   );
 }

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { formatMoney } from "@planer/shared";
 import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
-import { ScreenScroll } from "../../components/ScreenScroll";
 import { ActionButton, Card, Group, Hint } from "../../ui";
 import type { FoodRoute } from "./food-route";
 import { OrderForm } from "./OrderForm";
@@ -46,7 +45,7 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
   if (route.view === "places") return <PlacesScreen onBack={toList} />;
 
   return (
-    <ScreenScroll>
+    <div className="ui-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1 className="ui-screen__title">Заказы и опросы</h1>
         <ActionButton compact kind="quiet" onClick={onClose}>Закрыть</ActionButton>
@@ -90,7 +89,7 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
       {Array.isArray(polls) && polls.length > 0 && (
         <Group>{polls.map((p) => <PollCard key={p.id} poll={p} />)}</Group>
       )}
-    </ScreenScroll>
+    </div>
   );
 }
 
@@ -148,7 +147,7 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
   }
 
   return (
-    <ScreenScroll>
+    <div className="ui-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1 className="ui-screen__title">Места и меню</h1>
         <ActionButton compact kind="quiet" onClick={onBack}>Назад</ActionButton>
@@ -179,6 +178,6 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
           ))}
         </Group>
       )}
-    </ScreenScroll>
+    </div>
   );
 }

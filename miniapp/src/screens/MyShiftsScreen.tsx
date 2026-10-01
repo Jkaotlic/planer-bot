@@ -8,12 +8,11 @@ import type { SelfEntryMode } from "./SelfEntryScreen";
 import { ChecklistCard } from "../components/ChecklistCard";
 import { DayTeamList } from "../components/DayTeamList";
 import { GreetingHero } from "../components/GreetingHero";
-import { TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
 import { coworkersOf } from "../lib/coworkers";
 import { groupUpcomingByWeek, remainingThisWeek } from "../lib/upcoming";
 import { pluralizeRu } from "../lib/shift";
-import { ActionButton, Card, Group, Screen } from "../ui";
+import { ActionButton, Card, Group, Screen, TAB_BAR_CLEARANCE } from "../ui";
 
 // Причина одна на весь экран, и её порядок берётся у той же функции, что решает
 // на сервере. `toExcluded: false` — здесь речь только про меня; исключённые

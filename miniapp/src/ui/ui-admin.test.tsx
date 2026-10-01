@@ -5,7 +5,7 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { ActionButton, CheckRow, MenuRow, Screen, SelectField, TapHeight } from "./index";
+import { ActionButton, CheckRow, MenuRow, Screen, SelectField, TAB_BAR_CLEARANCE, TapHeight } from "./index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -213,6 +213,13 @@ describe("ui.css: что нельзя потерять", () => {
     const r = rule(".ui-btn--secondary.ui-btn--danger");
     expect(r.indexOf("rgb(")).toBeGreaterThanOrEqual(0);
     expect(r.indexOf("rgb(")).toBeLessThan(r.indexOf("color-mix"));
+  });
+
+  it("резерв под нижнюю панель: константа и оба класса считают одно и то же", () => {
+    // Расчёт без `calc(` и скобки: в CSS он стоит внутри другого `calc`.
+    const core = TAB_BAR_CLEARANCE.replace(/^calc\(/, "").replace(/\)$/, "");
+    expect(rule(".ui-screen")).toContain(core);
+    expect(rule(".ui-page")).toContain(core);
   });
 
   it("danger красит текст токеном destructive_text_color", () => {

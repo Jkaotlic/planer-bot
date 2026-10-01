@@ -3,7 +3,6 @@ import { Input } from "@telegram-apps/telegram-ui";
 import { FOOD_QTY_MAX, formatMoney, itemLines } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
-import { ScreenScroll } from "../../components/ScreenScroll";
 import { ActionButton, Card, Group, Hint } from "../../ui";
 
 /**
@@ -89,23 +88,23 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
 
   if (loadError) {
     return (
-      <ScreenScroll>
+      <div className="ui-page">
         <div>{loadError}</div>
         <div style={{ display: "flex", gap: 8, paddingTop: 8 }}>
           <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
           <ActionButton compact kind="quiet" onClick={() => setLoadAttempt((n) => n + 1)}>Повторить</ActionButton>
         </div>
-      </ScreenScroll>
+      </div>
     );
   }
-  if (order === null) return <ScreenScroll><Hint>Загружаю заказ…</Hint></ScreenScroll>;
+  if (order === null) return <div className="ui-page"><Hint>Загружаю заказ…</Hint></div>;
 
   const status = order.cancelled ? "отменён" : order.open ? (order.closes ?? "приём идёт") : "приём закрыт";
   return (
-    <ScreenScroll>
+    <div className="ui-page">
       <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
       <h1 className="ui-screen__title">🍱 {order.placeName ?? "Заказ без меню"}</h1>
-      {/* Нижний отступ: `ScreenScroll` не ставит зазор между детьми, и строка статуса липла к первой карточке. */}
+      {/* Нижний отступ: `ui-page` не ставит зазор между детьми, и строка статуса липла к первой карточке. */}
       <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", marginBottom: 8 }}>
         Собирает {order.creatorName} · {status} · ответили {order.respondedCount} из {order.recipientCount}
       </div>
@@ -234,6 +233,6 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             onConfirm={() => run(() => apiClient.cancelOrder(order.id))} disabled={busy} />
         </div>
       )}
-    </ScreenScroll>
+    </div>
   );
 }

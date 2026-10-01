@@ -25,6 +25,13 @@
   min-width: 0;
 }
 
+/* Страница без колонки-флекса и без зазора между детьми: заказы и опросы
+   складывают своё содержимое сами. Отступы те же, что у `.ui-screen`. */
+.ui-page {
+  padding: 16px var(--app-gutter) calc(96px + var(--app-inset-bottom, env(safe-area-inset-bottom)));
+  min-width: 0;
+}
+
 /* Оверлей без таб-бара: резерв снизу только под системную полоску. */
 .ui-screen--overlay {
   padding-bottom: calc(24px + var(--app-inset-bottom, env(safe-area-inset-bottom)));

@@ -6,7 +6,6 @@ import type { Shift, Template } from "../api/client";
 import { DayBadge } from "../components/DayBadge";
 import { EntryChip } from "../components/EntryChip";
 import { ActionButton, Card, Group } from "../ui";
-import { ScreenScroll } from "../components/ScreenScroll";
 import { initialsOf, personPalette } from "../lib/people";
 import { formatTimeRange, pluralizeRu } from "../lib/shift";
 
@@ -124,7 +123,7 @@ export function ProposeSwapScreen({
   }
 
   return (
-    <ScreenScroll style={{ padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))", display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className="ui-screen ui-screen--overlay">
       {/* Корень и «Назад» свои, а не `Screen onBack`: у экрана своя логика отмены, и
           вторая подписка на системную кнопку задвоила бы её. */}
       <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -251,7 +250,7 @@ export function ProposeSwapScreen({
           {confirmLabel}
         </ActionButton>
       </div>
-    </ScreenScroll>
+    </div>
   );
 }
 

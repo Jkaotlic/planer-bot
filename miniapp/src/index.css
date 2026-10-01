@@ -287,20 +287,3 @@ textarea {
   outline: 2px solid var(--tgui--link_color);
   outline-offset: -2px;
 }
-
-/* Кнопка группы адресатов. Название группы — до 40 символов, и telegram-ui по
-   умолчанию обрезает подпись кнопки троеточием (`h6` с nowrap): на 320px
-   «Ночная смена на кухне и …» терялась бы вместе с тем, что отличает одну группу
-   от другой. Перенос по словам вместо обрезки; кнопка вырастает по высоте. */
-.group-chip {
-  height: auto;
-  min-height: 32px;
-  max-width: 100%;
-}
-.group-chip h6 {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
-  text-align: left;
-}

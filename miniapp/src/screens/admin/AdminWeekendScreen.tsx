@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { Avatar, Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } from "../../api/client";
-import { MetaLine } from "../../components/Card";
 import { formatDayLabel } from "../../lib/week";
 import { pluralizeRu } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { CategoryChip, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
 import { ConfirmButton } from "../../components/ConfirmButton";
-import { ActionButton, Card, Group, StatusPill } from "../../ui";
+import { ActionButton, Card, Group, MetaLine, StatusPill } from "../../ui";
 
 /**
  * First & last calendar day of the month containing `today` ("YYYY-MM-DD" —
