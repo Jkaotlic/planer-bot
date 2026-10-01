@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react";
-import { Avatar, Button, Input, List, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Avatar, Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } from "../../api/client";
-import { CardShell, CardStack, MetaLine } from "../../components/Card";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { MetaLine } from "../../components/Card";
 import { formatDayLabel } from "../../lib/week";
 import { pluralizeRu } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
-import { useIsDark } from "../../lib/theme";
-import { categoryLabel, useCategoryPalette, type Category } from "../../categories";
+import { categoryLabel, type Category } from "../../categories";
 import { withBusy, withoutBusy } from "../../lib/busy-set";
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { ActionButton, Card, Group, StatusPill } from "../../ui";
 
 /**
  * First & last calendar day of the month containing `today` ("YYYY-MM-DD" —
@@ -151,88 +150,78 @@ export function AdminWeekendScreen({
   const openSlots = slots?.filter((v) => v.slot.status !== "closed") ?? null;
   const closedSlots = slots?.filter((v) => v.slot.status === "closed") ?? [];
 
+  // Экран живёт внутри `Screen` из `AdminScreen`: ни своих отступов, ни заголовка.
   return (
-    <ScreenScroll>
-      <List>
-        <Section header="Открыть смену">
-          <CardStack>
-            {showPost ? (
-              <PostSlotForm
-                onCancel={() => setShowPost(false)}
-                onCreated={async (reach) => {
-                  setShowPost(false);
-                  setWarning(null);
-                  setNotice(reachNotice(reach.delivered, reach.intended));
-                  await reload();
-                }}
-              />
-            ) : (
-              <Button size="m" mode="filled" stretched onClick={() => setShowPost(true)}>
-                ＋ Открыть смену на выходной
-              </Button>
-            )}
-          </CardStack>
-        </Section>
-
-        {error && (
-          <Section>
-            <div style={{ padding: "8px 20px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>
-          </Section>
+    <>
+      <Group header="Открыть смену">
+        {showPost ? (
+          <PostSlotForm
+            onCancel={() => setShowPost(false)}
+            onCreated={async (reach) => {
+              setShowPost(false);
+              setWarning(null);
+              setNotice(reachNotice(reach.delivered, reach.intended));
+              await reload();
+            }}
+          />
+        ) : (
+          // Единственная главная кнопка раздела: «Назначить» в карточках слотов их
+          // несколько в одной карточке, и ни одна не главнее соседней.
+          <ActionButton kind="primary" stretched onClick={() => setShowPost(true)}>
+            ＋ Открыть смену на выходной
+          </ActionButton>
         )}
+      </Group>
 
-        {notice && (
-          <Section>
-            <div style={{ padding: "8px 20px", color: "var(--tgui--hint_color)", fontSize: 14 }} role="status">{notice}</div>
-          </Section>
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>}
+      {notice && (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-body)" }} role="status">
+          {notice}
+        </div>
+      )}
+      {warning && (
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }} role="status">
+          {warning}
+        </div>
+      )}
+
+      <Group header="Открытые смены">
+        {!openSlots ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+            <Spinner size="m" />
+          </div>
+        ) : openSlots.length === 0 ? (
+          <Placeholder description="Нет открытых смен. Открой смену, чтобы позвать желающих." />
+        ) : (
+          openSlots.map((view) => (
+            <SlotCard
+              key={view.slot.id}
+              view={view}
+              busy={busySlotIds.has(view.slot.id)}
+              onAssign={handleAssign}
+              onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
+              onClose={() => void handleClose(view.slot.id)}
+            />
+          ))
         )}
-        {warning && (
-          <Section>
-            <div style={{ padding: "8px 20px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }} role="status">{warning}</div>
-          </Section>
-        )}
+      </Group>
 
-        <Section header="Открытые смены">
-          {!openSlots ? (
-            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-              <Spinner size="m" />
-            </div>
-          ) : openSlots.length === 0 ? (
-            <Placeholder description="Нет открытых смен. Открой смену, чтобы позвать желающих." />
-          ) : (
-            <CardStack>
-              {openSlots.map((view) => (
-                <SlotCard
-                key={view.slot.id}
-                view={view}
-                busy={busySlotIds.has(view.slot.id)}
-                onAssign={handleAssign}
-                onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
-                onClose={() => void handleClose(view.slot.id)}
-              />
-              ))}
-            </CardStack>
-          )}
-        </Section>
+      {closedSlots.length > 0 && (
+        <Group header="Закрытые">
+          {closedSlots.map((view) => (
+            <SlotCard
+              key={view.slot.id}
+              view={view}
+              busy={busySlotIds.has(view.slot.id)}
+              onAssign={handleAssign}
+              onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
+            />
+          ))}
+        </Group>
+      )}
 
-        {closedSlots.length > 0 && (
-          <Section header="Закрытые">
-            <CardStack>
-              {closedSlots.map((view) => (
-                <SlotCard
-                  key={view.slot.id}
-                  view={view}
-                  busy={busySlotIds.has(view.slot.id)}
-                  onAssign={handleAssign}
-                  onUnassign={(assignmentId) => handleUnassign(view.slot.id, assignmentId)}
-                />
-              ))}
-            </CardStack>
-          </Section>
-        )}
-
-        <PayrollSection today={today} />
-      </List>
-    </ScreenScroll>
+      <PayrollSection today={today} />
+    </>
   );
 }
 
@@ -254,16 +243,16 @@ function SlotCard({
   const assignedIds = new Set(assignees.map((a) => a.employeeId));
   const closed = slot.status === "closed";
   return (
-    <CardShell>
+    <Card>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 15.5 }}>{slot.title ?? "Работа в выходной"}</div>
-        <span style={{ flex: "none", fontSize: 12.5, color: "var(--tgui--hint_color)", whiteSpace: "nowrap" }}>
+        <div style={{ fontWeight: 600, fontSize: "var(--app-text-head)" }}>{slot.title ?? "Работа в выходной"}</div>
+        <span style={{ flex: "none", fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", whiteSpace: "nowrap" }}>
           {closed
             ? "Закрыта — набрали"
             : `${interested.length} ${pluralizeRu(interested.length, "желающий", "желающих", "желающих")}`}
         </span>
       </div>
-      <div style={{ fontSize: 14.5, fontWeight: 500 }}>
+      <div style={{ fontSize: "var(--app-text-body)", fontWeight: 500 }}>
         {formatDayLabel(slot.date)} · {slot.start}–{slot.end}
       </div>
       {slot.location && <MetaLine icon="📍">{slot.location}</MetaLine>}
@@ -271,16 +260,16 @@ function SlotCard({
 
       {assignees.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Назначены · {assignees.length}</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Назначены · {assignees.length}</span>
           {assignees.map((a) => (
             <div key={a.assignmentId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, flex: 1, minWidth: 0 }}>{a.name}</span>
-              <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: "var(--app-text-body)", fontWeight: 600, flex: 1, minWidth: 0 }}>{a.name}</span>
+              <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", whiteSpace: "nowrap" }}>
                 {a.status === "confirmed" ? "подтвердил" : "ждём ответа"}
               </span>
-              <Button size="s" mode="gray" disabled={busy} onClick={() => onUnassign(a.assignmentId)}>
+              <ActionButton compact disabled={busy} onClick={() => onUnassign(a.assignmentId)}>
                 Снять
-              </Button>
+              </ActionButton>
             </div>
           ))}
         </div>
@@ -290,10 +279,10 @@ function SlotCard({
         // Закрытая смена уже не набирает: список желающих с «Назначить» здесь
         // обещал бы то, чего сервер не сделает, — остаются только назначенные.
         assignees.length === 0 && (
-          <div style={{ marginTop: 6, fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Никого не назначили.</div>
+          <div style={{ marginTop: 6, fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Никого не назначили.</div>
         )
       ) : interested.filter((p) => !assignedIds.has(p.employeeId)).length === 0 ? (
-        <div style={{ marginTop: 6, fontSize: 13.5, color: "var(--tgui--hint_color)" }}>
+        <div style={{ marginTop: 6, fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
           {assignees.length > 0 ? "Других желающих нет." : "Пока никто не откликнулся — уведомление ушло всем."}
         </div>
       ) : (
@@ -324,7 +313,7 @@ function SlotCard({
           />
         </div>
       )}
-    </CardShell>
+    </Card>
   );
 }
 
@@ -344,15 +333,18 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
             2026-09-28 на 390×844: «И», «Д». Теперь плашка уходит строкой ниже,
             а имя режется многоточием, только если не влезает само по себе. */}
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-          <span style={{ fontWeight: 500, fontSize: 14.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{person.name}</span>
+          <span style={{ fontWeight: 500, fontSize: "var(--app-text-body)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{person.name}</span>
           {recommended && <FairBadge />}
           {person.absence && <AbsenceBadge category={person.absence} />}
         </div>
-        <div style={{ fontSize: 12.5, color: n === 0 ? "var(--tgui--hint_color)" : "var(--tgui--text_color)" }}>{countLabel}{passedLabel}</div>
+        <div style={{ fontSize: "var(--app-text-meta)", color: n === 0 ? "var(--tgui--hint_color)" : "var(--tgui--text_color)" }}>{countLabel}{passedLabel}</div>
       </div>
-      <Button size="s" mode="filled" loading={busy} disabled={busy} onClick={onAssign} style={{ flex: "none" }}>
-        Назначить
-      </Button>
+      {/* Не `primary`: у слота несколько желающих, и столько же «главных» кнопок. */}
+      <div style={{ flex: "none" }}>
+        <ActionButton compact loading={busy} disabled={busy} onClick={onAssign}>
+          Назначить
+        </ActionButton>
+      </div>
     </div>
   );
 }
@@ -363,25 +355,17 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
  * June vacation land on it, and sometimes a person asks to come in anyway. The
  * admin decides — but only if they can see it, and the list used to say nothing.
  * Mirrored in admin/src/screens/WeekendAdminScreen.tsx.
+ *
+ * Пилюля набора, а не цвет категории: отметка должна читаться одинаково с
+ * остальными статусами экрана, а не мимикрировать под цвет самой отсутствующей смены.
  */
 function AbsenceBadge({ category }: { category: Category }) {
-  const palette = useCategoryPalette(category);
-  return (
-    <span style={{ flex: "0 1 auto", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap", boxSizing: "border-box" }}>
-      {categoryLabel(category)}
-    </span>
-  );
+  return <StatusPill tone="wait">{categoryLabel(category)}</StatusPill>;
 }
 
 /** "★ реже всех работал" — the fairness hint on the volunteer with fewest weekends worked. */
 function FairBadge() {
-  const isDark = useIsDark();
-  const palette = isDark ? { bg: "rgba(240,170,60,0.22)", fg: "#F4C169" } : { bg: "#FCEEDA", fg: "#8A5700" };
-  return (
-    <span style={{ flex: "0 1 auto", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, fontWeight: 600, borderRadius: 999, padding: "2px 8px", background: palette.bg, color: palette.fg, whiteSpace: "nowrap", boxSizing: "border-box" }}>
-      ★ реже всех работал
-    </span>
-  );
+  return <StatusPill tone="need">★ реже всех работал</StatusPill>;
 }
 
 function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: (reach: { delivered: number; intended: number }) => Promise<void> }) {
@@ -416,7 +400,7 @@ function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
   }
 
   return (
-    <CardShell>
+    <Card>
       <Input header="Дата" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
@@ -429,16 +413,17 @@ function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
       <Input header="Название (необязательно)" placeholder="Например, Ярмарка выходного дня" value={title} onChange={(e) => setTitle(e.target.value)} />
       <Input header="Место (необязательно)" placeholder="Например, ТЦ Авиапарк" value={location} onChange={(e) => setLocation(e.target.value)} />
       <Input header="Заметка (необязательно)" placeholder="Например, оплата в двойном размере" value={note} onChange={(e) => setNote(e.target.value)} />
-      {localError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{localError}</div>}
+      {localError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{localError}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <Button size="m" mode="filled" stretched loading={saving} disabled={saving} onClick={() => void submit()}>
+        {/* Единственная `primary` формы: она завершает действие. */}
+        <ActionButton kind="primary" stretched loading={saving} disabled={saving} onClick={() => void submit()}>
           Позвать желающих
-        </Button>
-        <Button size="m" mode="gray" disabled={saving} onClick={onCancel}>
+        </ActionButton>
+        <ActionButton disabled={saving} onClick={onCancel}>
           Отмена
-        </Button>
+        </ActionButton>
       </div>
-    </CardShell>
+    </Card>
   );
 }
 
@@ -502,57 +487,56 @@ function PayrollSection({ today }: { today: string }) {
   const totalHours = rows?.reduce((sum, r) => sum + r.hours, 0) ?? 0;
 
   return (
-    <Section header="Учёт часов (для оплаты)">
-      <CardStack>
-        <CardShell>
-          {/* `minWidth: 0` у обёрток и у полей: поле даты в WebKit не сжимается
-              ниже своей встроенной ширины, и два в ряд раздвигали страницу вбок
-              до 478px на экране 390 (замер 2026-09-28). */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ minWidth: 0, width: "100%" }} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ minWidth: 0, width: "100%" }} />
-            </div>
+    <Group header="Учёт часов (для оплаты)">
+      <Card>
+        {/* `minWidth: 0` у обёрток и у полей: поле даты в WebKit не сжимается
+            ниже своей встроенной ширины, и два в ряд раздвигали страницу вбок
+            до 478px на экране 390 (замер 2026-09-28). */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ minWidth: 0, width: "100%" }} />
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <Button size="s" mode="gray" stretched loading={loading} disabled={loading} onClick={() => void load()}>
-              Показать
-            </Button>
-            <Button size="s" mode="filled" stretched disabled={!rows || rows.length === 0} onClick={() => void exportCsv()}>
-              ⬇ Экспорт CSV
-            </Button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ minWidth: 0, width: "100%" }} />
           </div>
-          {error && (
-            <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
-              {error}
-            </div>
-          )}
-        </CardShell>
+        </div>
+        {/* Обе обычные: главная кнопка раздела — «Открыть смену» наверху экрана. */}
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <ActionButton stretched loading={loading} disabled={loading} onClick={() => void load()}>
+            Показать
+          </ActionButton>
+          <ActionButton stretched disabled={!rows || rows.length === 0} onClick={() => void exportCsv()}>
+            ⬇ Экспорт CSV
+          </ActionButton>
+        </div>
+        {error && (
+          <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.35 }}>
+            {error}
+          </div>
+        )}
+      </Card>
 
-        {rows && rows.length > 0 && (
-          <CardShell>
-            {rows.map((r, i) => (
-              <div
-                key={`${r.employeeId}-${r.date}-${i}`}
-                style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 14, padding: "3px 0" }}
-              >
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.employeeName}</span>
-                <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{formatDayLabel(r.date)}</span>
-                <span style={{ flex: "none", fontWeight: 600 }}>{r.hours} ч</span>
-              </div>
-            ))}
-            <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--tgui--divider)", marginTop: 6, paddingTop: 8, fontWeight: 600 }}>
-              <span>Итого</span>
-              <span>{hoursLabel(totalHours)}</span>
+      {rows && rows.length > 0 && (
+        <Card>
+          {rows.map((r, i) => (
+            <div
+              key={`${r.employeeId}-${r.date}-${i}`}
+              style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: "var(--app-text-body)", padding: "3px 0" }}
+            >
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.employeeName}</span>
+              <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{formatDayLabel(r.date)}</span>
+              <span style={{ flex: "none", fontWeight: 600 }}>{r.hours} ч</span>
             </div>
-          </CardShell>
-        )}
-        {rows && rows.length === 0 && (
-          <Placeholder description="За выбранный период нет подтверждённых смен." />
-        )}
-      </CardStack>
-    </Section>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--tgui--divider)", marginTop: 6, paddingTop: 8, fontWeight: 600 }}>
+            <span>Итого</span>
+            <span>{hoursLabel(totalHours)}</span>
+          </div>
+        </Card>
+      )}
+      {rows && rows.length === 0 && (
+        <Placeholder description="За выбранный период нет подтверждённых смен." />
+      )}
+    </Group>
   );
 }
