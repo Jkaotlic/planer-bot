@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { filterPeople, RECIPIENT_GROUP_NAME_MAX } from "@planer/shared";
 import { apiClient, type Employee, type RecipientGroupView } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { PersonSearch } from "../../components/PersonSearch";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, CheckRow, Group } from "../../ui";
 
 /**
  * «Группы» — списки людей, которые админ правит сам и потом выбирает одной
@@ -106,80 +105,73 @@ export function AdminGroups() {
 
   if (!groups) {
     return (
-      <ScreenScroll>
-        <Section header="Группы">
-          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-            <Spinner size="m" />
-          </div>
-        </Section>
-      </ScreenScroll>
+      <Group header="Группы">
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+          <Spinner size="m" />
+        </div>
+      </Group>
     );
   }
 
   if (loadFailed) {
     return (
-      <ScreenScroll>
-        <Section header="Группы">
-          <CardStack>
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-            </CardShell>
-            <Button mode="bezeled" size="m" stretched onClick={() => { setError(null); void reload(); }}>
-              Повторить
-            </Button>
-          </CardStack>
-        </Section>
-      </ScreenScroll>
+      <Group header="Группы">
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>
+        </Card>
+        <ActionButton stretched onClick={() => { setError(null); void reload(); }}>
+          Повторить
+        </ActionButton>
+      </Group>
     );
   }
 
   const visible = filterPeople(people, query);
 
   return (
-    <ScreenScroll>
-      <Section
-        header="Группы"
-        footer="Список людей, который выбирается одной кнопкой в рассылках. Уволенные из группы выпадают сами и возвращаются, если их восстановить."
-      >
-        <CardStack>
-          {error && !editing && (
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-            </CardShell>
-          )}
+    <Group
+      header="Группы"
+      footer="Список людей, который выбирается одной кнопкой в рассылках. Уволенные из группы выпадают сами и возвращаются, если их восстановить."
+    >
+      {error && !editing && (
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>
+        </Card>
+      )}
 
-          {groups.length === 0 && !editing && (
-            <Placeholder description="Групп пока нет — заведи первую, например «ЧИП 5-й этаж»." />
-          )}
+      {groups.length === 0 && !editing && (
+        <Placeholder description="Групп пока нет — заведи первую, например «ЧИП 5-й этаж»." />
+      )}
 
-          {groups.map((g) => (
-            <CardShell key={g.id}>
-              <button
-                type="button"
-                onClick={() => (editing?.id === g.id ? setEditing(null) : open(g))}
-                disabled={busy}
-                style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, width: "100%",
-                  background: "none", border: 0, padding: 0, font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer",
-                }}
-              >
-                <span style={{ fontWeight: 600, minWidth: 0, overflowWrap: "anywhere" }}>{g.name}</span>
-                <span style={{ color: "var(--tgui--hint_color)", fontSize: 13, whiteSpace: "nowrap" }}>{g.memberIds.length} чел.</span>
-              </button>
-              {editing?.id === g.id && renderEditor()}
-            </CardShell>
-          ))}
+      {groups.map((g) => (
+        <Card key={g.id}>
+          {/* Вся полоса — кнопка не ниже 44px, а не только имя. */}
+          <button
+            type="button"
+            onClick={() => (editing?.id === g.id ? setEditing(null) : open(g))}
+            disabled={busy}
+            aria-expanded={editing?.id === g.id}
+            style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%",
+              minHeight: "var(--app-tap)", background: "none", border: 0, padding: 0, font: "inherit",
+              fontSize: "var(--app-text-body)", color: "inherit", textAlign: "left", cursor: "pointer",
+            }}
+          >
+            <span style={{ fontWeight: 600, minWidth: 0, overflowWrap: "anywhere" }}>{g.name}</span>
+            <span style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", whiteSpace: "nowrap" }}>{g.memberIds.length} чел.</span>
+          </button>
+          {editing?.id === g.id && renderEditor()}
+        </Card>
+      ))}
 
-          {editing?.id === null && <CardShell>{renderEditor()}</CardShell>}
+      {editing?.id === null && <Card>{renderEditor()}</Card>}
 
-          {!editing && (
-            <Button mode="bezeled" size="m" stretched disabled={busy} onClick={() => open(null)}>
-              + Новая группа
-            </Button>
-          )}
-        </CardStack>
-      </Section>
-    </ScreenScroll>
+      {!editing && (
+        <ActionButton stretched disabled={busy} onClick={() => open(null)}>
+          + Новая группа
+        </ActionButton>
+      )}
+    </Group>
   );
 
   function renderEditor() {
@@ -195,32 +187,30 @@ export function AdminGroups() {
           disabled={busy}
           onChange={(e) => setEditing({ ...editing, name: e.target.value })}
         />
-        {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
+        {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>}
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", fontWeight: 600 }}>
           В группе: {editing.memberIds.size}
         </div>
         <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={busy} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {people.length === 0 ? (
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Выбирать некого.</div>
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-body)" }}>Выбирать некого.</div>
           ) : visible.length === 0 ? (
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Никого с таким именем нет.</div>
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-body)" }}>Никого с таким именем нет.</div>
           ) : (
             visible.map((p) => (
-              <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}>
-                <input type="checkbox" checked={editing.memberIds.has(p.id)} disabled={busy} onChange={() => toggle(p.id)} />
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{p.displayName}</span>
-              </label>
+              <CheckRow key={p.id} checked={editing.memberIds.has(p.id)} disabled={busy} onChange={() => toggle(p.id)} label={p.displayName} />
             ))
           )}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Button size="s" mode="filled" disabled={busy} loading={busy} onClick={() => void save()}>
+          {/* Единственная primary редактора. */}
+          <ActionButton kind="primary" compact disabled={busy} loading={busy} onClick={() => void save()}>
             Сохранить
-          </Button>
-          <Button size="s" mode="plain" disabled={busy} onClick={() => setEditing(null)}>
+          </ActionButton>
+          <ActionButton kind="quiet" compact disabled={busy} onClick={() => setEditing(null)}>
             Отмена
-          </Button>
+          </ActionButton>
         </div>
         {editing.id !== null && (
           <ConfirmButton

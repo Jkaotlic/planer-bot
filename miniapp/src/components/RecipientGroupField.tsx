@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Select } from "@telegram-apps/telegram-ui";
 import { apiClient, type RecipientGroupView } from "../api/client";
+import { SelectField } from "../ui";
 
 /**
  * «Рассылаем»: кому уйдёт первая рассылка сбора — всей команде или одной группе.
@@ -46,7 +46,7 @@ export function RecipientGroupField({
 
   if (sent) {
     return (
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
         Рассылали: {value == null ? "вся команда" : (currentName ?? "группа")}
       </div>
     );
@@ -56,15 +56,15 @@ export function RecipientGroupField({
   const removed = groups != null && value != null && !live;
 
   return (
-    <Select
-      header="Рассылаем"
+    // Видимая подпись — `label`, а `aria-label` оставлен тем же словом: по нему
+    // поле находят тесты и внешние проверки, и расходиться с подписью ему незачем.
+    <SelectField
+      stretched
+      label="Рассылаем"
       aria-label="Рассылаем"
       value={value == null ? "" : String(value)}
       disabled={disabled}
-      // Длинное имя группы (до 40 знаков) в узкой колонке обрезается многоточием,
-      // а не рвётся на строки, которых нативный список не показывает.
-      style={{ textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-      onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+      onChange={(next) => onChange(next === "" ? null : Number(next))}
     >
       <option value="">Вся команда</option>
       {(groups ?? []).map((g) => (
@@ -73,6 +73,6 @@ export function RecipientGroupField({
       {value != null && !live && (
         <option value={String(value)}>{`${currentName ?? "Группа"}${removed ? " (удалена)" : ""}`}</option>
       )}
-    </Select>
+    </SelectField>
   );
 }
