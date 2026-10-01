@@ -129,6 +129,18 @@ describe("карточки раскрытого сбора называют св
     expect(toggle().getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("поля дат и сумм переносятся на узком экране и подписаны над полем, а не режутся плавающим заголовком", async () => {
+    const el = await mount();
+    await openNth(el, 0);
+    for (const label of ["Дата события", "Скинуться до", "По сколько", "Нужно всего"]) {
+      const input = el.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
+      expect(input, label).toBeTruthy();
+      const wrap = input.closest("label")!.parentElement as HTMLElement;
+      expect(wrap.style.flexWrap, label).toBe("wrap");
+      expect(input.closest("label")!.style.minWidth, label).toBe("0px");
+    }
+  });
+
   it("карточки открытого сбора лежат в одной обёртке, отдельной от соседнего сбора", async () => {
     const el = await mount();
     await openNth(el, 0);

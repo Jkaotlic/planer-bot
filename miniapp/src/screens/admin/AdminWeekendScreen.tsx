@@ -324,9 +324,12 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
   const passedLabel =
     person.passedOver > 0 ? ` · пропустили ${person.passedOver} ${pluralizeRu(person.passedOver, "раз", "раза", "раз")}` : "";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    // `wrap`: на 320px справа от текста оставалось ~107px, и имя с плашкой «реже
+    // всех работал» рвались на 3–5 строк, а «Даша Кузнец…» резалась. Колонке дана
+    // база 150px: если её с «Назначить» в строке не вместить, кнопка уходит вниз.
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
       <Avatar acronym={initialsOf(person.name)} size={28} style={{ background: palette.bg, color: palette.fg, flex: "none" }} />
-      <div style={{ minWidth: 0, flex: 1 }}>
+      <div style={{ minWidth: 0, flex: "1 1 150px" }}>
         {/* `wrap`: плашки «реже всех работал» / «Отпуск» не сжимаются
             (`flex: none`), и без переноса имя уходило в одну букву — замер
             2026-09-28 на 390×844: «И», «Д». Теперь плашка уходит строкой ниже,
@@ -339,7 +342,7 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
         <div style={{ fontSize: "var(--app-text-meta)", color: n === 0 ? "var(--tgui--hint_color)" : "var(--tgui--text_color)" }}>{countLabel}{passedLabel}</div>
       </div>
       {/* Не `primary`: у слота несколько желающих, и столько же «главных» кнопок. */}
-      <div style={{ flex: "none" }}>
+      <div style={{ flex: "none", marginLeft: "auto" }}>
         <ActionButton compact loading={busy} disabled={busy} onClick={onAssign}>
           Назначить
         </ActionButton>

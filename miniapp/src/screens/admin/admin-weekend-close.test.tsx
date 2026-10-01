@@ -103,3 +103,14 @@ describe("AdminWeekendScreen — отметка об отсутствии", () =
     expect(label!.closest("[data-absence-chip]")!.getAttribute("data-absence-chip")).toBe("vacation");
   });
 });
+
+describe("AdminWeekendScreen — узкий экран", () => {
+  it("строка желающего переносится: на 320px «Назначить» уходит вниз, а не сжимает имя", async () => {
+    const el = await mount([view(305, "open")]);
+    const assign = buttons(el, "Назначить")[0]!;
+    const row = assign.parentElement!.parentElement as HTMLElement;
+    expect(row.style.flexWrap).toBe("wrap");
+    const textColumn = row.children[1] as HTMLElement;
+    expect(textColumn.style.flex).toContain("150px");
+  });
+});

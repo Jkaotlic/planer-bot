@@ -168,6 +168,7 @@ const MESSAGE_BOX_STYLE = {
 } as const;
 const FIELD_LABEL_STYLE = { fontSize: "var(--app-text-meta)", fontWeight: 600, color: "var(--tgui--hint_color)" } as const;
 
+// Общий вид нативных полей формы сбора: даты и суммы.
 const DATE_INPUT_STYLE = {
   padding: "8px 10px",
   minHeight: "var(--app-tap)",
@@ -566,8 +567,10 @@ function CollectionFields({
 }) {
   return (
     <>
-      <div style={{ display: "flex", gap: 8 }}>
-        <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+      {/* `wrap` и база 140px: две нативные даты в 126px каждая на 320px теряли
+          «yyyy» под значком календаря; узкий экран — друг под другом. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <label style={{ flex: "1 1 140px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={FIELD_LABEL_STYLE}>Дата события</span>
           <input
             type="date"
@@ -578,7 +581,7 @@ function CollectionFields({
             onChange={(e) => onEventDate(e.target.value)}
           />
         </label>
-        <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+        <label style={{ flex: "1 1 140px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={FIELD_LABEL_STYLE}>Скинуться до</span>
           <input
             type="date"
@@ -591,29 +594,36 @@ function CollectionFields({
         </label>
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <Input
-            header="По сколько"
+      {/* Подпись над полем, как у дат выше, а не плавающий заголовок `Input`:
+          тот на половине ширины режет лейбл до «По ск…» и «Н…» (замер на 320px),
+          и два вида полей в одной форме выглядели как две разные формы. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <label style={{ flex: "1 1 120px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={FIELD_LABEL_STYLE}>По сколько</span>
+          <input
             type="number"
             inputMode="numeric"
             placeholder="₽"
             value={amountPerPerson}
             disabled={busy}
+            aria-label="По сколько"
+            style={DATE_INPUT_STYLE}
             onChange={(e) => onAmountPerPerson(e.target.value)}
           />
-        </div>
-        <div style={{ flex: 1 }}>
-          <Input
-            header="Нужно всего"
+        </label>
+        <label style={{ flex: "1 1 120px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={FIELD_LABEL_STYLE}>Нужно всего</span>
+          <input
             type="number"
             inputMode="numeric"
             placeholder="₽"
             value={totalGoal}
             disabled={busy}
+            aria-label="Нужно всего"
+            style={DATE_INPUT_STYLE}
             onChange={(e) => onTotalGoal(e.target.value)}
           />
-        </div>
+        </label>
       </div>
 
       {/* Заголовки короткие: на телефоне `Input` режет свой лейбл многоточием,
