@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Button, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
+import { ActionButton } from "./ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
@@ -520,7 +521,7 @@ export function App() {
       <div style={centeredStyle}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <Placeholder header="Не удалось загрузить" description={error} />
-          <Button onClick={() => loadBootstrap()}>Повторить</Button>
+          <ActionButton onClick={() => loadBootstrap()}>Повторить</ActionButton>
         </div>
       </div>
     );

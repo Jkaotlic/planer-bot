@@ -128,7 +128,8 @@ export function ProposeSwapScreen({
       {/* Корень и «Назад» свои, а не `Screen onBack`: у экрана своя логика отмены, и
           вторая подписка на системную кнопку задвоила бы её. */}
       <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <IconButton mode="plain" size="l" aria-label="Назад" onClick={onCancel}>
+        {/* 44px, а не 38 у `size="l"`: зона нажатия «Назад» — как у остальных кнопок. */}
+        <IconButton mode="plain" size="l" aria-label="Назад" style={{ minWidth: 44, minHeight: 44 }} onClick={onCancel}>
           <BackIcon />
         </IconButton>
         <h1 className="ui-screen__title">

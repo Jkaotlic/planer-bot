@@ -18,11 +18,14 @@ export interface ShiftRowProps {
   /** Тап по строке (не по «Обменять» — та сама гасит клик `stopPropagation`) —
    *  раскрывает под ней «Кто ещё работает». Опущен — строка не реагирует на тап. */
   onOpen?: (shift: Shift) => void;
+  /** Раскрыт ли лист под строкой. Читается только у раскрываемой строки: скринридеру
+   *  надо знать состояние кнопки, а не угадывать его по появившемуся тексту. */
+  expanded?: boolean;
 }
 
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
-export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen }: ShiftRowProps) {
+export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen, expanded }: ShiftRowProps) {
   // По той же причине, что в `swap-candidates.ts`: одно правило, один источник.
   // Локальной копии «category === shift» здесь больше нет — с 2026-08-10 ответ
   // на этот вопрос знает только shared.
@@ -37,6 +40,7 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
       className="shift-row"
       role={openable ? "button" : undefined}
       tabIndex={openable ? 0 : undefined}
+      aria-expanded={openable ? (expanded ?? false) : undefined}
       onClick={openable ? () => onOpen(shift) : undefined}
       onKeyDown={
         openable

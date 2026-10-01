@@ -53,6 +53,8 @@ describe("«Выходные»: кнопки назначения", () => {
     expect(take.className).toContain("ui-btn--primary");
     expect(refuse.className).toContain("ui-btn--secondary");
     expect(refuse.querySelector("h6")).toBeNull();
+    // Рядом с «Беру» той же высоты: низкая («compact») кнопка выглядела бы мельче главной.
+    expect(refuse.className).not.toContain("ui-btn--compact");
   });
 
   it("«Не смогу» по-прежнему переспрашивает: первое нажатие onDecline не зовёт", async () => {

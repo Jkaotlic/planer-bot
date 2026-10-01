@@ -135,6 +135,15 @@ describe("ActionButton", () => {
   });
 });
 
+// Проверка типов, а не рантайма: ссылка с `disabled`/`onClick` не должна компилироваться.
+// Если объединение ослабят, `@ts-expect-error` станет ошибкой в `npm run typecheck`.
+export const linkCannotBeDisabled = () => [
+  // @ts-expect-error у ссылки нет `disabled`
+  createElement(ActionButton, { href: "x", disabled: true, children: "а" }),
+  // @ts-expect-error у ссылки нет `onClick`
+  createElement(ActionButton, { href: "x", onClick: () => {}, children: "а" }),
+];
+
 describe("ActionButton: disabled", () => {
   it("disabled ставит атрибут и не пускает onClick", async () => {
     const onClick = vi.fn();

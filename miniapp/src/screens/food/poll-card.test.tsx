@@ -56,3 +56,13 @@ describe("PollCard — отказ действия", () => {
     expect(byText(el, "👍 За")).toBeTruthy();
   });
 });
+
+describe("PollCard — выбранный голос", () => {
+  it("выбранный вариант помечен aria-pressed=true, остальные — false", async () => {
+    const el = await mountCard({ ...POLL, myChoice: "for" });
+    const pressed = [...el.querySelectorAll("button[aria-pressed]")].map((b) => [b.textContent?.trim(), b.getAttribute("aria-pressed")]);
+    expect(pressed.length).toBeGreaterThanOrEqual(2);
+    expect(pressed.filter(([, v]) => v === "true")).toEqual([["👍 За", "true"]]);
+    expect(pressed.filter(([, v]) => v === "false")).toHaveLength(pressed.length - 1);
+  });
+});

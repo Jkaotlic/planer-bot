@@ -154,6 +154,13 @@
   margin-top: 18px;
 }
 
+/* Подпись подраздела — та же серая мелкая, что у разделов остальных вкладок
+   (`.ui-group__header`): большой чёрный `h3` выбивался из общего вида. Снизу
+   отступ тот же 8px, что между подписью и телом в `.ui-group`. */
+.team-no-time > .ui-group__header {
+  margin-bottom: 8px;
+}
+
 .team-empty,
 .team-error {
   display: grid;

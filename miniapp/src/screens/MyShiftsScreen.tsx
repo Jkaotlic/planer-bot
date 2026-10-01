@@ -109,6 +109,9 @@ export function MyShiftsScreen({
 
   return (
     <Screen>
+      {/* Заголовка у главной вкладки нет на виду (её называет таб-бар), но у
+          страницы он нужен скринридеру — как у остальных вкладок. */}
+      <h1 className="visually-hidden">Смены</h1>
       {/* `me.address` приходит с сервера: он знает имя из Telegram. Делить
           `displayName` здесь давало «Привет, Петров» — ростер пишется «Фамилия
           Имя». См. `addressOf` в @planer/shared. */}
@@ -160,6 +163,7 @@ export function MyShiftsScreen({
                     templates={templates}
                     onSwap={onProposeSwap}
                     onOpen={coworkersOpenable(shift) ? handleRowOpen : undefined}
+                    expanded={expandedShiftId === shift.id}
                     isToday={shift.date === today}
                     swapBlockedReason={swapBlockedFor(shift, today, nowOnTeamDay(today), swapBlockedReason)}
                   />
@@ -212,10 +216,10 @@ function CoworkersPanel({
   // (`position: fixed`, 758–844 из 844 на замере 390×844) перекрывает ровно
   // тот кусок вьюпорта, куда он и целится, так что «докрученный» лист всё
   // равно рисовался за баром (проверено `elementFromPoint`: кнопка таб-бара, а
-  // не текст листа). `scrollMarginBottom` — тот же `TAB_BAR_CLEARANCE`, что
-  // `ScreenScroll` уже держит в самом низу каждого экрана (см. её комментарий):
-  // `scrollIntoView` учитывает `scroll-margin` нативно, и это ровно то число,
-  // которым уже посчитана высота бара плюс отступ на вырез снизу.
+  // не текст листа). `scrollMarginBottom` — тот же `TAB_BAR_CLEARANCE`
+  // (96px плюс вырез), что в нижнем `padding` `.ui-screen`: там он оставляет
+  // место в конце страницы, здесь — отступ цели докрутки. `scrollIntoView`
+  // учитывает `scroll-margin` нативно, поэтому лист встаёт над баром.
   //
   // Докрутка — ПОСЛЕ того, как содержимое устоялось: докрути раньше — высота
   // ещё спиннера, а не итогового списка, и прокрутки не хватит.
@@ -228,7 +232,7 @@ function CoworkersPanel({
   return (
     <div
       ref={panelRef}
-      style={{ padding: "2px 20px 14px", fontSize: 14, lineHeight: 1.4, scrollMarginBottom: TAB_BAR_CLEARANCE }}
+      style={{ padding: "2px 14px 14px", fontSize: 14, lineHeight: 1.4, scrollMarginBottom: TAB_BAR_CLEARANCE }}
     >
       <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, marginBottom: 6 }}>
         Кто ещё работает в этот день:

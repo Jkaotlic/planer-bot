@@ -23,7 +23,7 @@ const shift = {
   title: "Вечер", location: null, note: null, unrecognisedCode: null, templateId: 1, employeeId: 1,
 } as Shift;
 
-async function renderRow(props: { onSwap?: (s: Shift) => void; onOpen?: (s: Shift) => void }) {
+async function renderRow(props: { onSwap?: (s: Shift) => void; onOpen?: (s: Shift) => void; expanded?: boolean }) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -58,6 +58,19 @@ describe("строка смены: два разных нажатия", () => {
     const row = el.querySelector('[data-testid="shift-row"]') as HTMLElement;
     expect(row.getAttribute("role")).toBeNull();
     expect(row.getAttribute("tabindex")).toBeNull();
+  });
+
+  it("раскрываемая строка сообщает, раскрыта ли она; нераскрываемая — ничего", async () => {
+    const closed = await renderRow({ onOpen: vi.fn() });
+    expect(closed.querySelector('[data-testid="shift-row"]')!.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => root!.unmount());
+    host!.remove();
+    const open = await renderRow({ onOpen: vi.fn(), expanded: true });
+    expect(open.querySelector('[data-testid="shift-row"]')!.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => root!.unmount());
+    host!.remove();
+    const plain = await renderRow({ expanded: true });
+    expect(plain.querySelector('[data-testid="shift-row"]')!.hasAttribute("aria-expanded")).toBe(false);
   });
 
   it("раскрываемая строка доступна с клавиатуры: role=button и Enter", async () => {

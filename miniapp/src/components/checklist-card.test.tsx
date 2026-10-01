@@ -85,6 +85,8 @@ describe("карточка чек-листа", () => {
     expect(open!.getAttribute("aria-pressed")).toBe("false");
     expect(open!.querySelector(".checklist-check")).not.toBeNull();
     expect(open!.querySelector(".checklist-check--on")).toBeNull();
+    // Галочка рисуется svg-ом: у несделанного пункта её быть не должно.
+    expect(open!.querySelector(".checklist-check svg")).toBeNull();
     expect(el.textContent).not.toMatch(/[✅◻]/u);
   });
 

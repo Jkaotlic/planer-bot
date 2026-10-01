@@ -42,7 +42,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
       {poll.open && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {POLL_CHOICES.map((choice) => (
-            <ActionButton key={choice} compact kind={poll.myChoice === choice ? "primary" : "secondary"} disabled={busy}
+            <ActionButton key={choice} compact kind={poll.myChoice === choice ? "primary" : "secondary"} aria-pressed={poll.myChoice === choice} disabled={busy}
               onClick={() => run(() => apiClient.votePoll(poll.id, choice))}>{POLL_CHOICE_LABEL[choice]}</ActionButton>
           ))}
         </div>
