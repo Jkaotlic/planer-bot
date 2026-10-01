@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Title } from "@telegram-apps/telegram-ui";
+import { Input } from "@telegram-apps/telegram-ui";
 import { FOOD_QTY_MAX, formatMoney, itemLines } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, Group, Hint } from "../../ui";
 
 /**
  * Один заказ. Участнику — меню кнопками, своё блюдо, свои позиции с
@@ -92,41 +92,41 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
       <ScreenScroll>
         <div>{loadError}</div>
         <div style={{ display: "flex", gap: 8, paddingTop: 8 }}>
-          <Button size="s" mode="plain" onClick={onBack}>‹ Назад</Button>
-          <Button size="s" mode="plain" onClick={() => setLoadAttempt((n) => n + 1)}>Повторить</Button>
+          <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
+          <ActionButton compact kind="quiet" onClick={() => setLoadAttempt((n) => n + 1)}>Повторить</ActionButton>
         </div>
       </ScreenScroll>
     );
   }
-  if (order === null) return <ScreenScroll><div style={{ color: "var(--tgui--hint_color)" }}>Загружаю заказ…</div></ScreenScroll>;
+  if (order === null) return <ScreenScroll><Hint>Загружаю заказ…</Hint></ScreenScroll>;
 
   const status = order.cancelled ? "отменён" : order.open ? (order.closes ?? "приём идёт") : "приём закрыт";
   return (
     <ScreenScroll>
-      <Button size="s" mode="plain" onClick={onBack}>‹ Назад</Button>
-      <Title level="2" weight="2">🍱 {order.placeName ?? "Заказ без меню"}</Title>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+      <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
+      <h1 className="ui-screen__title">🍱 {order.placeName ?? "Заказ без меню"}</h1>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
         Собирает {order.creatorName} · {status} · ответили {order.respondedCount} из {order.recipientCount}
       </div>
       {/* Наверху, а не под кнопками управления: отказ тапа по блюду меню
           (например, «Приём закрыт.» — гонка с закрытием) должен быть виден
           сразу, а не после прокрутки всех карточек вниз. */}
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
-      {order.note && <div style={{ fontSize: 13.5 }}>{order.note}</div>}
-      {order.payHint && <div style={{ fontSize: 13.5 }}>Куда сдавать: {order.payHint}</div>}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
+      {order.note && <div style={{ fontSize: "var(--app-text-meta)" }}>{order.note}</div>}
+      {order.payHint && <div style={{ fontSize: "var(--app-text-meta)" }}>Куда сдавать: {order.payHint}</div>}
 
-      <CardStack>
-        <CardShell>
+      <Group>
+        <Card>
           <div style={{ fontWeight: 600 }}>Твой заказ</div>
-          {order.myItems.length === 0 && <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>{order.declined ? "Ты не заказываешь." : "Пока пусто."}</div>}
+          {order.myItems.length === 0 && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{order.declined ? "Ты не заказываешь." : "Пока пусто."}</div>}
           {order.myItems.map((item) => (
             <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ flex: 1 }}>{itemLines([item])[0]}</span>
               {order.open && (
                 <>
-                  <Button size="s" mode="gray" disabled={busy || item.qty <= 1} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty - 1))}>−</Button>
-                  <Button size="s" mode="gray" disabled={busy || item.qty >= FOOD_QTY_MAX} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty + 1))}>+</Button>
-                  <Button size="s" mode="plain" disabled={busy} onClick={() => run(() => apiClient.removeOrderItem(order.id, item.id))}>✕</Button>
+                  <ActionButton compact disabled={busy || item.qty <= 1} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty - 1))}>−</ActionButton>
+                  <ActionButton compact disabled={busy || item.qty >= FOOD_QTY_MAX} onClick={() => run(() => apiClient.setOrderItemQty(order.id, item.id, item.qty + 1))}>+</ActionButton>
+                  <ActionButton compact kind="quiet" disabled={busy} onClick={() => run(() => apiClient.removeOrderItem(order.id, item.id))}>✕</ActionButton>
                 </>
               )}
             </div>
@@ -142,10 +142,10 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               снять — отдельно и с подтверждением, как в боте (там повторный
               тап вообще ничего не снимает). */}
           {order.closed && !order.isCreator && order.myTotal > 0 && !order.payment.myPaid && (
-            <Button size="s" mode="bezeled" disabled={busy}
+            <ActionButton compact disabled={busy}
               onClick={() => run(() => apiClient.setOrderPaid(order.id, true))}>
               💸 Я сдал
-            </Button>
+            </ActionButton>
           )}
           {order.closed && !order.isCreator && order.myTotal > 0 && order.payment.myPaid && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -154,22 +154,22 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
                 onConfirm={() => run(() => apiClient.setOrderPaid(order.id, false))} disabled={busy} />
             </div>
           )}
-        </CardShell>
+        </Card>
 
         {order.open && order.menu.length > 0 && (
-          <CardShell>
+          <Card>
             <div style={{ fontWeight: 600 }}>Меню</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {order.menu.map((m) => (
-                <Button key={m.id} size="s" mode="bezeled" disabled={busy}
-                  onClick={() => run(() => apiClient.addOrderItem(order.id, { menuItemId: m.id }))}>{`${m.name} · ${formatMoney(m.price)}`}</Button>
+                <ActionButton key={m.id} compact disabled={busy}
+                  onClick={() => run(() => apiClient.addOrderItem(order.id, { menuItemId: m.id }))}>{`${m.name} · ${formatMoney(m.price)}`}</ActionButton>
               ))}
             </div>
-          </CardShell>
+          </Card>
         )}
 
         {order.open && (
-          <CardShell>
+          <Card>
             <div style={{ fontWeight: 600 }}>Своё блюдо</div>
             <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -181,21 +181,21 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button size="s" mode="filled" disabled={busy || !customName.trim() || !customPrice}
+              <ActionButton compact kind="primary" disabled={busy || !customName.trim() || !customPrice}
                 onClick={() => run(async () => {
                   const next = await apiClient.addOrderItem(order.id, { name: customName.trim(), price: Number(customPrice) });
                   setCustomName(""); setCustomPrice("");
                   return next;
-                })}>Добавить</Button>
+                })}>Добавить</ActionButton>
               {order.myItems.length === 0 && !order.declined && (
-                <Button size="s" mode="plain" disabled={busy} onClick={() => run(() => apiClient.declineOrder(order.id))}>🙅 Не буду</Button>
+                <ActionButton compact kind="quiet" disabled={busy} onClick={() => run(() => apiClient.declineOrder(order.id))}>🙅 Не буду</ActionButton>
               )}
             </div>
-          </CardShell>
+          </Card>
         )}
 
         {order.people && (
-          <CardShell>
+          <Card>
             <div style={{ fontWeight: 600 }}>Что заказать</div>
             {order.dishes.map((d) => <div key={`${d.name}-${d.price}`}>{itemLines([d])[0]}</div>)}
             <div style={{ fontWeight: 600, marginTop: 6 }}>Кто сколько</div>
@@ -203,11 +203,11 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               <div key={p.employeeId}>{p.displayName} — {p.declined ? "не будет" : p.amount > 0 ? formatMoney(p.amount) : "не ответил(а)"}</div>
             ))}
             <div style={{ fontWeight: 600 }}>Итого: {formatMoney(order.total)}</div>
-          </CardShell>
+          </Card>
         )}
 
         {order.closed && order.payment.rows && order.payment.total > 0 && (
-          <CardShell>
+          <Card>
             <div style={{ fontWeight: 600 }}>Кто сдал · {order.payment.paidCount} из {order.payment.total}</div>
             {order.payment.rows.map((r) => (
               <label key={r.employeeId} style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -218,12 +218,12 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               </label>
             ))}
             {order.payment.paidCount < order.payment.total && (
-              <Button size="s" mode="bezeled" disabled={busy} onClick={() => runRemind(order.id)}>⏰ Напомнить не сдавшим</Button>
+              <ActionButton compact disabled={busy} onClick={() => runRemind(order.id)}>⏰ Напомнить не сдавшим</ActionButton>
             )}
-            {remindResult && <div style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>{remindResult}</div>}
-          </CardShell>
+            {remindResult && <div style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>{remindResult}</div>}
+          </Card>
         )}
-      </CardStack>
+      </Group>
 
       {order.canManage && order.open && (
         <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>

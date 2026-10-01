@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { Button, Title } from "@telegram-apps/telegram-ui";
 import { formatMoney } from "@planer/shared";
 import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, Group, Hint } from "../../ui";
 import type { FoodRoute } from "./food-route";
 import { OrderForm } from "./OrderForm";
 import { OrderScreen } from "./OrderScreen";
@@ -49,19 +48,19 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
   return (
     <ScreenScroll>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Title level="2" weight="2">Заказы и опросы</Title>
-        <Button size="s" mode="plain" onClick={onClose}>Закрыть</Button>
+        <h1 className="ui-screen__title">Заказы и опросы</h1>
+        <ActionButton compact kind="quiet" onClick={onClose}>Закрыть</ActionButton>
       </div>
       <div style={{ display: "flex", gap: 8, padding: "8px 0", flexWrap: "wrap" }}>
-        <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "new-order" })}>🍱 Новый заказ</Button>
-        <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "new-poll" })}>🗳 Новый опрос</Button>
-        <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "places" })}>🍴 Места и меню</Button>
+        <ActionButton compact onClick={() => setRoute({ view: "new-order" })}>🍱 Новый заказ</ActionButton>
+        <ActionButton compact onClick={() => setRoute({ view: "new-poll" })}>🗳 Новый опрос</ActionButton>
+        <ActionButton compact onClick={() => setRoute({ view: "places" })}>🍴 Места и меню</ActionButton>
       </div>
       {orders === "error" && (
-        <div>Заказы не загрузились. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>
+        <div>Заказы не загрузились. <ActionButton compact kind="quiet" onClick={() => setAttempt((n) => n + 1)}>Повторить</ActionButton></div>
       )}
       {Array.isArray(orders) && orders.length > 0 && (
-        <CardStack>
+        <Group>
           {orders.map((o) => {
             // Та же формула, что в OrderScreen/PollCard: `o.closes` — просто
             // форматированный срок, он не гаснет сам, когда заказ закрыт или
@@ -69,27 +68,27 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
             // бы «до 12:30» и закрытому, и отменённому заказу.
             const status = o.cancelled ? "отменён" : o.open ? (o.closes ?? "приём идёт") : "приём закрыт";
             return (
-              <CardShell key={`order-${o.id}`}>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
-                <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+              <Card key={`order-${o.id}`}>
+                <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
+                <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
                   Собирает {o.creatorName} · {status}
                 </div>
-                {o.myTotal > 0 && <div style={{ fontSize: 13.5 }}>Твой заказ: {formatMoney(o.myTotal)}</div>}
-                <Button size="s" mode="bezeled" onClick={() => setRoute({ view: "order", orderId: o.id })}>Открыть</Button>
-              </CardShell>
+                {o.myTotal > 0 && <div style={{ fontSize: "var(--app-text-meta)" }}>Твой заказ: {formatMoney(o.myTotal)}</div>}
+                <ActionButton compact onClick={() => setRoute({ view: "order", orderId: o.id })}>Открыть</ActionButton>
+              </Card>
             );
           })}
-        </CardStack>
+        </Group>
       )}
-      {polls === null && orders === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}
+      {polls === null && orders === null && <Hint>Загружаю…</Hint>}
       {polls === "error" && (
-        <div>Не удалось загрузить. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>
+        <div>Не удалось загрузить. <ActionButton compact kind="quiet" onClick={() => setAttempt((n) => n + 1)}>Повторить</ActionButton></div>
       )}
       {Array.isArray(polls) && polls.length === 0 && Array.isArray(orders) && orders.length === 0 && (
-        <div style={{ color: "var(--tgui--hint_color)" }}>Пока ничего не запускали.</div>
+        <Hint>Пока ничего не запускали.</Hint>
       )}
       {Array.isArray(polls) && polls.length > 0 && (
-        <CardStack>{polls.map((p) => <PollCard key={p.id} poll={p} />)}</CardStack>
+        <Group>{polls.map((p) => <PollCard key={p.id} poll={p} />)}</Group>
       )}
     </ScreenScroll>
   );
@@ -151,34 +150,34 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
   return (
     <ScreenScroll>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Title level="2" weight="2">Места и меню</Title>
-        <Button size="s" mode="plain" onClick={onBack}>Назад</Button>
+        <h1 className="ui-screen__title">Места и меню</h1>
+        <ActionButton compact kind="quiet" onClick={onBack}>Назад</ActionButton>
       </div>
       <div style={{ padding: "8px 0" }}>
-        <Button size="s" mode="bezeled" onClick={() => setView({ mode: "editor", place: null })}>+ Место</Button>
+        <ActionButton compact onClick={() => setView({ mode: "editor", place: null })}>+ Место</ActionButton>
       </div>
-      {archiveError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, paddingBottom: 8 }}>{archiveError}</div>}
-      {places === null && <div style={{ color: "var(--tgui--hint_color)" }}>Загружаю…</div>}
+      {archiveError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", paddingBottom: 8 }}>{archiveError}</div>}
+      {places === null && <Hint>Загружаю…</Hint>}
       {places === "error" && (
-        <div>Не удалось загрузить. <Button size="s" mode="plain" onClick={() => setAttempt((n) => n + 1)}>Повторить</Button></div>
+        <div>Не удалось загрузить. <ActionButton compact kind="quiet" onClick={() => setAttempt((n) => n + 1)}>Повторить</ActionButton></div>
       )}
-      {Array.isArray(places) && places.length === 0 && <div style={{ color: "var(--tgui--hint_color)" }}>Мест ещё нет.</div>}
+      {Array.isArray(places) && places.length === 0 && <Hint>Мест ещё нет.</Hint>}
       {Array.isArray(places) && places.length > 0 && (
-        <CardStack>
+        <Group>
           {places.map((p) => (
-            <CardShell key={p.id}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>🍴 {p.name}</div>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+            <Card key={p.id}>
+              <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍴 {p.name}</div>
+              <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
                 {p.menu.length > 0 ? p.menu.map((m) => `${m.name} — ${m.price} ₽`).join(", ") : "Меню пусто"}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <Button size="s" mode="bezeled" onClick={() => setView({ mode: "editor", place: p })}>Изменить</Button>
+                <ActionButton compact onClick={() => setView({ mode: "editor", place: p })}>Изменить</ActionButton>
                 <ConfirmButton label="Удалить" question={`Удалить «${p.name}»?`} confirmLabel="Удалить"
                   onConfirm={() => archive(p.id)} disabled={busyId === p.id} loading={busyId === p.id} />
               </div>
-            </CardShell>
+            </Card>
           ))}
-        </CardStack>
+        </Group>
       )}
     </ScreenScroll>
   );

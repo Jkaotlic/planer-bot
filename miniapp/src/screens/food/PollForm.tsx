@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Button, Input, Textarea, Title } from "@telegram-apps/telegram-ui";
+import { Input, Textarea } from "@telegram-apps/telegram-ui";
 import { POLL_QUESTION_MAX } from "@planer/shared";
 import { apiClient, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
+import { ActionButton } from "../../ui";
 
 /**
  * Новый опрос. «На смене» — по умолчанию: чаще всего спрашивают тех, кто
@@ -41,29 +42,29 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
 
   if (summary) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
-        <Title level="2" weight="2">Опрос отправлен</Title>
-        <div style={{ fontSize: 14, lineHeight: 1.45 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
+        <h1 className="ui-screen__title">Опрос отправлен</h1>
+        <div style={{ fontSize: "var(--app-text-body)", lineHeight: 1.45 }}>
           Отправлено: {summary.delivered}. Не дошло: {summary.unreachable.join(", ")}
         </div>
-        <Button size="m" mode="filled" onClick={onDone}>ОК</Button>
+        <ActionButton kind="primary" onClick={onDone}>ОК</ActionButton>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
-      <Title level="2" weight="2">Новый опрос</Title>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
+      <h1 className="ui-screen__title">Новый опрос</h1>
       <Textarea header="Вопрос" placeholder="Корпоратив в пятницу?" value={question} maxLength={POLL_QUESTION_MAX}
         onChange={(e) => setQuestion(e.target.value)} disabled={busy} />
       <Input header="Голосуем до (необязательно)" type="time" value={closesTime}
         onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>Ответы: 👍 За · 👎 Против · 🤷 Воздержался</div>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Ответы: 👍 За · 👎 Против · 🤷 Воздержался</div>
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <Button size="m" mode="filled" disabled={!ready || busy} loading={busy} onClick={submit}>Отправить</Button>
-        <Button size="m" mode="plain" disabled={busy} onClick={onCancel}>Отмена</Button>
+        <ActionButton kind="primary" disabled={!ready || busy} loading={busy} onClick={submit}>Отправить</ActionButton>
+        <ActionButton kind="quiet" disabled={busy} onClick={onCancel}>Отмена</ActionButton>
       </div>
     </div>
   );

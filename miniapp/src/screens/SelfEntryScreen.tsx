@@ -1,7 +1,8 @@
 import { useTelegramBack } from "../lib/telegram-back";
+import { ActionButton, Card, Group } from "../ui";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useState } from "react";
-import { Button, Cell, IconButton, Input, List, Placeholder, Section, Title } from "@telegram-apps/telegram-ui";
+import { Cell, IconButton, Input, Placeholder } from "@telegram-apps/telegram-ui";
 import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
 import type { HandoverDraft, SelfEntryInput, Shift, Template } from "../api/client";
 import type { Category } from "../categories";
@@ -277,52 +278,48 @@ export function SelfEntryScreen({
   }
 
   return (
-    <ScreenScroll>
-      <header style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 4px 16px" }}>
-        <IconButton mode="plain" size="m" aria-label="Назад" onClick={handleBack}>
+    <ScreenScroll style={{ padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))", display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* Корень и «Назад» свои, а не `Screen onBack`: у экрана своя логика выхода с
+          предупреждением, и вторая подписка на системную кнопку задвоила бы её. */}
+      <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <IconButton mode="plain" size="l" aria-label="Назад" onClick={handleBack}>
           <BackIcon />
         </IconButton>
-        <Title level="2" weight="2">
+        <h1 className="ui-screen__title">
           {isSick ? "Больничный" : isShift ? "Смена" : "Мероприятие"}
-        </Title>
+        </h1>
       </header>
 
-      <List>
-        <Section
-          header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
-          footer={
-            isSick
-              ? "Админам уйдёт письмо: они увидят, какие смены остались без человека."
-              : isShift
-                ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
-                : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
-          }
-        >
+      <Group
+        header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
+        footer={
+          isSick
+            ? "Админам уйдёт письмо: они увидят, какие смены остались без человека."
+            : isShift
+              ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
+              : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
+        }
+      >
+        <Card>
           {category === "offsite" && (
-            <div style={{ padding: "2px 12px 8px" }}>
-              <Input
-                header="Название"
-                placeholder="Например: конференция"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </div>
+            <Input
+              header="Название"
+              placeholder="Например: конференция"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           )}
-          <div style={{ padding: "2px 12px 8px" }}>
-            <Input header={isSick ? "С какого" : "Дата"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
+          <Input header={isSick ? "С какого" : "Дата"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           {isSick ? (
-            <div style={{ padding: "2px 12px 8px" }}>
-              <Input
-                header="По какое (если знаешь)"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
+            <Input
+              header="По какое (если знаешь)"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
           ) : (
             <>
-              <div style={{ display: "flex", gap: 8, padding: "2px 12px 8px" }}>
+              <div style={{ display: "flex", gap: 8 }}>
                 <Input
                   header="Начало"
                   type="time"
@@ -337,92 +334,88 @@ export function SelfEntryScreen({
                 />
                 <Input header="Конец" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
               </div>
-              <div style={{ padding: "2px 12px 8px" }}>
-                <Input
-                  header="Место (необязательно)"
-                  placeholder="Адрес или площадка"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                />
-              </div>
+              <Input
+                header="Место (необязательно)"
+                placeholder="Адрес или площадка"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+              />
             </>
           )}
-        </Section>
-      </List>
+        </Card>
+      </Group>
 
-      <div style={{ padding: "6px 4px 18px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {/* Отказ и ошибка — рядом с кнопкой, а не в шапке: мини-апп это один
             длинный скролл без единого `position: fixed`, и сообщение, отрисованное
             вверху по нажатию внизу, человеку невидимо. */}
         {(error ?? refusal) && (
-          <div style={{ padding: "0 8px 8px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
             {error ?? refusal}
           </div>
         )}
-        <Button size="l" stretched mode="filled" loading={submitting} disabled={submitting || !!refusal} onClick={() => void handleSubmit()}>
+        <ActionButton stretched kind="primary" loading={submitting} disabled={submitting || !!refusal} onClick={() => void handleSubmit()}>
           {editingId != null ? "Сохранить" : isSick ? "Поставить больничный" : isShift ? "Поставить себе смену" : "Записать мероприятие"}
-        </Button>
+        </ActionButton>
         {editingId != null && (
-          <div style={{ paddingTop: 8 }}>
-            <Button size="m" stretched mode="plain" onClick={resetForm}>
-              Отменить правку
-            </Button>
-          </div>
+          <ActionButton stretched kind="quiet" onClick={resetForm}>
+            Отменить правку
+          </ActionButton>
         )}
       </div>
 
       {drafts.length > 0 && leaveWarned && (
-        <div role="status" style={{ padding: "0 16px 12px", fontSize: 13.5, color: "var(--tgui--destructive_text_color)" }}>
+        <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--destructive_text_color)" }}>
           Смена ещё не отдана. Если выйти — через три часа спросим всех свободных. Нажми «Назад» ещё раз, чтобы выйти.
         </div>
       )}
       {drafts.length > 0 && (
-        <List>
+        <>
           {drafts.map((draft) => (
-            <Section
+            <Group
               key={draft.id}
               header="Кому предложить смену"
               footer="Не ответит за три часа — спросим всех свободных. Если никто не выйдет, за 12 часов до смены напишем админам."
             >
-              <Cell multiline>{draft.shiftLine}</Cell>
-              {draft.candidates.length === 0 ? (
-                <Placeholder description="Свободных нет — админы уже знают, что смена без человека." />
-              ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "4px 12px 10px" }}>
-                  {draft.candidates.map((candidate) => (
-                    <Button
-                      key={candidate.id}
-                      size="s"
-                      mode="bezeled"
-                      disabled={handoverBusy}
-                      onClick={() => void resolveDraft(draft.id, () => onOfferHandover(draft.id, candidate.id))}
-                    >
-                      {candidate.displayName}
-                    </Button>
-                  ))}
+              <Card flush>
+                <Cell multiline>{draft.shiftLine}</Cell>
+                {draft.candidates.length === 0 ? (
+                  <Placeholder description="Свободных нет — админы уже знают, что смена без человека." />
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 12 }}>
+                    {draft.candidates.map((candidate) => (
+                      <ActionButton
+                        key={candidate.id}
+                        compact
+                        disabled={handoverBusy}
+                        onClick={() => void resolveDraft(draft.id, () => onOfferHandover(draft.id, candidate.id))}
+                      >
+                        {candidate.displayName}
+                      </ActionButton>
+                    ))}
+                  </div>
+                )}
+                <div style={{ padding: "0 12px 12px" }}>
+                  <ActionButton
+                    stretched
+                    kind="quiet"
+                    disabled={handoverBusy}
+                    onClick={() => void resolveDraft(draft.id, () => onSkipHandover(draft.id))}
+                  >
+                    {/* Называлась «Потом», а сервер сразу пишет всем свободным —
+                        название обещало обратное тому, что делает. Без свободных
+                        спрашивать некого: админы уже знают, остаётся закрыть. */}
+                    {draft.candidates.length === 0 ? "Понятно" : "Спросить всех свободных"}
+                  </ActionButton>
                 </div>
-              )}
-              <div style={{ padding: "0 12px 12px" }}>
-                <Button
-                  size="m"
-                  stretched
-                  mode="plain"
-                  disabled={handoverBusy}
-                  onClick={() => void resolveDraft(draft.id, () => onSkipHandover(draft.id))}
-                >
-                  {/* Называлась «Потом», а сервер сразу пишет всем свободным —
-                      название обещало обратное тому, что делает. Без свободных
-                      спрашивать некого: админы уже знают, остаётся закрыть. */}
-                  {draft.candidates.length === 0 ? "Понятно" : "Спросить всех свободных"}
-                </Button>
-              </div>
-            </Section>
+              </Card>
+            </Group>
           ))}
-        </List>
+        </>
       )}
 
-      <List>
-        <Section header="Что ты уже записал себе" footer="Здесь только то, что ещё не кончилось: прошедшее правит админ.">
+      <Group header="Что ты уже записал себе" footer="Здесь только то, что ещё не кончилось: прошедшее правит админ.">
+        <Card flush>
           {mine.length === 0 ? (
             <Placeholder description="Пока ничего. Заполни форму выше." />
           ) : (
@@ -439,9 +432,9 @@ export function SelfEntryScreen({
                 }
                 after={
                   <span style={{ display: "flex", gap: 6 }}>
-                    <Button size="s" mode="bezeled" onClick={() => startEditing(entry)}>
+                    <ActionButton compact onClick={() => startEditing(entry)}>
                       Изменить
-                    </Button>
+                    </ActionButton>
                     <ConfirmButton
                       label="Снять"
                       question="Снять эту запись? Админам придёт письмо."
@@ -458,8 +451,8 @@ export function SelfEntryScreen({
               </Cell>
             ))
           )}
-        </Section>
-      </List>
+        </Card>
+      </Group>
     </ScreenScroll>
   );
 }
