@@ -3,12 +3,12 @@ import { Cell, Switch } from "@telegram-apps/telegram-ui";
 import { apiClient } from "../api/client";
 
 /**
- * «Напоминания о сменах» — the one setting a worker owns about themselves.
+ * «Напоминания о сменах» — личная настройка работника.
  *
- * Lives on «Мои смены» rather than behind a settings screen of its own: it is
- * the only setting there is, and this is the screen everyone opens. The same
- * switch is reachable from the bot (`/notifications`, and the button on every
- * reminder), because whoever wants these to stop is holding one at that moment.
+ * Живёт на экране «Настройки» вместе с остальными личными: на «Сменах» она
+ * тянула список вниз, а открывают этот экран ради «когда я работаю». Тот же
+ * тумблер доступен из бота (`/notifications` и кнопка под каждым напоминанием),
+ * потому что тот, кто хочет их отключить, держит в руках именно напоминание.
  */
 export function RemindersSwitch({ enabled, onChanged }: { enabled: boolean; onChanged: (next: boolean) => void }) {
   const [busy, setBusy] = useState(false);
@@ -39,9 +39,10 @@ export function RemindersSwitch({ enabled, onChanged }: { enabled: boolean; onCh
         multiline
         description={
           enabled
-            ? // Тот же довод, что у `/notifications` в боте: виды выбирает админ
-              // галочкой, и перечень трёх здесь молчал про дежурства и ранние.
-              "Вечером накануне напишу про смену, которая меняет твой день: раннюю, утреннюю, вечернюю, ночную, дежурство. Про какие именно — решает админ"
+            ? // Перечень видов («раннюю, утреннюю, …») убран: какие именно — решает
+              // админ галочкой, и работнику этот список ничего не давал, а место
+              // занимал в шесть строк.
+              "Вечером накануне напишу про смену"
             : "Про смены писать не буду — можно включить обратно в любой момент"
         }
       >

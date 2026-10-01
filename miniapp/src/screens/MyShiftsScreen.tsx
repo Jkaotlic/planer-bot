@@ -1,24 +1,19 @@
 import { swapBlockedFor } from "../lib/swaps";
 import { nowOnTeamDay } from "../lib/swap-candidates";
-import { Fragment, useEffect, useRef, useState } from "react";
-import { Button, List, Placeholder, Section } from "@telegram-apps/telegram-ui";
+import { useEffect, useRef, useState } from "react";
+import { Placeholder } from "@telegram-apps/telegram-ui";
 import { canAddOwnShifts, isAbsence, swapBlockReason } from "@planer/shared";
-import type { StartTab } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
-import { AddressField } from "../components/AddressField";
-import { CalendarSection } from "../components/CalendarSection";
 import { ChecklistCard } from "../components/ChecklistCard";
 import { DayTeamList } from "../components/DayTeamList";
 import { GreetingHero } from "../components/GreetingHero";
-import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
+import { TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
 import { ShiftRow } from "../components/ShiftRow";
-import { RemindersSwitch } from "../components/RemindersSwitch";
-import { StartTabPicker } from "../components/StartTabPicker";
-import { SelfScheduleSwitch } from "../components/SelfScheduleSwitch";
 import { coworkersOf } from "../lib/coworkers";
 import { groupUpcomingByWeek, remainingThisWeek } from "../lib/upcoming";
 import { pluralizeRu } from "../lib/shift";
+import { ActionButton, Card, Group, Screen } from "../ui";
 
 // Причина одна на весь экран, и её порядок берётся у той же функции, что решает
 // на сервере. `toExcluded: false` — здесь речь только про меня; исключённые
@@ -44,14 +39,8 @@ export interface MyShiftsScreenProps {
   /** Открывает форму больничного, мероприятия или (для наблюдателя) своей
    *  смены — тот же оверлей, в который ведут кнопки бота. */
   onSelfEntry: (mode: SelfEntryMode) => void;
-  /** Keeps `me` in step when the reminders switch is flipped. */
-  onRemindersChanged: (enabled: boolean) => void;
-  /** Стартовая вкладка — личная настройка, живёт рядом с напоминаниями. */
-  onStartTabChanged: (tab: StartTab | null) => void;
-  /** Keeps `me` in step when the self-schedule switch is flipped — наблюдатель. */
-  onSelfScheduleChanged: (enabled: boolean) => void;
-  /** Keeps `me` in step when the greeting name is saved. */
-  onAddressChanged: (next: { preferredName: string | null; address: string }) => void;
+  /** Открывает экран «Настройки» — шестерёнка в приветствии. */
+  onOpenSettings: () => void;
   /** Расписание дня раскрытой строки — тот же загрузчик, что кормит экран
    *  обмена (см. `App.tsx`). `null`, пока не пришло или дата не совпадает с
    *  раскрытой строкой (предыдущий день ещё висит в памяти, пока грузится новый). */
@@ -63,8 +52,8 @@ export interface MyShiftsScreenProps {
   onToggleCoworkers: (shift: Shift | null) => void;
 }
 
-/** «Мои смены»: приветствие с остатком недели, ближайшие записи секциями по
- *  неделям, и переключатель напоминаний. Прошедших дней здесь нет. */
+/** «Мои смены»: приветствие с остатком недели (и шестерёнкой в «Настройки»),
+ *  вход в самозапись и ближайшие записи по неделям. Прошедших дней здесь нет. */
 export function MyShiftsScreen({
   me,
   today,
@@ -72,10 +61,7 @@ export function MyShiftsScreen({
   templates,
   onProposeSwap,
   onSelfEntry,
-  onRemindersChanged,
-  onStartTabChanged,
-  onSelfScheduleChanged,
-  onAddressChanged,
+  onOpenSettings,
   openDay,
   openDayLoading,
   openDayError,
@@ -122,120 +108,71 @@ export function MyShiftsScreen({
   const swapBlockedReason = blocked ? BLOCK_PHRASES[blocked] : undefined;
 
   return (
-    <ScreenScroll>
-      <div style={{ margin: "4px 4px 20px" }}>
-        {/* `me.address` comes from the server, which knows the person's Telegram
-            first name. Splitting `displayName` here gave «Привет, Петров» — the
-            roster is written «Фамилия Имя». See `addressOf` in @planer/shared. */}
-        <GreetingHero name={me.address} summary={summary} />
-      </div>
+    <Screen>
+      {/* `me.address` приходит с сервера: он знает имя из Telegram. Делить
+          `displayName` здесь давало «Привет, Петров» — ростер пишется «Фамилия
+          Имя». См. `addressOf` в @planer/shared. */}
+      <GreetingHero name={me.address} summary={summary} onSettings={onOpenSettings} />
 
-      {/* Чек-лист — самое верхнее, что есть на экране в тот день, когда он
-          положен: человек открывает мини-аппу по кнопке из утреннего
-          сообщения, и искать его под списком смен ему незачем. В остальные
-          дни карточки нет вовсе. */}
+      {/* Чек-лист — самое верхнее в день, когда он положен: человек открывает
+          мини-апп по кнопке из утреннего сообщения. В остальные дни его нет. */}
       <ChecklistCard today={today} />
 
-      {/* Вход в самозапись стоит НАД списком смен: список не имеет нижней
-          границы, и кнопка под ним у человека с плотным графиком оказалась бы
-          за десятком экранов прокрутки. Те же две формы открывают кнопки бота. */}
-      <List>
-        <Section header="Записать себе">
-          {/* `wrap`: у наблюдателя с «Веду график сам» кнопок три, и в одну
-              строку на 390px все три резались многоточием. Третья — строкой
-              ниже на всю ширину (`flexBasis: 100%`). */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "4px 12px 12px" }}>
-            <Button size="m" stretched mode="bezeled" style={{ flex: "1 1 40%" }} onClick={() => onSelfEntry("sick")}>
-              🤒 Больничный
-            </Button>
-            <Button size="m" stretched mode="bezeled" style={{ flex: "1 1 40%" }} onClick={() => onSelfEntry("event")}>
-              📌 Мероприятие
-            </Button>
-            {/* Эффективное право (`canAddOwnShifts`), не сырой тумблер: снятие роли
-                намеренно не гасит `selfScheduleEnabled` в БД (см. спеку), поэтому у
-                бывшего наблюдателя галочка может остаться поднятой — кнопка, ведущая
-                на форму, которая никогда не откроется (`App.tsx`), и отвечающая 403
-                на каждое нажатие, хуже отсутствующей. */}
-            {canAddOwnShifts(me) && (
-              <Button size="m" stretched mode="bezeled" style={{ flexBasis: "100%" }} onClick={() => onSelfEntry("shift")}>
-                🕒 Поставить себе смену
-              </Button>
-            )}
-          </div>
-        </Section>
-      </List>
+      {/* Вход в самозапись стоит НАД списком смен: у списка нет нижней границы,
+          и кнопка под ним у человека с плотным графиком оказалась бы за десятком
+          экранов прокрутки. */}
+      <Group header="Записать себе">
+        {/* `wrap`: у наблюдателя с «Веду график сам» кнопок три; третья —
+            строкой ниже на всю ширину. */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <span style={{ flex: "1 1 40%", display: "flex" }}>
+            <ActionButton stretched onClick={() => onSelfEntry("sick")}>🤒 Больничный</ActionButton>
+          </span>
+          <span style={{ flex: "1 1 40%", display: "flex" }}>
+            <ActionButton stretched onClick={() => onSelfEntry("event")}>📌 Мероприятие</ActionButton>
+          </span>
+          {/* Эффективное право (`canAddOwnShifts`), не сырой тумблер: снятие роли
+              намеренно не гасит `selfScheduleEnabled` в БД, и кнопка, ведущая на
+              форму с отказом 403, хуже отсутствующей. */}
+          {canAddOwnShifts(me) && (
+            <span style={{ flexBasis: "100%", display: "flex" }}>
+              <ActionButton stretched onClick={() => onSelfEntry("shift")}>🕒 Поставить себе смену</ActionButton>
+            </span>
+          )}
+        </div>
+      </Group>
 
       {weeks.length === 0 ? (
         <Placeholder header="Пока нет смен" description="Здесь появятся ваши ближайшие смены и отпуска." />
       ) : (
-        <List>
-          <Section header="Ближайшие смены">
-            {weeks.map((week) => (
-              <Section key={week.key} header={week.label}>
-                {week.shifts.map((shift) => (
-                  // `Fragment`, не `div`: `Section` считает дивайдеры по числу
-                  // ПРЯМЫХ детей (`Children.map` в её исходнике) — обёртка-`div`
-                  // добавила бы лишний узел в этот счёт и не изменила бы место
-                  // дивайдера, а `Fragment` даёт строку и раскрытый под ней лист
-                  // одной группой без лишнего DOM-узла.
-                  <Fragment key={shift.id}>
-                    <ShiftRow
-                      shift={shift}
-                      templates={templates}
-                      onSwap={onProposeSwap}
-                      onOpen={coworkersOpenable(shift) ? handleRowOpen : undefined}
-                      isToday={shift.date === today}
-                      swapBlockedReason={swapBlockedFor(shift, today, nowOnTeamDay(today), swapBlockedReason)}
-                    />
-                    {expandedShiftId === shift.id && (
-                      <CoworkersPanel
-                        shift={shift}
-                        meId={me.id}
-                        openDay={openDay}
-                        loading={openDayLoading}
-                        error={openDayError}
-                      />
-                    )}
-                  </Fragment>
-                ))}
-              </Section>
-            ))}
-          </Section>
-        </List>
+        // Один заголовок на неделю. Общий «Ближайшие смены» над ним убран:
+        // два заголовка подряд говорили одно и то же.
+        weeks.map((week) => (
+          <Group key={week.key} header={week.label}>
+            <Card flush>
+              {week.shifts.map((shift) => (
+                // Один `div` на строку вместе с раскрытым листом: разделитель
+                // `Card flush` ставится между прямыми детьми, и лист не должен
+                // отделяться линией от своей же строки.
+                <div key={shift.id}>
+                  <ShiftRow
+                    shift={shift}
+                    templates={templates}
+                    onSwap={onProposeSwap}
+                    onOpen={coworkersOpenable(shift) ? handleRowOpen : undefined}
+                    isToday={shift.date === today}
+                    swapBlockedReason={swapBlockedFor(shift, today, nowOnTeamDay(today), swapBlockedReason)}
+                  />
+                  {expandedShiftId === shift.id && (
+                    <CoworkersPanel shift={shift} meId={me.id} openDay={openDay} loading={openDayLoading} error={openDayError} />
+                  )}
+                </div>
+              ))}
+            </Card>
+          </Group>
+        ))
       )}
-
-      <List>
-        <Section header="Уведомления">
-          <RemindersSwitch enabled={me.remindersEnabled} onChanged={onRemindersChanged} />
-          {/* Здесь же, а не отдельным экраном настроек: это личная настройка, а
-              «Мои смены» — экран, который открывают все. */}
-          <StartTabPicker me={me} onChanged={onStartTabChanged} />
-          {/* Рядом с напоминаниями, не отдельной секцией: это тоже личная
-              настройка, а не общий раздел — и видна только наблюдателю. */}
-          {me.isObserver && (
-            <SelfScheduleSwitch enabled={me.selfScheduleEnabled} onChanged={onSelfScheduleChanged} />
-          )}
-        </Section>
-      </List>
-
-      {/* Своим запросом, не из bootstrap: токен подписки нарочно не отдаётся
-          там (см. CalendarSection) — раздел спрашивает сам, когда открыт. */}
-      <List>
-        <Section header="Календарь">
-          <CalendarSection />
-        </Section>
-      </List>
-
-      <List>
-        <Section header="Обращение">
-          <AddressField
-            preferredName={me.preferredName}
-            address={me.address}
-            onSaved={onAddressChanged}
-          />
-        </Section>
-      </List>
-    </ScreenScroll>
+    </Screen>
   );
 }
 
@@ -244,11 +181,9 @@ export function MyShiftsScreen({
  *
  * Плоский `div`, не `Cell`: `Cell`/`Tappable` несёт свой рипл- и hover-фон на
  * весь блок — тот же дефект, что уже разбирали в «Записать себе». Свой фон
- * этому `div` не задан нарочно: он, как и строка над ним, прямой ребёнок
- * `Section`, а фон карточки красит именно она (`var(--tgui--section_bg_color)`
- * на её обёртке) — задать здесь ещё и «свой» цвет означало бы гадать его
- * заново вместо того, чтобы получить точно тот же по построению. Замер
- * (headless, 390×844): фон блока и фон строки совпадают в обеих темах.
+ * этому `div` не задан нарочно: он, как и строка над ним, лежит внутри `Card`,
+ * а фон красит именно она — задать здесь ещё и «свой» цвет означало бы гадать
+ * его заново вместо того, чтобы получить точно тот же по построению.
  */
 function CoworkersPanel({
   shift,
