@@ -55,7 +55,7 @@ export type StatusTone = "sent" | "ready" | "pending";
  * Где сбор, в одном слове.
  *
  * Закрытый читается закрытым, а не «Разослано»: после закрытия в нём уже
- * ничего не происходит, и пилюля про рассылку выглядел бы как приглашение
+ * ничего не происходит, и пилюля про рассылку выглядела бы как приглашение
  * дожать.
  */
 export function statusOf(row: Pick<CollectionRow, "collection" | "status" | "active">): { label: string; tone: StatusTone } {
@@ -697,6 +697,18 @@ function CollectionsList({
   );
 }
 
+/**
+ * Подпись сверху карточки раскрытого сбора: чей он.
+ *
+ * Раскрытый сбор — несколько соседних карточек (форма, рассылка, отметки,
+ * закрытие) на том же расстоянии друг от друга, что и карточка следующего
+ * сбора. Кнопка, которая пишет всей команде или удаляет, без названия не
+ * говорит, к какому сбору относится, — и прокрутившему вниз остаётся гадать.
+ */
+function OwnerLine({ children }: { children: string }) {
+  return <p className="ui-hint ui-item__owner">{children}</p>;
+}
+
 /** Дедлайн главнее даты события — как в правиле активности. */
 function edgeLine(c: Collection): string | null {
   if (c.deadline) return `до ${formatDayMonth(c.deadline)}`;
@@ -749,7 +761,7 @@ function CollectionCard({
   // карточке «Собрали», «Сохранить» и «Да, разослать» были бы тремя главными
   // кнопками, а правило — одна на карточку. Строка сбора остаётся первой.
   return (
-    <>
+    <div className={open ? "ui-item ui-item--open" : "ui-item"}>
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -766,7 +778,7 @@ function CollectionCard({
         {/* Равные доли: `stretched` у `ActionButton` — `flex: 1 1 0`, и «Собрали»
             не ужимается до «Соб…», как ужималось при одной растянутой кнопке. */}
         <div style={{ display: "flex", gap: 8 }}>
-          <ActionButton compact stretched onClick={onToggle}>
+          <ActionButton compact stretched aria-expanded={open} onClick={onToggle}>
             {open ? "Свернуть" : "Открыть"}
           </ActionButton>
           {/* «Собрали» прямо в строке: закрыть сбор — самое частое, что с ним
@@ -801,7 +813,7 @@ function CollectionCard({
           onDeleted={onDeleted}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -931,8 +943,8 @@ function CollectionEditor({
 
   // Каждый блок — своя карточка, чтобы в каждой была не больше одной главной
   // кнопки: «Сохранить» у формы, «Да, разослать» у рассылки, «Да, напомнить» у
-  // дожима. «Сохранить» гаснет до обычной, пока рассылка взведена: взвод
-  // снимается любой правкой, так что в этот момент сохранять нечего.
+  // дожима. «Сохранить» — всегда главная кнопка своей карточки: взведённая
+  // рассылка живёт в другой карточке, и две главные на одной не встречаются.
   return (
     <>
       <Card>
@@ -982,14 +994,7 @@ function CollectionEditor({
           onMessageText={(v) => { setMessageText(v); setConfirming(false); }}
         />
 
-        <ActionButton
-          kind={confirming ? "secondary" : "primary"}
-          compact
-          stretched
-          loading={saving}
-          disabled={busy}
-          onClick={() => void handleSave()}
-        >
+        <ActionButton kind="primary" compact stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
           Сохранить
         </ActionButton>
 
@@ -998,6 +1003,7 @@ function CollectionEditor({
 
       {preview && (
         <Card>
+          <OwnerLine>{cardSubject(row)}</OwnerLine>
           <SendBlock
             preview={preview}
             personName={row.personName}
@@ -1011,9 +1017,10 @@ function CollectionEditor({
         </Card>
       )}
 
-      <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} />
+      <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} subject={cardSubject(row)} />
 
       <Card>
+        <OwnerLine>{cardSubject(row)}</OwnerLine>
         <ActionButton
           compact
           stretched
@@ -1031,6 +1038,7 @@ function CollectionEditor({
         {!isBirthday && collection.sendCount === 0 && (
           <ActionButton
             kind="quiet"
+            danger
             compact
             stretched
             loading={deleting}
@@ -1056,7 +1064,7 @@ function CollectionEditor({
  * Грузится при раскрытии карточки, а не вместе со списком: сборов бывает
  * десяток, а раскрыт один.
  */
-function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canRemind: boolean }) {
+function PaymentsBlock({ collectionId, canRemind, subject }: { collectionId: number; canRemind: boolean; subject: string }) {
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [paidCount, setPaidCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -1113,6 +1121,7 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
 
   return (
     <Card>
+      <OwnerLine>{subject}</OwnerLine>
       <div style={FIELD_LABEL_STYLE}>
         Отметились {paidCount} из {total}
       </div>
@@ -1312,7 +1321,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
   }
 
   return (
-    <>
+    <div className={open ? "ui-item ui-item--open" : "ui-item"}>
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span
@@ -1359,7 +1368,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
 
         {/* Главной кнопки у карточки нет: «Подготовить сбор» только раскрывает
             редактор, а рассылка — в его собственной карточке. */}
-        <ActionButton compact stretched onClick={onToggle}>
+        <ActionButton compact stretched aria-expanded={open} onClick={onToggle}>
           {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}
         </ActionButton>
       </Card>
@@ -1367,7 +1376,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
       {/* Редактор — своими карточками следом (см. `CollectionCard`): в одной
           карточке с «Подготовить сбор» у него были бы свои главные кнопки. */}
       {open && <BirthdayEditor birthday={birthday} today={today} onChanged={onChanged} onSent={onSent} />}
-    </>
+    </div>
   );
 }
 
@@ -1502,16 +1511,8 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
                 setConfirming(false);
               }}
             />
-            {/* Главная кнопка формы; гаснет до обычной, пока рассылка взведена
-                (взвод снимается любой правкой, сохранять в этот момент нечего). */}
-            <ActionButton
-              kind={confirming ? "secondary" : "primary"}
-              compact
-              stretched
-              loading={saving}
-              disabled={busy}
-              onClick={() => void handleSave()}
-            >
+            {/* Главная кнопка формы; рассылка — в соседней карточке со своей. */}
+            <ActionButton kind="primary" compact stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
               Сохранить
             </ActionButton>
           </>
@@ -1540,6 +1541,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
           </Card>
         ) : (
           <Card>
+            <OwnerLine>{birthday.displayName}</OwnerLine>
             <SendBlock
               preview={preview}
               personName={birthday.displayName}
@@ -1557,7 +1559,11 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       {/* Отметки и у раунда ДР: скидываются на подарок ровно так же, а виновник
           в получатели не входит никогда — сюрприз этим не выдаётся. */}
       {birthday.campaign && (
-        <PaymentsBlock collectionId={birthday.campaign.id} canRemind={birthday.campaign.sendCount > 0} />
+        <PaymentsBlock
+          collectionId={birthday.campaign.id}
+          canRemind={birthday.campaign.sendCount > 0}
+          subject={birthday.displayName}
+        />
       )}
     </>
   );

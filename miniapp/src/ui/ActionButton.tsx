@@ -7,6 +7,9 @@ interface ActionButtonBase {
   /** Кнопка внутри строки: ниже на вид, та же зона нажатия. */
   compact?: boolean;
   stretched?: boolean;
+  /** Разрушающее действие («Удалить сбор»): красный текст, как было до набора.
+   *  Синий у «удалить» читается как безобидное, а он необратим. */
+  danger?: boolean;
   "aria-label"?: string;
   children: ReactNode;
 }
@@ -18,6 +21,9 @@ export interface ActionButtonAction extends ActionButtonBase {
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   /** Выбран ли вариант в ряду фишек; для остальных кнопок не задаётся. */
   "aria-pressed"?: boolean;
+  /** Раскрыта ли секция, которой кнопка управляет: без этого скринридер читает
+   *  «Показать» и не знает, что список уже открыт. */
+  "aria-expanded"?: boolean;
   href?: never;
 }
 
@@ -30,6 +36,7 @@ export interface ActionButtonLink extends ActionButtonBase {
   disabled?: never;
   onClick?: never;
   "aria-pressed"?: never;
+  "aria-expanded"?: never;
 }
 
 export type ActionButtonProps = ActionButtonAction | ActionButtonLink;
@@ -43,17 +50,20 @@ export function ActionButton({
   kind = "secondary",
   compact,
   stretched,
+  danger,
   loading,
   disabled,
   onClick,
   "aria-label": ariaLabel,
   "aria-pressed": ariaPressed,
+  "aria-expanded": ariaExpanded,
   href,
   children,
 }: ActionButtonProps) {
   const classes = ["ui-btn", `ui-btn--${kind}`];
   if (compact) classes.push("ui-btn--compact");
   if (stretched) classes.push("ui-btn--stretched");
+  if (danger) classes.push("ui-btn--danger");
   const inner = (
     <>
       {loading && (
@@ -81,6 +91,7 @@ export function ActionButton({
       aria-busy={loading || undefined}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
+      aria-expanded={ariaExpanded}
       onClick={onClick}
     >
       {inner}

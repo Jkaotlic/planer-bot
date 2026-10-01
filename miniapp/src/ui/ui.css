@@ -171,6 +171,18 @@
   padding-inline: 8px;
 }
 
+/* Разрушающее действие. Правило стоит после `--secondary` и `--quiet` и той же
+   специфичности, поэтому перекрашивает обе; у `primary` фон остаётся кнопочным,
+   меняется только цвет текста. Перед `color-mix` — сплошной запасной фон. */
+.ui-btn--danger {
+  color: var(--tgui--destructive_text_color, #d33a3a);
+}
+
+.ui-btn--secondary.ui-btn--danger {
+  background: rgb(229 57 53 / 14%);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 14%, transparent);
+}
+
 /* Кнопка в строке: рисуется 36px, но зона нажатия — те же 44. */
 .ui-btn--compact {
   min-height: 36px;
@@ -336,6 +348,11 @@
   width: 22px;
   height: 22px;
   margin: 0;
+  /* Без `top` абсолютное поле вставало в верхний край строки, на 11px выше
+     нарисованного квадрата (его сдвигают `padding` строки 10px и `margin-top`
+     1px), и фокус с кольцом рисовались не там, где виден квадрат. */
+  top: 11px;
+  left: 0;
 }
 
 .ui-check__box {
@@ -437,4 +454,46 @@
 
 .ui-select select:disabled {
   opacity: 0.55;
+}
+
+/* ---------- Сегментный переключатель ---------- */
+/* `SegmentedControl` из telegram-ui тянется на 100% высоты родителя, а своей не
+   имеет и выходит ниже 44px. Фиксированная `height`, а не `min-height`:
+   процент у потомка считается только от заданной высоты. */
+.ui-tap-height {
+  height: var(--app-tap);
+}
+
+/* ---------- Раскрытый элемент списка ---------- */
+/* Сбор, раскрытый в несколько карточек, держится вместе: внутри зазор меньше
+   группового, между соседними элементами — больше, а слева в поле экрана
+   тянется полоска. Полоска в поле, а не в карточке: левый край карточек
+   остаётся на 16px, как у всех. */
+.ui-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ui-group__body > .ui-item + .ui-item {
+  margin-top: 10px;
+}
+
+.ui-item--open::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--tgui--link_color);
+}
+
+/* Название сбора над его кнопкой: серое, как пояснение, но плотнее. */
+.ui-item__owner {
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }

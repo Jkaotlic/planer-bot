@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { CheckRow, MenuRow, Screen, SelectField } from "./index";
+import { ActionButton, CheckRow, MenuRow, Screen, SelectField, TapHeight } from "./index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -157,5 +159,94 @@ describe("Screen: назад с нижней панелью", () => {
     const el = await render(createElement(Screen, { title: "Настройки", onBack: () => {}, children: null }));
     expect(el.querySelector('button[aria-label="Назад"]')!.textContent).toBe("‹ Назад");
     expect(el.querySelector(".ui-screen")!.className).toContain("ui-screen--overlay");
+  });
+});
+
+describe("ActionButton: danger и aria-expanded", () => {
+  it("danger добавляет класс разрушающего тона; без него класса нет", async () => {
+    const el = await render(createElement("div", null,
+      createElement(ActionButton, { danger: true, children: "Удалить" }),
+      createElement(ActionButton, { children: "Сохранить" }),
+    ));
+    const [del, save] = [...el.querySelectorAll("button")];
+    expect(del!.className).toContain("ui-btn--danger");
+    expect(save!.className).not.toContain("ui-btn--danger");
+  });
+
+  it("danger не отнимает вид secondary: оба класса на месте", async () => {
+    const el = await render(createElement(ActionButton, { danger: true, children: "Удалить" }));
+    const cls = el.querySelector("button")!.className;
+    expect(cls).toContain("ui-btn--secondary");
+    expect(cls).toContain("ui-btn--danger");
+  });
+
+  it("aria-expanded уходит на кнопку как есть, без него атрибута нет", async () => {
+    const el = await render(createElement("div", null,
+      createElement(ActionButton, { "aria-expanded": true, children: "Свернуть" }),
+      createElement(ActionButton, { "aria-expanded": false, children: "Показать" }),
+      createElement(ActionButton, { children: "Просто" }),
+    ));
+    const [a, b, c] = [...el.querySelectorAll("button")];
+    expect(a!.getAttribute("aria-expanded")).toBe("true");
+    expect(b!.getAttribute("aria-expanded")).toBe("false");
+    expect(c!.hasAttribute("aria-expanded")).toBe(false);
+  });
+});
+
+describe("ui.css: что нельзя потерять", () => {
+  // jsdom не считает раскладку, поэтому правила проверяются по тексту файла.
+  // Не `?raw`: vitest отдаёт CSS пустым, пока не включена обработка стилей.
+  const css = readFileSync(`${import.meta.dirname}/ui.css`, "utf8");
+  const rule = (selector: string) => {
+    const start = css.indexOf(`${selector} {`);
+    expect(start, selector).toBeGreaterThanOrEqual(0);
+    return css.slice(start, css.indexOf("}", start));
+  };
+
+  it("невидимое поле галочки привязано к рисованной отметке (top/left)", () => {
+    const r = rule(".ui-check__input");
+    expect(r).toMatch(/top:\s*\d+px/);
+    expect(r).toMatch(/left:\s*0/);
+  });
+
+  it("danger у secondary: запасной фон стоит ДО color-mix", () => {
+    const r = rule(".ui-btn--secondary.ui-btn--danger");
+    expect(r.indexOf("rgb(")).toBeGreaterThanOrEqual(0);
+    expect(r.indexOf("rgb(")).toBeLessThan(r.indexOf("color-mix"));
+  });
+
+  it("danger красит текст токеном destructive_text_color", () => {
+    expect(rule(".ui-btn--danger")).toContain("--tgui--destructive_text_color");
+  });
+});
+
+describe("TapHeight", () => {
+  it("оборачивает детей в блок с классом высоты нажимаемого", async () => {
+    const el = await render(createElement(TapHeight, null, createElement("span", { id: "x" }, "a")));
+    const wrap = el.querySelector(".ui-tap-height")!;
+    expect(wrap.querySelector("#x")).not.toBeNull();
+  });
+});
+
+describe("SelectField: disabled и CheckRow без hint", () => {
+  it("disabled гасит нативный select", async () => {
+    const el = await render(createElement(SelectField, {
+      value: "a", onChange: () => {}, disabled: true, "aria-label": "М",
+      children: [createElement("option", { key: "a", value: "a" }, "А")],
+    }));
+    expect((el.querySelector("select") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("без disabled select живой", async () => {
+    const el = await render(createElement(SelectField, {
+      value: "a", onChange: () => {}, "aria-label": "М",
+      children: [createElement("option", { key: "a", value: "a" }, "А")],
+    }));
+    expect((el.querySelector("select") as HTMLSelectElement).disabled).toBe(false);
+  });
+
+  it("CheckRow без hint не рисует узел пояснения", async () => {
+    const el = await render(createElement(CheckRow, { checked: false, onChange: () => {}, label: "А" }));
+    expect(el.querySelector(".ui-check__hint")).toBeNull();
   });
 });

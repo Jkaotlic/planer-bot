@@ -86,6 +86,15 @@ describe("файл инструкции из вебки", () => {
     expect(el.textContent ?? "").toContain("Проверка 47.pdf");
   });
 
+  it("кнопка «Приложить файл» открывает выбор файла у скрытого поля", async () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click");
+    const el = await mount(LIST);
+    const button = [...el.querySelectorAll("button")].find((b) => b.textContent?.includes("Приложить файл")) as HTMLButtonElement;
+    await act(async () => button.click());
+    const fileInput = el.querySelector('input[type="file"]');
+    expect(click.mock.contexts).toContain(fileInput);
+  });
+
   it("слишком большой файл объясняется словами", async () => {
     vi.spyOn(apiClient, "uploadChecklistDoc").mockRejectedValue(new Error("Файл больше 5 МБ — выбери поменьше"));
 

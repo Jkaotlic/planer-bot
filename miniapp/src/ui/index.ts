@@ -7,3 +7,4 @@ export { MenuRow } from "./MenuRow";
 export { Screen } from "./Screen";
 export { SelectField } from "./SelectField";
 export { StatusPill } from "./StatusPill";
+export { TapHeight } from "./TapHeight";

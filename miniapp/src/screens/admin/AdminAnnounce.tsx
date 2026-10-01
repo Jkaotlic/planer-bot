@@ -3,8 +3,7 @@ import { announcementUnreachableLine, filterPeople, presetRecipientIds, type Ann
 import { Placeholder, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult, type RecipientGroupView } from "../../api/client";
 import { PersonSearch } from "../../components/PersonSearch";
-import { TapHeight } from "../../components/TapHeight";
-import { ActionButton, Card, CheckRow, Group, Hint } from "../../ui";
+import { ActionButton, Card, CheckRow, Group, Hint, TapHeight } from "../../ui";
 
 /**
  * «Анонсы»: вольный текст всей команде или выбранным. Открыт и админу (вкладка

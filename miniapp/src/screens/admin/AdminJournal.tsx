@@ -18,8 +18,7 @@ import {
   type ShiftCountsKind,
 } from "@planer/shared";
 import { apiClient, type JournalPage, type ShiftCountsReport } from "../../api/client";
-import { TapHeight } from "../../components/TapHeight";
-import { ActionButton, Card, Group, SelectField } from "../../ui";
+import { ActionButton, Card, Group, SelectField, TapHeight } from "../../ui";
 import { initialsOf, personPalette } from "../../lib/people";
 
 /** Событие журнала карточкой. Текст — тот же, что в вебе: общий описатель. */

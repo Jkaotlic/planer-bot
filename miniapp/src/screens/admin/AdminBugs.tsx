@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { Placeholder, SegmentedControl, Spinner } from "@telegram-apps/telegram-ui";
 import { formatAuditMoment } from "@planer/shared";
 import { apiClient, type BugReportRow } from "../../api/client";
-import { TapHeight } from "../../components/TapHeight";
-import { ActionButton, Card, Group } from "../../ui";
+import { ActionButton, Card, Group, TapHeight } from "../../ui";
 
 /**
  * «Баги» (admin): список того, что работники нажали «🐞 Проблема» и написали.

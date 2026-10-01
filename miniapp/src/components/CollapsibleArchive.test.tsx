@@ -1,4 +1,6 @@
-import { createElement } from "react";
+// @vitest-environment jsdom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { describe, expect, it } from "vitest";
@@ -38,9 +40,34 @@ describe("CollapsibleArchive", () => {
   });
 
   // Вид один: раньше был второй, на Section telegram-ui, с фоном под голые строки.
-  it("тело — Group общего набора, без Section telegram-ui", () => {
+  // Классы telegram-ui хешируются, так что «нет Section» по имени класса не
+  // проверить; честный признак — что корень секции наш `ui-group`.
+  it("тело — Group общего набора", () => {
     const html = markup(["Аня"]);
-    expect(html).toContain("ui-group");
-    expect(html).not.toMatch(/tgui[^"]*Section/);
+    expect(html).toContain('class="ui-group"');
+  });
+
+  it("кнопка раскрытия сообщает скринридеру, что секция свёрнута", () => {
+    expect(markup(["Аня"])).toContain('aria-expanded="false"');
+  });
+});
+
+describe("CollapsibleArchive: раскрытие", () => {
+  it("после нажатия aria-expanded=true и строки на месте", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(createElement(AppRoot, {}, createElement(CollapsibleArchive<string>, {
+        title: "Архив", items: ["Аня"], children: (rows) => rows.map((r) => createElement("div", { key: r }, r)),
+      })));
+    });
+    const btn = host.querySelector("button") as HTMLButtonElement;
+    await act(async () => btn.click());
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(host.textContent).toContain("Аня");
+    await act(async () => root.unmount());
+    host.remove();
   });
 });

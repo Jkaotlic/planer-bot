@@ -39,7 +39,7 @@ export function CollapsibleArchive<T>({
 
   return (
     <Group header={`${title} · ${items.length}`}>
-      <ActionButton kind="quiet" compact stretched onClick={() => setOpen(!open)}>
+      <ActionButton kind="quiet" compact stretched aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? "Свернуть" : `Показать · ${items.length}`}
       </ActionButton>
       {open && children(items)}
