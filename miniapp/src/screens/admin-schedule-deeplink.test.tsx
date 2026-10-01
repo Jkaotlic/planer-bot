@@ -14,9 +14,6 @@ import { App } from "../App";
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-// jsdom не реализует scrollIntoView — `SectionChips` зовёт его, чтобы активная
-// вкладка была видна на узком экране; здесь достаточно, что он не бросает.
-if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 
 function bootstrapWith(me: { isAdmin?: boolean; isObserver?: boolean; canAnnounce?: boolean }) {
   return {
@@ -109,14 +106,18 @@ describe("админка помнит раздел, а дата из ссылк�
   it("выбранный раздел переживает уход на другую вкладку", async () => {
     vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([] as never);
     const el = await mount({ isAdmin: true }, "?screen=schedule");
-    const chip = [...el.querySelectorAll('[role="tab"]')].find((n) => (n.textContent ?? "").includes("Работники")) as HTMLElement;
-    await act(async () => chip.click());
+    // Из «Расписания» в «Работники» — через меню: «‹ Разделы» → строка.
+    const back = el.querySelector('button[aria-label="Разделы"]') as HTMLElement;
+    await act(async () => back.click());
     await settle(10);
+    const row = [...el.querySelectorAll("button.ui-menu-row")].find((n) => (n.textContent ?? "").includes("Работники")) as HTMLElement;
+    await act(async () => row.click());
+    await settle(10);
+    expect(el.querySelector("h1")?.textContent).toBe("Работники");
 
     await goTab(el, "Смены");
     await goTab(el, "Админ");
 
-    const selected = [...el.querySelectorAll('[role="tab"][aria-selected="true"]')].map((n) => n.textContent ?? "");
-    expect(selected.join()).toContain("Работники");
+    expect(el.querySelector("h1")?.textContent).toBe("Работники");
   });
 });
