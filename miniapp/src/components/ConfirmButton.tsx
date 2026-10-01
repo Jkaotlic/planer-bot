@@ -40,9 +40,10 @@ export function ConfirmButton({
   return (
     <span role="group" aria-label={question} style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       <span style={{ fontSize: "var(--app-text-meta)", lineHeight: 1.4, flexBasis: "100%" }}>{question}</span>
+      {/* Не `primary`: на карточке уже есть главное действие («Беру»), а подтверждённый
+          отказ не должен красться в его цвет и делать две «главные» кнопки. */}
       <ActionButton
         compact
-        kind="primary"
         disabled={disabled}
         onClick={() => {
           setArmed(false);
