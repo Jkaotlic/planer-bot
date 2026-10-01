@@ -57,6 +57,23 @@ describe("Screen с onBack: системная кнопка «Назад»", () 
     expect(sdk.hideBackButton).toHaveBeenCalledTimes(1);
   });
 
+  it("с tabBar (раздел админки) системная «Назад» тоже есть и уходит при закрытии", async () => {
+    const onBack = vi.fn();
+    root = createRoot(document.createElement("div"));
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(Screen, { title: "Баги", onBack, backLabel: "Разделы", tabBar: true, children: null })));
+    });
+
+    expect(sdk.showBackButton).toHaveBeenCalledTimes(1);
+    expect(sdk.listeners).toHaveLength(1);
+    sdk.listeners[0]!();
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    await act(async () => root!.unmount());
+    root = null;
+    expect(sdk.hideBackButton).toHaveBeenCalledTimes(1);
+  });
+
   it("без onBack системную кнопку не трогаем", async () => {
     root = createRoot(document.createElement("div"));
     await act(async () => {

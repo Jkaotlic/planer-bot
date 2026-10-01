@@ -262,3 +262,157 @@
   color: #86e093;
   background: rgb(70 190 90 / 22%);
 }
+
+/* ---------- Меню разделов ---------- */
+.ui-menu-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-menu-row:active {
+  background: rgb(128 128 128 / 12%);
+}
+
+.ui-menu-row__icon {
+  font-size: 20px;
+  text-align: center;
+}
+
+.ui-menu-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ui-menu-row__title {
+  font-size: var(--app-text-head);
+  font-weight: 500;
+}
+
+.ui-menu-row__hint {
+  font-size: var(--app-text-meta);
+  line-height: 1.35;
+  color: var(--tgui--hint_color);
+}
+
+.ui-menu-row__chevron {
+  font-size: 22px;
+  color: var(--tgui--hint_color);
+}
+
+/* ---------- Галочка ---------- */
+.ui-check {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: var(--app-tap);
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.ui-check--disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Не `display: none`: поле должно получать фокус и нажатие пробела. */
+.ui-check__input {
+  position: absolute;
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+}
+
+.ui-check__box {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 6px;
+  border: 2px solid var(--tgui--hint_color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tgui--button_text_color, #fff);
+}
+
+.ui-check__box--on {
+  border-color: var(--tgui--button_color, var(--tgui--link_color));
+  background: var(--tgui--button_color, var(--tgui--link_color));
+}
+
+.ui-check__input:focus-visible + .ui-check__box {
+  outline: 2px solid var(--tgui--link_color);
+  outline-offset: 2px;
+}
+
+.ui-check__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ui-check__label {
+  font-size: var(--app-text-body);
+}
+
+.ui-check__hint {
+  font-size: var(--app-text-meta);
+  line-height: 1.35;
+  color: var(--tgui--hint_color);
+}
+
+/* ---------- Селект ---------- */
+.ui-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.ui-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: var(--app-tap);
+  max-width: 100%;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid var(--tgui--divider, rgb(128 128 128 / 30%));
+  border-radius: var(--app-radius-control);
+  background: var(--app-card);
+  color: inherit;
+  font: inherit;
+  font-size: var(--app-text-body);
+}
+
+.ui-select::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -6px;
+  border-right: 2px solid var(--tgui--hint_color);
+  border-bottom: 2px solid var(--tgui--hint_color);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.ui-select select:disabled {
+  opacity: 0.55;
+}
