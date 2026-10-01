@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Placeholder, SegmentedControl, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Input, Placeholder, SegmentedControl, Spinner } from "@telegram-apps/telegram-ui";
 import {
   describeAuditEvent,
   formatAuditMoment,
@@ -18,26 +18,26 @@ import {
   type ShiftCountsKind,
 } from "@planer/shared";
 import { apiClient, type JournalPage, type ShiftCountsReport } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { TapHeight } from "../../components/TapHeight";
+import { ActionButton, Card, Group, SelectField } from "../../ui";
 import { initialsOf, personPalette } from "../../lib/people";
 
 /** Событие журнала карточкой. Текст — тот же, что в вебе: общий описатель. */
 export function JournalEventCard({ event }: { event: JournalPage["events"][number] }) {
   const view = describeAuditEvent(event);
   return (
-    <CardShell>
+    <Card>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span aria-hidden style={{ flex: "none", fontSize: 15 }}>{view.icon}</span>
-        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14.5 }}>{view.title}</span>
+        <span aria-hidden style={{ flex: "none", fontSize: "var(--app-text-body)" }}>{view.icon}</span>
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: "var(--app-text-body)" }}>{view.title}</span>
       </div>
-      <div style={{ marginTop: 4, color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+      <div style={{ marginTop: 4, color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
         {event.actorName ?? "система"} · {formatAuditMoment(event.createdAt)}
       </div>
       {view.lines.map((line, i) => (
-        <div key={i} style={{ marginTop: 3, fontSize: 13, lineHeight: 1.45 }}>{line}</div>
+        <div key={i} style={{ marginTop: 3, fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>{line}</div>
       ))}
-    </CardShell>
+    </Card>
   );
 }
 
@@ -54,8 +54,10 @@ export function AdminJournal({ today }: { today: string }) {
   const [tab, setTab] = useState<Tab>("report");
 
   return (
-    <ScreenScroll style={{ padding: "12px 12px 96px" }}>
-      <div style={{ marginBottom: 12 }}>
+    // Отступы и заголовок раздела даёт `Screen` в `AdminScreen`; зазор между
+    // блоками — его же колонка, поэтому здесь фрагмент.
+    <>
+      <TapHeight>
         <SegmentedControl>
           <SegmentedControl.Item selected={tab === "report"} onClick={() => setTab("report")}>
             Кто сколько
@@ -64,9 +66,9 @@ export function AdminJournal({ today }: { today: string }) {
             Кто менял
           </SegmentedControl.Item>
         </SegmentedControl>
-      </div>
+      </TapHeight>
       {tab === "report" ? <ShiftCounts today={today} /> : <History />}
-    </ScreenScroll>
+    </>
   );
 }
 
@@ -154,42 +156,52 @@ function ShiftCounts({ today }: { today: string }) {
   const hasAny = !!report && report.rows.some((r) => r.byGroup.shift + r.byGroup.duty + r.byGroup.other > 0);
 
   return (
-    <Section header="Кто сколько отдежурил">
-      <CardStack>
-        <CardShell>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {presets.map((preset) => (
-              <Button
+    <Group header="Кто сколько отдежурил">
+      <Card>
+        {/* Выбранный период — `aria-pressed` и плотный тон набора, не `primary`:
+            это переключатель, а не действие, и главная кнопка карточки — «Показать». */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {presets.map((preset) => {
+            const selected = preset.from === from && preset.to === to;
+            return (
+              <ActionButton
                 key={preset.label}
-                size="s"
-                mode={preset.from === from && preset.to === to ? "filled" : "bezeled"}
+                compact
+                kind={selected ? "secondary" : "quiet"}
+                aria-pressed={selected}
                 disabled={busy}
                 onClick={() => pickPreset(preset)}
               >
                 {preset.label}
-              </Button>
-            ))}
-          </div>
-          <details style={{ marginTop: 8 }}>
-            <summary style={{ fontSize: 13, color: "var(--tgui--link_color)", cursor: "pointer" }}>Свой период</summary>
-            {/* Stacked, not side by side: two native date fields sharing a phone's
-                width clip their own year — «07/01/2» — and the year is the part you
-                check when picking a period. */}
-            <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            <Button size="s" mode="filled" stretched loading={busy} disabled={busy} style={{ marginTop: 6 }} onClick={() => void load()}>
+              </ActionButton>
+            );
+          })}
+        </div>
+        <details style={{ marginTop: 8 }}>
+          {/* Отступы у строки раскрытия, а не `min-height`: `display: flex` на
+              `summary` убрал бы стрелку-маркер раскрытия. */}
+          <summary style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--link_color)", cursor: "pointer", padding: "12px 0" }}>Свой период</summary>
+          {/* Stacked, not side by side: two native date fields sharing a phone's
+              width clip their own year — «07/01/2» — and the year is the part you
+              check when picking a period. */}
+          <Input header="С" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <Input header="По" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <div style={{ marginTop: 6 }}>
+            <ActionButton kind="primary" stretched loading={busy} disabled={busy} onClick={() => void load()}>
               Показать
-            </Button>
-          </details>
-          {error && (
-            <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{error}</div>
-          )}
-        </CardShell>
+            </ActionButton>
+          </div>
+        </details>
+        {error && (
+          <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
+        )}
+      </Card>
 
-        {report && !hasAny && <Placeholder description="За этот период смен не было." />}
+      {report && !hasAny && <Placeholder description="За этот период смен не было." />}
 
-        {report && hasAny && (
-          <>
+      {report && hasAny && (
+        <>
+          <TapHeight>
             <SegmentedControl>
               <SegmentedControl.Item selected={mode === "kinds"} onClick={() => setMode("kinds")}>
                 По видам
@@ -198,13 +210,13 @@ function ShiftCounts({ today }: { today: string }) {
                 По людям
               </SegmentedControl.Item>
             </SegmentedControl>
+          </TapHeight>
 
-            {mode === "kinds" && active && <ByKind report={report} keys={keys} active={active} onPick={setPicked} />}
-            {mode === "people" && <ByPerson report={report} />}
-          </>
-        )}
-      </CardStack>
-    </Section>
+          {mode === "kinds" && active && <ByKind report={report} keys={keys} active={active} onPick={setPicked} />}
+          {mode === "people" && <ByPerson report={report} />}
+        </>
+      )}
+    </Group>
   );
 }
 
@@ -224,30 +236,22 @@ function ByKind({
         {keys.map((k) => {
           const selected = sameKey(k.key, active.key);
           return (
-            <button
-              // Ключ — сам ключ, а не подпись: вид с именем «Все смены» совпал бы с итогом группы.
-              key={JSON.stringify(k.key)}
-              type="button"
-              onClick={() => onPick(k.key)}
-              style={{
-                flex: "none", display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
-                borderRadius: 999, border: "1px solid var(--tgui--outline)", fontSize: 13,
-                fontWeight: "group" in k.key ? 700 : 500, cursor: "pointer",
-                background: selected ? "var(--tgui--button_color)" : "var(--tgui--bg_color)",
-                color: selected ? "var(--tgui--button_text_color)" : "var(--tgui--text_color)",
-              }}
-            >
-              {"kind" in k.key && <Swatch accent={k.accent} />}
-              {countsKeyLabel(k.key)}
-            </button>
+            // `flex: none`: в строке с прокруткой кнопка не должна сжиматься.
+            // Ключ — сам ключ, а не подпись: вид с именем «Все смены» совпал бы с итогом группы.
+            <span key={JSON.stringify(k.key)} style={{ flex: "none" }}>
+              <ActionButton compact kind={selected ? "secondary" : "quiet"} aria-pressed={selected} onClick={() => onPick(k.key)}>
+                {"kind" in k.key && <Swatch accent={k.accent} />}
+                {"group" in k.key ? <b>{countsKeyLabel(k.key)}</b> : countsKeyLabel(k.key)}
+              </ActionButton>
+            </span>
           );
         })}
       </div>
 
-      <CardShell>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>{countsKeyLabel(active.key)}</div>
+      <Card>
+        <div style={{ fontWeight: 700, fontSize: "var(--app-text-body)", marginBottom: 8 }}>{countsKeyLabel(active.key)}</div>
         {ranked.length === 0 ? (
-          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
             За этот период никто не брал «{countsKeyLabel(active.key)}».
           </div>
         ) : (
@@ -255,18 +259,18 @@ function ByKind({
             <div key={row.employeeId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
               <Avatar employeeId={row.employeeId} name={row.displayName} size={26} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontSize: "var(--app-text-body)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {row.displayName}
                 </div>
                 <div style={{ marginTop: 4, height: 6, borderRadius: 3, background: "var(--tgui--secondary_bg_color)" }}>
                   <div style={{ width: `${share * 100}%`, height: "100%", borderRadius: 3, background: heatBackground(active.group, 4) }} />
                 </div>
               </div>
-              <span style={{ flex: "none", minWidth: 24, textAlign: "right", fontWeight: 700, fontSize: 15 }}>{value}</span>
+              <span style={{ flex: "none", minWidth: 24, textAlign: "right", fontWeight: 700, fontSize: "var(--app-text-body)" }}>{value}</span>
             </div>
           ))
         )}
-      </CardShell>
+      </Card>
     </>
   );
 }
@@ -276,17 +280,17 @@ function ByPerson({ report }: { report: ShiftCountsReport }) {
   return (
     <>
       {sortCountsRows(report.rows, { group: "duty" }, "desc").map((row) => (
-        <CardShell key={row.employeeId}>
+        <Card key={row.employeeId}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Avatar employeeId={row.employeeId} name={row.displayName} size={30} />
-            <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 15 }}>{row.displayName}</span>
+            <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: "var(--app-text-body)" }}>{row.displayName}</span>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             {SHIFT_COUNTS_GROUPS.map((g) => {
               const value = row.byGroup[g];
               return (
                 <div key={g} style={{ flex: 1, padding: "6px 8px", borderRadius: 10, background: heatBackground(g, value ? 1 : 0) }}>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: value ? undefined : "var(--tgui--hint_color)" }}>{value}</div>
+                  <div style={{ fontSize: "var(--app-text-head)", fontWeight: 700, color: value ? undefined : "var(--tgui--hint_color)" }}>{value}</div>
                   <div style={{ fontSize: 11, color: "var(--tgui--hint_color)" }}>{SHIFT_COUNTS_GROUP_TITLES[g]}</div>
                 </div>
               );
@@ -301,7 +305,7 @@ function ByPerson({ report }: { report: ShiftCountsReport }) {
                     key={kind.name}
                     style={{
                       display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", borderRadius: 999,
-                      fontSize: 12.5, background: heatBackground(g.group, 2),
+                      fontSize: "var(--app-text-meta)", background: heatBackground(g.group, 2),
                     }}
                   >
                     <Swatch accent={kind.accent} />
@@ -310,7 +314,7 @@ function ByPerson({ report }: { report: ShiftCountsReport }) {
                 )),
             )}
           </div>
-        </CardShell>
+        </Card>
       ))}
     </>
   );
@@ -348,94 +352,84 @@ function History() {
 
   if (error) {
     return (
-      <Section header="Кто что менял">
-        <CardStack>
-          <CardShell>
-            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>
-            <Button size="s" mode="gray" stretched style={{ marginTop: 8 }} onClick={() => setAttempt((n) => n + 1)}>
-              Повторить
-            </Button>
-          </CardShell>
-        </CardStack>
-      </Section>
+      <Group header="Кто что менял">
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>
+          <ActionButton stretched onClick={() => setAttempt((n) => n + 1)}>
+            Повторить
+          </ActionButton>
+        </Card>
+      </Group>
     );
   }
   if (!page) {
     return (
-      <Section header="Кто что менял">
+      <Group header="Кто что менял">
         <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
           <Spinner size="m" />
         </div>
-      </Section>
+      </Group>
     );
   }
 
   const shown = page.offset + page.events.length;
 
   return (
-    <Section header="Кто что менял">
-      <CardStack>
-        <CardShell>
-          <select
-            value={type}
-            onChange={(e) => {
-              setOffset(0);
-              setType(e.target.value);
-            }}
-            style={{
-              width: "100%", padding: "8px 10px", borderRadius: 8,
-              border: "1px solid var(--tgui--outline)", background: "var(--tgui--secondary_bg_color)",
-              color: "var(--tgui--text_color)", font: "inherit",
-            }}
-          >
-            <option value="">Все события</option>
-            {page.availableTypes.map((available) => (
-              <option value={available} key={available}>
-                {describeAuditEvent({ type: available, payload: {} }).title}
-              </option>
-            ))}
-          </select>
-          <select
-            value={actor}
-            onChange={(e) => {
-              setOffset(0);
-              setActor(e.target.value);
-            }}
-            style={{
-              width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 8,
-              border: "1px solid var(--tgui--outline)", background: "var(--tgui--secondary_bg_color)",
-              color: "var(--tgui--text_color)", font: "inherit",
-            }}
-          >
-            <option value="">Все люди</option>
-            {page.availableActors.map((available) => (
-              <option value={String(available.id)} key={available.id}>
-                {available.displayName}
-              </option>
-            ))}
-          </select>
-          <div style={{ marginTop: 8, color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
-            {page.total === 0 ? "пусто" : `${page.offset + 1}–${shown} из ${page.total}`}
-          </div>
-        </CardShell>
+    <Group header="Кто что менял">
+      <Card>
+        <SelectField
+          stretched
+          aria-label="Тип события"
+          value={type}
+          onChange={(next) => {
+            setOffset(0);
+            setType(next);
+          }}
+        >
+          <option value="">Все события</option>
+          {page.availableTypes.map((available) => (
+            <option value={available} key={available}>
+              {describeAuditEvent({ type: available, payload: {} }).title}
+            </option>
+          ))}
+        </SelectField>
+        <SelectField
+          stretched
+          aria-label="Кто менял"
+          value={actor}
+          onChange={(next) => {
+            setOffset(0);
+            setActor(next);
+          }}
+        >
+          <option value="">Все люди</option>
+          {page.availableActors.map((available) => (
+            <option value={String(available.id)} key={available.id}>
+              {available.displayName}
+            </option>
+          ))}
+        </SelectField>
+        <div style={{ marginTop: 2, color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
+          {page.total === 0 ? "пусто" : `${page.offset + 1}–${shown} из ${page.total}`}
+        </div>
+      </Card>
 
-        {page.events.length === 0 ? (
-          <Placeholder description="Событий пока нет." />
-        ) : (
-          page.events.map((event) => <JournalEventCard event={event} key={event.id} />)
-        )}
+      {page.events.length === 0 ? (
+        <Placeholder description="Событий пока нет." />
+      ) : (
+        page.events.map((event) => <JournalEventCard event={event} key={event.id} />)
+      )}
 
-        <CardShell>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button size="s" mode="gray" stretched disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
-              ← Новее
-            </Button>
-            <Button size="s" mode="gray" stretched disabled={shown >= page.total} onClick={() => setOffset(offset + PAGE)}>
-              Старее →
-            </Button>
-          </div>
-        </CardShell>
-      </CardStack>
-    </Section>
+      <Card>
+        <div style={{ display: "flex", gap: 8 }}>
+          <ActionButton stretched disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
+            ← Новее
+          </ActionButton>
+          <ActionButton stretched disabled={shown >= page.total} onClick={() => setOffset(offset + PAGE)}>
+            Старее →
+          </ActionButton>
+        </div>
+      </Card>
+    </Group>
   );
 }

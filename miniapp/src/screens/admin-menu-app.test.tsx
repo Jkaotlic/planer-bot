@@ -181,9 +181,10 @@ describe("админка: меню разделов", () => {
   it("8. не-админ с canAnnounce: вкладка «Анонс» — заголовок без «Разделы»", async () => {
     const el = await mount({ isObserver: true, canAnnounce: true });
     await click(tabItem(el, "Анонс"));
-    // Именно заголовок `Screen`: у самого раздела пока свой заголовок «Анонс»
-    // (уйдёт с переводом раздела), он бы пропустил отсутствие обёртки.
+    // Именно заголовок `Screen` — и единственный `h1`: у самого раздела не должно
+    // быть своего заголовка «Анонс», иначе на экране два `h1`.
     expect(el.querySelector("h1.ui-screen__title")?.textContent).toBe("Анонс");
+    expect(el.querySelectorAll("h1")).toHaveLength(1);
     expect(backButton(el)).toBeNull();
   });
 });
