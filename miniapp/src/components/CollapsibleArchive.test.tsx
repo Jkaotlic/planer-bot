@@ -10,12 +10,11 @@ import { CollapsibleArchive } from "./CollapsibleArchive";
  * `useState`, и симулировать нажатие этим способом нечем. Ловится то, из-за чего
  * секцию вообще заводили: свёрнутость по умолчанию и честный счётчик.
  */
-function markup(items: string[], plain = false): string {
+function markup(items: string[]): string {
   return renderToStaticMarkup(
     createElement(AppRoot, {}, createElement(CollapsibleArchive<string>, {
       title: "Архив",
       items,
-      plain,
       children: (rows) => rows.map((row) => createElement("div", { key: row }, row)),
     })),
   );
@@ -38,15 +37,10 @@ describe("CollapsibleArchive", () => {
     expect(markup([])).toBe(renderToStaticMarkup(createElement(AppRoot, {}, null)));
   });
 
-  // Админские экраны кладут сюда голые строки и рассчитывают на фон Section;
-  // под Group (он ничего не красит) строки ложились на холст без карточки.
-  it("по умолчанию тело в Section telegram-ui, без обёртки .ui-group", () => {
+  // Вид один: раньше был второй, на Section telegram-ui, с фоном под голые строки.
+  it("тело — Group общего набора, без Section telegram-ui", () => {
     const html = markup(["Аня"]);
-    expect(html).not.toContain("ui-group");
-    expect(html).toContain("Показать · 1");
-  });
-
-  it("с plain — Group общего набора", () => {
-    expect(markup(["Аня"], true)).toContain("ui-group");
+    expect(html).toContain("ui-group");
+    expect(html).not.toMatch(/tgui[^"]*Section/);
   });
 });
