@@ -1,6 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Title } from "@telegram-apps/telegram-ui";
-import { ScreenScroll, TAB_BAR_CLEARANCE } from "../components/ScreenScroll";
+import { Screen } from "../ui";
 import { TeamCollections } from "./team/TeamCollections";
 
 /**
@@ -29,19 +28,20 @@ export interface CollectionsTabScreenProps {
 }
 
 export function CollectionsTabScreen({ isAdmin, today, onPaidChanged }: CollectionsTabScreenProps) {
+  // Заголовок «Сборы» один на обе роли: у админа экран раньше начинался сразу
+  // с карточек, и вкладка выглядела безымянной.
   if (isAdmin) {
     return (
-      <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю сборы…</div>}>
-        <AdminCollections today={today} />
-      </Suspense>
+      <Screen title="Сборы">
+        <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю сборы…</div>}>
+          <AdminCollections today={today} />
+        </Suspense>
+      </Screen>
     );
   }
 
   return (
-    <ScreenScroll style={{ padding: `16px 12px ${TAB_BAR_CLEARANCE}` }}>
-      <Title level="2" weight="2">
-        Сборы
-      </Title>
+    <Screen title="Сборы">
       {/* Секция во вкладке «Команда» умела исчезать целиком, когда сборов нет.
           Отдельная вкладка исчезнуть не может, и пустой экран без слов читался
           бы как «не загрузилось». */}
@@ -49,6 +49,6 @@ export function CollectionsTabScreen({ isAdmin, today, onPaidChanged }: Collecti
         emptyLabel="Сейчас сборов нет. Когда админ разошлёт новый — он появится здесь."
         onPaidChanged={onPaidChanged}
       />
-    </ScreenScroll>
+    </Screen>
   );
 }

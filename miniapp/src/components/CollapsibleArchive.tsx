@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Button, Section } from "@telegram-apps/telegram-ui";
+import { ActionButton, Group } from "../ui";
 
 /**
  * Секция с прошедшим: архив работников, закрытые сборы, завершённые обмены.
@@ -33,13 +33,11 @@ export function CollapsibleArchive<T>({
   if (items.length === 0) return null;
 
   return (
-    <Section header={`${title} · ${items.length}`}>
-      <div style={{ padding: "10px 12px" }}>
-        <Button size="s" mode="gray" stretched onClick={() => setOpen(!open)}>
-          {open ? "Свернуть" : `Показать · ${items.length}`}
-        </Button>
-      </div>
+    <Group header={`${title} · ${items.length}`}>
+      <ActionButton kind="quiet" compact stretched onClick={() => setOpen(!open)}>
+        {open ? "Свернуть" : `Показать · ${items.length}`}
+      </ActionButton>
       {open && children(items)}
-    </Section>
+    </Group>
   );
 }
