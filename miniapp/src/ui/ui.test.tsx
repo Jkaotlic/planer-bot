@@ -135,6 +135,17 @@ describe("ActionButton", () => {
   });
 });
 
+describe("ActionButton: disabled", () => {
+  it("disabled ставит атрибут и не пускает onClick", async () => {
+    const onClick = vi.fn();
+    const el = await render(createElement(ActionButton, { disabled: true, onClick, children: "Беру" }));
+    const btn = el.querySelector("button")!;
+    expect(btn.disabled).toBe(true);
+    await act(async () => btn.click());
+    expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
 describe("ActionButton: href и aria-pressed", () => {
   it("с href — ссылка с тем же видом, без button", async () => {
     const el = await render(createElement(ActionButton, { kind: "primary", href: "webcal://x.example.com/a.ics", children: "Добавить" }));
@@ -165,6 +176,17 @@ describe("StatusPill / Card / Hint", () => {
     const pill = el.querySelector(".ui-pill")!;
     expect(pill.className).toContain("ui-pill--need");
     expect(pill.textContent).toBe("Нужен ответ");
+  });
+
+  it("все четыре тона дают свой класс", async () => {
+    for (const tone of ["need", "wait", "ok", "bad"] as const) {
+      const el = await render(createElement(StatusPill, { tone, children: "x" }));
+      expect(el.querySelector(".ui-pill")!.className).toBe(`ui-pill ui-pill--${tone}`);
+      await act(async () => root!.unmount());
+      host!.remove();
+      root = null;
+      host = null;
+    }
   });
 
   it("flush-карточка помечена классом — строки внутри идут от края до края", async () => {

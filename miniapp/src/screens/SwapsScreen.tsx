@@ -64,7 +64,7 @@ export function SwapsScreen({ swaps, onAccept, onDecline, onCancel, busyIds, act
       {/* Тумблер, счётчик и «пустое не рисуем» переехали в `CollapsibleArchive`:
           те же три решения понадобились архиву работников и закрытым сборам, а
           три набранные вручную копии одного поведения разъезжаются. */}
-      <CollapsibleArchive title="Архив" items={archived}>
+      <CollapsibleArchive plain title="Архив" items={archived}>
         {(rows) => (
           <>
             {rows.map((request) => (

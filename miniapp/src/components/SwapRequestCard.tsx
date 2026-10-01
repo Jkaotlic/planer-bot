@@ -29,9 +29,9 @@ export interface SwapStatusPillProps {
   status: SwapStatus;
 }
 
-/** Пилюля статуса заявки. Тонов три, а статусов пять: состоявшийся обмен — «улажено», ждущий — «ждём», прочие закрытые отличает подпись, а не цвет. */
+/** Пилюля статуса заявки. Тонов четыре, а статусов пять: состоявшийся обмен — «улажено», отклонённый — красный (до перехода на общий набор был красным, и терять это нельзя: отказ должен бросаться в глаза), ждущий — «ждём»; отменённые и истёкшие отличает подпись, а не цвет. */
 export function SwapStatusPill({ status }: SwapStatusPillProps) {
-  const tone = status === "accepted" ? "ok" : "wait";
+  const tone = status === "accepted" ? "ok" : status === "declined" ? "bad" : "wait";
   return <StatusPill tone={tone}>{STATUS_LABELS[status]}</StatusPill>;
 }
 

@@ -154,8 +154,14 @@
   background: var(--tgui--button_color, var(--tgui--link_color));
 }
 
+/* Перед каждым `color-mix` — сплошной запасной фон: сборка рассчитана на
+   iOS 14+, а `color-mix` понимает Safari с 16.2. Без запаса на старом iPhone
+   объявление выбрасывается целиком, и кнопка, пилюля или выбранная фишка
+   остаются без фона. Фон канвы (`secondary_bg_color`) на карточке читается
+   как плашка — не оттенок, но граница видна. */
 .ui-btn--secondary {
   color: var(--tgui--link_color);
+  background: var(--tgui--secondary_bg_color);
   background: color-mix(in srgb, var(--tgui--link_color) 14%, transparent);
 }
 
@@ -181,6 +187,7 @@
 /* Выбранный вариант в ряду фишек: тон 14% на тёмной карточке едва отличим от
    «тихой» соседки, поэтому выбранной добавлены плотнее тон и рамка. */
 .ui-btn--secondary[aria-pressed="true"] {
+  background: var(--tgui--secondary_bg_color);
   background: color-mix(in srgb, var(--tgui--link_color) 28%, transparent);
   box-shadow: inset 0 0 0 1.5px var(--tgui--link_color);
 }
@@ -205,10 +212,11 @@
   color: var(--tgui--button_text_color, #fff);
 }
 
-/* Низкая кнопка прямо в карточке (колонка флекса) иначе растягивалась бы на
-   всю ширину: `align-items: stretch` по умолчанию. Растягивать её нужно только
-   явным `stretched`. */
-.ui-card > .ui-btn--compact:not(.ui-btn--stretched) {
+/* Низкая кнопка прямо в карточке или в теле раздела (колонка флекса) иначе
+   растягивалась бы на всю ширину: `align-items: stretch` по умолчанию.
+   Растягивать её нужно только явным `stretched`. */
+.ui-card > .ui-btn--compact:not(.ui-btn--stretched),
+.ui-group__body > .ui-btn--compact:not(.ui-btn--stretched) {
   align-self: flex-start;
 }
 
@@ -225,12 +233,22 @@
 
 .ui-pill--need {
   color: var(--tgui--link_color);
+  background: var(--tgui--secondary_bg_color);
   background: color-mix(in srgb, var(--tgui--link_color) 16%, transparent);
 }
 
 .ui-pill--wait {
   color: var(--tgui--hint_color);
+  background: var(--tgui--secondary_bg_color);
   background: color-mix(in srgb, var(--tgui--hint_color) 18%, transparent);
+}
+
+/* Отказ: красный текст на розовой плашке. Запасной фон — обычный rgb с
+   прозрачностью, он есть и там, где нет `color-mix`. */
+.ui-pill--bad {
+  color: var(--tgui--destructive_text_color, #d33a3a);
+  background: rgb(229 57 53 / 14%);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 14%, transparent);
 }
 
 .ui-pill--ok {
