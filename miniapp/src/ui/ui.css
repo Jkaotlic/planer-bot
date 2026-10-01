@@ -385,6 +385,28 @@
   min-width: 0;
 }
 
+.ui-select--stretched {
+  display: flex;
+  width: 100%;
+}
+
+.ui-select--stretched select {
+  width: 100%;
+}
+
+/* Подпись над полем: серая, как подпись группы, — синий значит «нажимаемое». */
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-field__label {
+  font-size: var(--app-text-meta);
+  color: var(--tgui--hint_color);
+}
+
 .ui-select select {
   appearance: none;
   -webkit-appearance: none;

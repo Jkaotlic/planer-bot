@@ -11,12 +11,15 @@ export function CheckRow({
   disabled,
   label,
   hint,
+  "aria-label": ariaLabel,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
   label: ReactNode;
   hint?: ReactNode;
+  /** Когда видимая подпись («Допущен») без контекста строки ничего не говорит. */
+  "aria-label"?: string;
 }) {
   return (
     <label className={`ui-check${disabled ? " ui-check--disabled" : ""}`}>
@@ -25,6 +28,7 @@ export function CheckRow({
         type="checkbox"
         checked={checked}
         disabled={disabled}
+        aria-label={ariaLabel}
         onChange={(e) => onChange(e.target.checked)}
       />
       <span className={`ui-check__box${checked ? " ui-check__box--on" : ""}`} aria-hidden="true">

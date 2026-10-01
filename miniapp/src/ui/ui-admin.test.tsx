@@ -69,6 +69,18 @@ describe("CheckRow", () => {
   });
 });
 
+describe("CheckRow: aria-label", () => {
+  it("aria-label уходит на поле, чтобы две галочки в одной строке различались", async () => {
+    const el = await render(createElement(CheckRow, { checked: false, onChange: () => {}, label: "Допущен", "aria-label": "Игорь: допущен к «Ночь»" }));
+    expect(el.querySelector("input")!.getAttribute("aria-label")).toBe("Игорь: допущен к «Ночь»");
+  });
+
+  it("без aria-label атрибута нет", async () => {
+    const el = await render(createElement(CheckRow, { checked: false, onChange: () => {}, label: "А" }));
+    expect(el.querySelector("input")!.hasAttribute("aria-label")).toBe(false);
+  });
+});
+
 describe("SelectField", () => {
   it("выбор зовёт onChange со значением option", async () => {
     const onChange = vi.fn();
@@ -90,6 +102,46 @@ describe("SelectField", () => {
     select.value = "2";
     await act(async () => select.dispatchEvent(new Event("change", { bubbles: true })));
     expect(onChange).toHaveBeenCalledWith("2");
+  });
+});
+
+describe("SelectField: подпись и ширина", () => {
+  const options = [createElement("option", { key: "a", value: "a" }, "А"), createElement("option", { key: "b", value: "b" }, "Б")];
+
+  it("label — настоящая <label>, привязанная к select; без aria-label имя поля берётся из неё", async () => {
+    const el = await render(createElement(SelectField, { value: "a", onChange: () => {}, label: "Очередь идёт", children: options }));
+    const select = el.querySelector("select") as HTMLSelectElement;
+    const label = el.querySelector("label") as HTMLLabelElement;
+    expect(label.textContent).toBe("Очередь идёт");
+    expect(select.id).not.toBe("");
+    expect(label.htmlFor).toBe(select.id);
+    expect(select.hasAttribute("aria-label")).toBe(false);
+  });
+
+  it("два поля с подписью получают разные id", async () => {
+    const el = await render(
+      createElement("div", null,
+        createElement(SelectField, { value: "a", onChange: () => {}, label: "Один", children: options }),
+        createElement(SelectField, { value: "a", onChange: () => {}, label: "Два", children: options }),
+      ),
+    );
+    const ids = [...el.querySelectorAll("select")].map((s) => s.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("без label подписи в DOM нет", async () => {
+    const el = await render(createElement(SelectField, { value: "a", onChange: () => {}, "aria-label": "Месяц", children: options }));
+    expect(el.querySelector("label")).toBeNull();
+    expect(el.querySelector("select")!.getAttribute("aria-label")).toBe("Месяц");
+  });
+
+  it("stretched растягивает поле на ширину контейнера; без него — нет", async () => {
+    const wide = await render(createElement(SelectField, { value: "a", onChange: () => {}, stretched: true, "aria-label": "М", children: options }));
+    expect(wide.querySelector(".ui-select")!.className).toContain("ui-select--stretched");
+    await act(async () => root!.unmount());
+    host?.remove();
+    const narrow = await render(createElement(SelectField, { value: "a", onChange: () => {}, "aria-label": "М", children: options }));
+    expect(narrow.querySelector(".ui-select")!.className).not.toContain("ui-select--stretched");
   });
 });
 
