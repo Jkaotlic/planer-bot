@@ -100,6 +100,23 @@ describe("AnnounceScreen", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  // Правка галочек гасит пресет (toggle), поэтому «Админам» после неё уже не нажата и
+  // сбрасывает выбор сама. Единственное, что даёт именно повторный клик по нажатому, —
+  // отмена ожидающего подтверждения: передумал отправлять — нажал аудиторию заново.
+  it.each(["Всем", "Админам"])("повторное нажатие на «%s» снимает запрошенное подтверждение", async (audience) => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue([
+      recipient({ id: 1, displayName: "Аня", role: "admin" }),
+    ]);
+    const el = await mount();
+    await type(textareaByLabel(el, "Текст анонса"), "Планёрка");
+    act(() => buttonByText(el, audience).click());
+    act(() => buttonByText(el, "Отправить").click());
+    expect(buttonByText(el, "Да, отправить")).toBeTruthy();
+
+    act(() => buttonByText(el, audience).click());
+    expect(() => buttonByText(el, "Да, отправить")).toThrow();
+  });
+
   it.each([
     ["Админам", [1]],
     ["Работникам", [2]],

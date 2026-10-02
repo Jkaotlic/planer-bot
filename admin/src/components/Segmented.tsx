@@ -12,9 +12,14 @@ export interface SegmentedProps<K extends string> {
   "aria-label": string;
   /** Отправка анонса идёт — выбор аудитории на это время заморожен. */
   disabled?: boolean;
+  /**
+   * Повторный клик по выбранному тоже зовёт onChange. Нужен «Анонсам»: повторное
+   * нажатие на пресет «Админам» сбрасывало ручные галочки обратно к пресету.
+   */
+  reselect?: boolean;
 }
 
-export function Segmented<K extends string>({ options, value, onChange, disabled, "aria-label": ariaLabel }: SegmentedProps<K>) {
+export function Segmented<K extends string>({ options, value, onChange, disabled, reselect = false, "aria-label": ariaLabel }: SegmentedProps<K>) {
   return (
     <div className="segmented" role="group" aria-label={ariaLabel}>
       {options.map((o) => (
@@ -24,8 +29,8 @@ export function Segmented<K extends string>({ options, value, onChange, disabled
           className="segmented-item"
           aria-pressed={o.key === value}
           disabled={disabled}
-          // Клик по уже выбранному ничего не меняет — не будим обработчик зря.
-          onClick={() => { if (o.key !== value) onChange(o.key); }}
+          // По умолчанию клик по уже выбранному ничего не меняет — не будим обработчик зря.
+          onClick={() => { if (reselect || o.key !== value) onChange(o.key); }}
         >
           {o.label}
         </button>

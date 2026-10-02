@@ -21,7 +21,7 @@ afterEach(async () => {
   root = null; host = null;
 });
 
-async function mount(props: { value: "a" | "b" | "c" | null; onChange: (k: "a" | "b" | "c") => void; disabled?: boolean }) {
+async function mount(props: { value: "a" | "b" | "c" | null; onChange: (k: "a" | "b" | "c") => void; disabled?: boolean; reselect?: boolean }) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -60,6 +60,13 @@ describe("Segmented", () => {
     const el = await mount({ value: "a", onChange });
     await act(async () => items(el)[0].click());
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("с reselect клик по выбранному onChange зовёт", async () => {
+    const onChange = vi.fn();
+    const el = await mount({ value: "a", onChange, reselect: true });
+    await act(async () => items(el)[0].click());
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("a");
   });
 
   it("без выбранного нажатых нет; disabled гасит все кнопки", async () => {

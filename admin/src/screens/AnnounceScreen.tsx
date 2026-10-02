@@ -192,6 +192,7 @@ export function AnnounceScreen() {
           options={AUDIENCES}
           value={audienceKey}
           disabled={sending}
+          reselect
           onChange={(key) => {
             if (key === "admins" || key === "workers") {
               pickPreset(key);
