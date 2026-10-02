@@ -812,6 +812,16 @@ button {
   white-space: nowrap;
 }
 
+/* Все статусы в строке работника — одна пилюля: у «привязан» и «админ» высота
+   считалась из разного содержимого, и пилюли стояли в ряду вразнобой. */
+.status-chip,
+.admin-badge {
+  box-sizing: border-box;
+  min-height: 22px;
+  line-height: 1.3;
+  font-size: var(--text-meta);
+}
+
 /* Sits on its own line inside the row card (`flex-basis: 100%`, the card
    already wraps) — two checkboxes an admin sets rarely enough that they
    shouldn't compete for space with the row's everyday buttons. */
@@ -824,6 +834,37 @@ button {
   padding-top: 6px;
   border-top: 1px dashed var(--separator);
   margin-top: 4px;
+}
+
+/* Свёрнутые ограничения — одна строка-кнопка: сводка слева, стрелка справа.
+   Колонкой, чтобы раскрытый блок встал под кнопку, а не рядом. */
+.employee-restrictions {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.employee-restrictions-toggle {
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 0 4px;
+  color: var(--hint);
+  font-size: var(--text-meta);
+  text-align: left;
+}
+
+.employee-restrictions-summary {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.employee-restrictions-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 4px 4px 0;
 }
 
 .employee-restrictions-title {
@@ -3202,7 +3243,7 @@ textarea {
      в 332px подпись сжималась до «Не / участвует в / назначениях» — три строки
      в колонке уже собственного пояснения. Пункты — в столбик, а внутри пункта
      пояснение переносится под галочку и выравнивается по её подписи. */
-  .employee-restrictions {
+  .employee-restrictions-body {
     flex-direction: column;
     align-items: flex-start;
     gap: 2px;

@@ -65,6 +65,11 @@ async function mount() {
     root!.render(createElement(Harness, { initial: EMPLOYEES }));
   });
   await settle();
+  // Ограничения свёрнуты по умолчанию: тесты ниже проверяют галки, поэтому
+  // раскрываем каждую карточку один раз — раскрытие переживает перерисовки.
+  await act(async () => {
+    host!.querySelectorAll<HTMLButtonElement>("button.employee-restrictions-toggle").forEach((b) => b.click());
+  });
   return host;
 }
 

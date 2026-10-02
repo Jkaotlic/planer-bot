@@ -1,6 +1,6 @@
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
-import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
+import { filterPeople, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
@@ -331,6 +331,9 @@ function EmployeeRow({
   // Одно поле в строке на оба вида правки: имя и обращение — оба текст, и две
   // открытые правки разом раздвинули бы карточку ради ничего.
   const [editing, setEditing] = useState<"name" | "address" | null>(null);
+  // Свёрнуто на каждом заходе и у каждой карточки: ограничения админ ставит
+  // редко, а сводка в кнопке уже говорит, кто исключён.
+  const [restrictionsOpen, setRestrictionsOpen] = useState(false);
   const [draft, setDraft] = useState(employee.displayName);
 
   function startEditing(what: "name" | "address") {
@@ -478,57 +481,71 @@ function EmployeeRow({
       )}
       {!editing && (
         <div className="employee-restrictions">
-          <span className="employee-restrictions-title">Ограничения</span>
-          <label className="employee-restriction-checkbox">
-            <input
-              type="checkbox"
-              checked={employee.isObserver}
-              disabled={busy}
-              onChange={() => onSetObserver(!employee.isObserver)}
-            />
-            Наблюдатель
-            <span className="employee-restriction-hint">
-              — смотрит график, ведёт свой, шлёт анонсы. Вне раздачи, обменов и передачи смен
-            </span>
-          </label>
-          <label
-            className="employee-restriction-checkbox"
-            style={employee.isObserver ? { cursor: "default" } : undefined}
+          {/* Сводка читает значения ИЗ БАЗЫ (как и галки ниже), а не эффективные:
+              свёрнутая и раскрытая карточки не должны противоречить друг другу. */}
+          <button
+            type="button"
+            className="btn btn-quiet btn-compact employee-restrictions-toggle"
+            aria-expanded={restrictionsOpen}
+            onClick={() => setRestrictionsOpen((open) => !open)}
           >
-            <input
-              type="checkbox"
-              // Значение из базы, а не эффективное («и так вне назначений из-за
-              // роли») — админ должен видеть, куда человек вернётся, когда роль
-              // снимут, а не то, что происходит с ним сейчас. Mirrors the Mini
-              // App's AdminEmployeesScreen.
-              checked={employee.excludedFromAssignment}
-              disabled={busy || employee.isObserver}
-              onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
-            />
-            Не участвует в назначениях
-            <span className="employee-restriction-hint">
-              {employee.isObserver
-                ? "— управляется ролью «Наблюдатель»"
-                : "— бот не зовёт его на работу в выходные и не подсказывает его в очереди дежурств; вручную поставить можно"}
-            </span>
-          </label>
-          <label
-            className="employee-restriction-checkbox"
-            style={employee.isObserver ? { cursor: "default" } : undefined}
-          >
-            <input
-              type="checkbox"
-              checked={employee.excludedFromSwaps}
-              disabled={busy || employee.isObserver}
-              onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
-            />
-            Не участвует в обменах
-            <span className="employee-restriction-hint">
-              {employee.isObserver
-                ? "— управляется ролью «Наблюдатель»"
-                : "— ни предложить, ни принять обмен; открытые заявки будут отменены"}
-            </span>
-          </label>
+            <span className="employee-restrictions-summary">Ограничения: {restrictionsSummary(employee)}</span>
+            <span aria-hidden="true">{restrictionsOpen ? "▴" : "▾"}</span>
+          </button>
+          {restrictionsOpen && (
+            <div className="employee-restrictions-body">
+              <label className="employee-restriction-checkbox">
+                <input
+                  type="checkbox"
+                  checked={employee.isObserver}
+                  disabled={busy}
+                  onChange={() => onSetObserver(!employee.isObserver)}
+                />
+                Наблюдатель
+                <span className="employee-restriction-hint">
+                  — смотрит график, ведёт свой, шлёт анонсы. Вне раздачи, обменов и передачи смен
+                </span>
+              </label>
+              <label
+                className="employee-restriction-checkbox"
+                style={employee.isObserver ? { cursor: "default" } : undefined}
+              >
+                <input
+                  type="checkbox"
+                  // Значение из базы, а не эффективное («и так вне назначений из-за
+                  // роли») — админ должен видеть, куда человек вернётся, когда роль
+                  // снимут, а не то, что происходит с ним сейчас. Mirrors the Mini
+                  // App's AdminEmployeesScreen.
+                  checked={employee.excludedFromAssignment}
+                  disabled={busy || employee.isObserver}
+                  onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
+                />
+                Не участвует в назначениях
+                <span className="employee-restriction-hint">
+                  {employee.isObserver
+                    ? "— управляется ролью «Наблюдатель»"
+                    : "— бот не зовёт его на работу в выходные и не подсказывает его в очереди дежурств; вручную поставить можно"}
+                </span>
+              </label>
+              <label
+                className="employee-restriction-checkbox"
+                style={employee.isObserver ? { cursor: "default" } : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={employee.excludedFromSwaps}
+                  disabled={busy || employee.isObserver}
+                  onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
+                />
+                Не участвует в обменах
+                <span className="employee-restriction-hint">
+                  {employee.isObserver
+                    ? "— управляется ролью «Наблюдатель»"
+                    : "— ни предложить, ни принять обмен; открытые заявки будут отменены"}
+                </span>
+              </label>
+            </div>
+          )}
         </div>
       )}
       {/* The refusal belongs where the click was. `flex-basis: 100%` puts it on
