@@ -1308,12 +1308,14 @@ describe("архивация гасит хвосты", () => {
     const anyaShift = createShift(db, { date: inDays(3), start: "08:00", end: "17:00", employeeId: anya.id });
     const igorShift = createShift(db, { date: inDays(3), start: "12:00", end: "21:00", employeeId: igor.id });
     const swap = createSwapRequest(db, { fromEmployeeId: anya.id, fromShiftId: anyaShift.id, toEmployeeId: igor.id, toShiftId: igorShift.id });
-    const vacation = createShift(db, { date: inDays(10), endDate: inDays(14), category: "vacation", start: null, end: null, employeeId: anya.id });
-    // Выходная смена обязана стоять на субботе или воскресенье (`assignSlot`
-    // отвечает `not_weekend`), а фиксированное «через 12 дней» попадало на
-    // выходной только в два дня недели из семи — тест падал по календарю.
-    // Берём первый выходной внутри отпуска: в пяти днях подряд он есть всегда.
-    const weekendDay = [10, 11, 12, 13, 14].map(inDays).find((d) => [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay()))!;
+    const vacation = createShift(db, { date: inDays(10), endDate: inDays(16), category: "vacation", start: null, end: null, employeeId: anya.id });
+    // A weekend slot must fall on a Saturday or Sunday (`assignSlot` answers
+    // `not_weekend` otherwise), so the day is searched for, not hard-coded.
+    // The window is SEVEN consecutive days: any seven contain a weekend. It
+    // used to be five («в пяти днях подряд он есть всегда» — not true), and a
+    // run on a Friday put days +10…+14 on Monday–Friday: no weekend,
+    // `weekendDay` undefined, and the insert failed on `vacant_slots.date`.
+    const weekendDay = [10, 11, 12, 13, 14, 15, 16].map(inDays).find((d) => [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay()))!;
     const slot = createVacantSlot(db, { date: weekendDay, start: "10:00", end: "18:00" });
     addInterest(db, slot.id, anya.id);
     const assigned = assignSlot(db, slot.id, anya.id, inDays(0));
