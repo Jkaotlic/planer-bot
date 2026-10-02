@@ -554,8 +554,14 @@ function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: str
         gap: 2,
         // Обводка, а не заливка: заливка занята под «выбран».
         boxShadow: [
+          // Кольцо снаружи клетки, а не внутри: внутреннее на синей заливке выбранного
+          // дня давало контраст 1.46 (тёмная) и 1.72 (светлая). Между клеткой и красным
+          // — волосок цвета холста (1px), чтобы красное граничило с холстом, а не с
+          // заливкой; вместе 3px, то есть ровно половина зазора между клетками (6px).
+          // Красный — сам токен, не затемнённый: затемнённый на тёмном холсте
+          // давал 2.54 при нужных 3.
+          short > 0 ? "0 0 0 1px var(--app-canvas, var(--tgui--secondary_bg_color)), 0 0 0 3px var(--tgui--destructive_text_color)" : null,
           active ? (isDark ? "0 0 0 1px rgba(255,255,255,0.06)" : "0 1px 4px rgba(0,0,0,0.12)") : null,
-          short > 0 ? "inset 0 0 0 2px color-mix(in srgb, var(--tgui--destructive_text_color) 84%, #000)" : null,
         ].filter(Boolean).join(", ") || "none",
       }}
     >
@@ -579,7 +585,9 @@ function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: str
         </span>
       )}
       {/* Значок рядом с днём недели, а не новой строкой: высота клетки одна на всех. */}
-      <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85, whiteSpace: "nowrap" }}>
+      {/* Строка фиксированной высоты: эмодзи праздника тянул её, и неделя с отметкой
+          выходила на 5px выше (60 против 55). */}
+      <span style={{ fontSize: 11, lineHeight: "14px", height: 14, fontWeight: 500, opacity: 0.85, whiteSpace: "nowrap" }}>
         {weekdayShort(iso)}{kind ? ` ${kind === "holiday" ? "🎉" : "💼"}` : ""}
       </span>
       <span style={{ fontSize: "var(--app-text-body)", fontWeight: 600 }}>{dayOfMonth(iso)}</span>

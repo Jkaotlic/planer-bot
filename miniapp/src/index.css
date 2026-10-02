@@ -134,6 +134,9 @@ textarea {
   padding: 0 3px;
   border-radius: 999px;
   background-color: var(--tgui--destructive_text_color, #e53935);
+  /* Белое на красном клиента давало 4.01 (тёмная) и 4.28 (светлая) при 10px —
+     ниже 4.5, поэтому красный затемнён, как у метки `[data-day-short]`. */
+  background-color: color-mix(in srgb, var(--tgui--destructive_text_color, #e53935) 84%, #000);
   color: #fff;
   font-size: 10px;
   line-height: 15px;

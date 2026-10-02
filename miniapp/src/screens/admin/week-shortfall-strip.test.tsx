@@ -86,6 +86,10 @@ describe("нехватка на полоске дней недели", () => {
     const el = await mount([kind(10, [0, 0, 0, 0, 0, 0, 0]), kind(20, [0, 0, 0, 0, 0, 0, 0])]);
     const line = el.querySelector<HTMLButtonElement>("[data-norm-unset]")!;
     expect(line.textContent).toBe("задать →");
+    // Кнопкой в одной строке с заголовком, а не серой строчкой под ним: так её не замечали.
+    expect(line.classList.contains("ui-btn")).toBe(true);
+    expect(line.classList.contains("ui-btn--compact")).toBe(true);
+    expect(line.parentElement!.querySelector(".ui-shortfall-title")?.textContent).toBe("Нормы не заданы");
     const strip = chips(el)[0]!;
     expect(line.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 

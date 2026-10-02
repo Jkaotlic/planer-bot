@@ -1,4 +1,4 @@
-import { weekdayShort, type ShortfallStatus, type WeekShortfall } from "@planer/shared";
+import { dayShortfallText, weekdayShort, type ShortfallStatus, type WeekShortfall } from "@planer/shared";
 import { pluralizeRu } from "../lib/shift";
 
 /**
@@ -23,19 +23,26 @@ export function ShortfallBanner({ week, status, onPickDay, onOpenNorms }: {
             {week.days.map((day) => (
               <button key={day.date} type="button" className="ui-shortfall-day" data-shortfall-day={day.date} onClick={() => onPickDay(day.date)}>
                 <b>{weekdayShort(day.date)}</b>
-                {` ${day.missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ")}`}
+                {` ${dayShortfallText(day.missing)}`}
               </button>
             ))}
           </span>
         </>
       )}
       {status.state === "closed" && <span className="ui-shortfall-title">Нормы закрыты ✓</span>}
-      {status.state === "no-norms" && <span className="ui-shortfall-title">Нормы не заданы</span>}
-      {(status.unsetCount > 0 || status.state === "no-norms") && (
+      {status.state === "no-norms" && (
+        // Заголовок и кнопка в одной строке: «задать →» мелкой серой строкой под
+        // заголовком читалась как подпись, а не как действие.
+        <div className="ui-shortfall-row">
+          <span className="ui-shortfall-title">Нормы не заданы</span>
+          <button type="button" className="ui-btn ui-btn--secondary ui-btn--compact ui-shortfall-set" data-norm-unset onClick={onOpenNorms}>
+            задать →
+          </button>
+        </div>
+      )}
+      {status.state !== "no-norms" && status.unsetCount > 0 && (
         <button type="button" className="ui-shortfall-unset" data-norm-unset onClick={onOpenNorms}>
-          {status.state === "no-norms"
-            ? "задать →"
-            : `Без нормы: ${status.unsetCount} ${pluralizeRu(status.unsetCount, "вид", "вида", "видов")} — задать →`}
+          {`Без нормы: ${status.unsetCount} ${pluralizeRu(status.unsetCount, "вид", "вида", "видов")} — задать →`}
         </button>
       )}
     </div>

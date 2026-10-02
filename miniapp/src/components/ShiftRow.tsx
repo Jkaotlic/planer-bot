@@ -81,8 +81,9 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
         <span style={{ fontSize: "var(--app-text-body)", fontWeight: 500 }}>{formatTimeRange(shift)}</span>
         {/* Чип называет запись («Утро» / «Отпуск») цветом своего пресета. */}
         <EntryChip entry={shift} templates={templates} />
+        {/* Обычный цвет, а не hint: серый давал 4.23 (тёмная) и 3.22 (светлая) при нужных 4.5. */}
         {special && (
-          <span data-special-day style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.3 }}>
+          <span data-special-day style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--text_color)", lineHeight: 1.3 }}>
             {special}
           </span>
         )}

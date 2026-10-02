@@ -73,6 +73,13 @@ describe("плашка нехватки над графиком мини-апп�
     expect(banner(el)?.textContent).toContain("Вид 10 −2");
   });
 
+  it("день с тремя видами нехватки — на кнопке только итог, с двумя — разбивка", async () => {
+    const el = await mount([kind(10, [2, 2, 0, 0, 0, 0, 0]), kind(20, [3, 1, 0, 0, 0, 0, 0]), kind(30, [1, 0, 0, 0, 0, 0, 0])]);
+    const days = [...banner(el)!.querySelectorAll<HTMLElement>("[data-shortfall-day]")];
+    expect(days[0]!.textContent).toBe("Пн −6");
+    expect(days[1]!.textContent).toBe("Вт Вид 10 −2, Вид 20 −1");
+  });
+
   it("стоит раньше полоски дней — её видно, не листая", async () => {
     const el = await mount([kind(10, [2, 0, 0, 0, 0, 0, 0])]);
     const chip = el.querySelector("[data-day-chip]")!;
@@ -150,15 +157,18 @@ describe("плашка нехватки над графиком мини-апп�
     expect(onScheduleChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("обводка дня лежит в boxShadow и у выбранного, и у невыбранного дня", async () => {
-    // Выбранный день (сегодня, среда) уже несёт свою тень; склейка не должна терять обводку.
+  it("обводка дня — внешнее кольцо в boxShadow и у выбранного, и у невыбранного дня", async () => {
+    // Выбранный день (сегодня, среда) уже несёт свою тень; склейка не должна терять кольцо.
+    // Кольцо внешнее: внутреннее на синей заливке выбранного дня давало контраст 1.46/1.72.
+    const ring = /0 0 0 3px var\(--tgui--destructive_text_color\)/;
     const el = await mount([kind(10, [2, 0, 2, 0, 0, 0, 0])]);
     const chips = [...el.querySelectorAll<HTMLElement>("[data-day-chip]")];
     expect(chips[2]!.getAttribute("aria-pressed")).toBe("true");
-    expect(chips[2]!.style.boxShadow).toContain("inset");
+    expect(chips[2]!.style.boxShadow).toMatch(ring);
     expect(chips[0]!.getAttribute("aria-pressed")).toBe("false");
-    expect(chips[0]!.style.boxShadow).toContain("inset");
-    expect(chips[1]!.style.boxShadow).not.toContain("inset");
+    expect(chips[0]!.style.boxShadow).toMatch(ring);
+    expect(chips[1]!.style.boxShadow).not.toMatch(ring);
+    for (const chip of chips) expect(chip.style.boxShadow).not.toContain("inset");
   });
 
   it("пока нормы не пришли, плашки нет, хотя неделя уже загружена", async () => {

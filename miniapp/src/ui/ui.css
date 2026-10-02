@@ -324,7 +324,9 @@
 .ui-menu-row__hint {
   font-size: var(--app-text-meta);
   line-height: 1.35;
-  color: var(--tgui--hint_color);
+  /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
+     при нужных 4.5. */
+  color: var(--tgui--text_color);
 }
 
 .ui-menu-row__chevron {
@@ -399,7 +401,9 @@
 .ui-check__hint {
   font-size: var(--app-text-meta);
   line-height: 1.35;
-  color: var(--tgui--hint_color);
+  /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
+     при нужных 4.5. */
+  color: var(--tgui--text_color);
 }
 
 /* ---------- Селект ---------- */
@@ -549,14 +553,38 @@
 }
 .ui-shortfall-title { font-weight: 700; }
 .ui-shortfall--short {
-  color: var(--tgui--destructive_text_color, #d33a3a);
   background: rgb(229 57 53 / 14%);
   background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 14%, transparent);
 }
-.ui-shortfall--short .ui-shortfall-title { font-size: 17px; }
+/* Заголовок — залитая таблетка, как метка `[data-day-short]` на дне. Красный
+   текст на красной подложке замером давал 3.11 (тёмная) и 3.08 (светлая) при
+   нужных 4.5; белое на затемнённом красном даёт больше. Цвет текста плашки —
+   обычный: он же у «Без нормы…» и у кнопок дней. */
+.ui-shortfall--short .ui-shortfall-title {
+  align-self: flex-start;
+  padding: 2px 12px;
+  border-radius: 999px;
+  font-size: 17px;
+  background: var(--tgui--destructive_text_color, #d33a3a);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 84%, #000);
+  color: #fff;
+}
 .ui-shortfall--closed { color: #1f7a34; background: #e1f6e1; padding-block: 8px; }
 .ui-dark .ui-shortfall--closed { color: #86e093; background: rgb(70 190 90 / 22%); }
-.ui-shortfall--no-norms { color: var(--tgui--hint_color); background: var(--app-card); padding-block: 8px; }
+/* Заголовок обычным цветом, а не `hint_color`: серый давал 4.23 (тёмная) и 3.22
+   (светлая) при нужных 4.5. */
+.ui-shortfall--no-norms { color: var(--tgui--text_color); background: var(--app-card); padding-block: 8px; }
+.ui-shortfall-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* Зона нажатия 44px по самой кнопке: у `compact` она 36px плюс невидимое поле. */
+.ui-shortfall-set {
+  min-height: var(--app-tap);
+  flex: none;
+  /* Подпись обычным цветом, а кнопкой её делает рамка цвета ссылки: синий текст
+     «задать →» на синей подложке `--secondary` давал 3.31 (светлая) и белый на
+     залитой `--primary` — 3.31/3.72, оба ниже 4.5. */
+  color: var(--tgui--text_color);
+  box-shadow: inset 0 0 0 1.5px var(--tgui--link_color);
+}
 .ui-shortfall-days { display: flex; flex-wrap: wrap; gap: 6px; }
 .ui-shortfall-day {
   min-height: var(--app-tap);
@@ -576,7 +604,9 @@
   padding: 0;
   border: none;
   background: none;
-  color: inherit;
+  /* Обычный цвет текста: наследуемый красный на красной подложке давал 3.11/3.08. */
+  color: var(--tgui--text_color);
+  text-decoration: underline;
   font: inherit;
   font-size: var(--app-text-meta);
   cursor: pointer;
@@ -588,5 +618,7 @@
   padding: 0 4px;
   font-size: var(--app-text-meta);
   line-height: 1.35;
-  color: var(--tgui--hint_color);
+  /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
+     при нужных 4.5. */
+  color: var(--tgui--text_color);
 }
