@@ -50,11 +50,11 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, ca
           {` ${day.missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ")}`}
         </button>
       ))}
-      {withoutNorm.length > 0 && (
+      {(withoutNorm.length > 0 || status.state === "no-norms") && (
         <button
           type="button"
           className="week-shortfall-unset btn btn-quiet btn-compact"
-          title={`Норма не задана: ${withoutNorm.map((kind) => kind.name).join(", ")}`}
+          title={withoutNorm.length > 0 ? `Норма не задана: ${withoutNorm.map((kind) => kind.name).join(", ")}` : undefined}
           onClick={onOpenKinds}
         >
           {status.state === "no-norms"

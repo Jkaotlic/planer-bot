@@ -73,6 +73,49 @@ describe("метка нехватки в сайдбаре", () => {
     expect(badge(await mount())?.textContent).toBe("9+");
   });
 
+  it("граница: девять — «9», десять — «9+»", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 9, firstDate: "2026-08-26" });
+    const el = await mount();
+    expect(badge(el)?.textContent).toBe("9");
+    spy.mockResolvedValue({ total: 10, firstDate: "2026-08-26" });
+    await act(async () => navButton(el, "Работники").click());
+    await act(async () => navButton(el, "Расписание").click());
+    await settle(4);
+    expect(badge(el)?.textContent).toBe("9+");
+  });
+
+  it("позднее обновление упало — прежнее число не остаётся", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
+    const el = await mount();
+    expect(badge(el)?.textContent).toBe("4");
+    spy.mockRejectedValue(new Error("сеть"));
+    await act(async () => navButton(el, "Работники").click());
+    await act(async () => navButton(el, "Расписание").click());
+    await settle(4);
+    expect(badge(el)).toBeNull();
+  });
+
+  it("возврат во вкладку перечитывает число; после размонтирования слушателя нет", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
+    const el = await mount();
+    const before = spy.mock.calls.length;
+    spy.mockResolvedValue({ total: 6, firstDate: "2026-08-26" });
+    const visibility = vi.spyOn(document, "visibilityState", "get");
+    visibility.mockReturnValue("hidden");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(2);
+    expect(spy.mock.calls.length).toBe(before);
+    visibility.mockReturnValue("visible");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(2);
+    expect(spy.mock.calls.length).toBe(before + 1);
+    expect(badge(el)?.textContent).toBe("6");
+    await act(async () => root!.unmount());
+    root = null;
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(spy.mock.calls.length).toBe(before + 1);
+  });
+
   it("экранному диктору число зачитывается словами, а сама метка скрыта от него", async () => {
     vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
     const el = await mount();

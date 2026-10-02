@@ -120,6 +120,11 @@ describe("строка нехватки в «Расписании»", () => {
     const el = await mount([]);
     expect(el.querySelector(".schedule-table")).not.toBeNull();
     expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
+    const set = [...el.querySelectorAll<HTMLButtonElement>(".week-shortfall button")].find((b) => b.textContent === "задать →")!;
+    expect(set).toBeDefined();
+    await act(async () => set.click());
+    await settle(4);
+    expect(el.querySelector(".kinds-intro")).not.toBeNull();
   });
 
   it("хвост «без нормы» открывает «Виды смен»", async () => {

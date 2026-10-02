@@ -199,6 +199,19 @@ export function App() {
     );
   }
 
+  // Консоль годами висит открытой вкладкой: возвращаясь к ней, человек ждёт
+  // свежего числа, а не того, что было при уходе. Тот же запрос с защитой от
+  // устаревшего ответа, что и везде.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshAdminShortfall();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // refreshAdminShortfall держится на рефе и сеттере — привязка один раз безопасна.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function refreshEmployees() {
     setEmployees(await apiClient.getEmployees());
   }

@@ -1441,14 +1441,6 @@ button {
     background: var(--destructive);
     color: #14181f;
   }
-
-  /* Строка выше возвращает красную таблетку и в тёмной теме; у зелёной и
-     нейтральной плашек итог — текст, и таблетка не нужна. */
-  .week-shortfall--closed .week-shortfall-total,
-  .week-shortfall--no-norms .week-shortfall-total {
-    background: none;
-    color: inherit;
-  }
 }
 
 /* День с дырой — шапка колонки красная целиком, а не только метка «−N»: метку

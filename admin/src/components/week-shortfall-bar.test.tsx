@@ -65,6 +65,16 @@ describe("строка нехватки над сеткой недели", () =>
     expect(onOpenKinds).toHaveBeenCalledTimes(1);
   });
 
+  it("видов смен нет вовсе — всё равно «Нормы не заданы» и кнопка «задать →»", async () => {
+    const onOpenKinds = vi.fn();
+    const el = await mount({ templates: [], onOpenKinds });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
+    const set = [...el.querySelectorAll("button")].find((b) => b.textContent === "задать →")!;
+    expect(set).toBeDefined();
+    await act(async () => set.click());
+    expect(onOpenKinds).toHaveBeenCalledTimes(1);
+  });
+
   it("дыра — data-shortfall=short и прежний расклад", async () => {
     const el = await mount({ templates: [MORNING] });
     expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("short");
