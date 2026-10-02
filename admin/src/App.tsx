@@ -541,6 +541,7 @@ export function App() {
                 shifts={shifts}
                 templates={templateRoles}
                 weekDates={weekDates}
+                calendar={dayCalendar}
                 pointedDate={pointedInWeek}
                 onPointDay={setPointedDate}
                 onOpenKinds={() => setNav("kinds")}

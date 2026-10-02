@@ -43,8 +43,8 @@ export interface ScheduleGridProps {
  * обрезался многоточием, и именно хвост — второй вид — терялся. Расклад по
  * видам живёт в подсказке и в строке над сеткой (`WeekShortfallBar`).
  */
-function DayShortfall({ date, shifts, coverage }: { date: string; shifts: Shift[]; coverage: readonly CoverageTemplate[] }) {
-  const missing = missingCoverage(shifts, coverage, date);
+function DayShortfall({ date, shifts, coverage, calendar }: { date: string; shifts: Shift[]; coverage: readonly CoverageTemplate[]; calendar: DayCalendar }) {
+  const missing = missingCoverage(shifts, coverage, date, calendar);
   const hint = coverageHint(missing);
   if (!hint) return null;
   const short = missing.reduce((sum, kind) => sum + kind.need - kind.have, 0);
@@ -92,7 +92,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
                       Молчит, пока норма не задана. */}
                   <span className="dow">
                     {weekdayShort(date)}
-                    <DayShortfall date={date} shifts={shifts} coverage={coverage} />
+                    <DayShortfall date={date} shifts={shifts} coverage={coverage} calendar={calendar} />
                   </span>
                   <span className="dom">{dayOfMonth(date)}</span>
                 </span>

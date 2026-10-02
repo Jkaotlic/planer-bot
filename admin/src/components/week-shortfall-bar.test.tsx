@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { WeekShortfallBar, type WeekShortfallBarProps } from "./WeekShortfallBar";
 
@@ -34,7 +35,7 @@ async function mount(props: Partial<WeekShortfallBarProps>) {
   root = createRoot(host);
   await act(async () => {
     root!.render(createElement(WeekShortfallBar, {
-      shifts: [], templates: [], weekDates: WEEK, pointedDate: null, onPointDay: () => {}, onOpenKinds: () => {}, ...props,
+      shifts: [], templates: [], weekDates: WEEK, calendar: EMPTY_CALENDAR, pointedDate: null, onPointDay: () => {}, onOpenKinds: () => {}, ...props,
     }));
   });
   return host;

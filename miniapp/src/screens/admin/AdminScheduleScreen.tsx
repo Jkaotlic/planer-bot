@@ -264,13 +264,13 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   const weekShifts = shifts && shiftsFrom === from ? shifts : null;
   // Только по записям показанной недели; пока их нет — подсказка молчит, а не
   // объявляет нехватку по пустому списку.
-  const dayHint = weekShifts ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate)) : null;
+  const dayHint = weekShifts ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate, dayCalendar)) : null;
 
   // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
   // семь дней красным, и закрытая неделя открывалась бы тревогой.
   const week = useMemo(
-    () => (weekShifts ? weekShortfall(weekShifts, templateRoles, weekDates) : null),
-    [weekShifts, templateRoles, weekDates],
+    () => (weekShifts ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar) : null),
+    [weekShifts, templateRoles, weekDates, dayCalendar],
   );
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
   const unsetCount = week?.withoutNorm.length ?? 0;

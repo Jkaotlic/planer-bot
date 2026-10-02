@@ -1,4 +1,4 @@
-import { weekShortfall, weekdayShort, type NormTemplate } from "@planer/shared";
+import { weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { pluralizeRu } from "../lib/people";
 
@@ -7,6 +7,8 @@ export interface WeekShortfallBarProps {
   /** Виды смен с нормой дня — те же, из которых сетка считает метку в колонке. */
   templates: readonly NormTemplate[];
   weekDates: readonly string[];
+  /** Праздники и рабочие выходные: от них зависит, по какой колонке нормы считать день. */
+  calendar: DayCalendar;
   /** День, колонка которого сейчас выделена в сетке. */
   pointedDate: string | null;
   onPointDay: (date: string | null) => void;
@@ -24,8 +26,8 @@ export interface WeekShortfallBarProps {
  * это не поломка, а несделанная настройка, и кричать о ней наравне с дырой
  * в графике значило бы приучить глаз строку пропускать.
  */
-export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, onPointDay, onOpenKinds }: WeekShortfallBarProps) {
-  const { days, total, withoutNorm } = weekShortfall(shifts, templates, weekDates);
+export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, calendar, onPointDay, onOpenKinds }: WeekShortfallBarProps) {
+  const { days, total, withoutNorm } = weekShortfall(shifts, templates, weekDates, calendar);
   if (days.length === 0 && withoutNorm.length === 0) return null;
   return (
     <div className="week-shortfall" role="status">

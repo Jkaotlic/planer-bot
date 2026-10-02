@@ -96,6 +96,25 @@ export function coverageSummary(coverage: readonly number[]): string {
   return parts.length === 0 ? "норма не задана" : parts.join(" · ");
 }
 
+const SUNDAY_INDEX = 6;
+const FRIDAY_NORM_INDEX = 4;
+
+/**
+ * По какой колонке нормы считать день.
+ *
+ * Праздник — как воскресенье: обычные смены не нужны, дежурство выходного дня
+ * нужно. Рабочий выходной (перенос) — как пятница: это рабочий день перед
+ * выходным. Решение владельца от 02.10.2026; до него праздник в среду требовал
+ * людей по норме среды, и плашка с вечерним советом звали закрывать день, в
+ * который никто не выходит.
+ */
+export function normWeekday(date: string, calendar: DayCalendar): number {
+  const kind = calendar.get(date);
+  if (kind === "holiday") return SUNDAY_INDEX;
+  if (kind === "workday") return FRIDAY_NORM_INDEX;
+  return weekdayIndex(date);
+}
+
 /**
  * Чего в дне не хватает против нормы.
  *
@@ -106,13 +125,17 @@ export function coverageSummary(coverage: readonly number[]): string {
  * Норму закрывает ЧЕЛОВЕК, а не строка в сетке: у записи без `employeeId` некому
  * выйти. Люди считаются множеством — две записи одного вида на одного человека
  * это один вышедший, а не два.
+ *
+ * Календарь обязателен, без умолчания (как у `isDayOff`): забытый аргумент
+ * молча вернул бы норму по дню недели, и праздник снова звал бы закрывать смены.
  */
 export function missingCoverage(
   entries: readonly CoverageEntry[],
   templates: readonly CoverageTemplate[],
   date: string,
+  calendar: DayCalendar,
 ): MissingKind[] {
-  const weekday = weekdayIndex(date);
+  const weekday = normWeekday(date, calendar);
   const out: MissingKind[] = [];
   for (const template of templates) {
     const need = template.coverage[weekday] ?? 0;
@@ -181,7 +204,7 @@ export function scheduleGaps(
 ): DayGap[] {
   const out: DayGap[] = [];
   for (const date of dates) {
-    const missing = missingCoverage(entries, templates, date);
+    const missing = missingCoverage(entries, templates, date, calendar);
     // По календарю, а не по дню недели: в праздник не выходят, и пустой он
     // по праву; рабочая суббота, в которую никто не вышел, — пробел.
     const dayOff = isDayOff(date, calendar);
@@ -258,10 +281,11 @@ export function weekShortfall(
   entries: readonly CoverageEntry[],
   templates: readonly NormTemplate[],
   dates: readonly string[],
+  calendar: DayCalendar,
 ): WeekShortfall {
   const days: ShortDay[] = [];
   for (const date of dates) {
-    const missing = missingCoverage(entries, templates, date);
+    const missing = missingCoverage(entries, templates, date, calendar);
     if (missing.length === 0) continue;
     days.push({ date, missing, short: missing.reduce((sum, kind) => sum + kind.need - kind.have, 0) });
   }
