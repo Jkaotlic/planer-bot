@@ -58,6 +58,20 @@ export const myShiftsResponseSchema = z
   .object({
     shifts: z.array(scheduleEntrySchema),
     today: dateStr,
+    /**
+     * Праздники и рабочие субботы в размахе отданных смен (пусто без смен):
+     * «Мои смены» помечают ими строки. Фронт читает поле как необязательное —
+     * старый сервер его не шлёт, и экран не должен из-за этого падать.
+     */
+    calendar: z.array(
+      z
+        .object({
+          date: dateStr,
+          kind: z.enum(["holiday", "workday"]),
+          note: z.string().nullable(),
+        })
+        .strict(),
+    ),
   })
   .strict();
 export type MyShiftsResponse = z.infer<typeof myShiftsResponseSchema>;

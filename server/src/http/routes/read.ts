@@ -8,6 +8,7 @@ import {
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
+import { listCalendarDays } from "../../repo/calendar-days";
 import { listUpcomingForEmployee } from "../../repo/shifts";
 import { readTeamSchedule } from "../../repo/team-schedule";
 import { listActiveTemplates } from "../../repo/templates";
@@ -51,8 +52,15 @@ export function createReadRoutes(deps: { db: Db; config: Config }): Hono<Env> {
     // `readTeamSchedule` его уже вырезает по тому же соображению; здесь он
     // уезжал работнику просто потому, что никто не написал список полей.
     // Ни один экран ни одного из трёх не читает.
+    const mine = listUpcomingForEmployee(db, c.get("auth").employeeId, from);
+    // Календарь только на размах отданных смен: «Мои смены» помечают праздник у
+    // самой смены, а широкий запрос в процессе, что ещё и опрашивает бота, не нужен.
+    const last = mine.reduce((max, s) => ((s.endDate ?? s.date) > max ? (s.endDate ?? s.date) : max), "");
+    const calendar = mine.length
+      ? listCalendarDays(db, mine[0]!.date, last).map(({ date, kind, note }) => ({ date, kind, note }))
+      : [];
     return c.json({
-      shifts: listUpcomingForEmployee(db, c.get("auth").employeeId, from).map((s) => ({
+      shifts: mine.map((s) => ({
         id: s.id,
         date: s.date,
         start: s.start,
@@ -66,6 +74,7 @@ export function createReadRoutes(deps: { db: Db; config: Config }): Hono<Env> {
         employeeId: s.employeeId,
       })),
       today,
+      calendar,
     } satisfies MyShiftsResponse);
   });
 

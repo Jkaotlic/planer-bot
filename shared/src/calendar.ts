@@ -1,4 +1,5 @@
 import { dayOfWeek, isWeekend } from "./time";
+import { weekdayShort } from "./week-dates";
 
 /**
  * Календарь дней: только исключения из правила «суббота и воскресенье — выходные».
@@ -44,4 +45,45 @@ export function dayOffLabel(date: string, kind: DayKind | undefined, note: strin
   }
   if (kind === "workday") return dayOfWeek(date) === 0 ? "💼 Рабочее воскресенье" : "💼 Рабочая суббота";
   return null;
+}
+
+/** Особый день для подписи человеку: `label` — строка под неделей, `short` — для узкой шапки колонки. */
+export interface SpecialDay {
+  date: string;
+  kind: DayKind;
+  label: string;
+  short: string;
+}
+
+/**
+ * Праздники и рабочие выходные из `dates`, с подписями, по порядку `dates`.
+ *
+ * Идём по списку дат, а не по строкам календаря: строк может быть на месяц, а
+ * нужна одна неделя, и порядок задаёт экран, а не база. Название пишется
+ * текстом на самом экране — подсказки по наведению на телефоне нет.
+ */
+export function specialDays(
+  dates: readonly string[],
+  rows: readonly { date: string; kind: DayKind; note?: string | null }[],
+): SpecialDay[] {
+  const byDate = new Map(rows.map((row) => [row.date, row]));
+  const out: SpecialDay[] = [];
+  for (const date of dates) {
+    const row = byDate.get(date);
+    if (!row) continue;
+    const when = `${weekdayShort(date)} ${Number(date.slice(8, 10))}`;
+    if (row.kind === "holiday") {
+      const title = row.note?.trim();
+      out.push({
+        date,
+        kind: "holiday",
+        label: `🎉 ${when} — ${title || "выходной по календарю"}`,
+        short: `🎉 ${title || "выходной"}`,
+      });
+    } else {
+      const name = dayOfWeek(date) === 0 ? "рабочее воскресенье" : "рабочая суббота";
+      out.push({ date, kind: "workday", label: `💼 ${when} — ${name}`, short: "💼 рабочая" });
+    }
+  }
+  return out;
 }
