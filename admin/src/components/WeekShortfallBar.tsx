@@ -53,7 +53,8 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, ca
       {(withoutNorm.length > 0 || status.state === "no-norms") && (
         <button
           type="button"
-          className="week-shortfall-unset btn btn-quiet btn-compact"
+          // «задать →» при незаданных нормах вовсе — настоящая кнопка: серой ссылкой её не замечали.
+          className={`week-shortfall-unset btn btn-compact ${status.state === "no-norms" ? "btn-secondary" : "btn-quiet"}`}
           title={withoutNorm.length > 0 ? `Норма не задана: ${withoutNorm.map((kind) => kind.name).join(", ")}` : undefined}
           onClick={onOpenKinds}
         >
