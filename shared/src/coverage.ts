@@ -299,3 +299,37 @@ export function weekShortfall(
     .map((template) => ({ templateId: template.templateId, name: template.name }));
   return { days, total: days.reduce((sum, day) => sum + day.short, 0), withoutNorm };
 }
+
+export type ShortfallState = "closed" | "short" | "no-norms";
+
+export interface ShortfallStatus {
+  state: ShortfallState;
+  /** Сколько видов смен и дежурств без нормы — хвост «без нормы: N» в плашке. */
+  unsetCount: number;
+}
+
+/** Ответ `GET /api/admin/shortfall` — нехватка на 7 дней от командной даты. */
+export interface AdminShortfall {
+  total: number;
+  /** Первый день с дырой; `null`, когда дыр нет. */
+  firstDate: string | null;
+}
+
+/**
+ * Что показывать плашкой над графиком.
+ *
+ * Отдельная функция, а не условие на каждом экране: «закрыто» и «нормы не
+ * заданы» выглядят в `weekShortfall` одинаково (дней с нехваткой нет), и одна
+ * из морд рано или поздно показала бы зелёное там, где считать было не из чего.
+ */
+export function shortfallStatus(week: WeekShortfall, templates: readonly NormTemplate[]): ShortfallStatus {
+  const unsetCount = week.withoutNorm.length;
+  if (week.days.length > 0) return { state: "short", unsetCount };
+  const withNorm = templates.filter(
+    (template) =>
+      (template.category === "shift" || template.category === "duty") &&
+      template.fillMode !== "remainder" &&
+      template.coverage.some((need) => need > 0),
+  ).length;
+  return { state: withNorm === 0 ? "no-norms" : "closed", unsetCount };
+}

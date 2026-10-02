@@ -9,6 +9,7 @@ import {
   parseCoverage,
   scheduleGaps,
   serializeCoverage,
+  shortfallStatus,
   weekShortfall,
 } from "./coverage";
 import type { EntryCategory } from "./category";
@@ -285,5 +286,41 @@ describe("норма дня по календарю", () => {
     const calendar = calendarFrom([{ date: "2026-11-04", kind: "holiday" }]);
     expect(weekShortfall([], [{ ...morning, category: "shift" }], ["2026-11-04"], calendar).total).toBe(0);
     expect(scheduleGaps([], [morning], ["2026-11-04"], calendar)).toEqual([]);
+  });
+});
+
+describe("shortfallStatus — состояние плашки над графиком", () => {
+  const WEEK_DAYS = ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-29", "2026-08-30"];
+  const kind = (templateId: number, coverage: number[], category: EntryCategory = "shift", fillMode: "count" | "remainder" = "count") =>
+    ({ templateId, name: `Вид ${templateId}`, coverage, category, fillMode });
+  const status = (entries: Parameters<typeof weekShortfall>[0], templates: ReturnType<typeof kind>[]) =>
+    shortfallStatus(weekShortfall(entries, templates, WEEK_DAYS, EMPTY_CALENDAR), templates);
+
+  it("есть дыра — short", () => {
+    expect(status([], [kind(1, [1, 0, 0, 0, 0, 0, 0])])).toEqual({ state: "short", unsetCount: 0 });
+  });
+
+  it("норма закрыта — closed", () => {
+    const entries = [{ date: "2026-08-24", employeeId: 7, templateId: 1 }];
+    expect(status(entries, [kind(1, [1, 0, 0, 0, 0, 0, 0])])).toEqual({ state: "closed", unsetCount: 0 });
+  });
+
+  it("closed помнит, сколько видов без нормы", () => {
+    const entries = [{ date: "2026-08-24", employeeId: 7, templateId: 1 }];
+    expect(status(entries, [kind(1, [1, 0, 0, 0, 0, 0, 0]), kind(2, [0, 0, 0, 0, 0, 0, 0], "duty")]))
+      .toEqual({ state: "closed", unsetCount: 1 });
+  });
+
+  it("нормы нет ни у одного вида — no-norms, а не closed", () => {
+    expect(status([], [kind(1, [0, 0, 0, 0, 0, 0, 0]), kind(2, [0, 0, 0, 0, 0, 0, 0], "duty")]))
+      .toEqual({ state: "no-norms", unsetCount: 2 });
+  });
+
+  it("видов смен и дежурств нет вовсе — no-norms", () => {
+    expect(status([], [kind(3, [0, 0, 0, 0, 0, 0, 0], "vacation")])).toEqual({ state: "no-norms", unsetCount: 0 });
+  });
+
+  it("вид «все оставшиеся» нормой не считается и в no-norms не мешает", () => {
+    expect(status([], [kind(1, [0, 0, 0, 0, 0, 0, 0], "shift", "remainder")]).state).toBe("no-norms");
   });
 });
