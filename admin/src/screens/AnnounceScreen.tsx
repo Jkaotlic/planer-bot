@@ -158,7 +158,7 @@ export function AnnounceScreen() {
   const unreachableLine = report ? announcementUnreachableLine(report.unreachable, report.archivedCount) : null;
 
   return (
-    <div className="employees-screen">
+    <div className="employees-screen employees-screen-form">
       <div className="employees-header">
         <h2 className="employees-title">Анонсы</h2>
       </div>

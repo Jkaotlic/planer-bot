@@ -79,7 +79,7 @@ export function BugsScreen() {
       {!error && !reports && <div className="employees-empty">Загрузка…</div>}
 
       {!error && reports && reports.length === 0 && (
-        <div className="employees-empty">{status === "open" ? "Открытых багрепортов нет." : "Багрепортов пока не было."}</div>
+        <div className="empty-state">{status === "open" ? "Открытых багрепортов нет." : "Багрепортов пока не было."}</div>
       )}
 
       {!error && reports?.map((report) => <BugReportCard key={report.id} report={report} onToggle={handleToggle} />)}

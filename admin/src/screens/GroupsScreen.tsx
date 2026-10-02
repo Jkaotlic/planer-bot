@@ -185,7 +185,7 @@ export function GroupsScreen({ employees }: { employees: readonly Employee[] }) 
   }
 
   return (
-    <div className="employees-screen">
+    <div className="employees-screen employees-screen-form">
       <div className="employees-header">
         <h2 className="employees-title">Группы</h2>
       </div>
@@ -198,7 +198,7 @@ export function GroupsScreen({ employees }: { employees: readonly Employee[] }) 
       {error && !editing && <div className="employees-error">{error}</div>}
 
       {groups.length === 0 && !editing && (
-        <div className="employees-empty">Групп пока нет — заведите первую, например «ЧИП 5-й этаж».</div>
+        <div className="empty-state">Групп пока нет — заведите первую, например «ЧИП 5-й этаж».</div>
       )}
 
       <div className="employees-list">

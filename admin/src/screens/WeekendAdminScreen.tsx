@@ -140,7 +140,7 @@ export function WeekendAdminScreen() {
         {!openSlots ? (
           <div className="employees-empty">Загрузка…</div>
         ) : openSlots.length === 0 ? (
-          <div className="employees-empty">Нет открытых смен. Нажми «Открыть смену», чтобы позвать желающих.</div>
+          <div className="empty-state">Нет открытых смен. Нажми «Открыть смену», чтобы позвать желающих.</div>
         ) : (
           <div className="weekend-slot-list">
             {openSlots.map((view) => (
