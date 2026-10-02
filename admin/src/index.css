@@ -1692,10 +1692,35 @@ button {
   gap: 10px;
 }
 
-/* Все однострочные поля, а не список типов: number и url («Сборы») оставались
-   34px рядом с 36px. Флажки, радио, файл и ползунок высоту не получают. */
 select,
-input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="hidden"]) {
+input[type="text"],
+input[type="date"],
+input[type="time"],
+input[type="search"] {
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--separator);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-body);
+}
+
+/* number, url и прочие однострочные («Сборы») оставались 34px рядом с 36px. Список
+   типов не продолжен выше и не собран через `input:not([type=…])…` намеренно —
+   ловушка каскада: вес общего правила. Классовые правила (`.employee-position`
+   44px, `.kind-coverage-day input`, `.weekend-date-field input`) весят 0,1,0 и
+   проигрывают даже `input[type=number]` (0,1,1), а цепочка :not() давала 0,6,1.
+   :where() обнуляет вес: это правило слабее ЛЮБОГО классового и только добирает
+   высоту и вид полям, у которых своего правила нет. */
+:where(
+  input[type="number"],
+  input[type="url"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="password"]
+) {
   width: 100%;
   min-height: var(--control-h);
   padding: 0 10px;
