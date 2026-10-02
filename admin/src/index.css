@@ -12,7 +12,9 @@
   --fallback-secondary-bg: #e4e3ea;
   --fallback-section-bg: #ffffff;
   --fallback-text: #0b0b0f;
-  --fallback-hint: #767b87;
+  /* Серый #767b87 давал на белой карточке 4.24:1 — ниже порога 4.5 для мелкого
+     текста. #666b77: 5.34:1 на #ffffff и 4.63:1 на холсте #efeef4. */
+  --fallback-hint: #666b77;
   --fallback-link: #3390ec;
   --fallback-button: #3390ec;
   --fallback-button-text: #ffffff;
@@ -1436,6 +1438,8 @@ button {
 .kind-chevron {
   flex: none;
   color: var(--hint);
+  /* Без кегля стрелка наследовала 16px от body — лишний шестой размер. */
+  font-size: var(--text-sub);
 }
 
 .kind-people {
@@ -3201,6 +3205,14 @@ textarea {
     justify-content: center;
   }
 
+  /* Кнопки панелей и двухшаговых подтверждений — основное действие пальцем,
+     их не сжимаем до компактных 30px, как кнопки в топбаре. */
+  .panel-actions .btn,
+  .birthday-confirm .btn,
+  .settings-confirm .btn {
+    min-height: var(--control-h);
+  }
+
   /* «Работник · С · По» в один ряд: у `input[type="date"]` есть собственная
      минимальная ширина, ужаться до трети от 390px он не может — поле «По»
      уходило за правый край панели. `min-width` заставляет ряд переноситься;
@@ -3284,7 +3296,9 @@ textarea {
   padding: 0 12px;
   border: 0;
   background: transparent;
-  color: var(--hint);
+  /* Серый --hint на --surface-secondary давал 3.33:1: невыбранный пункт было
+     трудно прочесть. Выбранный отличается фоном и тенью, а не цветом текста. */
+  color: var(--text);
   font: inherit;
   font-size: var(--text-sub);
   font-weight: 600;
