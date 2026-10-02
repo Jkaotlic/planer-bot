@@ -20,7 +20,7 @@ export interface WeekShortfallBarProps {
  * получает ни одного узла, и экран выглядит как до этой строки. Зелёное «всё
  * закрыто» висело бы над сеткой сорок недель в году, ничего не сообщая.
  *
- * Виды без нормы — в той же строке хвостом, а не отдельным предупреждением:
+ * Виды без нормы — в той же строке ссылкой-кнопкой в конце, а не отдельным предупреждением:
  * это не поломка, а несделанная настройка, и кричать о ней наравне с дырой
  * в графике значило бы приучить глаз строку пропускать.
  */
@@ -46,7 +46,7 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, on
       {withoutNorm.length > 0 && (
         <button
           type="button"
-          className="week-shortfall-unset"
+          className="week-shortfall-unset btn btn-quiet btn-compact"
           title={`Норма не задана: ${withoutNorm.map((kind) => kind.name).join(", ")}`}
           onClick={onOpenKinds}
         >

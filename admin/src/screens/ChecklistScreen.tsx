@@ -84,7 +84,7 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
       <DaySummary day={day} />
 
       {checklists.length === 0 ? (
-        <div className="employees-empty">
+        <div className="empty-state">
           Чек-листов пока нет — заведите первый, и он начнёт приходить дежурным тех видов смен, которые вы ему укажете.
         </div>
       ) : (

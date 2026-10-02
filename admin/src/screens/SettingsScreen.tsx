@@ -103,7 +103,7 @@ export function SettingsScreen() {
     : null;
 
   return (
-    <div className="employees-screen">
+    <div className="employees-screen employees-screen-form">
       <div className="employees-header">
         <h2 className="employees-title">Настройки</h2>
       </div>

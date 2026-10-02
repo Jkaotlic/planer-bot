@@ -442,7 +442,7 @@ function NewCollectionForm({
 
   return (
     <div className="birthday-card">
-      <div className="birthday-editor">
+      <div className="birthday-editor collection-new-form">
         <label className="birthday-label">
           Повод
           <input
@@ -631,7 +631,7 @@ function CollectionsList({
 }) {
   if (error) return <div className="employees-error">{error}</div>;
   if (!rows) return <div className="employees-empty">Загрузка…</div>;
-  if (rows.length === 0) return <div className="employees-empty">{emptyLabel}</div>;
+  if (rows.length === 0) return <div className="empty-state">{emptyLabel}</div>;
 
   return (
     <div className="employees-list">

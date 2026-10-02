@@ -94,7 +94,7 @@ describe("отказ одного запроса не уносит всю кон
     expect(el.querySelector(".schedule-table")).not.toBeNull();
 
     vi.spyOn(apiClient, "getRosterCsv").mockRejectedValue(new Error("Failed to fetch"));
-    await click(byText(el, "button", "⬇ Выгрузить CSV"));
+    await click(byText(el, "button", "Выгрузить CSV"));
 
     // Скачивание не состоялось — сказать об этом надо, но расписание тут ни при чём.
     expect(el.textContent ?? "").toContain("Failed to fetch");

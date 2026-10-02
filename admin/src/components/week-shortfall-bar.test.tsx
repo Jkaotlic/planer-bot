@@ -78,7 +78,7 @@ describe("строка нехватки над сеткой недели", () =>
     expect(onPointDay).toHaveBeenLastCalledWith(null);
   });
 
-  it("виды без нормы — тихим хвостом, и он ведёт в «Виды смен»", async () => {
+  it("виды без нормы — ссылкой-кнопкой в конце строки, и она ведёт в «Виды смен»", async () => {
     const onOpenKinds = vi.fn();
     const el = await mount({ templates: [MORNING, EVENING], onOpenKinds });
     const tail = el.querySelector<HTMLButtonElement>(".week-shortfall-unset")!;

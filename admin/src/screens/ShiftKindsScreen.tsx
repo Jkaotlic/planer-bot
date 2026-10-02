@@ -189,7 +189,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
         ))}
       </div>
 
-      <div className="employees-header">
+      <div className="employees-header employees-header-later">
         <h2 className="employees-title">Кто что может</h2>
       </div>
       <p className="kinds-intro">
