@@ -120,6 +120,9 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
   const [templates, setTemplates] = useState<Template[]>([]);
   /** Нормы дня по видам смен — из них считается подсказка «чего не хватает». */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
+  // Пока нормы не пришли, пустой список ролей читается как «норм нет»: плашка
+  // на секунду объявила бы «Нормы не заданы» там, где они заданы.
+  const [rolesLoaded, setRolesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
    * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
@@ -191,6 +194,7 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
         setEmployees(emps.filter((e) => e.isActive));
         setTemplates(tmpls);
         setTemplateRoles(roles);
+        setRolesLoaded(true);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -271,13 +275,13 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
   const weekShifts = shifts && shiftsFrom === from ? shifts : null;
   // Только по записям показанной недели; пока их нет — подсказка молчит, а не
   // объявляет нехватку по пустому списку.
-  const dayHint = weekShifts ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate, dayCalendar)) : null;
+  const dayHint = weekShifts && rolesLoaded ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate, dayCalendar)) : null;
 
   // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
   // семь дней красным, и закрытая неделя открывалась бы тревогой.
   const week = useMemo(
-    () => (weekShifts ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar) : null),
-    [weekShifts, templateRoles, weekDates, dayCalendar],
+    () => (weekShifts && rolesLoaded ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar) : null),
+    [weekShifts, rolesLoaded, templateRoles, weekDates, dayCalendar],
   );
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
   const status = week ? shortfallStatus(week, templateRoles) : null;

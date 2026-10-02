@@ -149,4 +149,57 @@ describe("плашка нехватки над графиком мини-апп�
     await settle();
     expect(onScheduleChanged).toHaveBeenCalledTimes(1);
   });
+
+  it("обводка дня лежит в boxShadow и у выбранного, и у невыбранного дня", async () => {
+    // Выбранный день (сегодня, среда) уже несёт свою тень; склейка не должна терять обводку.
+    const el = await mount([kind(10, [2, 0, 2, 0, 0, 0, 0])]);
+    const chips = [...el.querySelectorAll<HTMLElement>("[data-day-chip]")];
+    expect(chips[2]!.getAttribute("aria-pressed")).toBe("true");
+    expect(chips[2]!.style.boxShadow).toContain("inset");
+    expect(chips[0]!.getAttribute("aria-pressed")).toBe("false");
+    expect(chips[0]!.style.boxShadow).toContain("inset");
+    expect(chips[1]!.style.boxShadow).not.toContain("inset");
+  });
+
+  it("пока нормы не пришли, плашки нет, хотя неделя уже загружена", async () => {
+    vi.spyOn(apiClient, "getTemplateRoles").mockReturnValue(new Promise(() => {}));
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
+    const el = await mountRaw();
+    expect(el.querySelector("[data-day-chip]")).not.toBeNull();
+    expect(banner(el)).toBeNull();
+  });
+
+  it("«Заполнить неделю» сообщает наверх, что нехватка могла измениться", async () => {
+    const onScheduleChanged = vi.fn();
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([
+      { id: 7, displayName: "Аня", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Аня",
+        excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
+    ] as never);
+    vi.spyOn(apiClient, "getTemplates").mockResolvedValue([]);
+    const createEntries = vi.spyOn(apiClient, "createEntries").mockResolvedValue({ created: 1, notified: { delivered: 0, intended: 0 } } as never);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY, onScheduleChanged })));
+    });
+    await settle();
+    const byText = (re: RegExp) => [...host!.querySelectorAll<HTMLButtonElement>("button")].find((b) => re.test(b.textContent ?? ""))!;
+    await act(async () => byText(/Заполнить неделю/).click());
+    await settle(2);
+    await act(async () => [...host!.querySelectorAll<HTMLButtonElement>(".person-picker-row")].find((b) => (b.textContent ?? "").includes("Аня"))!.click());
+    const select = host.querySelectorAll<HTMLSelectElement>("select")[1]!;
+    const option = [...select.options].find((o) => o.value !== "")!;
+    await act(async () => {
+      select.value = option.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onScheduleChanged).not.toHaveBeenCalled();
+    await act(async () => byText(/^Заполнить \(1\)/).click());
+    await settle();
+    expect(createEntries).toHaveBeenCalledTimes(1);
+    expect(onScheduleChanged).toHaveBeenCalledTimes(1);
+  });
 });

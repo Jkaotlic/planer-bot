@@ -213,8 +213,9 @@ describe("метки на TabBar реагируют на действия, а н
   it("ручка упала — метки нет, приложение живо", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
-    vi.spyOn(apiClient, "getAdminShortfall").mockRejectedValue(new Error("сеть"));
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockRejectedValue(new Error("сеть"));
     const el = await mount();
+    expect(getShortfall).toHaveBeenCalled();
     expect(badgeOf(el, "Админ")).toBeNull();
     expect(el.textContent).toContain("Админ");
   });
@@ -248,6 +249,61 @@ describe("метки на TabBar реагируют на действия, а н
     await act(async () => mark!.click());
     await settle();
     expect(getShortfall.mock.calls.length).toBeGreaterThan(before);
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
+  });
+
+  /** Возврат в приложение: `reloadData` слушает `visibilitychange`. */
+  async function backToApp() {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await settle();
+  }
+
+  it("возврат в приложение перечитывает нехватку, и метка обновляется", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+    expect(getShortfall).toHaveBeenCalledTimes(1);
+
+    getShortfall.mockResolvedValue({ total: 2, firstDate: "2026-09-26" });
+    await backToApp();
+    expect(getShortfall).toHaveBeenCalledTimes(2);
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("2");
+  });
+
+  it("отказ при перечитывании снимает метку, а не оставляет устаревшее число", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+
+    getShortfall.mockRejectedValue(new Error("сеть"));
+    await backToApp();
+    expect(getShortfall).toHaveBeenCalledTimes(2);
+    expect(badgeOf(el, "Админ")).toBeNull();
+  });
+
+  it("медленный старый ответ нехватки не затирает новое число", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValueOnce({ total: 4, firstDate: null });
+    const resolvers: Array<(v: { total: number; firstDate: string | null }) => void> = [];
+    getShortfall.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
+    const el = await mount();
+
+    await backToApp();
+    await backToApp();
+    expect(resolvers).toHaveLength(2);
+
+    await act(async () => resolvers[1]!({ total: 1, firstDate: null }));
+    await settle();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
+    // Более старый запрос отвечает последним, с другим числом.
+    await act(async () => resolvers[0]!({ total: 9, firstDate: null }));
+    await settle();
     expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
   });
 });

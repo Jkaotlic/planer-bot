@@ -161,6 +161,10 @@ export function App() {
   // независимо от bootstrap-запроса (см. там же), и общий счётчик с ним
   // выдавал бы тикеты не по своей, а по чужой последовательности вызовов.
   const collectionsReloadGate = useRef(createLatestRequestGate());
+  // Свой гейт и у нехватки: её перечитывают и после каждой правки графика, и при
+  // возврате в приложение, и более медленный старый ответ не должен затирать
+  // новое число.
+  const shortfallGate = useRef(createLatestRequestGate());
   // Отмена предыдущей ещё не завершённой загрузки — целиком, а не только той
   // её ветки, что уже успела вернуться. Кнопка «Повторить» вызывает
   // `loadBootstrap` напрямую, в обход эффекта, поэтому предыдущий возврат
@@ -172,11 +176,14 @@ export function App() {
   // Отдельно от bootstrap и после него — по той же причине, что сборы: один
   // запрос за раз на HTTP/1.1 до релея. Упало — метки нет, экран не страдает.
   const refreshAdminShortfall = useCallback(() => {
+    const ticket = shortfallGate.current.begin();
     apiClient.getAdminShortfall().then(
-      (s) => setAdminShortfall(s.total),
+      (s) => {
+        if (shortfallGate.current.isLatest(ticket)) setAdminShortfall(s.total);
+      },
       (err: unknown) => {
         console.error("Shortfall for badge failed:", err);
-        setAdminShortfall(null);
+        if (shortfallGate.current.isLatest(ticket)) setAdminShortfall(null);
       },
     );
   }, []);
@@ -197,6 +204,9 @@ export function App() {
     let cancelled = false;
     cancelLoadRef.current = () => {
       cancelled = true;
+      // Ответ нехватки брошенной загрузки (размонтирование, «Повторить») не
+      // должен приземлиться после неё.
+      shortfallGate.current.invalidate();
     };
     setError(null);
     const monday = mondayOf(new Date());
