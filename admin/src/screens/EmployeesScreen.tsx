@@ -485,7 +485,7 @@ function EmployeeRow({
               свёрнутая и раскрытая карточки не должны противоречить друг другу. */}
           <button
             type="button"
-            className="btn btn-quiet btn-compact employee-restrictions-toggle"
+            className={`btn btn-quiet btn-compact employee-restrictions-toggle${restrictionsSummary(employee) !== "нет" ? " employee-restrictions-toggle--set" : ""}`}
             aria-expanded={restrictionsOpen}
             onClick={() => setRestrictionsOpen((open) => !open)}
           >

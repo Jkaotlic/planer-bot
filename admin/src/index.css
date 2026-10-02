@@ -831,8 +831,11 @@ button {
 
 /* Все статусы в строке работника — одна пилюля: у «привязан» и «админ» высота
    считалась из разного содержимого, и пилюли стояли в ряду вразнобой.
-   Правило только в строке работника: на «Чек-листе» и «Работе в выходные» те же
-   классы стоят в плотных рядах, и min-height раздувал строки на 3-4px. */
+   Правило задевает всё, что лежит в `.employee-row-card`, а это не только строка
+   работника: «Сегодня» на «Чек-листе» — тоже `.employee-row-card`, и его строки
+   выросли с 40 до 44px. Принято сознательно: пилюли там и так стояли вразнобой, а
+   лишние 4px в короткой строке дешевле, чем второй набор правил ради одной высоты.
+   «Работа в выходные» эти классы не использует и не затронута. */
 .employee-row-card .status-chip,
 .employee-row-card .admin-badge {
   box-sizing: border-box;
@@ -856,20 +859,29 @@ button {
   margin-top: 4px;
 }
 
+/* Цвет ссылки остаётся от .btn-quiet: серая подпись читалась как статичный текст,
+   а раскрывающийся блок должен выглядеть нажимаемым. Стрелка стоит сразу за
+   текстом (не растянута до края), поэтому кнопка по ширине содержимого. */
 .employee-restrictions-toggle {
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
+  justify-content: flex-start;
+  align-self: flex-start;
+  gap: 6px;
+  max-width: 100%;
   padding: 0 4px;
-  color: var(--hint);
   font-size: var(--text-meta);
   text-align: left;
 }
 
 .employee-restrictions-summary {
-  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Ограничения заданы — строка заметнее «нет»: админ, листая список, должен
+   отличить наблюдателя от обычного работника, не раскрывая карточку. */
+.employee-restrictions-toggle--set .employee-restrictions-summary {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .employee-restrictions-body {
@@ -1354,6 +1366,11 @@ button {
   background: color-mix(in srgb, var(--destructive) 12%, transparent);
 }
 
+/* Текст «без нормы» встаёт на левый край сетки: отступ кнопки сдвигал его вправо. */
+.week-shortfall .week-shortfall-unset.btn {
+  padding-left: 0;
+}
+
 .week-shortfall-unset {
   /* Ссылка-кнопка слева, а не серая строчка в правом углу: незаданная норма —
      действие («задать»), и оно должно читаться как кнопка. Вид даёт
@@ -1675,11 +1692,10 @@ button {
   gap: 10px;
 }
 
+/* Все однострочные поля, а не список типов: number и url («Сборы») оставались
+   34px рядом с 36px. Флажки, радио, файл и ползунок высоту не получают. */
 select,
-input[type="text"],
-input[type="date"],
-input[type="time"],
-input[type="search"] {
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="hidden"]) {
   width: 100%;
   min-height: var(--control-h);
   padding: 0 10px;
@@ -3214,8 +3230,28 @@ textarea {
      снова выросли бы и съели то, что этот блок отыграл. */
   .btn {
     min-height: var(--control-h-compact);
-    padding: 0 12px;
+    /* Только inline: padding-block у .btn-компонентов (чипы групп анонса) свой, и
+       полный `padding` их обнулял — двухстрочное имя упиралось в рамку. */
+    padding-inline: 12px;
     font-size: var(--text-sub);
+  }
+
+  /* Правило выше стоит позже и равно по весу, поэтому перебивало собственные
+     отступ и кегль компактной кнопки и раскрытия ограничений. Второй класс
+     возвращает им своё. */
+  .btn.btn-compact {
+    padding-inline: 10px;
+  }
+
+  /* Строка нехваток — на левый край 14px, как топбар: 24px десктопа сдвигали её
+     вправо от края сетки. */
+  .week-shortfall {
+    padding-inline: 14px;
+  }
+
+  .btn.employee-restrictions-toggle {
+    padding-inline: 4px;
+    font-size: var(--text-meta);
   }
 
   /* ---------- Панели ----------
@@ -3353,10 +3389,21 @@ textarea {
   cursor: pointer;
 }
 
+/* Выбранный пункт метим акцентом, а не яркостью: в тёмной теме фон карточки и
+   дорожки почти совпадают (1.04:1), тень на тёмном не видна, цвет текста не
+   отличается. Кайма цвета кнопки видна в обеих темах, а вес 700 — второй,
+   не цветовой признак для тех, кто цвета не различает. */
 .segmented-item[aria-pressed="true"] {
   background: var(--surface-section);
   color: var(--text);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--button), 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+/* Наведение на невыбранный — тонкая рамка, а не смена фона: фон --surface-section
+   на тёмной дорожке не виден. */
+.segmented-item:not([aria-pressed="true"]):not(:disabled):hover {
+  box-shadow: inset 0 0 0 1px var(--separator);
 }
 
 .segmented-item:disabled {

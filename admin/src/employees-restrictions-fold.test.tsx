@@ -100,6 +100,14 @@ describe("ограничения работника свёрнуты", () => {
   });
 
 
+  // Модификатор нужен CSS, чтобы строка с заданными ограничениями читалась заметнее «нет».
+  it("модификатор «--set» стоит у ограниченного работника и не стоит у обычного", async () => {
+    const el = await mount([emp(1, "Аня"), emp(2, "Игорь", { isObserver: true }), emp(3, "Марк", { excludedFromSwaps: true })]);
+    expect(toggleOf(el, 1).classList.contains("employee-restrictions-toggle--set")).toBe(false);
+    expect(toggleOf(el, 2).classList.contains("employee-restrictions-toggle--set")).toBe(true);
+    expect(toggleOf(el, 3).classList.contains("employee-restrictions-toggle--set")).toBe(true);
+  });
+
   it("раскрытие: три галки с прежними подписями и пояснениями", async () => {
     const el = await mount([emp(1, "Аня")]);
     await expand(el, 1);
