@@ -92,6 +92,9 @@ import {
   type StartTab,
   parseCoverage,
   serializeCoverage,
+  addDaysIso,
+  weekShortfall,
+  type AdminShortfall,
   isDayOff,
   isAbsence,
   countsForBalance,
@@ -1935,6 +1938,31 @@ export function createApp(deps: AppDeps): Hono<Env> {
         ...(roles.get(template.id) ?? { pool: [], preference: {} }),
       })),
     });
+  });
+
+  /**
+   * Shortfall for the badge on «Админ» / «Расписание»: seven days from the
+   * team's today. Past days are left out on purpose — nobody can staff
+   * yesterday, and a badge that never clears teaches people to ignore it.
+   *
+   * The range is fixed, not a query parameter: this process also runs the
+   * bot's long polling, and a badge has no business asking for a year.
+   */
+  app.get("/api/admin/shortfall", requireAdmin(db, config.jwtSecret), (c) => {
+    const from = teamNow(config.teamTz).date;
+    const to = addDaysIso(from, 6);
+    const templates = listActiveTemplates(db).map((template) => ({
+      templateId: template.id,
+      name: template.name,
+      coverage: parseCoverage(template.coverage),
+      category: template.category,
+      fillMode: template.fillMode,
+    }));
+    // `listShiftsOverlapping`, not `listShiftsInRange`: a week-long duty that
+    // began before the window still covers its days inside it.
+    const week = weekShortfall(listShiftsOverlapping(db, from, to), templates, eachDayIso(from, to), loadCalendar(db, from, to));
+    const body: AdminShortfall = { total: week.total, firstDate: week.days[0]?.date ?? null };
+    return c.json(body);
   });
 
   // Whose turn it is for a kind of shift. The bot only suggests — it never assigns
