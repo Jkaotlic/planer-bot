@@ -536,3 +536,48 @@
   padding: 0;
   background: none;
 }
+
+/* Плашка нехватки. Красная — карточкой с крупным числом, зелёная и нейтральная —
+   одной строкой: тревога должна быть заметнее покоя, иначе глаз привыкнет к обеим. */
+.ui-shortfall {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-card);
+  font-size: var(--app-text-body);
+}
+.ui-shortfall-title { font-weight: 700; }
+.ui-shortfall--short {
+  color: var(--tgui--destructive_text_color, #d33a3a);
+  background: rgb(229 57 53 / 14%);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 14%, transparent);
+}
+.ui-shortfall--short .ui-shortfall-title { font-size: 17px; }
+.ui-shortfall--closed { color: #1f7a34; background: #e1f6e1; padding-block: 8px; }
+.ui-dark .ui-shortfall--closed { color: #86e093; background: rgb(70 190 90 / 22%); }
+.ui-shortfall--no-norms { color: var(--tgui--hint_color); background: var(--app-card); padding-block: 8px; }
+.ui-shortfall-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-shortfall-day {
+  min-height: var(--app-tap);
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--app-radius-control);
+  background: var(--app-card);
+  color: var(--tgui--text_color);
+  font: inherit;
+  font-size: var(--app-text-meta);
+  text-align: left;
+  cursor: pointer;
+}
+.ui-shortfall-unset {
+  align-self: flex-start;
+  min-height: var(--app-tap);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--app-text-meta);
+  cursor: pointer;
+}

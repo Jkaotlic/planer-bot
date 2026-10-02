@@ -76,18 +76,18 @@ describe("нехватка на полоске дней недели", () => {
     expect(chips(el)[1]!.getAttribute("aria-label") ?? "").not.toContain("не хватает");
   });
 
-  it("закрытая неделя с заданными нормами не добавляет на экран ничего", async () => {
+  it("без видов меток на днях нет, а плашка честно говорит, что норм нет", async () => {
     const el = await mount([]);
     expect(marks(el)).toEqual([null, null, null, null, null, null, null]);
-    expect(el.querySelector("[data-norm-unset]")).toBeNull();
+    expect(el.querySelector("[data-shortfall]")?.getAttribute("data-shortfall")).toBe("no-norms");
   });
 
-  it("виды без нормы — одной строкой под полоской, и она ведёт в «Виды смен»", async () => {
+  it("виды без нормы — ссылка в плашке над полоской, и она ведёт в «Виды смен»", async () => {
     const el = await mount([kind(10, [0, 0, 0, 0, 0, 0, 0]), kind(20, [0, 0, 0, 0, 0, 0, 0])]);
     const line = el.querySelector<HTMLButtonElement>("[data-norm-unset]")!;
-    expect(line.textContent).toBe("Без нормы: 2 вида — задать →");
-    const strip = chips(el)[6]!;
-    expect(strip.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.textContent).toBe("задать →");
+    const strip = chips(el)[0]!;
+    expect(line.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await act(async () => line.click());
     await settle(4);

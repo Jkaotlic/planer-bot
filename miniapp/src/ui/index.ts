@@ -8,5 +8,6 @@ export { MenuRow } from "./MenuRow";
 export { MetaLine } from "./MetaLine";
 export { Screen } from "./Screen";
 export { SelectField } from "./SelectField";
+export { ShortfallBanner } from "./ShortfallBanner";
 export { StatusPill } from "./StatusPill";
 export { TapHeight } from "./TapHeight";
