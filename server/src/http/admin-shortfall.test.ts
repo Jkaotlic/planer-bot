@@ -111,6 +111,14 @@ describe("GET /api/admin/shortfall", () => {
     expect(await shortfall(app, admin)).toEqual({ total: 0, firstDate: null });
   });
 
+  it("starts the window from the team date, not the UTC date, near midnight", async () => {
+    // 22:30Z on 26 Aug is already 01:30 on Thursday 27 Aug in Europe/Moscow
+    // (testConfig), so the UTC date and the team date really differ here.
+    vi.setSystemTime(new Date("2026-08-26T22:30:00Z"));
+    const { app, admin } = await setup();
+    expect(await shortfall(app, admin)).toEqual({ total: 11, firstDate: "2026-08-27" });
+  });
+
   it("refuses a non-admin", async () => {
     const { app, workerToken } = await setup();
     expect((await app.request("/api/admin/shortfall", bearer(workerToken))).status).toBe(403);

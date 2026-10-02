@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EMPTY_CALENDAR, calendarFrom, dayOffLabel, isDayOff, specialDays } from "./calendar";
+import { EMPTY_CALENDAR, calendarFrom, dayOffLabel, isDayOff, specialDayKind, specialDays } from "./calendar";
 
 // 2026-06-12 — пятница, День России; 2026-06-13 — суббота; 2024-04-27 — рабочая суббота.
 const CAL = calendarFrom([
@@ -78,5 +78,21 @@ describe("specialDays — подписи праздников и рабочих 
       { date: "2026-11-03", kind: "holiday" as const, note: "А" },
     ];
     expect(specialDays(WEEK, rows).map((d) => d.date)).toEqual(["2026-11-03", "2026-11-05"]);
+  });
+});
+
+describe("specialDayKind — какую отметку несёт день", () => {
+  it("праздник — всегда, в любой день недели", () => {
+    expect(specialDayKind("2026-11-04", "holiday")).toBe("holiday");
+    expect(specialDayKind("2026-11-07", "holiday")).toBe("holiday");
+  });
+  it("рабочий день — только в субботу и воскресенье", () => {
+    expect(specialDayKind("2026-11-07", "workday")).toBe("workday");
+    expect(specialDayKind("2026-11-08", "workday")).toBe("workday");
+    // Среда, возвращённая в работу, читателю обычна: значка нет.
+    expect(specialDayKind("2026-11-04", "workday")).toBeUndefined();
+  });
+  it("без записи — ничего", () => {
+    expect(specialDayKind("2026-11-04", undefined)).toBeUndefined();
   });
 });

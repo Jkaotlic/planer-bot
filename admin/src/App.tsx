@@ -520,7 +520,7 @@ export function App() {
         ) : nav === "groups" ? (
           <GroupsScreen employees={employees} />
         ) : nav === "kinds" ? (
-          <ShiftKindsScreen employees={employees ?? []} />
+          <ShiftKindsScreen employees={employees ?? []} onNormSaved={refreshAdminShortfall} />
         ) : nav === "checklist" ? (
           <ChecklistScreen templates={templates ?? []} />
         ) : nav === "weekend" ? (

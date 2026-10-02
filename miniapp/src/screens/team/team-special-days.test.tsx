@@ -50,6 +50,17 @@ describe("строка праздников над сеткой «Команды
     expect(line.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("рабочий день в будни — без значка 💼 в шапке колонки и без строки", async () => {
+    const el = await mount([{ date: "2026-08-27", kind: "workday", note: null, source: "manual" }]);
+    expect(el.querySelector('[data-date="2026-08-27"] small')).toBeNull();
+    expect(el.querySelector("[data-special-days]")).toBeNull();
+  });
+
+  it("рабочая суббота — значок 💼 в шапке колонки", async () => {
+    const el = await mount([{ date: "2026-08-29", kind: "workday", note: null, source: "manual" }]);
+    expect(el.querySelector('[data-date="2026-08-29"] small')?.textContent).toBe("💼");
+  });
+
   it("обычная неделя — строки нет", async () => {
     const el = await mount([]);
     expect(el.querySelector(".team-week")).not.toBeNull();

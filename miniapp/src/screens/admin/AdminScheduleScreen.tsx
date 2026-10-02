@@ -18,6 +18,7 @@ import {
   resolveShiftTimes,
   takesPartInAssignment,
   shortfallStatus,
+  specialDayKind,
   specialDays,
   weekShortfall,
   workPresets,
@@ -537,7 +538,7 @@ function DayStrip({ dates, selected, today, short, calendar, onSelect }: {
 function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: string; active: boolean; isToday: boolean; short: number; calendar: DayCalendar; onSelect: () => void }) {
   const isDark = useIsDark();
   const weekend = isDayOff(iso, calendar);
-  const kind = calendar.get(iso);
+  const kind = specialDayKind(iso, calendar.get(iso));
   // Невыбранный день — карточкой: холст теперь `secondary_bg_color`, и клетка
   // этого цвета на нём не читалась бы вовсе.
   const bg = active ? "var(--tgui--button_color)" : "var(--app-card)";

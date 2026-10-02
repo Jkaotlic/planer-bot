@@ -76,6 +76,31 @@ describe("метка нехватки в сайдбаре", () => {
     expect(el.querySelector(".login-screen")).not.toBeNull();
   });
 
+  it("сохранение нормы на «Видах смен» обновляет число, не уходя с экрана", async () => {
+    // Метка видна на любом экране: пока админ правит норму, число должно
+    // отражать её, а не то, что было при заходе.
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
+    vi.spyOn(apiClient, "setTemplateCoverage").mockResolvedValue(undefined);
+    const el = await mount();
+    await act(async () => navButton(el, "Виды смен").click());
+    await settle();
+    const before = getShortfall.mock.calls.length;
+    getShortfall.mockResolvedValue({ total: 1, firstDate: "2026-08-26" });
+    await act(async () => (el.querySelector(".kind-card-head") as HTMLButtonElement).click());
+    await settle();
+    const field = el.querySelector<HTMLInputElement>('input[aria-label$=": норма на Пн"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "5");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const save = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Сохранить норму")!;
+    await act(async () => save.click());
+    await settle();
+    expect(el.querySelector(".kinds-intro")).not.toBeNull();
+    expect(getShortfall.mock.calls.length).toBeGreaterThan(before);
+    expect(badge(el)?.textContent).toBe("1");
+  });
+
   it("больше девяти — «9+»", async () => {
     vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 23, firstDate: "2026-08-26" });
     expect(badge(await mount())?.textContent).toBe("9+");

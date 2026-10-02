@@ -67,6 +67,11 @@ describe("название праздника в шапке колонки се�
     expect(marks(el).map((n) => n.textContent)).toEqual(["💼 рабочая"]);
   });
 
+  it("рабочий день в будни — без подписи «рабочая»", async () => {
+    const el = await mount([{ date: WEDNESDAY, kind: "workday", note: null, source: "manual" }]);
+    expect(el.querySelector(".day-col-mark")).toBeNull();
+  });
+
   it("обычная неделя — без подписи", async () => {
     const el = await mount([]);
     expect(el.querySelector(".day-col-mark")).toBeNull();

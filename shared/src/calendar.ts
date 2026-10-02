@@ -52,6 +52,19 @@ export function dayOffLabel(date: string, kind: DayKind | undefined, note: strin
   return null;
 }
 
+/**
+ * Отметка дня для читателя: праздник — всегда, рабочий день — только в субботу и
+ * воскресенье. Будень, возвращённый в работу, для читателя обычен: «рабочей
+ * субботой» он не называется, значка и строки под неделей у него нет. Одно
+ * правило для подписи (`specialDays`) и для значков на клетках — иначе значок
+ * 💼 стоял бы там, где строки о нём нет.
+ */
+export function specialDayKind(date: string, kind: DayKind | undefined): DayKind | undefined {
+  if (kind === "holiday") return "holiday";
+  if (kind === "workday" && isWeekend(date)) return "workday";
+  return undefined;
+}
+
 /** Особый день для подписи человеку: `label` — строка под неделей, `short` — для узкой шапки колонки. */
 export interface SpecialDay {
   date: string;
@@ -75,7 +88,7 @@ export function specialDays(
   const out: SpecialDay[] = [];
   for (const date of dates) {
     const row = byDate.get(date);
-    if (!row) continue;
+    if (!row || !specialDayKind(date, row.kind)) continue;
     const when = `${weekdayShort(date)} ${Number(date.slice(8, 10))}`;
     if (row.kind === "holiday") {
       const title = row.note?.trim();
@@ -86,8 +99,6 @@ export function specialDays(
         short: `🎉 ${title || "выходной"}`,
       });
     } else {
-      // Будень, возвращённый в работу, — обычный день; особым он был бы только для нормы.
-      if (!isWeekend(date)) continue;
       const name = dayOfWeek(date) === 0 ? "рабочее воскресенье" : "рабочая суббота";
       out.push({ date, kind: "workday", label: `💼 ${when} — ${name}`, short: "💼 рабочая" });
     }

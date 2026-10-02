@@ -76,6 +76,16 @@ describe("праздники на полоске дней админского �
     expect(chips(el)[6]!.style.color).toContain("hint_color");
   });
 
+  it("рабочий день в будни — обычная клетка: ни 💼, ни пометки вида", async () => {
+    // Четверг, возвращённый в работу вручную: строки под полоской для него нет,
+    // и значок на клетке врал бы про «рабочую субботу».
+    const el = await mount([{ date: "2026-08-27", kind: "workday", note: null, source: "manual" }]);
+    const thu = chips(el)[3]!;
+    expect(thu.textContent).not.toContain("💼");
+    expect(thu.dataset.dayKind).toBeUndefined();
+    expect(el.querySelector("[data-special-days]")).toBeNull();
+  });
+
   it("под полоской — строка с названием праздника текстом, а не в подсказке", async () => {
     const el = await mount();
     const line = el.querySelector("[data-special-days]")!;
