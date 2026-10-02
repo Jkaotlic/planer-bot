@@ -70,6 +70,10 @@ describe("токены оформления консоли", () => {
     expect(lightContrast("fallback-link", "fallback-section-bg")).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("белый текст на залитой синей кнопке читается: контраст светлой палитры не ниже 4.5", () => {
+    expect(lightContrast("fallback-button-text", "fallback-button")).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("невыбранный пункт переключателя не серый --hint", () => {
     const rule = css.match(/\n\.segmented-item \{([^}]*)\}/)![1];
     expect(rule).not.toMatch(/color:\s*var\(--hint\)/);
