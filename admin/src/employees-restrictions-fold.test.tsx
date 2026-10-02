@@ -2,7 +2,6 @@
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { restrictionsSummary } from "@planer/shared";
 import { apiClient, type Employee } from "./api/client";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 
@@ -22,12 +21,17 @@ function emp(id: number, name: string, over: Partial<Employee> = {}): Employee {
   };
 }
 
-const COMBOS: Array<[string, Partial<Employee>]> = [
-  ["наблюдатель", { isObserver: true }],
-  ["без назначений", { excludedFromAssignment: true }],
-  ["без обменов", { excludedFromSwaps: true }],
-  ["без назначений и обменов", { excludedFromAssignment: true, excludedFromSwaps: true }],
-  ["все три", { isObserver: true, excludedFromAssignment: true, excludedFromSwaps: true }],
+// Ожидаемый текст — литералами, а не вызовом restrictionsSummary: иначе тест
+// повторял бы компонент и не мог бы упасть ни на словах, ни на подмене значений.
+const COMBOS: Array<[string, Partial<Employee>, string]> = [
+  ["нет", {}, "нет"],
+  ["наблюдатель", { isObserver: true }, "наблюдатель"],
+  ["без назначений", { excludedFromAssignment: true }, "без назначений"],
+  ["без обменов", { excludedFromSwaps: true }, "без обменов"],
+  ["без назначений и обменов", { excludedFromAssignment: true, excludedFromSwaps: true }, "без назначений, без обменов"],
+  ["наблюдатель и без назначений", { isObserver: true, excludedFromAssignment: true }, "наблюдатель, без назначений"],
+  ["наблюдатель и без обменов", { isObserver: true, excludedFromSwaps: true }, "наблюдатель, без обменов"],
+  ["все три", { isObserver: true, excludedFromAssignment: true, excludedFromSwaps: true }, "наблюдатель, без назначений, без обменов"],
 ];
 
 let root: Root | null = null;
@@ -90,13 +94,11 @@ describe("ограничения работника свёрнуты", () => {
     expect(boxes(el, 1)).toHaveLength(0);
   });
 
-  it.each(COMBOS)("сводка свёрнутой карточки: %s", async (_name, over) => {
-    const employee = emp(1, "Игорь", over);
-    const el = await mount([employee]);
-    const expected = restrictionsSummary(employee);
-    expect(expected).not.toBe("нет");
+  it.each(COMBOS)("сводка свёрнутой карточки: %s", async (_name, over, expected) => {
+    const el = await mount([emp(1, "Игорь", over)]);
     expect(toggleOf(el, 1).textContent).toContain(`Ограничения: ${expected}`);
   });
+
 
   it("раскрытие: три галки с прежними подписями и пояснениями", async () => {
     const el = await mount([emp(1, "Аня")]);
