@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DownloadIcon } from "./DownloadIcon";
 
 export interface TopBarProps {
   weekLabel: string;
@@ -26,10 +27,6 @@ function Icon({ children }: { children: ReactNode }) {
 
 function UploadIcon() {
   return <Icon><path d="M12 16V4M7 9l5-5 5 5M4 20h16" /></Icon>;
-}
-
-function DownloadIcon() {
-  return <Icon><path d="M12 4v12M7 11l5 5 5-5M4 20h16" /></Icon>;
 }
 
 function CalendarIcon() {

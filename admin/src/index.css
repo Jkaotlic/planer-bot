@@ -15,7 +15,11 @@
   /* Серый #767b87 давал на белой карточке 4.24:1 — ниже порога 4.5 для мелкого
      текста. #666b77: 5.34:1 на #ffffff и 4.63:1 на холсте #efeef4. */
   --fallback-hint: #666b77;
-  --fallback-link: #3390ec;
+  /* Ссылки и «тихие» кнопки (`.btn-quiet`): прежний #3390ec давал 3.31:1 на белой
+     карточке и 2.87:1 на холсте #efeef4 — ниже порога 4.5. #1767bd: 5.66:1 на
+     #ffffff и 4.91:1 на холсте. Заливка кнопок (--fallback-button) остаётся
+     прежней: на ней текст белый, а не синий. */
+  --fallback-link: #1767bd;
   --fallback-button: #3390ec;
   --fallback-button-text: #ffffff;
   --fallback-destructive: #e23b32;
@@ -826,34 +830,30 @@ button {
 }
 
 /* Все статусы в строке работника — одна пилюля: у «привязан» и «админ» высота
-   считалась из разного содержимого, и пилюли стояли в ряду вразнобой. */
-.status-chip,
-.admin-badge {
+   считалась из разного содержимого, и пилюли стояли в ряду вразнобой.
+   Правило только в строке работника: на «Чек-листе» и «Работе в выходные» те же
+   классы стоят в плотных рядах, и min-height раздувал строки на 3-4px. */
+.employee-row-card .status-chip,
+.employee-row-card .admin-badge {
   box-sizing: border-box;
   min-height: 22px;
   line-height: 1.3;
-  font-size: var(--text-meta);
 }
 
 /* Sits on its own line inside the row card (`flex-basis: 100%`, the card
    already wraps) — two checkboxes an admin sets rarely enough that they
-   shouldn't compete for space with the row's everyday buttons. */
+   shouldn't compete for space with the row's everyday buttons.
+   Свёрнутые ограничения — одна строка-кнопка: сводка слева, стрелка справа.
+   Колонкой, чтобы раскрытый блок встал под кнопку, а не рядом. */
 .employee-restrictions {
   flex-basis: 100%;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 4px 14px;
   padding-top: 6px;
   border-top: 1px dashed var(--separator);
   margin-top: 4px;
-}
-
-/* Свёрнутые ограничения — одна строка-кнопка: сводка слева, стрелка справа.
-   Колонкой, чтобы раскрытый блок встал под кнопку, а не рядом. */
-.employee-restrictions {
-  flex-direction: column;
-  align-items: stretch;
 }
 
 .employee-restrictions-toggle {
@@ -878,14 +878,6 @@ button {
   align-items: center;
   gap: 4px 14px;
   padding: 4px 4px 0;
-}
-
-.employee-restrictions-title {
-  font-size: var(--text-meta);
-  font-weight: 600;
-  color: var(--hint);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
 }
 
 .employee-restriction-checkbox {
@@ -2540,7 +2532,9 @@ textarea {
 
 /* Форма нового сбора. Список «Кому» — человек под два десятка строк — раньше
    тянул форму вниз на два экрана, а кнопка «Создать» уезжала из виду. Четыре
-   строки с прокруткой (по ~34px) оставляют поиск и выбор на месте. */
+   строки с прокруткой (по ~34px) оставляют поиск и выбор на месте. Правило
+   действует на любой ширине: и в одной колонке на телефоне список «Кому»
+   был бы таким же длинным. */
 .collection-new-form .person-picker-list {
   max-height: 136px;
 }
@@ -2604,6 +2598,11 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* Кнопка «Отправить» стояла вплотную под плашками получателей. */
+.birthday-recipients ~ .journal-controls {
+  margin-top: 12px;
 }
 
 .birthday-recipient {
@@ -3247,13 +3246,13 @@ textarea {
     gap: 8px;
   }
 
+  /* Кнопки панелей и двухшаговых подтверждений — основное действие пальцем,
+     их не сжимаем до компактных 30px, как кнопки в топбаре. */
   .panel-actions .btn {
     flex: 1 1 0;
     justify-content: center;
   }
 
-  /* Кнопки панелей и двухшаговых подтверждений — основное действие пальцем,
-     их не сжимаем до компактных 30px, как кнопки в топбаре. */
   .panel-actions .btn,
   .birthday-confirm .btn,
   .settings-confirm .btn {

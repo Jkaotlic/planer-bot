@@ -18,16 +18,26 @@ describe("токены оформления консоли", () => {
   });
 
   it("кегли числом остались только у двух оговорённых исключений", () => {
+    // Чего эта проверка намеренно НЕ видит: сокращённую запись `font: 12px/1.4 …`
+    // и размеры в `rem`/`em` — в файле их нет, а ловить их регуляркой на
+    // каждый возможный вид записи дороже, чем заметить на ревью.
     const literal = [...css.matchAll(/font-size:\s*([0-9.]+)px/g)].map((m) => m[1]);
     // 10.5 и 9.5 — мелкая подпись клетки сетки и таблицы журнала; токена под неё нет намеренно.
     expect([...new Set(literal)].sort()).toEqual(["10.5", "9.5"]);
   });
 
   it("радиусы числом — только полоски в 2px и круг", () => {
-    const literal = [...css.matchAll(/border-radius:\s*([^;]+);/g)]
-      .map((m) => m[1].trim())
-      .filter((v) => !v.includes("var("));
-    expect(new Set(literal)).toEqual(new Set(["2px", "50%"]));
+    // Берём и сокращённую запись, и угловые `border-top-left-radius` и т. п.
+    const literal = [...css.matchAll(/(?:^|[\s;{])(border(?:-[a-z]+)*-radius):\s*([^;}]+)[;}]/g)]
+      .map((m) => m[2].trim());
+    // Каждая часть значения — токен, calc от токена, ноль или оговорённый литерал.
+    // Раньше хватало `includes("var(")`, и `14px var(--x)` проходило.
+    const allowed = (part: string) =>
+      /^var\(--[a-z-]+\)$/.test(part) || /^calc\(var\(--[a-z-]+\)[^()]*\)$/.test(part) || part === "0" || part === "2px" || part === "50%";
+    const parts = (v: string) => v.match(/calc\([^)]*\([^)]*\)[^)]*\)|\S+/g) ?? [];
+    const bad = literal.filter((v) => !parts(v).every(allowed));
+    expect(bad).toEqual([]);
+    expect(literal.length).toBeGreaterThan(20);
   });
 
   it("перед каждым color-mix стоит простое значение того же свойства", () => {
@@ -38,7 +48,8 @@ describe("токены оформления консоли", () => {
       expect(lines[i - 1]?.trim().startsWith(`${m[1]}:`), `строка ${i + 1}: ${line.trim()}`).toBe(true);
     });
   });
-  it("серый текст на карточке читается: контраст светлой палитры не ниже 4.5", () => {
+  // Контраст двух цветов светлой палитры; WCAG: 4.5 для мелкого текста.
+  const lightContrast = (fg: string, bg: string) => {
     const start = css.indexOf(":root {");
     const root = css.slice(start, css.indexOf("}", start));
     const hex = (name: string) => root.match(new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`))![1];
@@ -47,8 +58,16 @@ describe("токены оформления консоли", () => {
         .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
       return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     };
-    const [a, b] = [lum(hex("fallback-hint")), lum(hex("fallback-section-bg"))].sort((x, y) => y - x);
-    expect((a + 0.05) / (b + 0.05)).toBeGreaterThanOrEqual(4.5);
+    const [a, b] = [lum(hex(fg)), lum(hex(bg))].sort((x, y) => y - x);
+    return (a + 0.05) / (b + 0.05);
+  };
+
+  it("серый текст на карточке читается: контраст светлой палитры не ниже 4.5", () => {
+    expect(lightContrast("fallback-hint", "fallback-section-bg")).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("ссылка и тихая кнопка на карточке читаются: контраст светлой палитры не ниже 4.5", () => {
+    expect(lightContrast("fallback-link", "fallback-section-bg")).toBeGreaterThanOrEqual(4.5);
   });
 
   it("невыбранный пункт переключателя не серый --hint", () => {

@@ -14,6 +14,7 @@ import {
   type ShiftCountsKind,
 } from "@planer/shared";
 import { apiClient, AuthRequiredError, type JournalPage, type ShiftCountsReport } from "../api/client";
+import { DownloadIcon } from "../components/DownloadIcon";
 import { Segmented } from "../components/Segmented";
 import { initialsOf, personPalette } from "../lib/people";
 import { toISODate } from "../lib/week";
@@ -180,7 +181,8 @@ function ShiftCounts() {
           {busy ? "…" : "Показать"}
         </button>
         <button type="button" className="btn btn-secondary" disabled={!report} onClick={() => void download()}>
-          ⬇ Выгрузить CSV
+          <DownloadIcon />
+          Выгрузить CSV
         </button>
       </div>
 

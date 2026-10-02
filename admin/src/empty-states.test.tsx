@@ -4,8 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "./api/client";
 import { BugsScreen } from "./screens/BugsScreen";
+import { ChecklistScreen } from "./screens/ChecklistScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { GroupsScreen } from "./screens/GroupsScreen";
+import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 
 // Пустой список — это ответ, а не недогруз: текст обязан лежать в блоке
 // `.empty-state`, иначе он снова станет серой строчкой, которую не замечают.
@@ -54,5 +56,18 @@ describe("пустые состояния консоли", () => {
     vi.spyOn(apiClient, "getBugReports").mockResolvedValue([]);
     const el = await mount(BugsScreen as ComponentType<never>);
     expect(emptyStateWith(el, "Открытых багрепортов нет")).toBeTruthy();
+  });
+
+  it("«Работа в выходные»: «Нет открытых смен» в .empty-state", async () => {
+    vi.spyOn(apiClient, "getWeekendSlots").mockResolvedValue([]);
+    const el = await mount(WeekendAdminScreen as ComponentType<never>);
+    expect(emptyStateWith(el, "Нет открытых смен")).toBeTruthy();
+  });
+
+  it("«Чек-лист»: «Чек-листов пока нет» в .empty-state", async () => {
+    vi.spyOn(apiClient, "getChecklists").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getChecklistDay").mockResolvedValue({ date: "2026-01-01", people: [] });
+    const el = await mount(ChecklistScreen as ComponentType<never>, { templates: [] });
+    expect(emptyStateWith(el, "Чек-листов пока нет")).toBeTruthy();
   });
 });
