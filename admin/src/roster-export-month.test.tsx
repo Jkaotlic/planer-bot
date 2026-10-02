@@ -7,7 +7,7 @@ import { App } from "./App";
 import { addDays, mondayOf, toISODate } from "./lib/week";
 
 /**
- * «⬇ Выгрузить CSV» стоит в одной полосе с переключателем недель — значит выгружает
+ * «Выгрузить CSV» стоит в одной полосе с переключателем недель — значит выгружает
  * то, на что админ смотрит. Кнопка брала месяц по системным часам, поэтому из консоли
  * нельзя было выгрузить никакой месяц, кроме текущего: график на следующий месяц —
  * ровно то, ради чего файл и качают.
@@ -86,7 +86,7 @@ describe("выгрузка CSV из консоли", () => {
     for (let i = 0; i < 5; i += 1) {
       await click(el.querySelector("[aria-label='Следующая неделя']") as HTMLElement);
     }
-    await click(byText(el, "button", "⬇ Выгрузить CSV"));
+    await click(byText(el, "button", "Выгрузить CSV"));
 
     const expected = monthOf(SHOWN);
     expect(csv).toHaveBeenCalledWith(expected.from, expected.to);
@@ -99,7 +99,7 @@ describe("выгрузка CSV из консоли", () => {
     for (let i = 0; i < 5; i += 1) {
       await click(el.querySelector("[aria-label='Следующая неделя']") as HTMLElement);
     }
-    await click(byText(el, "button", "⬇ Выгрузить CSV"));
+    await click(byText(el, "button", "Выгрузить CSV"));
 
     const { from, to } = monthOf(SHOWN);
     const ru = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
@@ -110,7 +110,7 @@ describe("выгрузка CSV из консоли", () => {
     const el = await mount();
     const csv = vi.spyOn(apiClient, "getRosterCsv").mockResolvedValue("csv");
 
-    await click(byText(el, "button", "⬇ Выгрузить CSV"));
+    await click(byText(el, "button", "Выгрузить CSV"));
 
     const expected = monthOf(toISODate(mondayOf(new Date())));
     expect(csv).toHaveBeenCalledWith(expected.from, expected.to);

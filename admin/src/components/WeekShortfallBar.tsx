@@ -46,7 +46,7 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, on
       {withoutNorm.length > 0 && (
         <button
           type="button"
-          className="week-shortfall-unset"
+          className="week-shortfall-unset btn btn-quiet btn-compact"
           title={`Норма не задана: ${withoutNorm.map((kind) => kind.name).join(", ")}`}
           onClick={onOpenKinds}
         >
