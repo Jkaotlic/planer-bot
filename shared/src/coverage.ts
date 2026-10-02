@@ -164,6 +164,20 @@ export function coverageHint(missing: readonly MissingKind[]): string | null {
   return `Не хватает: ${missingList(missing)}`;
 }
 
+/**
+ * Что писать на кнопке дня в плашке нехватки: «Утро −1, День −2» либо, когда
+ * видов больше двух, только итог дня — «−35».
+ *
+ * Перечень видов у тяжёлой недели (7 дней × 4 вида) растягивал плашку до 440px —
+ * 52% экрана 844px, и полоска дней уезжала под таб-бар. Разбивка по видам
+ * никуда не пропадает: она в подсказке дня, куда кнопка ведёт.
+ */
+export function dayShortfallText(missing: readonly MissingKind[]): string {
+  if (missing.length === 0) return "";
+  if (missing.length > 2) return `−${missing.reduce((sum, kind) => sum + (kind.need - kind.have), 0)}`;
+  return missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ");
+}
+
 /** «Утро — 1, Дежурство — 2» — общий хвост подсказки дня и вечернего совета. */
 function missingList(missing: readonly MissingKind[]): string {
   return missing.map((kind) => `${kind.name} — ${kind.need - kind.have}`).join(", ");

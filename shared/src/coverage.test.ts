@@ -4,6 +4,7 @@ import {
   coverageAdviceText,
   coverageHint,
   coverageSummary,
+  dayShortfallText,
   missingCoverage,
   normWeekday,
   parseCoverage,
@@ -146,6 +147,31 @@ describe("coverageHint", () => {
 
   it("считает разницу, а не норму", () => {
     expect(coverageHint([{ templateId: 10, name: "Утро", need: 3, have: 1 }])).toBe("Не хватает: Утро — 2");
+  });
+});
+
+describe("dayShortfallText — строка дня в плашке нехватки", () => {
+  const kind = (templateId: number, name: string, missing: number) => ({ templateId, name, need: missing, have: 0 });
+
+  it("один и два вида — с разбивкой по видам", () => {
+    expect(dayShortfallText([kind(1, "Утро", 1)])).toBe("Утро −1");
+    expect(dayShortfallText([kind(1, "Утро", 1), kind(2, "День", 2)])).toBe("Утро −1, День −2");
+  });
+
+  it("больше двух видов — только итог дня", () => {
+    expect(dayShortfallText([kind(1, "Утро", 9), kind(2, "День", 9), kind(3, "Вечер", 9)])).toBe("−27");
+  });
+
+  it("итог — сумма разниц, а не норм", () => {
+    expect(dayShortfallText([
+      { templateId: 1, name: "Утро", need: 3, have: 1 },
+      { templateId: 2, name: "День", need: 2, have: 1 },
+      { templateId: 3, name: "Вечер", need: 5, have: 0 },
+    ])).toBe("−8");
+  });
+
+  it("нечего показывать — пустая строка", () => {
+    expect(dayShortfallText([])).toBe("");
   });
 });
 
