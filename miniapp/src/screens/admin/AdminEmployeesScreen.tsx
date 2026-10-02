@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { filterPeople, MONTH_NAMES, parseBirthDate, toBirthDate } from "@planer/shared";
+import { filterPeople, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { Avatar, Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
@@ -7,7 +7,6 @@ import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { PersonSearch } from "../../components/PersonSearch";
 import { withError, withoutError } from "../../lib/error-map";
 import { initialsOf, personPalette } from "../../lib/people";
-import { restrictionsSummary } from "../../lib/restrictions-summary";
 import { ActionButton, Card, CheckRow, Group, Hint, SelectField, StatusPill } from "../../ui";
 
 /**

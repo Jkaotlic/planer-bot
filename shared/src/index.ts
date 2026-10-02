@@ -19,6 +19,7 @@ export * from "./start-tab";
 export * from "./reminder";
 export * from "./csv-encoding";
 export * from "./roster-summary";
+export * from "./restrictions-summary";
 export * from "./rotation";
 export * from "./birthday";
 export * from "./collection";
