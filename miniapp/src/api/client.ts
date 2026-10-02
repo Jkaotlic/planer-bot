@@ -1,7 +1,7 @@
 import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 import { readInitData } from "./init-data";
 import type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
-import type { ShiftCountsReport } from "@planer/shared";
+import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
 // Импорт для собственного использования ниже (`PollView`, `ApiClient`) плюс
 // реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
 // `POST /api/polls/:id/vote`), — опрос считает и правами, и сроком закрытия
@@ -99,6 +99,7 @@ import {
   mockRemindUnpaid,
   mockDeleteCollection,
   mockGetMyCollections,
+  mockGetAdminShortfall,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -1004,6 +1005,8 @@ export interface ApiClient {
   deleteCollection(id: number): Promise<void>;
   /** Активные чужие сборы, уже разосланные команде — вкладка «Команда». Не для админов-скринов. */
   getMyCollections(): Promise<WorkerCollection[]>;
+  /** Нехватка на 7 дней от сегодня — для метки на вкладке, а не для экрана графика. */
+  getAdminShortfall(): Promise<AdminShortfall>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -1713,6 +1716,10 @@ export const realClient: ApiClient = {
     return authorizedGet<TemplateQueue>(`/api/admin/templates/${templateId}/queue`);
   },
 
+  getAdminShortfall() {
+    return authorizedGet<AdminShortfall>("/api/admin/shortfall");
+  },
+
   async getTemplateRoles() {
     const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
     return templates;
@@ -1974,6 +1981,7 @@ const devClient: ApiClient = {
   remindUnpaid: (id) => mockRemindUnpaid(id),
   deleteCollection: (id) => mockDeleteCollection(id),
   getMyCollections: () => mockGetMyCollections(),
+  getAdminShortfall: () => mockGetAdminShortfall(),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),
