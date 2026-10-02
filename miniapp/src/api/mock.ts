@@ -45,6 +45,7 @@ import type {
   SelfEntryInput,
   Shift,
   SwapDirection,
+  MyShifts,
   SwapLockResult,
   SwapRequest,
   SwapShiftSummary,
@@ -379,7 +380,7 @@ const readMock = createReadMock({
   },
 });
 
-export function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
+export function mockGetMyShifts(): Promise<MyShifts> {
   return readMock.getMyShifts();
 }
 

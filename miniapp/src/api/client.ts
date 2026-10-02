@@ -179,6 +179,14 @@ export interface TeamEmployee {
   excludedFromSwaps: boolean;
 }
 
+/** Свои смены. `calendar` необязателен: старый сервер его не шлёт, и мини-апп
+ *  из кэша тоже не обязан его ждать — пусто значит «ничего не помечать». */
+export interface MyShifts {
+  shifts: Shift[];
+  today: string;
+  calendar?: { date: string; kind: "holiday" | "workday"; note: string | null }[];
+}
+
 export interface TeamSchedule {
   employees: TeamEmployee[];
   shifts: Shift[];
@@ -860,7 +868,7 @@ export interface UpcomingBirthday {
  */
 export interface Bootstrap {
   me: Me;
-  myShifts: { shifts: Shift[]; today: string };
+  myShifts: MyShifts;
   teamSchedule: TeamSchedule;
   templates: Template[];
   swaps: SwapRequest[];
@@ -887,7 +895,7 @@ export interface ApiClient {
    *  старая ссылка после этого отвечает 404. */
   createCalendarLink(): Promise<string>;
   deleteCalendarLink(): Promise<void>;
-  getMyShifts(): Promise<{ shifts: Shift[]; today: string }>;
+  getMyShifts(): Promise<MyShifts>;
   getTeamSchedule(from: string, to: string): Promise<TeamSchedule>;
   getSwaps(): Promise<SwapRequest[]>;
   /** `notified` — дошло ли письмо второй стороне (нет Telegram, бот заблокирован → false). */
@@ -1413,7 +1421,7 @@ export const realClient: ApiClient = {
   async getBootstrap(from, to) {
     const raw = await authorizedGet<{
       me: Me;
-      myShifts: { shifts: Shift[]; today: string };
+      myShifts: MyShifts;
       teamSchedule: TeamSchedule;
       templates: { templates: Template[] };
       swaps: { swaps: SwapRequest[] };

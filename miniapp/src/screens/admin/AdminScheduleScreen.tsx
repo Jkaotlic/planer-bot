@@ -18,6 +18,7 @@ import {
   resolveShiftTimes,
   takesPartInAssignment,
   shortfallStatus,
+  specialDays,
   weekShortfall,
   workPresets,
 } from "@planer/shared";
@@ -33,7 +34,7 @@ import {
 import type { DayCalendar, EntryRangeMode } from "@planer/shared";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
-import { ActionButton, Card, CheckRow, Group, Hint, MenuRow, SelectField, ShortfallBanner } from "../../ui";
+import { ActionButton, Card, CheckRow, Group, Hint, MenuRow, SelectField, ShortfallBanner, SpecialDaysLine } from "../../ui";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
 import { AdminKindSettings } from "./AdminKindSettings";
@@ -335,7 +336,8 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
             onPrev={() => goWeek(-1)}
             onNext={() => goWeek(1)}
           />
-          <DayStrip dates={weekDates} selected={selectedDate} today={today} short={shortByDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          <DayStrip dates={weekDates} selected={selectedDate} today={today} short={shortByDate} calendar={dayCalendar} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          <SpecialDaysLine days={specialDays(weekDates, calendar)} />
         </div>
       )}
 
@@ -497,26 +499,29 @@ function WeekBar({ label, backVisible, onBack, onPrev, onNext }: {
   );
 }
 
-function DayStrip({ dates, selected, today, short, onSelect }: {
+function DayStrip({ dates, selected, today, short, calendar, onSelect }: {
   dates: readonly string[];
   selected: string;
   today: string;
   /** Сколько людей не хватает в дне против нормы; дня без нехватки здесь нет. */
   short: ReadonlyMap<string, number>;
+  /** Выходной красится по календарю, а не по дню недели: праздник в среду тоже серый. */
+  calendar: DayCalendar;
   onSelect: (iso: string) => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 6 }}>
       {dates.map((iso) => (
-        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} short={short.get(iso) ?? 0} onSelect={() => onSelect(iso)} />
+        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} short={short.get(iso) ?? 0} calendar={calendar} onSelect={() => onSelect(iso)} />
       ))}
     </div>
   );
 }
 
-function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; active: boolean; isToday: boolean; short: number; onSelect: () => void }) {
+function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: string; active: boolean; isToday: boolean; short: number; calendar: DayCalendar; onSelect: () => void }) {
   const isDark = useIsDark();
-  const weekend = weekdayIndex(iso) >= FRIDAY_INDEX + 1;
+  const weekend = isDayOff(iso, calendar);
+  const kind = calendar.get(iso);
   // Невыбранный день — карточкой: холст теперь `secondary_bg_color`, и клетка
   // этого цвета на нём не читалась бы вовсе.
   const bg = active ? "var(--tgui--button_color)" : "var(--app-card)";
@@ -526,6 +531,7 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
       type="button"
       onClick={onSelect}
       data-day-chip
+      data-day-kind={kind}
       aria-current={isToday ? "date" : undefined}
       aria-pressed={active}
       data-day-short-outline={short > 0 ? "true" : undefined}
@@ -572,7 +578,10 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
           {short}
         </span>
       )}
-      <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>{weekdayShort(iso)}</span>
+      {/* Значок рядом с днём недели, а не новой строкой: высота клетки одна на всех. */}
+      <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85, whiteSpace: "nowrap" }}>
+        {weekdayShort(iso)}{kind ? ` ${kind === "holiday" ? "🎉" : "💼"}` : ""}
+      </span>
       <span style={{ fontSize: "var(--app-text-body)", fontWeight: 600 }}>{dayOfMonth(iso)}</span>
       {/* «Выбран» and «сегодня» were the same style, so three weeks out you
           could not tell where you were. The dot is drawn independently of the

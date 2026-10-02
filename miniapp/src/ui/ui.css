@@ -581,3 +581,12 @@
   font-size: var(--app-text-meta);
   cursor: pointer;
 }
+
+/* Строка праздников недели: текстом, как подпись под полоской, — не карточка. */
+.ui-special-days {
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--app-text-meta);
+  line-height: 1.35;
+  color: var(--tgui--hint_color);
+}

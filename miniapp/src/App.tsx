@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { ActionButton, Screen } from "./ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
-import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
+import { apiClient, type Me, type MyShifts, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
@@ -50,6 +50,8 @@ import { swapUndeliveredNotice } from "./lib/swap-notice";
 interface AppData {
   me: Me;
   myShifts: Shift[];
+  /** Праздники и рабочие субботы в размахе своих смен; пусто, если сервер поля не прислал. */
+  myCalendar: NonNullable<MyShifts["calendar"]>;
   /** Сегодня в часовом поясе команды — пришло вместе с «моими сменами». */
   today: string;
   teamShifts: Shift[];
@@ -221,7 +223,7 @@ export function App() {
       .getBootstrap(from, to)
       .then(({ me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers }) => {
         if (cancelled) return;
-        setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
+        setData({ me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
 
         // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
         // «Команда»), и тащить её в общий контракт ради одной метки значило бы
@@ -367,7 +369,7 @@ export function App() {
    *  показывали то, что человек только что сделал. */
   async function refreshMyShifts() {
     const myShifts = await apiClient.getMyShifts();
-    setData((prev) => (prev ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today } : prev));
+    setData((prev) => (prev ? { ...prev, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today } : prev));
   }
 
   /** Ошибку показывает сама форма — она её и ловит, поэтому здесь ничего не
@@ -430,7 +432,7 @@ export function App() {
         prev
           ? // `me` тоже: права и запреты, поменянные админом, иначе не доходили
             // до открытого приложения, пока его не закроешь совсем.
-            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
+            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
           : prev,
       );
       setRefreshError(null);
@@ -693,6 +695,7 @@ export function App() {
           me={data.me}
           today={data.today}
           shifts={data.myShifts}
+          calendar={data.myCalendar}
           templates={data.templates}
           // Обмен и «Кто ещё работает» не бывают открыты вместе (см. эффект
           // загрузки дня выше) — уход в обмен закрывает раскрытую строку, а не

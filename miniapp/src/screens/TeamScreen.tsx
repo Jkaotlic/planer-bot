@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type TeamSchedule, type Template } from "../api/client";
-import { calendarFrom } from "@planer/shared";
+import { calendarFrom, specialDays } from "@planer/shared";
 import { useIsDark } from "../lib/theme";
-import { Screen } from "../ui";
+import { Screen, SpecialDaysLine } from "../ui";
 import {
   applyTeamScreenLoadResult,
   beginTeamScreenLoad,
@@ -195,6 +195,9 @@ function WeekView({
   const model = buildWeekModel(from, schedule, templates);
   return (
     <>
+      {/* Название текстом над сеткой: в колонке под две цифры помещается
+          только значок, а `title` на телефоне не показывается. */}
+      <SpecialDaysLine days={specialDays(model.days, schedule.calendar)} />
       <TeamWeekGrid model={model} today={today} isDark={isDark} calendar={calendarFrom(schedule.calendar)} meId={meId} />
       <TeamWeekLegend items={buildWeekLegend(model)} isDark={isDark} />
     </>
