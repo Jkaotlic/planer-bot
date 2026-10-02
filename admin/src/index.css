@@ -336,6 +336,9 @@ button {
   overflow-wrap: anywhere;
   text-align: left;
   max-width: 100%;
+  /* Перенесённая строка не должна упираться в рамку: min-height держит одну строку,
+     а у двух строк высоту задаёт только отступ. */
+  padding-block: 6px;
 }
 
 .btn-primary {
@@ -362,6 +365,8 @@ button {
   cursor: default;
 }
 
+/* Кнопка в строке таблицы или тулбара, где 36px раздувают строку: тот же вид, но
+   высота компактного контрола. */
 .btn-compact {
   min-height: var(--control-h-compact);
   padding: 0 10px;
@@ -3113,9 +3118,12 @@ textarea {
   }
 
   /* Топбар в три ряда съедал 151px из 844 — до первой строки сетки оставалась
-     половина экрана. */
+     половина экрана. Глобальный .btn держит min-height 36px, поэтому одного
+     padding мало: на телефоне высоту задаёт компактный токен, иначе кнопки
+     снова выросли бы и съели то, что этот блок отыграл. */
   .btn {
-    padding: 7px 12px;
+    min-height: var(--control-h-compact);
+    padding: 0 12px;
     font-size: var(--text-sub);
   }
 
