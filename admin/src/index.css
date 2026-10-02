@@ -2136,29 +2136,6 @@ textarea {
 
 /* ---------- Журнал ---------- */
 
-.journal-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-
-.journal-tab {
-  padding: 8px 14px;
-  border: 1px solid var(--separator);
-  border-radius: var(--radius-control);
-  background: var(--surface-section);
-  color: var(--hint);
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.journal-tab.active {
-  background: var(--button);
-  border-color: var(--button);
-  color: var(--button-text);
-}
-
 .journal-controls {
   display: flex;
   align-items: center;
@@ -3240,4 +3217,45 @@ textarea {
   .sidebar {
     transition: none;
   }
+}
+
+/* ---------- Переключатель «один из нескольких» ---------- */
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-control);
+}
+
+.segmented-item {
+  min-height: var(--control-h-compact);
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--hint);
+  font: inherit;
+  font-size: var(--text-sub);
+  font-weight: 600;
+  /* Внутренний радиус меньше внешнего на толщину поля, иначе углы «не сходятся». */
+  border-radius: calc(var(--radius-control) - 2px);
+  cursor: pointer;
+}
+
+.segmented-item[aria-pressed="true"] {
+  background: var(--surface-section);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+.segmented-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Переключатель в потоке экрана: тот же отступ снизу, что был у самодельных. */
+.segmented-row {
+  margin: 0 0 12px;
 }

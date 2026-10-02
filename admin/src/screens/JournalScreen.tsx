@@ -14,6 +14,7 @@ import {
   type ShiftCountsKind,
 } from "@planer/shared";
 import { apiClient, AuthRequiredError, type JournalPage, type ShiftCountsReport } from "../api/client";
+import { Segmented } from "../components/Segmented";
 import { initialsOf, personPalette } from "../lib/people";
 import { toISODate } from "../lib/week";
 
@@ -41,6 +42,11 @@ export function JournalEventRow({ event }: { event: JournalPage["events"][number
 
 type Tab = "report" | "history";
 
+const JOURNAL_TABS: readonly { key: Tab; label: string }[] = [
+  { key: "report", label: "Кто сколько отдежурил" },
+  { key: "history", label: "Кто что менял" },
+];
+
 /** «Журнал»: who did how many of each kind, and who changed what and when. */
 export function JournalScreen() {
   const [tab, setTab] = useState<Tab>("report");
@@ -50,25 +56,8 @@ export function JournalScreen() {
       <div className="employees-header">
         <h2 className="employees-title">Журнал</h2>
       </div>
-      <div className="journal-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "report"}
-          className={`journal-tab${tab === "report" ? " active" : ""}`}
-          onClick={() => setTab("report")}
-        >
-          Кто сколько отдежурил
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "history"}
-          className={`journal-tab${tab === "history" ? " active" : ""}`}
-          onClick={() => setTab("history")}
-        >
-          Кто что менял
-        </button>
+      <div className="segmented-row">
+        <Segmented aria-label="Раздел журнала" options={JOURNAL_TABS} value={tab} onChange={setTab} />
       </div>
 
       {tab === "report" ? <ShiftCounts /> : <History />}

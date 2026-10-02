@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { formatAuditMoment } from "@planer/shared";
 import { apiClient, type BugReportRow } from "../api/client";
+import { Segmented } from "../components/Segmented";
+
+const BUG_FILTERS = [
+  { key: "open", label: "Новые" },
+  { key: "all", label: "Все" },
+] as const;
 
 /**
  * «Баги» (admin): список того, что работники нажали «🐞 Проблема» и написали.
@@ -52,21 +58,13 @@ export function BugsScreen() {
         <h2 className="employees-title">Баги</h2>
       </div>
 
-      <div className="announce-audience">
-        <button
-          type="button"
-          className={`btn ${status === "open" ? "btn-primary" : "btn-secondary"}`}
-          onClick={() => setStatus("open")}
-        >
-          Новые
-        </button>
-        <button
-          type="button"
-          className={`btn ${status === "all" ? "btn-primary" : "btn-secondary"}`}
-          onClick={() => setStatus("all")}
-        >
-          Все
-        </button>
+      <div className="segmented-row">
+        <Segmented
+          aria-label="Какие баги показывать"
+          options={BUG_FILTERS}
+          value={status}
+          onChange={setStatus}
+        />
       </div>
 
       {error && (

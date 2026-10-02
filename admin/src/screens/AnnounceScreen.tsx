@@ -9,7 +9,15 @@ import {
   type RecipientGroupView,
 } from "../api/client";
 import { PersonSearch } from "../components/PersonSearch";
+import { Segmented } from "../components/Segmented";
 import { recipientsPhrase } from "./CollectionsScreen";
+
+const AUDIENCES = [
+  { key: "all", label: "Всем" },
+  { key: "admins", label: "Админам" },
+  { key: "workers", label: "Работникам" },
+  { key: "picked", label: "Выбрать" },
+] as const;
 
 /**
  * «Анонсы»: вольный текст всей команде или выбранным людям — из десктопной консоли.
@@ -40,6 +48,12 @@ export function AnnounceScreen() {
   const [preset, setPreset] = useState<AnnouncementPreset | null>(null);
   const [groups, setGroups] = useState<RecipientGroupView[]>([]);
   const [groupId, setGroupId] = useState<number | null>(null);
+  // Выбрана группа — ни один из четырёх вариантов не горит: группа живёт в своей строке ниже.
+  const audienceKey: (typeof AUDIENCES)[number]["key"] | null =
+    audienceMode === "all" ? "all"
+    : preset !== null ? preset
+    : groupId === null ? "picked"
+    : null;
   const [query, setQuery] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -172,44 +186,23 @@ export function AnnounceScreen() {
         {text.length} / {ANNOUNCEMENT_TEXT_MAX}
       </div>
 
-      <div className="announce-audience">
-        <button
-          type="button"
-          className={`btn ${audienceMode === "all" ? "btn-primary" : "btn-secondary"}`}
+      <div className="segmented-row">
+        <Segmented
+          aria-label="Кому отправить"
+          options={AUDIENCES}
+          value={audienceKey}
           disabled={sending}
-          onClick={() => {
-            setAudienceMode("all");
+          onChange={(key) => {
+            if (key === "admins" || key === "workers") {
+              pickPreset(key);
+              return;
+            }
+            setAudienceMode(key === "all" ? "all" : "picked");
             setPreset(null);
             setGroupId(null);
             setConfirming(false);
           }}
-        >
-          Всем
-        </button>
-        {(["admins", "workers"] as const).map((p) => (
-          <button
-            key={p}
-            type="button"
-            className={`btn ${audienceMode === "picked" && preset === p ? "btn-primary" : "btn-secondary"}`}
-            disabled={sending}
-            onClick={() => pickPreset(p)}
-          >
-            {p === "admins" ? "Админам" : "Работникам"}
-          </button>
-        ))}
-        <button
-          type="button"
-          className={`btn ${audienceMode === "picked" && preset === null && groupId === null ? "btn-primary" : "btn-secondary"}`}
-          disabled={sending}
-          onClick={() => {
-            setAudienceMode("picked");
-            setPreset(null);
-            setGroupId(null);
-            setConfirming(false);
-          }}
-        >
-          Выбрать
-        </button>
+        />
       </div>
 
       {groups.length > 0 && (
