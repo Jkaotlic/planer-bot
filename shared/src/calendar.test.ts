@@ -34,6 +34,9 @@ describe("dayOffLabel", () => {
     expect(dayOffLabel("2024-04-27", "workday", null)).toBe("💼 Рабочая суббота");
     expect(dayOffLabel("2024-04-28", "workday", null)).toBe("💼 Рабочее воскресенье");
   });
+  it("рабочий день в будни — не «рабочая суббота», а ничего", () => {
+    expect(dayOffLabel("2026-02-23", "workday", null)).toBeNull();
+  });
   it("обычный день — ничего", () => {
     expect(dayOffLabel("2026-06-13", undefined, null)).toBeNull();
   });
@@ -63,6 +66,10 @@ describe("specialDays — подписи праздников и рабочих 
   it("рабочее воскресенье называется по дню недели", () => {
     const [day] = specialDays(WEEK, [{ date: "2026-11-08", kind: "workday" }]);
     expect(day!.label).toBe("💼 Вс 8 — рабочее воскресенье");
+  });
+  it("рабочий день в будни — не особый: ни «рабочей субботы», ни строки вовсе", () => {
+    // 2026-11-04 — среда, возвращённая в работу вручную; читателю это обычный день.
+    expect(specialDays(WEEK, [{ date: "2026-11-04", kind: "workday" }])).toEqual([]);
   });
   it("порядок — по списку дат, а не по порядку строк; дни вне списка не попадают", () => {
     const rows = [

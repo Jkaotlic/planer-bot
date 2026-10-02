@@ -308,6 +308,29 @@ describe("норма дня по календарю", () => {
       .toEqual([{ templateId: 1, name: "Утро", need: 1, have: 0 }]);
   });
 
+  it("рабочий день в будни считается по своему дню недели, а не пятницы", () => {
+    // Понедельник-праздник вернули в работу вручную: его норма — понедельничная.
+    const calendar = calendarFrom([{ date: "2026-02-23", kind: "workday" }]);
+    expect(normWeekday("2026-02-23", calendar)).toBe(0);
+    expect(missingCoverage([], [morning], "2026-02-23", calendar))
+      .toEqual([{ templateId: 1, name: "Утро", need: 3, have: 0 }]);
+  });
+
+  it("рабочее воскресенье тоже считается по норме пятницы", () => {
+    const calendar = calendarFrom([{ date: "2026-11-08", kind: "workday" }]);
+    expect(normWeekday("2026-11-08", calendar)).toBe(4);
+  });
+
+  it("праздник в субботу и воскресенье сохраняет норму своего дня", () => {
+    // Решение владельца — про праздник в БУДНИ; выходной, совпавший с праздником, остаётся собой.
+    const calendar = calendarFrom([
+      { date: "2026-11-07", kind: "holiday" },
+      { date: "2026-11-08", kind: "holiday" },
+    ]);
+    expect(normWeekday("2026-11-07", calendar)).toBe(5);
+    expect(normWeekday("2026-11-08", calendar)).toBe(6);
+  });
+
   it("weekShortfall и scheduleGaps считают праздник так же", () => {
     const calendar = calendarFrom([{ date: "2026-11-04", kind: "holiday" }]);
     expect(weekShortfall([], [{ ...morning, category: "shift" }], ["2026-11-04"], calendar).total).toBe(0);

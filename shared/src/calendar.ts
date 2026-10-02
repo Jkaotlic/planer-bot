@@ -43,7 +43,11 @@ export function dayOffLabel(date: string, kind: DayKind | undefined, note: strin
     const title = note?.trim();
     return title ? `🎉 ${title} — выходной` : "🎉 Выходной по календарю";
   }
-  if (kind === "workday") return dayOfWeek(date) === 0 ? "💼 Рабочее воскресенье" : "💼 Рабочая суббота";
+  if (kind === "workday") {
+    // Будень, возвращённый в работу, обычен для читателя: «рабочая суббота» на среде соврала бы.
+    if (!isWeekend(date)) return null;
+    return dayOfWeek(date) === 0 ? "💼 Рабочее воскресенье" : "💼 Рабочая суббота";
+  }
   return null;
 }
 
@@ -81,6 +85,8 @@ export function specialDays(
         short: `🎉 ${title || "выходной"}`,
       });
     } else {
+      // Будень, возвращённый в работу, — обычный день; особым он был бы только для нормы.
+      if (!isWeekend(date)) continue;
       const name = dayOfWeek(date) === 0 ? "рабочее воскресенье" : "рабочая суббота";
       out.push({ date, kind: "workday", label: `💼 ${when} — ${name}`, short: "💼 рабочая" });
     }
