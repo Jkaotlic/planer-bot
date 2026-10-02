@@ -252,6 +252,29 @@ describe("метки на TabBar реагируют на действия, а н
     expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
   });
 
+  it("firstDate из ответа доходит до плашки: строка «Ближайшая нехватка» ведёт в следующую неделю", async () => {
+    // Сегодня пятница 25.09, неделя 21–27.09 закрыта, а нехватка — в понедельник 28.09.
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 3, firstDate: "2026-09-28" });
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([{
+      templateId: 10, name: "Утро", category: "shift", accent: "gold", checklistIds: [], sendReminder: false, reminderText: null,
+      coverage: [1, 0, 0, 0, 0, 0, 0], pool: [], preference: {},
+    }] as never);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
+      shifts: [{ id: 1, date: "2026-09-21", endDate: null, start: "08:00", end: "17:00", employeeId: 7, employeeName: "Аня",
+        category: "shift", templateId: 10, title: "Утро", location: null, unrecognisedCode: null }],
+      employees: [], calendar: [],
+    } as never);
+    const el = await mount();
+    await act(async () => tabItem(el, "Админ").click());
+    await settle();
+    const open = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && (n.textContent ?? "").trim() === "Расписание");
+    await act(async () => open!.click());
+    await settle();
+    expect(el.querySelector("[data-shortfall]")?.getAttribute("data-shortfall")).toBe("closed");
+    expect(el.querySelector("[data-nearest-shortfall]")?.textContent).toBe("Ближайшая нехватка: Пн 28 — показать →");
+  });
+
   /** Возврат в приложение: `reloadData` слушает `visibilitychange`. */
   async function backToApp() {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });

@@ -34,8 +34,8 @@ describe("dayOffLabel", () => {
     expect(dayOffLabel("2024-04-27", "workday", null)).toBe("💼 Рабочая суббота");
     expect(dayOffLabel("2024-04-28", "workday", null)).toBe("💼 Рабочее воскресенье");
   });
-  it("рабочий день в будни — не «рабочая суббота», а ничего", () => {
-    expect(dayOffLabel("2026-02-23", "workday", null)).toBeNull();
+  it("рабочий день в будни — «Рабочий день», а не «рабочая суббота»", () => {
+    expect(dayOffLabel("2026-02-23", "workday", null)).toBe("💼 Рабочий день");
   });
   it("обычный день — ничего", () => {
     expect(dayOffLabel("2026-06-13", undefined, null)).toBeNull();

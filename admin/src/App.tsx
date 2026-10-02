@@ -31,7 +31,7 @@ import { AnnounceScreen } from "./screens/AnnounceScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
-import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
+import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
@@ -127,6 +127,9 @@ export function App() {
   const rosterFileInput = useRef<HTMLInputElement>(null);
   /** Число нехватки на пункте «Расписание» сайдбара; `null` — не знаем (ручка упала). */
   const [adminShortfall, setAdminShortfall] = useState<number | null>(null);
+  // Первый день этой нехватки — для строки «Ближайшая нехватка»: число считает
+  // сегодня…+6 и пересекает границу недели, а плашка видит только показанную.
+  const [adminShortfallFirst, setAdminShortfallFirst] = useState<string | null>(null);
   // Номер последнего запроса: медленный ответ на старый запрос не должен затереть
   // число из нового — после правки записи два запроса идут почти подряд.
   const shortfallSeq = useRef(0);
@@ -194,8 +197,16 @@ export function App() {
   function refreshAdminShortfall() {
     const seq = ++shortfallSeq.current;
     apiClient.getAdminShortfall().then(
-      (s) => { if (seq === shortfallSeq.current) setAdminShortfall(s.total); },
-      () => { if (seq === shortfallSeq.current) setAdminShortfall(null); },
+      (s) => {
+        if (seq !== shortfallSeq.current) return;
+        setAdminShortfall(s.total);
+        setAdminShortfallFirst(s.firstDate);
+      },
+      () => {
+        if (seq !== shortfallSeq.current) return;
+        setAdminShortfall(null);
+        setAdminShortfallFirst(null);
+      },
     );
   }
 
@@ -579,6 +590,11 @@ export function App() {
                 pointedDate={pointedInWeek}
                 onPointDay={setPointedDate}
                 onOpenKinds={() => setNav("kinds")}
+                nearestDate={adminShortfallFirst}
+                onJumpNearest={(date) => {
+                  setWeekMonday(mondayOf(parseISODate(date)));
+                  setPointedDate(date);
+                }}
               />}
               <div className="schedule-layout">
                 <ScheduleGrid

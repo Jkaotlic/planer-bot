@@ -189,6 +189,20 @@ export function dayShortfallText(missing: readonly MissingKind[]): string {
   return missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ");
 }
 
+/**
+ * Строка плашки, когда ближайшая нехватка лежит за пределами показанной недели:
+ * метка на вкладке считает «сегодня + 6 дней» и пересекает границу недели, а
+ * плашка видит только свою неделю — без этой строки красное число вело бы к
+ * зелёному «Нормы закрыты ✓». Число месяца без названия месяца: дата в пределах
+ * ближайших шести дней однозначна.
+ */
+export function nearestShortfallLabel(date: string): string {
+  return `Ближайшая нехватка: ${weekdayShort(date)} ${Number(date.slice(8, 10))} — показать →`;
+}
+
+/** Подсказка у редакторов нормы: правило календаря невидимо, пока не наступит праздник. */
+export const NORM_CALENDAR_HINT = "В праздник в будни действует норма воскресенья, в рабочую субботу — норма пятницы.";
+
 /** «Утро — 1, Дежурство — 2» — общий хвост подсказки дня и вечернего совета. */
 function missingList(missing: readonly MissingKind[]): string {
   return missing.map((kind) => `${kind.name} — ${kind.need - kind.have}`).join(", ");

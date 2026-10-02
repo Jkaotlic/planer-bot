@@ -94,9 +94,11 @@ export function showsWeekSwitcher(state: {
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
-export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
+export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nearestShortfall = null }: {
   initialDate?: string;
   today: string;
+  /** Первый день нехватки из сегодня…+6 (тот же ответ, что у метки на вкладке «Админ»). */
+  nearestShortfall?: string | null;
   /** Правка графика меняет нехватку, а метка на вкладке «Админ» живёт выше, в App. */
   onScheduleChanged?: () => void;
 }) {
@@ -243,6 +245,14 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
     setNotice(null);
   }
 
+  /** К дыре за пределами показанной недели: неделя её дня и сам день — как при
+   *  переходе по ссылке бота (`initialDate`). */
+  function goToDate(date: string) {
+    setWeekStart(mondayOf(parseISODate(date)));
+    setSelectedDate(date);
+    setNotice(null);
+  }
+
   /** Back to the current week AND to today. Returning to the week but leaving the
    *  selection on, say, Thursday would drop the admin on a day they never picked. */
   function goToday() {
@@ -327,6 +337,8 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged }: {
               status={status}
               onPickDay={(date) => { setSelectedDate(date); setNotice(null); }}
               onOpenNorms={() => { setNotice(null); setError(null); setSettingsOpen(true); }}
+              nearestOutside={nearestShortfall && !weekDates.includes(nearestShortfall) ? nearestShortfall : null}
+              onJumpNearest={goToDate}
             />
           )}
           <WeekBar

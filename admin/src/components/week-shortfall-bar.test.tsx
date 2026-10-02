@@ -125,3 +125,37 @@ describe("строка нехватки над сеткой недели", () =>
     expect(el.querySelector(".week-shortfall")!.textContent).toBe("Нормы закрыты ✓без нормы: 2 вида →");
   });
 });
+
+describe("«Ближайшая нехватка» над сеткой недели", () => {
+  const NEXT_MONDAY = "2026-08-31";
+  const closedShifts = [entry(1, WEEK[0]!, 1, 10), entry(2, WEEK[0]!, 2, 10), entry(3, WEEK[3]!, 1, 10)];
+  const nearest = (el: HTMLElement) => el.querySelector<HTMLButtonElement>(".week-shortfall-nearest");
+
+  it("дата в следующей неделе — строка с днём недели и числом, и в закрытой плашке тоже", async () => {
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: NEXT_MONDAY });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+    expect(nearest(el)?.textContent).toBe("Ближайшая нехватка: Пн 31 — показать →");
+  });
+
+  it("при красной плашке строка тоже есть", async () => {
+    const el = await mount({ templates: [MORNING], nearestDate: NEXT_MONDAY });
+    expect(nearest(el)?.textContent).toContain("Пн 31");
+  });
+
+  it("дата внутри показанной недели — строки нет", async () => {
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: WEEK[3]! });
+    expect(nearest(el)).toBeNull();
+  });
+
+  it("даты нет — строки нет", async () => {
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: null });
+    expect(nearest(el)).toBeNull();
+  });
+
+  it("нажатие отдаёт дату наверх", async () => {
+    const onJumpNearest = vi.fn();
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: NEXT_MONDAY, onJumpNearest });
+    await act(async () => nearest(el)!.click());
+    expect(onJumpNearest).toHaveBeenCalledWith(NEXT_MONDAY);
+  });
+});

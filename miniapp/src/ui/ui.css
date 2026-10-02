@@ -324,9 +324,7 @@
 .ui-menu-row__hint {
   font-size: var(--app-text-meta);
   line-height: 1.35;
-  /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
-     при нужных 4.5. */
-  color: var(--tgui--text_color);
+  color: var(--tgui--hint_color);
 }
 
 .ui-menu-row__chevron {
@@ -401,9 +399,7 @@
 .ui-check__hint {
   font-size: var(--app-text-meta);
   line-height: 1.35;
-  /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
-     при нужных 4.5. */
-  color: var(--tgui--text_color);
+  color: var(--tgui--hint_color);
 }
 
 /* ---------- Селект ---------- */
@@ -596,6 +592,21 @@
   font: inherit;
   font-size: var(--app-text-meta);
   text-align: left;
+  cursor: pointer;
+}
+.ui-shortfall-nearest {
+  align-self: flex-start;
+  min-height: var(--app-tap);
+  padding: 0;
+  border: none;
+  background: none;
+  /* Обычный цвет текста и подчёркивание — как у «Без нормы…»: на зелёной и красной
+     подложках только он держит контраст, а ссылочный синий — нет. */
+  color: var(--tgui--text_color);
+  text-decoration: underline;
+  font: inherit;
+  font-size: var(--app-text-body);
+  font-weight: 600;
   cursor: pointer;
 }
 .ui-shortfall-unset {

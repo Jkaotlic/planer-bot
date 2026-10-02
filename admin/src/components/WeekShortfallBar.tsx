@@ -1,4 +1,4 @@
-import { shortfallStatus, weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
+import { nearestShortfallLabel, shortfallStatus, weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { pluralizeRu } from "../lib/people";
 
@@ -13,6 +13,9 @@ export interface WeekShortfallBarProps {
   pointedDate: string | null;
   onPointDay: (date: string | null) => void;
   onOpenKinds: () => void;
+  /** Первый день нехватки на неделю вперёд (то же число, что на пункте сайдбара). */
+  nearestDate?: string | null;
+  onJumpNearest?: (date: string) => void;
 }
 
 /**
@@ -28,10 +31,13 @@ export interface WeekShortfallBarProps {
  * это не поломка, а несделанная настройка, и кричать о ней наравне с дырой
  * в графике значило бы приучить глаз строку пропускать.
  */
-export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, calendar, onPointDay, onOpenKinds }: WeekShortfallBarProps) {
+export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, calendar, onPointDay, onOpenKinds, nearestDate = null, onJumpNearest }: WeekShortfallBarProps) {
   const week = weekShortfall(shifts, templates, weekDates, calendar);
   const { days, total, withoutNorm } = week;
   const status = shortfallStatus(week, templates);
+  // Число в сайдбаре считает сегодня…+6 и пересекает границу недели, а плашка видит
+  // только показанную: без этой строки красное число вело к зелёному «Нормы закрыты ✓».
+  const nearestOutside = nearestDate && !weekDates.includes(nearestDate) ? nearestDate : null;
   return (
     <div className={`week-shortfall week-shortfall--${status.state}`} data-shortfall={status.state} role="status">
       {status.state === "short" && <span className="week-shortfall-total">{`Не хватает ${total}`}</span>}
@@ -50,6 +56,15 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, ca
           {` ${day.missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ")}`}
         </button>
       ))}
+      {status.state !== "no-norms" && nearestOutside && (
+        <button
+          type="button"
+          className="week-shortfall-nearest btn btn-compact btn-quiet"
+          onClick={() => onJumpNearest?.(nearestOutside)}
+        >
+          {nearestShortfallLabel(nearestOutside)}
+        </button>
+      )}
       {(withoutNorm.length > 0 || status.state === "no-norms") && (
         <button
           type="button"

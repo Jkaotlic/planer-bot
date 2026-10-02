@@ -27,6 +27,7 @@ export function AdminScreen({
   onInitialDateUsed,
   today,
   onScheduleChanged,
+  nearestShortfall,
 }: {
   view: AdminView;
   onViewChange: (view: AdminView) => void;
@@ -39,6 +40,8 @@ export function AdminScreen({
   today: string;
   /** График правили — число нехватки на вкладке «Админ» живёт в `App`. */
   onScheduleChanged?: () => void;
+  /** Первый день нехватки на неделю вперёд — для строки «Ближайшая нехватка» в плашке. */
+  nearestShortfall?: string | null;
 }) {
   // Дата нужна графику только при первом монтировании (`useState` внутри);
   // сразу после — отдаём, что использовали.
@@ -57,7 +60,7 @@ export function AdminScreen({
 
   return (
     <Screen title={adminSectionTitle(view)} onBack={() => onViewChange("menu")} backLabel="Разделы" tabBar>
-      {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} />}
+      {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} nearestShortfall={nearestShortfall} />}
       {view === "weekend" && <AdminWeekendScreen today={today} />}
       {view === "employees" && <AdminEmployeesScreen />}
       {view === "checklists" && <AdminChecklists />}

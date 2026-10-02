@@ -1428,6 +1428,18 @@ button {
   padding-left: 0;
 }
 
+/* Отдельной строкой и обычным цветом текста: серая сноска в зелёной плашке — то,
+   что не заметили бы. Подпись слева, как у «без нормы». */
+.week-shortfall .week-shortfall-nearest.btn-quiet {
+  flex: 1 0 100%;
+  justify-content: flex-start;
+  padding-left: 0;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-align: left;
+}
+
 .week-shortfall-unset {
   /* Обычный текст, а не синяя ссылка: на подложке плашки она давала 4.16–4.44. */
   color: var(--text);

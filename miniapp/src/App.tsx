@@ -159,6 +159,9 @@ export function App() {
   const [collections, setCollections] = useState<WorkerCollection[] | null>(null);
   // Нехватка людей для метки на «Админ». `null` — не загрузилась (или упала).
   const [adminShortfall, setAdminShortfall] = useState<number | null>(null);
+  // Первый день этой нехватки: число на вкладке считает сегодня…+6 и пересекает
+  // границу недели, а плашка видит только свою — по дате она ведёт к дыре.
+  const [adminShortfallFirst, setAdminShortfallFirst] = useState<string | null>(null);
   // Отдельный от `reloadGate` гейт: сборы перечитываются в `reloadData`
   // независимо от bootstrap-запроса (см. там же), и общий счётчик с ним
   // выдавал бы тикеты не по своей, а по чужой последовательности вызовов.
@@ -181,11 +184,17 @@ export function App() {
     const ticket = shortfallGate.current.begin();
     apiClient.getAdminShortfall().then(
       (s) => {
-        if (shortfallGate.current.isLatest(ticket)) setAdminShortfall(s.total);
+        if (shortfallGate.current.isLatest(ticket)) {
+          setAdminShortfall(s.total);
+          setAdminShortfallFirst(s.firstDate);
+        }
       },
       (err: unknown) => {
         console.error("Shortfall for badge failed:", err);
-        if (shortfallGate.current.isLatest(ticket)) setAdminShortfall(null);
+        if (shortfallGate.current.isLatest(ticket)) {
+          setAdminShortfall(null);
+          setAdminShortfallFirst(null);
+        }
       },
     );
   }, []);
@@ -776,6 +785,7 @@ export function App() {
             onInitialDateUsed={consumeAdminDeepDate}
             today={data.today}
             onScheduleChanged={refreshAdminShortfall}
+            nearestShortfall={adminShortfallFirst}
           />
         </Suspense>
       )}

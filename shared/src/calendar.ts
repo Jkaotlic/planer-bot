@@ -44,8 +44,9 @@ export function dayOffLabel(date: string, kind: DayKind | undefined, note: strin
     return title ? `🎉 ${title} — выходной` : "🎉 Выходной по календарю";
   }
   if (kind === "workday") {
-    // Будень, возвращённый в работу, обычен для читателя: «рабочая суббота» на среде соврала бы.
-    if (!isWeekend(date)) return null;
+    // Будень, возвращённый в работу: «рабочая суббота» на среде соврала бы, а подпись
+    // нужна — редактор дня показывает по ней, что отметка стоит (и снимается).
+    if (!isWeekend(date)) return "💼 Рабочий день";
     return dayOfWeek(date) === 0 ? "💼 Рабочее воскресенье" : "💼 Рабочая суббота";
   }
   return null;

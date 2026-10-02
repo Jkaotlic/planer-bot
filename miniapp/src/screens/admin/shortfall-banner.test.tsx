@@ -40,12 +40,12 @@ async function settle(times = 14) {
 // Среда: неделя 24–30 августа 2026, понедельник — первая клетка полоски.
 const TODAY = "2026-08-26";
 
-async function mountRaw() {
+async function mountRaw(extra: { nearestShortfall?: string | null } = {}) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY })));
+    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY, ...extra })));
   });
   await settle();
   return host;
@@ -56,10 +56,10 @@ const entry = (date: string) => ({
   category: "shift", templateId: 10, title: "Вид 10", location: null, unrecognisedCode: null,
 });
 
-async function mount(roles: TemplateRolesView[], shifts: ReturnType<typeof entry>[] = []) {
+async function mount(roles: TemplateRolesView[], shifts: ReturnType<typeof entry>[] = [], extra: { nearestShortfall?: string | null } = {}) {
   vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue(roles);
   vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts, employees: [], calendar: [] } as never);
-  return mountRaw();
+  return mountRaw(extra);
 }
 
 const banner = (el: HTMLElement) => el.querySelector<HTMLElement>("[data-shortfall]");
@@ -78,6 +78,30 @@ describe("плашка нехватки над графиком мини-апп�
     const days = [...banner(el)!.querySelectorAll<HTMLElement>("[data-shortfall-day]")];
     expect(days[0]!.textContent).toBe("Пн −6");
     expect(days[1]!.textContent).toBe("Вт Вид 10 −2, Вид 20 −1");
+  });
+
+  // Среда 26.08 — праздник, а норма стоит именно на среду; воскресная норма нулевая.
+  // С EMPTY_CALENDAR вместо настоящего календаря (на плашке или на метках дней)
+  // день снова считался бы по норме среды — этот тест краснеет на обеих подстановках.
+  it("праздник в будни считается по воскресенью: норма среды не создаёт нехватки", async () => {
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([kind(10, [0, 0, 2, 0, 0, 0, 0])]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
+      shifts: [], employees: [], calendar: [{ date: "2026-08-26", kind: "holiday", note: "День теста" }],
+    } as never);
+    const el = await mountRaw();
+    expect(banner(el)?.dataset.shortfall).toBe("closed");
+    const chips = [...el.querySelectorAll<HTMLElement>("[data-day-chip]")];
+    expect(chips[2]!.dataset.dayShortOutline).toBeUndefined();
+    // Среда выбрана — подсказка дня тоже считает по календарю.
+    expect(el.textContent ?? "").not.toContain("Не хватает:");
+  });
+
+  it("контроль: та же норма без праздника — нехватка и обведённый день", async () => {
+    const el = await mount([kind(10, [0, 0, 2, 0, 0, 0, 0])]);
+    expect(banner(el)?.dataset.shortfall).toBe("short");
+    const chips = [...el.querySelectorAll<HTMLElement>("[data-day-chip]")];
+    expect(chips[2]!.dataset.dayShortOutline).toBe("true");
+    expect(el.textContent ?? "").toContain("Не хватает: Вид 10 — 2");
   });
 
   it("стоит раньше полоски дней — её видно, не листая", async () => {
@@ -211,5 +235,47 @@ describe("плашка нехватки над графиком мини-апп�
     await settle();
     expect(createEntries).toHaveBeenCalledTimes(1);
     expect(onScheduleChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("«Ближайшая нехватка» — переход к дыре за пределами показанной недели", () => {
+  // Неделя 24–30.08 закрыта, а красное число на вкладке считает и понедельник 31.08.
+  const closedWeek = () => mount([kind(10, [1, 0, 0, 0, 0, 0, 0])], [entry("2026-08-24")], { nearestShortfall: "2026-08-31" });
+  const nearest = (el: HTMLElement) => el.querySelector<HTMLButtonElement>("[data-nearest-shortfall]");
+
+  it("дата в следующей неделе — строка с днём недели и числом, даже при «Нормы закрыты»", async () => {
+    const el = await closedWeek();
+    expect(banner(el)?.dataset.shortfall).toBe("closed");
+    expect(nearest(el)?.textContent).toBe("Ближайшая нехватка: Пн 31 — показать →");
+    // Внутри плашки, то есть выше полоски дней.
+    expect(banner(el)!.contains(nearest(el))).toBe(true);
+  });
+
+  it("при красной плашке строка тоже есть", async () => {
+    const el = await mount([kind(10, [2, 0, 0, 0, 0, 0, 0])], [], { nearestShortfall: "2026-08-31" });
+    expect(banner(el)?.dataset.shortfall).toBe("short");
+    expect(nearest(el)?.textContent).toContain("Пн 31");
+  });
+
+  it("дата внутри показанной недели — строки нет", async () => {
+    const el = await mount([kind(10, [1, 0, 0, 0, 0, 0, 0])], [entry("2026-08-24")], { nearestShortfall: "2026-08-27" });
+    expect(nearest(el)).toBeNull();
+  });
+
+  it("даты нет — строки нет", async () => {
+    const el = await mount([kind(10, [1, 0, 0, 0, 0, 0, 0])], [entry("2026-08-24")], { nearestShortfall: null });
+    expect(nearest(el)).toBeNull();
+  });
+
+  it("нажатие листает на ту неделю и выбирает день", async () => {
+    const el = await closedWeek();
+    const getSchedule = vi.spyOn(apiClient, "getTeamSchedule");
+    getSchedule.mockClear();
+    await act(async () => nearest(el)!.click());
+    await settle(4);
+    expect(getSchedule).toHaveBeenCalledWith("2026-08-31", "2026-09-06");
+    expect(el.querySelector("[data-day-chip][aria-pressed='true']")?.getAttribute("aria-label")).toContain("31");
+    // Неделя сменилась — день в ней, строка больше не нужна.
+    expect(nearest(el)).toBeNull();
   });
 });

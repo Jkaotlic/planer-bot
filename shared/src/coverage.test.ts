@@ -6,6 +6,8 @@ import {
   coverageSummary,
   dayShortfallText,
   missingCoverage,
+  NORM_CALENDAR_HINT,
+  nearestShortfallLabel,
   normWeekday,
   parseCoverage,
   scheduleGaps,
@@ -371,5 +373,19 @@ describe("shortfallStatus — состояние плашки над графи�
 
   it("вид «все оставшиеся» нормой не считается и в no-norms не мешает", () => {
     expect(status([], [kind(1, [0, 0, 0, 0, 0, 0, 0], "shift", "remainder")]).state).toBe("no-norms");
+  });
+});
+
+describe("nearestShortfallLabel — строка «Ближайшая нехватка» в плашке", () => {
+  it("день недели и число месяца, без месяца", () => {
+    // 2026-08-31 — понедельник; «31», а не «08-31» и не «1 сентября».
+    expect(nearestShortfallLabel("2026-08-31")).toBe("Ближайшая нехватка: Пн 31 — показать →");
+    expect(nearestShortfallLabel("2026-09-05")).toBe("Ближайшая нехватка: Сб 5 — показать →");
+  });
+});
+
+describe("NORM_CALENDAR_HINT", () => {
+  it("называет оба правила календаря", () => {
+    expect(NORM_CALENDAR_HINT).toBe("В праздник в будни действует норма воскресенья, в рабочую субботу — норма пятницы.");
   });
 });
