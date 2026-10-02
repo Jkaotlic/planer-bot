@@ -1409,18 +1409,35 @@ button {
   white-space: nowrap;
 }
 
+/* Справа в строке пункта, а не на иконке: в сайдбаре есть ширина, и число
+   рядом с подписью читается раньше кружка на 18-пиксельной иконке. Фон и
+   цвет в тёмной теме — в общем правиле с `.week-shortfall-total` ниже. */
+.sidebar-nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  color: #fff;
+  font-size: var(--text-meta);
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
 /* Белое на `--destructive` не дотягивает до 4.5: замер дал 4.28 в светлой теме
    и 2.79 в тёмной, где красный светлый. Поэтому в светлой красный затемнён, а
    в тёмной текст метки тёмный. */
 .day-short-badge,
-.week-shortfall-total {
+.week-shortfall-total,
+.sidebar-nav-badge {
   background: var(--destructive);
   background: color-mix(in srgb, var(--destructive) 84%, #000);
 }
 
 @media (prefers-color-scheme: dark) {
   .day-short-badge,
-  .week-shortfall-total {
+  .week-shortfall-total,
+  .sidebar-nav-badge {
     background: var(--destructive);
     color: #14181f;
   }

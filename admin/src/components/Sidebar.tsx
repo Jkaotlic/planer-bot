@@ -10,6 +10,8 @@ export interface SidebarProps {
    * признак читает только медиазапрос `max-width: 900px`.
    */
   open: boolean;
+  /** Число справа от подписи пункта; ноль и отсутствие — метки нет. */
+  badges?: Partial<Record<NavKey, number>>;
 }
 
 export const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
@@ -33,7 +35,7 @@ export function navLabel(key: NavKey): string {
 }
 
 /** Left navigation rail: brand, nav items, and a footer identifying the signed-in admin. */
-export function Sidebar({ active, onChange, adminLabel, open }: SidebarProps) {
+export function Sidebar({ active, onChange, adminLabel, open, badges }: SidebarProps) {
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
       <div className="sidebar-brand">Смены</div>
@@ -47,6 +49,12 @@ export function Sidebar({ active, onChange, adminLabel, open }: SidebarProps) {
           >
             <span className="sidebar-nav-icon">{item.icon}</span>
             {item.label}
+            {badges?.[item.key] ? (
+              <>
+                <span className="sidebar-nav-badge" aria-hidden="true">{badges[item.key]! > 9 ? "9+" : badges[item.key]}</span>
+                <span className="visually-hidden">, не хватает людей: {badges[item.key]}</span>
+              </>
+            ) : null}
           </button>
         ))}
       </nav>

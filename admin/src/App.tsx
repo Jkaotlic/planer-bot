@@ -125,6 +125,11 @@ export function App() {
   /** Filters `ScheduleGrid`'s rows — see `PersonSearch` there for why `BalanceRail` doesn't get it. */
   const [scheduleQuery, setScheduleQuery] = useState("");
   const rosterFileInput = useRef<HTMLInputElement>(null);
+  /** Число нехватки на пункте «Расписание» сайдбара; `null` — не знаем (ручка упала). */
+  const [adminShortfall, setAdminShortfall] = useState<number | null>(null);
+  // Номер последнего запроса: медленный ответ на старый запрос не должен затереть
+  // число из нового — после правки записи два запроса идут почти подряд.
+  const shortfallSeq = useRef(0);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
@@ -185,6 +190,15 @@ export function App() {
     }
   }
 
+  /** Метка в сайдбаре — отдельным запросом: упал — метки нет, а расписание работает. */
+  function refreshAdminShortfall() {
+    const seq = ++shortfallSeq.current;
+    apiClient.getAdminShortfall().then(
+      (s) => { if (seq === shortfallSeq.current) setAdminShortfall(s.total); },
+      () => { if (seq === shortfallSeq.current) setAdminShortfall(null); },
+    );
+  }
+
   async function refreshEmployees() {
     setEmployees(await apiClient.getEmployees());
   }
@@ -225,6 +239,9 @@ export function App() {
   const scheduleShown = useRef(false);
   useEffect(() => {
     if (nav !== "schedule") return;
+    // И на первом показе: метке нужен свой первый запрос, а нормы могли
+    // поправить на «Видах смен» — число в сайдбаре считает по ним же.
+    refreshAdminShortfall();
     if (!scheduleShown.current) {
       scheduleShown.current = true;
       return;
@@ -268,6 +285,9 @@ export function App() {
     setShifts(next);
     setShiftsFrom(from);
     setCalendarDays(calendar);
+    // Все правки записей кончаются здесь (сохранение, диапазон, удаление,
+    // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки.
+    refreshAdminShortfall();
   }
 
   async function previewRosterFile(file: File) {
@@ -430,6 +450,7 @@ export function App() {
         }}
         adminLabel={viewer ? `${viewer.address} · админ` : "Админ"}
         open={menuOpen}
+        badges={adminShortfall ? { schedule: adminShortfall } : undefined}
       />
       {menuOpen && (
         <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />
