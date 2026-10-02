@@ -155,6 +155,8 @@ export function App() {
   // врёт нулём. Не в `AppData`/bootstrap намеренно — см. комментарий в
   // `loadBootstrap` ниже.
   const [collections, setCollections] = useState<WorkerCollection[] | null>(null);
+  // Нехватка людей для метки на «Админ». `null` — не загрузилась (или упала).
+  const [adminShortfall, setAdminShortfall] = useState<number | null>(null);
   // Отдельный от `reloadGate` гейт: сборы перечитываются в `reloadData`
   // независимо от bootstrap-запроса (см. там же), и общий счётчик с ним
   // выдавал бы тикеты не по своей, а по чужой последовательности вызовов.
@@ -166,6 +168,18 @@ export function App() {
   // тапа «Повторить» запускали бы два параллельных запроса, и на экране
   // остался бы тот, чей ответ пришёл позже, а не тот, что запущен позже.
   const cancelLoadRef = useRef<() => void>(() => {});
+
+  // Отдельно от bootstrap и после него — по той же причине, что сборы: один
+  // запрос за раз на HTTP/1.1 до релея. Упало — метки нет, экран не страдает.
+  const refreshAdminShortfall = useCallback(() => {
+    apiClient.getAdminShortfall().then(
+      (s) => setAdminShortfall(s.total),
+      (err: unknown) => {
+        console.error("Shortfall for badge failed:", err);
+        setAdminShortfall(null);
+      },
+    );
+  }, []);
 
   /**
    * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
@@ -208,7 +222,10 @@ export function App() {
         // сборы наперегонки делили бы то же узкое место. У админа «Сборы» —
         // консоль, а не список для отметки, метки там не бывает вовсе
         // (`tabBadges`), и звать ручку ради неё незачем.
-        if (me.isAdmin) return;
+        if (me.isAdmin) {
+          refreshAdminShortfall();
+          return;
+        }
         apiClient
           .getMyCollections()
           .then((cs) => {
@@ -222,7 +239,7 @@ export function App() {
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
       });
-  }, []);
+  }, [refreshAdminShortfall]);
 
   useEffect(() => {
     loadBootstrap();
@@ -419,7 +436,10 @@ export function App() {
     // причина, что у `loadBootstrap`. `me` не пришёл (bootstrap выше упал) —
     // делаем попытку по-старому: узнать админство не от кого, а метка сборов
     // важнее лишнего запроса при и так неудачном обновлении.
-    if (me?.isAdmin) return;
+    if (me?.isAdmin) {
+      refreshAdminShortfall();
+      return;
+    }
 
     // Отдельно от bootstrap-запроса выше, по той же причине, что в
     // `loadBootstrap`: правка (кто-то оплатил сбор, пришёл новый) должна
@@ -615,7 +635,7 @@ export function App() {
     );
   }
 
-  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin });
+  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin, adminShortfall });
 
   return (
     // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
@@ -742,6 +762,7 @@ export function App() {
             initialDate={adminDeepDate}
             onInitialDateUsed={consumeAdminDeepDate}
             today={data.today}
+            onScheduleChanged={refreshAdminShortfall}
           />
         </Suspense>
       )}

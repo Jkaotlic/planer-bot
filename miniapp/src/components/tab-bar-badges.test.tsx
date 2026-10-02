@@ -87,4 +87,25 @@ describe("TabBar — метки «ждёт тебя»", () => {
     expect(badge?.getAttribute("aria-hidden")).toBe("true");
     expect(swapsItem.textContent ?? "").toContain("ждёт ответа: 2");
   });
+
+  it("у «Админ» скринридер слышит «не хватает людей», а не «ждёт ответа»", async () => {
+    // Админская метка — не про ответ, а про дело; одна фраза на все вкладки врала бы.
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        createElement(
+          AppRoot,
+          null,
+          createElement(TabBar, {
+            active: "mine", onChange: () => {}, isAdmin: true, isObserver: false, canAnnounce: false, badges: { admin: 3 },
+          } as never),
+        ),
+      );
+    });
+    const text = itemFor(host, "Админ").textContent ?? "";
+    expect(text).toContain("не хватает людей: 3");
+    expect(text).not.toContain("ждёт ответа");
+  });
 });

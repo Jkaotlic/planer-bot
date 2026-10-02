@@ -118,7 +118,9 @@ function TabIcon({ tab, badges, children }: { tab: TabKey; badges?: Partial<Reco
           {/* Настоящий текст для скринридера — внутри пункта, визуально скрыт
               (`.visually-hidden`, не `display: none`): попадает в имя кнопки
               вместе с её видимой подписью («Обмены, ждёт ответа: 2»). */}
-          <span className="visually-hidden">, ждёт ответа: {count}</span>
+          <span className="visually-hidden">
+            {tab === "admin" ? `, не хватает людей: ${count}` : `, ждёт ответа: ${count}`}
+          </span>
         </>
       ) : null}
     </span>
