@@ -76,8 +76,8 @@ export function AudiencePicker({ value, onChange, disabled }: {
     onChange({ kind: "picked", employeeIds: [...next] });
   }
 
-  if (loadError) return <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{loadError}</div>;
-  if (!people) return <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>Загружаю команду…</div>;
+  if (loadError) return <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{loadError}</div>;
+  if (!people) return <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Загружаю команду…</div>;
 
   const reachable = preview.filter((p) => p.reachable).map((p) => p.displayName);
   // Отдельной строкой, а не молча: запускающий иначе узнаёт про недошедших
@@ -107,19 +107,19 @@ export function AudiencePicker({ value, onChange, disabled }: {
         <div>
           <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />
           {filterPeople(people, query).map((p) => (
-            <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}>
+            <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--app-text-meta)", padding: "4px 0", cursor: "pointer" }}>
               <input type="checkbox" checked={picked.has(p.id)} disabled={disabled} onChange={() => toggle(p.id)} />
               <span>{p.displayName}</span>
-              {!p.reachable && <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>— не привязан</span>}
+              {!p.reachable && <span style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>— не привязан</span>}
             </label>
           ))}
         </div>
       )}
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
         {reachable.length === 0 ? "Пока никого, кроме тебя." : `Уйдёт: ${reachable.join(", ")} и тебе`}
       </div>
       {unreachable.length > 0 && (
-        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 12.5 }}>
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
           Не дойдёт: {unreachable.join(", ")} — не привязан(а) к боту
         </div>
       )}

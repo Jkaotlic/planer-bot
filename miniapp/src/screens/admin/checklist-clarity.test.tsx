@@ -100,6 +100,17 @@ describe("«Чек-листы» в мини-аппе: уходит или нет
     expect(el.textContent).toContain("Дежурство с 07:00");
   });
 
+  it("пояснение шапки — своей строкой под названием, а не в одной строке с пилюлей", async () => {
+    const el = await mount(checklist({}));
+    const titleRow = el.querySelector(".checklist-badge")!.parentElement!;
+    expect(titleRow.textContent).toContain("Обход 47-го");
+    // В строке названия — только название и статус; «2 п. · Дежурство…» в узкую
+    // колонку рядом с ними рвалось на три строки.
+    expect(titleRow.textContent).not.toContain("Дежурство с 07:00");
+    expect(titleRow.textContent).not.toContain("1 п.");
+    expect(el.querySelector("button[aria-expanded]")!.textContent).toContain("1 п. · Дежурство с 07:00");
+  });
+
   it("заполненный, но никому не назначенный назван неуходящим", async () => {
     const el = await mount(checklist({ templateIds: [] }));
     expect(badgeOf(el)).toBe("Не уходит");

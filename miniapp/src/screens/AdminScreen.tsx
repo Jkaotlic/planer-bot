@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { AdminScheduleScreen } from "./admin/AdminScheduleScreen";
 import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
@@ -8,41 +8,27 @@ import { AdminJournal } from "./admin/AdminJournal";
 import { AdminSettings } from "./admin/AdminSettings";
 import { AdminGroups } from "./admin/AdminGroups";
 import { AdminChecklists } from "./admin/AdminChecklists";
-import { SectionChips, SectionPanel } from "../components/SectionChips";
-import type { AdminSection } from "./admin-section";
-
-const SECTIONS: readonly { key: AdminSection; label: string }[] = [
-  { key: "schedule", label: "Расписание" },
-  { key: "weekend", label: "Выходные" },
-  { key: "employees", label: "Работники" },
-  { key: "checklists", label: "Чек-листы" },
-  { key: "announce", label: "Анонсы" },
-  { key: "groups", label: "Группы" },
-  { key: "bugs", label: "Баги" },
-  { key: "journal", label: "Журнал" },
-  { key: "settings", label: "Настройки" },
-];
+import { AdminMenu } from "./admin/AdminMenu";
+import { Screen } from "../ui";
+import { adminSectionTitle, type AdminView } from "./admin-section";
 
 /**
- * The admin-only "Админ" tab: a scrolling chip row over the admin surfaces
- * (schedule / weekend marketplace / workers / collections / announcements /
- * journal / settings). Each sub-screen owns its own data-loading and
- * mutations — nothing is fetched until its section is first shown, so opening
- * the tab is cheap. Rendered only when `me.isAdmin` (see `App`), and every
- * call it makes is `requireAdmin`-guarded server-side.
+ * Вкладка «Админ»: меню разделов и сами разделы. Каждый раздел сам грузит свои
+ * данные и делает свои записи — пока раздел не открыт, ничего не запрашивается,
+ * поэтому открыть вкладку дёшево. Рисуется только при `me.isAdmin` (см. `App`), и
+ * каждый вызов оттуда проверяется сервером через `requireAdmin`.
+ *
+ * Что открыто — решает `App` (`view`), чтобы оно пережило уход на другую вкладку.
  */
 export function AdminScreen({
-  initialSection,
-  section: sectionProp,
-  onSectionChange,
+  view,
+  onViewChange,
   initialDate,
   onInitialDateUsed,
   today,
 }: {
-  initialSection?: AdminSection;
-  /** Управляемый раздел — `App` держит его, чтобы он пережил смену вкладки. */
-  section?: AdminSection;
-  onSectionChange?: (section: AdminSection) => void;
+  view: AdminView;
+  onViewChange: (view: AdminView) => void;
   initialDate?: string;
   /** Дата из ссылки показана — `App` уберёт её, чтобы не прилипла. */
   onInitialDateUsed?: () => void;
@@ -51,9 +37,6 @@ export function AdminScreen({
    *  «какой сегодня день» сами. */
   today: string;
 }) {
-  const [localSection, setLocalSection] = useState<AdminSection>(initialSection ?? "schedule");
-  const section = sectionProp ?? localSection;
-  const setSection = onSectionChange ?? setLocalSection;
   // Дата нужна графику только при первом монтировании (`useState` внутри);
   // сразу после — отдаём, что использовали.
   useEffect(() => {
@@ -61,22 +44,26 @@ export function AdminScreen({
     // Пустые зависимости намеренно: дата — одна, на монтирование.
   }, []);
 
-  return (
-    <div>
-      <SectionChips sections={SECTIONS} active={section} onChange={setSection} />
+  if (view === "menu") {
+    return (
+      <Screen title="Админ">
+        <AdminMenu onOpen={onViewChange} />
+      </Screen>
+    );
+  }
 
-      <SectionPanel active={section}>
-        {section === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} />}
-        {section === "weekend" && <AdminWeekendScreen today={today} />}
-        {section === "employees" && <AdminEmployeesScreen />}
-        {section === "checklists" && <AdminChecklists />}
-        {section === "announce" && <AdminAnnounce />}
-        {section === "groups" && <AdminGroups />}
-        {section === "bugs" && <AdminBugs />}
-        {section === "journal" && <AdminJournal today={today} />}
-        {section === "settings" && <AdminSettings />}
-      </SectionPanel>
-    </div>
+  return (
+    <Screen title={adminSectionTitle(view)} onBack={() => onViewChange("menu")} backLabel="Разделы" tabBar>
+      {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} />}
+      {view === "weekend" && <AdminWeekendScreen today={today} />}
+      {view === "employees" && <AdminEmployeesScreen />}
+      {view === "checklists" && <AdminChecklists />}
+      {view === "announce" && <AdminAnnounce />}
+      {view === "groups" && <AdminGroups />}
+      {view === "bugs" && <AdminBugs />}
+      {view === "journal" && <AdminJournal today={today} />}
+      {view === "settings" && <AdminSettings />}
+    </Screen>
   );
 }
 

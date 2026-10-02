@@ -7,7 +7,7 @@ import {
   formatMoney,
   isCollectionActive,
 } from "@planer/shared";
-import { Button, Cell, Input, List, Placeholder, Section, Spinner, Switch, Textarea } from "@telegram-apps/telegram-ui";
+import { Cell, Input, Placeholder, Spinner, Switch, Textarea } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
 import { RecipientGroupField } from "../../components/RecipientGroupField";
 import {
@@ -20,11 +20,10 @@ import {
   type PaymentRow,
   type UpcomingBirthday,
 } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
-import { ScreenScroll } from "../../components/ScreenScroll";
 import { initialsOf, personPalette } from "../../lib/people";
 import { withNotifyNotice } from "../../lib/shift";
+import { ActionButton, Card, Group, Hint, StatusPill } from "../../ui";
 
 /**
  * «Сборы» (admin, mobile): деньги, которые команда скидывает — на день
@@ -56,11 +55,11 @@ export type StatusTone = "sent" | "ready" | "pending";
  * Где сбор, в одном слове.
  *
  * Закрытый читается закрытым, а не «Разослано»: после закрытия в нём уже
- * ничего не происходит, и чип про рассылку выглядел бы как приглашение
+ * ничего не происходит, и пилюля про рассылку выглядела бы как приглашение
  * дожать.
  */
 export function statusOf(row: Pick<CollectionRow, "collection" | "status" | "active">): { label: string; tone: StatusTone } {
-  // Короче консольных формулировок намеренно: на 390 чип делит строку с
+  // Короче консольных формулировок намеренно: на 390 пилюля делит строку с
   // поводом и датой, и «Готово к отправке» роняло вторую строку.
   if (!row.active) return { label: "Закрыт", tone: "pending" };
   if (row.status === "sent") return { label: `Разослано · ${row.collection.sentCount}`, tone: "sent" };
@@ -69,7 +68,7 @@ export function statusOf(row: Pick<CollectionRow, "collection" | "status" | "act
 }
 
 /**
- * Тот же чип для раунда дня рождения из списка ближайших.
+ * Та же пилюля для раунда дня рождения из списка ближайших.
  *
  * У списка ближайших нет посчитанной сервером строки — там лежит сама запись
  * (или ничего, пока раунд не сохранён ни разу). Статус и активность считаются
@@ -146,20 +145,39 @@ export function sendButtonLabel(preview: CollectionPreview): string {
   return `Напомнить ещё раз${when}`;
 }
 
-const TONE_COLOR: Record<StatusTone, string> = {
-  sent: "var(--tgui--link_color)",
-  ready: "var(--tgui--link_color)",
-  pending: "var(--tgui--hint_color)",
+/**
+ * Тон пилюли по статусу: «Готово» ждёт кнопки админа (`need`), «Разослано» —
+ * улажено (`ok`), а «Нет ссылки» и «Закрыт» ждут чего-то ещё или уже ничего не
+ * ждут (`wait`). Слова статуса остаются за `statusOf`: тон — только вид.
+ */
+const TONE_PILL: Record<StatusTone, "need" | "wait" | "ok"> = {
+  sent: "ok",
+  ready: "need",
+  pending: "wait",
 };
 
+const ERROR_STYLE = { color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" } as const;
+const MESSAGE_BOX_STYLE = {
+  padding: "10px 12px",
+  borderRadius: "var(--app-radius-control)",
+  background: "var(--tgui--secondary_bg_color)",
+  fontSize: "var(--app-text-meta)",
+  lineHeight: 1.5,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+} as const;
+const FIELD_LABEL_STYLE = { fontSize: "var(--app-text-meta)", fontWeight: 600, color: "var(--tgui--hint_color)" } as const;
+
+// Общий вид нативных полей формы сбора: даты и суммы.
 const DATE_INPUT_STYLE = {
   padding: "8px 10px",
-  borderRadius: 8,
+  minHeight: "var(--app-tap)",
+  borderRadius: "var(--app-radius-control)",
   border: "1px solid var(--tgui--outline)",
   background: "var(--tgui--secondary_bg_color)",
   color: "var(--tgui--text_color)",
   font: "inherit",
-  fontSize: 13.5,
+  fontSize: "var(--app-text-body)",
   // Нативное поле даты имеет собственную минимальную ширину и в узкой колонке
   // выпирало за край: на 320px форма получала горизонтальную прокрутку страницы.
   minWidth: 0,
@@ -228,15 +246,9 @@ export function AdminCollections({
 
   if (!birthdays) {
     return (
-      <ScreenScroll>
-        <List>
-          <Section header="Сборы">
-            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-              <Spinner size="m" />
-            </div>
-          </Section>
-        </List>
-      </ScreenScroll>
+      <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+        <Spinner size="m" />
+      </div>
     );
   }
 
@@ -264,127 +276,111 @@ export function AdminCollections({
     void reloadEverything();
   };
 
+  // Корня-экрана здесь нет: заголовок «Сборы», поля и резерв под таб-бар даёт
+  // `Screen` во вкладке (`CollectionsTabScreen`), а блоки идут прямо друг за другом.
   return (
-    <ScreenScroll>
-      <List>
-        {/* Сообщения о том, что только что произошло, — над всеми списками:
-            они одинаково относятся и к сбору, и к дню рождения, а внутри
-            секции ДР оказывались ниже сбора, о котором рассказывают. */}
-        {(error || notice) && (
-          <Section>
-            <CardStack>
-              {error && (
-                <CardShell>
-                  <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-                </CardShell>
-              )}
-              {notice && (
-                <CardShell>
-                  <div style={{ fontSize: 13.5 }}>{notice}</div>
-                </CardShell>
-              )}
-            </CardStack>
-          </Section>
+    <>
+      {/* Сообщения о том, что только что произошло, — над всеми списками:
+          они одинаково относятся и к сбору, и к дню рождения, а внутри
+          секции ДР оказывались ниже сбора, о котором рассказывают. */}
+      {error && (
+        <Card>
+          <div style={ERROR_STYLE}>{error}</div>
+        </Card>
+      )}
+      {notice && (
+        <Card>
+          <div style={{ fontSize: "var(--app-text-meta)" }}>{notice}</div>
+        </Card>
+      )}
+
+      {/* Идущие сборы — первым делом. Экран открывают, чтобы посмотреть на
+          них или разослать дожим, а календарь дней рождения на год вперёд —
+          справка, за которой сюда не ходят. Порядок тот же, что в консоли:
+          один экран на двух фронтах не должен читаться по-разному. */}
+      <Group header="Идут сборы">
+        <CollectionsList
+          rows={openRows}
+          error={rowsError}
+          // Не «сборов пока не было», когда они были и все закрыты: список
+          // ниже прямо противоречил бы этой фразе.
+          emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
+          employees={employees}
+          viewerId={viewerId}
+          openId={openCollection}
+          onToggle={toggleCollection}
+          onChanged={reloadEverything}
+          onSent={handleSent}
+          onDeleted={handleDeleted}
+        />
+      </Group>
+
+      <Group header="Новый сбор">
+        <NewCollectionForm
+          employees={employees}
+          viewerId={viewerId}
+          onCreated={async () => {
+            setNotice(null);
+            await reloadEverything();
+          }}
+        />
+      </Group>
+
+      <Group header="Ближайшие дни рождения">
+        <Hint>
+          За неделю до дня рождения бот напишет админам. Пришли ему ссылку на сбор — он привяжет её сам
+          и за три дня разошлёт команде, кроме именинника. Не хочешь автоматом — выключи тумблер на карточке
+          или нажми «Разослать» раньше.
+        </Hint>
+
+        {birthdays.length === 0 && (
+          <Placeholder description="Ни у кого не указан день рождения — проставь даты в разделе «Работники»." />
         )}
 
-        {/* Идущие сборы — первым делом. Экран открывают, чтобы посмотреть на
-            них или разослать дожим, а календарь дней рождения на год вперёд —
-            справка, за которой сюда не ходят. Порядок тот же, что в консоли:
-            один экран на двух фронтах не должен читаться по-разному. */}
-        <Section header="Идут сборы">
-          <CardStack>
-            <CollectionsList
-              rows={openRows}
-              error={rowsError}
-              // Не «сборов пока не было», когда они были и все закрыты: список
-              // ниже прямо противоречил бы этой фразе.
-              emptyLabel={closedRows.length > 0 ? "Открытых сборов нет — закрытые ниже." : "Сборов пока не было."}
-              employees={employees}
-              viewerId={viewerId}
-              openId={openCollection}
-              onToggle={toggleCollection}
-              onChanged={reloadEverything}
-              onSent={handleSent}
-              onDeleted={handleDeleted}
-            />
-          </CardStack>
-        </Section>
+        {birthdays.map((birthday) => (
+          <BirthdayCard
+            key={birthday.employeeId}
+            birthday={birthday}
+            today={today}
+            open={openBirthday === birthday.employeeId}
+            onToggle={() => {
+              setNotice(null);
+              setOpenBirthday(openBirthday === birthday.employeeId ? null : birthday.employeeId);
+            }}
+            onChanged={reloadEverything}
+            onSent={(delivered, intended) => {
+              setOpenBirthday(null);
+              setNotice(
+                withNotifyNotice(
+                  `Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`,
+                  { delivered, intended },
+                ),
+              );
+              void reloadEverything();
+            }}
+          />
+        ))}
+      </Group>
 
-        <Section header="Новый сбор">
-          <CardStack>
-            <NewCollectionForm
-              employees={employees}
-              viewerId={viewerId}
-              onCreated={async () => {
-                setNotice(null);
-                await reloadEverything();
-              }}
-            />
-          </CardStack>
-        </Section>
-
-        <Section header="Ближайшие дни рождения">
-          <CardStack>
-            <CardShell>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                За неделю до дня рождения бот напишет админам. Пришли ему ссылку на сбор — он привяжет её сам
-                и за три дня разошлёт команде, кроме именинника. Не хочешь автоматом — выключи тумблер на карточке
-                или нажми «Разослать» раньше.
-              </div>
-            </CardShell>
-
-            {birthdays.length === 0 && (
-              <Placeholder description="Ни у кого не указан день рождения — проставь даты в разделе «Работники»." />
-            )}
-
-            {birthdays.map((birthday) => (
-              <BirthdayCard
-                key={birthday.employeeId}
-                birthday={birthday}
-                today={today}
-                open={openBirthday === birthday.employeeId}
-                onToggle={() => {
-                  setNotice(null);
-                  setOpenBirthday(openBirthday === birthday.employeeId ? null : birthday.employeeId);
-                }}
-                onChanged={reloadEverything}
-                onSent={(delivered, intended) => {
-                  setOpenBirthday(null);
-                  setNotice(
-                    withNotifyNotice(
-                      `Разослано ${recipientsPhrase(delivered)}. ${birthday.displayName} — не в списке.`,
-                      { delivered, intended },
-                    ),
-                  );
-                  void reloadEverything();
-                }}
-              />
-            ))}
-          </CardStack>
-        </Section>
-
-        {/* Закрытые не мешают живым, но и не пропадают: их ещё открывают заново. */}
-        <CollapsibleArchive title="Закрытые" items={closedRows}>
-          {(closed) => (
-            <CardStack>
-              <CollectionsList
-                rows={closed as CollectionRow[]}
-                // Ошибка загрузки уже показана в секции выше — второй раз тем же текстом незачем.
-                error={null}
-                emptyLabel="Сборов пока не было."
-                employees={employees}
-                viewerId={viewerId}
-                openId={openCollection}
-                onToggle={toggleCollection}
-                onChanged={reloadEverything}
-                onSent={handleSent}
-                onDeleted={handleDeleted}
-              />
-            </CardStack>
-          )}
-        </CollapsibleArchive>
-      </List>
-    </ScreenScroll>
+      {/* Закрытые не мешают живым, но и не пропадают: их ещё открывают заново. */}
+      <CollapsibleArchive title="Закрытые" items={closedRows}>
+        {(closed) => (
+          <CollectionsList
+            rows={closed as CollectionRow[]}
+            // Ошибка загрузки уже показана в секции выше — второй раз тем же текстом незачем.
+            error={null}
+            emptyLabel="Сборов пока не было."
+            employees={employees}
+            viewerId={viewerId}
+            openId={openCollection}
+            onToggle={toggleCollection}
+            onChanged={reloadEverything}
+            onSent={handleSent}
+            onDeleted={handleDeleted}
+          />
+        )}
+      </CollapsibleArchive>
+    </>
   );
 }
 
@@ -456,16 +452,16 @@ function NewCollectionForm({
 
   if (!open) {
     return (
-      <CardShell>
-        <Button size="s" mode="bezeled" stretched onClick={() => setOpen(true)}>
+      <Card>
+        <ActionButton compact stretched onClick={() => setOpen(true)}>
           + Новый сбор
-        </Button>
-      </CardShell>
+        </ActionButton>
+      </Card>
     );
   }
 
   return (
-    <CardShell>
+    <Card>
       <Input
         header="Повод"
         placeholder="Например, Свадьба"
@@ -503,24 +499,25 @@ function NewCollectionForm({
         onMessageText={setMessageText}
       />
 
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
+      {error && <div style={ERROR_STYLE}>{error}</div>}
 
+      {/* Единственная primary формы. */}
       <div style={{ display: "flex", gap: 8 }}>
-        <Button
-          size="s"
-          mode="filled"
+        <ActionButton
+          kind="primary"
+          compact
           stretched
           loading={busy}
           disabled={!canCreate(title) || busy}
           onClick={() => void handleCreate()}
         >
           Создать
-        </Button>
-        <Button size="s" mode="gray" disabled={busy} onClick={() => { reset(); setOpen(false); }}>
+        </ActionButton>
+        <ActionButton compact disabled={busy} onClick={() => { reset(); setOpen(false); }}>
           Отмена
-        </Button>
+        </ActionButton>
       </div>
-    </CardShell>
+    </Card>
   );
 }
 
@@ -570,9 +567,11 @@ function CollectionFields({
 }) {
   return (
     <>
-      <div style={{ display: "flex", gap: 8 }}>
-        <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)" }}>Дата события</span>
+      {/* `wrap` и база 140px: две нативные даты в 126px каждая на 320px теряли
+          «yyyy» под значком календаря; узкий экран — друг под другом. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <label style={{ flex: "1 1 140px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={FIELD_LABEL_STYLE}>Дата события</span>
           <input
             type="date"
             value={eventDate}
@@ -582,8 +581,8 @@ function CollectionFields({
             onChange={(e) => onEventDate(e.target.value)}
           />
         </label>
-        <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)" }}>Скинуться до</span>
+        <label style={{ flex: "1 1 140px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={FIELD_LABEL_STYLE}>Скинуться до</span>
           <input
             type="date"
             value={deadline}
@@ -595,29 +594,36 @@ function CollectionFields({
         </label>
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <Input
-            header="По сколько"
+      {/* Подпись над полем, как у дат выше, а не плавающий заголовок `Input`:
+          тот на половине ширины режет лейбл до «По ск…» и «Н…» (замер на 320px),
+          и два вида полей в одной форме выглядели как две разные формы. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <label style={{ flex: "1 1 120px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={FIELD_LABEL_STYLE}>По сколько</span>
+          <input
             type="number"
             inputMode="numeric"
             placeholder="₽"
             value={amountPerPerson}
             disabled={busy}
+            aria-label="По сколько"
+            style={DATE_INPUT_STYLE}
             onChange={(e) => onAmountPerPerson(e.target.value)}
           />
-        </div>
-        <div style={{ flex: 1 }}>
-          <Input
-            header="Нужно всего"
+        </label>
+        <label style={{ flex: "1 1 120px", minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={FIELD_LABEL_STYLE}>Нужно всего</span>
+          <input
             type="number"
             inputMode="numeric"
             placeholder="₽"
             value={totalGoal}
             disabled={busy}
+            aria-label="Нужно всего"
+            style={DATE_INPUT_STYLE}
             onChange={(e) => onTotalGoal(e.target.value)}
           />
-        </div>
+        </label>
       </div>
 
       {/* Заголовки короткие: на телефоне `Input` режет свой лейбл многоточием,
@@ -678,9 +684,9 @@ function CollectionsList({
   onSent: (row: CollectionRow, delivered: number, intended: number) => void;
   onDeleted: () => void;
 }) {
-  if (error) return <CardShell><div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div></CardShell>;
-  if (!rows) return <CardShell><Spinner size="s" /></CardShell>;
-  if (rows.length === 0) return <CardShell><div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>{emptyLabel}</div></CardShell>;
+  if (error) return <Card><div style={ERROR_STYLE}>{error}</div></Card>;
+  if (!rows) return <Card><Spinner size="s" /></Card>;
+  if (rows.length === 0) return <Card><Hint>{emptyLabel}</Hint></Card>;
 
   return (
     <>
@@ -699,6 +705,21 @@ function CollectionsList({
       ))}
     </>
   );
+}
+
+/** Карточка раскрытого сбора, в которой показывается отказ его действия. */
+type ErrorPlace = "save" | "send" | "close";
+
+/**
+ * Подпись сверху карточки раскрытого сбора: чей он.
+ *
+ * Раскрытый сбор — несколько соседних карточек (форма, рассылка, отметки,
+ * закрытие) на том же расстоянии друг от друга, что и карточка следующего
+ * сбора. Кнопка, которая пишет всей команде или удаляет, без названия не
+ * говорит, к какому сбору относится, — и прокрутившему вниз остаётся гадать.
+ */
+function OwnerLine({ children }: { children: string }) {
+  return <p className="ui-hint ui-item__owner">{children}</p>;
 }
 
 /** Дедлайн главнее даты события — как в правиле активности. */
@@ -749,54 +770,51 @@ function CollectionCard({
     }
   }
 
+  // Открытый сбор — несколько карточек подряд, а не одна длинная: в одной
+  // карточке «Собрали», «Сохранить» и «Да, разослать» были бы тремя главными
+  // кнопками, а правило — одна на карточку. Строка сбора остаётся первой.
   return (
-    <CardShell>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>{cardSubject(row)}</div>
-          {subtitle && <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>{subtitle}</div>}
+    <div className={open ? "ui-item ui-item--open" : "ui-item"}>
+      <Card>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)", overflowWrap: "anywhere" }}>{cardSubject(row)}</div>
+            {subtitle && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{subtitle}</div>}
+          </div>
+          <span style={{ flex: "none" }}>
+            <StatusPill tone={TONE_PILL[status.tone]}>{status.label}</StatusPill>
+          </span>
         </div>
-        <span style={{ flex: "none", fontSize: 12, fontWeight: 600, color: TONE_COLOR[status.tone], textAlign: "right" }}>
-          {status.label}
-        </span>
-      </div>
 
-      {row.collection.collectUrl && <CopyableLink url={row.collection.collectUrl} />}
+        {row.collection.collectUrl && <CopyableLink url={row.collection.collectUrl} />}
 
-      {/* Равные доли, а не «одна растянута, вторая как получится»: `stretched`
-          у первой кнопки забирал всю строку, и «Собрали» ужималось до «Соб…». */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <Button
-          size="s"
-          mode={open ? "gray" : "bezeled"}
-          stretched
-          style={{ flex: "1 1 0", minWidth: 0 }}
-          onClick={onToggle}
-        >
-          {open ? "Свернуть" : "Открыть"}
-        </Button>
-        {/* «Собрали» прямо в строке: закрыть сбор — самое частое, что с ним
-            делают, и ради одного нажатия карточку раскрывать незачем. Внутри
-            карточки кнопка остаётся — там она про пару «закрыть / открыть
-            заново». Закрытый сбор её здесь не показывает: открывать заново —
-            редкое действие, и место в строке оно не заслуживает. */}
-        {row.collection.closedAt == null && (
-          <Button
-            size="s"
-            mode="filled"
-            stretched
-            style={{ flex: "1 1 0", minWidth: 0 }}
-            loading={closing}
-            disabled={closing}
-            onClick={() => void close()}
-          >
-            Собрали
-          </Button>
-        )}
-      </div>
-      {closeError && (
-        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{closeError}</div>
-      )}
+        {/* Равные доли: `stretched` у `ActionButton` — `flex: 1 1 0`, и «Собрали»
+            не ужимается до «Соб…», как ужималось при одной растянутой кнопке. */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <ActionButton compact stretched aria-expanded={open} onClick={onToggle}>
+            {open ? "Свернуть" : "Открыть"}
+          </ActionButton>
+          {/* «Собрали» прямо в строке: закрыть сбор — самое частое, что с ним
+              делают, и ради одного нажатия карточку раскрывать незачем. Внутри
+              раскрытого сбора кнопка остаётся — там она про пару «закрыть /
+              открыть заново». Закрытый сбор её здесь не показывает: открывать
+              заново — редкое действие, и место в строке оно не заслуживает.
+              Единственная primary этой карточки. */}
+          {row.collection.closedAt == null && (
+            <ActionButton
+              kind="primary"
+              compact
+              stretched
+              loading={closing}
+              disabled={closing}
+              onClick={() => void close()}
+            >
+              Собрали
+            </ActionButton>
+          )}
+        </div>
+        {closeError && <div style={ERROR_STYLE}>{closeError}</div>}
+      </Card>
 
       {open && (
         <CollectionEditor
@@ -808,7 +826,7 @@ function CollectionCard({
           onDeleted={onDeleted}
         />
       )}
-    </CardShell>
+    </div>
   );
 }
 
@@ -839,6 +857,10 @@ function CollectionEditor({
   const [recipientGroupId, setRecipientGroupId] = useState<number | null>(collection.recipientGroupId);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** В какой карточке нажали кнопку, давшую `error`: раскрытый сбор — несколько
+   *  карточек, и сообщение об отказе «Да, разослать» или «Удалить сбор» одной
+   *  карточкой выше, под «Сохранить», читается как отказ сохранения. */
+  const [errorAt, setErrorAt] = useState<ErrorPlace>("save");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -858,6 +880,7 @@ function CollectionEditor({
       setPreview(await apiClient.getCollectionPreview(collection.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
+      setErrorAt("save");
     }
   }
 
@@ -891,6 +914,7 @@ function CollectionEditor({
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setErrorAt("save");
     } finally {
       setSaving(false);
     }
@@ -905,6 +929,7 @@ function CollectionEditor({
       onSent(result.delivered, result.intended);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось разослать");
+      setErrorAt("send");
       setConfirming(false);
     } finally {
       setSending(false);
@@ -919,6 +944,7 @@ function CollectionEditor({
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось закрыть сбор");
+      setErrorAt("close");
     } finally {
       setClosing(false);
     }
@@ -932,110 +958,123 @@ function CollectionEditor({
       onDeleted();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось удалить сбор");
+      setErrorAt("close");
       setDeleting(false);
     }
   }
 
+  // Каждый блок — своя карточка, чтобы в каждой была не больше одной главной
+  // кнопки: «Сохранить» у формы, «Да, разослать» у рассылки, «Да, напомнить» у
+  // дожима. «Сохранить» — всегда главная кнопка своей карточки: взведённая
+  // рассылка живёт в другой карточке, и две главные на одной не встречаются.
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-      {!isBirthday && (
-        <>
-          <Input
-            header="Повод"
-            value={title}
-            disabled={busy || subjectFrozen}
-            onChange={(e) => { setTitle(e.target.value); setConfirming(false); }}
-          />
-          <PersonPicker
-            label="Кому"
-            people={employees.filter((e) => e.isActive && e.id !== viewerId)}
-            value={employeeId}
-            onChange={(id) => { setEmployeeId(id); setConfirming(false); }}
-            emptyOptionLabel="Общий сбор — на всех"
-            disabled={busy || subjectFrozen}
-          />
-          {subjectFrozen && (
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, lineHeight: 1.4 }}>
-              Повод и виновника менять уже нельзя: команда прочитала, на что скидывается.
-            </div>
-          )}
-        </>
-      )}
+    <>
+      <Card data-testid="collection-form-card">
+        {!isBirthday && (
+          <>
+            <Input
+              header="Повод"
+              value={title}
+              disabled={busy || subjectFrozen}
+              onChange={(e) => { setTitle(e.target.value); setConfirming(false); }}
+            />
+            <PersonPicker
+              label="Кому"
+              people={employees.filter((e) => e.isActive && e.id !== viewerId)}
+              value={employeeId}
+              onChange={(id) => { setEmployeeId(id); setConfirming(false); }}
+              emptyOptionLabel="Общий сбор — на всех"
+              disabled={busy || subjectFrozen}
+            />
+            {subjectFrozen && (
+              <Hint>Повод и виновника менять уже нельзя: команда прочитала, на что скидывается.</Hint>
+            )}
+          </>
+        )}
 
-      <RecipientGroupField
-        value={recipientGroupId}
-        onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
-        sent={collection.sendCount > 0}
-        knownName={preview?.recipientGroupName}
-        disabled={busy}
-      />
+        <RecipientGroupField
+          value={recipientGroupId}
+          onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
+          sent={collection.sendCount > 0}
+          knownName={preview?.recipientGroupName}
+          disabled={busy}
+        />
 
-      <CollectionFields
-        busy={busy}
-        eventDate={eventDate}
-        deadline={deadline}
-        amountPerPerson={amountPerPerson}
-        totalGoal={totalGoal}
-        collectUrl={collectUrl}
-        messageText={messageText}
-        onEventDate={(v) => { setEventDate(v); setConfirming(false); }}
-        onDeadline={(v) => { setDeadline(v); setConfirming(false); }}
-        onAmountPerPerson={(v) => { setAmountPerPerson(v); setConfirming(false); }}
-        onTotalGoal={(v) => { setTotalGoal(v); setConfirming(false); }}
-        onCollectUrl={(v) => { setCollectUrl(v); setConfirming(false); }}
-        onMessageText={(v) => { setMessageText(v); setConfirming(false); }}
-      />
+        <CollectionFields
+          busy={busy}
+          eventDate={eventDate}
+          deadline={deadline}
+          amountPerPerson={amountPerPerson}
+          totalGoal={totalGoal}
+          collectUrl={collectUrl}
+          messageText={messageText}
+          onEventDate={(v) => { setEventDate(v); setConfirming(false); }}
+          onDeadline={(v) => { setDeadline(v); setConfirming(false); }}
+          onAmountPerPerson={(v) => { setAmountPerPerson(v); setConfirming(false); }}
+          onTotalGoal={(v) => { setTotalGoal(v); setConfirming(false); }}
+          onCollectUrl={(v) => { setCollectUrl(v); setConfirming(false); }}
+          onMessageText={(v) => { setMessageText(v); setConfirming(false); }}
+        />
 
-      <Button size="s" mode="filled" stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
-        Сохранить
-      </Button>
+        <ActionButton kind="primary" compact stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
+          Сохранить
+        </ActionButton>
 
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
+        {error && errorAt === "save" && <div style={ERROR_STYLE}>{error}</div>}
+      </Card>
 
       {preview && (
-        <SendBlock
-          preview={preview}
-          personName={row.personName}
-          busy={busy}
-          sending={sending}
-          confirming={confirming}
-          onArm={() => setConfirming(true)}
-          onCancel={() => setConfirming(false)}
-          onSend={() => void handleSend()}
-        />
+        <Card data-testid="collection-send-card">
+          <OwnerLine>{cardSubject(row)}</OwnerLine>
+          <SendBlock
+            preview={preview}
+            personName={row.personName}
+            busy={busy}
+            sending={sending}
+            confirming={confirming}
+            onArm={() => setConfirming(true)}
+            onCancel={() => setConfirming(false)}
+            onSend={() => void handleSend()}
+          />
+          {error && errorAt === "send" && <div style={ERROR_STYLE}>{error}</div>}
+        </Card>
       )}
 
-      <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} />
+      <PaymentsBlock collectionId={collection.id} canRemind={collection.sendCount > 0} subject={cardSubject(row)} />
 
-      <Button
-        size="s"
-        mode="bezeled"
-        stretched
-        loading={closing}
-        disabled={busy}
-        onClick={() => void handleClose(collection.closedAt == null)}
-      >
-        {collection.closedAt == null ? "Собрали, закрыть" : "Открыть заново"}
-      </Button>
-
-      {/* Удалить можно только то, о чём никто ещё не слышал: после рассылки
-          люди уже получили письмо, и строка журнала про неё должна остаться
-          осмысленной. Раунд дня рождения не удаляется вовсе — он выведен из
-          даты рождения, и следующий проход завёл бы его заново. */}
-      {!isBirthday && collection.sendCount === 0 && (
-        <Button
-          size="s"
-          mode="plain"
+      <Card data-testid="collection-close-card">
+        <OwnerLine>{cardSubject(row)}</OwnerLine>
+        <ActionButton
+          compact
           stretched
-          loading={deleting}
+          loading={closing}
           disabled={busy}
-          style={{ color: "var(--tgui--destructive_text_color)" }}
-          onClick={() => void handleDelete()}
+          onClick={() => void handleClose(collection.closedAt == null)}
         >
-          Удалить сбор
-        </Button>
-      )}
-    </div>
+          {collection.closedAt == null ? "Собрали, закрыть" : "Открыть заново"}
+        </ActionButton>
+
+        {/* Удалить можно только то, о чём никто ещё не слышал: после рассылки
+            люди уже получили письмо, и строка журнала про неё должна остаться
+            осмысленной. Раунд дня рождения не удаляется вовсе — он выведен из
+            даты рождения, и следующий проход завёл бы его заново. */}
+        {!isBirthday && collection.sendCount === 0 && (
+          <ActionButton
+            kind="quiet"
+            danger
+            compact
+            stretched
+            loading={deleting}
+            disabled={busy}
+            onClick={() => void handleDelete()}
+          >
+            Удалить сбор
+          </ActionButton>
+        )}
+
+        {error && errorAt === "close" && <div style={ERROR_STYLE}>{error}</div>}
+      </Card>
+    </>
   );
 }
 
@@ -1050,7 +1089,7 @@ function CollectionEditor({
  * Грузится при раскрытии карточки, а не вместе со списком: сборов бывает
  * десяток, а раскрыт один.
  */
-function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canRemind: boolean }) {
+function PaymentsBlock({ collectionId, canRemind, subject }: { collectionId: number; canRemind: boolean; subject: string }) {
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [paidCount, setPaidCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -1106,10 +1145,13 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
   }
 
   return (
-    <>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
+    <Card>
+      <OwnerLine>{subject}</OwnerLine>
+      <div style={FIELD_LABEL_STYLE}>
         Отметились {paidCount} из {total}
       </div>
+      {/* Строки остаются нажимаемыми `button`, а не галочками: это не форма, а
+          отметка «за человека», и тап по строке — то же действие, что было. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {rows.map((row) => (
           <button
@@ -1119,17 +1161,18 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
             disabled={busy}
             onClick={() => toggle(row)}
             style={{
-              display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
-              borderRadius: 8, border: "none", background: "var(--tgui--secondary_bg_color)",
-              fontSize: 13.5, textAlign: "left", color: "var(--tgui--text_color)", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 10px",
+              minHeight: "var(--app-tap)", borderRadius: "var(--app-radius-control)", border: "none",
+              background: "var(--tgui--secondary_bg_color)", font: "inherit",
+              fontSize: "var(--app-text-body)", textAlign: "left", color: "var(--tgui--text_color)", cursor: "pointer",
             }}
           >
             <span style={{ width: 16 }}>{row.paid ? "✓" : "·"}</span>
-            <span style={{ flex: 1, minWidth: 0 }}>{row.displayName}</span>
+            <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{row.displayName}</span>
             {/* «Я отметился» и «за меня отметили» — разные утверждения, и на
                 экране это должно быть видно. */}
             {row.markedByAdmin && (
-              <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>отметил админ</span>
+              <span style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>отметил админ</span>
             )}
           </button>
         ))}
@@ -1137,35 +1180,30 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
 
       {confirming ? (
         <>
-          <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
             Напомнить {unpaidCount === 1 ? "одному человеку" : `${unpaidCount} коллегам`}? Сообщения уйдут сразу.
           </div>
-          <Button size="s" mode="filled" stretched loading={busy} disabled={busy} onClick={remind}>
+          <ActionButton kind="primary" compact stretched loading={busy} disabled={busy} onClick={remind}>
             Да, напомнить
-          </Button>
-          <Button size="s" mode="gray" stretched disabled={busy} onClick={() => setConfirming(false)}>
+          </ActionButton>
+          <ActionButton compact stretched disabled={busy} onClick={() => setConfirming(false)}>
             Отмена
-          </Button>
+          </ActionButton>
         </>
       ) : (
-        <Button
-          size="s"
-          mode="bezeled"
+        <ActionButton
+          compact
           stretched
           disabled={busy || unpaidCount === 0 || !canRemind}
           onClick={() => setConfirming(true)}
         >
           Напомнить не сдавшим ({unpaidCount})
-        </Button>
+        </ActionButton>
       )}
-      {!canRemind && (
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-          Сбор ещё не рассылали — дожимать нечего.
-        </div>
-      )}
-      {notice && <div style={{ fontSize: 13, lineHeight: 1.45 }}>{notice}</div>}
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
-    </>
+      {!canRemind && <Hint>Сбор ещё не рассылали — дожимать нечего.</Hint>}
+      {notice && <div style={{ fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>{notice}</div>}
+      {error && <div style={ERROR_STYLE}>{error}</div>}
+    </Card>
   );
 }
 
@@ -1197,19 +1235,12 @@ function SendBlock({
 }) {
   return (
     <>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>Уйдёт вот это:</div>
+      <div style={FIELD_LABEL_STYLE}>Уйдёт вот это:</div>
       {/* Показано так, как придёт — те же переносы, и длинная ссылка переносится,
           а не выталкивает карточку за край экрана. */}
-      <div
-        style={{
-          padding: "10px 12px", borderRadius: 10, background: "var(--tgui--secondary_bg_color)",
-          fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
-        }}
-      >
-        {preview.message}
-      </div>
+      <div style={MESSAGE_BOX_STYLE}>{preview.message}</div>
 
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
+      <div style={FIELD_LABEL_STYLE}>
         Получат {recipientsSubject(preview.recipients.length)}
         {preview.recipientGroupName
           ? ` — группа «${preview.recipientGroupName}»${personName ? `, кроме ${personName}` : ""}:`
@@ -1217,23 +1248,25 @@ function SendBlock({
             ? ` — все, кроме ${personName}:`
             : " — вся команда:"}
       </div>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
+      <Hint>
         {preview.recipients.length === 0
           ? "Некому: ни у кого не привязан Telegram."
           : preview.recipients.map((person) => person.displayName).join(", ")}
-      </div>
+      </Hint>
 
       {confirming ? (
         <>
-          <div style={{ fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
             Отправить {recipientsPhrase(preview.recipients.length)}? Отменить будет нельзя — сообщения уйдут сразу.
           </div>
-          <Button size="s" mode="filled" stretched loading={sending} disabled={sending} onClick={onSend}>
+          {/* Единственная primary блока — и только на втором шаге: первый тап
+              лишь взводит, так что случайно разослать всем одним касанием нельзя. */}
+          <ActionButton kind="primary" compact stretched loading={sending} disabled={sending} onClick={onSend}>
             {sending ? "Отправляю…" : "Да, разослать"}
-          </Button>
-          <Button size="s" mode="gray" stretched disabled={sending} onClick={onCancel}>
+          </ActionButton>
+          <ActionButton compact stretched disabled={sending} onClick={onCancel}>
             Отмена
-          </Button>
+          </ActionButton>
         </>
       ) : (
         <>
@@ -1241,12 +1274,10 @@ function SendBlock({
               Прежде непустой блокер её ЗАМЕНЯЛ текстом, и здесь это било сильнее,
               чем в консоли: блокер набран тем же серым мелким шрифтом, что соседние
               пояснения, то есть на месте кнопки человек видел ещё один абзац. */}
-          <Button size="s" mode="bezeled" stretched disabled={busy || preview.blocker != null} onClick={onArm}>
+          <ActionButton compact stretched disabled={busy || preview.blocker != null} onClick={onArm}>
             {sendButtonLabel(preview)}
-          </Button>
-          {preview.blocker ? (
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>{preview.blocker}</div>
-          ) : null}
+          </ActionButton>
+          {preview.blocker ? <Hint>{preview.blocker}</Hint> : null}
         </>
       )}
     </>
@@ -1262,7 +1293,7 @@ function CopyableLink({ url }: { url: string }) {
         style={{
           flex: 1,
           minWidth: 0,
-          fontSize: 12.5,
+          fontSize: "var(--app-text-meta)",
           fontFamily: "var(--tgui--font_family_mono, monospace)",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -1272,9 +1303,8 @@ function CopyableLink({ url }: { url: string }) {
       >
         {url}
       </span>
-      <Button
-        size="s"
-        mode="gray"
+      <ActionButton
+        compact
         onClick={() => {
           navigator.clipboard
             .writeText(url)
@@ -1288,7 +1318,7 @@ function CopyableLink({ url }: { url: string }) {
         }}
       >
         {copied ? "✓" : "Копировать"}
-      </Button>
+      </ActionButton>
     </div>
   );
 }
@@ -1316,56 +1346,62 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
   }
 
   return (
-    <CardShell>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span
-          style={{
-            flex: "none", display: "grid", placeContent: "center", width: 34, height: 34,
-            borderRadius: 999, fontSize: 12, fontWeight: 700, background: palette.bg, color: palette.fg,
-          }}
-        >
-          {initialsOf(birthday.displayName)}
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>{birthday.displayName}</div>
-          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>{whenLabel(birthday)}</div>
+    <div className={open ? "ui-item ui-item--open" : "ui-item"}>
+      <Card>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{
+              flex: "none", display: "grid", placeContent: "center", width: 34, height: 34,
+              borderRadius: 999, fontSize: "var(--app-text-meta)", fontWeight: 700, background: palette.bg, color: palette.fg,
+            }}
+          >
+            {initialsOf(birthday.displayName)}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)", overflowWrap: "anywhere" }}>{birthday.displayName}</div>
+            <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{whenLabel(birthday)}</div>
+          </div>
+          <span style={{ flex: "none" }}>
+            <StatusPill tone={TONE_PILL[status.tone]}>{status.label}</StatusPill>
+          </span>
         </div>
-        <span style={{ flex: "none", fontSize: 12, fontWeight: 600, color: TONE_COLOR[status.tone], textAlign: "right" }}>
-          {status.label}
-        </span>
-      </div>
 
-      {/* Только пока сбор не ушёл. После рассылки `autoSendOn` в базе остаётся
-          (гасить его нечем и незачем), и строка обещала бы вторую рассылку рядом
-          с чипом «Разослано · 14» — все три дня, пока команда скидывается.
-          Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам.
-          И только пока раунд активен: закрытый сервер вооружить отказывается,
-          и без этой проверки тумблер молча ничего не делал бы 200-м ответом
-          без единой правки — баг из ledger. */}
-      {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && isCollectionActive(birthday.campaign, today) && (
-        <Cell
-          after={
-            <Switch
-              checked={Boolean(birthday.campaign.autoSendOn)}
-              aria-label="Бот рассылает сам"
-              onChange={() => void toggleAutoSend(birthday)}
-            />
-          }
-          subtitle={
-            autoSendLabel(birthday.campaign.autoSendOn, today) ??
-            "Разошлёшь сам — бот ждёт твоей кнопки"
-          }
-        >
-          Бот рассылает сам
-        </Cell>
-      )}
+        {/* Только пока сбор не ушёл. После рассылки `autoSendOn` в базе остаётся
+            (гасить его нечем и незачем), и строка обещала бы вторую рассылку рядом
+            с пилюлей «Разослано · 14» — все три дня, пока команда скидывается.
+            Выключать тут тоже уже нечего: тик пропускает разосланный раунд сам.
+            И только пока раунд активен: закрытый сервер вооружить отказывается,
+            и без этой проверки тумблер молча ничего не делал бы 200-м ответом
+            без единой правки — баг из ledger. */}
+        {birthday.campaign?.collectUrl && birthday.campaign.sendCount === 0 && isCollectionActive(birthday.campaign, today) && (
+          <Cell
+            after={
+              <Switch
+                checked={Boolean(birthday.campaign.autoSendOn)}
+                aria-label="Бот рассылает сам"
+                onChange={() => void toggleAutoSend(birthday)}
+              />
+            }
+            subtitle={
+              autoSendLabel(birthday.campaign.autoSendOn, today) ??
+              "Разошлёшь сам — бот ждёт твоей кнопки"
+            }
+          >
+            Бот рассылает сам
+          </Cell>
+        )}
 
-      <Button size="s" mode={open ? "gray" : "bezeled"} stretched onClick={onToggle}>
-        {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}
-      </Button>
+        {/* Главной кнопки у карточки нет: «Подготовить сбор» только раскрывает
+            редактор, а рассылка — в его собственной карточке. */}
+        <ActionButton compact stretched aria-expanded={open} onClick={onToggle}>
+          {open ? "Свернуть" : status.tone === "sent" ? "Посмотреть" : "Подготовить сбор"}
+        </ActionButton>
+      </Card>
 
+      {/* Редактор — своими карточками следом (см. `CollectionCard`): в одной
+          карточке с «Подготовить сбор» у него были бы свои главные кнопки. */}
       {open && <BirthdayEditor birthday={birthday} today={today} onChanged={onChanged} onSent={onSent} />}
-    </CardShell>
+    </div>
   );
 }
 
@@ -1383,6 +1419,10 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
   const [recipientGroupId, setRecipientGroupId] = useState<number | null>(birthday.campaign?.recipientGroupId ?? null);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** В какой карточке нажали кнопку, давшую `error`: раскрытый сбор — несколько
+   *  карточек, и сообщение об отказе «Да, разослать» или «Удалить сбор» одной
+   *  карточкой выше, под «Сохранить», читается как отказ сохранения. */
+  const [errorAt, setErrorAt] = useState<ErrorPlace>("save");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   /** The send button arms itself first; the second tap is the one that sends. */
@@ -1393,6 +1433,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       setPreview(await apiClient.getBirthdayPreview(birthday.employeeId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
+      setErrorAt("save");
     }
   }
 
@@ -1416,6 +1457,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      setErrorAt("save");
     } finally {
       setSaving(false);
     }
@@ -1431,6 +1473,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
       onSent(result.delivered, result.intended);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось разослать");
+      setErrorAt("send");
       setConfirming(false);
     } finally {
       setSending(false);
@@ -1441,121 +1484,121 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
   const busy = saving || sending;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-      {sent ? (
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-          Уже разослано{birthday.campaign?.sentCount ? ` — ${recipientsPhrase(birthday.campaign.sentCount)}` : ""}.
-          Повторная отправка отключена, чтобы никто не получил поздравление дважды.
-        </div>
-      ) : (
-        <>
-          <RecipientGroupField
-            value={recipientGroupId}
-            onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
-            sent={false}
-            knownName={preview?.recipientGroupName}
-            disabled={busy}
-          />
-          {/* Headers stay short — a phone-width `Input` ellipsises its own label,
-              and «Ссылка на сбор (Сбербан…» tells you nothing the field doesn't. */}
-          <Input
-            header="Ссылка на сбор"
-            type="url"
-            inputMode="url"
-            placeholder="https://..."
-            value={collectUrl}
-            disabled={busy}
-            onChange={(e) => {
-              setCollectUrl(e.target.value);
-              setConfirming(false);
-            }}
-          />
-          {/* A native date field: unlike the birthday itself this one has a real
-              year, and the range is what the server enforces anyway. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--tgui--hint_color)" }}>Напомнить мне</span>
-            <input
-              type="date"
-              value={scheduledSendOn}
+    <>
+      <Card data-testid="birthday-form-card">
+        {sent ? (
+          <Hint>
+            Уже разослано{birthday.campaign?.sentCount ? ` — ${recipientsPhrase(birthday.campaign.sentCount)}` : ""}.
+            Повторная отправка отключена, чтобы никто не получил поздравление дважды.
+          </Hint>
+        ) : (
+          <>
+            <RecipientGroupField
+              value={recipientGroupId}
+              onChange={(id) => { setRecipientGroupId(id); setConfirming(false); }}
+              sent={false}
+              knownName={preview?.recipientGroupName}
               disabled={busy}
-              min={today}
-              max={birthday.celebratedOn}
-              aria-label="Дата напоминания о сборе"
-              style={DATE_INPUT_STYLE}
-              onChange={(e) => { setScheduledSendOn(e.target.value); setConfirming(false); }}
             />
-            <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
-              В этот день бот напишет админам. Команде — по-прежнему только по твоему тапу.
-            </span>
-          </div>
-          {/* The placeholder is a hint, not the default text: the default is shown
-              in full right below, and putting it here too clipped mid-line. */}
-          <Textarea
-            header="Свой текст"
-            rows={3}
-            placeholder="Оставь пустым — уйдёт текст ниже"
-            value={messageText}
-            disabled={busy}
-            onChange={(e) => {
-              setMessageText(e.target.value);
-              setConfirming(false);
-            }}
+            {/* Headers stay short — a phone-width `Input` ellipsises its own label,
+                and «Ссылка на сбор (Сбербан…» tells you nothing the field doesn't. */}
+            <Input
+              header="Ссылка на сбор"
+              type="url"
+              inputMode="url"
+              placeholder="https://..."
+              value={collectUrl}
+              disabled={busy}
+              onChange={(e) => {
+                setCollectUrl(e.target.value);
+                setConfirming(false);
+              }}
+            />
+            {/* A native date field: unlike the birthday itself this one has a real
+                year, and the range is what the server enforces anyway. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={FIELD_LABEL_STYLE}>Напомнить мне</span>
+              <input
+                type="date"
+                value={scheduledSendOn}
+                disabled={busy}
+                min={today}
+                max={birthday.celebratedOn}
+                aria-label="Дата напоминания о сборе"
+                style={DATE_INPUT_STYLE}
+                onChange={(e) => { setScheduledSendOn(e.target.value); setConfirming(false); }}
+              />
+              <Hint>В этот день бот напишет админам. Команде — по-прежнему только по твоему тапу.</Hint>
+            </div>
+            {/* The placeholder is a hint, not the default text: the default is shown
+                in full right below, and putting it here too clipped mid-line. */}
+            <Textarea
+              header="Свой текст"
+              rows={3}
+              placeholder="Оставь пустым — уйдёт текст ниже"
+              value={messageText}
+              disabled={busy}
+              onChange={(e) => {
+                setMessageText(e.target.value);
+                setConfirming(false);
+              }}
+            />
+            {/* Главная кнопка формы; рассылка — в соседней карточке со своей. */}
+            <ActionButton kind="primary" compact stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
+              Сохранить
+            </ActionButton>
+          </>
+        )}
+
+        {sent && (
+          <RecipientGroupField
+            value={birthday.campaign?.recipientGroupId ?? null}
+            onChange={() => {}}
+            sent
+            knownName={preview?.recipientGroupName}
           />
-          <Button size="s" mode="filled" stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
-            Сохранить
-          </Button>
-        </>
-      )}
+        )}
 
-      {sent && (
-        <RecipientGroupField
-          value={birthday.campaign?.recipientGroupId ?? null}
-          onChange={() => {}}
-          sent
-          knownName={preview?.recipientGroupName}
-        />
-      )}
-
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
+        {error && errorAt === "save" && <div style={ERROR_STYLE}>{error}</div>}
+      </Card>
 
       {preview && (
         preview.id === 0 ? (
           // Раунда ещё нет: предпросмотр — черновик, и рассылать пока нечего.
           // Первое «Сохранить» его и заводит.
-          <>
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>Уйдёт вот это:</div>
-            <div
-              style={{
-                padding: "10px 12px", borderRadius: 10, background: "var(--tgui--secondary_bg_color)",
-                fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
-              }}
-            >
-              {preview.message}
-            </div>
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-              Сохрани — и появится кнопка рассылки.
-            </div>
-          </>
+          <Card>
+            <div style={FIELD_LABEL_STYLE}>Уйдёт вот это:</div>
+            <div style={MESSAGE_BOX_STYLE}>{preview.message}</div>
+            <Hint>Сохрани — и появится кнопка рассылки.</Hint>
+          </Card>
         ) : (
-          <SendBlock
-            preview={preview}
-            personName={birthday.displayName}
-            busy={busy}
-            sending={sending}
-            confirming={confirming}
-            onArm={() => setConfirming(true)}
-            onCancel={() => setConfirming(false)}
-            onSend={() => void handleSend()}
-          />
+          <Card data-testid="birthday-send-card">
+            <OwnerLine>{birthday.displayName}</OwnerLine>
+            <SendBlock
+              preview={preview}
+              personName={birthday.displayName}
+              busy={busy}
+              sending={sending}
+              confirming={confirming}
+              onArm={() => setConfirming(true)}
+              onCancel={() => setConfirming(false)}
+              onSend={() => void handleSend()}
+            />
+            {error && errorAt === "send" && <div style={ERROR_STYLE}>{error}</div>}
+          </Card>
         )
       )}
 
       {/* Отметки и у раунда ДР: скидываются на подарок ровно так же, а виновник
           в получатели не входит никогда — сюрприз этим не выдаётся. */}
       {birthday.campaign && (
-        <PaymentsBlock collectionId={birthday.campaign.id} canRemind={birthday.campaign.sendCount > 0} />
+        <PaymentsBlock
+          collectionId={birthday.campaign.id}
+          canRemind={birthday.campaign.sendCount > 0}
+          subject={birthday.displayName}
+        />
       )}
-    </div>
+    </>
   );
 }
 

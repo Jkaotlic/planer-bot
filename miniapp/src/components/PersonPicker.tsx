@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { ButtonCell, Section } from "@telegram-apps/telegram-ui";
 import { filterPeople } from "@planer/shared";
+import { Card, Group } from "../ui";
 import { PersonSearch } from "./PersonSearch";
 
 /**
@@ -12,10 +12,20 @@ import { PersonSearch } from "./PersonSearch";
  * Строка «Выбран: …» стоит отдельно и поиску не подчиняется — иначе, отфильтровав
  * список, человек переставал видеть собственный выбор и переставлял его вслепую.
  *
- * Ряды — `ButtonCell`, а не `Cell`: он рендерится настоящей `<button>` по
- * умолчанию, а обычный `Cell` — обёрткой `<div>`, по которой клик в тесте
- * не сработал бы через семантику кнопки.
+ * Ряды — настоящие `<button type="button">` с `aria-pressed` и высотой не ниже
+ * 44px: выбор одного из списка читается скринридером как переключатель, а не
+ * как строка таблицы. Класс `person-picker-row` и `selected` — не для стилей, а
+ * зацепка тестов и консольного зеркала.
  */
+const rowStyle = (selected: boolean) =>
+  ({
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%",
+    minHeight: "var(--app-tap)", padding: "0 4px", background: "transparent", border: "none",
+    borderTop: "1px solid var(--tgui--divider, rgb(128 128 128 / 18%))",
+    font: "inherit", fontSize: "var(--app-text-body)", fontWeight: selected ? 600 : 400,
+    color: "var(--tgui--text_color)", textAlign: "left", cursor: "pointer", overflowWrap: "anywhere",
+  }) as const;
+
 export function PersonPicker<T extends { id: number; displayName: string; preferredName?: string | null }>({
   label,
   people,
@@ -46,61 +56,66 @@ export function PersonPicker<T extends { id: number; displayName: string; prefer
   const filtered = filterPeople(people, query);
 
   return (
-    <Section header={label}>
-      {chosenLabel != null && (
-        <div
-          className="person-picker-chosen"
-          style={{ padding: "8px 24px 4px", fontSize: 13, color: "var(--tgui--hint_color)" }}
-        >
-          {/* Пометка обязана быть и здесь, не только в строке списка: список
-              ограничен `maxHeight` со скроллом, и при паре десятков человек
-              выбранная строка со своей пометкой запросто окажется вне
-              видимой области — а «Выбран» существует именно на этот случай. */}
-          Выбран: {chosenLabel}
-          {chosenMark ? ` ${chosenMark}` : ""}
-        </div>
-      )}
-      <div style={{ padding: "0 12px 8px" }}>
-        <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />
-      </div>
-      {/* Ограничена по высоте с прокруткой: без этого два десятка строк
-          растянули бы форму на весь экран. */}
-      <div className="person-picker-list" style={{ maxHeight: 220, overflowY: "auto" }}>
-        {/* type="button" — явно: ButtonCell рендерит `<button>` без атрибута
-            `type`, то есть по умолчанию `type="submit"`. Сегодня на этих
-            экранах нет родных `<form>`, поэтому не проявляется, но
-            консольный зеркальный PersonPicker ставит `type="button"` явно —
-            и здесь для того же: чтобы обе копии не разъезжались тихо. */}
-        {emptyOptionLabel != null && (
-          <ButtonCell
-            type="button"
-            className={`person-picker-row${value === 0 ? " selected" : ""}`}
-            aria-pressed={value === 0}
-            after={value === 0 ? "✓" : undefined}
-            disabled={disabled}
-            onClick={() => onChange(0)}
+    <Group header={label}>
+      <Card className="person-picker-card">
+        {chosenLabel != null && (
+          <div
+            className="person-picker-chosen"
+            style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", overflowWrap: "anywhere" }}
           >
-            {emptyOptionLabel}
-          </ButtonCell>
+            {/* Пометка обязана быть и здесь, не только в строке списка: список
+                ограничен `maxHeight` со скроллом, и при паре десятков человек
+                выбранная строка со своей пометкой запросто окажется вне
+                видимой области — а «Выбран» существует именно на этот случай. */}
+            Выбран: {chosenLabel}
+            {chosenMark ? ` ${chosenMark}` : ""}
+          </div>
         )}
-        {filtered.map((person) => {
-          const mark = note?.(person);
-          return (
-            <ButtonCell
-              key={person.id}
+        <PersonSearch value={query} onChange={setQuery} count={people.length} disabled={disabled} />
+        {/* Ограничена по высоте с прокруткой: без этого два десятка строк
+            растянули бы форму на весь экран. */}
+        <div className="person-picker-list" style={{ maxHeight: 220, overflowY: "auto" }}>
+          {/* type="button" — явно: у `<button>` без него тип по умолчанию
+              `submit`. Сегодня на этих экранах нет родных `<form>`, поэтому не
+              проявляется, но консольный зеркальный PersonPicker ставит
+              `type="button"` явно — и здесь для того же: чтобы обе копии не
+              разъезжались тихо. */}
+          {emptyOptionLabel != null && (
+            <button
               type="button"
-              className={`person-picker-row${value === person.id ? " selected" : ""}`}
-              aria-pressed={value === person.id}
-              after={value === person.id ? "✓" : undefined}
+              className={`person-picker-row${value === 0 ? " selected" : ""}`}
+              aria-pressed={value === 0}
               disabled={disabled}
-              onClick={() => onChange(person.id)}
+              style={rowStyle(value === 0)}
+              onClick={() => onChange(0)}
             >
-              {person.displayName}
-              {mark ? ` ${mark}` : ""}
-            </ButtonCell>
-          );
-        })}
-      </div>
-    </Section>
+              <span>{emptyOptionLabel}</span>
+              {value === 0 && <span aria-hidden="true">✓</span>}
+            </button>
+          )}
+          {filtered.map((person) => {
+            const mark = note?.(person);
+            const selected = value === person.id;
+            return (
+              <button
+                key={person.id}
+                type="button"
+                className={`person-picker-row${selected ? " selected" : ""}`}
+                aria-pressed={selected}
+                disabled={disabled}
+                style={rowStyle(selected)}
+                onClick={() => onChange(person.id)}
+              >
+                <span>
+                  {person.displayName}
+                  {mark ? ` ${mark}` : ""}
+                </span>
+                {selected && <span aria-hidden="true">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    </Group>
   );
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { coverageSummary, exactSchedulePalette, previewReminderText, REMINDER_PLACEHOLDERS } from "@planer/shared";
-import { Button, Placeholder, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Checklist, type TemplateQueue, type TemplateRolesView } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { useEntryPalette } from "../../categories";
 import { withError, withoutError } from "../../lib/error-map";
+import { ActionButton, Card, CheckRow, Group, Hint, SelectField } from "../../ui";
 
 /**
  * «Виды смен» (admin, mobile): свойства самого вида — чек-лист и очередь.
@@ -110,39 +110,50 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const back = (
+    <div style={{ alignSelf: "flex-start" }}>
+      <ActionButton kind="quiet" onClick={onClose}>
+        ← Назад к расписанию
+      </ActionButton>
+    </div>
+  );
+
   if (loadError) {
     return (
-      <Section header="Виды смен">
-        <CardStack>
-          <CardShell>
-            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{loadError}</div>
-            <Button size="s" mode="gray" stretched style={{ marginTop: 8 }} onClick={() => setAttempt((n) => n + 1)}>
+      <>
+        {back}
+        <Group header="Виды смен">
+          <Card>
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{loadError}</div>
+            <ActionButton stretched onClick={() => setAttempt((n) => n + 1)}>
               Повторить
-            </Button>
-          </CardShell>
-        </CardStack>
-      </Section>
+            </ActionButton>
+          </Card>
+        </Group>
+      </>
     );
   }
 
   if (!kinds) {
     return (
-      <Section header="Виды смен">
-        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-          <Spinner size="m" />
-        </div>
-      </Section>
+      <>
+        {back}
+        <Group header="Виды смен">
+          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+            <Spinner size="m" />
+          </div>
+        </Group>
+      </>
     );
   }
 
   return (
-    <Section header="Виды смен">
-      <CardStack>
-        <CardShell>
-          <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-            Здесь свойства самого вида смены. Кого к нему допускать — на «Кто что может».
-          </div>
-        </CardShell>
+    <>
+      {back}
+      <Group header="Виды смен">
+        <Card>
+          <Hint>Здесь свойства самого вида смены. Кого к нему допускать — на «Кто что может».</Hint>
+        </Card>
 
         {kinds.map((kind) => (
           <KindCard
@@ -161,14 +172,8 @@ export function AdminKindSettings({ onClose }: { onClose: () => void }) {
         ))}
 
         {kinds.length === 0 && <Placeholder description="Видов смен пока нет." />}
-
-        <CardShell>
-          <Button size="s" mode="gray" stretched onClick={onClose}>
-            ← Назад к расписанию
-          </Button>
-        </CardShell>
-      </CardStack>
-    </Section>
+      </Group>
+    </>
   );
 }
 
@@ -197,15 +202,12 @@ function ReminderRow({
 
   return (
     <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-        <input
-          type="checkbox"
-          checked={kind.sendReminder}
-          disabled={busy}
-          onChange={(e) => void onReminder(e.target.checked, trimmed || null)}
-        />
-        Напоминать накануне
-      </label>
+      <CheckRow
+        checked={kind.sendReminder}
+        disabled={busy}
+        onChange={(next) => void onReminder(next, trimmed || null)}
+        label="Напоминать накануне"
+      />
       <textarea
         rows={3}
         value={text}
@@ -213,34 +215,33 @@ function ReminderRow({
         placeholder="Стандартный текст по типу смены"
         onChange={(e) => setText(e.target.value)}
         style={{
-          width: "100%", boxSizing: "border-box", resize: "vertical", font: "inherit", padding: "8px 10px",
-          borderRadius: 8, border: "1px solid var(--tgui--outline)",
-          background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)",
+          width: "100%", boxSizing: "border-box", resize: "vertical", font: "inherit", fontSize: "var(--app-text-body)",
+          padding: "8px 10px", borderRadius: "var(--app-radius-control)", border: "1px solid var(--tgui--divider, rgb(128 128 128 / 30%))",
+          background: "var(--app-card)", color: "var(--tgui--text_color)",
         }}
       />
-      <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>
+      <Hint>
         {/* «{с кем}» пуст у дневных смен и дежурств (решение владельца 2026-09-25) —
             без этой строки админ пишет «С тобой: {с кем}», ожидая имя, и получает
             письмо с пустым местом после двоеточия. */}
         Подстановки: {REMINDER_PLACEHOLDERS.map((name) => `{${name}}`).join(", ")}. Пустое поле — уйдёт стандартный текст. «{"{с кем}"}» пуст у дневных смен и дежурств.
-      </span>
+      </Hint>
       {preview?.ok && (
-        <p style={{ margin: 0, padding: "8px 10px", borderRadius: 8, background: "var(--tgui--secondary_bg_color)", fontSize: 13, whiteSpace: "pre-wrap" }}>
+        <p style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--app-radius-control)", background: "var(--tgui--secondary_bg_color)", fontSize: "var(--app-text-meta)", whiteSpace: "pre-wrap" }}>
           Уйдёт так: {preview.text}
         </p>
       )}
       {preview && !preview.ok && (
-        <p style={{ margin: 0, color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>{preview.error}</p>
+        <p style={{ margin: 0, color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{preview.error}</p>
       )}
-      <Button
-        size="s"
-        mode="gray"
+      <ActionButton
+        compact
         stretched
         disabled={busy || (preview !== null && !preview.ok)}
         onClick={() => void onReminder(kind.sendReminder, trimmed || null)}
       >
         Сохранить текст
-      </Button>
+      </ActionButton>
     </div>
   );
 }
@@ -311,13 +312,14 @@ function KindCard({
   const checklistNames = checklists.filter((list) => kind.checklistIds.includes(list.id)).map((list) => list.name);
 
   return (
-    <CardShell>
+    <Card>
+      {/* Заголовок — вся полоса-кнопка не ниже 44px, а не одна стрелка ▾. */}
       <button
         type="button"
         onClick={onToggleOpen}
         aria-expanded={open}
         style={{
-          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: "var(--app-tap)",
           background: "transparent", border: "none", padding: 0, font: "inherit",
           color: "var(--tgui--text_color)", textAlign: "left", cursor: "pointer",
         }}
@@ -332,53 +334,48 @@ function KindCard({
           {code}
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: "block", fontWeight: 600, fontSize: 15 }}>{kind.name}</span>
-          <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+          <span style={{ display: "block", fontWeight: 600, fontSize: "var(--app-text-body)" }}>{kind.name}</span>
+          <span style={{ display: "block", color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
             {coverageSummary(kind.coverage)}
             {checklistNames.length > 0 ? ` · чек-листы: ${checklistNames.join(", ")}` : ""}
           </span>
         </span>
-        <span style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
+        <span aria-hidden="true" style={{ flex: "none", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (
-        <div style={{ marginTop: 10, borderTop: "1px solid var(--tgui--outline)" }}>
-          <div style={{ padding: "10px 0 2px" }}>
+        <div style={{ borderTop: "1px solid var(--tgui--divider, rgb(128 128 128 / 18%))" }}>
+          <div style={{ padding: "10px 0 2px", display: "flex", flexDirection: "column", gap: 12 }}>
             <CoverageRow kind={kind} busy={busy} onCoverage={onCoverage} />
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tgui--hint_color)", marginTop: 12 }}>
-              Очередь идёт
-              <select
-                value={queue?.rotationUnit ?? "day"}
-                disabled={busy || !queue}
-                onChange={(e) => void changeUnit(e.target.value as "day" | "week")}
-                style={{
-                  padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
-                  background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
-                }}
-              >
-                <option value="day">по дням</option>
-                <option value="week">по неделям</option>
-              </select>
-            </label>
+            <SelectField
+              stretched
+              label="Очередь идёт"
+              value={queue?.rotationUnit ?? "day"}
+              disabled={busy || !queue}
+              onChange={(value) => void changeUnit(value as "day" | "week")}
+            >
+              <option value="day">по дням</option>
+              <option value="week">по неделям</option>
+            </SelectField>
             {/* Привязка живёт здесь, а не на экране чек-листа: «кому он положен» —
                 свойство вида смены, как очередь рядом. Зеркало консольного
                 `ShiftKindsScreen`. */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-              <span style={{ fontSize: 13 }}>Чек-листы</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Чек-листы</span>
               {/* Галочками, а не выпадашкой: списков у смены бывает несколько —
                   общая инструкция этажа и отдельная задача на ту же смену. Пока
                   выбор был одиночным, назначение второго молча снимало первый, и
                   2026-09-01 дежурные остались без инструкции 47 этажа. */}
               {checklists.length === 0 ? (
-                <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Чек-листов пока нет.</span>
+                <Hint>Чек-листов пока нет.</Hint>
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {checklists.map((list) => {
                     const on = kind.checklistIds.includes(list.id);
                     return (
-                      <button
+                      <ActionButton
                         key={list.id}
-                        type="button"
+                        compact
                         aria-pressed={on}
                         disabled={busy}
                         onClick={() =>
@@ -388,15 +385,9 @@ function KindCard({
                               : [...kind.checklistIds, list.id],
                           )
                         }
-                        style={{
-                          padding: "5px 10px", borderRadius: 999, font: "inherit", fontSize: 13, cursor: "pointer",
-                          border: "1px solid var(--tgui--outline)",
-                          background: on ? "var(--tgui--button_color)" : "var(--tgui--secondary_bg_color)",
-                          color: on ? "var(--tgui--button_text_color)" : "var(--tgui--text_color)",
-                        }}
                       >
                         {list.name}
-                      </button>
+                      </ActionButton>
                     );
                   })}
                 </div>
@@ -406,17 +397,15 @@ function KindCard({
             <ReminderRow kind={kind} busy={busy} onReminder={onReminder} />
 
             {queue && queue.queue.length > 0 ? (
-              <p style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.45 }}>
+              <p style={{ margin: 0, fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
                 Следующие: {queue.queue.slice(0, 3).map((turn) => turn.label).join(" → ")}
                 <br />
-                <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>
+                <span style={{ color: "var(--tgui--hint_color)" }}>
                   Бот только подсказывает — ставишь смену ты сам.
                 </span>
               </p>
             ) : (
-              <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--tgui--hint_color)" }}>
-                Очередь появится, когда в допущенных кто-нибудь будет.
-              </p>
+              <Hint>Очередь появится, когда в допущенных кто-нибудь будет.</Hint>
             )}
           </div>
         </div>
@@ -424,11 +413,11 @@ function KindCard({
       {/* Свёрнутую карточку отказ тоже касается: сохранение могло не дойти уже
           после того, как её закрыли. */}
       {error && (
-        <div style={{ marginTop: 8, color: "var(--tgui--destructive_text_color)", fontSize: 13.5, lineHeight: 1.35 }}>
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.35 }}>
           {error}
         </div>
       )}
-    </CardShell>
+    </Card>
   );
 }
 
@@ -455,11 +444,11 @@ function CoverageRow({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <span style={{ fontSize: 13, color: "var(--tgui--hint_color)" }}>Норма дня — сколько людей нужно</span>
+      <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Норма дня — сколько людей нужно</span>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
         {WEEKDAYS.map((day, index) => (
           <label key={day} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-            <span style={{ fontSize: 11, color: "var(--tgui--hint_color)" }}>{day}</span>
+            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>{day}</span>
             <input
               type="number"
               min={0}
@@ -471,27 +460,25 @@ function CoverageRow({
                 setDraft((prev) => prev.map((value, i) => (i === index ? e.target.value : value)))
               }
               style={{
-                width: "100%", padding: "5px 0", textAlign: "center", borderRadius: 8,
-                border: "1px solid var(--tgui--outline)", background: "var(--tgui--secondary_bg_color)",
-                color: "var(--tgui--text_color)", font: "inherit", fontSize: 14,
+                width: "100%", minHeight: "var(--app-tap)", boxSizing: "border-box", padding: "5px 0", textAlign: "center",
+                borderRadius: "var(--app-radius-control)", border: "1px solid var(--tgui--divider, rgb(128 128 128 / 30%))",
+                background: "var(--app-card)", color: "var(--tgui--text_color)", font: "inherit", fontSize: "var(--app-text-body)",
               }}
             />
           </label>
         ))}
       </div>
-      <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
-        Ноль значит «не считаем» — про такой день подсказка в расписании молчит.
-      </span>
+      <Hint>Ноль значит «не считаем» — про такой день подсказка в расписании молчит.</Hint>
       {dirty && (
-        <Button
-          size="s"
-          mode="filled"
+        // Единственная primary карточки: «Сохранить текст» ниже — обычная.
+        <ActionButton
+          kind="primary"
           stretched
           disabled={busy}
           onClick={() => void onCoverage(draft.map((value) => Number(value.trim()) || 0))}
         >
           Сохранить норму
-        </Button>
+        </ActionButton>
       )}
     </div>
   );

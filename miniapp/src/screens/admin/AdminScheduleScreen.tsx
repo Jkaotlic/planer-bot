@@ -1,6 +1,6 @@
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Avatar, Button, Cell, Input, List, Placeholder, Section, Select, Spinner } from "@telegram-apps/telegram-ui";
+import { Avatar, Cell, Input, Spinner } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
 import {
   ABSENCE_CATEGORIES,
@@ -32,11 +32,10 @@ import {
 import type { DayCalendar, EntryRangeMode } from "@planer/shared";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
-import { CardShell, CardStack } from "../../components/Card";
+import { ActionButton, Card, CheckRow, Group, Hint, MenuRow, SelectField } from "../../ui";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
 import { AdminKindSettings } from "./AdminKindSettings";
-import { ScreenScroll } from "../../components/ScreenScroll";
 import { formatTimeRange, notifyPendingNotice, pluralizeRu, withNotifyNotice } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
@@ -298,7 +297,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   }
 
   return (
-    <ScreenScroll>
+    <>
       {/* The week switcher and day strip drive the day view, the entry form and the
           bulk fill. The CSV screen works on whole months from the file itself, so
           leaving them up there would offer navigation that changes nothing. Hidden
@@ -307,7 +306,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
           the admin navigate under them would leave that state pointing at a day
           that quietly isn't an option on screen anymore. */}
       {showsWeekSwitcher({ csvOpen, kindsOpen, settingsOpen, fillOpen, editing }) && (
-        <div style={{ padding: "12px 4px 0" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <WeekBar
             label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))}
             backVisible={!isCurrentPeriod("week", toISODate(weekStart), today)}
@@ -318,16 +317,17 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
           <DayStrip dates={weekDates} selected={selectedDate} today={today} short={shortByDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
           {/* Тихой строкой, а не предупреждением: вид без нормы — несделанная
               настройка, а не дыра в графике. Без неё такой вид выглядел бы на
-              полоске так же, как закрытый. */}
+              полоске так же, как закрытый. Строка — ссылка высотой в строку
+              текста, поэтому зона нажатия набрана `minHeight`, а не кеглем. */}
           {unsetCount > 0 && (
             <button
               type="button"
               data-norm-unset
               onClick={() => { setNotice(null); setError(null); setSettingsOpen(true); }}
               style={{
-                display: "block", width: "100%", border: "none", background: "none", cursor: "pointer",
-                padding: "4px 4px 0", textAlign: "left", font: "inherit", fontSize: 12.5,
-                color: "var(--tgui--hint_color)",
+                display: "flex", alignItems: "center", width: "100%", minHeight: "var(--app-tap)", border: "none",
+                background: "none", cursor: "pointer", padding: "0 4px", textAlign: "left", font: "inherit",
+                fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)",
               }}
             >
               {`Без нормы: ${unsetCount} ${pluralizeRu(unsetCount, "вид", "вида", "видов")} — задать →`}
@@ -336,134 +336,137 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
         </div>
       )}
 
-      {error && <div style={{ padding: "8px 4px", color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{error}</div>}
-      {notice && <div style={{ padding: "8px 4px", color: "var(--tgui--hint_color)", fontSize: 13.5 }}>{notice}</div>}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>}
+      {notice && <Hint>{notice}</Hint>}
 
-      <List>
-        {fillOpen ? (
-          <Section header="Заполнить неделю">
-            <CardStack>
-              <FillWeekPanel
-                calendar={dayCalendar}
-                employees={employees}
-                templates={templates}
-                weekDates={weekDates}
-                onCancel={() => setFillOpen(false)}
-                onFilled={handleFilled}
-              />
-            </CardStack>
-          </Section>
-        ) : kindsOpen ? (
-          <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
-        ) : settingsOpen ? (
-          <AdminKindSettings
-            onClose={() => {
-              setSettingsOpen(false);
-              // Норму правят там, а считают по ней здесь: без перечитывания
-              // полоска показывала бы нехватку по нормам, какими они были при
-              // открытии экрана. Не сумели — остаются прежние.
-              apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
-            }}
-          />
-        ) : csvOpen ? (
-          <AdminRosterCsv
+      {fillOpen ? (
+        <Group header="Заполнить неделю">
+          <FillWeekPanel
+            calendar={dayCalendar}
             employees={employees}
-            today={selectedDate}
-            onError={setError}
-            onNotice={(message) => {
-              setNotice(message);
-              setCsvOpen(false);
-            }}
-            onImported={reloadAfterImport}
-            onClose={() => setCsvOpen(false)}
+            templates={templates}
+            weekDates={weekDates}
+            onCancel={() => setFillOpen(false)}
+            onFilled={handleFilled}
           />
-        ) : editing !== null ? (
-          <Section header={editing === "new" ? "Новая запись" : "Изменить запись"}>
-            <CardStack>
-              <EntryForm
-                employees={employees}
-                templates={templates}
-                existing={editing === "new" ? null : editing}
-                defaultDate={selectedDate}
-                calendar={dayCalendar}
-                onCancel={() => setEditing(null)}
-                onSaved={handleSaved}
-              />
-            </CardStack>
-          </Section>
-        ) : (
-          <Section header={formatDayLabel(selectedDate)}>
+        </Group>
+      ) : kindsOpen ? (
+        <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
+      ) : settingsOpen ? (
+        <AdminKindSettings
+          onClose={() => {
+            setSettingsOpen(false);
+            // Норму правят там, а считают по ней здесь: без перечитывания
+            // полоска показывала бы нехватку по нормам, какими они были при
+            // открытии экрана. Не сумели — остаются прежние.
+            apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+          }}
+        />
+      ) : csvOpen ? (
+        <AdminRosterCsv
+          employees={employees}
+          today={selectedDate}
+          onError={setError}
+          onNotice={(message) => {
+            setNotice(message);
+            setCsvOpen(false);
+          }}
+          onImported={reloadAfterImport}
+          onClose={() => setCsvOpen(false)}
+        />
+      ) : editing !== null ? (
+        <Group header={editing === "new" ? "Новая запись" : "Изменить запись"}>
+          <EntryForm
+            employees={employees}
+            templates={templates}
+            existing={editing === "new" ? null : editing}
+            defaultDate={selectedDate}
+            calendar={dayCalendar}
+            onCancel={() => setEditing(null)}
+            onSaved={handleSaved}
+          />
+        </Group>
+      ) : (
+        <>
+          <Group header={formatDayLabel(selectedDate)}>
             {scheduleError ? (
-              <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
-                <span style={{ color: "var(--tgui--destructive_text_color)", fontSize: 14 }}>{scheduleError}</span>
-                <Button size="s" mode="gray" stretched onClick={() => void loadWeek(from, to)}>
+              <Card>
+                <span style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{scheduleError}</span>
+                <ActionButton compact stretched onClick={() => void loadWeek(from, to)}>
                   Повторить
-                </Button>
-              </div>
+                </ActionButton>
+              </Card>
             ) : shifts === null ? (
-              <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-                <Spinner size="m" />
-              </div>
+              <Card>
+                <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+                  <Spinner size="m" />
+                </div>
+              </Card>
             ) : (
               <>
-                {/* Подсказка стоит НАД записями: она про то, чего в дне нет, и
-                    под списком её пришлось бы искать глазами. Молчит, пока
-                    норма не задана — см. `missingCoverage`. */}
                 {/* Над подсказкой о норме: сперва «какой это день», потом
                     «чего в нём не хватает». Кнопки рядом, потому что решение
-                    принимают, глядя на день, а не в настройках. */}
-                <div style={{ padding: "2px 20px 8px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  {dayOffText && (
-                    <span style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 }}>
-                      {dayOffText}
-                      {selectedDayRow?.source === "manual" ? " (вручную)" : ""}
-                    </span>
-                  )}
-                  <Button size="s" mode="gray" disabled={dayOffBusy} onClick={() => void markDay(isDayOff(selectedDate, dayCalendar) ? "workday" : "holiday")}>
-                    {isDayOff(selectedDate, dayCalendar) ? "Сделать рабочим" : "Сделать выходным"}
-                  </Button>
-                  {selectedDayRow?.source === "manual" && (
-                    <Button size="s" mode="plain" disabled={dayOffBusy} onClick={() => void markDay(null)}>
-                      Как в календаре
-                    </Button>
-                  )}
-                </div>
-                {dayHint && (
-                  <div
-                    role="status"
-                    style={{ padding: "2px 20px 8px", color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.4 }}
-                  >
-                    {dayHint}
+                    принимают, глядя на день, а не в настройках. Подсказка
+                    стоит НАД записями: она про то, чего в дне нет, и под
+                    списком её пришлось бы искать глазами. Молчит, пока норма
+                    не задана — см. `missingCoverage`. */}
+                <Card>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {dayOffText && (
+                      <span style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.4 }}>
+                        {dayOffText}
+                        {selectedDayRow?.source === "manual" ? " (вручную)" : ""}
+                      </span>
+                    )}
+                    <ActionButton compact disabled={dayOffBusy} onClick={() => void markDay(isDayOff(selectedDate, dayCalendar) ? "workday" : "holiday")}>
+                      {isDayOff(selectedDate, dayCalendar) ? "Сделать рабочим" : "Сделать выходным"}
+                    </ActionButton>
+                    {selectedDayRow?.source === "manual" && (
+                      <ActionButton compact kind="quiet" disabled={dayOffBusy} onClick={() => void markDay(null)}>
+                        Как в календаре
+                      </ActionButton>
+                    )}
                   </div>
-                )}
+                  {dayHint && (
+                    <div
+                      role="status"
+                      style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.4 }}
+                    >
+                      {dayHint}
+                    </div>
+                  )}
+                </Card>
                 {dayEntries.length === 0 ? (
-                  <Placeholder description="В этот день пока ничего не запланировано." />
+                  <Card>
+                    <Hint>В этот день пока ничего не запланировано.</Hint>
+                  </Card>
                 ) : (
-                  dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)
+                  <Card flush>
+                    {dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)}
+                  </Card>
                 )}
               </>
             )}
-            <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
-              <Button size="m" mode="filled" stretched onClick={() => setEditing("new")}>
-                ＋ Добавить
-              </Button>
-              <Button size="m" mode="bezeled" stretched onClick={() => setFillOpen(true)}>
-                📅 Заполнить неделю
-              </Button>
-              <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setCsvOpen(true); }}>
-                📄 График файлом (CSV)
-              </Button>
-              <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setKindsOpen(true); }}>
-                ⚙ Кто что может
-              </Button>
-              <Button size="m" mode="bezeled" stretched onClick={() => { setNotice(null); setError(null); setSettingsOpen(true); }}>
-                🗂 Виды смен
-              </Button>
-            </div>
-          </Section>
-        )}
-      </List>
-    </ScreenScroll>
+            {/* По важности: одно главное («Добавить»), одно частое («Заполнить
+                неделю»); остальное — редкие настройки и обмен файлом, их место
+                в «Ещё», чтобы пять равных кнопок не спорили за внимание. */}
+            <ActionButton kind="primary" stretched onClick={() => setEditing("new")}>
+              ＋ Добавить
+            </ActionButton>
+            <ActionButton stretched onClick={() => setFillOpen(true)}>
+              📅 Заполнить неделю
+            </ActionButton>
+          </Group>
+          <Group header="Ещё">
+            <Card flush>
+              <MenuRow icon="📄" title="График файлом (CSV)" onClick={() => { setNotice(null); setError(null); setCsvOpen(true); }} />
+              <MenuRow icon="⚙" title="Кто что может" onClick={() => { setNotice(null); setError(null); setKindsOpen(true); }} />
+              <MenuRow icon="🗂" title="Виды смен" onClick={() => { setNotice(null); setError(null); setSettingsOpen(true); }} />
+            </Card>
+          </Group>
+        </>
+      )}
+    </>
   );
 }
 
@@ -476,17 +479,17 @@ function WeekBar({ label, backVisible, onBack, onPrev, onNext }: {
   onNext: () => void;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-      <Button size="s" mode="gray" onClick={onPrev} aria-label="Прошлая неделя">
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      <ActionButton onClick={onPrev} aria-label="Прошлая неделя">
         ‹
-      </Button>
+      </ActionButton>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>{label}</span>
+        <span style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>{label}</span>
         {backVisible && <BackToTodayButton label="Эта неделя" onClick={onBack} />}
       </span>
-      <Button size="s" mode="gray" onClick={onNext} aria-label="Следующая неделя">
+      <ActionButton onClick={onNext} aria-label="Следующая неделя">
         ›
-      </Button>
+      </ActionButton>
     </div>
   );
 }
@@ -500,7 +503,7 @@ function DayStrip({ dates, selected, today, short, onSelect }: {
   onSelect: (iso: string) => void;
 }) {
   return (
-    <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+    <div style={{ display: "flex", gap: 6 }}>
       {dates.map((iso) => (
         <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} short={short.get(iso) ?? 0} onSelect={() => onSelect(iso)} />
       ))}
@@ -525,8 +528,11 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
       style={{
         position: "relative",
         flex: 1,
+        // Клетка и так выше 44px от содержимого; минимум задан явно, чтобы
+        // он не просел, если кегль или число строк в ней поменяют.
+        minHeight: "var(--app-tap)",
         border: "none",
-        borderRadius: 12,
+        borderRadius: "var(--app-radius-control)",
         padding: "8px 0",
         background: bg,
         color: fg,
@@ -558,7 +564,7 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
         </span>
       )}
       <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>{weekdayShort(iso)}</span>
-      <span style={{ fontSize: 15, fontWeight: 600 }}>{dayOfMonth(iso)}</span>
+      <span style={{ fontSize: "var(--app-text-body)", fontWeight: 600 }}>{dayOfMonth(iso)}</span>
       {/* «Выбран» and «сегодня» were the same style, so three weeks out you
           could not tell where you were. The dot is drawn independently of the
           selection and stays visible on the selected chip too. */}
@@ -594,32 +600,42 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
   // The badge shows *which* preset (Утро/День/…) in that preset's own colour, so
   // the day reads at a glance instead of every shift being the same blue.
   const entryPalette = useEntryPalette(shift, templates);
+  const badge = (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: "var(--app-text-meta)",
+        fontWeight: 600,
+        borderRadius: 999,
+        padding: "4px 10px",
+        whiteSpace: "nowrap",
+        // Подстраховка: какой бы ни оказалась подпись, имя и часы сохраняют своё
+        // место — плашка обрезается раньше них.
+        maxWidth: 132,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        background: entryPalette.bg,
+        color: entryPalette.fg,
+      }}
+    >
+      {badgeLabel(shift.title, shift.category)}
+    </span>
+  );
   return (
     <Cell
       onClick={onTap}
       before={<Avatar acronym={shift.employeeId != null ? initialsOf(name) : "?"} size={40} style={{ background: palette.bg, color: palette.fg }} />}
-      subtitle={formatTimeRange(shift)}
-      after={
-        <span
-          style={{
-            display: "inline-block",
-            fontSize: 12.5,
-            fontWeight: 600,
-            borderRadius: 999,
-            padding: "4px 10px",
-            whiteSpace: "nowrap",
-            // Belt and braces: whatever the label turns out to be, the name and
-            // the hours keep their room. The badge truncates before they do.
-            maxWidth: 132,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            background: entryPalette.bg,
-            color: entryPalette.fg,
-          }}
-        >
-          {badgeLabel(shift.title, shift.category)}
+      // Плашка смены стоит справа, а на узком экране (<360px, см. `.entry-badge`
+      // в `index.css`) переезжает под имя, к часам: в 288px карточки справа она
+      // отъедала столько, что имя резалось до «Аня Сми…» — а имя важнее плашки.
+      // Узлов два, показан один из них; тексты у них одни и те же.
+      subtitle={
+        <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px 8px" }}>
+          <span>{formatTimeRange(shift)}</span>
+          <span className="entry-badge entry-badge--below">{badge}</span>
         </span>
       }
+      after={<span className="entry-badge entry-badge--after">{badge}</span>}
     >
       {name}
     </Cell>
@@ -823,7 +839,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
   const busy = saving || deleting;
 
   return (
-    <CardShell>
+    <Card>
       <PersonPicker
         label="Работник"
         people={employees}
@@ -832,8 +848,11 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
         emptyOptionLabel="— не назначен —"
       />
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
+      {/* `wrap` и `minWidth: 0`: нативное поле даты не уже ~140px, и на 320px два
+          рядом (по 126px) выпихивали «По» за край карточки и давали горизонтальную
+          прокрутку всего экрана. Узкий экран — друг под другом. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ flex: "1 1 140px", minWidth: 0 }}>
           <Input
             header={showTo ? "С" : "День"}
             type="date"
@@ -846,7 +865,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
           />
         </div>
         {showTo && (
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: "1 1 140px", minWidth: 0 }}>
             <Input header="По" type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
           </div>
         )}
@@ -854,7 +873,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
 
       {/* Смены и дежурства в одном списке, без шага «Категория»: до 2026-08-21
           увидеть дежурство, не сказав сперва «Дежурство», было нельзя. */}
-      <Select header={`Что ставим${isFriday ? " · пятница, сокращённый" : ""}`} value={choiceValue} onChange={(e) => selectChoice(e.target.value)}>
+      <SelectField stretched label={`Что ставим${isFriday ? " · пятница, сокращённый" : ""}`} value={choiceValue} onChange={selectChoice}>
         {presets.map((t) => {
           const times = resolveShiftTimes(t, from);
           return (
@@ -869,20 +888,20 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
             {categoryLabel(c as Category)}
           </option>
         ))}
-      </Select>
+      </SelectField>
 
       {choice.kind === "custom" && (
         <>
           <TimeRow start={start} end={end} onStart={setStart} onEnd={setEnd} />
           {/* Здесь категорию всё-таки спрашиваем: у записи без пресета взять её
               неоткуда, и это единственное место, где она осталась вопросом. */}
-          <Select header="Вид" value={category} onChange={(e) => setChoice({ kind: "custom", category: e.target.value as Category })}>
+          <SelectField stretched label="Вид" value={category} onChange={(value) => setChoice({ kind: "custom", category: value as Category })}>
             {CUSTOM_TIME_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {categoryLabel(c as Category)}
               </option>
             ))}
-          </Select>
+          </SelectField>
         </>
       )}
 
@@ -897,48 +916,46 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
 
       {isRange && !absence && (
         <>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
-            <input type="checkbox" checked={includeWeekends} onChange={(e) => setIncludeWeekends(e.target.checked)} />
-            Включая выходные
-          </label>
-          <div data-testid="range-preview" style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+          <CheckRow checked={includeWeekends} onChange={setIncludeWeekends} label="Включая выходные" />
+          <div data-testid="range-preview" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
             Поставится {describeEntryRangePlan(plan)}. {entryRangeHint(mode)}
           </div>
         </>
       )}
 
-      {formError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{formError}</div>}
+      {formError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{formError}</div>}
 
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <Button size="m" mode="filled" stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
+        <ActionButton kind="primary" stretched loading={saving} disabled={busy} onClick={() => void handleSave()}>
           {existing ? "Сохранить" : "Добавить"}
-        </Button>
-        <Button size="m" mode="gray" disabled={busy} onClick={onCancel}>
+        </ActionButton>
+        <ActionButton disabled={busy} onClick={onCancel}>
           Отмена
-        </Button>
+        </ActionButton>
       </div>
       {existing && (
         <ConfirmButton
           label="Удалить запись"
           question="Удалить эту запись из графика? Человеку придёт письмо об изменении."
           confirmLabel="Да, удалить"
+          compact={false}
           mode="plain"
           loading={deleting}
           disabled={busy}
           onConfirm={() => void handleDelete()}
         />
       )}
-    </CardShell>
+    </Card>
   );
 }
 
 function TimeRow({ start, end, onStart, onEnd }: { start: string; end: string; onStart: (v: string) => void; onEnd: (v: string) => void }) {
   return (
-    <div style={{ display: "flex", gap: 8 }}>
-      <div style={{ flex: 1 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ flex: "1 1 120px", minWidth: 0 }}>
         <Input header="Начало" type="time" value={start} onChange={(e) => onStart(e.target.value)} />
       </div>
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: "1 1 120px", minWidth: 0 }}>
         <Input header="Конец" type="time" value={end} onChange={(e) => onEnd(e.target.value)} />
       </div>
     </div>
@@ -1049,7 +1066,7 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
   }
 
   return (
-    <CardShell>
+    <Card>
       {/* Не фильтруем: «Заполнить неделю» — ручная постановка, админ называет
           человека сам, и по решению заказчика это разрешено. Пометка нужна, чтобы
           не выбрать по инерции того, кого бот сам никогда бы не поставил. */}
@@ -1065,7 +1082,7 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
         note={(e) => (!takesPartInAssignment(e) ? "· вне назначений" : null)}
       />
 
-      <Select header="Все будни одним вариантом (Сб/Вс не трогаем)" value="" onChange={(e) => setWholeWeek(e.target.value)}>
+      <SelectField stretched label="Все будни одним вариантом (Сб/Вс не трогаем)" value="" onChange={setWholeWeek}>
         <option value="">— по дням —</option>
         {templates.map((t) => (
           <option key={t.id} value={`p:${t.id}`}>
@@ -1077,10 +1094,10 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
             {categoryLabel(c)}
           </option>
         ))}
-      </Select>
+      </SelectField>
 
       {weekDates.map((iso) => (
-        <Select key={iso} header={formatDayLabel(iso)} value={byDay[iso] ?? ""} onChange={(e) => setDay(iso, e.target.value)}>
+        <SelectField stretched key={iso} label={formatDayLabel(iso)} value={byDay[iso] ?? ""} onChange={(value) => setDay(iso, value)}>
           <option value="">— выходной —</option>
           {templates.map((t) => {
             const times = templateTimesFor(t, iso);
@@ -1095,24 +1112,24 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
               {categoryLabel(c)}
             </option>
           ))}
-        </Select>
+        </SelectField>
       ))}
 
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>}
+      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       {/* Один запрос вместо цикла — заполняется не по одному дню, поэтому
           "N из M" посреди сохранения было бы враньём: savedCount равен нулю
           до самого ответа сервера, а не растёт по ходу. */}
-      {saving && <div style={{ color: "var(--tgui--hint_color)", fontSize: 13 }}>Сохранение…</div>}
+      {saving && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Сохранение…</div>}
 
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <Button size="m" mode="filled" stretched loading={saving} disabled={saving} onClick={() => void handleFill()}>
+        <ActionButton kind="primary" stretched loading={saving} disabled={saving} onClick={() => void handleFill()}>
           Заполнить{chosenDays.length > 0 ? ` (${chosenDays.length})` : ""}
-        </Button>
-        <Button size="m" mode="gray" disabled={saving} onClick={onCancel}>
+        </ActionButton>
+        <ActionButton disabled={saving} onClick={onCancel}>
           Отмена
-        </Button>
+        </ActionButton>
       </div>
-    </CardShell>
+    </Card>
   );
 }
 

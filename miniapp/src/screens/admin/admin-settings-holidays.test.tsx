@@ -113,3 +113,37 @@ describe("настройки — праздники", () => {
     expect(text).toContain("2027: ещё не опубликован");
   });
 });
+
+describe("настройки — зоны нажатия", () => {
+  it("тап по названию и описанию строки НЕ переключает автозагрузку — только сам тумблер", async () => {
+    // Настройка сохраняется сразу: оборачивать строку в `label` значило бы, что
+    // случайное касание текста при прокрутке меняет её без подтверждения.
+    const setAuto = vi.spyOn(apiClient, "setHolidaysAuto").mockResolvedValue(undefined);
+    const el = await mount();
+    const input = el.querySelector('input[aria-label="Брать праздники из календаря"]') as HTMLInputElement;
+
+    const title = [...el.querySelectorAll<HTMLElement>("*")].find(
+      (n) => n.children.length === 0 && (n.textContent ?? "").trim() === "Брать праздники из календаря",
+    )!;
+    const description = [...el.querySelectorAll<HTMLElement>("*")].find(
+      (n) => n.children.length === 0 && (n.textContent ?? "").startsWith("Производственный календарь"),
+    )!;
+    expect(title).toBeTruthy();
+    expect(description).toBeTruthy();
+    await act(async () => title.click());
+    await act(async () => description.click());
+    await settle(4);
+    expect(setAuto).not.toHaveBeenCalled();
+
+    await act(async () => input.click());
+    await settle(4);
+    expect(setAuto).toHaveBeenCalledTimes(1);
+    expect(setAuto).toHaveBeenCalledWith(false);
+  });
+
+  it("поле часа не ниже нажимаемого", async () => {
+    const el = await mount();
+    const time = el.querySelector('input[type="time"]') as HTMLInputElement;
+    expect(time.style.minHeight).toBe("var(--app-tap)");
+  });
+});

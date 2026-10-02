@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { formatAuditMoment, validateReminderHour } from "@planer/shared";
-import { Button, Cell, List, Section, Spinner, Switch } from "@telegram-apps/telegram-ui";
+import { Cell, Spinner, Switch } from "@telegram-apps/telegram-ui";
 import { apiClient, type AdminSettings as AdminSettingsData, type NoticePref, type SwapLockResult } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, Group, Hint } from "../../ui";
 import { withNotifyNotice } from "../../lib/shift";
 
 /**
@@ -178,9 +177,9 @@ export function AdminSettings() {
   function renderReminderSection() {
     if (!settings) return null;
     return (
-      <CardStack>
-        <CardShell>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+      <>
+        <Card>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--app-text-body)" }}>
             Уходят накануне в
             <input
               type="time"
@@ -192,24 +191,24 @@ export function AdminSettings() {
                 setHourSaved(false);
               }}
               style={{
-                padding: "5px 8px", borderRadius: 8, border: "1px solid var(--tgui--outline)",
+                minHeight: "var(--app-tap)", boxSizing: "border-box", padding: "8px 12px", borderRadius: "var(--app-radius-control)", border: "1px solid var(--tgui--outline)",
                 background: "var(--tgui--secondary_bg_color)", color: "var(--tgui--text_color)", font: "inherit",
               }}
             />
           </label>
-          <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5, lineHeight: 1.45, marginTop: 6 }}>
+          <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.45, marginTop: 6 }}>
             Проверяется раз в пять минут, поэтому уходит первым тиком после этого времени.
             {settings.reminderHourUpdatedBy === null ? " Час ни разу не меняли." : ` Поставил ${settings.reminderHourUpdatedBy}.`}
           </div>
           {hourError && (
-            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5, marginTop: 6 }}>{hourError}</div>
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", marginTop: 6 }}>{hourError}</div>
           )}
-          {hourSaved && <div style={{ fontSize: 13.5, marginTop: 6 }}>Час сохранён.</div>}
-          <Button size="s" mode="bezeled" stretched disabled={savingHour} style={{ marginTop: 8 }} onClick={() => void handleHour()}>
+          {hourSaved && <div style={{ fontSize: "var(--app-text-meta)", marginTop: 6 }}>Час сохранён.</div>}
+          <ActionButton stretched disabled={savingHour} onClick={() => void handleHour()}>
             {savingHour ? "Сохраняю…" : "Сохранить час"}
-          </Button>
-        </CardShell>
-      </CardStack>
+          </ActionButton>
+        </Card>
+      </>
     );
   }
 
@@ -228,40 +227,42 @@ export function AdminSettings() {
 
     return (
       <>
-        <Cell
-          after={
-            <Switch
-              checked={settings.holidaysAuto}
-              disabled={savingHolidays}
-              aria-label="Брать праздники из календаря"
-              onChange={() => void handleHolidaysAuto(!settings.holidaysAuto)}
-            />
-          }
-          description="Производственный календарь РФ с xmlcalendar.ru. Дни, отмеченные руками, автозагрузка не трогает."
-        >
-          Брать праздники из календаря
-        </Cell>
-        <CardStack>
-          <CardShell>
-            {years.map((year) => {
-              const row = known.get(year);
-              return (
-                <div key={year} style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                  {row
-                    ? `${year}: ${row.days} дн., обновлено ${formatAuditMoment(row.refreshedAt)}${row.source === "bundled" ? " (зашитая копия)" : ""}`
-                    : `${year}: ещё не опубликован`}
-                </div>
-              );
-            })}
-            {holidaysNotice && <div style={{ fontSize: 13.5, marginTop: 6 }}>{holidaysNotice}</div>}
-            {holidaysError && (
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5, marginTop: 6 }}>{holidaysError}</div>
-            )}
-            <Button size="s" mode="bezeled" stretched disabled={savingHolidays} style={{ marginTop: 8 }} onClick={() => void handleRefreshHolidays()}>
-              {savingHolidays ? "Обновляю…" : "Обновить сейчас"}
-            </Button>
-          </CardShell>
-        </CardStack>
+        <Card flush>
+          {/* Не `label`: сохраняет мгновенно, и случайный тап по названию при
+              прокрутке не должен менять настройку — переключает только сам тумблер. */}
+          <Cell
+            after={
+              <Switch
+                checked={settings.holidaysAuto}
+                disabled={savingHolidays}
+                aria-label="Брать праздники из календаря"
+                onChange={() => void handleHolidaysAuto(!settings.holidaysAuto)}
+              />
+            }
+            description="Производственный календарь РФ с xmlcalendar.ru. Дни, отмеченные руками, автозагрузка не трогает."
+          >
+            Брать праздники из календаря
+          </Cell>
+        </Card>
+        <Card>
+          {years.map((year) => {
+            const row = known.get(year);
+            return (
+              <div key={year} style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
+                {row
+                  ? `${year}: ${row.days} дн., обновлено ${formatAuditMoment(row.refreshedAt)}${row.source === "bundled" ? " (зашитая копия)" : ""}`
+                  : `${year}: ещё не опубликован`}
+              </div>
+            );
+          })}
+          {holidaysNotice && <div style={{ fontSize: "var(--app-text-meta)", marginTop: 6 }}>{holidaysNotice}</div>}
+          {holidaysError && (
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", marginTop: 6 }}>{holidaysError}</div>
+          )}
+          <ActionButton stretched disabled={savingHolidays} onClick={() => void handleRefreshHolidays()}>
+            {savingHolidays ? "Обновляю…" : "Обновить сейчас"}
+          </ActionButton>
+        </Card>
       </>
     );
   }
@@ -276,9 +277,9 @@ export function AdminSettings() {
   function renderSwapsSection() {
     if (error && !settings) {
       return (
-        <CardShell>
-          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-        </CardShell>
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
+        </Card>
       );
     }
 
@@ -309,92 +310,82 @@ export function AdminSettings() {
       <>
         {/* Тумблер только показывает состояние — он выключен, потому что менять
             его можно исключительно через кнопки ниже (с подтверждением). */}
-        <Cell
-          after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
-          description={whoLabel}
-        >
-          Обмены смен — {locked ? "Закрыты" : "Открыты"}
-        </Cell>
+        <Card flush>
+          <Cell
+            after={<Switch checked={locked} disabled readOnly aria-label="Обмены смен" />}
+            description={whoLabel}
+          >
+            Обмены смен — {locked ? "Закрыты" : "Открыты"}
+          </Cell>
+        </Card>
 
-        <CardStack>
-          <CardShell>
-            <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-              Закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде.
-            </div>
-          </CardShell>
+        <Card>
+          <Hint>Закрытые обмены отменяют все неотвеченные заявки и пишут об этом всей команде.</Hint>
 
-          {error && (
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-            </CardShell>
+          {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
+
+          {resultLine && <div style={{ fontSize: "var(--app-text-meta)" }}>{resultLine}</div>}
+
+          {confirming ? (
+            <>
+              <div style={{ fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
+                {locked
+                  ? "Открыть обмены обратно?"
+                  : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
+              </div>
+              {/* `primary` — только второй шаг: он и есть действие. Первый («Закрыть
+                  обмены») обычный, чтобы случайный тап не выглядел «главным». */}
+              <ActionButton kind="primary" stretched disabled={saving} onClick={() => void handleConfirm()}>
+                {saving ? "Отправляю…" : confirmLabel}
+              </ActionButton>
+              <ActionButton stretched disabled={saving} onClick={() => setConfirming(false)}>
+                Отмена
+              </ActionButton>
+            </>
+          ) : (
+            <ActionButton
+              stretched
+              disabled={saving}
+              onClick={() => {
+                setResult(null);
+                setError(null);
+                setConfirming(true);
+              }}
+            >
+              {actionLabel}
+            </ActionButton>
           )}
-
-          {resultLine && (
-            <CardShell>
-              <div style={{ fontSize: 13.5 }}>{resultLine}</div>
-            </CardShell>
-          )}
-
-          <CardShell>
-            {confirming ? (
-              <>
-                <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-                  {locked
-                    ? "Открыть обмены обратно?"
-                    : "Закрыть обмены? Незакрытые заявки отменятся, и об этом напишут всей команде."}
-                </div>
-                <Button size="s" mode="filled" stretched disabled={saving} onClick={() => void handleConfirm()}>
-                  {saving ? "Отправляю…" : confirmLabel}
-                </Button>
-                <Button size="s" mode="gray" stretched disabled={saving} onClick={() => setConfirming(false)}>
-                  Отмена
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="s"
-                mode="bezeled"
-                stretched
-                disabled={saving}
-                onClick={() => {
-                  setResult(null);
-                  setError(null);
-                  setConfirming(true);
-                }}
-              >
-                {actionLabel}
-              </Button>
-            )}
-          </CardShell>
-        </CardStack>
+        </Card>
       </>
     );
   }
 
+  // Экран живёт внутри `Screen` из `AdminScreen`, и «Настройки» в заголовке — его
+  // `h1`; у своей группы замка поэтому другая подпись.
   return (
-    <ScreenScroll>
-      <List>
-        <Section header="Настройки">{renderSwapsSection()}</Section>
+    <>
+      <Group header="Обмены смен">{renderSwapsSection()}</Group>
 
-        <Section header="Напоминания о смене">{renderReminderSection()}</Section>
+      <Group header="Напоминания о смене">{renderReminderSection()}</Group>
 
-        <Section header="Праздники">{renderHolidaysSection()}</Section>
+      <Group header="Праздники">{renderHolidaysSection()}</Group>
 
-        <Section header="Что мне писать">
-          {noticePrefs === null ? (
-            noticeLoadError ? (
-              <CardStack>
-                <CardShell>
-                  <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{noticeLoadError}</div>
-                </CardShell>
-              </CardStack>
-            ) : (
-              <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-                <Spinner size="m" />
-              </div>
-            )
+      <Group header="Что мне писать">
+        {noticePrefs === null ? (
+          noticeLoadError ? (
+            <Card>
+              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{noticeLoadError}</div>
+            </Card>
           ) : (
-            <>
+            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+              <Spinner size="m" />
+            </div>
+          )
+        ) : (
+          <>
+            {/* Каждая пара «ячейка + ошибка» — один `div`: разделитель `Card flush`
+                ложится между настройками, а не между ячейкой и её собственной ошибкой. */}
+            <Card flush>
               {noticePrefs.map((pref) => (
                 <div key={pref.kind}>
                   <Cell
@@ -406,24 +397,18 @@ export function AdminSettings() {
                     {pref.title}
                   </Cell>
                   {noticeErrors[pref.kind] && (
-                    <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: 13 }}>
+                    <div style={{ padding: "0 20px 10px", color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
                       {noticeErrors[pref.kind]}
                     </div>
                   )}
                 </div>
               ))}
+            </Card>
 
-              <CardStack>
-                <CardShell>
-                  <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                    Письмо «смену никто не взял» приходит всегда — его выключить нельзя.
-                  </div>
-                </CardShell>
-              </CardStack>
-            </>
-          )}
-        </Section>
-      </List>
-    </ScreenScroll>
+            <Hint>Письмо «смену никто не взял» приходит всегда — его выключить нельзя.</Hint>
+          </>
+        )}
+      </Group>
+    </>
   );
 }

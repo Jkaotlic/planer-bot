@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
-import { ActionButton } from "./ui";
+import { ActionButton, Screen } from "./ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
@@ -12,7 +12,7 @@ import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
-import { adminSectionFromSearch, scheduleDateFromSearch, type AdminSection } from "./screens/admin-section";
+import { adminSectionFromSearch, scheduleDateFromSearch, type AdminView } from "./screens/admin-section";
 import { foodRouteFromSearch, type FoodRoute } from "./screens/food/food-route";
 
 /**
@@ -128,10 +128,11 @@ export function App() {
   // instead of a per-screen error — nothing to retry by hand, it just says the
   // data on screen might be stale, and clears itself once a refresh succeeds.
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  // Раздел админки — здесь, а не в `AdminScreen`: тот размонтируется при уходе
-  // на другую вкладку, и раздел сбрасывался на «Расписание» при каждом
-  // возвращении. Первое значение — из ссылки бота (`?screen=…`).
-  const [adminSection, setAdminSection] = useState<AdminSection>(
+  // Что открыто в админке (раздел или меню) — здесь, а не в `AdminScreen`: тот
+  // размонтируется при уходе на другую вкладку, и открытое сбрасывалось бы при
+  // каждом возвращении. Первое значение — из ссылки бота (`?screen=…`), иначе
+  // «Расписание»: меню — это место, куда выходят, а не где начинают.
+  const [adminView, setAdminView] = useState<AdminView>(
     () => adminSectionFromSearch(window.location.search) ?? "schedule",
   );
   // Дата из ссылки бота — на один показ. Раньше её перечитывали из адреса при
@@ -736,8 +737,8 @@ export function App() {
         // `immutable`, поэтому платится один раз на устройство.
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю админку…</div>}>
           <AdminScreen
-            section={adminSection}
-            onSectionChange={setAdminSection}
+            view={adminView}
+            onViewChange={setAdminView}
             initialDate={adminDeepDate}
             onInitialDateUsed={consumeAdminDeepDate}
             today={data.today}
@@ -746,12 +747,17 @@ export function App() {
       )}
       {tab === "announce" && data.me.canAnnounce && !data.me.isAdmin && (
         <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю анонс…</div>}>
-          <AnnounceScreen />
+          <Screen title="Анонс">
+            <AnnounceScreen />
+          </Screen>
         </Suspense>
       )}
       <TabBar
         active={tab}
         onChange={(t) => {
+          // Повторное нажатие активной «Админ» — «наверх», в меню разделов, как
+          // у остальных вкладок повторное нажатие ведёт к корню.
+          if (t === "admin" && tab === "admin") setAdminView("menu");
           setTab(t);
           // A stale action error from wherever we're leaving shouldn't greet us
           // on the next visit to that tab.

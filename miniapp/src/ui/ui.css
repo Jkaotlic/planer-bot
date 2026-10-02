@@ -25,6 +25,13 @@
   min-width: 0;
 }
 
+/* Страница без колонки-флекса и без зазора между детьми: заказы и опросы
+   складывают своё содержимое сами. Отступы те же, что у `.ui-screen`. */
+.ui-page {
+  padding: 16px var(--app-gutter) calc(96px + var(--app-inset-bottom, env(safe-area-inset-bottom)));
+  min-width: 0;
+}
+
 /* Оверлей без таб-бара: резерв снизу только под системную полоску. */
 .ui-screen--overlay {
   padding-bottom: calc(24px + var(--app-inset-bottom, env(safe-area-inset-bottom)));
@@ -171,6 +178,18 @@
   padding-inline: 8px;
 }
 
+/* Разрушающее действие. Правило стоит после `--secondary` и `--quiet` и той же
+   специфичности, поэтому перекрашивает обе; у `primary` фон остаётся кнопочным,
+   меняется только цвет текста. Перед `color-mix` — сплошной запасной фон. */
+.ui-btn--danger {
+  color: var(--tgui--destructive_text_color, #d33a3a);
+}
+
+.ui-btn--secondary.ui-btn--danger {
+  background: rgb(229 57 53 / 14%);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 14%, transparent);
+}
+
 /* Кнопка в строке: рисуется 36px, но зона нажатия — те же 44. */
 .ui-btn--compact {
   min-height: 36px;
@@ -261,4 +280,259 @@
 .ui-dark .ui-pill--ok {
   color: #86e093;
   background: rgb(70 190 90 / 22%);
+}
+
+/* ---------- Меню разделов ---------- */
+.ui-menu-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-menu-row:active {
+  background: rgb(128 128 128 / 12%);
+}
+
+.ui-menu-row__icon {
+  font-size: 20px;
+  text-align: center;
+}
+
+.ui-menu-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ui-menu-row__title {
+  font-size: var(--app-text-head);
+  font-weight: 500;
+}
+
+.ui-menu-row__hint {
+  font-size: var(--app-text-meta);
+  line-height: 1.35;
+  color: var(--tgui--hint_color);
+}
+
+.ui-menu-row__chevron {
+  font-size: 22px;
+  color: var(--tgui--hint_color);
+}
+
+/* ---------- Галочка ---------- */
+.ui-check {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: var(--app-tap);
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.ui-check--disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Не `display: none`: поле должно получать фокус и нажатие пробела. */
+.ui-check__input {
+  position: absolute;
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  /* Без `top` абсолютное поле вставало в верхний край строки, на 11px выше
+     нарисованного квадрата (его сдвигают `padding` строки 10px и `margin-top`
+     1px), и фокус с кольцом рисовались не там, где виден квадрат. */
+  top: 11px;
+  left: 0;
+}
+
+.ui-check__box {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 6px;
+  border: 2px solid var(--tgui--hint_color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tgui--button_text_color, #fff);
+}
+
+.ui-check__box--on {
+  border-color: var(--tgui--button_color, var(--tgui--link_color));
+  background: var(--tgui--button_color, var(--tgui--link_color));
+}
+
+.ui-check__input:focus-visible + .ui-check__box {
+  outline: 2px solid var(--tgui--link_color);
+  outline-offset: 2px;
+}
+
+.ui-check__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ui-check__label {
+  font-size: var(--app-text-body);
+}
+
+.ui-check__hint {
+  font-size: var(--app-text-meta);
+  line-height: 1.35;
+  color: var(--tgui--hint_color);
+}
+
+/* ---------- Селект ---------- */
+.ui-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.ui-select--stretched {
+  display: flex;
+  width: 100%;
+}
+
+.ui-select--stretched select {
+  width: 100%;
+}
+
+/* Подпись над полем: серая, как подпись группы, — синий значит «нажимаемое». */
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-field__label {
+  font-size: var(--app-text-meta);
+  color: var(--tgui--hint_color);
+}
+
+.ui-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: var(--app-tap);
+  max-width: 100%;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid var(--tgui--divider, rgb(128 128 128 / 30%));
+  border-radius: var(--app-radius-control);
+  background: var(--app-card);
+  color: inherit;
+  font: inherit;
+  font-size: var(--app-text-body);
+}
+
+.ui-select::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -6px;
+  border-right: 2px solid var(--tgui--hint_color);
+  border-bottom: 2px solid var(--tgui--hint_color);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.ui-select select:disabled {
+  opacity: 0.55;
+}
+
+/* ---------- Сегментный переключатель ---------- */
+/* `SegmentedControl` из telegram-ui тянется на 100% высоты родителя, а своей не
+   имеет и выходит ниже 44px. Фиксированная `height`, а не `min-height`:
+   процент у потомка считается только от заданной высоты. Плюс 4px: у самого
+   `SegmentedControl` по 2px внутренней рамки, и сами сегменты при 44px
+   выходили 40px — ниже зоны нажатия (замер аудита). */
+.ui-tap-height {
+  height: calc(var(--app-tap) + 4px);
+}
+
+/* Сам сегмент (`button`) внутри своей обёртки на 44px рисуется 40px, и палец у
+   его кромки попадал в обёртку, у которой нет обработчика. */
+.ui-tap-height button {
+  min-height: var(--app-tap);
+}
+
+/* ---------- Раскрытый элемент списка ---------- */
+/* Сбор, раскрытый в несколько карточек, держится вместе: внутри зазор меньше
+   группового, между соседними элементами — больше, а слева в поле экрана
+   тянется полоска. Полоска в поле, а не в карточке: левый край карточек
+   остаётся на 16px, как у всех. */
+.ui-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ui-group__body > .ui-item + .ui-item {
+  margin-top: 10px;
+}
+
+.ui-item--open::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--tgui--link_color);
+}
+
+/* Название сбора над его кнопкой: серое, как пояснение, но плотнее. */
+.ui-item__owner {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Поля telegram-ui внутри карточки ---------- */
+/* `Input`/`Textarea` кладут поле в обёртку с боковым отступом 22px (рассчитан
+   на `Section` без своего поля), и в карточке с её 14px поле садилось на 36px от
+   края карточки, а соседние кнопки и селекты — на 14px: левый край рвался
+   (замер 2026-10-01). Только в обычной карточке: в `Card flush` отступы строк
+   задают сами строки (форма «Обращение» в настройках работника), и обнулённый
+   отступ поля там рвал бы левый край — поле вставало на 4px против 24px у
+   соседней кнопки. Обёртку узнаём по структуре (`div > label > input`), а не по
+   хешированному классу. Без `:has` (iOS до 15.4) остаётся прежний отступ. */
+.ui-card:not(.ui-card--flush) div:has(> label > input:not([type="checkbox"]):not([type="radio"])),
+.ui-card:not(.ui-card--flush) div:has(> label > textarea) {
+  padding-inline: 0;
+}
+
+/* Карточка `PersonPicker` внутри карточки формы — только обёртка (`Group` +
+   `Card`, а форма вокруг тоже карточка). Свои фон и отступ давали второй сдвиг
+   вправо на 14px: список людей стоял на 44px от края, а поля и кнопки формы —
+   на 30px. Правило привязано к классу самого выбора, а не к любой вложенности:
+   будущая карточка в карточке не должна молча терять отступ. */
+.ui-card .person-picker-card {
+  padding: 0;
+  background: none;
 }

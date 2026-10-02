@@ -20,6 +20,41 @@ export type AdminSection =
   | "journal"
   | "settings";
 
+/** Что показывает вкладка «Админ»: раздел или меню разделов. */
+export type AdminView = AdminSection | "menu";
+
+/** Меню разделов: порядок и группы — решение заказчика, а не алфавит. Здесь, а не
+ *  в `AdminMenu.tsx`, потому что название раздела нужно и заголовку экрана
+ *  (`adminSectionTitle`), и тестам — один источник, без расхождения подписей. */
+export const ADMIN_MENU: readonly { header: string; items: readonly { key: AdminSection; icon: string; title: string; hint: string }[] }[] = [
+  { header: "График", items: [
+    { key: "schedule", icon: "📅", title: "Расписание", hint: "Кто когда работает, правка смен" },
+    { key: "weekend", icon: "🙋", title: "Выходные", hint: "Открыть смену на выходной и назначить" },
+  ] },
+  { header: "Люди", items: [
+    { key: "employees", icon: "👥", title: "Работники", hint: "Состав, роли, дни рождения" },
+    { key: "groups", icon: "🏷", title: "Группы", hint: "Списки людей для рассылок" },
+  ] },
+  { header: "Рассылки", items: [
+    { key: "announce", icon: "📣", title: "Анонсы", hint: "Написать всей команде или части" },
+    { key: "checklists", icon: "✅", title: "Чек-листы", hint: "Проверки дежурного и кому они уходят" },
+  ] },
+  { header: "Служебное", items: [
+    { key: "journal", icon: "📊", title: "Журнал", hint: "Кто сколько отдежурил и кто что менял" },
+    { key: "bugs", icon: "🐞", title: "Баги", hint: "Жалобы из бота" },
+    { key: "settings", icon: "⚙️", title: "Настройки", hint: "Обмены, напоминания, праздники" },
+  ] },
+];
+
+/** Название раздела — заголовок его экрана. */
+export function adminSectionTitle(key: AdminSection): string {
+  for (const group of ADMIN_MENU) {
+    const item = group.items.find((i) => i.key === key);
+    if (item) return item.title;
+  }
+  return key;
+}
+
 /** Раздел, на котором открыться, если мини-апп запущен ссылкой из бота.
  *  Своя функция, а не `screenFromSearch`: та отвечает за формы-оверлеи
  *  (больничный, мероприятие), а это — про вкладку админа. Один параметр,

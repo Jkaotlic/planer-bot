@@ -55,7 +55,21 @@ async function mount() {
     root!.render(createElement(AppRoot, null, createElement(AdminEmployeesScreen, null)));
   });
   await settle();
+  await expandAll(host);
   return host;
+}
+
+/**
+ * Галки теперь свёрнуты за строкой «Ограничения: …» (см.
+ * `employee-restrictions-fold.test.tsx`), поэтому тесты ниже сначала раскрывают
+ * её у каждой карточки — сами проверки про галки остались как были.
+ */
+async function expandAll(el: HTMLElement) {
+  for (const fold of el.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")) {
+    if ((fold.textContent ?? "").startsWith("Ограничения:") && fold.getAttribute("aria-expanded") === "false") {
+      await act(async () => fold.click());
+    }
+  }
 }
 
 /** Чекбокс по подписи рядом с ним, в карточке нужного работника. */
@@ -155,6 +169,7 @@ describe("тумблер «Наблюдатель» на карточке раб
       root!.render(createElement(AppRoot, null, createElement(AdminEmployeesScreen, null)));
     });
     await settle();
+    await expandAll(host);
 
     const assignment = checkboxIn(host, 5, "Не участвует в назначениях");
     const swaps = checkboxIn(host, 5, "Не участвует в обменах");

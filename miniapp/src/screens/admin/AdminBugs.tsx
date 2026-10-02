@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Button, Placeholder, SegmentedControl, Section, Spinner } from "@telegram-apps/telegram-ui";
+import { Placeholder, SegmentedControl, Spinner } from "@telegram-apps/telegram-ui";
 import { formatAuditMoment } from "@planer/shared";
 import { apiClient, type BugReportRow } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, Group, TapHeight } from "../../ui";
 
 /**
  * «Баги» (admin): список того, что работники нажали «🐞 Проблема» и написали.
@@ -47,45 +46,43 @@ export function AdminBugs() {
   }
 
   return (
-    <ScreenScroll>
-      <Section header="Баги">
-        <CardStack>
-          <CardShell>
-            <SegmentedControl>
-              <SegmentedControl.Item selected={status === "open"} onClick={() => setStatus("open")}>
-                Новые
-              </SegmentedControl.Item>
-              <SegmentedControl.Item selected={status === "all"} onClick={() => setStatus("all")}>
-                Все
-              </SegmentedControl.Item>
-            </SegmentedControl>
-          </CardShell>
+    <Group>
+      <Card>
+        <TapHeight>
+          <SegmentedControl>
+            <SegmentedControl.Item selected={status === "open"} onClick={() => setStatus("open")}>
+              Новые
+            </SegmentedControl.Item>
+            <SegmentedControl.Item selected={status === "all"} onClick={() => setStatus("all")}>
+              Все
+            </SegmentedControl.Item>
+          </SegmentedControl>
+        </TapHeight>
+      </Card>
 
-          {error && (
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-              <Button size="s" mode="gray" stretched style={{ marginTop: 8 }} onClick={() => setAttempt((n) => n + 1)}>
-                Повторить
-              </Button>
-            </CardShell>
-          )}
+      {error && (
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
+          <ActionButton stretched onClick={() => setAttempt((n) => n + 1)}>
+            Повторить
+          </ActionButton>
+        </Card>
+      )}
 
-          {!error && !reports && (
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
-                <Spinner size="m" />
-              </div>
-            </CardShell>
-          )}
+      {!error && !reports && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+            <Spinner size="m" />
+          </div>
+        </Card>
+      )}
 
-          {!error && reports && reports.length === 0 && (
-            <Placeholder description={status === "open" ? "Открытых багрепортов нет." : "Багрепортов пока не было."} />
-          )}
+      {!error && reports && reports.length === 0 && (
+        <Placeholder description={status === "open" ? "Открытых багрепортов нет." : "Багрепортов пока не было."} />
+      )}
 
-          {!error && reports?.map((report) => <BugReportCard key={report.id} report={report} onToggle={handleToggle} />)}
-        </CardStack>
-      </Section>
-    </ScreenScroll>
+      {!error && reports?.map((report) => <BugReportCard key={report.id} report={report} onToggle={handleToggle} />)}
+    </Group>
   );
 }
 
@@ -109,24 +106,26 @@ function BugReportCard({ report, onToggle }: { report: BugReportRow; onToggle: (
   }
 
   return (
-    <CardShell>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+    <Card>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
         {report.authorName} · {formatAuditMoment(report.createdAt)}
       </div>
-      <div style={{ marginTop: 4, fontSize: 14, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+      <div style={{ marginTop: 4, fontSize: "var(--app-text-body)", lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
         {report.text}
       </div>
       {resolved && (
-        <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 12.5 }}>
+        <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
           Разобрал {report.resolvedByName ?? "кто-то"} · {formatAuditMoment(report.resolvedAt!)}
         </div>
       )}
       {error && (
-        <div style={{ marginTop: 6, color: "var(--tgui--destructive_text_color)", fontSize: 12.5 }}>{error}</div>
+        <div style={{ marginTop: 6, color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
       )}
-      <Button size="s" mode={resolved ? "gray" : "bezeled"} stretched loading={busy} disabled={busy} style={{ marginTop: 8 }} onClick={() => void handleClick()}>
+      {/* Обычная: отметка обратима, и кнопок «главнее» на карточке нет, а на экране
+          их столько, сколько багрепортов. */}
+      <ActionButton stretched loading={busy} disabled={busy} onClick={() => void handleClick()}>
         {resolved ? "Вернуть в работу" : "Разобрал"}
-      </Button>
-    </CardShell>
+      </ActionButton>
+    </Card>
   );
 }

@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { announcementUnreachableLine, filterPeople, presetRecipientIds, type AnnouncementPreset } from "@planer/shared";
-import { Button, List, Placeholder, Section, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { Placeholder, SegmentedControl, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import { ANNOUNCEMENT_TEXT_MAX, apiClient, type AnnouncementRecipient, type AnnouncementResult, type RecipientGroupView } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
 import { PersonSearch } from "../../components/PersonSearch";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, CheckRow, Group, Hint, TapHeight } from "../../ui";
 
 /**
  * «Анонсы»: вольный текст всей команде или выбранным. Открыт и админу (вкладка
@@ -67,17 +66,13 @@ export function AdminAnnounce() {
   }, []);
 
   if (loadError) {
-    return (
-      <ScreenScroll>
-        <Placeholder header="Не удалось загрузить" description={loadError} />
-      </ScreenScroll>
-    );
+    return <Placeholder header="Не удалось загрузить" description={loadError} />;
   }
   if (!recipients) {
     return (
-      <ScreenScroll style={{ display: "flex", justifyContent: "center", paddingTop: 48 }}>
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 48 }}>
         <Spinner size="l" />
-      </ScreenScroll>
+      </div>
     );
   }
 
@@ -148,169 +143,169 @@ export function AdminAnnounce() {
 
   const unreachableLine = report ? announcementUnreachableLine(report.unreachable, report.archivedCount) : null;
 
+  // Заголовок «Анонс(ы)» даёт `Screen` снаружи — и в `AdminScreen`, и в `App` для
+  // наблюдателя. Своего заголовка здесь нет: два `h1` на экране путали скринридер.
   return (
-    <ScreenScroll>
-      <List>
-        <Section header="Анонс">
-          <CardStack>
-            <CardShell>
-              <div style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                Уходит в обход всех личных настроек уведомлений — отписаться от анонсов нельзя. Отправленное
-                сообщение не отзывается, поэтому перед отправкой экран показывает точный список получателей.
-              </div>
-            </CardShell>
+    <Group>
+      <Hint>
+        Уходит в обход всех личных настроек уведомлений — отписаться от анонсов нельзя. Отправленное
+        сообщение не отзывается, поэтому перед отправкой экран показывает точный список получателей.
+      </Hint>
 
-            <CardShell>
-              <Textarea
-                header="Текст"
-                rows={5}
-                placeholder="Что сказать команде"
-                value={text}
-                disabled={sending}
-                onChange={(e) => {
-                  setText(e.target.value);
-                  setConfirming(false);
-                }}
-              />
-              <div
-                style={{
-                  textAlign: "right",
-                  fontSize: 12.5,
-                  color: overLimit ? "var(--tgui--destructive_text_color)" : "var(--tgui--hint_color)",
-                }}
-              >
-                {text.length} / {ANNOUNCEMENT_TEXT_MAX}
-              </div>
-            </CardShell>
+      <Card>
+        <Textarea
+          header="Текст"
+          rows={5}
+          placeholder="Что сказать команде"
+          value={text}
+          disabled={sending}
+          onChange={(e) => {
+            setText(e.target.value);
+            setConfirming(false);
+          }}
+        />
+        <div
+          style={{
+            textAlign: "right",
+            fontSize: "var(--app-text-meta)",
+            color: overLimit ? "var(--tgui--destructive_text_color)" : "var(--tgui--hint_color)",
+          }}
+        >
+          {text.length} / {ANNOUNCEMENT_TEXT_MAX}
+        </div>
+      </Card>
 
-            <CardShell>
-              <SegmentedControl>
-                <SegmentedControl.Item
-                  selected={audienceMode === "all"}
-                  onClick={() => {
-                    setAudienceMode("all");
-                    setPreset(null);
-                    setGroupId(null);
-                    setConfirming(false);
-                  }}
-                >
-                  Всем
-                </SegmentedControl.Item>
-                <SegmentedControl.Item
-                  selected={audienceMode === "picked"}
-                  onClick={() => {
-                    setAudienceMode("picked");
-                    setPreset(null);
-                    setGroupId(null);
-                    setConfirming(false);
-                  }}
-                >
-                  Выбрать
-                </SegmentedControl.Item>
-              </SegmentedControl>
-              {/* Подборки — отдельным рядом, а не сегментами: четыре сегмента на
-                  320–375px сжимались до «В… А… Р… В…» (замер 2026-09-29). */}
-              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                <Button size="s" mode={preset === "admins" ? "filled" : "bezeled"} disabled={sending} onClick={() => pickPreset("admins")}>
-                  Админам
-                </Button>
-                <Button size="s" mode={preset === "workers" ? "filled" : "bezeled"} disabled={sending} onClick={() => pickPreset("workers")}>
-                  Работникам
-                </Button>
-              </div>
-              {groups.length > 0 && (
-                <div data-testid="group-row" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                  {groups.map((g) => (
-                    <Button key={g.id} className="group-chip" size="s" mode={groupId === g.id ? "filled" : "bezeled"} disabled={sending} onClick={() => pickGroup(g)}>
-                      {g.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
+      <Card>
+        <TapHeight>
+          <SegmentedControl>
+            <SegmentedControl.Item
+              selected={audienceMode === "all"}
+              onClick={() => {
+                setAudienceMode("all");
+                setPreset(null);
+                setGroupId(null);
+                setConfirming(false);
+              }}
+            >
+              Всем
+            </SegmentedControl.Item>
+            <SegmentedControl.Item
+              selected={audienceMode === "picked"}
+              onClick={() => {
+                setAudienceMode("picked");
+                setPreset(null);
+                setGroupId(null);
+                setConfirming(false);
+              }}
+            >
+              Выбрать
+            </SegmentedControl.Item>
+          </SegmentedControl>
+        </TapHeight>
+        {/* Подборки — отдельным рядом, а не сегментами: четыре сегмента на
+            320–375px сжимались до «В… А… Р… В…» (замер 2026-09-29). Выбранная —
+            плотным тоном (`aria-pressed`), не `primary`: главная кнопка — «Отправить».
+            Невыбранные — обычные кнопки, не `quiet`: тихие читались как ссылки. */}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <ActionButton compact aria-pressed={preset === "admins"} disabled={sending} onClick={() => pickPreset("admins")}>
+            Админам
+          </ActionButton>
+          <ActionButton compact aria-pressed={preset === "workers"} disabled={sending} onClick={() => pickPreset("workers")}>
+            Работникам
+          </ActionButton>
+        </div>
+        {groups.length > 0 && (
+          <div data-testid="group-row" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {groups.map((g) => (
+              <ActionButton key={g.id} compact aria-pressed={groupId === g.id} disabled={sending} onClick={() => pickGroup(g)}>
+                {g.name}
+              </ActionButton>
+            ))}
+          </div>
+        )}
 
-              {audienceMode === "picked" && (
-                <div style={{ marginTop: 10 }}>
-                  <PersonSearch value={query} onChange={setQuery} count={recipients.length} disabled={sending} />
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    {recipients.length === 0 ? (
-                      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Выбирать некого.</div>
-                    ) : filteredRecipients.length === 0 ? (
-                      <div style={{ color: "var(--tgui--hint_color)", fontSize: 13.5 }}>Никого с таким именем нет.</div>
-                    ) : (
-                      filteredRecipients.map((e) => (
-                        <label
-                          key={e.id}
-                          className="announce-picker-row"
-                          style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "4px 0", cursor: "pointer" }}
-                        >
-                          <input type="checkbox" checked={selectedIds.has(e.id)} disabled={sending} onChange={() => toggle(e.id)} />
-                          <span>{e.displayName}</span>
-                          {!e.reachable && (
-                            <span style={{ color: "var(--tgui--hint_color)", fontSize: 12 }}>— не привязан</span>
-                          )}
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginTop: 10, color: "var(--tgui--hint_color)", fontSize: 12.5, fontWeight: 600 }}>
-                Уйдёт {reachable.length === 0 ? "некому" : `${reachable.length}:`}
-              </div>
-              {reachable.length > 0 && (
-                <div
-                  className="announce-recipients-preview"
-                  style={{ color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}
-                >
-                  {reachable.map((e) => e.displayName).join(", ")}
-                </div>
-              )}
-            </CardShell>
-
-            {error && (
-              <CardShell>
-                <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-              </CardShell>
-            )}
-
-            <CardShell>
-              {confirming ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ fontSize: 13, lineHeight: 1.45 }}>
-                    Отправить {reachable.length} {reachable.length === 1 ? "коллеге" : "коллегам"}? Отменить будет
-                    нельзя — сообщение уйдёт сразу.
-                  </div>
-                  <Button size="s" mode="filled" stretched loading={sending} disabled={sending} onClick={() => void handleSend()}>
-                    {sending ? "Отправляю…" : "Да, отправить"}
-                  </Button>
-                  <Button size="s" mode="gray" stretched disabled={sending} onClick={() => setConfirming(false)}>
-                    Отмена
-                  </Button>
-                </div>
+        {audienceMode === "picked" && (
+          <div style={{ marginTop: 10 }}>
+            <PersonSearch value={query} onChange={setQuery} count={recipients.length} disabled={sending} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {recipients.length === 0 ? (
+                <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Выбирать некого.</div>
+              ) : filteredRecipients.length === 0 ? (
+                <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Никого с таким именем нет.</div>
               ) : (
-                <Button size="s" mode="filled" stretched disabled={!canSend} onClick={() => setConfirming(true)}>
-                  Отправить
-                </Button>
-              )}
-            </CardShell>
-
-            {report && (
-              <CardShell>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>
-                  Дошло {report.delivered} из {report.intended}.
-                </div>
-                {unreachableLine && (
-                  <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: 13, lineHeight: 1.45 }}>
-                    {unreachableLine}
+                filteredRecipients.map((e) => (
+                  // Обёртка несёт класс строки: по нему её находят тесты, а `CheckRow`
+                  // своего класса наружу не отдаёт.
+                  <div key={e.id} className="announce-picker-row">
+                    <CheckRow
+                      checked={selectedIds.has(e.id)}
+                      disabled={sending}
+                      onChange={() => toggle(e.id)}
+                      label={e.displayName}
+                      hint={!e.reachable ? "— не привязан" : undefined}
+                    />
                   </div>
-                )}
-              </CardShell>
-            )}
-          </CardStack>
-        </Section>
-      </List>
-    </ScreenScroll>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 10, color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", fontWeight: 600 }}>
+          Уйдёт {reachable.length === 0 ? "некому" : `${reachable.length}:`}
+        </div>
+        {reachable.length > 0 && (
+          <div
+            className="announce-recipients-preview"
+            style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}
+          >
+            {reachable.map((e) => e.displayName).join(", ")}
+          </div>
+        )}
+      </Card>
+
+      {error && (
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
+        </Card>
+      )}
+
+      {/* Единственная `primary` экрана в каждый момент: «Отправить» — или, после
+          первого тапа, «Да, отправить»; обе завершают действие. */}
+      <Card>
+        {confirming ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
+              Отправить {reachable.length} {reachable.length === 1 ? "коллеге" : "коллегам"}? Отменить будет
+              нельзя — сообщение уйдёт сразу.
+            </div>
+            <ActionButton kind="primary" stretched loading={sending} disabled={sending} onClick={() => void handleSend()}>
+              {sending ? "Отправляю…" : "Да, отправить"}
+            </ActionButton>
+            <ActionButton stretched disabled={sending} onClick={() => setConfirming(false)}>
+              Отмена
+            </ActionButton>
+          </div>
+        ) : (
+          <ActionButton kind="primary" stretched disabled={!canSend} onClick={() => setConfirming(true)}>
+            Отправить
+          </ActionButton>
+        )}
+      </Card>
+
+      {report && (
+        <Card>
+          <div style={{ fontSize: "var(--app-text-meta)", fontWeight: 600 }}>
+            Дошло {report.delivered} из {report.intended}.
+          </div>
+          {unreachableLine && (
+            <div style={{ marginTop: 6, color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.45 }}>
+              {unreachableLine}
+            </div>
+          )}
+        </Card>
+      )}
+    </Group>
   );
 }
 

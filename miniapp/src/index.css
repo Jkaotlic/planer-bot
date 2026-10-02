@@ -288,19 +288,18 @@ textarea {
   outline-offset: -2px;
 }
 
-/* Кнопка группы адресатов. Название группы — до 40 символов, и telegram-ui по
-   умолчанию обрезает подпись кнопки троеточием (`h6` с nowrap): на 320px
-   «Ночная смена на кухне и …» терялась бы вместе с тем, что отличает одну группу
-   от другой. Перенос по словам вместо обрезки; кнопка вырастает по высоте. */
-.group-chip {
-  height: auto;
-  min-height: 32px;
-  max-width: 100%;
+/* Плашка смены в строке дня админского расписания: справа от имени, а на экране
+   уже 360px — под ним (см. `EntryRow`). Показан ровно один из двух узлов. */
+.entry-badge--below {
+  display: none;
 }
-.group-chip h6 {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
-  text-align: left;
+
+@media (max-width: 359px) {
+  .entry-badge--after {
+    display: none;
+  }
+
+  .entry-badge--below {
+    display: inline-flex;
+  }
 }

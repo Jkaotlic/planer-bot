@@ -88,3 +88,29 @@ describe("AdminWeekendScreen — «Набрали, закрыть»", () => {
     expect(buttons(el, "Набрали, закрыть")).toHaveLength(0);
   });
 });
+
+describe("AdminWeekendScreen — отметка об отсутствии", () => {
+  it("«Отпуск» у желающего — цветная пилюля категории, а не серая пилюля статуса", async () => {
+    const el = await mount([
+      view(304, "open", {
+        interested: [{ employeeId: 3, name: "Марк", confirmedThisMonth: 0, passedOver: 0, absence: "vacation" }],
+      }),
+    ]);
+    const label = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && n.textContent === "Отпуск");
+    expect(label).toBeTruthy();
+    expect(label!.closest(".ui-pill")).toBeNull();
+    // Цвет — из палитры категории, а не из токена набора.
+    expect(label!.closest("[data-absence-chip]")!.getAttribute("data-absence-chip")).toBe("vacation");
+  });
+});
+
+describe("AdminWeekendScreen — узкий экран", () => {
+  it("строка желающего переносится: на 320px «Назначить» уходит вниз, а не сжимает имя", async () => {
+    const el = await mount([view(305, "open")]);
+    const assign = buttons(el, "Назначить")[0]!;
+    const row = assign.parentElement!.parentElement as HTMLElement;
+    expect(row.style.flexWrap).toBe("wrap");
+    const textColumn = row.children[1] as HTMLElement;
+    expect(textColumn.style.flex).toContain("150px");
+  });
+});

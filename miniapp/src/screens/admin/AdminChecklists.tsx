@@ -1,6 +1,6 @@
 import { ConfirmButton } from "../../components/ConfirmButton";
-import { useEffect, useState } from "react";
-import { Button, Input, Placeholder, Section, Spinner, Textarea } from "@telegram-apps/telegram-ui";
+import { useEffect, useRef, useState } from "react";
+import { Input, Placeholder, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import {
   CHECKLIST_RULE_TEXT,
   checklistDayTotals,
@@ -11,8 +11,7 @@ import {
   checklistHasContent,
 } from "@planer/shared";
 import { apiClient, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../../api/client";
-import { CardShell, CardStack } from "../../components/Card";
-import { ScreenScroll } from "../../components/ScreenScroll";
+import { ActionButton, Card, Group, Hint, StatusPill } from "../../ui";
 
 /**
  * «Чек-листы» в мини-аппе — зеркало консольного экрана.
@@ -77,71 +76,67 @@ export function AdminChecklists() {
     }
   }
 
+  // Заголовок «Чек-листы» даёт `Screen` в `AdminScreen`: своего здесь нет.
   if (!checklists) {
     return (
-      <ScreenScroll>
-        <Section header="Чек-листы">
-          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-            <Spinner size="m" />
-          </div>
-        </Section>
-      </ScreenScroll>
+      <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+        <Spinner size="m" />
+      </div>
     );
   }
 
   return (
-    <ScreenScroll>
-      <Section
-        header="Чек-листы"
-        footer="Проверки, которые дежурный проходит в свою смену. Списков может быть несколько — у выходящих в 07:00 и в 08:00 они разные."
-      >
-        <CardStack>
-          {error && (
-            <CardShell>
-              <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13.5 }}>{error}</div>
-            </CardShell>
-          )}
+    <Group>
+      {error && (
+        <Card>
+          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
+        </Card>
+      )}
 
-          <DaySummary day={day} />
+      <DaySummary day={day} />
 
-          {checklists.length === 0 && (
-            <Placeholder description="Чек-листов пока нет — заведи первый, и он начнёт приходить дежурным тех видов смен, которые ты ему укажешь." />
-          )}
+      {checklists.length === 0 && (
+        <Placeholder description="Чек-листов пока нет — заведи первый, и он начнёт приходить дежурным тех видов смен, которые ты ему укажешь." />
+      )}
 
-          {checklists.map((list) => (
-            <ChecklistCard
-              key={list.id}
-              list={list}
-              templates={templates}
-              day={day}
-              open={openId === list.id}
-              busy={busy}
-              onToggle={() => setOpenId(openId === list.id ? null : list.id)}
-              run={run}
-            />
-          ))}
+      {checklists.map((list) => (
+        <ChecklistCard
+          key={list.id}
+          list={list}
+          templates={templates}
+          day={day}
+          open={openId === list.id}
+          busy={busy}
+          onToggle={() => setOpenId(openId === list.id ? null : list.id)}
+          run={run}
+        />
+      ))}
 
-          <CardShell>
-            <Input
-              header="Новый чек-лист"
-              placeholder="Например, дежурство с 07:00"
-              value={draft}
-              disabled={busy}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-            <Button
-              size="s"
-              mode="filled"
-              stretched
-              disabled={busy || !draft.trim()}
-              onClick={() => void run(() => apiClient.createChecklist(draft.trim())).then((ok) => ok && setDraft(""))}
-            >
-              Завести
-            </Button>
-          </CardShell>
-        </CardStack>
-      </Section>
-    </ScreenScroll>
+      <Card>
+        <Input
+          header="Новый чек-лист"
+          placeholder="Например, дежурство с 07:00"
+          value={draft}
+          disabled={busy}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        {/* Единственная `primary` этой карточки; в раскрытом списке своя, и
+            раскрыт одновременно только один. */}
+        <ActionButton
+          kind="primary"
+          stretched
+          disabled={busy || !draft.trim()}
+          onClick={() => void run(() => apiClient.createChecklist(draft.trim())).then((ok) => ok && setDraft(""))}
+        >
+          Завести
+        </ActionButton>
+      </Card>
+
+      {/* Пояснение внизу и серое: сводка дня должна быть первым блоком экрана. */}
+      <Hint>
+        Проверки, которые дежурный проходит в свою смену. Списков может быть несколько — у выходящих в 07:00 и в 08:00 они разные.
+      </Hint>
+    </Group>
   );
 }
 
@@ -155,50 +150,41 @@ export function AdminChecklists() {
 function DaySummary({ day }: { day: ChecklistDay | null }) {
   const people = day?.people ?? [];
   const totals = checklistDayTotals(people);
-  const chip = (text: string, tone: "ok" | "wait" | "alert") => (
-    <span
-      key={text}
-      style={{
-        padding: "3px 9px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
-        color: tone === "ok" ? "var(--tgui--link_color)" : tone === "alert" ? "var(--tgui--destructive_text_color)" : "var(--tgui--hint_color)",
-        background: tone === "ok"
-          ? "color-mix(in srgb, var(--tgui--link_color) 14%, transparent)"
-          : tone === "alert"
-            ? "color-mix(in srgb, var(--tgui--destructive_text_color) 12%, transparent)"
-            : "var(--tgui--secondary_bg_color)",
-      }}
-    >
+  // Каждая пилюля — отдельный узел: тест держит «Ушло N / Ждёт N / Не уйдёт N» по одной.
+  const chip = (text: string, tone: "ok" | "wait" | "bad") => (
+    <StatusPill key={text} tone={tone}>
       {text}
-    </span>
+    </StatusPill>
   );
 
   return (
-    <CardShell>
+    <Card>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: people.length > 0 ? 10 : 0 }}>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>Сегодня</span>
+        <span style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>Сегодня</span>
         {people.length > 0 && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {chip(`Ушло ${totals.sent}`, "ok")}
             {chip(`Ждёт ${totals.waiting}`, "wait")}
             {/* Застрявшие выделены отдельно: это единственная строка, по которой
                 надо что-то делать руками. */}
-            {chip(`Не уйдёт ${totals.blocked}`, totals.blocked > 0 ? "alert" : "wait")}
+            {chip(`Не уйдёт ${totals.blocked}`, totals.blocked > 0 ? "bad" : "wait")}
           </div>
         )}
       </div>
 
       {people.length === 0 ? (
-        <span style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Сегодня чек-лист никому не положен.</span>
+        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сегодня чек-лист никому не положен.</span>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {people.map((p) => (
-            <div key={`${p.employeeId}:${p.checklistId}`} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13.5 }}>
+            <div key={`${p.employeeId}:${p.checklistId}`} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--app-text-meta)" }}>
               <span style={{ flex: 1, minWidth: 0 }}>{p.displayName}</span>
               <span
                 style={{
-                  fontSize: 12.5,
+                  fontSize: "var(--app-text-meta)",
+                  // Синий — только у нажимаемого: «ушло» читается обычным цветом текста.
                   color: p.delivery === "sent"
-                    ? "var(--tgui--link_color)"
+                    ? "var(--tgui--text_color)"
                     : p.delivery === "scheduled"
                       ? "var(--tgui--hint_color)"
                       : "var(--tgui--destructive_text_color)",
@@ -210,7 +196,7 @@ function DaySummary({ day }: { day: ChecklistDay | null }) {
           ))}
         </div>
       )}
-    </CardShell>
+    </Card>
   );
 }
 
@@ -234,6 +220,9 @@ function ChecklistCard({
   const [itemDraft, setItemDraft] = useState("");
   const [note, setNote] = useState(list.note ?? "");
   const [docUrl, setDocUrl] = useState(list.docUrl ?? "");
+  // Скрытое поле файла нажимается кнопкой набора: кнопка внутри `label` не передаёт
+  // ему нажатие, поэтому `label` + `Component="span"` больше не годится.
+  const fileInput = useRef<HTMLInputElement>(null);
   const linked = templates.filter((t) => list.templateIds.includes(t.id));
   const dirty = note !== (list.note ?? "") || docUrl !== (list.docUrl ?? "");
   // Пояснение и ссылка — единственное здесь, что не сохраняется по тапу, и уйти
@@ -248,52 +237,49 @@ function ChecklistCard({
   const todayPeople = day?.people.filter((p) => p.checklistId === list.id) ?? [];
 
   return (
-    <CardShell>
+    <Card>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
         style={{
-          display: "flex", alignItems: "center", gap: 8, width: "100%", padding: 0,
-          border: 0, background: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer",
+          display: "flex", flexDirection: "column", alignItems: "stretch", gap: 2, width: "100%", padding: 0, minHeight: "var(--app-tap)",
+          justifyContent: "center", border: 0, background: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer",
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 15 }}>{list.name}</span>
-        {/* Цветом, а не серым текстом в общей строке: до 2026-08-28 статус был
-            написан правильно, но глаз проходил мимо. */}
-        <span
-          className="checklist-badge"
-          style={{
-            padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
-            color: dispatch === "sends" ? "var(--tgui--link_color)" : "var(--tgui--destructive_text_color)",
-            background: dispatch === "sends"
-              ? "color-mix(in srgb, var(--tgui--link_color) 14%, transparent)"
-              : "color-mix(in srgb, var(--tgui--destructive_text_color) 12%, transparent)",
-          }}
-        >
-          {checklistDispatchBadge(dispatch)}
+        {/* Название с пилюлей — первой строкой, пояснение — второй, на всю
+            ширину: в одной строке с названием оно сжималось в узкую колонку и
+            рвалось на три строки. */}
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: "var(--app-text-body)", minWidth: 0, overflowWrap: "anywhere" }}>{list.name}</span>
+          {/* Пилюлей, а не серым текстом в общей строке: до 2026-08-28 статус был
+              написан правильно, но глаз проходил мимо. Обёртка несёт класс, по
+              которому статус находят в тестах. */}
+          <span className="checklist-badge" style={{ flex: "none" }}>
+            <StatusPill tone={dispatch === "sends" ? "ok" : "bad"}>{checklistDispatchBadge(dispatch)}</StatusPill>
+          </span>
+          <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
         </span>
-        <span style={{ flex: 1, fontSize: 12.5, color: "var(--tgui--hint_color)" }}>
+        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
           {checklistDispatchReason(dispatch, linked.map((t) => t.name))}
         </span>
-        <span style={{ color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
           {/* «Кому положен» первым: это и есть тот «скоп смен», ради которого
               списков стало несколько. */}
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Кому положен</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Кому положен</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {templates.map((template) => {
               const on = list.templateIds.includes(template.id);
               return (
-                <Button
+                <ActionButton
                   key={template.id}
-                  size="s"
-                  mode={on ? "filled" : "bezeled"}
+                  compact
+                  aria-pressed={on}
                   disabled={busy}
                   onClick={() =>
                     void run(() =>
@@ -305,37 +291,37 @@ function ChecklistCard({
                   }
                 >
                   {template.name} · {template.start}
-                </Button>
+                </ActionButton>
               );
             })}
           </div>
 
-          <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.45, color: "var(--tgui--hint_color)" }}>
+          <Hint>
             {CHECKLIST_RULE_TEXT} Виды смен и пункты сохраняются сразу.
-          </p>
+          </Hint>
 
           {/* Сегодняшний расклад рядом с настройкой: «уйдёт ли» проверяют
               ровно в тот момент, когда виды смен только что переключили. */}
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Сегодня</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сегодня</span>
           {todayPeople.length === 0 ? (
-            <span style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Сегодня этот чек-лист никому не положен.</span>
+            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сегодня этот чек-лист никому не положен.</span>
           ) : (
             todayPeople.map((p) => (
-              <div key={p.employeeId} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13.5 }}>
+              <div key={p.employeeId} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--app-text-meta)" }}>
                 <span style={{ flex: 1, minWidth: 0 }}>{p.displayName}</span>
                 {/* Судьба сообщения рядом с прогрессом: «0 из 5» у того, кому
                     ничего не ушло, читается как лень человека, а не как
                     выключенные напоминания. */}
-                <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>
+                <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
                   {checklistDeliveryLabel(p.delivery, p.start, p.sentAt)} · {p.done} из {p.total}
                 </span>
               </div>
             ))
           )}
 
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Пункты</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Пункты</span>
           {list.items.length === 0 ? (
-            <span style={{ fontSize: 13.5, color: "var(--tgui--hint_color)" }}>Пунктов пока нет.</span>
+            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Пунктов пока нет.</span>
           ) : (
             list.items.map((item, index) => (
               <ItemRow
@@ -358,15 +344,13 @@ function ChecklistCard({
             disabled={busy}
             onChange={(e) => setItemDraft(e.target.value)}
           />
-          <Button
-            size="s"
-            mode="bezeled"
+          <ActionButton
             stretched
             disabled={busy || !itemDraft.trim()}
             onClick={() => void run(() => apiClient.addChecklistItem(list.id, itemDraft.trim())).then((ok) => ok && setItemDraft(""))}
           >
             Добавить пункт
-          </Button>
+          </ActionButton>
 
           <Textarea
             header="Пояснение — уходит дежурному в чат вместе со списком"
@@ -382,9 +366,10 @@ function ChecklistCard({
             disabled={busy}
             onChange={(e) => setDocUrl(e.target.value)}
           />
-          <Button
-            size="s"
-            mode="filled"
+          {/* `primary` раскрытой карточки: единственное действие, которое не
+              сохраняется по тапу, а значит — то, ради которого карточку открыли. */}
+          <ActionButton
+            kind="primary"
             stretched
             disabled={busy || !dirty}
             onClick={() => {
@@ -394,47 +379,46 @@ function ChecklistCard({
             }}
           >
             Сохранить инструкцию
-          </Button>
+          </ActionButton>
           {dirty ? (
-            <span style={{ fontSize: 12.5, color: "var(--tgui--destructive_text_color)" }}>
+            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--destructive_text_color)" }}>
               Не сохранено — нажми «Сохранить инструкцию».
             </span>
           ) : (
-            saved && <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)" }}>Сохранено.</span>
+            saved && <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сохранено.</span>
           )}
 
-          <span style={{ fontSize: 12.5, color: "var(--tgui--hint_color)", lineHeight: 1.45 }}>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.45 }}>
             {list.hasDoc
               ? `📄 Приложен файл: ${list.docName} — уходит дежурному вместе с чек-листом.`
               : "Файл не приложен."}
           </span>
           {/* Файл выбирается прямо здесь; путь через бота остаётся вторым — он
               короче, когда файл уже лежит в телефоне. */}
-          <label style={{ display: "inline-flex" }}>
-            <input
-              type="file"
-              style={{ display: "none" }}
-              disabled={busy}
-              aria-label={`Приложить файл к «${list.name}»`}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                // Значение поля сбрасывается: иначе повторный выбор ТОГО ЖЕ файла
-                // (после неудачи) не даёт события change вовсе.
-                e.target.value = "";
-                if (file) void run(() => apiClient.uploadChecklistDoc(list.id, file));
-              }}
-            />
-            <Button size="s" mode="bezeled" disabled={busy} Component="span">
-              {list.hasDoc ? "📎 Заменить файл" : "📎 Приложить файл"}
-            </Button>
-          </label>
-          <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+          <input
+            ref={fileInput}
+            type="file"
+            style={{ display: "none" }}
+            disabled={busy}
+            aria-label={`Приложить файл к «${list.name}»`}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              // Значение поля сбрасывается: иначе повторный выбор ТОГО ЖЕ файла
+              // (после неудачи) не даёт события change вовсе.
+              e.target.value = "";
+              if (file) void run(() => apiClient.uploadChecklistDoc(list.id, file));
+            }}
+          />
+          <ActionButton disabled={busy} onClick={() => fileInput.current?.click()}>
+            {list.hasDoc ? "📎 Заменить файл" : "📎 Приложить файл"}
+          </ActionButton>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
             До 5 МБ. Можно и прислать боту: /instruction, потом выбрать «{list.name}».
           </span>
           {list.hasDoc && (
-            <Button size="s" mode="plain" disabled={busy} onClick={() => void run(() => apiClient.removeChecklistDoc(list.id))}>
+            <ActionButton kind="quiet" disabled={busy} onClick={() => void run(() => apiClient.removeChecklistDoc(list.id))}>
               Убрать файл
-            </Button>
+            </ActionButton>
           )}
 
           <ConfirmButton
@@ -447,7 +431,7 @@ function ChecklistCard({
           />
         </div>
       )}
-    </CardShell>
+    </Card>
   );
 }
 
@@ -508,17 +492,17 @@ function ItemRow({
           onChange={(e) => setNote(e.target.value)}
         />
         <div style={{ display: "flex", gap: 8 }}>
-          <Button
-            size="s"
-            mode="filled"
+          {/* Обычная: `primary` в раскрытой карточке — «Сохранить инструкцию». */}
+          <ActionButton
+            compact
             disabled={busy || !changed}
             onClick={() => void onSave(patch).then((ok) => ok && setEditing(false))}
           >
             Сохранить
-          </Button>
-          <Button size="s" mode="plain" disabled={busy} onClick={() => setEditing(false)}>
+          </ActionButton>
+          <ActionButton compact kind="quiet" disabled={busy} onClick={() => setEditing(false)}>
             Отмена
-          </Button>
+          </ActionButton>
         </div>
       </div>
     );
@@ -526,28 +510,28 @@ function ItemRow({
 
   return (
     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-      <span style={{ fontSize: 12, color: "var(--tgui--hint_color)", minWidth: 16 }}>{index + 1}</span>
+      <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", minWidth: 16 }}>{index + 1}</span>
       {/* Базис 140px: на узком экране кнопки уходят строкой ниже, а не
           сжимают название до пары букв. */}
-      <span style={{ flex: "1 1 140px", fontSize: 14, minWidth: 0, overflowWrap: "anywhere" }}>
+      <span style={{ flex: "1 1 140px", fontSize: "var(--app-text-body)", minWidth: 0, overflowWrap: "anywhere" }}>
         {item.title}
         {item.note && (
-          <span style={{ display: "block", fontSize: 12.5, color: "var(--tgui--hint_color)" }}>{item.note}</span>
+          <span style={{ display: "block", fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>{item.note}</span>
         )}
       </span>
       <span style={{ display: "inline-flex", gap: 2, marginLeft: "auto", flex: "none" }}>
-        <Button size="s" mode="plain" aria-label="Выше" disabled={busy || index === 0} onClick={() => onMove(index - 1)}>
+        <ActionButton compact kind="quiet" aria-label="Выше" disabled={busy || index === 0} onClick={() => onMove(index - 1)}>
           ↑
-        </Button>
-        <Button size="s" mode="plain" aria-label="Ниже" disabled={busy || index === total - 1} onClick={() => onMove(index + 1)}>
+        </ActionButton>
+        <ActionButton compact kind="quiet" aria-label="Ниже" disabled={busy || index === total - 1} onClick={() => onMove(index + 1)}>
           ↓
-        </Button>
-        <Button size="s" mode="plain" aria-label="Изменить пункт" disabled={busy} onClick={open}>
+        </ActionButton>
+        <ActionButton compact kind="quiet" aria-label="Изменить пункт" disabled={busy} onClick={open}>
           ✎
-        </Button>
-        <Button size="s" mode="plain" disabled={busy} onClick={onRemove}>
+        </ActionButton>
+        <ActionButton compact kind="quiet" disabled={busy} onClick={onRemove}>
           Убрать
-        </Button>
+        </ActionButton>
       </span>
     </div>
   );
