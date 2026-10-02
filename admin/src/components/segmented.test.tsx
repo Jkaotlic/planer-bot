@@ -75,4 +75,17 @@ describe("Segmented", () => {
     expect(items(el).map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "false", "false"]);
     expect(items(el).every((b) => b.disabled)).toBe(true);
   });
+  // Пункты — настоящие кнопки: Enter и Пробел на сфокусированной кнопке дают click,
+  // отдельной клавиатурной логики в компоненте нет и быть не должно.
+  it("с клавиатуры: каждый пункт достижим по Tab, фокус и «Enter» (click) зовут onChange", async () => {
+    const onChange = vi.fn();
+    const el = await mount({ value: "a", onChange });
+    expect(items(el).every((b) => b.getAttribute("tabindex") !== "-1" && b.tabIndex >= 0)).toBe(true);
+
+    const target = items(el)[1];
+    act(() => target.focus());
+    expect(document.activeElement).toBe(target);
+    await act(async () => (document.activeElement as HTMLButtonElement).click());
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("b");
+  });
 });

@@ -232,6 +232,73 @@ describe("AnnounceScreen", () => {
   });
 });
 
+/** Какие пункты «Кому отправить» нажаты: по ним админ узнаёт, кому уйдёт неотзываемое сообщение. */
+function pressedAudience(el: HTMLElement): string[] {
+  const group = el.querySelector('[aria-label="Кому отправить"]')!;
+  return [...group.querySelectorAll<HTMLButtonElement>("button")]
+    .filter((b) => b.getAttribute("aria-pressed") === "true")
+    .map((b) => (b.textContent ?? "").trim());
+}
+
+describe("AnnounceScreen: нажатый пункт аудитории", () => {
+  const TEAM = [
+    recipient({ id: 1, displayName: "Аня", role: "admin" }),
+    recipient({ id: 2, displayName: "Игорь", role: "worker" }),
+    recipient({ id: 3, displayName: "Марк", role: "worker" }),
+  ];
+
+  it.each(["Всем", "Админам", "Работникам", "Выбрать"])("после «%s» нажат ровно он", async (label) => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    const el = await mount();
+    // Сначала уходим с исходного «Всем» на другой пункт, чтобы «Всем» проверялось возвратом.
+    act(() => buttonByText(el, label === "Выбрать" ? "Админам" : "Выбрать").click());
+    act(() => buttonByText(el, label).click());
+    expect(pressedAudience(el)).toEqual([label]);
+  });
+
+  it("при открытии нажато «Всем»", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    const el = await mount();
+    expect(pressedAudience(el)).toEqual(["Всем"]);
+  });
+
+  it.each(["Админам", "Работникам"])("галочка под пресетом «%s» переводит нажатие на «Выбрать»", async (preset) => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    const el = await mount();
+    act(() => buttonByText(el, preset).click());
+    expect(pressedAudience(el)).toEqual([preset]);
+
+    await act(async () => checkboxIn(pickerRow(el, "Марк")).click());
+    expect(pressedAudience(el)).toEqual(["Выбрать"]);
+
+    // Снятие галочки — тоже ручная правка: пресет не возвращается.
+    act(() => buttonByText(el, preset).click());
+    await act(async () => checkboxIn(pickerRow(el, "Аня")).click());
+    expect(pressedAudience(el)).toEqual(["Выбрать"]);
+  });
+
+  it("выбрана группа — не нажат ни один пункт аудитории", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([{ id: 7, name: "ЧИП 5-й этаж", memberIds: [2, 3] }]);
+    const el = await mount();
+    act(() => buttonByText(el, "ЧИП 5-й этаж").click());
+    expect(pressedAudience(el)).toEqual([]);
+  });
+
+  it("пока отправка не завершилась, все четыре пункта аудитории недоступны", async () => {
+    vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue(TEAM);
+    vi.spyOn(apiClient, "sendAnnouncement").mockReturnValue(new Promise(() => {}));
+    const el = await mount();
+    await type(textareaByLabel(el, "Текст анонса"), "Планёрка");
+    act(() => buttonByText(el, "Отправить").click());
+    await act(async () => buttonByText(el, "Да, отправить").click());
+
+    for (const label of ["Всем", "Админам", "Работникам", "Выбрать"]) {
+      expect(buttonByText(el, label).disabled, label).toBe(true);
+    }
+  });
+});
+
 describe("AnnounceScreen: кнопки групп", () => {
   const TEAM = [
     recipient({ id: 1, displayName: "Аня" }),

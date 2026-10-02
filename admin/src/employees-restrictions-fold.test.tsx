@@ -126,6 +126,16 @@ describe("ограничения работника свёрнуты", () => {
     expect(card(el, 1).textContent).toContain("управляется ролью «Наблюдатель»");
   });
 
+  // Чекбокс «Не участвует в назначениях» у наблюдателя показывает хранимое значение,
+  // а не «эффективное» (наблюдатель и так вне раздачи): иначе админ не увидит, что в базе.
+  it.each([[false], [true]])("у наблюдателя галка назначений недоступна и показывает хранимое %s", async (stored) => {
+    const el = await mount([emp(1, "Лена", { isObserver: true, excludedFromAssignment: stored })]);
+    await expand(el, 1);
+    const assignment = boxes(el, 1)[1];
+    expect(assignment.disabled).toBe(true);
+    expect(assignment.checked).toBe(stored);
+  });
+
   it("переключение зовёт те же методы API, а сводка свёрнутой карточки меняется", async () => {
     const save = vi.spyOn(apiClient, "setEmployeeRestrictions").mockResolvedValue(undefined);
     const observer = vi.spyOn(apiClient, "setEmployeeObserver").mockResolvedValue(undefined);
