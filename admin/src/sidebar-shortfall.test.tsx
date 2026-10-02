@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdminShortfall } from "@planer/shared";
-import { apiClient } from "./api/client";
+import { AuthRequiredError, apiClient } from "./api/client";
 import { App } from "./App";
 
 /**
@@ -66,6 +66,14 @@ describe("метка нехватки в сайдбаре", () => {
     const el = await mount();
     expect(badge(el)).toBeNull();
     expect(el.querySelector(".schedule-table")).not.toBeNull();
+  });
+
+  it("сессия истекла (401/403) — экран входа, а не молча пропавшая метка", async () => {
+    // Остальные вызовы консоли так и делают; тихая метка оставляла бы вкладку,
+    // на которой следующая же правка падает.
+    vi.spyOn(apiClient, "getAdminShortfall").mockRejectedValue(new AuthRequiredError("auth"));
+    const el = await mount();
+    expect(el.querySelector(".login-screen")).not.toBeNull();
   });
 
   it("больше девяти — «9+»", async () => {

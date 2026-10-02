@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { apiClient, type TemplateRolesView } from "../../api/client";
+import { NORM_CALENDAR_HINT } from "@planer/shared";
 import { AdminKindSettings } from "./AdminKindSettings";
 
 /**
@@ -93,5 +94,15 @@ describe("норма дня на карточке вида смены", () => {
     expect(el.textContent ?? "").toContain("Пн 2 · Вт 2 · Ср 2 · Чт 2 · Пт 2");
     // Нулевые дни в сводку не попадают — это «не считаем», а не «ноль людей».
     expect(el.textContent ?? "").not.toContain("Сб 0");
+  });
+
+  it("рядом с полями нормы — подсказка о правиле календаря", async () => {
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([MORNING]);
+    vi.spyOn(apiClient, "getChecklists").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTemplateQueue").mockRejectedValue(new Error("не нужно"));
+    const el = await mount();
+    await act(async () => (el.querySelector("button[aria-expanded]") as HTMLButtonElement).click());
+    await settle();
+    expect(el.textContent ?? "").toContain(NORM_CALENDAR_HINT);
   });
 });

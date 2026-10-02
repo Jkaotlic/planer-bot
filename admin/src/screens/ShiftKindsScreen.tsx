@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import {
   coverageSummary,
+  NORM_CALENDAR_HINT,
   previewReminderText,
   REMINDER_PLACEHOLDERS,
   exactSchedulePalette,
@@ -574,6 +575,7 @@ function CoverageRow({
       <span className="kind-rotation-note">
         Ноль значит «не считаем» — про такой день подсказка в расписании молчит.
       </span>
+      <span className="kind-rotation-note">{NORM_CALENDAR_HINT}</span>
       {dirty && (
         <button
           type="button"

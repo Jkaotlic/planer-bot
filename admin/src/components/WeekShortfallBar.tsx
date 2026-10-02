@@ -1,4 +1,4 @@
-import { nearestShortfallLabel, shortfallStatus, weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
+import { dayShortfallText, nearestShortfallLabel, shortfallStatus, weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { pluralizeRu } from "../lib/people";
 
@@ -53,7 +53,7 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, ca
           onClick={() => onPointDay(day.date === pointedDate ? null : day.date)}
         >
           <b>{weekdayShort(day.date)}</b>
-          {` ${day.missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ")}`}
+          {` ${dayShortfallText(day.missing)}`}
         </button>
       ))}
       {status.state !== "no-norms" && nearestOutside && (

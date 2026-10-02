@@ -186,6 +186,8 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   async function reloadAfterImport() {
     const [emps] = await Promise.all([apiClient.getAdminEmployees(), loadWeek(from, to)]);
     setEmployees(emps.filter((e) => e.isActive));
+    // Импорт переписывает записи недели — метка на вкладке считает по ним же.
+    onScheduleChanged?.();
   }
 
   // Roster + templates load once; they don't change with the visible week.
@@ -377,6 +379,8 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
             // полоска показывала бы нехватку по нормам, какими они были при
             // открытии экрана. Не сумели — остаются прежние.
             apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+            // И метка на вкладке «Админ»: сервер считает её по тем же нормам.
+            onScheduleChanged?.();
           }}
         />
       ) : csvOpen ? (

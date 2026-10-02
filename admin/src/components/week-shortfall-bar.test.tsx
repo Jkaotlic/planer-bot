@@ -93,6 +93,14 @@ describe("строка нехватки над сеткой недели", () =>
     expect(days).toEqual(["Пн Утро −2, Дежурство −1", "Чт Утро −1"]);
   });
 
+  it("видов с нехваткой больше двух — на кнопке дня только итог, как в мини-аппе", async () => {
+    // Один хелпер на оба фронта: свой формат в консоли разъехался бы с мини-аппом.
+    const third = { templateId: 40, name: "Ночь", category: "shift" as const, coverage: [1, 0, 0, 0, 0, 0, 0] };
+    const el = await mount({ templates: [MORNING, DUTY, third] });
+    const days = [...el.querySelectorAll(".week-shortfall-day")].map((b) => b.textContent);
+    expect(days).toEqual(["Пн −4", "Чт Утро −1"]);
+  });
+
   it("клик по дню показывает на его колонку, повторный — снимает", async () => {
     const onPointDay = vi.fn();
     const el = await mount({ templates: [MORNING], onPointDay });

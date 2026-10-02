@@ -202,10 +202,13 @@ export function App() {
         setAdminShortfall(s.total);
         setAdminShortfallFirst(s.firstDate);
       },
-      () => {
+      (err: unknown) => {
         if (seq !== shortfallSeq.current) return;
         setAdminShortfall(null);
         setAdminShortfallFirst(null);
+        // Метка может быть единственным запросом, который идёт на скрытой вкладке:
+        // молча проглоченный отказ сессии оставил бы вкладку, где следующая правка падает.
+        if (err instanceof AuthRequiredError) setNeedLogin(true);
       },
     );
   }
