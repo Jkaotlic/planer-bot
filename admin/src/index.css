@@ -1342,8 +1342,7 @@ button {
   white-space: nowrap;
 }
 
-.week-shortfall-day,
-.week-shortfall-unset {
+.week-shortfall-day {
   border: none;
   background: none;
   font: inherit;
@@ -1364,13 +1363,10 @@ button {
 }
 
 .week-shortfall-unset {
-  margin-left: auto;
-  color: var(--hint);
+  /* Ссылка-кнопка слева, а не серая строчка в правом углу: незаданная норма —
+     действие («задать»), и оно должно читаться как кнопка. Вид даёт
+     .btn-quiet; тут только то, что нужно строке, — не переносить подпись. */
   white-space: nowrap;
-}
-
-.week-shortfall-unset:hover {
-  color: var(--link);
 }
 
 /* Белое на `--destructive` не дотягивает до 4.5: замер дал 4.28 в светлой теме
@@ -2556,6 +2552,9 @@ textarea {
   .collection-new-form {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    /* Вторая строка забирает остаток высоты «Кому», а «Рассылаем» прижат вверх —
+       иначе между «Поводом» и «Рассылаем» зияла пустота. */
+    grid-template-rows: auto 1fr;
     gap: 10px 20px;
     align-items: start;
   }
