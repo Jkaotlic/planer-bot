@@ -43,8 +43,7 @@ export interface ScheduleGridProps {
  * обрезался многоточием, и именно хвост — второй вид — терялся. Расклад по
  * видам живёт в подсказке и в строке над сеткой (`WeekShortfallBar`).
  */
-function DayShortfall({ date, shifts, coverage, calendar }: { date: string; shifts: Shift[]; coverage: readonly CoverageTemplate[]; calendar: DayCalendar }) {
-  const missing = missingCoverage(shifts, coverage, date, calendar);
+function DayShortfall({ missing }: { missing: ReturnType<typeof missingCoverage> }) {
   const hint = coverageHint(missing);
   if (!hint) return null;
   const short = missing.reduce((sum, kind) => sum + kind.need - kind.have, 0);
@@ -80,10 +79,13 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
             {/* Сегодняшний столбец отмечен: в сетке из семи дней это первый
                 вопрос, который к ней возникает, а до этого сетка отвечала
                 только «где выходные». */}
-            {weekDates.map((date) => (
+            {weekDates.map((date) => {
+              // Один раз на колонку: от неё зависит и красная шапка, и метка в ней.
+              const missing = missingCoverage(shifts, coverage, date, calendar);
+              return (
               <th
                 key={date}
-                className={[isDayOff(date, calendar) ? "weekend-col" : "", date === today ? "today-col" : "", date === highlightDate ? "pointed-col" : ""].filter(Boolean).join(" ") || undefined}
+                className={[isDayOff(date, calendar) ? "weekend-col" : "", missing.length > 0 ? "short-col" : "", date === today ? "today-col" : "", date === highlightDate ? "pointed-col" : ""].filter(Boolean).join(" ") || undefined}
                 aria-current={date === today ? "date" : undefined}
               >
                 <span className="day-col-header">
@@ -92,12 +94,13 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
                       Молчит, пока норма не задана. */}
                   <span className="dow">
                     {weekdayShort(date)}
-                    <DayShortfall date={date} shifts={shifts} coverage={coverage} calendar={calendar} />
+                    <DayShortfall missing={missing} />
                   </span>
                   <span className="dom">{dayOfMonth(date)}</span>
                 </span>
               </th>
-            ))}
+              );
+            })}
           </tr>
         </thead>
         <tbody>

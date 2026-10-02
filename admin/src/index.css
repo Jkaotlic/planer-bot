@@ -1328,17 +1328,43 @@ button {
   cursor: help;
 }
 
-/* Строка нехватки над сеткой. Без рамки и подложки: это строка текста под
-   поиском, а не ещё одна плашка — плашек с уведомлениями над сеткой уже две. */
+/* Плашкой, а не строкой мелкого текста: строку над сеткой владелец не
+   заметил вовсе. Отступы — как у сетки под ней, чтобы края совпали. */
 .week-shortfall {
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 6px;
-  padding: 0 24px 10px;
-  font-size: var(--text-meta);
+  margin: 0 24px 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
+  font-size: var(--text-body);
   line-height: 1.5;
+}
+
+.week-shortfall--short {
+  background: var(--surface-secondary);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+}
+
+/* Зелёный — тот же, что у `.roster-notice-success`: нового цвета не заводим. */
+.week-shortfall--closed {
+  background: rgba(28, 163, 91, 0.12);
+  color: #16824a;
+}
+
+.week-shortfall--no-norms {
+  background: var(--surface-secondary);
+  color: var(--hint);
+}
+
+/* Итог у зелёной и нейтральной плашек — просто текст, а не красная таблетка. */
+.week-shortfall--closed .week-shortfall-total,
+.week-shortfall--no-norms .week-shortfall-total {
+  background: none;
+  color: inherit;
+  padding-inline: 0;
 }
 
 .week-shortfall-total {
@@ -1398,12 +1424,39 @@ button {
     background: var(--destructive);
     color: #14181f;
   }
+
+  /* Строка выше возвращает красную таблетку и в тёмной теме; у зелёной и
+     нейтральной плашек итог — текст, и таблетка не нужна. */
+  .week-shortfall--closed .week-shortfall-total,
+  .week-shortfall--no-norms .week-shortfall-total {
+    background: none;
+    color: inherit;
+  }
+}
+
+/* День с дырой — шапка колонки красная целиком, а не только метка «−N»: метку
+   в углу ячейки владелец не замечал. Непрозрачная (микс с --surface): шапка
+   липкая, и сквозь полупрозрачную просвечивали бы строки при прокрутке.
+   Цвет текста — --text и у выходных: красные буквы выходного на красной
+   подложке не читаются, а «выходной» и без того виден по колонке ниже. */
+.schedule-table thead th.short-col {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--destructive) 16%, var(--surface));
+  box-shadow: inset 0 -2px 0 var(--destructive);
+  color: var(--text);
 }
 
 /* Колонка дня, на который показали из строки нехватки. Обводкой по краям, а
    не заливкой: заливка уже занята «сегодня» и выходными. */
 .schedule-table .pointed-col {
   box-shadow: inset 2px 0 0 var(--destructive), inset -2px 0 0 var(--destructive);
+}
+
+/* Показывают всегда на день с дырой, так что шапка бывает и красной, и
+   обведённой: её нижняя черта задана правилом с большим весом и затёрла бы
+   боковую обводку, поэтому тени сложены здесь явно. */
+.schedule-table thead th.short-col.pointed-col {
+  box-shadow: inset 2px 0 0 var(--destructive), inset -2px 0 0 var(--destructive), inset 0 -2px 0 var(--destructive);
 }
 
 .kind-coverage {
@@ -3276,7 +3329,7 @@ textarea {
   /* Строка нехваток — на левый край 14px, как топбар: 24px десктопа сдвигали её
      вправо от края сетки. */
   .week-shortfall {
-    padding-inline: 14px;
+    margin-inline: 14px;
   }
 
   .btn.employee-restrictions-toggle {

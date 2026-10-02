@@ -83,7 +83,18 @@ describe("строка нехватки в «Расписании»", () => {
     expect(el.querySelector(".week-shortfall-day[aria-pressed='true']")).toBeNull();
   });
 
-  it("норма задана и закрыта записями — ни строки, ни меток", async () => {
+  it("шапка колонки дня с дырой — красная целиком", async () => {
+    const el = await mount([HUGE]);
+    expect(el.querySelectorAll(".schedule-table thead th.short-col").length).toBe(7);
+  });
+
+  it("пока неделя грузится, плашки нет", async () => {
+    vi.spyOn(apiClient, "getTeamSchedule").mockReturnValue(new Promise(() => {}));
+    const el = await mount([HUGE]);
+    expect(el.querySelector(".week-shortfall")).toBeNull();
+  });
+
+  it("норма задана и закрыта записями — зелёная плашка, ни меток, ни красных шапок", async () => {
     const week = Array.from({ length: 7 }, (_, i) => toISODate(addDays(mondayOf(new Date()), i)));
     vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue(week.map((date, i) => ({
       id: 100 + i, date, endDate: null, start: "08:00", end: "17:00", employeeId: 1,
@@ -91,8 +102,9 @@ describe("строка нехватки в «Расписании»", () => {
     })));
     const el = await mount([role(9003, "Закрытая", [1, 1, 1, 1, 1, 1, 1])]);
     expect(el.querySelector(".schedule-table")).not.toBeNull();
-    expect(el.querySelector(".week-shortfall")).toBeNull();
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
     expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
+    expect(el.querySelectorAll("th.short-col")).toHaveLength(0);
   });
 
   it("при листании не считает новую неделю по записям прежней", async () => {
@@ -104,10 +116,10 @@ describe("строка нехватки в «Расписании»", () => {
     expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
   });
 
-  it("видов смен нет вовсе — строки нет", async () => {
+  it("видов смен нет вовсе — нейтральная плашка «Нормы не заданы»", async () => {
     const el = await mount([]);
     expect(el.querySelector(".schedule-table")).not.toBeNull();
-    expect(el.querySelector(".week-shortfall")).toBeNull();
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
   });
 
   it("хвост «без нормы» открывает «Виды смен»", async () => {

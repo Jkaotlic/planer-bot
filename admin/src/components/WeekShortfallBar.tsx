@@ -1,4 +1,4 @@
-import { weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
+import { shortfallStatus, weekShortfall, weekdayShort, type DayCalendar, type NormTemplate } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { pluralizeRu } from "../lib/people";
 
@@ -18,20 +18,25 @@ export interface WeekShortfallBarProps {
 /**
  * «Не хватает 4: Пн Утро −1 · Чт Дежурство −2» — нехватка недели одной строкой.
  *
- * Строкой, а не панелью, и только когда есть что сказать: закрытая неделя не
- * получает ни одного узла, и экран выглядит как до этой строки. Зелёное «всё
- * закрыто» висело бы над сеткой сорок недель в году, ничего не сообщая.
+ * Стоит всегда, а не только при нехватке: молчащая подсказка неотличима от
+ * отсутствующей — владелец не знал, что она вообще есть (02.10.2026). Прежний
+ * довод «зелёное всё-закрыто висело бы над сеткой сорок недель в году» отменён:
+ * цена спокойной недели — одна тихая зелёная строка, и она дешевле незамеченной
+ * дыры. Ту же плашку рисует мини-апп (`ShortfallBanner`).
  *
  * Виды без нормы — в той же строке ссылкой-кнопкой в конце, а не отдельным предупреждением:
  * это не поломка, а несделанная настройка, и кричать о ней наравне с дырой
  * в графике значило бы приучить глаз строку пропускать.
  */
 export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, calendar, onPointDay, onOpenKinds }: WeekShortfallBarProps) {
-  const { days, total, withoutNorm } = weekShortfall(shifts, templates, weekDates, calendar);
-  if (days.length === 0 && withoutNorm.length === 0) return null;
+  const week = weekShortfall(shifts, templates, weekDates, calendar);
+  const { days, total, withoutNorm } = week;
+  const status = shortfallStatus(week, templates);
   return (
-    <div className="week-shortfall" role="status">
-      {days.length > 0 && <span className="week-shortfall-total">{`Не хватает ${total}`}</span>}
+    <div className={`week-shortfall week-shortfall--${status.state}`} data-shortfall={status.state} role="status">
+      {status.state === "short" && <span className="week-shortfall-total">{`Не хватает ${total}`}</span>}
+      {status.state === "closed" && <span className="week-shortfall-total">Нормы закрыты ✓</span>}
+      {status.state === "no-norms" && <span className="week-shortfall-total">Нормы не заданы</span>}
       {days.map((day) => (
         <button
           key={day.date}
@@ -52,7 +57,9 @@ export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, ca
           title={`Норма не задана: ${withoutNorm.map((kind) => kind.name).join(", ")}`}
           onClick={onOpenKinds}
         >
-          {`без нормы: ${withoutNorm.length} ${pluralizeRu(withoutNorm.length, "вид", "вида", "видов")} →`}
+          {status.state === "no-norms"
+            ? "задать →"
+            : `без нормы: ${withoutNorm.length} ${pluralizeRu(withoutNorm.length, "вид", "вида", "видов")} →`}
         </button>
       )}
     </div>

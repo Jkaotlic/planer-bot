@@ -9,8 +9,9 @@ import { WeekShortfallBar, type WeekShortfallBarProps } from "./WeekShortfallBar
 /**
  * Строка над сеткой недели: «Не хватает 4: Пн Утро −1 · Чт Дежурство −2».
  *
- * Закрытая неделя строки не рисует вовсе — не «всё в порядке» зелёным, а
- * ничего: экран, на котором нечего чинить, не должен ничего сообщать.
+ * Строка стоит всегда: закрытая неделя — зелёная «Нормы закрыты ✓», без норм —
+ * нейтральная «Нормы не заданы». Молчание читалось как «подсказки нет» —
+ * владелец не знал, что она вообще существует.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,10 +48,27 @@ const entry = (id: number, date: string, employeeId: number, templateId: number)
 });
 
 describe("строка нехватки над сеткой недели", () => {
-  it("закрытой неделе не достаётся ни одного узла", async () => {
+  it("закрытая неделя — зелёная «Нормы закрыты ✓»", async () => {
     const shifts = [entry(1, WEEK[0]!, 1, 10), entry(2, WEEK[0]!, 2, 10), entry(3, WEEK[3]!, 1, 10)];
     const el = await mount({ shifts, templates: [MORNING] });
-    expect(el.innerHTML).toBe("");
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+    expect(el.textContent).toBe("Нормы закрыты ✓");
+  });
+
+  it("нормы не заданы ни у одного вида — нейтральная, с кнопкой «задать →»", async () => {
+    const onOpenKinds = vi.fn();
+    const el = await mount({ templates: [EVENING], onOpenKinds });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
+    expect(el.textContent).toContain("Нормы не заданы");
+    const set = [...el.querySelectorAll("button")].find((b) => b.textContent === "задать →")!;
+    await act(async () => set.click());
+    expect(onOpenKinds).toHaveBeenCalledTimes(1);
+  });
+
+  it("дыра — data-shortfall=short и прежний расклад", async () => {
+    const el = await mount({ templates: [MORNING] });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("short");
+    expect(el.textContent).toContain("Не хватает 3");
   });
 
   it("итог — числом людей, отдельным узлом в начале строки", async () => {
@@ -91,9 +109,9 @@ describe("строка нехватки над сеткой недели", () =>
     expect(onOpenKinds).toHaveBeenCalledTimes(1);
   });
 
-  it("дыр нет, а виды без нормы есть — строка состоит из одного хвоста", async () => {
-    const el = await mount({ templates: [EVENING, { ...EVENING, templateId: 31, name: "Ночь" }] });
-    expect(el.querySelector(".week-shortfall-total")).toBeNull();
-    expect(el.querySelector(".week-shortfall")!.textContent).toBe("без нормы: 2 вида →");
+  it("дыр нет, а виды без нормы есть — вместо итога один хвост", async () => {
+    const shifts = [entry(1, WEEK[0]!, 1, 10), entry(2, WEEK[0]!, 2, 10), entry(3, WEEK[3]!, 1, 10)];
+    const el = await mount({ shifts, templates: [MORNING, EVENING, { ...EVENING, templateId: 31, name: "Ночь" }] });
+    expect(el.querySelector(".week-shortfall")!.textContent).toBe("Нормы закрыты ✓без нормы: 2 вида →");
   });
 });
