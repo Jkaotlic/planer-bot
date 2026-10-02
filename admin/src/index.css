@@ -57,6 +57,25 @@
   --separator: var(--tg-theme-section-separator-color, var(--fallback-separator));
 }
 
+/* Токены оформления. До них в этом файле жили 15 кеглей и 11 радиусов, заданных
+   числами в сотнях мест, и соседние экраны разъезжались на полпикселя без причины.
+   Кегль и радиус берём отсюда; число оставляем только там, где токена нет
+   намеренно (10.5px/9.5px — мелкая подпись клетки; 2px — полоски; 50% — круг). */
+:root {
+  --text-title: 20px;
+  --text-head: 15px;
+  --text-body: 14px;
+  --text-sub: 13px;
+  --text-meta: 12px;
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
+  --control-h: 36px;
+  --control-h-compact: 30px;
+  --page-max: 1180px;
+  --form-max: 720px;
+}
+
 html,
 body,
 #root {
@@ -97,7 +116,7 @@ button {
 }
 
 .sidebar-brand {
-  font-size: 20px;
+  font-size: var(--text-title);
   font-weight: 700;
   padding: 4px 10px 20px;
 }
@@ -113,8 +132,8 @@ button {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 14px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-body);
   font-weight: 500;
   color: var(--text);
   background: transparent;
@@ -143,7 +162,7 @@ button {
 .sidebar-footer {
   margin-top: auto;
   padding: 12px 10px 2px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   color: var(--hint);
   border-top: 1px solid var(--separator);
 }
@@ -172,19 +191,19 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 15px;
+  font-size: var(--text-head);
   font-weight: 600;
 }
 
 .week-switcher-btn {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--separator);
   background: var(--surface-section);
   color: var(--text);
   cursor: pointer;
-  font-size: 15px;
+  font-size: var(--text-head);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -243,7 +262,7 @@ button {
   grid-template-columns: 110px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .fill-week-day-name.off {
@@ -266,12 +285,12 @@ button {
   margin: 12px 24px 0;
   padding: 10px 12px;
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .roster-notice-success {
@@ -289,7 +308,7 @@ button {
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 18px;
+  font-size: var(--text-head);
   cursor: pointer;
 }
 
@@ -297,9 +316,13 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 9px 16px;
-  border-radius: 10px;
-  font-size: 14px;
+  min-height: var(--control-h);
+  padding: 0 14px;
+  /* Без явного межстрочного кнопка с эмодзи («📅», «🔗») вытягивалась до 37px:
+     шрифт эмодзи выше текстового. Высота кнопок должна быть одна — 36px. */
+  line-height: 1.2;
+  border-radius: var(--radius-control);
+  font-size: var(--text-body);
   font-weight: 600;
   border: 1px solid transparent;
   cursor: pointer;
@@ -339,6 +362,38 @@ button {
   cursor: default;
 }
 
+.btn-compact {
+  min-height: var(--control-h-compact);
+  padding: 0 10px;
+  font-size: var(--text-sub);
+}
+
+/* Тихая кнопка — «Отмена», «Свернуть»: действие есть, но спорить с главным не должно. */
+.btn-quiet {
+  background: transparent;
+  color: var(--link);
+  border-color: transparent;
+}
+.btn-quiet:hover {
+  background: var(--surface-secondary);
+}
+.btn-quiet:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Пустое состояние — блок, а не серая строка в углу: «ничего нет» должно читаться
+   как ответ, а не как недогруз. */
+.empty-state {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--hint);
+  font-size: var(--text-body);
+  background: var(--surface-section);
+  border: 1px dashed var(--separator);
+  border-radius: var(--radius-card);
+}
+
 /* ---------- Schedule layout (grid + right rail) ---------- */
 
 .schedule-layout {
@@ -360,7 +415,7 @@ button {
 
 .rail-title {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   font-weight: 700;
   color: var(--hint);
   text-transform: uppercase;
@@ -372,7 +427,7 @@ button {
 .balance-rail {
   background: var(--surface-section);
   border: 1px solid var(--separator);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 16px;
 }
 
@@ -402,7 +457,7 @@ button {
 }
 
 .balance-name {
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -410,7 +465,7 @@ button {
 }
 
 .balance-total {
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   font-weight: 700;
   color: var(--hint);
   white-space: nowrap;
@@ -418,14 +473,14 @@ button {
 
 .load-bar {
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-secondary);
   overflow: hidden;
 }
 
 .load-bar-fill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--button);
 }
 
@@ -435,7 +490,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 6px;
-  font-size: 11.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -457,10 +512,10 @@ button {
 .balance-legend {
   margin-top: 16px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-secondary);
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
   line-height: 1.45;
 }
 
@@ -476,7 +531,7 @@ button {
 .events-feed {
   background: var(--surface-section);
   border: 1px solid var(--separator);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 16px;
 }
 
@@ -501,7 +556,7 @@ button {
    строк текст начинался по одной вертикали, а не плясал за шириной эмодзи. */
 .feed-icon {
   flex: 0 0 18px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   line-height: 1.4;
   text-align: center;
 }
@@ -511,7 +566,7 @@ button {
 }
 
 .feed-text {
-  font-size: 13px;
+  font-size: var(--text-sub);
   line-height: 1.4;
 }
 
@@ -520,7 +575,7 @@ button {
    читаться взглядом. */
 .feed-detail {
   margin-top: 1px;
-  font-size: 12px;
+  font-size: var(--text-meta);
   line-height: 1.35;
   color: var(--hint);
   overflow: hidden;
@@ -530,12 +585,12 @@ button {
 
 .feed-time {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
 .feed-empty {
-  font-size: 13px;
+  font-size: var(--text-sub);
   color: var(--hint);
 }
 
@@ -546,7 +601,7 @@ button {
   background: none;
   color: var(--link);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   cursor: pointer;
 }
 
@@ -576,7 +631,7 @@ button {
 
 .employees-title {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-title);
   font-weight: 700;
 }
 
@@ -586,7 +641,7 @@ button {
 
 .employees-section-title {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   font-weight: 700;
   color: var(--hint);
   text-transform: uppercase;
@@ -606,7 +661,7 @@ button {
   background: none;
   border: 0;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sub);
   font-weight: 700;
   color: var(--hint);
   text-transform: uppercase;
@@ -620,7 +675,7 @@ button {
 }
 
 .archive-caret {
-  font-size: 11px;
+  font-size: var(--text-meta);
   /* Не сдвигать текст заголовка при раскрытии: «▸» и «▾» разной ширины. */
   width: 10px;
   flex: none;
@@ -636,17 +691,18 @@ button {
    отказ блоком, а не абзацем. */
 .employees-error {
   color: var(--destructive);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   padding: 10px 12px;
   margin: 10px 0;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border-left: 3px solid var(--destructive);
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 10%, transparent);
 }
 
 .employees-empty {
   color: var(--hint);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   padding: 10px 2px;
 }
 
@@ -664,13 +720,13 @@ button {
   flex-wrap: wrap;
   gap: 10px;
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--surface-section);
   border: 1px solid var(--separator);
 }
 
 .employee-row-name {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
   /* Та же обрезка, что в сетке: карточка работника не должна расти вверх из-за
      длинного имени, иначе список людей идёт ступеньками. */
@@ -689,7 +745,7 @@ button {
   align-items: baseline;
   gap: 10px;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 .employee-address-text {
@@ -712,7 +768,7 @@ button {
 }
 
 .employee-edit-label {
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   color: var(--hint);
 }
@@ -730,8 +786,8 @@ button {
   display: inline-flex;
   align-items: center;
   padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 600;
   background: var(--surface-secondary);
   color: var(--hint);
@@ -742,9 +798,10 @@ button {
   display: inline-flex;
   align-items: center;
   padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 600;
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--button) 16%, transparent);
   color: var(--button);
   white-space: nowrap;
@@ -765,7 +822,7 @@ button {
 }
 
 .employee-restrictions-title {
-  font-size: 11.5px;
+  font-size: var(--text-meta);
   font-weight: 600;
   color: var(--hint);
   text-transform: uppercase;
@@ -776,13 +833,13 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   cursor: pointer;
 }
 
 .employee-restriction-hint {
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 
 .invite-link-row {
@@ -792,12 +849,12 @@ button {
 
 .invite-link-row input {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 .invite-hint {
   margin: 8px 0 0;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
   line-height: 1.4;
 }
@@ -873,7 +930,7 @@ button {
   background: var(--surface);
   z-index: 2;
   padding: 10px 8px;
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   color: var(--hint);
   text-align: left;
@@ -891,12 +948,12 @@ button {
 }
 
 .day-col-header .dow {
-  font-size: 12px;
+  font-size: var(--text-meta);
   letter-spacing: 0.02em;
 }
 
 .day-col-header .dom {
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-weight: 400;
   opacity: 0.8;
 }
@@ -938,12 +995,12 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 700;
 }
 
 .employee-name {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
   /* Одной строкой: перенос делал строку выше соседних, и вся неделя после неё
      съезжала по вертикали. Полное имя — в `title`. */
@@ -965,6 +1022,7 @@ button {
 }
 
 .day-cell.weekend-col {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 4%, transparent);
 }
 
@@ -972,10 +1030,12 @@ button {
    Подложка слабее выходной и другого тона, чтобы суббота-сегодня читалась и
    выходным, и сегодняшним днём одновременно, а не сливалась в одно пятно. */
 .day-cell.today-col {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--link) 7%, transparent);
 }
 
 .day-cell.weekend-col.today-col {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--link) 7%, color-mix(in srgb, var(--destructive) 4%, transparent));
 }
 
@@ -989,7 +1049,7 @@ button {
   justify-content: center;
   min-width: 22px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--link);
   color: var(--button-text);
 }
@@ -1001,7 +1061,7 @@ button {
   flex-direction: column;
   gap: 4px;
   min-height: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 2px;
 }
 
@@ -1014,12 +1074,14 @@ button {
   width: 100%;
   padding: 5px 7px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   font-family: inherit;
   /* 11.5px at low contrast made the times unreadable in the grid; this size plus
      the darkened accent tones keeps them legible in a dense cell. */
-  font-size: 12.5px;
-  line-height: 1.3;
+  font-size: var(--text-meta);
+  /* Был кегль 12.5px при 1.3; на токене 12px межстрочный подняли до 1.35, чтобы
+     высота строки сетки осталась прежней (16.2px против 16.25px). */
+  line-height: 1.35;
   text-align: left;
   cursor: pointer;
 }
@@ -1044,11 +1106,11 @@ button {
   align-items: center;
   justify-content: center;
   min-height: 56px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   background: transparent;
   color: var(--hint);
-  font-size: 18px;
+  font-size: var(--text-head);
   opacity: 0.35;
   cursor: pointer;
 }
@@ -1064,8 +1126,8 @@ button {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1088,7 +1150,7 @@ button {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
   background: var(--surface-section);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--separator);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
   padding: 22px 22px 18px;
@@ -1101,7 +1163,7 @@ button {
 .roster-import-file {
   margin-top: 4px;
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 
 .roster-import-summary {
@@ -1109,15 +1171,15 @@ button {
   justify-content: space-between;
   gap: 12px;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-secondary);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .roster-import-hint {
   margin: 12px 0;
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   line-height: 1.45;
 }
 
@@ -1127,13 +1189,13 @@ button {
   margin: 0 0 16px;
   max-width: 68ch;
   color: var(--hint);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   line-height: 1.5;
 }
 
 .kind-card {
   border: 1px solid var(--separator);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--surface-section);
   overflow: hidden;
 }
@@ -1165,9 +1227,9 @@ button {
   place-content: center;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   box-shadow: inset 0 0 0 1px rgb(128 128 128 / 30%);
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 700;
 }
 
@@ -1176,8 +1238,8 @@ button {
 .kind-swatch-sm {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
 }
 
 /* Нехватка по норме — метка рядом с днём недели в шапке колонки. Залитая, а
@@ -1187,7 +1249,7 @@ button {
   display: inline-block;
   margin-left: 5px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--destructive);
   color: #fff;
   font-size: 10.5px;
@@ -1207,14 +1269,14 @@ button {
   align-items: center;
   gap: 4px 6px;
   padding: 0 24px 10px;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   line-height: 1.5;
 }
 
 .week-shortfall-total {
   margin-right: 4px;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--destructive);
   color: #fff;
   font-weight: 700;
@@ -1227,7 +1289,7 @@ button {
   background: none;
   font: inherit;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   padding: 1px 6px;
   text-align: left;
 }
@@ -1238,6 +1300,7 @@ button {
 
 .week-shortfall-day:hover,
 .week-shortfall-day[aria-pressed="true"] {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 12%, transparent);
 }
 
@@ -1256,6 +1319,7 @@ button {
    в тёмной текст метки тёмный. */
 .day-short-badge,
 .week-shortfall-total {
+  background: var(--destructive);
   background: color-mix(in srgb, var(--destructive) 84%, #000);
 }
 
@@ -1281,7 +1345,7 @@ button {
 }
 
 .kind-coverage-title {
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -1297,7 +1361,7 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  font-size: 11.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -1305,7 +1369,7 @@ button {
   width: 100%;
   padding: 4px 0;
   text-align: center;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--separator);
   background: var(--surface-secondary);
   color: var(--text);
@@ -1313,14 +1377,14 @@ button {
 }
 
 .kind-name {
-  font-size: 14.5px;
+  font-size: var(--text-head);
   font-weight: 600;
 }
 
 .kind-meta {
   margin-left: auto;
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .kind-chevron {
@@ -1344,14 +1408,14 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   color: var(--hint);
 }
 
 .kind-rotation-unit select {
   padding: 5px 8px;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -1359,13 +1423,13 @@ button {
 
 .kind-rotation-hint {
   margin: 8px 0 0;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   line-height: 1.5;
 }
 
 .kind-rotation-note {
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 .kind-people-head,
@@ -1379,7 +1443,7 @@ button {
 .kind-people-head {
   padding: 10px 0 6px;
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1400,7 +1464,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--text-body);
   min-width: 0;
 }
 
@@ -1427,10 +1491,10 @@ button {
   width: 44px;
   padding: 6px 4px;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
   font-weight: 600;
   text-align: center;
 }
@@ -1449,9 +1513,10 @@ button {
   margin: 12px 0;
   padding: 10px 12px;
   border: 1px solid var(--danger, #d1495b);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--danger, #d1495b) 8%, transparent);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   line-height: 1.45;
   cursor: pointer;
 }
@@ -1477,16 +1542,16 @@ button {
   gap: 12px;
   padding: 9px 10px;
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .roster-import-error {
   margin-top: 12px;
   padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 12.5px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
 }
 
 .panel-actions {
@@ -1530,7 +1595,7 @@ button {
 }
 
 .panel-title {
-  font-size: 17px;
+  font-size: var(--text-head);
   font-weight: 700;
 }
 
@@ -1538,7 +1603,7 @@ button {
   border: none;
   background: none;
   color: var(--hint);
-  font-size: 20px;
+  font-size: var(--text-title);
   cursor: pointer;
   line-height: 1;
   padding: 2px 6px;
@@ -1550,7 +1615,7 @@ button {
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   color: var(--hint);
   margin-bottom: 6px;
@@ -1567,12 +1632,22 @@ input[type="date"],
 input[type="time"],
 input[type="search"] {
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--separator);
   background: var(--surface);
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-body);
+}
+
+/* Поля даты и времени браузер рисует моноширинным, пока шрифт не унаследован:
+   на соседних строках формы это выглядело как чужой элемент. */
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: var(--text-body);
 }
 
 .person-search {
@@ -1580,7 +1655,7 @@ input[type="search"] {
 }
 
 .person-picker-chosen {
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -1588,7 +1663,7 @@ input[type="search"] {
   max-height: 208px;
   overflow-y: auto;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
 }
 
 .person-picker-row {
@@ -1599,7 +1674,7 @@ input[type="search"] {
   border: none;
   background: var(--surface);
   color: var(--text);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   cursor: pointer;
 }
 
@@ -1626,13 +1701,13 @@ input[type="search"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   cursor: pointer;
 }
 
 .range-preview {
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
   line-height: 1.4;
 }
@@ -1645,9 +1720,9 @@ input[type="search"] {
 
 .category-option {
   border: 1px solid var(--separator);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 6px 12px;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   font-weight: 600;
   cursor: pointer;
   background: var(--surface);
@@ -1672,13 +1747,13 @@ input[type="search"] {
   justify-content: space-between;
   gap: 10px;
   padding: 9px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--separator);
   background: var(--surface);
   cursor: pointer;
   text-align: left;
   color: var(--text);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .preset-option.selected {
@@ -1693,16 +1768,17 @@ input[type="search"] {
 
 .preset-time {
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 .friday-badge {
   font-size: 10.5px;
   font-weight: 700;
   color: var(--button);
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--button) 16%, transparent);
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 
 .custom-time-toggle {
@@ -1710,7 +1786,7 @@ input[type="search"] {
   background: none;
   border: none;
   color: var(--link);
-  font-size: 13px;
+  font-size: var(--text-sub);
   cursor: pointer;
   padding: 4px 0;
 }
@@ -1724,7 +1800,7 @@ input[type="search"] {
 
 .error-text {
   color: var(--destructive);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   margin-top: 6px;
 }
 
@@ -1735,7 +1811,7 @@ input[type="search"] {
   justify-content: center;
   gap: 12px;
   color: var(--hint);
-  font-size: 15px;
+  font-size: var(--text-head);
 }
 
 /* Тот же блок, но внутри уже нарисованного раздела — под шапкой недели, а не
@@ -1754,7 +1830,7 @@ input[type="search"] {
 
 .weekend-slot-card {
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--surface-section);
   border: 1px solid var(--separator);
 }
@@ -1767,28 +1843,28 @@ input[type="search"] {
 }
 
 .weekend-slot-title {
-  font-size: 15px;
+  font-size: var(--text-head);
   font-weight: 700;
 }
 
 .weekend-slot-when {
   margin-top: 2px;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   font-weight: 600;
   color: var(--text);
 }
 
 .weekend-slot-meta {
   margin-top: 3px;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
 .weekend-slot-count {
   flex: none;
   padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 600;
   background: var(--surface-secondary);
   color: var(--hint);
@@ -1797,7 +1873,7 @@ input[type="search"] {
 
 .weekend-slot-empty {
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   color: var(--hint);
 }
 
@@ -1819,20 +1895,20 @@ input[type="search"] {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-secondary);
 }
 
 .weekend-interest-name {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
 .weekend-fair-badge {
   flex: none;
   padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 700;
   background: rgba(42, 168, 79, 0.15);
   color: #23913f;
@@ -1847,7 +1923,7 @@ input[type="search"] {
 }
 
 .weekend-month-count {
-  font-size: 12px;
+  font-size: var(--text-meta);
   color: var(--hint);
   white-space: nowrap;
 }
@@ -1889,7 +1965,7 @@ input[type="search"] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   color: var(--hint);
 }
@@ -1901,12 +1977,12 @@ input[type="search"] {
 .weekend-payroll-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--text-body);
 }
 
 .weekend-payroll-table th {
   text-align: left;
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 700;
   color: var(--hint);
   text-transform: uppercase;
@@ -1945,20 +2021,20 @@ input[type="search"] {
   max-width: 420px;
   background: var(--surface-section);
   border: 1px solid var(--separator);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   padding: 28px 26px;
   text-align: center;
 }
 
 .login-title {
   margin: 0 0 12px;
-  font-size: 20px;
+  font-size: var(--text-title);
   font-weight: 700;
 }
 
 .login-text {
   margin: 0 0 20px;
-  font-size: 14px;
+  font-size: var(--text-body);
   line-height: 1.5;
   color: var(--text);
 }
@@ -1966,8 +2042,8 @@ input[type="search"] {
 .login-text code {
   background: var(--surface-secondary);
   padding: 1px 6px;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--radius-control);
+  font-size: var(--text-sub);
 }
 
 .login-btn {
@@ -1978,7 +2054,7 @@ input[type="search"] {
 
 .login-hint {
   margin: 16px 0 0;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -1988,11 +2064,11 @@ input[type="search"] {
   min-width: 0;
   max-width: 260px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--separator);
   background: var(--surface);
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
@@ -2005,10 +2081,10 @@ input[type="search"] {
   min-height: 18px;
   margin-bottom: 3px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
   line-height: 1;
   opacity: 0.3;
   cursor: pointer;
@@ -2019,12 +2095,15 @@ input[type="search"] {
 }
 
 .btn-danger {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 12%, transparent);
   color: var(--destructive);
+  border-color: var(--destructive);
   border-color: color-mix(in srgb, var(--destructive) 35%, transparent);
   margin-right: auto;
 }
 .btn-danger:hover {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 20%, transparent);
 }
 .btn-danger:disabled {
@@ -2040,7 +2119,7 @@ input[type="search"] {
   gap: 8px;
 }
 .weekend-assignee-title {
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 700;
   color: var(--hint);
   text-transform: uppercase;
@@ -2051,7 +2130,7 @@ input[type="search"] {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-secondary);
 }
 
@@ -2066,7 +2145,7 @@ input[type="search"] {
 .journal-tab {
   padding: 8px 14px;
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-section);
   color: var(--hint);
   font: inherit;
@@ -2093,14 +2172,14 @@ input[type="search"] {
   align-items: center;
   gap: 6px;
   color: var(--hint);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .journal-controls input,
 .journal-controls select {
   padding: 6px 9px;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -2109,7 +2188,7 @@ input[type="search"] {
 .journal-count {
   margin-left: auto;
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 /* A wide table of kinds scrolls on its own rather than pushing the page sideways. */
@@ -2127,13 +2206,13 @@ input[type="search"] {
   padding: 8px 10px;
   border-bottom: 1px solid var(--separator);
   text-align: center;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   white-space: nowrap;
 }
 
 .counts-table thead th {
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
 }
 
@@ -2167,7 +2246,7 @@ input[type="search"] {
 
 .counts-table thead th.counts-group {
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   font-weight: 700;
   border-bottom: 2px solid var(--separator);
 }
@@ -2203,7 +2282,7 @@ input[type="search"] {
 .counts-legend {
   margin-top: 8px;
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 
 .counts-zero {
@@ -2217,13 +2296,13 @@ input[type="search"] {
   align-items: start;
   padding: 10px 14px;
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-section);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .journal-icon {
-  font-size: 16px;
+  font-size: var(--text-head);
   line-height: 1.35;
   text-align: center;
 }
@@ -2242,7 +2321,7 @@ input[type="search"] {
 .journal-meta {
   margin-left: auto;
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 /* Подробности — то, ради чего строка и нужна: они не обрезаются и переносятся. */
@@ -2257,7 +2336,7 @@ input[type="search"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   color: var(--hint);
 }
 
@@ -2269,11 +2348,11 @@ input[type="search"] {
 .birthday-field select {
   padding: 5px 6px;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 /* Wide enough for «сентября» and «не указан» plus the native arrow — at auto
@@ -2294,13 +2373,13 @@ input[type="search"] {
   margin: 0 0 16px;
   max-width: 62ch;
   color: var(--hint);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   line-height: 1.5;
 }
 
 .birthday-group {
   margin: 18px 0 10px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -2314,15 +2393,15 @@ input[type="search"] {
 .birthday-notice {
   margin-bottom: 14px;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-section);
   border: 1px solid var(--separator);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .birthday-card {
   border: 1px solid var(--separator);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--surface-section);
 }
 
@@ -2339,7 +2418,7 @@ input[type="search"] {
 }
 
 .birthday-name {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
@@ -2347,13 +2426,13 @@ input[type="search"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-sub);
   color: var(--hint);
 }
 
 .birthday-when {
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 /* Pushes the chip and the button to the right edge, and is the first thing to
@@ -2361,8 +2440,8 @@ input[type="search"] {
 .birthday-status {
   margin-left: auto;
   padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -2397,7 +2476,7 @@ input[type="search"] {
   gap: 5px;
   max-width: 620px;
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 .birthday-label input,
@@ -2405,11 +2484,11 @@ input[type="search"] {
 .birthday-label select {
   padding: 8px 10px;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   resize: vertical;
 }
 
@@ -2427,7 +2506,7 @@ input[type="search"] {
 
 .birthday-preview-title {
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   font-weight: 600;
 }
 
@@ -2437,11 +2516,11 @@ input[type="search"] {
   padding: 10px 12px;
   max-width: 620px;
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2455,20 +2534,20 @@ input[type="search"] {
 
 .birthday-recipient {
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface);
   border: 1px solid var(--separator);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 .birthday-blocker {
   padding: 9px 12px;
   max-width: 620px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   border: 1px solid var(--separator);
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .birthday-confirm {
@@ -2478,15 +2557,15 @@ input[type="search"] {
   gap: 10px;
   padding: 10px 12px;
   max-width: 620px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--button);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .birthday-sent-note {
   max-width: 620px;
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
   line-height: 1.5;
 }
 
@@ -2496,7 +2575,7 @@ input[type="search"] {
   max-width: 620px;
   margin: 4px 0 12px;
   text-align: right;
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -2525,26 +2604,26 @@ input[type="search"] {
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   cursor: pointer;
 }
 
 .announce-unreachable {
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 
 /* ---------- Баги ---------- */
 
 .bug-card {
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 12px;
   margin-bottom: 10px;
 }
 
 .bug-card-meta {
-  font-size: 12.5px;
+  font-size: var(--text-meta);
   color: var(--hint);
 }
 
@@ -2560,7 +2639,7 @@ input[type="search"] {
   margin: 0 0 20px;
   max-width: 62ch;
   color: var(--hint);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   line-height: 1.5;
 }
 
@@ -2568,10 +2647,10 @@ input[type="search"] {
   margin-bottom: 16px;
   padding: 10px 14px;
   max-width: 620px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-section);
   border: 1px solid var(--separator);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .settings-card {
@@ -2581,18 +2660,18 @@ input[type="search"] {
   max-width: 620px;
   padding: 18px 20px;
   border: 1px solid var(--separator);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--surface-section);
 }
 
 .settings-state {
-  font-size: 15px;
+  font-size: var(--text-head);
   font-weight: 600;
 }
 
 .settings-who {
   color: var(--hint);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 .settings-actions {
@@ -2606,9 +2685,9 @@ input[type="search"] {
   flex-wrap: wrap;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--button);
-  font-size: 13px;
+  font-size: var(--text-sub);
 }
 
 /* ---------- Чек-лист ---------- */
@@ -2618,17 +2697,18 @@ input[type="search"] {
 .checklist-order {
   flex: 0 0 24px;
   height: 24px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--surface-secondary);
   color: var(--hint);
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 700;
 }
 
 .status-chip-done {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--button) 16%, transparent);
   color: var(--button);
 }
@@ -2639,7 +2719,7 @@ input[type="search"] {
   gap: 8px;
   flex-wrap: wrap;
   padding: 10px 0 4px;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .kind-checklist-options {
@@ -2652,12 +2732,12 @@ input[type="search"] {
    «какие списки уже назначены» читают, не вчитываясь. */
 .kind-checklist-options .chip {
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--separator);
   background: var(--surface-secondary);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sub);
   cursor: pointer;
 }
 
@@ -2678,7 +2758,7 @@ input[type="search"] {
   gap: 6px;
   padding: 14px;
   border: 1px solid var(--separator);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--surface-section);
 }
 
@@ -2697,7 +2777,7 @@ input[type="search"] {
   flex-wrap: wrap;
   padding-top: 10px;
   border-top: 1px solid var(--separator);
-  font-size: 13px;
+  font-size: var(--text-sub);
   color: var(--hint);
 }
 
@@ -2705,7 +2785,7 @@ input[type="search"] {
    с ними ломала бы их порядок. */
 .checklist-doc-note {
   flex-basis: 100%;
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 
 .checklist-item-note {
@@ -2728,7 +2808,7 @@ input[type="search"] {
   gap: 8px;
   padding: 12px 0 4px;
   border-top: 1px solid var(--separator);
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .kind-reminder-switch {
@@ -2745,7 +2825,7 @@ input[type="search"] {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--separator);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
 }
@@ -2754,7 +2834,7 @@ input[type="search"] {
 .kind-reminder-preview {
   margin: 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface-secondary);
   white-space: pre-wrap;
 }
@@ -2769,13 +2849,13 @@ input[type="search"] {
   align-items: center;
   gap: 8px;
   padding: 10px 0 4px;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
 }
 
 .settings-reminder-note {
   display: block;
   color: var(--hint);
-  font-size: 12.5px;
+  font-size: var(--text-meta);
 }
 
 /* Карточки «Настроек» идут столбиком; без зазора их рамки слипались в одну. */
@@ -2787,7 +2867,7 @@ input[type="search"] {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: var(--text-sub);
   cursor: pointer;
 }
 
@@ -2829,19 +2909,21 @@ input[type="search"] {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11.5px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
 
 .checklist-badge-on {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--button) 18%, transparent);
   color: var(--button);
 }
 
 .checklist-badge-off {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 14%, transparent);
   color: var(--destructive);
 }
@@ -2849,6 +2931,7 @@ input[type="search"] {
 /* Тот же красный для строк, по которым надо что-то делать руками: выключенные
    напоминания и непривязанный Telegram — не «ещё не время», а «не дойдёт». */
 .status-chip-alert {
+  background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 14%, transparent);
   color: var(--destructive);
 }
@@ -2895,7 +2978,7 @@ input[type="search"] {
   }
 
   .mobile-topbar-title {
-    font-size: 17px;
+    font-size: var(--text-head);
     font-weight: 700;
   }
 
@@ -3002,7 +3085,7 @@ input[type="search"] {
   }
 
   .employee-name {
-    font-size: 12.5px;
+    font-size: var(--text-meta);
   }
 
   .grid-scroll {
@@ -3019,7 +3102,7 @@ input[type="search"] {
 
   .entry-chip {
     padding: 4px 5px;
-    font-size: 12px;
+    font-size: var(--text-meta);
   }
 
   /* Подпись без времени — одно длинное слово («Командировка»), перенести его
@@ -3056,7 +3139,7 @@ input[type="search"] {
      половина экрана. */
   .btn {
     padding: 7px 12px;
-    font-size: 13px;
+    font-size: var(--text-sub);
   }
 
   /* ---------- Панели ----------
@@ -3071,7 +3154,7 @@ input[type="search"] {
     width: 100%;
     max-width: 100%;
     max-height: 92dvh;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
     border-bottom: none;
     padding: 18px 16px;
     /* Иначе «Сохранить» и «Отмена» попадают под home-indicator, где тап
