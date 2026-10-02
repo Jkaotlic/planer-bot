@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
+import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
   type CalendarDayDto,
@@ -592,6 +592,7 @@ export function App() {
                   query={scheduleQuery}
                   coverage={shortfallReady ? templateRoles : []}
                   calendar={dayCalendar}
+                  special={specialDays(weekDates, calendarDays)}
                 />
                 <aside className="right-rail">
                   <EventsFeed events={events} onOpenJournal={() => setNav("log")} />

@@ -1026,6 +1026,19 @@ button {
   opacity: 0.8;
 }
 
+/* Название праздника под датой. `max-width: 0` + `min-width: 100%` — приём для
+   ячейки таблицы: подпись не растягивает колонку, а усекается многоточием по её ширине. */
+.day-col-mark {
+  display: block;
+  max-width: 0;
+  min-width: 100%;
+  font-size: var(--text-meta);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .employee-col-header {
   min-width: 172px;
 }
