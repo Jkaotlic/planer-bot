@@ -441,6 +441,33 @@ describe("urgent branch: a sick leave still waiting for «ОК»", () => {
     expect(listHandoversForEntry(db, observers.id)).toHaveLength(0);
   });
 
+  it("the window follows the TEAM date: 00:30 in Moscow on the 13th is still the 12th in UTC", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-13", "2026-08-13");
+    const early = shift(db, anya, "2026-08-13", "01:00", "09:00");
+    const night = Date.UTC(2026, 7, 12, 21, 30);
+    const narrow = { ...deps(db), config: { ...deps(db).config, handoverEscalateHours: 1 } };
+
+    await runHandoverTick(narrow, night);
+
+    expect(listHandoversForEntry(db, sick.id).map((h) => h.shiftId)).toEqual([early.id]);
+  });
+
+  it("a shift that has already started is not handed over", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12", "08:00"); // started an hour before NOW
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(listHandoversForEntry(db, sick.id)).toHaveLength(0);
+    expect(getShift(db, sick.id)!.handoverForcedAt).toBeNull();
+  });
+
   it("a pending EXTENSION hands over only shifts on its new days, never the approved ones", async () => {
     const db = makeTestDb();
     const anya = person(db, "Аня");

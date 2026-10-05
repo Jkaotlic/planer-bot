@@ -44,6 +44,7 @@ async function scene() {
 describe("sick leave buttons", () => {
   it("each admin's letter carries «ОК» and «Отклонить» for this entry", async () => {
     const { api, sick } = await scene();
+    expect(api.sent).toHaveLength(2); // two admins: a loop over an empty list must not pass
     for (const message of api.sent) expect(callbackDataOf(message)).toEqual([`sick:approve:${sick.id}`, `sick:reject:${sick.id}`]);
   });
 
@@ -81,6 +82,17 @@ describe("sick leave buttons", () => {
     await bot.handleUpdate(press(201, `sick:approve:${sick.id}`) as never);
     expect(api.answers.at(-1)).toBe("Это может только админ");
     expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+    expect(listHandoversForEntry(db, sick.id)).toHaveLength(0);
+    expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(0);
+  });
+
+  it("someone unknown to the bot is told «Ты не в системе» and changes nothing", async () => {
+    const { db, bot, api, sick } = await scene();
+    await bot.handleUpdate(press(999, `sick:approve:${sick.id}`) as never);
+    expect(api.answers.at(-1)).toBe("Ты не в системе");
+    expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+    expect(listHandoversForEntry(db, sick.id)).toHaveLength(0);
+    expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(0);
   });
 
   it("a button for a deleted sick leave says «Больничного уже нет» on the tap and in the message", async () => {

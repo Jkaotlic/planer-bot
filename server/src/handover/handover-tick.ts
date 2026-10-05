@@ -44,6 +44,7 @@ export async function forceUrgentSickHandovers(deps: HandoverTickDeps, nowMs: nu
       if (made.length === 0) continue;
       markHandoverForced(db, sick.id, new Date(nowMs));
       // Nobody is in the form to pick an addressee and the shift is close: ask everyone now.
+      // A fanOut throwing after the mark only delays: the draft stays «offered» and the ladder below fans it once the shift is close.
       for (const handover of made) {
         if (handover.status === "offered") await fanOut(deps, handover.id);
       }
