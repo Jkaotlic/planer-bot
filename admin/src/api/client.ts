@@ -2,7 +2,8 @@ import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 export type { CalendarDayDto };
 
-import type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
+import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from "@planer/shared";
+export type { SickApprovalRow } from "@planer/shared";
 import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
 import type {
   AdminEmployeeDto,
@@ -94,6 +95,9 @@ import {
   mockSendAnnouncement,
   mockGetBugReports,
   mockResolveBugReport,
+  mockGetSickApprovals,
+  mockApproveSickLeave,
+  mockRejectSickLeave,
 } from "./mock";
 
 /**
@@ -747,6 +751,12 @@ export interface ApiClient {
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
+  /** Больничные работников, ждущие ОК любого админа. */
+  getSickApprovals(): Promise<SickApprovalRow[]>;
+  /** 409 с текстом «Уже подтвердил(а) …», если другой админ успел раньше. */
+  approveSickLeave(id: number): Promise<void>;
+  /** Запись удаляется, работнику уходит письмо. */
+  rejectSickLeave(id: number): Promise<void>;
 }
 
 /** Raw shape of a `GET /api/admin/events` row — an audit-log entry, not yet
@@ -1320,6 +1330,16 @@ export const realClient: ApiClient = {
   },
   resolveBugReport: (id, resolved) =>
     authorizedPostJson<{ id: number; resolvedAt: string | null }>(`/api/admin/bug-reports/${id}/resolve`, { resolved }),
+  async getSickApprovals() {
+    const { approvals } = await authorizedGet<{ approvals: SickApprovalRow[] }>("/api/admin/sick-approvals");
+    return approvals;
+  },
+  async approveSickLeave(id) {
+    await authorizedPostJson(`/api/admin/sick-approvals/${id}/approve`, {});
+  },
+  async rejectSickLeave(id) {
+    await authorizedPostJson(`/api/admin/sick-approvals/${id}/reject`, {});
+  },
 };
 
 const devClient: ApiClient = {
@@ -1412,6 +1432,9 @@ const devClient: ApiClient = {
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
+  getSickApprovals: () => mockGetSickApprovals(),
+  approveSickLeave: (id) => mockApproveSickLeave(id),
+  rejectSickLeave: (id) => mockRejectSickLeave(id),
 };
 
 /**

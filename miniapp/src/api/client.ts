@@ -1,6 +1,7 @@
 import { createEmployeesApi, createReadApi, createTransport } from "@planer/client";
 import { readInitData } from "./init-data";
-import type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
+import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from "@planer/shared";
+export type { SickApprovalRow } from "@planer/shared";
 import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
 // Импорт для собственного использования ниже (`PollView`, `ApiClient`) плюс
 // реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
@@ -75,6 +76,7 @@ import {
   mockDeleteSelfEntry,
   mockOfferHandover,
   mockSkipHandover,
+  mockGetMyHandoverDrafts,
   mockGetAdminWeekendSlots,
   mockPostSlot,
   mockAssignSlot,
@@ -148,6 +150,9 @@ import {
   mockRemindOrderUnpaid,
   mockGetBugReports,
   mockResolveBugReport,
+  mockGetSickApprovals,
+  mockApproveSickLeave,
+  mockRejectSickLeave,
   employeesMock,
 } from "./mock";
 
@@ -915,6 +920,8 @@ export interface ApiClient {
   offerHandover(handoverId: number, toEmployeeId: number): Promise<void>;
   /** «Потом» — сразу всем свободным, чтобы смена не осталась молча на больном. */
   skipHandover(handoverId: number): Promise<void>;
+  /** Черновики передачи после ОК админа — вход по кнопке из бота. */
+  getMyHandoverDrafts(): Promise<HandoverDraft[]>;
   getWeekendSlots(): Promise<WeekendSlotView[]>;
   expressInterest(slotId: number): Promise<void>;
   withdrawInterest(slotId: number): Promise<void>;
@@ -1099,6 +1106,12 @@ export interface ApiClient {
   getBugReports(status: "open" | "all"): Promise<BugReportRow[]>;
   /** Переключатель, а не одноразовое действие — как «Собрали, закрыть» у сборов. */
   resolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }>;
+  /** Больничные работников, ждущие ОК любого админа. */
+  getSickApprovals(): Promise<SickApprovalRow[]>;
+  /** 409 с текстом «Уже подтвердил(а) …», если другой админ успел раньше. */
+  approveSickLeave(id: number): Promise<void>;
+  /** Запись удаляется, работнику уходит письмо. */
+  rejectSickLeave(id: number): Promise<void>;
 }
 
 /** One row of the uploaded file, and the active worker whose name matches it exactly. */
@@ -1512,6 +1525,9 @@ export const realClient: ApiClient = {
   async offerHandover(handoverId, toEmployeeId) {
     await authorizedPostJson(`/api/my/handovers/${handoverId}/offer`, { toEmployeeId });
   },
+  async getMyHandoverDrafts() {
+    return (await authorizedGet<{ drafts: HandoverDraft[] }>("/api/my/handovers/drafts")).drafts;
+  },
   async skipHandover(handoverId) {
     await authorizedPostJson(`/api/my/handovers/${handoverId}/skip`, {});
   },
@@ -1899,6 +1915,16 @@ export const realClient: ApiClient = {
   },
   resolveBugReport: (id, resolved) =>
     authorizedPostJson<{ id: number; resolvedAt: string | null }>(`/api/admin/bug-reports/${id}/resolve`, { resolved }),
+  async getSickApprovals() {
+    const { approvals } = await authorizedGet<{ approvals: SickApprovalRow[] }>("/api/admin/sick-approvals");
+    return approvals;
+  },
+  async approveSickLeave(id) {
+    await authorizedPostJson(`/api/admin/sick-approvals/${id}/approve`, {});
+  },
+  async rejectSickLeave(id) {
+    await authorizedPostJson(`/api/admin/sick-approvals/${id}/reject`, {});
+  },
 };
 
 const devClient: ApiClient = {
@@ -1934,6 +1960,7 @@ const devClient: ApiClient = {
   deleteSelfEntry: (id) => mockDeleteSelfEntry(id),
   offerHandover: (handoverId, toEmployeeId) => mockOfferHandover(handoverId, toEmployeeId),
   skipHandover: (handoverId) => mockSkipHandover(handoverId),
+  getMyHandoverDrafts: () => mockGetMyHandoverDrafts(),
   getWeekendSlots: () => mockGetWeekendSlots(),
   expressInterest: (slotId) => mockExpressInterest(slotId),
   withdrawInterest: (slotId) => mockWithdrawInterest(slotId),
@@ -2038,6 +2065,9 @@ const devClient: ApiClient = {
   remindOrderUnpaid: (id) => mockRemindOrderUnpaid(id),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
+  getSickApprovals: () => mockGetSickApprovals(),
+  approveSickLeave: (id) => mockApproveSickLeave(id),
+  rejectSickLeave: (id) => mockRejectSickLeave(id),
 };
 
 /**

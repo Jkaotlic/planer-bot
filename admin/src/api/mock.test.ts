@@ -12,6 +12,8 @@ import {
   mockGetBirthdayPreview,
   mockSaveBirthdayRound,
   mockSetCollectionClosed,
+  mockGetSickApprovals,
+  mockApproveSickLeave,
 } from "./mock";
 
 describe("admin schedule mock", () => {
@@ -122,5 +124,14 @@ describe("мок отметок о сдаче", () => {
 
     const remind = await mockRemindUnpaid(round.id);
     expect(remind.intended).toBe(waiting - 1);
+  });
+});
+
+describe("демо «На подтверждение»", () => {
+  it("ждущий больничный виден в «На подтверждение», ОК снимает его из списка", async () => {
+    const before = await mockGetSickApprovals();
+    expect(before.length).toBeGreaterThan(0);
+    await mockApproveSickLeave(before[0]!.id);
+    expect((await mockGetSickApprovals()).map((r) => r.id)).not.toContain(before[0]!.id);
   });
 });
