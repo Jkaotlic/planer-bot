@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultEventEnd, mySelfEntries, screenFromSearch } from "./SelfEntryScreen";
+import { defaultEventEnd, handoverDraftsFromSearch, mySelfEntries, screenFromSearch } from "./SelfEntryScreen";
 
 describe("форма мероприятия", () => {
   it("конец предзаполняется как «начало + 2 часа»", () => {
@@ -47,5 +47,13 @@ describe("что человек видит в списке своих запис
   it("по возрастанию даты — ближайшее сверху", () => {
     const shuffled = [rows[2]!, rows[1]!];
     expect(mySelfEntries(shuffled, TODAY).map((r) => r.id)).toEqual([2, 3]);
+  });
+});
+
+describe("ссылка на выбор коллег после ОК", () => {
+  it("?screen=handovers — да, остальное — нет", () => {
+    expect(handoverDraftsFromSearch("?screen=handovers")).toBe(true);
+    expect(handoverDraftsFromSearch("?screen=sick")).toBe(false);
+    expect(handoverDraftsFromSearch("")).toBe(false);
   });
 });

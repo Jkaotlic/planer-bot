@@ -1,11 +1,59 @@
 import { handoverActions, shiftStartMs } from "@planer/shared";
+import { getEmployeeById } from "../repo/employees";
 import { getHandover, listLiveHandovers } from "../repo/handovers";
+import { listPendingSickLeavesWithin, markHandoverForced } from "../repo/sick-approvals";
+import { daysAsked, extensionOf } from "../sick-approval/sick-approval-service";
 import { getShift } from "../repo/shifts";
 import { safeErrorMessage } from "../util/safe-error";
-import { escalate, expireHandover, fanOut, handoverVoidReason, voidHandover, type HandoverDeps } from "./handover-service";
+import { escalate, expireHandover, fanOut, handoverVoidReason, startHandovers, voidHandover, type HandoverDeps } from "./handover-service";
 
 export interface HandoverTickDeps extends HandoverDeps {
   config: { teamTz: string; publicUrl: string; handoverFanHours: number; handoverEscalateHours: number };
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** The team's calendar date at a moment — not the machine's (CLAUDE.md, «Дата — командная»). */
+function teamDateAt(ms: number, teamTz: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: teamTz }).format(new Date(ms));
+}
+
+/**
+ * Spec item 11: a sick leave still waiting for an admin must not leave a shift that
+ * starts sooner than the escalation threshold with nobody on it. Only those shifts are
+ * handed over; the sick leave itself keeps waiting for its «ОК».
+ *
+ * Bounded twice: pending rows come through the `shift_pending_approval` index, and
+ * only those whose span touches [today, today + threshold]. Safe on every tick —
+ * `startHandovers` skips shifts that already have a live hand-over, so the second pass
+ * creates nothing, sends nothing and leaves `handover_forced_at` as the first pass set it.
+ * For a pending EXTENSION only the new days are unapproved; the approved days already
+ * have their own hand-overs (or the admin's earlier «ОК» decided them), so they are not touched.
+ */
+export async function forceUrgentSickHandovers(deps: HandoverTickDeps, nowMs: number): Promise<number> {
+  const { db, config } = deps;
+  const startsBefore = nowMs + config.handoverEscalateHours * HOUR_MS;
+  let forced = 0;
+  for (const sick of listPendingSickLeavesWithin(db, teamDateAt(nowMs, config.teamTz), teamDateAt(startsBefore, config.teamTz))) {
+    try {
+      const owner = sick.employeeId == null ? undefined : getEmployeeById(db, sick.employeeId);
+      // Observers hand nothing over — the same gate as the self-entry route.
+      if (!owner || owner.isObserver) continue;
+      const onlyDates = extensionOf(sick) ? new Set(daysAsked(sick)) : undefined;
+      const made = await startHandovers({ ...deps, now: () => nowMs }, { sickEntry: sick, employeeId: owner.id, startsBefore, onlyDates });
+      if (made.length === 0) continue;
+      markHandoverForced(db, sick.id, new Date(nowMs));
+      // Nobody is in the form to pick an addressee and the shift is close: ask everyone now.
+      // A fanOut throwing after the mark only delays: the draft stays «offered» and the ladder below fans it once the shift is close.
+      for (const handover of made) {
+        if (handover.status === "offered") await fanOut(deps, handover.id);
+      }
+      forced += made.length;
+    } catch (err) {
+      console.error(`forceUrgentSickHandovers: sick leave ${sick.id} skipped:`, safeErrorMessage(err));
+    }
+  }
+  return forced;
 }
 
 /**
@@ -23,7 +71,8 @@ export interface HandoverTickDeps extends HandoverDeps {
  * Returns how many handovers were acted on, for the caller's log line.
  */
 export async function runHandoverTick(deps: HandoverTickDeps, nowMs: number): Promise<number> {
-  let touched = 0;
+  // Before the ladder, so a hand-over forced this tick is fanned and escalated by the same pass.
+  let touched = await forceUrgentSickHandovers(deps, nowMs);
 
   for (const row of listLiveHandovers(deps.db)) {
     try {

@@ -634,3 +634,14 @@ describe("отметки о сдаче в журнале", () => {
     expect(view.lines).toContain("Игорь — отметка снята");
   });
 });
+
+describe("describeAuditEvent — подтверждение больничного", () => {
+  const payload = { entryId: 7, employeeId: 3, employeeName: "Аня", date: "2026-10-06", endDate: "2026-10-08", category: "sick_leave", title: null, start: null, end: null };
+  it("подтверждение и отказ читаются по-разному и называют человека", () => {
+    const approved = describeAuditEvent({ type: "sick_leave_approved", payload });
+    const rejected = describeAuditEvent({ type: "sick_leave_rejected", payload });
+    expect(approved.title).toBe("Больничный подтверждён");
+    expect(rejected.title).toBe("Больничный отклонён");
+    expect(approved.lines.join(" ")).toContain("Аня");
+  });
+});

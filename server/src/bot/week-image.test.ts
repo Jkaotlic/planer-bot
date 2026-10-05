@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee } from "../repo/employees";
 import { createShift } from "../repo/shifts";
-import { buildWeekImage } from "./week-image";
+import { buildWeekImage, scheduleForImage } from "./week-image";
 
 const MONDAY = "2026-08-03";
 const TODAY = "2026-08-06";
@@ -89,5 +89,41 @@ describe("buildWeekImage", () => {
     expect(b.kind).toBe("photo");
     if (a.kind !== "photo" || b.kind !== "photo") return;
     expect(a.png.equals(b.png)).toBe(true);
+  });
+});
+
+describe("scheduleForImage", () => {
+  it("картинка недели «ждёт ОК» не рисует: у PNG нет пунктира, а лишняя строка легенды объясняла бы невидимое", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { employeeId: anya.id, date: "2026-08-05", category: "sick_leave", approvalRequestedAt: new Date() });
+    const schedule = scheduleForImage(db, MONDAY);
+    expect(schedule.shifts).toHaveLength(1);
+    expect(schedule.shifts[0]).not.toHaveProperty("pending");
+  });
+
+  it("не отдаёт и подтверждённый срок продления", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, {
+      employeeId: anya.id, date: "2026-08-05", endDate: "2026-08-06", category: "sick_leave",
+      approvalRequestedAt: new Date(), approvedDate: "2026-08-05", approvedEndDate: null,
+    });
+    expect(scheduleForImage(db, MONDAY).shifts[0]).not.toHaveProperty("approvedSpan");
+  });
+
+  it("buildWeekImage рисует через scheduleForImage: ждущий больничный не добавляет строку легенды", () => {
+    // Wrong implementation caught: buildWeekImage reading `readTeamSchedule` directly — the
+    // legend would then carry a «ждёт ОК» line, and the PNG would differ from the plain one.
+    const plain = makeTestDb();
+    const pending = makeTestDb();
+    for (const [db, at] of [[plain, null], [pending, new Date()]] as const) {
+      const anya = createEmployee(db, { displayName: "Аня" });
+      createShift(db, { employeeId: anya.id, date: "2026-08-05", category: "sick_leave", ...(at ? { approvalRequestedAt: at } : {}) });
+    }
+    const a = buildWeekImage(plain, MONDAY, TODAY);
+    const b = buildWeekImage(pending, MONDAY, TODAY);
+    expect(a.kind).toBe("photo");
+    expect(b.kind === "photo" && a.kind === "photo" && b.png.equals(a.png)).toBe(true);
   });
 });

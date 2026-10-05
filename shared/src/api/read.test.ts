@@ -69,3 +69,28 @@ describe("схемы домена read", () => {
     expect(parsed.success).toBe(false);
   });
 });
+
+describe("«ждёт ОК» в записи графика", () => {
+  it("«ждёт ОК» — необязательное `pending: true`; старый ответ без него проходит, `false` — нет", () => {
+    const row = {
+      id: 1, date: "2026-10-06", start: null, end: null, endDate: null, category: "sick_leave",
+      title: null, location: null, unrecognisedCode: null, templateId: null, employeeId: 3,
+    };
+    const parse = (shift: object) => teamScheduleResponseSchema.safeParse({ employees: [], shifts: [shift], calendar: [] }).success;
+    expect(parse(row)).toBe(true);
+    expect(parse({ ...row, pending: true })).toBe(true);
+    // Сервер шлёт ключ только у ждущего: `false` на каждой строке раздувал бы ответ без смысла.
+    expect(parse({ ...row, pending: false })).toBe(false);
+  });
+
+  it("`approvedSpan` — необязательный подтверждённый срок продления; лишний ключ внутри отвергается", () => {
+    const row = {
+      id: 1, date: "2026-10-06", start: null, end: null, endDate: "2026-10-09", category: "sick_leave",
+      title: null, location: null, unrecognisedCode: null, templateId: null, employeeId: 3, pending: true,
+    };
+    const parse = (shift: object) => teamScheduleResponseSchema.safeParse({ employees: [], shifts: [shift], calendar: [] }).success;
+    expect(parse({ ...row, approvedSpan: { date: "2026-10-06", endDate: "2026-10-07" } })).toBe(true);
+    expect(parse({ ...row, approvedSpan: { date: "2026-10-06", endDate: null } })).toBe(true);
+    expect(parse({ ...row, approvedSpan: { date: "2026-10-06", endDate: null, who: 1 } })).toBe(false);
+  });
+});

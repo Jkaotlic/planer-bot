@@ -1,10 +1,20 @@
 import { addDaysIso, buildWeekLegend, buildWeekModel, formatWeekRangeLabelIso } from "@planer/shared";
 import type { Db } from "../db/client";
-import { readTeamSchedule } from "../repo/team-schedule";
+import { readTeamSchedule, type TeamScheduleView } from "../repo/team-schedule";
 import { loadCalendar } from "../repo/calendar-days";
 import { listActiveTemplates } from "../repo/templates";
 import { renderWeekSvg } from "../render/week-svg";
 import { svgToPng } from "../render/rasterize";
+
+/**
+ * The week the image draws: the team schedule minus «ждёт ОК». A PNG has no dashed
+ * border to tell a pending sick leave apart, and a legend line for a square nobody can
+ * see would explain nothing — the grid screens carry that state, the image does not.
+ */
+export function scheduleForImage(db: Db, mondayIso: string): TeamScheduleView {
+  const schedule = readTeamSchedule(db, mondayIso, addDaysIso(mondayIso, 6));
+  return { ...schedule, shifts: schedule.shifts.map(({ pending: _pending, approvedSpan: _approved, ...shift }) => shift) };
+}
 
 /**
  * Week image for the bot: schedule → model → SVG → PNG.
@@ -19,7 +29,7 @@ export type WeekImage =
 
 export function buildWeekImage(db: Db, mondayIso: string, today: string, showLegend = true): WeekImage {
   const sunday = addDaysIso(mondayIso, 6);
-  const schedule = readTeamSchedule(db, mondayIso, sunday);
+  const schedule = scheduleForImage(db, mondayIso);
   if (schedule.employees.length === 0) return { kind: "text", text: "В расписании пока никого." };
 
   const model = buildWeekModel(mondayIso, schedule, listActiveTemplates(db));

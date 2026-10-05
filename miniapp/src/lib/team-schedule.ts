@@ -59,6 +59,8 @@ export interface TodayGroup {
   palette: SchedulePalette | null;
   people: TeamPerson[];
   entries: TeamEntryView[];
+  /** Больничный, ждущий ОК, на этот день — заголовок говорит это словами. */
+  pending: boolean;
 }
 
 export interface TodayModel {
@@ -85,10 +87,13 @@ export function moveTeamDate(
   return toISODate(addDays(new Date(`${selectedDate}T12:00:00`), step));
 }
 
-function groupingKey(shift: Shift): string {
-  if (shift.templateId != null) return `template:${shift.templateId}`;
+function groupingKey(shift: Shift, pending: boolean): string {
+  // Ждущий ОК — своя группа: иначе он слился бы с подтверждённым больничным того
+  // же дня, и палитру группы определил бы тот, кто попал первым.
+  if (shift.templateId != null) return `template:${shift.templateId}${pending ? ":pending" : ""}`;
   return JSON.stringify([
     "custom",
+    pending,
     shift.category,
     shift.title,
     shift.start,
@@ -125,14 +130,17 @@ function groupEntries(
   shifts: readonly Shift[],
   employees: readonly TeamEmployee[],
   templates: readonly ScheduleTemplate[],
+  date: string,
 ): TodayGroup[] {
   const grouped = new Map<string, TodayGroup>();
   for (const shift of [...shifts].sort((a, b) => compareShifts(a, b, templates))) {
-    const key = groupingKey(shift);
-    const entry = toEntryView(shift, templates);
+    const entry = toEntryView(shift, templates, date);
+    const pending = entry.pending === true;
+    const key = groupingKey(shift, pending);
     const group = grouped.get(key) ?? {
       key,
-      title: entry.title,
+      pending,
+      title: pending ? `${entry.title} · ждёт ОК` : entry.title,
       start: shift.start,
       end: shift.end,
       palette: entry.palette,
@@ -171,8 +179,8 @@ export function buildTodayModel(
     ),
   );
   return {
-    groups: groupEntries(timed, schedule.employees, templates),
-    noTimeGroups: groupEntries(noTime, schedule.employees, templates)
+    groups: groupEntries(timed, schedule.employees, templates, date),
+    noTimeGroups: groupEntries(noTime, schedule.employees, templates, date)
       .sort((a, b) => a.entries[0]!.shift.category.localeCompare(b.entries[0]!.shift.category)),
     workingCount: working.size,
     absentCount: absent.size,

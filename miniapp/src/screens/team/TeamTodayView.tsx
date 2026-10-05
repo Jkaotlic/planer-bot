@@ -1,3 +1,4 @@
+import { SICK_LEAVE_PENDING_OUTLINE } from "@planer/shared";
 import type { TodayGroup, TodayModel } from "../../lib/team-schedule";
 import { categoryPaletteForTheme } from "../../categories";
 import { initialsOf, personPalette } from "../../lib/people";
@@ -55,7 +56,10 @@ function TodayGroupCard({
   const category = group.entries[0]?.shift.category;
   const palette = group.palette
     ?? (category ? categoryPaletteForTheme(category, isDark) : null);
-  const markerStyle = palette ? { background: palette.bg } : undefined;
+  // Пунктир, как у клетки недели: «ждёт ОК» одинаково читается и там, и здесь.
+  const markerStyle = palette
+    ? { background: palette.bg, ...(group.pending ? { outline: SICK_LEAVE_PENDING_OUTLINE, outlineOffset: -2 } : {}) }
+    : undefined;
 
   return (
     <section className="team-group">

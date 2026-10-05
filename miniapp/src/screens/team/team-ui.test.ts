@@ -429,7 +429,7 @@ describe("team schedule UI", () => {
       expect(markup).toContain("<b>К</b>");
       expect(markup).toContain("background:#3949AB");
       expect(markup).toContain("<b>М</b>");
-      expect(markup).toContain("background:#00897B");
+      expect(markup).toContain("background:#FD0100");
       expect(markup).toContain("<b>Б</b>");
       expect(markup).toContain("background:#6D4C41");
       expect(markup).toContain("<b>РВ</b>");
@@ -438,6 +438,97 @@ describe("team schedule UI", () => {
     expect(dark).toContain("background:#CBC04D;color:#292505");
     expect(light).toContain(">•<");
     expect(dark).toContain(">•<");
+  });
+
+  it("ждущий ОК больничный — бледная пара, пунктир и слова в подписи; обычный рядом — красный", () => {
+    const sick = (id: number, employeeId: number, extra: object) => ({
+      id, employeeId, date: "2026-07-27", endDate: null, start: null, end: null, category: "sick_leave" as const,
+      title: null, templateId: null, location: null, unrecognisedCode: null, ...extra,
+    });
+    const schedule: TeamSchedule = {
+      employees: [
+        { id: 1, displayName: "Аня Первая", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 2, displayName: "Игорь Второй", rosterOrder: 1, excludedFromSwaps: false },
+      ],
+      shifts: [sick(201, 1, {}), sick(202, 2, { pending: true })],
+      calendar: [],
+    };
+    const model = buildWeekModel("2026-07-27", schedule, fallbackPaletteTemplates);
+    for (const isDark of [false, true]) {
+      const markup = renderToStaticMarkup(
+        createElement(TeamWeekGrid, { model, today: "2026-07-27", isDark, calendar: EMPTY_CALENDAR }),
+      );
+      expect(markup).toContain("background:#FFE3E3;color:#A30000");
+      expect(markup).toContain("outline:2px dashed #FD0100");
+      // Пунктир один — у ждущего; красная «Б» обычного без рамки.
+      expect(markup.match(/outline:2px dashed/g)).toHaveLength(1);
+      expect(markup).toContain("background:#FD0100");
+      expect(markup).toContain("Игорь Второй, 2026-07-27: Больничный (ждёт ОК)");
+    }
+  });
+
+  it("продление: подтверждённые дни без пунктира, новые — с ним", () => {
+    const schedule: TeamSchedule = {
+      employees: [{ id: 1, displayName: "Аня Первая", rosterOrder: 0, excludedFromSwaps: false }],
+      shifts: [{
+        id: 203, employeeId: 1, date: "2026-07-27", endDate: "2026-07-29", start: null, end: null, category: "sick_leave",
+        title: null, templateId: null, location: null, unrecognisedCode: null,
+        pending: true, approvedSpan: { date: "2026-07-27", endDate: "2026-07-28" },
+      }],
+      calendar: [],
+    };
+    const model = buildWeekModel("2026-07-27", schedule, fallbackPaletteTemplates);
+    const markup = renderToStaticMarkup(
+      createElement(TeamWeekGrid, { model, today: "2026-07-27", isDark: false, calendar: EMPTY_CALENDAR }),
+    );
+    expect(markup.match(/outline:2px dashed/g)).toHaveLength(1);
+    expect(markup.match(/background:#FD0100/g)).toHaveLength(2);
+  });
+
+  it("«Сегодня»: день внутри подтверждённого срока продления не бледный, новый день — бледный", () => {
+    const schedule: TeamSchedule = {
+      employees: [{ id: 1, displayName: "Аня Первая", rosterOrder: 0, excludedFromSwaps: false }],
+      shifts: [{
+        id: 204, employeeId: 1, date: "2026-07-27", endDate: "2026-07-29", start: null, end: null, category: "sick_leave",
+        title: null, templateId: null, location: null, unrecognisedCode: null,
+        pending: true, approvedSpan: { date: "2026-07-27", endDate: "2026-07-28" },
+      }],
+      calendar: [],
+    };
+    const pendingOn = (date: string) =>
+      buildTodayModel(date, schedule, fallbackPaletteTemplates).noTimeGroups[0]!.entries[0]!.pending;
+    expect([pendingOn("2026-07-28"), pendingOn("2026-07-29")]).toEqual([false, true]);
+  });
+
+  it("«Сегодня»: ждущий ОК — отдельная группа «Больничный · ждёт ОК», обычный рядом — своя", () => {
+    const sick = (id: number, employeeId: number, extra: object) => ({
+      id, employeeId, date: "2026-07-27", endDate: null, start: null, end: null, category: "sick_leave" as const,
+      title: null, templateId: null, location: null, unrecognisedCode: null, ...extra,
+    });
+    const schedule: TeamSchedule = {
+      employees: [
+        { id: 1, displayName: "Аня Первая", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 2, displayName: "Игорь Второй", rosterOrder: 1, excludedFromSwaps: false },
+      ],
+      // Обычный первым: без `pending` в ключе группа взяла бы его палитру и название.
+      shifts: [sick(301, 1, {}), sick(302, 2, { pending: true })],
+      calendar: [],
+    };
+    const model = buildTodayModel("2026-07-27", schedule, fallbackPaletteTemplates);
+    expect(model.noTimeGroups.map((g) => g.title).sort()).toEqual(["Больничный", "Больничный · ждёт ОК"]);
+    const markup = renderToStaticMarkup(createElement(TeamTodayView, { model, isDark: false }));
+    expect(markup).toContain("Больничный · ждёт ОК");
+    expect(markup).toContain("outline:2px dashed #FD0100");
+    expect(markup.match(/outline:2px dashed/g)).toHaveLength(1);
+  });
+
+  it("лист подробностей: ждущая запись подписана «(ждёт ОК)», обычная — нет", () => {
+    const base = { employeeId: 1, date: "2026-07-27", endDate: null, start: null, end: null, category: "sick_leave" as const, title: null, templateId: null, location: null, unrecognisedCode: null };
+    const rows = toTeamEntryDetailRows([
+      { shift: { id: 1, ...base } as never, title: "Больничный", palette: null, pending: true },
+      { shift: { id: 2, ...base } as never, title: "Больничный", palette: null, pending: false },
+    ]);
+    expect(rows.map((r) => r.title)).toEqual(["Больничный (ждёт ОК)", "Больничный"]);
   });
 
   it("renders all seven dates, active rows, two-line names, exact palettes, and full cell labels", () => {
@@ -763,6 +854,17 @@ describe("TeamWeekLegend", () => {
     const dark = render([item], true);
     expect(light).toContain("Своя точка");
     expect(light).not.toBe(dark); // the category palette differs between themes
+  });
+
+  it("строка «Больничный (ждёт ОК)» несёт тот же пунктир, что клетка; обычная — нет", () => {
+    const palette = { bg: "#FFE3E3", fg: "#A30000", code: "Б" };
+    const markup = render([
+      { code: "Б", label: "Больничный", palette: { bg: "#FD0100", fg: "#FFFFFF", code: "Б" }, category: null },
+      { code: "Б", label: "Больничный (ждёт ОК)", palette, category: null, pending: true },
+    ]);
+    expect(markup).toContain("Больничный (ждёт ОК)");
+    expect(markup.match(/outline:2px dashed #FD0100/g)).toHaveLength(1);
+    expect(markup).toContain("background:#FFE3E3;color:#A30000;outline:2px dashed #FD0100");
   });
 
   it("renders nothing at all for an empty week, rather than an empty box", () => {

@@ -7,7 +7,7 @@ import type {
 } from "../../lib/team-schedule";
 import { splitDisplayName } from "../../lib/team-schedule";
 import { weekdayShort } from "../../lib/week";
-import { dayOffLabel, isDayOff, specialDayKind, type DayCalendar } from "@planer/shared";
+import { SICK_LEAVE_PENDING_OUTLINE, dayOffLabel, isDayOff, specialDayKind, type DayCalendar } from "@planer/shared";
 import { TeamEntryDetails } from "./TeamEntryDetails";
 
 export interface WeekCellSelection {
@@ -148,6 +148,7 @@ function WeekCellButton({
       />
     );
   }
+  const pending = cell.primary.pending === true;
   const exactPalette = cell.primary.palette;
   const palette = exactPalette
     ?? categoryPaletteForTheme(cell.primary.shift.category, isDark);
@@ -155,9 +156,11 @@ function WeekCellButton({
     <div className="team-week__slot" role="gridcell">
       <button
         type="button"
-        className={`team-week__cell has-entry${isDayOffCell ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}
-        style={{ background: palette.bg, color: palette.fg }}
-        aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => entry.title).join(", ")}`}
+        className={`team-week__cell has-entry${isDayOffCell ? " is-weekend" : ""}${isToday ? " is-today" : ""}${pending ? " is-pending" : ""}`}
+        // outline, не border: рамка не меняет размер клетки, и `.is-today` (box-shadow)
+        // не спорит с ней.
+        style={{ background: palette.bg, color: palette.fg, ...(pending ? { outline: SICK_LEAVE_PENDING_OUTLINE, outlineOffset: -2 } : {}) }}
+        aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => (entry.pending ? `${entry.title} (ждёт ОК)` : entry.title)).join(", ")}`}
         onClick={onOpen}
       >
         <b>{exactPalette?.code ?? "•"}</b>

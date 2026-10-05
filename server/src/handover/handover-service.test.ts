@@ -136,6 +136,33 @@ describe("starting handovers for a sick leave", () => {
   });
 });
 
+describe("startHandovers — only shifts starting before a moment", () => {
+  it("hands over only the shifts that start before `startsBefore`", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = db.insert(shifts).values({ date: "2026-08-13", endDate: "2026-08-14", category: "sick_leave", employeeId: anya }).returning().get();
+    const near = shift(db, anya, "2026-08-13", "15:00");
+    const far = shift(db, anya, "2026-08-14", "15:00");
+    // 13 Aug 18:00 Moscow = 15:00 UTC: the 13th's 15:00 shift is before it, the 14th's is not.
+    const made = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya, startsBefore: Date.UTC(2026, 7, 13, 15, 0) });
+    expect(made.map((h) => h.shiftId)).toEqual([near.id]);
+    expect(made.map((h) => h.shiftId)).not.toContain(far.id);
+  });
+
+  it("the threshold itself is excluded: a shift starting exactly at `startsBefore` waits for the admin", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = db.insert(shifts).values({ date: "2026-08-13", category: "sick_leave", employeeId: anya }).returning().get();
+    const at = shift(db, anya, "2026-08-13", "15:00");
+    const exact = Date.UTC(2026, 7, 13, 12, 0); // 15:00 Moscow
+    expect(await startHandovers(deps(db), { sickEntry: sick, employeeId: anya, startsBefore: exact })).toEqual([]);
+    const made = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya, startsBefore: exact + 1 });
+    expect(made.map((h) => h.shiftId)).toEqual([at.id]);
+  });
+});
+
 describe("offering to one colleague", () => {
   it("remembers the addressee and writes to them", async () => {
     const db = makeTestDb();

@@ -108,4 +108,26 @@ describe("TabBar — метки «ждёт тебя»", () => {
     expect(text).toContain("не хватает людей: 3");
     expect(text).not.toContain("ждёт ответа");
   });
+
+  it("у «Админ» с ждущими ОК скринридер слышит «ждут подтверждения», а не «не хватает людей»", async () => {
+    // Видимая метка показывает число ждущих ОК; озвучка с «не хватает людей: 2» — ложь.
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        createElement(
+          AppRoot,
+          null,
+          createElement(TabBar, {
+            active: "mine", onChange: () => {}, isAdmin: true, isObserver: false, canAnnounce: false,
+            badges: { admin: 2 }, adminBadgeMeaning: "approvals",
+          } as never),
+        ),
+      );
+    });
+    const text = itemFor(host, "Админ").textContent ?? "";
+    expect(text).toContain("ждут подтверждения: 2");
+    expect(text).not.toContain("не хватает людей");
+  });
 });

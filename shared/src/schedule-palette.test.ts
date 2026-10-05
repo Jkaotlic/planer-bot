@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   SCHEDULE_ACCENT_PALETTES,
   SICK_LEAVE_SCHEDULE_PALETTE,
+  SICK_LEAVE_PENDING_SCHEDULE_PALETTE,
+  SICK_LEAVE_PENDING_OUTLINE,
+  cellSchedulePalette,
   VACATION_SCHEDULE_PALETTE,
   WEEKEND_WORK_SCHEDULE_PALETTE,
   UNRECOGNISED_SCHEDULE_PALETTE,
@@ -103,9 +106,11 @@ describe("working schedule palette", () => {
     expect(trip?.code).toBe("К");
   });
 
-  it("у каждого точного цвета он свой: ни одна пара не совпадает", () => {
-    // Клетка в сетке — это 34×28 пикселей с одной буквой: два одинаковых фона
-    // означают два состояния, которые на картинке не различить вовсе.
+  it("пары точных цветов различаются буквой, а фон общий только у отпуска и больничного", () => {
+    // Клетка в сетке — это 34×28 пикселей с одной буквой. Совпади у двух
+    // состояний и фон, и буква — их не различить вовсе. Общий фон при разной
+    // букве разрешён ровно одной паре: отпуск «О» и больничный «Б» (решение
+    // владельца 2026-10-05 — «чтобы не плодить цвета»).
     const exact = [
       ...Object.values(SCHEDULE_ACCENT_PALETTES),
       VACATION_SCHEDULE_PALETTE,
@@ -115,8 +120,37 @@ describe("working schedule palette", () => {
       SICK_LEAVE_SCHEDULE_PALETTE,
       WEEKEND_WORK_SCHEDULE_PALETTE,
     ];
-    expect(new Set(exact.map((p) => p.bg)).size).toBe(exact.length);
     expect(new Set(exact.map((p) => p.code)).size).toBe(exact.length);
+    const repeatedBg = exact.filter((p, i) => exact.findIndex((q) => q.bg === p.bg) !== i);
+    expect(repeatedBg).toEqual([SICK_LEAVE_SCHEDULE_PALETTE]);
+    expect(SICK_LEAVE_SCHEDULE_PALETTE.bg).toBe(VACATION_SCHEDULE_PALETTE.bg);
+  });
+
+  it("больничный красный, как отпуск, и отличается буквой", () => {
+    expect(SICK_LEAVE_SCHEDULE_PALETTE).toEqual({ bg: "#FD0100", fg: "#FFFFFF", code: "Б" });
+    expect(VACATION_SCHEDULE_PALETTE.code).toBe("О");
+  });
+
+  it("ждущий ОК больничный — бледная «Б»; флаг на другой категории ничего не меняет", () => {
+    expect(cellSchedulePalette(undefined, "sick_leave", true)).toEqual(SICK_LEAVE_PENDING_SCHEDULE_PALETTE);
+    expect(cellSchedulePalette(undefined, "sick_leave", false)).toEqual(SICK_LEAVE_SCHEDULE_PALETTE);
+    expect(cellSchedulePalette(undefined, "vacation", true)).toEqual(VACATION_SCHEDULE_PALETTE);
+    expect(cellSchedulePalette("gold", "shift", true)).toEqual(SCHEDULE_ACCENT_PALETTES.gold);
+    expect(SICK_LEAVE_PENDING_SCHEDULE_PALETTE.code).toBe("Б");
+    expect(SICK_LEAVE_PENDING_OUTLINE).toBe("2px dashed #FD0100");
+  });
+
+  it("бледная «Б» читается: контраст буквы к фону не ниже 4.5", () => {
+    // Полупрозрачный красный с белой буквой давал бы ниже 4.5 — поэтому своя пара.
+    const lum = (hex: string) => {
+      const parts = [1, 3, 5].map((i) => {
+        const v = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * parts[0]! + 0.7152 * parts[1]! + 0.0722 * parts[2]!;
+    };
+    const [hi, lo] = [lum(SICK_LEAVE_PENDING_SCHEDULE_PALETTE.fg), lum(SICK_LEAVE_PENDING_SCHEDULE_PALETTE.bg)].sort((a, b) => b - a);
+    expect((hi! + 0.05) / (lo! + 0.05)).toBeGreaterThanOrEqual(4.5);
   });
 
   it("новые цвета не повторяют блёклые категорийные", () => {

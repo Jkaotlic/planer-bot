@@ -162,6 +162,17 @@ button {
   color: var(--button-text);
 }
 
+/* Подпись занимает всё, что осталось от иконки и метки, и держится в одну строку:
+   без этого «На подтверждение» с меткой переносилась на вторую строку (пункт 54px
+   при 38px у соседей, замер 1280 и 900). */
+.sidebar-nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sidebar-nav-icon {
   flex: 0 0 20px;
   display: flex;
@@ -3235,7 +3246,10 @@ textarea {
     bottom: 0;
     left: 0;
     z-index: 30;
-    width: 232px;
+    /* 248, а не 232: при 232 пункт «На подтверждение» с меткой оставлял подписи
+       119px при нужных 131 (замер 900) — она обрезалась многоточием. Шторка лежит
+       поверх контента, лишние 16px никого не теснят. */
+    width: 248px;
     flex: none;
     overflow-y: auto;
     transform: translateX(-100%);
@@ -3548,4 +3562,57 @@ textarea {
 /* Переключатель в потоке экрана: тот же отступ снизу, что был у самодельных. */
 .segmented-row {
   margin: 0 0 12px;
+}
+
+/* ---------- «На подтверждение» и ждущий больничный ---------- */
+
+.approval-card {
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-control);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.approval-card-name {
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.approval-card-line {
+  font-size: var(--text-meta);
+}
+
+.approval-card-forced {
+  font-size: var(--text-meta);
+  color: var(--destructive);
+}
+
+.panel-pending {
+  margin-top: 12px;
+}
+
+.panel-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Пунктир чипа — единственное новое обозначение сетки; строка под ней объясняет его. */
+.grid-pending-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: var(--text-meta);
+  color: var(--hint);
+}
+
+.grid-pending-legend__sample {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  outline-offset: -2px;
+  flex: none;
 }

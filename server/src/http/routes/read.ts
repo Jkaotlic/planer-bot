@@ -10,6 +10,7 @@ import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { listCalendarDays } from "../../repo/calendar-days";
 import { listUpcomingForEmployee } from "../../repo/shifts";
+import { pendingMarks } from "../../repo/sick-approvals";
 import { readTeamSchedule } from "../../repo/team-schedule";
 import { listActiveTemplates } from "../../repo/templates";
 import { type Env, requireAuth } from "../middleware";
@@ -72,6 +73,7 @@ export function createReadRoutes(deps: { db: Db; config: Config }): Hono<Env> {
         unrecognisedCode: s.unrecognisedCode,
         templateId: s.templateId,
         employeeId: s.employeeId,
+        ...pendingMarks(s),
       })),
       today,
       calendar,

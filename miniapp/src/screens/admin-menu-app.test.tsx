@@ -29,6 +29,7 @@ vi.mock("@telegram-apps/sdk-react", async (importOriginal) => {
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { apiClient } from "../api/client";
 import { App } from "../App";
+import { waitFor } from "../test-wait";
 
 /**
  * Вкладка «Админ»: меню разделов вместо ленты чипов. Проверяется сквозь `App`,
@@ -36,6 +37,9 @@ import { App } from "../App";
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// Срок ожидания условия (10 с) длиннее таймаута теста по умолчанию (5 с): без этого vitest
+// убивал бы тест раньше, чем `until` сказал бы, чего именно не дождался.
+vi.setConfig({ testTimeout: 30_000 });
 
 function bootstrapWith(me: { isAdmin?: boolean; isObserver?: boolean; canAnnounce?: boolean }) {
   return {
@@ -64,12 +68,9 @@ afterEach(async () => {
   window.history.replaceState(null, "", "/");
 });
 
-async function settle(times = 20) {
-  for (let i = 0; i < times; i += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
-    });
-  }
+/** Витки очереди микрозадач — вместо «подождать 15 мс»: ответы мок-ручек готовы, им нужен лишь виток. */
+async function flush(times = 2) {
+  for (let i = 0; i < times; i += 1) await act(async () => {});
 }
 
 /**
@@ -77,19 +78,12 @@ async function settle(times = 20) {
  * `lazy()`, и сколько займёт этот импорт, зависит от нагрузки на машину: на
  * занятом процессоре сотня миллисекунд «пустых» ожиданий кончалась раньше, чем
  * раздел успевал нарисоваться, и тест падал раз в несколько прогонов.
- *
- * Свой срок — 3 с, короче 5 с у vitest: иначе vitest убивал бы тест раньше, чем
- * появилось бы сообщение «не дождался: …», а брошенный цикл ожидания мешал бы
- * следующим тестам.
+ * Сообщение «не дождался: …» — чтобы по упавшему тесту было видно, чего именно нет.
  */
-async function until(cond: () => boolean, what: string, timeoutMs = 3000) {
-  const deadline = Date.now() + timeoutMs;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`не дождался: ${what}`);
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
-    });
-  }
+async function until(cond: () => boolean, what: string) {
+  await waitFor(() => {
+    if (!cond()) throw new Error(`не дождался: ${what}`);
+  });
 }
 
 async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
@@ -102,6 +96,9 @@ async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
   vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([] as never);
   vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([] as never);
   vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue([] as never);
+  // Метка «Админ» и строка «На подтверждение» зависят от этого ответа — без заглушки
+  // тест читал бы сидовый мок, и строка меню без метки не отличалась бы от строки с ней.
+  if (!vi.isMockFunction(apiClient.getSickApprovals)) vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([]);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -109,7 +106,7 @@ async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
     root!.render(createElement(AppRoot, null, createElement(App)));
   });
   await until(() => host!.querySelector(".tab-bar-fit button") !== null, "нижняя панель после загрузки");
-  await settle(2);
+  await flush();
   return host;
 }
 
@@ -122,7 +119,6 @@ function tabItem(el: HTMLElement, label: string): HTMLElement {
 
 async function click(node: Element) {
   await act(async () => (node as HTMLElement).click());
-  await settle(8);
 }
 
 const h1 = (el: HTMLElement) => el.querySelector("h1")?.textContent ?? null;
@@ -145,17 +141,19 @@ describe("админка: меню разделов", () => {
     expect(el.querySelectorAll('[role="tab"]')).toHaveLength(0);
   });
 
-  it("2. «‹ Разделы» ведёт в меню из девяти строк по порядку", async () => {
+  it("2. «‹ Разделы» ведёт в меню из десяти строк по порядку", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
     await untilH1(el, "Расписание");
     await click(backButton(el)!);
     await untilH1(el, "Админ");
+    await until(() => menuRows(el).length === 10, "десять строк меню");
     const rows = menuRows(el);
-    expect(rows).toHaveLength(9);
+    // Раздел «На подтверждение» — первым в «График»: он про решение, которого ждут люди.
+    expect(rows[0]!.textContent).toContain("На подтверждение");
     // Название строки — ровно из `.ui-menu-row__title`: `toContain` по тексту всей
     // строки пропустил бы подмену названия, пока оно лежит где-то в пояснении.
-    expect(rows.map(rowTitle)).toEqual(["Расписание", "Выходные", "Работники", "Группы", "Анонсы", "Чек-листы", "Журнал", "Баги", "Настройки"]);
+    expect(rows.map(rowTitle)).toEqual(["На подтверждение", "Расписание", "Выходные", "Работники", "Группы", "Анонсы", "Чек-листы", "Журнал", "Баги", "Настройки"]);
     expect(backButton(el)).toBeNull();
   });
 
@@ -227,7 +225,7 @@ describe("админка: меню разделов", () => {
     await click(tabItem(el, "Анонс"));
     // Именно заголовок `Screen` — и единственный `h1`: у самого раздела не должно
     // быть своего заголовка «Анонс», иначе на экране два `h1`.
-    expect(el.querySelector("h1.ui-screen__title")?.textContent).toBe("Анонс");
+    await until(() => el.querySelector("h1.ui-screen__title")?.textContent === "Анонс", "заголовок «Анонс»");
     expect(el.querySelectorAll("h1")).toHaveLength(1);
     expect(backButton(el)).toBeNull();
   });

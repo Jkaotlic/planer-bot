@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
-import { getHandover, updateHandover } from "../repo/handovers";
+import { getHandover, listHandoversForEntry, updateHandover } from "../repo/handovers";
+import { approveSickLeave, sickApprovalDeps } from "../sick-approval/sick-approval-service";
 import { updateShift, deleteShift, getShift } from "../repo/shifts";
 import { startHandovers, offerTo, handoverVoidReason } from "./handover-service";
 import { runHandoverTick } from "./handover-tick";
@@ -358,5 +359,178 @@ describe("многодневная запись и больничный поср
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
 
     expect(handoverVoidReason(db, getHandover(db, handover!.id)!)).toBeNull();
+  });
+});
+
+describe("urgent branch: a sick leave still waiting for «ОК»", () => {
+  function pendingSick(db: TestDb, employeeId: number, date: string, endDate: string, approved?: { date: string; endDate: string }): Shift {
+    return db
+      .insert(shifts)
+      .values({
+        date,
+        endDate,
+        category: "sick_leave",
+        employeeId,
+        approvalRequestedAt: new Date(NOW - HOUR),
+        approvedDate: approved?.date ?? null,
+        approvedEndDate: approved?.endDate ?? null,
+      })
+      .returning()
+      .get();
+  }
+
+  it("hands over only the shift inside the escalation window, marks it, and the sick leave keeps waiting", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-13");
+    const soon = shift(db, anya, "2026-08-12", "15:00"); // 6 h away
+    const later = shift(db, anya, "2026-08-13", "15:00"); // 30 h away
+
+    await runHandoverTick(deps(db), NOW);
+
+    const handed = listHandoversForEntry(db, sick.id).map((h) => h.shiftId);
+    expect(handed).toEqual([soon.id]);
+    expect(handed).not.toContain(later.id);
+    const after = getShift(db, sick.id)!;
+    expect(after.handoverForcedAt?.getTime()).toBe(Math.floor(NOW / 1000) * 1000);
+    expect(after.approvalRequestedAt).not.toBeNull();
+  });
+
+  it("fans the urgent hand-over out to the colleagues at once, without waiting for the worker", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12", "15:00");
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(listHandoversForEntry(db, sick.id).map((h) => h.status)).toEqual(["fanned"]);
+    expect(sent.some((m) => m.to === `employee:${igor}`)).toBe(true);
+  });
+
+  it("a second tick creates nothing, sends nothing and keeps the first mark", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12", "15:00");
+    await runHandoverTick(deps(db), NOW);
+    const mark = getShift(db, sick.id)!.handoverForcedAt;
+    const sentAfterFirst = sent.length;
+
+    await runHandoverTick(deps(db), NOW + 5 * 60 * 1000);
+
+    expect(listHandoversForEntry(db, sick.id)).toHaveLength(1);
+    expect(sent.length).toBe(sentAfterFirst);
+    expect(getShift(db, sick.id)!.handoverForcedAt).toEqual(mark);
+  });
+
+  it("a later pass that hands over ANOTHER shift keeps the first pass's mark", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-13");
+    const soon = shift(db, anya, "2026-08-12", "15:00"); // 6 h away
+    const later = shift(db, anya, "2026-08-13", "15:00"); // 30 h away: outside the first window
+    await runHandoverTick(deps(db), NOW);
+    const firstMark = getShift(db, sick.id)!.handoverForcedAt;
+    expect(firstMark).not.toBeNull();
+
+    // 20 h on: the second shift is now inside the window, so this pass really creates a hand-over.
+    await runHandoverTick(deps(db), NOW + 20 * HOUR);
+
+    expect(listHandoversForEntry(db, sick.id).map((h) => h.shiftId).sort()).toEqual([soon.id, later.id].sort());
+    // Wrong implementation caught: the mark follows the latest pass, so «передача запущена без ОК»
+    // would date from the last shift instead of the first.
+    expect(getShift(db, sick.id)!.handoverForcedAt).toEqual(firstMark);
+  });
+
+  it("an approved sick leave and an observer's pending one are left to their usual paths", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const dasha = db.insert(employees).values({ displayName: "Даша", isObserver: true }).returning().get().id;
+    person(db, "Игорь");
+    const approved = sickLeave(db, anya, "2026-08-12");
+    shift(db, anya, "2026-08-12", "15:00");
+    const observers = pendingSick(db, dasha, "2026-08-12", "2026-08-12");
+    shift(db, dasha, "2026-08-12", "15:00");
+    await runHandoverTick(deps(db), NOW);
+    expect(listHandoversForEntry(db, approved.id)).toHaveLength(0);
+    expect(listHandoversForEntry(db, observers.id)).toHaveLength(0);
+  });
+
+  it("the window follows the TEAM date: 00:30 in Moscow on the 13th is still the 12th in UTC", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-13", "2026-08-13");
+    const early = shift(db, anya, "2026-08-13", "01:00", "09:00");
+    const night = Date.UTC(2026, 7, 12, 21, 30);
+    const narrow = { ...deps(db), config: { ...deps(db).config, handoverEscalateHours: 1 } };
+
+    await runHandoverTick(narrow, night);
+
+    expect(listHandoversForEntry(db, sick.id).map((h) => h.shiftId)).toEqual([early.id]);
+  });
+
+  it("a shift that has already started is not handed over", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12", "08:00"); // started an hour before NOW
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(listHandoversForEntry(db, sick.id)).toHaveLength(0);
+    expect(getShift(db, sick.id)!.handoverForcedAt).toBeNull();
+  });
+
+  it("a pending EXTENSION hands over only shifts on its new days, never the approved ones", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    // 12th is approved, 13th is what waits; a wide window puts both shifts inside it.
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-13", { date: "2026-08-12", endDate: "2026-08-12" });
+    const approvedDay = shift(db, anya, "2026-08-12", "15:00");
+    const newDay = shift(db, anya, "2026-08-13", "15:00");
+    const wide = { ...deps(db), config: { ...deps(db).config, handoverEscalateHours: 40 } };
+
+    await runHandoverTick(wide, NOW);
+
+    const handed = listHandoversForEntry(db, sick.id).map((h) => h.shiftId);
+    expect(handed).toEqual([newDay.id]);
+    expect(handed).not.toContain(approvedDay.id);
+  });
+});
+
+describe("after an «ОК»: drafts wait for the worker, then the existing timer takes over", () => {
+  it("an approved sick leave's draft is NOT fanned at once; silence past `handoverFanHours` fans it as today", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const boss = person(db, "Марк");
+    const sick = db
+      .insert(shifts)
+      .values({ date: "2026-08-13", endDate: "2026-08-13", category: "sick_leave", employeeId: anya, approvalRequestedAt: new Date(NOW - 2 * HOUR) })
+      .returning()
+      .get();
+    shift(db, anya, "2026-08-13", "15:00"); // 30 h after NOW: outside the escalation window
+    // The fixtures live in August 2026, so the service gets this file's clock, not the wall clock.
+    const approvalDeps = { ...sickApprovalDeps(null, db, deps(db).config), now: deps(db).now, messenger: deps(db).messenger };
+
+    await approveSickLeave(approvalDeps, sick.id, boss);
+    const [draft] = listHandoversForEntry(db, sick.id);
+    expect([draft!.status, draft!.offeredToEmployeeId]).toEqual(["offered", null]);
+    expect(sent.filter((m) => m.to === `employee:${igor}`)).toHaveLength(0);
+
+    // The worker never opened the button: three hours of silence, as for any draft today.
+    updateHandover(db, draft!.id, { offeredAt: new Date(NOW - 4 * HOUR) });
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, draft!.id)!.status).toBe("fanned");
+    expect(sent.some((m) => m.to === `employee:${igor}`)).toBe(true);
   });
 });

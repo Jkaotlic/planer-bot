@@ -9,6 +9,7 @@ import {
   selfEntryEditRefusal,
   canAddOwnShifts,
   EMPTY_CALENDAR,
+  sickSpanIntersection,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -28,10 +29,21 @@ import {
 } from "../../schedule/self-entry-notice";
 import {
   cancelHandoversForEntry,
+  cancelHandoversForEntryDb,
   detachHandoversFromEntry,
+  notifyCancelledHandovers,
+  type CancelledHandover,
   startHandovers,
   type HandoverDeps,
 } from "../../handover/handover-service";
+import {
+  editClosedRequest,
+  reconcilePendingDateEdit,
+  requestApproval,
+  sickApprovalDeps,
+  takeRequestOutOfPending,
+  type SickApprovalDeps,
+} from "../../sick-approval/sick-approval-service";
 import { createHandoverMessenger } from "../../handover/handover-messenger";
 import { handoverDraftViews } from "./my-handovers";
 import { type Env, requireAuth } from "../middleware";
@@ -122,6 +134,8 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
   /** Собирается на каждый вызов: мессенджер читает базу, а она живёт дольше. */
   const handoverDeps = (): HandoverDeps => ({ db, config, messenger: createHandoverMessenger(bot ?? null, db) });
 
+  const approvalDeps = (): SickApprovalDeps => sickApprovalDeps(bot ?? null, db, config);
+
   /** Every day the entry covers that still holds something ELSE. */
   function riskLines(employeeId: number, entry: { id: number; date: string; endDate: string | null }): string[] {
     return eachDayIso(entry.date, entry.endDate ?? entry.date)
@@ -160,9 +174,14 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const shape = shapeError(body);
     if (shape) return c.json({ error: shape }, 400);
 
-    const entry = createShift(db, { ...rowFor(body), employeeId });
-    recordAudit(db, "self_entry_created", employeeId, entryAuditPayload(db, entry));
-    if (bot) {
+    const created = createShift(db, { ...rowFor(body), employeeId });
+    recordAudit(db, "self_entry_created", employeeId, entryAuditPayload(db, created));
+    // An admin approves their own sick leave by booking it — nobody asks oneself for an «ОК».
+    // Everyone else, observers included (spec item 4), waits for one admin.
+    const needsOk = created.category === "sick_leave" && !me.isAdmin;
+    // The request REPLACES the old notice (spec item 17): one letter, not two.
+    const entry = needsOk ? await requestApproval(approvalDeps(), created) : created;
+    if (bot && !needsOk) {
       // Один и тот же поступок, но разные потоки: у наблюдателя это «человек
       // ведёт свой график», у работника — «работник выпал из смены».
       const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
@@ -179,11 +198,13 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // Иначе — только больничный: мероприятие 14:00–16:00 смену 09:00–18:00 не
     // освобождает, и предлагать её кому-то значило бы снять с человека работу,
     // которую он и не собирался пропускать.
+    //
+    // A pending sick leave hands nothing over until the «ОК» (spec item 7).
     const handovers =
-      entry.category === "sick_leave" && !me.isObserver
+      entry.category === "sick_leave" && !me.isObserver && !needsOk
         ? await startHandovers(handoverDeps(), { sickEntry: entry, employeeId })
         : [];
-    return c.json({ entry, handovers: handoverDraftViews(db, handovers) }, 201);
+    return c.json({ entry, handovers: handoverDraftViews(db, handovers), pending: needsOk }, 201);
   });
 
   routes.patch("/api/my/entries/:id", requireAuth(db, config.jwtSecret), async (c) => {
@@ -225,11 +246,16 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     if (!updated) return c.json({ error: "not_found" }, 404);
 
     recordAudit(db, "self_entry_updated", employeeId, { before, after: entryAuditPayload(db, updated) });
+    // Decided BEFORE anything else: `existing` is the only record of the old span and of
+    // whether the request was still open.
+    const wasPending = existing.approvalRequestedAt != null;
+    let asked = false;
+    // Set when a withdrawn extension also shortened the approved span: the admins' letter is
+    // closed, so they would otherwise never learn the approved days got fewer.
+    let noticeBefore: typeof existing | null = null;
     if (updated.category === "sick_leave") {
       // Порядок важен: сперва гасим дни, которые больничный больше не покрывает,
-      // потом открываем те, до которых он теперь дотянулся. Продление — это
-      // правка той же записи, и смена нового дня остаётся без человека точно так
-      // же, как в первый день.
+      // потом открываем те, до которых он теперь дотянулся.
       const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
       // `cancelHandoversForEntry` — БЕЗУСЛОВНО, не под `!me.isObserver`. Роль
       // закрывает ЗАПУСК лестницы, а не её уборку: если лестница когда-то
@@ -237,11 +263,30 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       // обязан погасить дни, о которых людям уже написали, — независимо от
       // того, кем этот человек стал с тех пор.
       await cancelHandoversForEntry(handoverDeps(), updated.id, covered);
-      // А вот НОВУЮ лестницу для наблюдателя запускать по-прежнему нельзя —
-      // тут гейт остаётся: см. комментарий у POST.
-      if (!me.isObserver) await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
+      const before = new Set(eachDayIso(existing.date, existing.endDate ?? existing.date));
+      // «Удлинить» = the edit reaches a day the approved span did not. Moving the start
+      // later is a shortening; moving the whole span is both, and the new days need an «ОК».
+      const extended = covered.some((date) => !before.has(date));
+      if (wasPending) {
+        // Withdrawn extension or redrawn letters: the same decision an admin's date edit gets.
+        if ((await reconcilePendingDateEdit(approvalDeps(), existing, updated)) === "withdrawn") {
+          const approvedSpan = { date: existing.approvedDate!, endDate: existing.approvedEndDate };
+          const approvedSize = eachDayIso(approvedSpan.date, approvedSpan.endDate ?? approvedSpan.date).length;
+          if (covered.length < approvedSize) noticeBefore = { ...existing, date: approvedSpan.date, endDate: approvedSpan.endDate };
+        }
+      } else if (extended && !me.isAdmin) {
+        // Hand-overs for the old days keep running; the new days wait (spec item 13). The
+        // approved span is remembered: a «Отклонить» gives the row back as it was.
+        // Only the days of it that survive the edit: a day the worker dropped is not given back.
+        await requestApproval(approvalDeps(), updated, sickSpanIntersection(existing, updated));
+        asked = true;
+      } else if (!me.isObserver) {
+        // НОВУЮ лестницу для наблюдателя запускать по-прежнему нельзя — гейт роли, см. POST.
+        await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
+      }
     }
-    if (bot) {
+    // A pending or re-asked sick leave already has its one letter (the request).
+    if (bot && ((!wasPending && !asked) || noticeBefore)) {
       // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
       const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
       const lines = updated.category === "shift" ? [] : riskLines(employeeId, updated);
@@ -249,10 +294,10 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
         bot,
         db,
         noticeKind,
-        selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", existing, updated, lines),
+        selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", noticeBefore ?? existing, getShift(db, updated.id) ?? updated, lines),
       );
     }
-    return c.json({ entry: updated });
+    return c.json({ entry: getShift(db, updated.id) ?? updated });
   });
 
   routes.delete("/api/my/entries/:id", requireAuth(db, config.jwtSecret), async (c) => {
@@ -286,7 +331,22 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // именно того больничного, что подняло лестницу, пока человек ещё был
     // обычным работником, а потом стал наблюдателем: `deleteShift` падал на
     // FK, потому что отвязка молча пропускалась вместе с остальным блоком.
-    if (existing.category === "sick_leave") {
+    const wasPending = existing.category === "sick_leave" && existing.approvalRequestedAt != null;
+    // A pending request: the whole database part (leave «pending», cancel and detach hand-overs, and
+    // below the delete itself) runs before the first await, like a reject's. Letters are edited from
+    // the snapshot afterwards, so a restart cannot strand a half-deleted row.
+    const closing = wasPending
+      ? takeRequestOutOfPending(
+          db,
+          existing,
+          `🗑 Больничного уже нет — ${nameOf(db, employeeId) ?? "работник"} снял(а) сам(а)`,
+        )
+      : null;
+    let cancelledNow: CancelledHandover[] = [];
+    if (closing) {
+      cancelledNow = cancelHandoversForEntryDb(db, existing.id, []);
+      detachHandoversFromEntry(db, existing.id);
+    } else if (existing.category === "sick_leave") {
       await cancelHandoversForEntry(handoverDeps(), existing.id, []);
       // Затем отвязать: `sickEntryId` — внешний ключ, и `deleteShift` без этого
       // отвечает `invalid_reference`. Строки передач остаются как история.
@@ -297,6 +357,8 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const { deleted, expiredSwaps } = deleteShift(db, existing.id);
     if (!deleted) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "self_entry_deleted", employeeId, entryAuditPayload(db, existing));
+    if (closing) await editClosedRequest(approvalDeps(), closing);
+    await notifyCancelledHandovers(handoverDeps(), cancelledNow);
 
     for (const request of expiredSwaps) {
       const payload = linesBefore.get(request.id) ?? swapAuditPayload(db, request);
@@ -308,7 +370,8 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       }
     }
 
-    if (bot) {
+    // The request letter already told the admins; its final edit said the sick leave is gone.
+    if (bot && !wasPending) {
       // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
       const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
       await notifyAdmins(bot, db, noticeKind, selfEntryDeletedText(nameOf(db, employeeId) ?? "Работник", existing));

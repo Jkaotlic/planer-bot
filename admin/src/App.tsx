@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { SickApprovalRow } from "@planer/shared";
 import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
@@ -21,6 +22,7 @@ import { ScheduleGrid } from "./components/ScheduleGrid";
 import { WeekShortfallBar } from "./components/WeekShortfallBar";
 import { Sidebar, navLabel, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { SickApprovalsScreen } from "./screens/SickApprovalsScreen";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { ChecklistScreen } from "./screens/ChecklistScreen";
@@ -133,6 +135,9 @@ export function App() {
   // Номер последнего запроса: медленный ответ на старый запрос не должен затереть
   // число из нового — после правки записи два запроса идут почти подряд.
   const shortfallSeq = useRef(0);
+  /** Больничные, ждущие ОК, — метка на «На подтверждение»; null — не знаем (ручка упала). */
+  const [sickApprovals, setSickApprovals] = useState<SickApprovalRow[] | null>(null);
+  const sickSeq = useRef(0);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
@@ -213,12 +218,31 @@ export function App() {
     );
   }
 
+  /** Копия `refreshAdminShortfall`: тот же отдельный запрос и та же защита от устаревшего ответа. */
+  function refreshSickApprovals() {
+    const seq = ++sickSeq.current;
+    apiClient.getSickApprovals().then(
+      (rows) => {
+        if (seq !== sickSeq.current) return;
+        setSickApprovals(rows);
+      },
+      (err: unknown) => {
+        if (seq !== sickSeq.current) return;
+        setSickApprovals(null);
+        if (err instanceof AuthRequiredError) setNeedLogin(true);
+      },
+    );
+  }
+
   // Консоль годами висит открытой вкладкой: возвращаясь к ней, человек ждёт
   // свежего числа, а не того, что было при уходе. Тот же запрос с защитой от
   // устаревшего ответа, что и везде.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible") refreshAdminShortfall();
+      if (document.visibilityState === "visible") {
+        refreshAdminShortfall();
+        refreshSickApprovals();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -263,12 +287,21 @@ export function App() {
   // перечитывания по возвращении сетка показывала бы нехватку по нормам,
   // какими они были при загрузке консоли. Первый показ пропускаем: нормы
   // только что пришли в `loadBootstrap`.
+  // Метка «На подтверждение» живёт отдельно от экрана: открыв его, человек видит
+  // свежий список, и число в сайдбаре должно совпасть с ним.
+  useEffect(() => {
+    if (nav === "approvals") refreshSickApprovals();
+    // refreshSickApprovals держится на рефе и сеттере — привязка к nav безопасна.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
   const scheduleShown = useRef(false);
   useEffect(() => {
     if (nav !== "schedule") return;
     // И на первом показе: метке нужен свой первый запрос, а нормы могли
     // поправить на «Видах смен» — число в сайдбаре считает по ним же.
     refreshAdminShortfall();
+    refreshSickApprovals();
     if (!scheduleShown.current) {
       scheduleShown.current = true;
       return;
@@ -305,7 +338,7 @@ export function App() {
     }
   }
 
-  async function refreshSchedule() {
+  async function refreshSchedule(): Promise<Shift[]> {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
     const [next, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
@@ -313,8 +346,43 @@ export function App() {
     setShiftsFrom(from);
     setCalendarDays(calendar);
     // Все правки записей кончаются здесь (сохранение, диапазон, удаление,
-    // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки.
+    // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки; удаление
+    // ждущего больничного заодно убирает его из очереди «На подтверждение».
     refreshAdminShortfall();
+    refreshSickApprovals();
+    return next;
+  }
+
+  /**
+   * ОК/отказ из карточки записи. Отказ сервера (409 «Уже подтвердил(а) …», 404) значит,
+   * что запись уже решена или снята: панель не должна висеть над устаревшей записью
+   * с живыми кнопками — перечитываем, и запись либо перестаёт быть ждущей (кнопок нет,
+   * ошибка остаётся в панели), либо исчезла (панель закрываем, текст — на экране).
+   */
+  async function decideEntry(entry: Shift, action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (err) {
+      try {
+        const next = await refreshSchedule();
+        const fresh = next.find((s) => s.id === entry.id);
+        if (fresh) setEditingEntry(fresh);
+        else {
+          setEditingEntry(null);
+          setScreenNotice({ kind: "error", text: err instanceof Error ? err.message : "Больничного уже нет" });
+        }
+      } catch {
+        // Перечитать не вышло — ошибка решения остаётся в панели, её и покажем.
+      }
+      throw err;
+    }
+    setEditingEntry(null);
+    try {
+      await refreshSchedule();
+    } catch {
+      // Решение принято: ошибку панели («не получилось») тут показывать нельзя.
+      setScreenNotice({ kind: "error", text: "Решение принято, но расписание не удалось обновить — обнови страницу." });
+    }
   }
 
   async function previewRosterFile(file: File) {
@@ -477,7 +545,10 @@ export function App() {
         }}
         adminLabel={viewer ? `${viewer.address} · админ` : "Админ"}
         open={menuOpen}
-        badges={adminShortfall ? { schedule: adminShortfall } : undefined}
+        badges={{
+          ...(adminShortfall ? { schedule: adminShortfall } : {}),
+          ...(sickApprovals?.length ? { approvals: sickApprovals.length } : {}),
+        }}
       />
       {menuOpen && (
         <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />
@@ -529,6 +600,15 @@ export function App() {
           <CollectionsScreen />
         ) : nav === "announce" ? (
           <AnnounceScreen />
+        ) : nav === "approvals" ? (
+          <SickApprovalsScreen
+            onChanged={() => {
+              // refreshSchedule сам перечитывает и метку ждущих, и нехватку — второй раз не зовём.
+              refreshSchedule().catch(() => {
+                // Сетка обновится при возврате на «Расписание»; экран решений своё уже показал.
+              });
+            }}
+          />
         ) : nav === "bugs" ? (
           <BugsScreen />
         ) : nav === "log" ? (
@@ -656,6 +736,9 @@ export function App() {
               text: withNotifyNotice(describeEntryRangeResult(result), result.notified),
             });
           }}
+          handoverForced={editingEntry ? sickApprovals?.find((r) => r.id === editingEntry.id)?.handoverForced : undefined}
+          onApprove={editingEntry?.pending ? () => decideEntry(editingEntry, () => apiClient.approveSickLeave(editingEntry.id)) : undefined}
+          onReject={editingEntry?.pending ? () => decideEntry(editingEntry, () => apiClient.rejectSickLeave(editingEntry.id)) : undefined}
           onDelete={
             editingEntry
               ? async () => {

@@ -121,6 +121,30 @@ describe("вход в самозапись по ссылке из бота", () 
     expect(text).not.toContain("Место (необязательно)");
   });
 
+  it("?screen=handovers открывает форму больничного сразу на шаге «Кому предложить смену»", async () => {
+    const draft = { id: 77, shiftLine: "Ср 7 окт · 09:00–18:00 · День", candidates: [{ id: 2, displayName: "Игорь" }] };
+    const load = vi.spyOn(apiClient, "getMyHandoverDrafts").mockResolvedValue([draft]);
+    const el = await mountAt("?screen=handovers");
+    const text = el.textContent ?? "";
+    expect(load).toHaveBeenCalledOnce();
+    expect(text).toContain("Кому предложить смену");
+    expect(text).toContain("Ср 7 окт · 09:00–18:00 · День");
+    expect(text).toContain("Игорь");
+    expect(text).not.toContain("Привет");
+  });
+
+  it("?screen=handovers без черновиков — словами, а не пустой формой", async () => {
+    vi.spyOn(apiClient, "getMyHandoverDrafts").mockResolvedValue([]);
+    const el = await mountAt("?screen=handovers");
+    expect(el.textContent).toContain("Смен для передачи не осталось");
+  });
+
+  it("обычная ссылка на больничный черновики не запрашивает", async () => {
+    const load = vi.spyOn(apiClient, "getMyHandoverDrafts").mockResolvedValue([]);
+    await mountAt("?screen=sick");
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it("без строки запроса мини-апп открывается как раньше — на «Моих сменах»", async () => {
     const el = await mountAt("");
     expect(el.textContent ?? "").toContain("Привет");

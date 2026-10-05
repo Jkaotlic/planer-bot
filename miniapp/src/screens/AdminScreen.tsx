@@ -9,6 +9,7 @@ import { AdminSettings } from "./admin/AdminSettings";
 import { AdminGroups } from "./admin/AdminGroups";
 import { AdminChecklists } from "./admin/AdminChecklists";
 import { AdminMenu } from "./admin/AdminMenu";
+import { AdminSickApprovals } from "./admin/AdminSickApprovals";
 import { Screen } from "../ui";
 import { adminSectionTitle, type AdminView } from "./admin-section";
 
@@ -28,6 +29,8 @@ export function AdminScreen({
   today,
   onScheduleChanged,
   nearestShortfall,
+  sickApprovals,
+  onSickApprovalsChanged,
 }: {
   view: AdminView;
   onViewChange: (view: AdminView) => void;
@@ -42,6 +45,10 @@ export function AdminScreen({
   onScheduleChanged?: () => void;
   /** Первый день нехватки на неделю вперёд — для строки «Ближайшая нехватка» в плашке. */
   nearestShortfall?: string | null;
+  /** Сколько больничных ждёт ОК — число в строке меню. `null` — не загрузилось. */
+  sickApprovals?: number | null;
+  /** Решили больничный — `App` перечитает метку на вкладке (и нехватку: отказ удаляет запись). */
+  onSickApprovalsChanged?: () => void;
 }) {
   // Дата нужна графику только при первом монтировании (`useState` внутри);
   // сразу после — отдаём, что использовали.
@@ -53,13 +60,14 @@ export function AdminScreen({
   if (view === "menu") {
     return (
       <Screen title="Админ">
-        <AdminMenu onOpen={onViewChange} />
+        <AdminMenu onOpen={onViewChange} badges={sickApprovals ? { "sick-approvals": sickApprovals } : undefined} />
       </Screen>
     );
   }
 
   return (
     <Screen title={adminSectionTitle(view)} onBack={() => onViewChange("menu")} backLabel="Разделы" tabBar>
+      {view === "sick-approvals" && <AdminSickApprovals onChanged={onSickApprovalsChanged} />}
       {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} nearestShortfall={nearestShortfall} />}
       {view === "weekend" && <AdminWeekendScreen today={today} />}
       {view === "employees" && <AdminEmployeesScreen />}

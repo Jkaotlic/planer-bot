@@ -1,7 +1,7 @@
 import { useTelegramBack } from "../lib/telegram-back";
 import { ActionButton, Card, Group } from "../ui";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Cell, IconButton, Input, Placeholder } from "@telegram-apps/telegram-ui";
 import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
 import type { HandoverDraft, SelfEntryInput, Shift, Template } from "../api/client";
@@ -49,6 +49,26 @@ export function defaultEventEnd(start: string): string {
 export function screenFromSearch(search: string): SelfEntryMode | null {
   const value = new URLSearchParams(search).get("screen");
   return value === "sick" || value === "event" || value === "shift" ? value : null;
+}
+
+/**
+ * Кнопка «🤝 Выбрать коллег» из письма об ОК админа. Своя функция, а не ещё одно
+ * значение `SelfEntryMode`: форма та же — больничный, — а ссылка говорит, что её
+ * второй шаг надо поднять с сервера, потому что человек давно ушёл из формы.
+ */
+export function handoverDraftsFromSearch(search: string): boolean {
+  return new URLSearchParams(search).get("screen") === "handovers";
+}
+
+/**
+ * Свёрнута ли форма. По ссылке «Выбрать коллег» человек пришёл за вторым шагом, а
+ * поля даты и «Поставить больничный» занимали ~440px над черновиками: первая
+ * кнопка-кандидат оказывалась на 870px при экране 844 (замер 390×844). В этом
+ * режиме форма — одна кнопка под черновиками, пока её не раскрыли или не нажали
+ * «Изменить».
+ */
+export function selfEntryFormFolded({ draftsLink, expanded }: { draftsLink: boolean; expanded: boolean }): boolean {
+  return draftsLink && !expanded;
 }
 
 /**
@@ -108,6 +128,8 @@ export interface SelfEntryScreenProps {
    *  просто нет, но тот же расчёт отказа не должен молча решать за него иначе,
    *  чем решит сервер. */
   ownShifts: boolean;
+  /** Больничный админа подтверждается сразу (сервер: `needsOk` только у не-админа): подпись про письмо ему врёт. */
+  isAdmin?: boolean;
   onCancel: () => void;
   /** Возвращает смены, оставшиеся без человека, — про них форма спросит вторым шагом. */
   onCreate: (input: SelfEntryInput) => Promise<HandoverDraft[]>;
@@ -115,6 +137,8 @@ export interface SelfEntryScreenProps {
   onDelete: (id: number) => Promise<void>;
   onOfferHandover: (handoverId: number, toEmployeeId: number) => Promise<void>;
   onSkipHandover: (handoverId: number) => Promise<void>;
+  /** Ссылка из письма об ОК: черновики передачи поднимаются с сервера при открытии. */
+  loadDrafts?: () => Promise<HandoverDraft[]>;
 }
 
 /**
@@ -131,17 +155,40 @@ export function SelfEntryScreen({
   shifts,
   templates,
   ownShifts,
+  isAdmin = false,
   onCancel,
   onCreate,
   onUpdate,
   onDelete,
   onOfferHandover,
   onSkipHandover,
+  loadDrafts,
 }: SelfEntryScreenProps) {
   // Смены, оставшиеся без человека. Пока список не пуст, форма не закрывается:
   // это единственный момент, когда человек ещё помнит, кого можно попросить.
   const [drafts, setDrafts] = useState<HandoverDraft[]>([]);
   const [handoverBusy, setHandoverBusy] = useState(false);
+  // Черновики после ОК — с сервера, один раз на открытие. Пусто — сказать словами:
+  // пустая форма больничного по кнопке «Выбрать коллег» выглядела бы поломкой.
+  const [draftsGone, setDraftsGone] = useState(false);
+  useEffect(() => {
+    if (!loadDrafts) return;
+    let cancelled = false;
+    loadDrafts().then(
+      (loaded) => {
+        if (cancelled) return;
+        setDrafts(loaded);
+        setDraftsGone(loaded.length === 0);
+      },
+      (err: unknown) => {
+        if (!cancelled) setError(describeError(err));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // Один раз на монтирование: ссылка — одна.
+  }, []);
   // «Назад» с неотданной сменой сначала говорит, что будет, — второе нажатие
   // уходит. Смена не пропадёт (через три часа спросим всех), но человек должен
   // это знать, а не думать, что просто закрыл форму.
@@ -158,6 +205,9 @@ export function SelfEntryScreen({
   // предупреждением о неотданной смене.
   useTelegramBack(handleBack);
 
+  // Раскрыл ли человек форму сам; значим только при ссылке «Выбрать коллег» (`loadDrafts`).
+  const [formExpanded, setFormExpanded] = useState(false);
+  const formFolded = selfEntryFormFolded({ draftsLink: !!loadDrafts, expanded: formExpanded });
   const [editingId, setEditingId] = useState<number | null>(null);
   // Категория формы: у правки — та, что у самой записи, иначе та, ради которой
   // экран открыли. Иначе, начав править мероприятие из формы больничного,
@@ -190,6 +240,8 @@ export function SelfEntryScreen({
   }
 
   function startEditing(entry: Shift) {
+    // Правка без полей невозможна — раскрываем.
+    setFormExpanded(true);
     setEditingId(entry.id);
     setCategory(entry.category);
     setDate(entry.date);
@@ -290,80 +342,91 @@ export function SelfEntryScreen({
         </h1>
       </header>
 
-      <Group
-        header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
-        footer={
-          isSick
-            ? "Админам уйдёт письмо: они увидят, какие смены остались без человека."
-            : isShift
-              ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
-              : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
-        }
-      >
-        <Card>
-          {category === "offsite" && (
-            <Input
-              header="Название"
-              placeholder="Например: конференция"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          )}
-          <Input header={isSick ? "С какого" : "Дата"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          {isSick ? (
-            <Input
-              header="По какое (если знаешь)"
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          ) : (
-            <>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Input
-                  header="Начало"
-                  type="time"
-                  value={start}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    setStart(next);
-                    // Конец тянется за началом, пока его не трогали руками —
-                    // человек, поменявший начало, почти всегда двигает и конец.
-                    if (end === defaultEventEnd(start)) setEnd(defaultEventEnd(next));
-                  }}
-                />
-                <Input header="Конец" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
-              </div>
+      {!formFolded && (
+        <>
+        <Group
+          header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
+          footer={
+            isSick
+              ? isAdmin
+                ? undefined
+                : "Админам уйдёт письмо: они подтвердят больничный и увидят, какие смены остались без человека."
+              : isShift
+                ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
+                : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
+          }
+        >
+          <Card>
+            {category === "offsite" && (
               <Input
-                header="Место (необязательно)"
-                placeholder="Адрес или площадка"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                header="Название"
+                placeholder="Например: конференция"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
               />
-            </>
+            )}
+            <Input header={isSick ? "С какого" : "Дата"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            {isSick ? (
+              <Input
+                header="По какое (если знаешь)"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Input
+                    header="Начало"
+                    type="time"
+                    value={start}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setStart(next);
+                      // Конец тянется за началом, пока его не трогали руками —
+                      // человек, поменявший начало, почти всегда двигает и конец.
+                      if (end === defaultEventEnd(start)) setEnd(defaultEventEnd(next));
+                    }}
+                  />
+                  <Input header="Конец" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
+                </div>
+                <Input
+                  header="Место (необязательно)"
+                  placeholder="Адрес или площадка"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                />
+              </>
+            )}
+          </Card>
+        </Group>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Отказ и ошибка — рядом с кнопкой, а не в шапке: мини-апп это один
+              длинный скролл без единого `position: fixed`, и сообщение, отрисованное
+              вверху по нажатию внизу, человеку невидимо. */}
+          {(error ?? refusal) && (
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
+              {error ?? refusal}
+            </div>
           )}
-        </Card>
-      </Group>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* Отказ и ошибка — рядом с кнопкой, а не в шапке: мини-апп это один
-            длинный скролл без единого `position: fixed`, и сообщение, отрисованное
-            вверху по нажатию внизу, человеку невидимо. */}
-        {(error ?? refusal) && (
-          <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
-            {error ?? refusal}
-          </div>
-        )}
-        <ActionButton stretched kind="primary" loading={submitting} disabled={submitting || !!refusal} onClick={() => void handleSubmit()}>
-          {editingId != null ? "Сохранить" : isSick ? "Поставить больничный" : isShift ? "Поставить себе смену" : "Записать мероприятие"}
-        </ActionButton>
-        {editingId != null && (
-          <ActionButton stretched kind="quiet" onClick={resetForm}>
-            Отменить правку
+          <ActionButton stretched kind="primary" loading={submitting} disabled={submitting || !!refusal} onClick={() => void handleSubmit()}>
+            {editingId != null ? "Сохранить" : isSick ? "Поставить больничный" : isShift ? "Поставить себе смену" : "Записать мероприятие"}
           </ActionButton>
-        )}
-      </div>
+          {editingId != null && (
+            <ActionButton stretched kind="quiet" onClick={resetForm}>
+              Отменить правку
+            </ActionButton>
+          )}
+        </div>
+        </>
+      )}
 
+      {draftsGone && drafts.length === 0 && (
+        <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
+          Смен для передачи не осталось — их уже взяли или предложили всем свободным.
+        </div>
+      )}
       {drafts.length > 0 && leaveWarned && (
         <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--destructive_text_color)" }}>
           Смена ещё не отдана. Если выйти — через три часа спросим всех свободных. Нажми «Назад» ещё раз, чтобы выйти.
@@ -414,36 +477,62 @@ export function SelfEntryScreen({
         </>
       )}
 
+      {formFolded && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Ошибка загрузки черновиков живёт в блоке формы, а он свёрнут: без неё
+              сломанная ссылка выглядела бы пустым экраном. */}
+          {error && (
+            <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
+          )}
+          <ActionButton stretched kind="quiet" onClick={() => setFormExpanded(true)}>
+            Записать ещё один больничный
+          </ActionButton>
+        </div>
+      )}
+
+      {/* Вместо черновиков передачи (их нет, пока нет ОК) — что будет дальше. Рядом
+          со списком, а не вверху: экран — один длинный скролл. */}
+      {mine.some((entry) => entry.category === "sick_leave" && entry.pending) && (
+        <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
+          Больничный ждёт ОК. Админы подтвердят — после этого предложим твои смены коллегам.
+        </div>
+      )}
+
       <Group header="Что ты уже записал себе" footer="Здесь только то, что ещё не кончилось: прошедшее правит админ.">
         <Card flush>
           {mine.length === 0 ? (
-            <Placeholder description="Пока ничего. Заполни форму выше." />
+            <Placeholder description={formFolded ? "Пока ничего." : "Пока ничего. Заполни форму выше."} />
           ) : (
             mine.map((entry) => (
               <Cell
                 key={entry.id}
                 before={<DayBadge date={entry.date} endDate={entry.endDate} />}
                 subtitle={formatTimeRange(entry)}
+                // Кнопки под чипом, а не в `after`: справа они оставляли описанию ~108px
+                // (замер 390px), а «Больничный · ждёт ОК» просит 178.8 — чип обрезался,
+                // а «Изменить»/«Снять» сжимались до 45.6/36.9px с вертикальным текстом.
                 description={
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <EntryChip entry={entry} templates={templates} />
-                    {entry.location && <span>{entry.location}</span>}
-                  </span>
-                }
-                after={
-                  <span style={{ display: "flex", gap: 6 }}>
-                    <ActionButton compact onClick={() => startEditing(entry)}>
-                      Изменить
-                    </ActionButton>
-                    <ConfirmButton
-                      label="Снять"
-                      question="Снять эту запись? Админам придёт письмо."
-                      confirmLabel="Да, снять"
-                      mode="plain"
-                      loading={busyId === entry.id}
-                      disabled={busyId != null}
-                      onConfirm={() => void handleDelete(entry.id)}
-                    />
+                  <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, paddingTop: 2 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <EntryChip entry={entry} templates={templates} />
+                      {entry.location && <span>{entry.location}</span>}
+                    </span>
+                    {/* 44px по высоте, как были кнопки в `after` (замер 44.5): compact рисует 36,
+                        а строка и без того высокая — лишние 8px зону нажатия не портят. */}
+                    <span style={{ display: "flex", gap: 6, minHeight: "var(--app-tap)" }}>
+                      <ActionButton compact onClick={() => startEditing(entry)}>
+                        Изменить
+                      </ActionButton>
+                      <ConfirmButton
+                        label="Снять"
+                        question="Снять эту запись? Админам придёт письмо."
+                        confirmLabel="Да, снять"
+                        mode="plain"
+                        loading={busyId === entry.id}
+                        disabled={busyId != null}
+                        onConfirm={() => void handleDelete(entry.id)}
+                      />
+                    </span>
                   </span>
                 }
               >

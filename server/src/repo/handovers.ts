@@ -1,6 +1,6 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { handoverDeclines, handovers, type Handover, type NewHandover } from "../db/schema";
+import { handoverDeclines, handovers, shifts, type Handover, type NewHandover } from "../db/schema";
 
 export function createHandover(db: Db, data: NewHandover): Handover {
   return db.insert(handovers).values(data).returning().all()[0]!;
@@ -55,4 +55,30 @@ export function listDeclines(db: Db, handoverId: number): number[] {
     .orderBy(asc(handoverDeclines.id))
     .all()
     .map((row) => row.employeeId);
+}
+
+/**
+ * A worker's hand-overs still waiting for them to pick a colleague: offered to nobody,
+ * not fanned, not closed, on a shift dated `fromDate` or later. Oldest shift first and
+ * capped — the process also serves the bot's polling. The cap is generous on purpose: the
+ * caller still drops void and started ones, and a tight cap here would let such stale rows
+ * crowd live drafts out of the answer.
+ */
+export function listOpenDrafts(db: Db, employeeId: number, fromDate: string, limit = 100): Handover[] {
+  return db
+    .select({ handover: handovers })
+    .from(handovers)
+    .innerJoin(shifts, eq(handovers.shiftId, shifts.id))
+    .where(
+      and(
+        eq(handovers.fromEmployeeId, employeeId),
+        eq(handovers.status, "offered"),
+        isNull(handovers.offeredToEmployeeId),
+        gte(shifts.date, fromDate),
+      ),
+    )
+    .orderBy(asc(shifts.date), asc(handovers.id))
+    .limit(limit)
+    .all()
+    .map((row) => row.handover);
 }

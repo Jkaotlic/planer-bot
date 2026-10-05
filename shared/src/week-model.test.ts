@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { SICK_LEAVE_PENDING_SCHEDULE_PALETTE } from "./schedule-palette";
 import { buildWeekLegend, buildWeekModel, splitDisplayName, type ScheduleEntryLike, type SchedulePresetLike } from "./week-model";
 
 const MONDAY = "2026-08-03";
@@ -178,5 +179,63 @@ describe("модель недели", () => {
   it("splitDisplayName отделяет фамилию от остального", () => {
     expect(splitDisplayName("Иванов Иван Иванович")).toEqual({ surname: "Иванов", rest: "Иван Иванович" });
     expect(splitDisplayName("Иванов")).toEqual({ surname: "Иванов", rest: "" });
+  });
+});
+
+describe("больничный, ждущий ОК", () => {
+  const sick = (employeeId: number, pending?: boolean) =>
+    entry({ date: MONDAY, category: "sick_leave", templateId: null, start: null, end: null, employeeId, ...(pending ? { pending } : {}) });
+
+  it("клетка ждущего — бледная «Б» с пометкой, обычного — красная", () => {
+    const model = buildWeekModel(MONDAY, { employees: TEAM, shifts: [sick(1), sick(2, true)] }, PRESETS);
+    const primary = (row: number) => model.rows[row]!.cells[0]!.primary!;
+    expect(primary(0).pending).toBe(false);
+    expect(primary(0).palette?.bg).toBe("#FD0100");
+    expect(primary(1).pending).toBe(true);
+    expect(primary(1).palette).toEqual(SICK_LEAVE_PENDING_SCHEDULE_PALETTE);
+  });
+
+  it("легенда — две строки: «Б Больничный» и «Б Больничный (ждёт ОК)»", () => {
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [sick(1), sick(2, true)] }, PRESETS));
+    expect(legend.map((item) => `${item.code} ${item.label}`)).toEqual(["Б Больничный", "Б Больничный (ждёт ОК)"]);
+    expect(legend[1]!.pending).toBe(true);
+    expect(legend[0]!.pending).toBe(false);
+  });
+
+  it("продление: дни внутри подтверждённого срока красные, только новые — бледные", () => {
+    // Сервер шлёт `approvedSpan`, пока ждёт ОК именно продление: подтверждённые
+    // дни не должны бледнеть, иначе человеку покажут, что у него «отняли» больничный.
+    const extension = entry({
+      date: MONDAY, endDate: "2026-08-06", category: "sick_leave", templateId: null, start: null, end: null,
+      pending: true, approvedSpan: { date: MONDAY, endDate: "2026-08-04" },
+    });
+    const cells = buildWeekModel(MONDAY, { employees: TEAM, shifts: [extension] }, PRESETS).rows[0]!.cells;
+    expect(cells.slice(0, 4).map((cell) => cell.primary!.pending)).toEqual([false, false, true, true]);
+    expect(cells[0]!.primary!.palette?.bg).toBe("#FD0100");
+    expect(cells[2]!.primary!.palette).toEqual(SICK_LEAVE_PENDING_SCHEDULE_PALETTE);
+  });
+
+  it("продление: подтверждённый срок из одного дня (endDate null) закрывает только этот день", () => {
+    const extension = entry({
+      date: MONDAY, endDate: "2026-08-04", category: "sick_leave", templateId: null, start: null, end: null,
+      pending: true, approvedSpan: { date: MONDAY, endDate: null },
+    });
+    const cells = buildWeekModel(MONDAY, { employees: TEAM, shifts: [extension] }, PRESETS).rows[0]!.cells;
+    expect(cells.slice(0, 2).map((cell) => cell.primary!.pending)).toEqual([false, true]);
+  });
+
+  it("легенда продления: строка «ждёт ОК» есть, только когда бледный день на неделе", () => {
+    const extension = entry({
+      date: MONDAY, endDate: "2026-08-04", category: "sick_leave", templateId: null, start: null, end: null,
+      pending: true, approvedSpan: { date: MONDAY, endDate: "2026-08-04" },
+    });
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [extension] }, PRESETS));
+    expect(legend.map((item) => item.label)).toEqual(["Больничный"]);
+  });
+
+  it("флаг на не-больничном ничего не меняет", () => {
+    const vacation = entry({ date: MONDAY, category: "vacation", templateId: null, start: null, end: null, pending: true });
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [vacation] }, PRESETS));
+    expect(legend.map((item) => item.label)).toEqual(["Отпуск"]);
   });
 });

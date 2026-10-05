@@ -21,6 +21,9 @@ export const AUDIT_TYPES = [
   // различать «я это поставил» и «человек поставил себе сам», иначе строка не
   // отвечает на первый же вопрос, который к ней возникает.
   "self_entry_created", "self_entry_updated", "self_entry_deleted",
+  // Решение админа по больничному работника: в журнале отвечает на «кто разрешил
+  // (или не разрешил) передачу смен», и `entry_*` этого не скажет.
+  "sick_leave_approved", "sick_leave_rejected",
   "swap_proposed", "swap_accepted", "swap_declined",
   "swap_cancelled", "swap_expired", "swap_auto_cancelled",
   "swaps_lock_changed",
@@ -281,6 +284,8 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   self_entry_created: (p) => ({ icon: "🙋", title: "Записал(а) себе сам(а)", lines: entryView(p) }),
   self_entry_updated: (p) => ({ icon: "🙋", title: "Поправил(а) свою запись сам(а)", lines: entryUpdatedLines(p) }),
   self_entry_deleted: (p) => ({ icon: "🙋", title: "Снял(а) свою запись сам(а)", lines: entryView(p) }),
+  sick_leave_approved: (p) => ({ icon: "✅", title: "Больничный подтверждён", lines: entryView(p) }),
+  sick_leave_rejected: (p) => ({ icon: "❌", title: "Больничный отклонён", lines: entryView(p) }),
 
   swap_proposed: (p) => ({ icon: "🔁", title: "Предложен обмен", lines: swapLines(p) }),
   swap_accepted: (p) => ({ icon: "🔁", title: "Обмен состоялся", lines: swapLines(p) }),

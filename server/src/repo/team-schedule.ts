@@ -3,6 +3,7 @@ import { canSwap, type EntryCategory } from "@planer/shared";
 import { listActiveInRosterOrder } from "./employees";
 import { listShiftsOverlapping } from "./shifts";
 import { listCalendarDays } from "./calendar-days";
+import { pendingMarks } from "./sick-approvals";
 
 /** A schedule entry shaped so it's safe to show to any worker. */
 export interface TeamScheduleEntry {
@@ -17,6 +18,10 @@ export interface TeamScheduleEntry {
   unrecognisedCode: string | null;
   templateId: number | null;
   employeeId: number | null;
+  /** Sick leave waiting for an admin's «ОК»; the key is absent otherwise. */
+  pending?: true;
+  /** Only while an EXTENSION waits: the days already approved, which are not pale. */
+  approvedSpan?: { date: string; endDate: string | null };
 }
 
 export interface TeamScheduleView {
@@ -68,6 +73,7 @@ export function readTeamSchedule(db: Db, from: string, to: string): TeamSchedule
       unrecognisedCode: shift.unrecognisedCode,
       templateId: shift.templateId,
       employeeId: shift.employeeId,
+      ...pendingMarks(shift),
     }));
   const calendar = listCalendarDays(db, from, to).map(({ date, kind, note, source }) => ({ date, kind, note, source }));
   return { employees, shifts, calendar };

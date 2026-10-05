@@ -1,6 +1,7 @@
 import { categoryLabel, type EntryCategory, type TemplateAccent } from "./category";
 import {
   exactSchedulePalette,
+  cellSchedulePalette,
   UNRECOGNISED_SCHEDULE_PALETTE,
   type SchedulePalette,
 } from "./schedule-palette";
@@ -28,6 +29,10 @@ export interface ScheduleEntryLike {
   title: string | null;
   templateId: number | null;
   unrecognisedCode?: string | null;
+  /** Больничный ждёт ОК админа (сервер шлёт только `true`). */
+  pending?: boolean;
+  /** Пока ждёт ОК продление: уже подтверждённый срок — его дни не бледные. */
+  approvedSpan?: { date: string; endDate: string | null };
 }
 
 /** Минимум пресета: сетка берёт из него имя, цвет и порядок сортировки. */
@@ -49,6 +54,8 @@ export interface TeamEntryView<E extends ScheduleEntryLike = ScheduleEntryLike> 
   shift: E;
   title: string;
   palette: SchedulePalette | null;
+  /** Всегда проставляет `toEntryView`; необязательное, чтобы литералы в тестах фронтов не ломались. */
+  pending?: boolean;
 }
 
 export interface WeekCell<E extends ScheduleEntryLike = ScheduleEntryLike> {
@@ -90,19 +97,27 @@ function templateFor<E extends ScheduleEntryLike>(
 export function toEntryView<E extends ScheduleEntryLike>(
   shift: E,
   templates: readonly SchedulePresetLike[],
+  /** День, который рисуем. Нужен только продлению: «ждёт ОК» у него — свойство дня,
+   *  а не записи (подтверждённые дни красные). Без даты — вся запись как есть. */
+  date?: string,
 ): TeamEntryView<E> {
   const template = templateFor(shift, templates);
   // A cell the import could not read keeps its own grey «?» square and says so in
   // words — «Смена» would claim we know what it is, and we do not.
   if (shift.unrecognisedCode) {
-    return { shift, title: `Не распознано: «${shift.unrecognisedCode}»`, palette: UNRECOGNISED_SCHEDULE_PALETTE };
+    return { shift, title: `Не распознано: «${shift.unrecognisedCode}»`, palette: UNRECOGNISED_SCHEDULE_PALETTE, pending: false };
   }
+  // «Ждёт ОК» бывает только у больничного — флаг на другой записи не значит ничего.
+  const insideApproved = date != null && shift.approvedSpan != null
+    && coversDate({ ...shift, date: shift.approvedSpan.date, endDate: shift.approvedSpan.endDate }, date);
+  const pending = shift.pending === true && shift.category === "sick_leave" && !insideApproved;
   return {
     shift,
     // Отличие от копии в мини-аппе: подпись категории берётся из categoryLabel,
     // а не из третьей копии той же таблицы.
     title: template?.name ?? shift.title ?? categoryLabel(shift.category),
-    palette: exactSchedulePalette(template?.accent, shift.category),
+    palette: cellSchedulePalette(template?.accent, shift.category, pending),
+    pending,
   };
 }
 
@@ -128,7 +143,7 @@ function weekCell<E extends ScheduleEntryLike>(
   const entries = shifts
     .filter((shift) => shift.employeeId === employeeId && coversDate(shift, date))
     .sort((a, b) => compareShifts(a, b, templates))
-    .map((shift) => toEntryView(shift, templates));
+    .map((shift) => toEntryView(shift, templates, date));
   return {
     date,
     entries,
@@ -181,6 +196,8 @@ export interface WeekLegendItem {
   palette: SchedulePalette | null;
   /** Only set alongside a null palette: which category's colour the cell used. */
   category: EntryCategory | null;
+  /** Строка про больничный, ждущий ОК: та же буква, но бледный квадрат в пунктире. */
+  pending?: boolean;
 }
 
 /** A one-off entry with no preset behind it; the grid draws it as a dot. */
@@ -205,7 +222,10 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
     for (const cell of row.cells) {
       const entry = cell.primary;
       if (!entry) continue;
-      const key = entry.palette ? entry.palette.code : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}`;
+      // Ждущий ОК — отдельная строка с той же буквой: квадрат другой (бледный,
+      // в пунктире), и легенда обязана объяснить и его.
+      const pendingKey = entry.pending ? ":pending" : "";
+      const key = entry.palette ? `${entry.palette.code}${pendingKey}` : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}`;
       // Квадрат категории (отпуск, командировка, мероприятие) стоит за СОСТОЯНИЕ,
       // а не за заголовок конкретной записи: у разных людей заголовки разные, и
       // легенда склеивала их через « · » — строка росла, а объясняла хуже.
@@ -214,9 +234,10 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
       // скопировать (тема, предпросмотр), и ссылочное равенство молча вернуло бы
       // заголовок записи вместо названия состояния.
       const categoryExact = exactSchedulePalette(undefined, entry.shift.category);
-      const title = entry.palette && categoryExact && entry.palette.code === categoryExact.code
+      const base = entry.palette && categoryExact && entry.palette.code === categoryExact.code
         ? categoryLabel(entry.shift.category)
         : entry.title;
+      const title = entry.pending ? `${base} (ждёт ОК)` : base;
       const existing = seen.get(key);
       if (existing) {
         existing.titles.add(title);
@@ -228,6 +249,7 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
           label: title,
           palette: entry.palette,
           category: entry.palette ? null : entry.shift.category,
+          pending: entry.pending === true,
         },
         titles: new Set([title]),
       });

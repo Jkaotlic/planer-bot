@@ -57,3 +57,24 @@ describe("мок домена read", () => {
     expect(Date.now() - started).toBeLessThan(50);
   });
 });
+
+describe("мок домена read — «ждёт ОК»", () => {
+  it("не срезает «ждёт ОК» — мок обязан отдавать то, что отдаёт сервер", async () => {
+    const state = seedReadMockState();
+    const pendingSick = { ...state.entries[0]!, category: "sick_leave" as const, start: null, end: null, pending: true as const };
+    const mock = createReadMock({ delayMs: 0, state: { ...state, entries: [pendingSick] } });
+    const schedule = await mock.getTeamSchedule(dayFromToday(-7), dayFromToday(7));
+    expect(schedule.shifts[0]!.pending).toBe(true);
+    expect(teamScheduleResponseSchema.safeParse(schedule).error?.issues ?? []).toEqual([]);
+  });
+
+  it("не срезает подтверждённый срок продления", async () => {
+    const state = seedReadMockState();
+    const span = { date: dayFromToday(0), endDate: null };
+    const stretched = { ...state.entries[0]!, category: "sick_leave" as const, start: null, end: null, pending: true as const, approvedSpan: span };
+    const mock = createReadMock({ delayMs: 0, state: { ...state, entries: [stretched] } });
+    const schedule = await mock.getTeamSchedule(dayFromToday(-7), dayFromToday(7));
+    expect(schedule.shifts[0]!.approvedSpan).toEqual(span);
+    expect(teamScheduleResponseSchema.safeParse(schedule).error?.issues ?? []).toEqual([]);
+  });
+});

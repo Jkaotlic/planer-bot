@@ -133,10 +133,13 @@ function daysOf(entry: Shift): string[] {
  * form. `offeredAt` starts counting from now anyway, so somebody who closes the
  * form and forgets still gets a fan-out three hours later instead of a shift
  * quietly left on a sick person.
+ *
+ * `startsBefore` (epoch ms) limits the pass to shifts starting before that moment;
+ * `onlyDates` to shifts on those days (an approved extension asks only about its new days).
  */
 export async function startHandovers(
   deps: HandoverDeps,
-  input: { sickEntry: Shift; employeeId: number },
+  input: { sickEntry: Shift; employeeId: number; startsBefore?: number; onlyDates?: ReadonlySet<string> },
 ): Promise<Handover[]> {
   const { db } = deps;
   const days = daysOf(input.sickEntry);
@@ -153,7 +156,11 @@ export async function startHandovers(
       entry.category !== "offsite" &&
       // Больничный задним числом: прошедшую или уже идущую смену не отдать никому,
       // а тревога админу «смена без человека» про прошлую среду — шум.
-      !isPast(deps, entry),
+      !isPast(deps, entry) &&
+      // The urgent branch of the tick (sick leave still waiting for an «ОК») hands over
+      // only what starts before its threshold; everything later waits for the admin.
+      (input.startsBefore == null || shiftStartMs(entry, deps.config.teamTz) < input.startsBefore) &&
+      (input.onlyDates == null || input.onlyDates.has(entry.date)),
   );
 
   // Extending a sick leave runs this again over days that already have offers.
@@ -164,7 +171,11 @@ export async function startHandovers(
       .map((handover) => handover.shiftId),
   );
 
+  // Pass 1 is synchronous: every draft row exists before the first Telegram await. A crash
+  // during the escalation letters below must not leave an approved sick leave without the
+  // drafts of its later shifts — nothing would ever create them again.
   const made: Handover[] = [];
+  const uncovered: { index: number; shift: Shift }[] = [];
   for (const shift of mine) {
     if (alreadyOffered.has(shift.id)) continue;
     const handover = createHandover(db, {
@@ -177,17 +188,22 @@ export async function startHandovers(
     // Nobody free at all: the ladder has no rungs left, so the admins are told at
     // once. Waiting three hours for an answer from nobody would be a lie told by
     // the interface.
-    if (handoverCandidates(db, shift).length === 0) {
-      const escalated = updateHandover(db, handover.id, { status: "fanned", escalatedAt: new Date() })!;
-      recordAudit(db, "handover_escalated", input.employeeId, auditPayload(db, escalated, shift, null));
-      await deps.messenger.adminsAlways(
-        handoverEscalationText(nameOf(db, input.employeeId) ?? "Работник", lineOf(shift), [], 0),
-        scheduleAction(deps.config.publicUrl, shift),
-      );
-      made.push(escalated);
-      continue;
-    }
+    if (handoverCandidates(db, shift).length === 0) uncovered.push({ index: made.length, shift });
     made.push(handover);
+  }
+
+  // Pass 2: the escalations. Each one re-reads its row, because the worker may delete the sick
+  // leave while an earlier letter is in flight — a cancelled draft is not escalated.
+  for (const { index, shift } of uncovered) {
+    const current = getHandover(db, made[index]!.id);
+    if (!current || current.status !== "offered") continue;
+    const escalated = updateHandover(db, current.id, { status: "fanned", escalatedAt: new Date() })!;
+    made[index] = escalated;
+    recordAudit(db, "handover_escalated", input.employeeId, auditPayload(db, escalated, shift, null));
+    await deps.messenger.adminsAlways(
+      handoverEscalationText(nameOf(db, input.employeeId) ?? "Работник", lineOf(shift), [], 0),
+      scheduleAction(deps.config.publicUrl, shift),
+    );
   }
   return made;
 }
@@ -557,10 +573,30 @@ export async function cancelHandoversForEntry(
   sickEntryId: number,
   stillCoveredDates: readonly string[],
 ): Promise<number> {
-  const { db } = deps;
-  const covered = new Set(stillCoveredDates);
-  let killed = 0;
+  const cancelled = cancelHandoversForEntryDb(deps.db, sickEntryId, stillCoveredDates);
+  await notifyCancelledHandovers(deps, cancelled);
+  return cancelled.length;
+}
 
+/** A handover cancelled by `cancelHandoversForEntryDb`, with what the «отбой» letter needs. */
+export interface CancelledHandover {
+  /** As it was BEFORE the cancel: the letter goes to whoever was waiting under that status. */
+  handover: Handover;
+  shift: Shift | undefined;
+}
+
+/**
+ * The synchronous half of `cancelHandoversForEntry`: statuses and audit only, no
+ * Telegram. Split out so a caller that must finish its DB work before the first
+ * await (rejecting a sick leave) can do so and send the letters afterwards.
+ */
+export function cancelHandoversForEntryDb(
+  db: Db,
+  sickEntryId: number,
+  stillCoveredDates: readonly string[],
+): CancelledHandover[] {
+  const covered = new Set(stillCoveredDates);
+  const cancelled: CancelledHandover[] = [];
   for (const handover of listHandoversForEntry(db, sickEntryId)) {
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
@@ -568,10 +604,15 @@ export async function cancelHandoversForEntry(
 
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
-    killed += 1;
-    if (!shift) continue;
-
-    await tellCancelled(deps, handover, shift, sickCancelledText(db, handover, shift));
+    cancelled.push({ handover, shift });
   }
-  return killed;
+  return cancelled;
+}
+
+/** The asynchronous half: tell whoever was waiting that the offer is off. */
+export async function notifyCancelledHandovers(deps: HandoverDeps, cancelled: readonly CancelledHandover[]): Promise<void> {
+  for (const { handover, shift } of cancelled) {
+    if (!shift) continue;
+    await tellCancelled(deps, handover, shift, sickCancelledText(deps.db, handover, shift));
+  }
 }

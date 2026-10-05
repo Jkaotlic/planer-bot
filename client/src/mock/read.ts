@@ -71,6 +71,9 @@ const toEntry = (s: ScheduleEntryDto): ScheduleEntryDto => ({
   unrecognisedCode: s.unrecognisedCode,
   templateId: s.templateId,
   employeeId: s.employeeId,
+  // Listed like the other fields: the mock must repeat the server, which sends the key only when true.
+  ...(s.pending ? { pending: true as const } : {}),
+  ...(s.approvedSpan ? { approvedSpan: s.approvedSpan } : {}),
 });
 
 export function createReadMock(opts: ReadMockOptions) {

@@ -1,6 +1,6 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
 import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
-import type { AdminShortfall, RecipientGroupView, StartTab, TeamScheduleResponse } from "@planer/shared";
+import type { AdminShortfall, RecipientGroupView, SickApprovalRow, StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
@@ -235,6 +235,7 @@ interface EntryDraft {
   title: string | null;
   location?: string | null;
   employeeId: number | null;
+  pending?: true;
 }
 
 let nextId = 1;
@@ -301,6 +302,9 @@ const ALL_ENTRIES: Shift[] = [
   // A cell a roster import could not read — exercises the grey «?» square. Real
   // imports produce these whenever the file says something like «Ко».
   entry({ date: dayIso(2), start: null, end: null, endDate: null, category: "shift", title: null, employeeId: 3, unrecognisedCode: "Ко" }),
+
+  // Больничный, ждущий ОК: виден в «На подтверждение», в сетке — бледная «Б».
+  entry({ date: dayIso(1), start: null, end: null, endDate: dayIso(2), category: "sick_leave", title: null, employeeId: 4, pending: true }),
 
   // Чт–Пт: Аня в отпуске (один интервал, показывается в оба дня)
   entry({ date: dayIso(3), start: null, end: null, endDate: dayIso(4), category: "vacation", title: null, employeeId: 1 }),
@@ -851,7 +855,14 @@ function mockHandoverDrafts(input: SelfEntryInput, sickId: number): HandoverDraf
   }));
 }
 
-export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<{ entry: Shift; handovers: HandoverDraft[] }> {
+/** Мок черновиков после ОК админа: те же, что строит форма, по моему подтверждённому больничному. */
+export async function mockGetMyHandoverDrafts(): Promise<HandoverDraft[]> {
+  await delay(200);
+  const sick = ALL_ENTRIES.find((e) => e.employeeId === MOCK_ME.id && e.category === "sick_leave" && !e.pending);
+  return sick ? mockHandoverDrafts({ category: "sick_leave", date: sick.date, endDate: sick.endDate }, sick.id) : [];
+}
+
+export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<{ entry: Shift; handovers: HandoverDraft[]; pending: boolean }> {
   await delay(250);
   const today = toISODate(new Date());
   const refusal = selfEntryRefusal(
@@ -872,9 +883,11 @@ export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<{ entr
     employeeId: MOCK_ME.id,
     unrecognisedCode: null,
     employeeName: personName(MOCK_ME.id),
+    // Мок повторяет сервер: свой больничный админ подтверждает сам, чужой ждёт ОК.
+    ...(input.category === "sick_leave" && !MOCK_ME.isAdmin ? { pending: true as const } : {}),
   };
   ALL_ENTRIES.push(created);
-  return { entry: created, handovers: mockHandoverDrafts(input, created.id) };
+  return { entry: created, handovers: created.pending ? [] : mockHandoverDrafts(input, created.id), pending: created.pending === true };
 }
 
 /** DEV-мок писем не шлёт — телеграма здесь нет вовсе; форма проверяется по факту вызова. */
@@ -2541,6 +2554,39 @@ export async function mockGetBugReports(status: "open" | "all"): Promise<BugRepo
   const rows = status === "open" ? MOCK_BUG_REPORTS.filter((r) => r.resolvedAt == null) : MOCK_BUG_REPORTS;
   // Свежие сверху — тем же порядком, что и `listBugReports` на сервере.
   return [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id).map(bugReportView);
+}
+
+const MOCK_REQUESTED_AT = new Date().toISOString();
+
+export async function mockGetSickApprovals(): Promise<SickApprovalRow[]> {
+  await delay(200);
+  return ALL_ENTRIES.filter((e) => e.category === "sick_leave" && e.pending && e.employeeId != null).map((e) => ({
+    id: e.id,
+    employeeId: e.employeeId!,
+    employeeName: personName(e.employeeId!),
+    date: e.date,
+    endDate: e.endDate,
+    requestedAt: MOCK_REQUESTED_AT,
+    shiftLines: ALL_ENTRIES.filter(
+      (s) => s.employeeId === e.employeeId && s.id !== e.id && (s.category === "shift" || s.category === "duty") && s.date >= e.date && s.date <= (e.endDate ?? e.date),
+    ).map((s) => `${s.date} · ${s.start ?? "весь день"}${s.end ? `–${s.end}` : ""} · ${s.title ?? "Смена"}`),
+    handoverForced: false,
+  }));
+}
+
+export async function mockApproveSickLeave(id: number): Promise<void> {
+  await delay(200);
+  const entry = ALL_ENTRIES.find((e) => e.id === id);
+  if (!entry) throw new Error("Больничного уже нет");
+  if (!entry.pending) throw new Error("Больничный уже подтверждён");
+  delete entry.pending;
+}
+
+export async function mockRejectSickLeave(id: number): Promise<void> {
+  await delay(200);
+  const index = ALL_ENTRIES.findIndex((e) => e.id === id && e.pending);
+  if (index === -1) throw new Error("Больничного уже нет");
+  ALL_ENTRIES.splice(index, 1);
 }
 
 export async function mockResolveBugReport(id: number, resolved: boolean): Promise<{ id: number; resolvedAt: string | null }> {

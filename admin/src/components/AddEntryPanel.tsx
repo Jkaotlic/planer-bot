@@ -34,6 +34,12 @@ export interface AddEntryPanelProps {
   onSaveRange?: (input: NewEntryRangeInput) => Promise<void>;
   /** Only offered while editing. */
   onDelete?: () => Promise<void>;
+  /** Только у больничного, ждущего ОК: то же действие, что «✅ ОК» под письмом в боте. */
+  onApprove?: () => Promise<void>;
+  /** Парная к `onApprove`: запись удаляется, работнику уходит письмо. */
+  onReject?: () => Promise<void>;
+  /** Срочная передача смены уже запущена без ОК — админ решает, зная это. */
+  handoverForced?: boolean;
   /**
    * Праздники и рабочие субботы показанной недели. Обязательный, а не «по
    * умолчанию пусто»: предпросмотр, молча забывший праздники, обещал бы дни,
@@ -81,6 +87,9 @@ export function AddEntryPanel({
   onSave,
   onSaveRange,
   onDelete,
+  onApprove,
+  onReject,
+  handoverForced,
   calendar,
 }: AddEntryPanelProps) {
   // Смены и дежурства одним списком, в порядке `sortOrder` — правило живёт в
@@ -97,6 +106,7 @@ export function AddEntryPanel({
   const [includeWeekends, setIncludeWeekends] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deciding, setDeciding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedPreset = choice.kind === "preset" ? presets.find((t) => t.id === choice.templateId) : undefined;
@@ -223,7 +233,21 @@ export function AddEntryPanel({
     }
   }
 
-  const busy = saving || deleting;
+  /** ОК и отказ — как удаление: ошибка (чаще «Уже подтвердил(а) …») остаётся в панели. */
+  async function decide(action: () => Promise<void>) {
+    setDeciding(true);
+    setError(null);
+    try {
+      await action();
+      // Успех: кнопки остаются выключенными до закрытия панели — второй тап в этом
+      // окне слал бы второй запрос и получал ложное «Уже подтвердил(а)».
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
+      setDeciding(false);
+    }
+  }
+
+  const busy = saving || deleting || deciding;
   /** «По какой день» — у отрезка и у полосы отсутствия; больше негде. */
   const showTo = rangeAllowed || (existing != null && absence);
 
@@ -367,6 +391,27 @@ export function AddEntryPanel({
             </label>
             <div className="range-preview" data-testid="range-preview">
               Поставится {describeEntryRangePlan(plan)}. {entryRangeHint(mode)}
+            </div>
+          </div>
+        )}
+
+        {existing?.pending && onApprove && onReject && (
+          <div className="panel-pending">
+            <div className="field-label">
+              Больничный ждёт ОК{handoverForced ? " · передача запущена без ОК" : ""}
+            </div>
+            <div className="panel-pending-actions">
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void decide(onApprove)}>
+                ✅ ОК
+              </button>
+              <ConfirmButton
+                label="❌ Отклонить"
+                question="Отклонить больничный? Запись удалится, работнику придёт письмо."
+                confirmLabel="Да, отклонить"
+                className="btn btn-danger"
+                disabled={busy}
+                onConfirm={() => void decide(onReject)}
+              />
             </div>
           </div>
         )}

@@ -28,6 +28,8 @@ import {
   mockSendAnnouncement,
   mockGetBugReports,
   mockResolveBugReport,
+  mockGetSickApprovals,
+  mockApproveSickLeave,
   mockGetTeamAudience,
   mockCreatePoll,
   mockGetFoodPlaces,
@@ -82,8 +84,9 @@ describe("team schedule development mock", () => {
     // not read, so the grey square and its legend line get exercised in dev too.
     // «К», «М», «РВ» — командировка, мероприятие и работа в выходной: у них свои
     // точные цвета, поэтому они приходят палитрой, а не общей точкой.
+    // «Б» — больничный Даши, ждущий ОК: в сетке он бледная «Б», код палитры тот же.
     expect([...visibleCodes].sort()).toEqual(
-      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О", "?", "К", "М", "РВ"].sort(),
+      ["Д", "У", "В", "Н", "Т", "ВА", "П", "07", "О", "?", "К", "М", "РВ", "Б"].sort(),
     );
 
     const detailCell = week.rows
@@ -650,5 +653,14 @@ describe("места: dev-мок", () => {
     await expect(
       mockSaveFoodPlace(first!.id, { name: first!.name, menu: [{ id: 999_999, name: "Чужое блюдо", price: 100 }] }),
     ).rejects.toThrow("Меню уже поменяли — открой место заново.");
+  });
+});
+
+describe("демо «На подтверждение»", () => {
+  it("ждущий больничный виден в «На подтверждение», ОК снимает его из списка", async () => {
+    const before = await mockGetSickApprovals();
+    expect(before.length).toBeGreaterThan(0);
+    await mockApproveSickLeave(before[0]!.id);
+    expect((await mockGetSickApprovals()).map((r) => r.id)).not.toContain(before[0]!.id);
   });
 });
