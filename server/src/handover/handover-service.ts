@@ -133,10 +133,12 @@ function daysOf(entry: Shift): string[] {
  * form. `offeredAt` starts counting from now anyway, so somebody who closes the
  * form and forgets still gets a fan-out three hours later instead of a shift
  * quietly left on a sick person.
+ *
+ * `startsBefore` (epoch ms) limits the pass to shifts starting before that moment.
  */
 export async function startHandovers(
   deps: HandoverDeps,
-  input: { sickEntry: Shift; employeeId: number },
+  input: { sickEntry: Shift; employeeId: number; startsBefore?: number },
 ): Promise<Handover[]> {
   const { db } = deps;
   const days = daysOf(input.sickEntry);
@@ -153,7 +155,10 @@ export async function startHandovers(
       entry.category !== "offsite" &&
       // Больничный задним числом: прошедшую или уже идущую смену не отдать никому,
       // а тревога админу «смена без человека» про прошлую среду — шум.
-      !isPast(deps, entry),
+      !isPast(deps, entry) &&
+      // The urgent branch of the tick (sick leave still waiting for an «ОК») hands over
+      // only what starts before its threshold; everything later waits for the admin.
+      (input.startsBefore == null || shiftStartMs(entry, deps.config.teamTz) < input.startsBefore),
   );
 
   // Extending a sick leave runs this again over days that already have offers.
