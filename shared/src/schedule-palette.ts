@@ -69,21 +69,34 @@ export const OFFSITE_SCHEDULE_PALETTE: SchedulePalette = {
 /**
  * Больничный.
  *
- * Своя палитра по той же причине, что у командировки и мероприятия: это не
- * «какая-то запись без вида», а состояние, которое команда читает в сетке
- * каждый день. Точка о нём не говорила ничего.
- *
- * Бирюза — единственная свободная ниша рядом: красный занят отпуском, розовый
- * и фиолетовый — «П» и командировкой. Оттенок медицинский, что здесь скорее
- * помогает вспомнить, чем мешает.
+ * Красный — тот же, что у отпуска, и это решение владельца от 2026-10-05:
+ * «чтобы не плодить цвета». Оба значат «человека нет», и различает их буква —
+ * «О» и «Б», — а не оттенок. Тест ниже разрешает общий фон ровно этой паре.
  *
  * «Б» — первая буква и единственная свободная: «В» и «Р» разобраны видами смен.
  */
 export const SICK_LEAVE_SCHEDULE_PALETTE: SchedulePalette = {
-  bg: "#00897B",
+  bg: "#FD0100",
   fg: "#FFFFFF",
   code: "Б",
 };
+
+/**
+ * Больничный, который ещё ждёт ОК админа.
+ *
+ * Своя бледная пара, а не тот же красный с прозрачностью: белая буква на
+ * полупрозрачном красном падает ниже 4.5 по контрасту, а тёмно-красная на
+ * розовом держит 6.8. Пунктир — цвета настоящего больничного: «это больничный,
+ * но ещё не точно».
+ */
+export const SICK_LEAVE_PENDING_SCHEDULE_PALETTE: SchedulePalette = {
+  bg: "#FFE3E3",
+  fg: "#A30000",
+  code: "Б",
+};
+
+/** Рамка клетки ждущего больничного — одна строка на обе морды и легенду. */
+export const SICK_LEAVE_PENDING_OUTLINE = `2px dashed ${SICK_LEAVE_SCHEDULE_PALETTE.bg}`;
 
 /**
  * Работа в выходной.
@@ -128,6 +141,22 @@ export function exactSchedulePalette(
   if (category === "sick_leave") return SICK_LEAVE_SCHEDULE_PALETTE;
   if (category === "weekend_work") return WEEKEND_WORK_SCHEDULE_PALETTE;
   return null;
+}
+
+/**
+ * Цвет клетки с учётом «ждёт ОК».
+ *
+ * Отдельно от `exactSchedulePalette`, а не третьим параметром: ту зовут палитра
+ * чипов и картинка недели, которым «ждёт ОК» не нужно, — новый параметр молча
+ * изменил бы их, если бы кто-то передал запись целиком.
+ */
+export function cellSchedulePalette(
+  accent: TemplateAccent | undefined,
+  category: EntryCategory,
+  pending: boolean,
+): SchedulePalette | null {
+  if (pending && category === "sick_leave") return SICK_LEAVE_PENDING_SCHEDULE_PALETTE;
+  return exactSchedulePalette(accent, category);
 }
 
 export interface CategoryPalette {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { SICK_LEAVE_PENDING_SCHEDULE_PALETTE } from "./schedule-palette";
 import { buildWeekLegend, buildWeekModel, splitDisplayName, type ScheduleEntryLike, type SchedulePresetLike } from "./week-model";
 
 const MONDAY = "2026-08-03";
@@ -178,5 +179,32 @@ describe("модель недели", () => {
   it("splitDisplayName отделяет фамилию от остального", () => {
     expect(splitDisplayName("Иванов Иван Иванович")).toEqual({ surname: "Иванов", rest: "Иван Иванович" });
     expect(splitDisplayName("Иванов")).toEqual({ surname: "Иванов", rest: "" });
+  });
+});
+
+describe("больничный, ждущий ОК", () => {
+  const sick = (employeeId: number, pending?: boolean) =>
+    entry({ date: MONDAY, category: "sick_leave", templateId: null, start: null, end: null, employeeId, ...(pending ? { pending } : {}) });
+
+  it("клетка ждущего — бледная «Б» с пометкой, обычного — красная", () => {
+    const model = buildWeekModel(MONDAY, { employees: TEAM, shifts: [sick(1), sick(2, true)] }, PRESETS);
+    const primary = (row: number) => model.rows[row]!.cells[0]!.primary!;
+    expect(primary(0).pending).toBe(false);
+    expect(primary(0).palette?.bg).toBe("#FD0100");
+    expect(primary(1).pending).toBe(true);
+    expect(primary(1).palette).toEqual(SICK_LEAVE_PENDING_SCHEDULE_PALETTE);
+  });
+
+  it("легенда — две строки: «Б Больничный» и «Б Больничный (ждёт ОК)»", () => {
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [sick(1), sick(2, true)] }, PRESETS));
+    expect(legend.map((item) => `${item.code} ${item.label}`)).toEqual(["Б Больничный", "Б Больничный (ждёт ОК)"]);
+    expect(legend[1]!.pending).toBe(true);
+    expect(legend[0]!.pending).toBe(false);
+  });
+
+  it("флаг на не-больничном ничего не меняет", () => {
+    const vacation = entry({ date: MONDAY, category: "vacation", templateId: null, start: null, end: null, pending: true });
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [vacation] }, PRESETS));
+    expect(legend.map((item) => item.label)).toEqual(["Отпуск"]);
   });
 });

@@ -429,7 +429,7 @@ describe("team schedule UI", () => {
       expect(markup).toContain("<b>К</b>");
       expect(markup).toContain("background:#3949AB");
       expect(markup).toContain("<b>М</b>");
-      expect(markup).toContain("background:#00897B");
+      expect(markup).toContain("background:#FD0100");
       expect(markup).toContain("<b>Б</b>");
       expect(markup).toContain("background:#6D4C41");
       expect(markup).toContain("<b>РВ</b>");
