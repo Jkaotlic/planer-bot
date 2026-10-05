@@ -58,6 +58,20 @@ describe("QR-код по ссылке", () => {
   it("текст, который не влезает в выбранную форму, объясняет словами, а не падает", async () => {
     const res = await buildQrImage("Ж".repeat(1000), { shape: "dots", color: "black" });
     expect(res.kind).toBe("text");
+    if (res.kind !== "text") throw new Error("ожидался текст");
+    // The person can't pick a style in the chat — the answer must say where to switch.
+    expect(res.text).toContain("выбери «Классику» в мини-аппе: 🧰 Сервисы → QR-код");
+  });
+
+  it("the same text in «Классика» is drawn — the form is what stops it", async () => {
+    const res = await buildQrImage("Ж".repeat(1000), { shape: "classic", color: "black" });
+    expect(res.kind).toBe("photo");
+  });
+
+  it("no «switch to Классика» advice when the length is the problem", async () => {
+    const res = await buildQrImage("Ж".repeat(1001), { shape: "dots", color: "black" });
+    if (res.kind !== "text") throw new Error("ожидался текст");
+    expect(res.text).not.toContain("Классику");
   });
 
   it("draws the same picture with and without emoji/CJK in the caption (no tofu boxes)", () => {

@@ -3,9 +3,9 @@ import { QrTextError, renderQr } from "@planer/shared/qr";
 import { svgToPng } from "../render/rasterize";
 
 /**
- * QR-код по ссылке: текст → SVG (`renderQr` из shared, тот же, что рисует мини-апп) →
- * PNG тем же растеризатором, что рисует неделю. Один растеризатор на весь бот проще,
- * чем два.
+ * QR code for a link: text -> SVG (`renderQr` from shared, the same one the mini app
+ * draws with) -> PNG through the same rasteriser that draws the week. One rasteriser
+ * for the whole bot is simpler than two.
  */
 export type QrImage =
   | { kind: "photo"; png: Buffer; caption: string }
@@ -36,7 +36,26 @@ export async function buildQrImage(url: string, style: QrSavedStyle = DEFAULT_QR
   try {
     return { kind: "photo", png: renderQrPng(url, style), caption: url };
   } catch (err) {
-    if (err instanceof QrTextError) return { kind: "text", text: err.message };
+    if (err instanceof QrTextError) return { kind: "text", text: classicWouldFit(url, style) ? FORM_ADVICE : err.message };
     throw err;
+  }
+}
+
+/**
+ * In the chat the sender cannot pick a style, and the shared error text only says
+ * "choose Классика" without saying where. The advice is given only when it is true:
+ * a fancy form is what stopped the code, and the classic one would draw it.
+ */
+const FORM_ADVICE =
+  "Эта ссылка не помещается в QR-код выбранной формы: у фигурных форм запас на ошибки больше, а места меньше. " +
+  "Чтобы получить код, выбери «Классику» в мини-аппе: 🧰 Сервисы → QR-код — она вмещает больше.";
+
+function classicWouldFit(url: string, style: QrSavedStyle): boolean {
+  if (style.shape === "classic") return false;
+  try {
+    renderQr(url, { ...style, shape: "classic" });
+    return true;
+  } catch {
+    return false;
   }
 }
