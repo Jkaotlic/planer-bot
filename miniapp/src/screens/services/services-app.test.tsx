@@ -128,4 +128,20 @@ describe("«Сервисы» в мини-аппе", () => {
     const again = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Точки")!;
     expect(again.getAttribute("aria-pressed")).toBe("true");
   });
+
+  // Список «Сервисов» лежит под заказами только когда человек пришёл из него:
+  // ссылка бота ведёт в заказы напрямую, и «Закрыть» возвращает в приложение.
+  it("?screen=orders закрывается на «Смены», а не в «Сервисы»", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith() as never);
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([]);
+    window.history.replaceState(null, "", "/?screen=orders");
+    const el = await mount();
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Заказы и опросы"));
+    const close = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Закрыть")!;
+    await act(async () => close.click());
+    await settle(3);
+    expect(el.textContent).toContain("Привет, Аня");
+    expect(el.querySelector("h1")?.textContent).not.toBe("Сервисы");
+  });
 });

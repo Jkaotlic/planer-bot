@@ -131,4 +131,54 @@ describe("экран «QR-код»", () => {
     await act(async () => button(el, "Назад").click());
     expect(save).not.toHaveBeenCalled();
   });
+
+  // Образцы форм — не декор: если все четыре одинаковы, человек выбирает вслепую.
+  it("четыре образца форм рисуются по-разному", async () => {
+    const { el } = await render();
+    const sources = ["Классика", "Точки", "Скруглённый", "Мягкий"].map((l) => button(el, l).querySelector("img")!.src);
+    expect(new Set(sources).size).toBe(4);
+  });
+
+  it("двойное касание «Прислать мне в бота» шлёт один раз", async () => {
+    const send = vi.spyOn(apiClient, "sendQrToMe").mockReturnValue(new Promise(() => {}));
+    const { el } = await render();
+    await type(el.querySelector("textarea")!, "https://example.com");
+    const go = button(el, "Прислать мне в бота");
+    await act(async () => {
+      go.click();
+      go.click();
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("итог отправки гаснет, когда меняется текст, подпись, форма или цвет", async () => {
+    const send = vi.spyOn(apiClient, "sendQrToMe").mockResolvedValue();
+    const { el } = await render();
+    const text = () => el.querySelector("textarea")!;
+    await type(text(), "https://example.com");
+    const edits: Array<() => Promise<void>> = [
+      () => type(text(), "https://example.org"),
+      () => type(el.querySelector<HTMLInputElement>("input[maxlength]")!, "Сбор"),
+      () => act(async () => button(el, "Точки").click()),
+      () => act(async () => button(el, "Синий").click()),
+    ];
+    for (const change of edits) {
+      await act(async () => button(el, "Прислать мне в бота").click());
+      expect(el.querySelector('[role="status"]')).not.toBeNull();
+      await change();
+      expect(el.querySelector('[role="status"]')).toBeNull();
+    }
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it("отправка не удалась, а потом «Назад» — стиль всё равно сохраняется", async () => {
+    vi.spyOn(apiClient, "sendQrToMe").mockRejectedValue(new Error("Не чаще раза в 5 секунд"));
+    const save = vi.spyOn(apiClient, "setQrStyle").mockResolvedValue({ shape: "dots", color: "black" });
+    const { el } = await render();
+    await act(async () => button(el, "Точки").click());
+    await type(el.querySelector("textarea")!, "https://example.com");
+    await act(async () => button(el, "Прислать мне в бота").click());
+    await act(async () => button(el, "Назад").click());
+    expect(save).toHaveBeenCalledWith({ shape: "dots", color: "black" });
+  });
 });

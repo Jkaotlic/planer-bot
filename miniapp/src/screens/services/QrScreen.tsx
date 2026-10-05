@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Input, Textarea } from "@telegram-apps/telegram-ui";
 import {
   QR_CAPTION_MAX,
@@ -30,6 +30,16 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
   const [saved, setSaved] = useState<QrSavedStyle>(initialStyle);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  // Состояние `sending` обновляется после рендера, а второе касание приходит раньше:
+  // без флага в ref быстрый двойной тап отправил бы картинку в личку дважды.
+  const inFlight = useRef(false);
+
+  // Итог отправки относится к тому коду, что был на экране в тот момент: после любой
+  // правки «Отправил…» стояло бы рядом с другой картинкой, а красный отказ — залип.
+  function edit(change: () => void) {
+    setStatus(null);
+    change();
+  }
 
   const full: QrStyle = caption.trim() ? { ...style, caption: caption.trim() } : style;
   const preview = useMemo(() => qrPreview(text, full), [text, caption, style]);
@@ -48,6 +58,8 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
   }
 
   async function send() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setSending(true);
     setStatus(null);
     try {
@@ -58,6 +70,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
     } catch (err) {
       setStatus({ ok: false, text: err instanceof Error ? err.message : "Не получилось отправить — попробуй ещё раз." });
     } finally {
+      inFlight.current = false;
       setSending(false);
     }
   }
@@ -65,7 +78,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
   return (
     <Screen title="QR-код" onBack={leave}>
       <div style={{ margin: "0 -20px" }}>
-        <Textarea header="Ссылка или текст" placeholder="https://…" value={text} onChange={(e) => setText(e.target.value)} />
+        <Textarea header="Ссылка или текст" placeholder="https://…" value={text} onChange={(e) => edit(() => setText(e.target.value))} />
       </div>
       {preview.kind === "error" && (
         <div role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, margin: "4px 0 8px" }}>
@@ -100,7 +113,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
               key={shape}
               type="button"
               aria-pressed={style.shape === shape}
-              onClick={() => setStyle((s) => ({ ...s, shape }))}
+              onClick={() => edit(() => setStyle((s) => ({ ...s, shape })))}
               style={{
                 flex: "1 1 0",
                 minWidth: 0,
@@ -133,7 +146,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
               type="button"
               aria-label={QR_COLORS[color].label}
               aria-pressed={style.color === color}
-              onClick={() => setStyle((s) => ({ ...s, color }))}
+              onClick={() => edit(() => setStyle((s) => ({ ...s, color })))}
               style={{
                 width: 44,
                 height: 44,
@@ -155,7 +168,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
             placeholder="Например, «Сбор на кофемашину»"
             value={caption}
             maxLength={QR_CAPTION_MAX}
-            onChange={(e) => setCaption(e.target.value)}
+            onChange={(e) => edit(() => setCaption(e.target.value))}
           />
         </div>
         <Hint>
