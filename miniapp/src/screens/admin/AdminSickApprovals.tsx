@@ -21,10 +21,18 @@ export function AdminSickApprovals({ onChanged }: { onChanged?: () => void }) {
   /** Bumped by «Повторить» — без него после ошибки перечитать список нечем. */
   const [attempt, setAttempt] = useState(0);
   const alive = useRef(true);
+  const noticeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; };
   }, []);
+
+  // Сообщение стоит над списком, а нажимали кнопку где-то внизу длинного списка —
+  // без прокрутки отказ остался бы за краем экрана, и человек решил бы, что тап пропал.
+  // `?.`: jsdom не знает scrollIntoView.
+  useEffect(() => {
+    if (notice) noticeRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [notice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +68,13 @@ export function AdminSickApprovals({ onChanged }: { onChanged?: () => void }) {
       const loaded = await apiClient.getSickApprovals();
       if (alive.current) setRows(loaded);
     } catch (err) {
-      if (alive.current) setError(err instanceof Error ? err.message : "Не удалось загрузить больничные");
+      // Решение уже принято сервером: «Не удалось загрузить» прозвучало бы как «ОК не прошёл»,
+      // и человек нажал бы его заново.
+      if (alive.current) {
+        setError(failure === null
+          ? "Решение принято, но список не удалось обновить — нажми «Повторить»."
+          : err instanceof Error ? err.message : "Не удалось загрузить больничные");
+      }
     }
     if (alive.current && failure) setNotice(failure);
     onChanged?.();
@@ -70,7 +84,7 @@ export function AdminSickApprovals({ onChanged }: { onChanged?: () => void }) {
     <Group>
       {notice && (
         <Card>
-          <div role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{notice}</div>
+          <div ref={noticeRef} role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{notice}</div>
         </Card>
       )}
 

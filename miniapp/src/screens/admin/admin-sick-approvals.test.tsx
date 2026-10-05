@@ -34,6 +34,7 @@ afterEach(async () => {
   root = null;
   host = null;
   vi.restoreAllMocks();
+  delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });
 
 async function settle(times = 6) {
@@ -192,4 +193,42 @@ describe("«На подтверждение» в мини-аппе", () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(el.textContent).toContain("Даша");
   });
+
+  it("решение принято, а перечитать список не вышло — так и сказано, а не «не удалось загрузить»", async () => {
+    // Человек нажал «ОК» и видит «Не удалось загрузить больничные»: решил бы, что ОК не прошёл,
+    // и нажал бы снова. Сервер уже решил — это надо сказать.
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([ROW]).mockRejectedValue(new Error("сеть"));
+    vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
+    const el = await mount();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(el.textContent).toContain("Решение принято, но список не удалось обновить");
+    expect(el.textContent).toContain("Повторить");
+    expect(el.textContent).not.toContain("сеть");
+  });
+
+  it("отказ сервера и провал перечитывания — это не «решение принято»", async () => {
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([ROW]).mockRejectedValue(new Error("сеть"));
+    vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("Уже подтвердил(а) Игорь"));
+    const el = await mount();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(el.textContent).not.toContain("Решение принято");
+    expect(el.textContent).toContain("Уже подтвердил(а) Игорь");
+  });
+
+  it("отказ сервера прокручивается в видимую часть: список под ним может быть длинным", async () => {
+    // Сообщение лежит над списком, а кнопка, которую нажали, — где-то внизу.
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([ROW]).mockResolvedValue([]);
+    vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("Уже подтвердил(а) Игорь"));
+    const el = await mount();
+    expect(scroll).not.toHaveBeenCalled();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect((scroll.mock.contexts[0] as HTMLElement).textContent).toContain("Уже подтвердил(а) Игорь");
+  });
 });
+

@@ -21,6 +21,13 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   /** После решения провал перечитывания — не «не загрузилось», а «решение принято, список старый». */
   const decided = useRef(false);
+  const noticeRef = useRef<HTMLDivElement>(null);
+
+  // Сообщение стоит над списком, а кнопку нажимали где-то внизу длинного списка —
+  // без прокрутки отказ остался бы за краем экрана. `?.`: jsdom не знает scrollIntoView.
+  useEffect(() => {
+    if (notice) noticeRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [notice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,7 +74,7 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
         <h2 className="employees-title">На подтверждение</h2>
       </div>
 
-      {notice && <div className="employees-error" role="alert">{notice}</div>}
+      {notice && <div ref={noticeRef} className="employees-error" role="alert">{notice}</div>}
 
       {error && (
         <div>

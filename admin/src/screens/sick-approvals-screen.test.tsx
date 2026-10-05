@@ -152,4 +152,20 @@ describe("«На подтверждение» в консоли", () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(el.textContent).toContain("Даша");
   });
+
+  it("отказ сервера прокручивается в видимую часть: сообщение над длинным списком", async () => {
+    // Кнопку нажали где-то внизу списка, сообщение стоит над ним — без прокрутки оно за краем экрана.
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([row()]).mockResolvedValue([]);
+    vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("Уже подтвердил(а) Игорь"));
+    const el = await mount();
+    expect(scroll).not.toHaveBeenCalled();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect((scroll.mock.contexts[0] as HTMLElement).textContent).toContain("Уже подтвердил(а) Игорь");
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
 });
+
