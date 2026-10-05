@@ -41,11 +41,17 @@ export function downloadBlob(blob: Blob, fileName: string): void {
 
 /** Имя файла по подписи: человек потом ищет его в «Загрузках» по смыслу, а не по дате. */
 export function qrFileName(caption?: string): string {
-  const slug = (caption ?? "")
-    .replace(/[\\/:*?"<>|]+/g, " ")
-    .trim()
-    .replace(/\s+/g, "-")
-    .slice(0, 40);
+  // Управляющие знаки файловые системы не принимают; режем по кодовым точкам, а не по
+  // единицам UTF-16, чтобы эмодзи не распался на одинокий суррогат.
+  const slug = Array.from(
+    (caption ?? "")
+      .replace(/[\u0000-\u001F\u007F]+/g, " ")
+      .replace(/[\\/:*?"<>|]+/g, " ")
+      .trim()
+      .replace(/\s+/g, "-"),
+  )
+    .slice(0, 40)
+    .join("");
   return slug ? `qr-${slug}.png` : "qr-code.png";
 }
 

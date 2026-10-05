@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_QR_STYLE,
   QR_CAPTION_MAX,
@@ -9,7 +9,7 @@ import {
   type QrSavedStyle,
   type QrStyle,
 } from "@planer/shared";
-import { qrPreview, renderQr } from "@planer/shared/qr";
+import { qrDataUrl, qrPreview, renderQr, renderQrSvg } from "@planer/shared/qr";
 import { copyPngToClipboard, downloadBlob, qrFileName, svgToPngBlob } from "../lib/qr-export";
 
 /**
@@ -26,25 +26,50 @@ export function QrScreen() {
   const full: QrStyle = caption.trim() ? { ...style, caption: caption.trim() } : style;
   const preview = useMemo(() => qrPreview(text, full), [text, caption, style]);
   const ready = preview.kind === "ok";
+  // Образцы форм — тем же рисованием, по короткому слову: так видно именно форму модуля.
+  const samples = useMemo(
+    () => Object.fromEntries(QR_SHAPES.map((shape) => [shape, qrDataUrl(renderQrSvg("QR", { shape, color: style.color }))])),
+    [style.color],
+  );
+  // Ссылка на прежний результат под новым кодом вводила бы в заблуждение: сообщение — про то, что было.
+  useEffect(() => setNotice(null), [text, caption, style]);
+  // Ref, а не state: второй клик может прийти раньше перерисовки, а растеризация идёт десятки миллисекунд.
+  const busy = useRef(false);
 
   function png(): Promise<Blob> {
     const { svg, width, height } = renderQr(text, full);
     return svgToPngBlob(svg, width, height);
   }
 
+  const FAILED = "Не получилось собрать картинку — обнови страницу и попробуй ещё раз.";
+
   async function download() {
+    if (busy.current) return;
+    busy.current = true;
     setNotice(null);
     try {
       downloadBlob(await png(), qrFileName(full.caption));
     } catch {
-      setNotice({ ok: false, text: "Не получилось собрать картинку — обнови страницу и попробуй ещё раз." });
+      setNotice({ ok: false, text: FAILED });
+    } finally {
+      busy.current = false;
     }
   }
 
   async function copy() {
+    if (busy.current) return;
+    busy.current = true;
     setNotice(null);
-    const res = await copyPngToClipboard(png());
-    setNotice(res.ok ? { ok: true, text: "Картинка скопирована — вставь её в чат или документ." } : { ok: false, text: res.message });
+    try {
+      // png() зовётся синхронно в обработчике нажатия: см. copyPngToClipboard.
+      const res = await copyPngToClipboard(png());
+      setNotice(res.ok ? { ok: true, text: "Картинка скопирована — вставь её в чат или документ." } : { ok: false, text: res.message });
+    } catch {
+      // renderQr бросает синхронно, до промиса, — без этого отказ ушёл бы необработанным.
+      setNotice({ ok: false, text: FAILED });
+    } finally {
+      busy.current = false;
+    }
   }
 
   return (
@@ -74,6 +99,7 @@ export function QrScreen() {
                   aria-pressed={style.shape === shape}
                   onClick={() => setStyle((s) => ({ ...s, shape }))}
                 >
+                  <img src={samples[shape]} alt="" aria-hidden="true" className="qr-shape-sample" />
                   {QR_SHAPE_LABELS[shape]}
                 </button>
               ))}

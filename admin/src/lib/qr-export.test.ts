@@ -15,6 +15,18 @@ describe("копирование картинки", () => {
     expect(Object.keys((write.mock.calls[0]![0] as FakeItem[])[0]!.items)).toEqual(["image/png"]);
   });
 
+  it("в буфер уходит тот же промис, write зовётся синхронно, до готовности картинки", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    let settle!: (b: Blob) => void;
+    const pending = new Promise<Blob>((r) => (settle = r));
+    const done = copyPngToClipboard(pending, { clipboard: { write }, ClipboardItemCtor: FakeItem as never });
+    // Картинка ещё не готова, а write уже вызван — иначе Safari сочтёт жест истёкшим.
+    expect(write).toHaveBeenCalledTimes(1);
+    expect((write.mock.calls[0]![0] as FakeItem[])[0]!.items["image/png"]).toBe(pending);
+    settle(new Blob(["x"]));
+    expect(await done).toEqual({ ok: true });
+  });
+
   it("нет clipboard.write (не https, старый браузер) — понятный отказ", async () => {
     expect(await copyPngToClipboard(png(), { clipboard: undefined, ClipboardItemCtor: FakeItem as never })).toEqual({ ok: false, message: COPY_REFUSED });
   });
@@ -49,5 +61,16 @@ describe("имя файла", () => {
     expect(qrFileName()).toBe("qr-code.png");
     expect(qrFileName("  ")).toBe("qr-code.png");
     expect(qrFileName('Сбор: "кофе"/чай?')).toBe("qr-Сбор-кофе-чай.png");
+  });
+
+  it("управляющие знаки вырезаются; одни они — имя по умолчанию", () => {
+    expect(qrFileName("a\u0000b\u001Fc\u007Fd")).toBe("qr-a-b-c-d.png");
+    expect(qrFileName("\u0007\u0000")).toBe("qr-code.png");
+  });
+
+  it("обрезка по кодовым точкам: эмодзи не распадается на одинокий суррогат", () => {
+    const name = qrFileName("😀".repeat(41));
+    expect(name).toBe(`qr-${"😀".repeat(40)}.png`);
+    expect(name).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 });
