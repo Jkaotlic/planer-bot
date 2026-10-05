@@ -88,7 +88,8 @@ function escapeXml(value: string): string {
 function cleanCaption(raw: string | undefined): string {
   return (raw ?? "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
-    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uFFFE\uFFFF]/g, "")
+    // Без lookbehind (Safari 16.4+): пара захватывается и возвращается целиком, одиночный суррогат — нет.
+    .replace(/([\uD800-\uDBFF][\uDC00-\uDFFF])|[\uD800-\uDFFF\uFFFE\uFFFF]/g, (_all, pair: string | undefined) => pair ?? "")
     .replace(/\s+/g, " ")
     .trim();
 }
