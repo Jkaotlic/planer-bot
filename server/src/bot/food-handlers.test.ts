@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
-import { createBot } from "./bot";
+import { createBot, FALLBACK_TEXT } from "./bot";
 import { recordApi, stubBotInfo } from "./testbot";
-import { BTN_FOOD } from "./keyboard";
+import { BTN_SERVICES, LEGACY_BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
@@ -92,16 +92,28 @@ async function say(bot: Bot, from: number, text: string) {
   } as never);
 }
 
-describe("кнопка «🍱 Заказы»", () => {
-  it("отвечает списком идущего и кнопками мини-аппа", async () => {
+describe("кнопка «🧰 Сервисы»", () => {
+  it("отвечает списком идущего, вход в «Сервисы» первым и прежние кнопки заказов", async () => {
     const { bot } = stage();
     const api = recordApi(bot);
-    await say(bot, 333, BTN_FOOD);
+    await say(bot, 333, BTN_SERVICES);
     const reply = api.sent.at(-1)!;
     expect(reply.text).toContain("Пицца?");
+    expect(reply.text).toContain("пришли ссылку");
     const buttons = (reply.reply_markup?.inline_keyboard ?? []).flat() as { text: string; web_app?: { url: string } }[];
-    expect(buttons.map((b) => b.text)).toEqual(["🍱 Новый заказ", "🗳 Новый опрос", "📋 Открыть"]);
-    expect(buttons[1]!.web_app!.url).toBe("https://example.com/app/?screen=orders&new=poll");
+    expect(buttons.map((b) => b.text)).toEqual(["🧰 Открыть Сервисы", "🍱 Новый заказ", "🗳 Новый опрос", "📋 Заказы и опросы"]);
+    expect(buttons[0]!.web_app!.url).toBe("https://example.com/app/?screen=services");
+    expect(buttons[2]!.web_app!.url).toBe("https://example.com/app/?screen=orders&new=poll");
+  });
+
+  // Keyboards already on people's phones still say «🍱 Заказы» until the next /start.
+  it("старая подпись «🍱 Заказы» из висящей клавиатуры открывает то же меню, а не заглушку", async () => {
+    const { bot } = stage();
+    const api = recordApi(bot);
+    await say(bot, 333, LEGACY_BTN_FOOD);
+    const reply = api.sent.at(-1)!;
+    expect(reply.text).not.toBe(FALLBACK_TEXT);
+    expect((reply.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text)[0]).toBe("🧰 Открыть Сервисы");
   });
 });
 
@@ -253,10 +265,10 @@ describe("колбэки заказа", () => {
     expect(itemsOf(db, order.id)).toEqual([]);
   });
 
-  it("кнопка «🍱 Заказы» показывает и заказы, и опросы", async () => {
+  it("кнопка «🧰 Сервисы» показывает и заказы, и опросы", async () => {
     const { bot } = stage();
     const api = recordApi(bot);
-    await say(bot, 333, BTN_FOOD);
+    await say(bot, 333, BTN_SERVICES);
     const text = api.sent.at(-1)!.text;
     expect(text).toContain("🍱 Аня: Шаурмечная");
     expect(text).toContain("🗳 Пицца?");

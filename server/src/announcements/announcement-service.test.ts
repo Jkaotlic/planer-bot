@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stubBotInfo, type SentMessage } from "../bot/testbot";
-import { Bot } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setRemindersEnabled, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
@@ -32,6 +32,22 @@ function linked(db: Db, name: string, tgId: number, isAdmin = false) {
 }
 
 describe("анонс", () => {
+  it("кнопка, если её дали, едет под каждым письмом рассылки", async () => {
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    linked(db, "Игорь", 222);
+    linked(db, "Марк", 333);
+    const { bot, sent } = testBot();
+    const keyboard = new InlineKeyboard().webApp("🧰 Открыть Сервисы", "https://example.com/app/?screen=services");
+
+    await sendAnnouncement(bot, db, { senderId: anya.id, text: "Новое", audience: { kind: "all" }, keyboard });
+
+    expect(sent).toHaveLength(2);
+    for (const message of sent) {
+      expect(message.reply_markup?.inline_keyboard.flat().map((b) => b.text)).toEqual(["🧰 Открыть Сервисы"]);
+    }
+  });
+
   it("подписан отправителем — анонимной рассылке в рабочем чате нечего ответить", () => {
     // Без предлога «от»: он требует родительного падежа, а `addressOf` имя не
     // склоняет — «от Аня» читалось бы как сломанный русский при каждой

@@ -30,10 +30,10 @@ import { ackCoverageDate, reminderHour } from "../repo/settings";
 import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
+import { addressOf, parseSavedQrStyle, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_SERVICES, LEGACY_BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 import { installFoodHandlers } from "./food-handlers";
 import {
   notifyUser,
@@ -859,8 +859,10 @@ export function createBot(deps: BotDeps): Bot {
   async function sendQr(ctx: Context, url: string): Promise<void> {
     const from = ctx.from;
     if (!from) return;
-    if (!acting(from.id).ok) return;
-    const image = await buildQrImage(url);
+    const who = acting(from.id);
+    if (!who.ok) return;
+    // The sender's own pick from the mini app's QR screen; never picked → «Классика», black.
+    const image = await buildQrImage(url, parseSavedQrStyle(who.me.qrStyle));
     if (image.kind === "text") {
       await ctx.reply(image.text);
       return;
@@ -1307,7 +1309,7 @@ export function createBot(deps: BotDeps): Bot {
     const text = ctx.msg.text;
     if (text === BTN_WEEK) await sendWeek(ctx);
     else if (text === BTN_MY_SHIFTS) await sendMiniApp(ctx);
-    else if (text === BTN_FOOD) await food.sendFoodMenu(ctx);
+    else if (text === BTN_SERVICES || text === LEGACY_BTN_FOOD) await food.sendServicesMenu(ctx);
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
     else if (text === BTN_BUG) await startBugReport(ctx);

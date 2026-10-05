@@ -79,6 +79,7 @@ import { createReadRoutes } from "./routes/read";
 import { createMyEntryRoutes } from "./routes/my-entries";
 import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
+import { createMyQrRoutes } from "./routes/my-qr";
 import {
   approvalTextFor,
   approveSickLeave,
@@ -100,6 +101,7 @@ import { createOrderRoutes } from "./routes/orders";
 import { createTeamAudienceRoutes } from "./routes/team-audience";
 import {
   isStartTab,
+  parseSavedQrStyle,
   startTabVisible,
   type StartTab,
   parseCoverage,
@@ -530,6 +532,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
       selfScheduleEnabled: me.selfScheduleEnabled,
       /** С какой вкладки открывать приложение. `null` — «Смены», как было всегда. */
       startTab: me.startTab,
+      /** Parsed, never null: the QR screen opens on it, and the default is a fact, not a gap. */
+      qrStyle: parseSavedQrStyle(me.qrStyle),
       canAnnounce: canAnnounce(me),
     });
   });
@@ -741,6 +745,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.route("/", createMyEntryRoutes({ db, config, bot }));
   app.route("/", createMyHandoverRoutes({ db, config, bot }));
+  app.route("/", createMyQrRoutes({ db, config, bot }));
   app.route("/", createChecklistRoutes(db, config));
   // `/cal/*` — вне `/api`, поэтому его не касаются `no-store` и `requireAdmin`/
   // `requireAnnouncer` мидлвары выше: календарь телефона это самостоятельный

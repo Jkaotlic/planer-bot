@@ -3616,3 +3616,125 @@ textarea {
   outline-offset: -2px;
   flex: none;
 }
+
+/* «QR-код»: форма слева, предпросмотр и кнопки справа; на узком — столбиком. */
+.qr-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 24px;
+  /* Шире обычной формы: в 720px колонка формы выходила 356px, и четыре образца
+     формы не помещались в одну строку («Мягкий» переносился). */
+  max-width: calc(var(--form-max) + 120px);
+}
+
+@media (max-width: 900px) {
+  .qr-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* textarea общие правила полей не покрывают — оформляем так же, как соседние поля. */
+.qr-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-body);
+}
+
+.qr-shape {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  height: auto;
+  padding: 6px 8px;
+}
+
+.qr-shape-sample {
+  width: 48px;
+  height: 48px;
+  background: #ffffff;
+  border-radius: var(--radius-control);
+}
+
+.qr-shapes,
+.qr-colors,
+.qr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qr-shape[aria-pressed="true"] {
+  border-color: var(--button);
+  color: var(--button);
+}
+
+.qr-color {
+  width: var(--control-h);
+  height: var(--control-h);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  cursor: pointer;
+}
+
+/* Выбранный: белая кромка (на шести тёмных заливках не ниже 3:1; акцентная давала
+   2.11 на синем и 2.27 на бордовом в светлой теме) и внешнее кольцо цвета текста
+   через зазор — оно видно на странице в обеих темах, где белая кромка сливается
+   со светлой поверхностью. */
+.qr-color[aria-pressed="true"] {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text);
+}
+
+/* Белый в обеих темах: код читают с белого, а не с тёмной карточки. */
+.qr-preview {
+  background: #ffffff;
+  border-radius: var(--radius-card);
+  padding: 8px;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.qr-preview img {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+}
+
+.qr-preview-empty {
+  color: #5f6368;
+  font-size: var(--text-sub);
+}
+
+/* Подсказка про вырезанные эмодзи: тихая, но читаемая — смесь с цветом текста, как у счётчика
+   подписи в мини-аппе, держит контраст в обеих темах. */
+.qr-caption-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--text-sub);
+  color: var(--hint);
+  color: color-mix(in srgb, var(--hint) 55%, var(--text));
+}
+
+.qr-notice {
+  margin-top: 8px;
+  font-size: var(--text-sub);
+}
+
+/* Замер до правки: красный отказ на новом экране 3.22 в светлой теме (норма 4.5).
+   Только QR: общий `.employees-error` стоит на других экранах. */
+.qr-screen .employees-error {
+  color: var(--destructive);
+  color: color-mix(in srgb, var(--destructive) 60%, var(--text));
+}

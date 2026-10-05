@@ -3,12 +3,14 @@ export interface GreetingHeroProps {
   summary: string;
   /** Открывает «Настройки». Опущен — шестерёнки нет. */
   onSettings?: () => void;
+  /** Открывает «Сервисы» (заказы и опросы, QR-код). Опущен — кнопки нет. */
+  onServices?: () => void;
 }
 
 /** Приветствие вверху «Смен». Шестерёнка — здесь, а не в шапке экрана: это
  *  первое, что человек видит, а настройки раньше лежали под списком смен, за
  *  двумя экранами прокрутки. */
-export function GreetingHero({ name, summary, onSettings }: GreetingHeroProps) {
+export function GreetingHero({ name, summary, onSettings, onServices }: GreetingHeroProps) {
   return (
     <div
       style={{
@@ -26,6 +28,36 @@ export function GreetingHero({ name, summary, onSettings }: GreetingHeroProps) {
         <div style={{ fontSize: 18, fontWeight: 700, overflowWrap: "anywhere" }}>Привет, {name} 👋</div>
         <div style={{ fontSize: "var(--app-text-meta)", opacity: 0.92, marginTop: 3 }}>{summary}</div>
       </div>
+      {/* Подложка кнопок тёмная, а не белая: белая 16% давала контраст подписи 1.98–3.08
+          на концах градиента, тёмная 36% — см. замер в коммите (норма 4.5). */}
+      {/* «Сервисы» — подписью, а не одной иконкой: владелец выбрал так 05.10.2026,
+          иконку без подписи никто не нажимает. Рядом с шестерёнкой, в той же строке,
+          чтобы не занимать на экране новое место. */}
+      {onServices && (
+        <button
+          type="button"
+          onClick={onServices}
+          style={{
+            flex: "none",
+            height: 44,
+            padding: "0 12px",
+            border: 0,
+            borderRadius: 12,
+            background: "rgb(0 0 0 / 36%)",
+            color: "#fff",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 15,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            cursor: "pointer",
+          }}
+        >
+          <span aria-hidden="true">🧰</span>
+          Сервисы
+        </button>
+      )}
       {onSettings && (
         <button
           type="button"
@@ -37,7 +69,7 @@ export function GreetingHero({ name, summary, onSettings }: GreetingHeroProps) {
             height: 44,
             border: 0,
             borderRadius: 12,
-            background: "rgb(255 255 255 / 16%)",
+            background: "rgb(0 0 0 / 36%)",
             color: "#fff",
             display: "inline-flex",
             alignItems: "center",

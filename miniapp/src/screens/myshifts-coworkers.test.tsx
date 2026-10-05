@@ -72,7 +72,7 @@ async function mount(overrides: Partial<MyShiftsScreenProps> = {}) {
     templates: [],
     onProposeSwap: vi.fn(),
     onSelfEntry: () => {},
-    onOpenSettings: () => {},
+    onOpenSettings: () => {}, onOpenServices: () => {},
     openDay: null,
     openDayLoading: false,
     openDayError: null,

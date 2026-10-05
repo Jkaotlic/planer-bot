@@ -43,6 +43,8 @@ import {
   mockSetOrderPaid,
   mockRemindOrderUnpaid,
   MOCK_ME,
+  mockSetQrStyle,
+  mockSendQrToMe,
 } from "./mock";
 
 const createdEntryIds: number[] = [];
@@ -662,5 +664,18 @@ describe("демо «На подтверждение»", () => {
     expect(before.length).toBeGreaterThan(0);
     await mockApproveSickLeave(before[0]!.id);
     expect((await mockGetSickApprovals()).map((r) => r.id)).not.toContain(before[0]!.id);
+  });
+});
+
+describe("мок QR-кода", () => {
+  it("стиль запоминается в MOCK_ME без подписи, отправка — тоже запоминает", async () => {
+    await mockSetQrStyle({ shape: "rounded", color: "purple" });
+    expect(MOCK_ME.qrStyle).toEqual({ shape: "rounded", color: "purple" });
+    await mockSendQrToMe("https://example.com", { shape: "soft", color: "green", caption: "Сбор" });
+    expect(MOCK_ME.qrStyle).toEqual({ shape: "soft", color: "green" });
+  });
+
+  it("длиннее 1000 знаков — отказ словами, как у сервера", async () => {
+    await expect(mockSendQrToMe("a".repeat(1001), { shape: "classic", color: "black" })).rejects.toThrow("1000");
   });
 });

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { ActionButton, Screen } from "./ui";
-import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
+import { canAddOwnShifts, DEFAULT_QR_STYLE, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type MyShifts, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -14,6 +14,8 @@ import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
 import { adminSectionFromSearch, scheduleDateFromSearch, type AdminView } from "./screens/admin-section";
 import { foodRouteFromSearch, type FoodRoute } from "./screens/food/food-route";
+import { servicesFromSearch } from "./screens/services/services-route";
+import { ServicesScreen } from "./screens/services/ServicesScreen";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -38,6 +40,9 @@ const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 // вкладка: тот же приём, что у «Анонса» наблюдателя — код не должен доезжать
 // до тех, кто ссылку не открывал.
 const FoodScreen = lazy(() => import("./screens/food/FoodScreen").then((m) => ({ default: m.FoodScreen })));
+// «QR-код» — тем же приёмом: `qrcode` едет только к тем, кто открыл экран
+// (сторож — `screens/services/qr-bundle.test.ts`).
+const QrScreen = lazy(() => import("./screens/services/QrScreen").then((m) => ({ default: m.QrScreen })));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
@@ -104,6 +109,11 @@ export function App() {
   // «Заказы и опросы» — тот же приём, что у формы больничного выше: ссылка из
   // бота (`?screen=orders`) читается один раз при открытии, на один показ.
   const [foodRoute, setFoodRoute] = useState<FoodRoute | null>(() => foodRouteFromSearch(window.location.search));
+  // «Сервисы» — оверлей со списком инструментов; "qr" — экран QR-кода поверх него.
+  // Ссылка бота (`?screen=services`) читается один раз при открытии, как у заказов.
+  const [services, setServices] = useState<"list" | "qr" | null>(() =>
+    servicesFromSearch(window.location.search) ? "list" : null,
+  );
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Sets, not single ids: several rows (two pending swaps, two open weekend
@@ -326,7 +336,7 @@ export function App() {
     // вкладку («📣 Анонс») ставит эффект выше, форму-оверлей («🤒 Больничный»,
     // «📌 Мероприятие») — `selfEntryMode`. Настройка, перебивающая их, сделала бы
     // кнопку в боте враньём.
-    if (adminSectionFromSearch(search) || screenFromSearch(search) || handoverDraftsFromSearch(search) || foodRouteFromSearch(search)) return;
+    if (adminSectionFromSearch(search) || screenFromSearch(search) || handoverDraftsFromSearch(search) || foodRouteFromSearch(search) || servicesFromSearch(search)) return;
     setTab(startTabScreen(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me })));
   }, [data]);
 
@@ -613,6 +623,32 @@ export function App() {
     );
   }
 
+  if (services === "qr") {
+    return (
+      <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю…</div>}>
+        <QrScreen
+          initialStyle={data.me.qrStyle ?? DEFAULT_QR_STYLE}
+          onClose={(qrStyle) => {
+            // Следующее открытие — с тем же выбором, без перечитывания `me`.
+            setData((prev) => (prev ? { ...prev, me: { ...prev.me, qrStyle } } : prev));
+            setServices("list");
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  // Ниже «Заказов»: открытые из списка, они закрываются обратно в список.
+  if (services === "list") {
+    return (
+      <ServicesScreen
+        onOpenFood={() => setFoodRoute({ view: "list" })}
+        onOpenQr={() => setServices("qr")}
+        onClose={() => setServices(null)}
+      />
+    );
+  }
+
   // `?screen=shift` — единственный из трёх адресов, где право на форму не
   // всеобщее: ссылку могли переслать, а тумблер «Веду свой график сам» —
   // выключить (или роль наблюдателя — снять) между открытием меню бота и
@@ -745,6 +781,7 @@ export function App() {
           }}
           onSelfEntry={setSelfEntryMode}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenServices={() => setServices("list")}
           openDay={
             openCoworkersFor && dayShifts?.date === openCoworkersFor.date
               ? { date: dayShifts.date, shifts: dayShifts.shifts }

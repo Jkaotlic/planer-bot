@@ -35,6 +35,15 @@ const SYNTAX = [
   { name: "логическое присваивание (??= ||= &&=)", pattern: /(\?\?=|\|\|=|&&=)/g, since: "Safari 14" },
   { name: "статический блок класса (static {})", pattern: /\bstatic\s*\{/g, since: "Safari 16.4" },
   { name: "приватное поле в проверке (#x in obj)", pattern: /#[A-Za-z_$][\w$]*\s+in\s/g, since: "Safari 16.4" },
+  /*
+   * Lookbehind в регулярке: esbuild под safari14 его не понижает, а заворачивает
+   * в `new RegExp("…")` — бандл парсится, но ВЫБРАСЫВАЕТ SyntaxError в момент
+   * вызова (экран «QR-код» падал на iOS 15 при монтировании). Ищем и литерал,
+   * и строку для конструктора: достаточно подстроки `(?<=` / `(?<!`. Именованные
+   * группы `(?<name>` не трогаем — они работают с Safari 11.1. Ложное срабатывание
+   * на тексте дешевле пропуска.
+   */
+  { name: "lookbehind в регулярке ((?<= / (?<!)", pattern: /\(\?<[=!]/g, since: "Safari 16.4" },
 ];
 
 /**
@@ -89,7 +98,7 @@ function main() {
       const code = readFileSync(file, "utf8");
       for (const found of scan(code, SYNTAX)) {
         bad += 1;
-        console.error(`СИНТАКСИС ${file}: ${found.name} ×${found.hits} — не парсится ниже ${found.since}`);
+        console.error(`СИНТАКСИС ${file}: ${found.name} ×${found.hits} — не работает ниже ${found.since}`);
       }
       for (const found of scan(code, RUNTIME).filter((rule) => !covered.includes(rule.name))) {
         bad += 1;

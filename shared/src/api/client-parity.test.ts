@@ -52,6 +52,10 @@ const MINIAPP_ONLY: Record<string, string> = {
   setPreferredName: "«Как ко мне обращаться» — себе; админ правит чужое через setEmployeePreferredName",
   setRemindersEnabled: "свои напоминания о сменах",
   setStartTab: "стартовая вкладка мини-аппа",
+  // QR-код: консоль рисует и скачивает локально; «моего» стиля и «прислать мне»
+  // у неё нет (спека 2026-10-05, «Паритет»).
+  setQrStyle: "QR-код: стиль, которым бот рисует ссылки этого человека",
+  sendQrToMe: "QR-код: «Прислать мне в бота»; в консоли вместо этого «Скачать PNG»",
   setSelfScheduleEnabled: "свой график наблюдателя",
   getCalendarLink: "подписка на свой календарь в телефоне",
   createCalendarLink: "подписка на свой календарь в телефоне",

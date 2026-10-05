@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
-import { buildQrImage, QR_MAX_TEXT_LENGTH } from "./qr-image";
+import { buildQrImage, QR_MAX_TEXT_LENGTH, renderQrPng } from "./qr-image";
 
 /**
  * Картинка проверяется декодером, а не по сигнатуре PNG: любой PNG прошёл бы
@@ -39,5 +39,49 @@ describe("QR-код по ссылке", () => {
     expect(res.kind).toBe("photo");
     if (res.kind !== "photo") throw new Error("ожидалась картинка");
     expect(decode(res.png)).toBe(url);
+  });
+
+  it("рисует выбранным стилем: тот же PNG, что у «Прислать мне в бота», и его читает сканер", async () => {
+    const res = await buildQrImage("https://example.com/sbor", { shape: "soft", color: "purple" });
+    expect(res.kind).toBe("photo");
+    if (res.kind !== "photo") throw new Error("ожидалась картинка");
+    expect(res.png).toEqual(renderQrPng("https://example.com/sbor", { shape: "soft", color: "purple" }));
+    expect(decode(res.png)).toBe("https://example.com/sbor");
+  });
+
+  it("без стиля — «Классика», чёрный", async () => {
+    const res = await buildQrImage("https://example.com/sbor");
+    if (res.kind !== "photo") throw new Error("ожидалась картинка");
+    expect(res.png).toEqual(renderQrPng("https://example.com/sbor", { shape: "classic", color: "black" }));
+  });
+
+  it("текст, который не влезает в выбранную форму, объясняет словами, а не падает", async () => {
+    const res = await buildQrImage("Ж".repeat(1000), { shape: "dots", color: "black" });
+    expect(res.kind).toBe("text");
+    if (res.kind !== "text") throw new Error("ожидался текст");
+    // The person can't pick a style in the chat — the answer must say where to switch.
+    expect(res.text).toContain("выбери «Классику» в мини-аппе: 🧰 Сервисы → QR-код");
+  });
+
+  it("the same text in «Классика» is drawn — the form is what stops it", async () => {
+    const res = await buildQrImage("Ж".repeat(1000), { shape: "classic", color: "black" });
+    expect(res.kind).toBe("photo");
+  });
+
+  it("no «switch to Классика» advice when the length is the problem", async () => {
+    const res = await buildQrImage("Ж".repeat(1001), { shape: "dots", color: "black" });
+    if (res.kind !== "text") throw new Error("ожидался текст");
+    expect(res.text).not.toContain("Классику");
+  });
+
+  it("draws the same picture with and without emoji/CJK in the caption (no tofu boxes)", () => {
+    // The rasteriser has DejaVu Sans only, so a glyph it lacks would show up as an empty
+    // box. The shared renderer drops such characters, which makes the PNG byte-identical
+    // to the one for the plain caption — i.e. what the mini app preview shows.
+    const url = "https://example.com/sbor";
+    const plain = renderQrPng(url, { shape: "classic", color: "black", caption: "Сбор на кофе" });
+    expect(renderQrPng(url, { shape: "classic", color: "black", caption: "Сбор 😀 на кофе ☕ 咖啡" }).equals(plain)).toBe(true);
+    // Sanity: a caption really changes the picture, so the equality above is not vacuous.
+    expect(renderQrPng(url, { shape: "classic", color: "black" }).equals(plain)).toBe(false);
   });
 });
