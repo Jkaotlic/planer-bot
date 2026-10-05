@@ -39,14 +39,6 @@ afterEach(async () => {
   window.history.replaceState(null, "", "/");
 });
 
-async function settle(times = 20) {
-  for (let i = 0; i < times; i += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
-    });
-  }
-}
-
 async function mount() {
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -54,7 +46,8 @@ async function mount() {
   await act(async () => {
     root!.render(createElement(AppRoot, null, createElement(App)));
   });
-  await settle();
+  // Ждём первого настоящего экрана, а не фиксированное число тиков: начальная загрузка тянется по-разному.
+  await waitFor(() => expect(host!.textContent).not.toBe(""));
   return host;
 }
 
@@ -68,7 +61,7 @@ describe("«Сервисы» в мини-аппе", () => {
     boot.me = { ...boot.me, isObserver: true, canAnnounce: true };
     vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(boot as never);
     const el = await mount();
-    expect(el.textContent).toContain("Привет, Аня");
+    await waitFor(() => expect(el.textContent).toContain("Привет, Аня"));
     expect(servicesButton(el)).toBeDefined();
   });
 
@@ -78,9 +71,9 @@ describe("«Сервисы» в мини-аппе", () => {
     vi.spyOn(apiClient, "getOrders").mockResolvedValue([]);
     const el = await mount();
 
+    await waitFor(() => expect(servicesButton(el)).toBeDefined());
     await act(async () => servicesButton(el).click());
-    await settle(3);
-    expect(el.querySelector("h1")!.textContent).toBe("Сервисы");
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Сервисы"));
     expect(el.querySelector(".tab-bar-fit")).toBeNull();
 
     const food = [...el.querySelectorAll<HTMLButtonElement>(".ui-menu-row")].find((b) => b.textContent!.includes("Заказы и опросы"))!;
@@ -89,12 +82,10 @@ describe("«Сервисы» в мини-аппе", () => {
 
     const close = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Закрыть")!;
     await act(async () => close.click());
-    await settle(3);
-    expect(el.querySelector("h1")!.textContent).toBe("Сервисы");
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Сервисы"));
 
     await act(async () => (el.querySelector('button[aria-label="Назад"]') as HTMLButtonElement).click());
-    await settle(3);
-    expect(el.textContent).toContain("Привет, Аня");
+    await waitFor(() => expect(el.textContent).toContain("Привет, Аня"));
   });
 
   it("?screen=services открывает список сразу и побеждает «Открывать сразу»", async () => {
@@ -103,26 +94,25 @@ describe("«Сервисы» в мини-аппе", () => {
     vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(boot as never);
     window.history.replaceState(null, "", "/?screen=services");
     const el = await mount();
-    expect(el.querySelector("h1")!.textContent).toBe("Сервисы");
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Сервисы"));
     await act(async () => (el.querySelector('button[aria-label="Назад"]') as HTMLButtonElement).click());
-    await settle(3);
-    expect(el.textContent).toContain("Привет, Аня");
+    await waitFor(() => expect(el.textContent).toContain("Привет, Аня"));
   });
 
   it("«Сервисы» → «QR-код» → «Назад» в «Сервисы»; выбранный стиль виден при следующем открытии", async () => {
     vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith() as never);
     vi.spyOn(apiClient, "setQrStyle").mockResolvedValue({ shape: "dots", color: "black" });
     const el = await mount();
+    await waitFor(() => expect(servicesButton(el)).toBeDefined());
     await act(async () => servicesButton(el).click());
-    await settle(3);
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Сервисы"));
     const qr = () => [...el.querySelectorAll<HTMLButtonElement>(".ui-menu-row")].find((b) => b.textContent!.includes("QR-код"))!;
     await act(async () => qr().click());
     await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("QR-код"));
     const dots = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Точки")!;
     await act(async () => dots.click());
     await act(async () => (el.querySelector('button[aria-label="Назад"]') as HTMLButtonElement).click());
-    await settle(3);
-    expect(el.querySelector("h1")!.textContent).toBe("Сервисы");
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Сервисы"));
     await act(async () => qr().click());
     await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("QR-код"));
     const again = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Точки")!;
@@ -140,8 +130,7 @@ describe("«Сервисы» в мини-аппе", () => {
     await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("Заказы и опросы"));
     const close = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Закрыть")!;
     await act(async () => close.click());
-    await settle(3);
-    expect(el.textContent).toContain("Привет, Аня");
+    await waitFor(() => expect(el.textContent).toContain("Привет, Аня"));
     expect(el.querySelector("h1")?.textContent).not.toBe("Сервисы");
   });
 });
