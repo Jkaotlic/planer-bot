@@ -30,6 +30,7 @@ import { GroupsScreen } from "./screens/GroupsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
+import { QrScreen } from "./screens/QrScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
@@ -609,6 +610,8 @@ export function App() {
               });
             }}
           />
+        ) : nav === "qr" ? (
+          <QrScreen />
         ) : nav === "bugs" ? (
           <BugsScreen />
         ) : nav === "log" ? (

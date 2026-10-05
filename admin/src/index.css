@@ -3616,3 +3616,77 @@ textarea {
   outline-offset: -2px;
   flex: none;
 }
+
+/* «QR-код»: форма слева, предпросмотр и кнопки справа; на узком — столбиком. */
+.qr-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 24px;
+  max-width: var(--form-max);
+}
+
+@media (max-width: 900px) {
+  .qr-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.qr-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.qr-shapes,
+.qr-colors,
+.qr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qr-shape[aria-pressed="true"] {
+  border-color: var(--button);
+  color: var(--button);
+}
+
+.qr-color {
+  width: var(--control-h);
+  height: var(--control-h);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  cursor: pointer;
+}
+
+.qr-color[aria-pressed="true"] {
+  border-color: var(--button);
+}
+
+/* Белый в обеих темах: код читают с белого, а не с тёмной карточки. */
+.qr-preview {
+  background: #ffffff;
+  border-radius: var(--radius-card);
+  padding: 8px;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.qr-preview img {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  display: block;
+}
+
+.qr-preview-empty {
+  color: #5f6368;
+  font-size: var(--text-sub);
+}
+
+.qr-notice {
+  margin-top: 8px;
+  font-size: var(--text-sub);
+}
