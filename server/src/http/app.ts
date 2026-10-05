@@ -79,6 +79,7 @@ import { createReadRoutes } from "./routes/read";
 import { createMyEntryRoutes } from "./routes/my-entries";
 import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
+import { createMyQrRoutes } from "./routes/my-qr";
 import {
   approvalTextFor,
   approveSickLeave,
@@ -744,6 +745,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.route("/", createMyEntryRoutes({ db, config, bot }));
   app.route("/", createMyHandoverRoutes({ db, config, bot }));
+  app.route("/", createMyQrRoutes({ db, config, bot }));
   app.route("/", createChecklistRoutes(db, config));
   // `/cal/*` — вне `/api`, поэтому его не касаются `no-store` и `requireAdmin`/
   // `requireAnnouncer` мидлвары выше: календарь телефона это самостоятельный
