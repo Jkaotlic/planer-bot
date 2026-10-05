@@ -63,3 +63,13 @@ export function tabBadges(input: TabBadgesInput): Partial<Record<TabKey, number>
 
   return badges;
 }
+
+/**
+ * О чём число на метке «Админ» — для скринридера. Решается тем же правилом, что
+ * и само число в `tabBadges` (ждущие ОК главнее нехватки): отдельное условие в
+ * `TabBar` разъехалось бы с ним, и «2 ждут подтверждения» читалось бы как
+ * «не хватает людей: 2».
+ */
+export function adminBadgeMeaning(input: Pick<TabBadgesInput, "isAdmin" | "sickApprovals" | "adminShortfall">): "approvals" | "shortfall" {
+  return input.isAdmin && input.sickApprovals ? "approvals" : "shortfall";
+}

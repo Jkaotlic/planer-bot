@@ -21,6 +21,9 @@ export interface TabBarProps {
    *  `TabIcon` проверяет значение на истинность (`count ? ... : null`) — ноль
    *  сюда просто никогда не попадает, `tabBadges` его не кладёт. */
   badges?: Partial<Record<TabKey, number>>;
+  /** О чём число на «Админ»: ждущие ОК больничные или нехватка людей — решает
+   *  `adminBadgeMeaning`. Нужно только скринридеру; без него — «нехватка», как было. */
+  adminBadgeMeaning?: "approvals" | "shortfall";
 }
 
 /** Bottom navigation: "Смены", "Команда", "Сборы", и по роли — "Обмены"/"Выходные"
@@ -30,7 +33,7 @@ export interface TabBarProps {
  *  команды. У админа получается шесть пунктов — тесно, но подписи ужаты в
  *  `index.css` (`.tab-bar-fit`), и это дешевле, чем держать сборы в двух местах:
  *  секцией у работника и разделом админки у админа. */
-export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce, badges }: TabBarProps) {
+export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce, badges, adminBadgeMeaning }: TabBarProps) {
   // Built as an array (rather than inline JSX with a `&&`) so every optional
   // item stays a bare element — `Tabbar` types its children as a plain
   // element array and rejects the `false` a short-circuit would leave behind.
@@ -70,7 +73,7 @@ export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce, bad
   if (isAdmin) {
     items.push(
       <Tabbar.Item key="admin" selected={active === "admin"} text="Админ" onClick={() => onChange("admin")}>
-        <TabIcon tab="admin" badges={badges}>
+        <TabIcon tab="admin" badges={badges} adminMeaning={adminBadgeMeaning}>
           <ShieldIcon />
         </TabIcon>
       </Tabbar.Item>,
@@ -100,7 +103,7 @@ export function TabBar({ active, onChange, isAdmin, isObserver, canAnnounce, bad
 /** Иконка вкладки + метка «ждёт тебя» поверх неё, одним `span` с
  *  `position: relative` — иначе метка позиционировалась бы от `Tabbar.Item`
  *  целиком и съезжала бы вбок вместе с подписью под ней. */
-function TabIcon({ tab, badges, children }: { tab: TabKey; badges?: Partial<Record<TabKey, number>>; children: ReactNode }) {
+function TabIcon({ tab, badges, adminMeaning, children }: { tab: TabKey; badges?: Partial<Record<TabKey, number>>; adminMeaning?: "approvals" | "shortfall"; children: ReactNode }) {
   const count = badges?.[tab];
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
@@ -119,7 +122,9 @@ function TabIcon({ tab, badges, children }: { tab: TabKey; badges?: Partial<Reco
               (`.visually-hidden`, не `display: none`): попадает в имя кнопки
               вместе с её видимой подписью («Обмены, ждёт ответа: 2»). */}
           <span className="visually-hidden">
-            {tab === "admin" ? `, не хватает людей: ${count}` : `, ждёт ответа: ${count}`}
+            {tab === "admin"
+              ? `, ${adminMeaning === "approvals" ? "ждут подтверждения" : "не хватает людей"}: ${count}`
+              : `, ждёт ответа: ${count}`}
           </span>
         </>
       ) : null}

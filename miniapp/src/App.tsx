@@ -44,7 +44,7 @@ import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-m
 import { runRowAction } from "./lib/row-action";
 import { createLatestRequestGate } from "./lib/request-gate";
 import { nowOnTeamDay, swapCandidates } from "./lib/swap-candidates";
-import { tabBadges } from "./lib/tab-badges";
+import { adminBadgeMeaning, tabBadges } from "./lib/tab-badges";
 import { swapUndeliveredNotice } from "./lib/swap-notice";
 
 interface AppData {
@@ -852,6 +852,7 @@ export function App() {
         isObserver={data.me.isObserver}
         canAnnounce={data.me.canAnnounce}
         badges={badges}
+        adminBadgeMeaning={adminBadgeMeaning({ isAdmin: data.me.isAdmin, sickApprovals, adminShortfall })}
       />
     </div>
   );

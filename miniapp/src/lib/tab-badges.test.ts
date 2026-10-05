@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SwapRequest, WeekendOffer, WorkerCollection } from "../api/client";
-import { tabBadges } from "./tab-badges";
+import { adminBadgeMeaning, tabBadges } from "./tab-badges";
 
 /**
  * Метки «ждёт тебя» на вкладках нижнего меню — что именно считается «ждёт»
@@ -124,3 +124,22 @@ describe("tabBadges", () => {
     expect(tabBadges({ ...EMPTY, isAdmin: false, sickApprovals: 2 })).not.toHaveProperty("admin");
   });
 });
+
+describe("adminBadgeMeaning", () => {
+  // Метка «Админ» показывает ждущие ОК, если они есть, иначе нехватку — скринридер
+  // обязан назвать то же самое, что нарисовано, иначе «2» читается как «не хватает людей: 2».
+  it("есть ждущие ОК — «approvals», как и число на метке", () => {
+    expect(adminBadgeMeaning({ isAdmin: true, sickApprovals: 2, adminShortfall: 5 })).toBe("approvals");
+  });
+
+  it("ждущих нет или не загрузились — «shortfall»", () => {
+    expect(adminBadgeMeaning({ isAdmin: true, sickApprovals: 0, adminShortfall: 5 })).toBe("shortfall");
+    expect(adminBadgeMeaning({ isAdmin: true, sickApprovals: null, adminShortfall: 5 })).toBe("shortfall");
+    expect(adminBadgeMeaning({ isAdmin: true, adminShortfall: 5 })).toBe("shortfall");
+  });
+
+  it("не админ — «shortfall»: метки «Админ» у него нет, значение не важно, но не «approvals»", () => {
+    expect(adminBadgeMeaning({ isAdmin: false, sickApprovals: 2 })).toBe("shortfall");
+  });
+});
+
