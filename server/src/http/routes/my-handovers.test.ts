@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { approveSickLeave, sickApprovalDeps } from "../../sick-approval/sick-approval-service";
 import { createApp } from "../app";
 import { makeTestDb } from "../../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../../repo/employees";
+import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../../repo/employees";
 import { createShift, getShift } from "../../repo/shifts";
 import { getHandover, listHandoversForEntry } from "../../repo/handovers";
 import { signInitData } from "../../auth/telegram";
@@ -50,6 +51,8 @@ describe("POST /api/my/entries — больничный рождает пере�
     const db = makeTestDb();
     const me = worker(db, 601, "Аня");
     const igor = worker(db, 602, "Игорь");
+    const boss = worker(db, 603, "Марк");
+    setEmployeeAdmin(db, boss.id, true);
     createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
     createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
     const app = createApp({ db, config, bot: undefined });
@@ -61,7 +64,33 @@ describe("POST /api/my/entries — больничный рождает пере�
 
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.handovers).toHaveLength(2);
+    // A worker's booking only asks for the «ОК»: nothing is handed over until an admin agrees.
+    expect(body.pending).toBe(true);
+    expect(body.handovers).toEqual([]);
+    expect(listHandoversForEntry(db, body.entry.id)).toHaveLength(0);
+
+    await approveSickLeave(sickApprovalDeps(null, db, config), body.entry.id, boss.id);
+
+    const made = listHandoversForEntry(db, body.entry.id);
+    expect(made).toHaveLength(2);
+    expect(igor.id).toBeGreaterThan(0);
+  });
+
+  it("an admin's own sick leave is approved at once and returns the drafts to the form, with candidates", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 604, "Аня");
+    setEmployeeAdmin(db, me.id, true);
+    const igor = worker(db, 605, "Игорь");
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 604);
+
+    const body = await (
+      await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))
+    ).json();
+
+    expect(body.pending).toBe(false);
+    expect(body.handovers).toHaveLength(1);
     expect(body.handovers[0].shiftLine).toContain("09:00–18:00");
     expect(body.handovers[0].candidates.map((c: { id: number }) => c.id)).toContain(igor.id);
   });
@@ -92,6 +121,8 @@ describe("POST /api/my/handovers/:id/offer", () => {
     const me = worker(db, 621, "Аня");
     const igor = worker(db, 622, "Игорь");
     const mark = worker(db, 623, "Марк");
+    // An admin's own sick leave is approved at once — the path that still returns hand-over drafts to the form.
+    setEmployeeAdmin(db, me.id, true);
     createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 621);
@@ -144,6 +175,8 @@ describe("POST /api/my/handovers/:id/skip", () => {
   it("«Потом» asks everybody free instead of leaving the shift on a sick person", async () => {
     const db = makeTestDb();
     const me = worker(db, 631, "Аня");
+    // An admin's own sick leave is approved at once — the path that still returns hand-over drafts to the form.
+    setEmployeeAdmin(db, me.id, true);
     worker(db, 632, "Игорь");
     createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
     const app = createApp({ db, config, bot: undefined });
@@ -165,6 +198,8 @@ describe("снятие и правка больничного гасят пер�
   async function sickWithTwoDays() {
     const db = makeTestDb();
     const me = worker(db, 641, "Аня");
+    // An admin's own sick leave is approved at once — the path that still creates hand-overs (and lets PATCH extend without a new «ОК»).
+    setEmployeeAdmin(db, me.id, true);
     worker(db, 642, "Игорь");
     const first = createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
     const second = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });

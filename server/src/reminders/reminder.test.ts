@@ -1176,6 +1176,18 @@ describe("догоняющее напоминание", () => {
     expect(sent).toHaveLength(0);
   });
 
+  it("на больничном, который ещё ждёт ОК, — тоже тишина: отсутствие не ждёт решения", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 1190);
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TODAY, endDate: TODAY, category: "sick_leave", start: null, end: null, employeeId: anya.id, approvalRequestedAt: new Date() });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
+
+    expect(sent).toHaveLength(0);
+  });
+
   it("обычная дневная смена догоняющего не получает — её и вечером не напоминают", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 1107);

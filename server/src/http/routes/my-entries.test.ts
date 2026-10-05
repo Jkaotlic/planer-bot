@@ -19,6 +19,7 @@ import { addDaysIso } from "@planer/shared";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
 import { cancelHandoversForEntry, detachHandoversFromEntry, startHandovers } from "../../handover/handover-service";
+import { approveSickLeave, sickApprovalDeps } from "../../sick-approval/sick-approval-service";
 
 /**
  * Спай, а не мок: реализация — настоящая (`importOriginal`), подменяются
@@ -40,11 +41,27 @@ vi.mock("../../handover/handover-service", async (importOriginal) => {
   };
 });
 
-/** A bot that records what it was asked to send instead of talking to Telegram. */
+/**
+ * A bot that records what it was asked to send instead of talking to Telegram. It hands
+ * back a `message_id` and can edit: without both the approval service cannot remember its
+ * letters, and the «redraw / finish» paths would silently have nothing to act on.
+ */
 function fakeBot() {
-  const sent: { to: number; text: string }[] = [];
-  const bot = { api: { sendMessage: vi.fn(async (to: number, text: string) => { sent.push({ to, text }); }) } };
-  return { bot: bot as unknown as Bot, sent };
+  const sent: { to: number; text: string; extra?: { reply_markup?: unknown } }[] = [];
+  const edits: { chat: number; message: number; text: string }[] = [];
+  const bot = {
+    api: {
+      sendMessage: vi.fn(async (to: number, text: string, extra?: { reply_markup?: unknown }) => {
+        sent.push({ to, text, extra });
+        return { message_id: sent.length };
+      }),
+      editMessageText: vi.fn(async (chat: number, message: number, text: string) => {
+        edits.push({ chat, message, text });
+        return true;
+      }),
+    },
+  };
+  return { bot: bot as unknown as Bot, sent, edits };
 }
 
 const config = testConfig({ adminTelegramIds: [] });
@@ -171,10 +188,140 @@ describe("POST /api/my/entries", () => {
     })));
 
     expect(sent.map((m) => m.to)).toEqual([508]);
+    // The letter is now the approval request, not the old notice.
+    expect(sent[0]!.text).toContain("🤒");
     expect(sent[0]!.text).toContain("Аня");
     expect(sent[0]!.text).toContain("09:00–18:00");
-    // The second day holds nothing, so it must not add a line about nothing.
-    expect(sent[0]!.text.split("\n")).toHaveLength(2);
+    // Header, one day line, tail. The second day holds nothing, so it must not add a line about nothing.
+    expect(sent[0]!.text.split("\n")).toHaveLength(3);
+  });
+});
+
+describe("больничный работника ждёт ОК", () => {
+  function admins(db: Db) {
+    const igor = worker(db, 701, "Игорь");
+    setEmployeeAdmin(db, igor.id, true);
+    return igor;
+  }
+
+  it("POST: entry is pending, no hand-over, and admins get ONE letter — the request", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 702, "Аня");
+    admins(db);
+    worker(db, 703, "Олег");
+    createShift(db, { employeeId: me.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 702);
+
+    const res = await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })));
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.pending).toBe(true);
+    expect(body.handovers).toEqual([]);
+    expect(getShift(db, body.entry.id)!.approvalRequestedAt).not.toBeNull();
+    expect(listHandoversForEntry(db, body.entry.id)).toHaveLength(0);
+    const toAdmin = sent.filter((m) => m.to === 701);
+    expect(toAdmin).toHaveLength(1);
+    expect(toAdmin[0]!.text.startsWith("🤒 Аня — больничный")).toBe(true);
+    expect(toAdmin[0]!.text).toContain("08:00–17:00");
+  });
+
+  it("POST by an admin: approved at once — no «ОК» to oneself — and the hand-over starts as before", async () => {
+    const db = makeTestDb();
+    const boss = admins(db);
+    worker(db, 704, "Олег");
+    createShift(db, { employeeId: boss.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 701);
+
+    const body = await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json();
+
+    expect(body.pending).toBe(false);
+    expect(getShift(db, body.entry.id)!.approvalRequestedAt).toBeNull();
+    expect(body.handovers).toHaveLength(1);
+  });
+
+  it("POST by an observer: also waits for an «ОК» (spec item 4)", async () => {
+    const db = makeTestDb();
+    observerWorker(db, 705, "Даша", false);
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 705);
+    const body = await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json();
+    expect(body.pending).toBe(true);
+  });
+
+  it("PATCH of a pending one (shortened): stays pending, starts nothing, redraws the letter instead of a second one", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 706, "Аня");
+    admins(db);
+    const { bot, sent, edits } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 706);
+    const id = (await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1), endDate: day(3) })))).json()).entry.id;
+    const sentBefore = sent.length;
+    const startBefore = vi.mocked(startHandovers).mock.calls.length;
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(1) }, "PATCH")));
+
+    expect(res.status).toBe(200);
+    expect(getShift(db, id)!.approvalRequestedAt).not.toBeNull();
+    expect(vi.mocked(startHandovers).mock.calls.length).toBe(startBefore);
+    expect(sent.length).toBe(sentBefore);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.text.startsWith("🤒 Аня — больничный")).toBe(true);
+    expect(me.id).toBeDefined();
+  });
+
+  it("PATCH extending an approved one: asks again, old days keep their hand-over, the new day waits", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 707, "Аня");
+    admins(db);
+    worker(db, 708, "Олег");
+    createShift(db, { employeeId: me.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const newDay = createShift(db, { employeeId: me.id, date: day(2), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    // Approved: written the way an old row or an admin's entry is — all approval columns NULL.
+    const sick = createShift(db, { employeeId: me.id, date: day(1), endDate: day(1), category: "sick_leave" });
+    await startHandovers({ db, config, messenger: { offer: async () => {}, fan: async () => {}, plain: async () => {}, admins: async () => {}, adminsAlways: async () => ({ attempted: 0, delivered: 0 }) } }, { sickEntry: sick, employeeId: me.id });
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 707);
+
+    await app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(2) }, "PATCH")));
+
+    expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+    const live = listHandoversForEntry(db, sick.id).filter((h) => h.status !== "cancelled");
+    expect(live).toHaveLength(1);
+    expect(live.map((h) => h.shiftId)).not.toContain(newDay.id);
+    expect(sent.filter((m) => m.to === 701).map((m) => m.text.slice(0, 2))).toEqual(["🤒"]);
+  });
+
+  it("PATCH shortening an approved one needs no «ОК»", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 709, "Аня");
+    const sick = createShift(db, { employeeId: me.id, date: day(1), endDate: day(3), category: "sick_leave" });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 709);
+    await app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(2) }, "PATCH")));
+    expect(getShift(db, sick.id)!.approvalRequestedAt).toBeNull();
+  });
+
+  it("DELETE of a pending one: every admin's buttons say «Больничного уже нет», no second letter", async () => {
+    const db = makeTestDb();
+    worker(db, 710, "Аня");
+    admins(db);
+    const { bot, sent, edits } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 710);
+    const id = (await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json()).entry.id;
+    const sentBefore = sent.length;
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${id}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    expect(edits.map((e) => e.text.split("\n\n").at(-1))).toEqual(["🗑 Больничного уже нет — Аня снял(а) сам(а)"]);
+    expect(sent.length).toBe(sentBefore);
   });
 });
 
@@ -359,6 +506,9 @@ describe("своя смена наблюдателя", () => {
     // проверка не отличила бы работающее правило от отсутствующего. Со своей
     // сменой на дату больничного список без гейта был бы непустым.
     createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    // An approving admin, so the check below is about the role gate and not about waiting for the «ОК».
+    const boss = worker(db, 609, "Марк");
+    setEmployeeAdmin(db, boss.id, true);
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 605);
 
@@ -368,6 +518,7 @@ describe("своя смена наблюдателя", () => {
 
     expect(res.status).toBe(201);
     const body = await res.json();
+    await approveSickLeave(sickApprovalDeps(null, db, config), body.entry.id, boss.id);
     expect(body.handovers).toEqual([]);
     // И в базе тоже пусто: пустой ответ маршрута мог бы означать «создали, но не
     // показали». `listHandoversForEntry` ищет по `sickEntryId` — это тот самый id.
@@ -380,6 +531,8 @@ describe("своя смена наблюдателя", () => {
     const mate = worker(db, 608, "Игорь");
     createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
     expect(mate.id).toBeDefined();
+    const boss = worker(db, 610, "Марк");
+    setEmployeeAdmin(db, boss.id, true);
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 607);
 
@@ -387,7 +540,10 @@ describe("своя смена наблюдателя", () => {
       category: "sick_leave", date: day(1),
     })));
 
-    expect(listHandoversForEntry(db, (await res.json()).entry.id)).not.toHaveLength(0);
+    // The ladder starts at the «ОК», not at the booking — and then it does start for a worker.
+    const entryId = (await res.json()).entry.id;
+    await approveSickLeave(sickApprovalDeps(null, db, config), entryId, boss.id);
+    expect(listHandoversForEntry(db, entryId)).not.toHaveLength(0);
   });
 });
 
@@ -412,15 +568,14 @@ describe("гейт передачи смены — роль закрывает �
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 616);
 
-    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
-      category: "sick_leave", date: day(1),
-    })));
-    const entryId = (await created.json()).entry.id;
+    // An APPROVED record (all approval columns NULL), shortened below: a pending one would
+    // skip `startHandovers` for the wrong reason — waiting — and this test is about the role gate.
+    const entryId = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" }).id;
     const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
     const startBefore = vi.mocked(startHandovers).mock.calls.length;
 
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
-      category: "sick_leave", date: day(1), endDate: day(2),
+      category: "sick_leave", date: day(1), endDate: day(1),
     }, "PATCH")));
 
     expect(res.status).toBe(200);
@@ -439,15 +594,14 @@ describe("гейт передачи смены — роль закрывает �
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 617);
 
-    const created = await app.request(new Request("http://x/api/my/entries", authed(token, {
-      category: "sick_leave", date: day(1),
-    })));
-    const entryId = (await created.json()).entry.id;
+    // Approved and then SHORTENED: no «ОК» is needed, so a worker's `startHandovers` runs —
+    // the reference point that makes the observer's «not called» above prove the role gate.
+    const entryId = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" }).id;
     const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
     const startBefore = vi.mocked(startHandovers).mock.calls.length;
 
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
-      category: "sick_leave", date: day(1), endDate: day(2),
+      category: "sick_leave", date: day(1), endDate: day(1),
     }, "PATCH")));
 
     expect(res.status).toBe(200);
@@ -525,6 +679,8 @@ describe("роль поменялась после того, как лестни
     const me = worker(db, 622, "Аня");
     const mate = worker(db, 623, "Игорь");
     createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    const boss = worker(db, 626, "Марк");
+    setEmployeeAdmin(db, boss.id, true);
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 622);
 
@@ -533,6 +689,8 @@ describe("роль поменялась после того, как лестни
     })));
     expect(created.status).toBe(201);
     const entryId = (await created.json()).entry.id;
+    // The ladder rises at the «ОК» (the booking only asks for it).
+    await approveSickLeave(sickApprovalDeps(null, db, config), entryId, boss.id);
     // Лестница действительно поднялась, пока Аня была обычным работником —
     // иначе весь остальной тест доказывал бы пустоту, которая была бы пустой
     // и без сценария.
@@ -565,6 +723,8 @@ describe("роль поменялась после того, как лестни
     const mate = worker(db, 625, "Игорь");
     createShift(db, { date: day(1), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
     createShift(db, { date: day(2), start: "09:00", end: "18:00", employeeId: me.id, category: "shift" });
+    const boss = worker(db, 627, "Марк");
+    setEmployeeAdmin(db, boss.id, true);
     const app = createApp({ db, config, bot: undefined });
     const token = await tokenFor(app, 624);
 
@@ -573,6 +733,7 @@ describe("роль поменялась после того, как лестни
     })));
     expect(created.status).toBe(201);
     const entryId = (await created.json()).entry.id;
+    await approveSickLeave(sickApprovalDeps(null, db, config), entryId, boss.id);
     const raised = listHandoversForEntry(db, entryId);
     // Оба дня — иначе укорачивать нечего.
     expect(raised.length).toBeGreaterThanOrEqual(2);
@@ -629,7 +790,8 @@ describe("письмо админам про правку наблюдателя
 
     await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })));
 
-    // Мьют «наблюдателей» не должен глушить письма про команду.
+    // Мьют «наблюдателей» не должен глушить письма про команду; а запрос ОК нельзя
+    // заглушить вовсе — на нём висит передача смены.
     expect(sent.map((m) => m.to)).toContain(615);
   });
 });
