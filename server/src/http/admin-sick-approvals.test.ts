@@ -4,7 +4,8 @@ import { addDaysIso } from "@planer/shared";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
-import { getShift } from "../repo/shifts";
+import { createShift, getShift } from "../repo/shifts";
+import { employees } from "../db/schema";
 import { signInitData } from "../auth/telegram";
 import { teamNow } from "../util/team-time";
 import { testConfig } from "../test-config";
@@ -64,7 +65,7 @@ describe("/api/admin/sick-approvals", () => {
     const app = createApp({ db, config, bot });
     const anyaToken = await tokenFor(app, 401);
     const created = await (await app.request(new Request("http://x/api/my/entries", authed(anyaToken, { category: "sick_leave", date: day(1) })))).json();
-    return { db, app, anyaToken, igorToken: await tokenFor(app, 402), markToken: await tokenFor(app, 403), id: created.entry.id as number, sent, edits };
+    return { db, app, anyaToken, igorToken: await tokenFor(app, 402), markToken: await tokenFor(app, 403), id: created.entry.id as number, sent, edits, bot };
   }
 
   it("lists the pending sick leave to an admin and refuses a worker", async () => {
@@ -99,6 +100,83 @@ describe("/api/admin/sick-approvals", () => {
     expect(res.status).toBe(200);
     expect(edits.map((e) => e.chat).sort()).toEqual([402, 403]);
     expect(edits.every((e) => e.text.endsWith("🗑 Больничного уже нет — запись удалил админ"))).toBe(true);
+  });
+
+  it("an admin's DELETE: a ✅ pressed on a not-yet-edited copy meanwhile loses, and the worker gets no false «Выбери, кому предложить смены»", async () => {
+    const { db, app, bot, igorToken, markToken, id, sent, edits } = await scene();
+    const sentBefore = sent.length;
+    let late: number | null = null;
+    // Right after the first letter is edited the second admin presses «ОК» on his copy, still holding live buttons.
+    const realEdit = bot.api.editMessageText as unknown as (...a: unknown[]) => Promise<unknown>;
+    (bot.api as { editMessageText: unknown }).editMessageText = async (...args: unknown[]) => {
+      const result = await realEdit(...args);
+      if (late === null) late = (await app.request(new Request(`http://x/api/admin/sick-approvals/${id}/approve`, authed(markToken, {})))).status;
+      return result;
+    };
+
+    const res = await app.request(new Request(`http://x/api/admin/entries/${id}`, authed(igorToken, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    // Wrong implementation caught: the request is still open during the edits, so the ✅ wins it (200).
+    expect(late).not.toBe(200);
+    expect(getShift(db, id)).toBeUndefined();
+    expect(edits.every((e) => e.text.endsWith("🗑 Больничного уже нет — запись удалил админ"))).toBe(true);
+    expect(sent.slice(sentBefore).some((m) => m.to === 401)).toBe(false);
+  });
+
+  it("an admin re-categorising a pending sick leave clears the request: buttons closed, nothing pending now or after switching back", async () => {
+    const { db, app, igorToken, markToken, id, edits } = await scene();
+    const patch = (body: unknown) => app.request(new Request(`http://x/api/admin/entries/${id}`, authed(igorToken, body, "PATCH")));
+
+    expect((await patch({ category: "vacation" })).status).toBe(200);
+
+    const row = getShift(db, id)!;
+    // Wrong implementation caught: the columns survive on a row that is not a sick leave any more.
+    expect([row.category, row.approvalRequestedAt, row.approvedByEmployeeId, row.approvedDate]).toEqual(["vacation", null, null, null]);
+    expect(edits.map((e) => e.chat).sort()).toEqual([402, 403]);
+    expect(edits.every((e) => e.text.endsWith("🗑 Больничного уже нет — запись изменил(а) Игорь"))).toBe(true);
+    // A late ✅ on the old letter: refused in words, nothing started.
+    const late = await app.request(new Request(`http://x/api/admin/sick-approvals/${id}/approve`, authed(markToken, {})));
+    expect(late.status).toBe(404);
+    // Switching back must not resurrect the old question.
+    expect((await patch({ category: "sick_leave" })).status).toBe(200);
+    expect(getShift(db, id)!.approvalRequestedAt).toBeNull();
+  });
+
+  describe("an admin editing the dates of a pending EXTENSION", () => {
+    /** Аня's approved day(1)–day(2) stretched by her to day(3): pending, snapshot day(1)–day(2). */
+    async function extensionScene() {
+      const base = await scene();
+      const anya = db0(base.db, "Аня");
+      const approved = createShift(base.db, { employeeId: anya, date: day(1), endDate: day(2), category: "sick_leave" });
+      const res = await base.app.request(new Request(`http://x/api/my/entries/${approved.id}`, authed(base.anyaToken, { category: "sick_leave", date: day(1), endDate: day(3) }, "PATCH")));
+      expect(res.status).toBe(200);
+      expect(getShift(base.db, approved.id)!.approvedDate).toBe(day(1));
+      base.edits.length = 0;
+      const patch = (body: unknown) => base.app.request(new Request(`http://x/api/admin/entries/${approved.id}`, authed(base.igorToken, body, "PATCH")));
+      return { ...base, approved, patch };
+    }
+    const db0 = (db: Db, name: string) => db.select().from(employees).all().find((e) => e.displayName === name)!.id;
+
+    it("redraws the letters and intersects the approved span with the new dates", async () => {
+      const { db, approved, patch, edits } = await extensionScene();
+      expect((await patch({ date: day(2), endDate: day(4) })).status).toBe(200);
+      const row = getShift(db, approved.id)!;
+      // Wrong implementation caught: the snapshot keeps day(1), which the new dates dropped — a ❌ would resurrect it.
+      expect([row.approvedDate, row.approvedEndDate]).toEqual([day(2), null]);
+      expect(row.approvalRequestedAt).not.toBeNull();
+      // Both admins' letters now name the new extension (day(3)–day(4)) — and carry no outcome line.
+      expect(edits.map((e) => e.chat).sort()).toEqual([402, 403]);
+      expect(edits.every((e) => e.text.startsWith("🤒 Аня — продление больничного: ") && !e.text.includes("✅") && !e.text.includes("🗑"))).toBe(true);
+    });
+
+    it("back inside the approved span: the request is withdrawn and the letters say so", async () => {
+      const { db, approved, patch, edits } = await extensionScene();
+      expect((await patch({ date: day(1), endDate: day(2) })).status).toBe(200);
+      expect(getShift(db, approved.id)!.approvalRequestedAt).toBeNull();
+      expect(edits.every((e) => e.text.endsWith("↩️ Продление снято — ОК не нужен"))).toBe(true);
+      expect(edits).toHaveLength(2);
+    });
   });
 
   it("a worker cannot approve or reject: 403 and the entry stays pending", async () => {

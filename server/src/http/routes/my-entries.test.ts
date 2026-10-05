@@ -431,6 +431,35 @@ describe("больничный работника ждёт ОК", () => {
     expect(edits.map((e) => e.text.split("\n\n").at(-1))).toEqual(["🗑 Больничного уже нет — Аня снял(а) сам(а)"]);
     expect(sent.length).toBe(sentBefore);
   });
+
+  it("DELETE of a pending one: a ✅ pressed while the letters are being edited loses — no «Выбери, кому предложить смены», no ✅ over the 🗑", async () => {
+    const db = makeTestDb();
+    worker(db, 714, "Аня");
+    const igor = admins(db);
+    const boss2 = worker(db, 715, "Марк");
+    setEmployeeAdmin(db, boss2.id, true);
+    const { bot, sent, edits } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 714);
+    const id = (await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json()).entry.id;
+    const sentBefore = sent.length;
+    // The first admin's letter is edited; at that very moment the second one presses «ОК» on his not-yet-edited copy.
+    let late: unknown = null;
+    const realEdit = bot.api.editMessageText as unknown as (...a: unknown[]) => Promise<unknown>;
+    (bot.api as { editMessageText: unknown }).editMessageText = async (...args: unknown[]) => {
+      const result = await realEdit(...args);
+      if (late === null) late = await approveSickLeave(sickApprovalDeps(bot, db, config), id, igor.id);
+      return result;
+    };
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${id}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    // Wrong implementation caught: the claim is still open during the edits, so the ✅ wins it.
+    expect((late as { ok: boolean }).ok).toBe(false);
+    expect(edits.every((e) => e.text.endsWith("🗑 Больничного уже нет — Аня снял(а) сам(а)"))).toBe(true);
+    expect(sent.slice(sentBefore).some((m) => m.to === 714)).toBe(false);
+  });
 });
 
 describe("PATCH /api/my/entries/:id", () => {

@@ -174,6 +174,9 @@ export async function startHandovers(
   const made: Handover[] = [];
   for (const shift of mine) {
     if (alreadyOffered.has(shift.id)) continue;
+    // The loop awaits Telegram (escalation) between shifts, and the worker may delete the sick
+    // leave meanwhile: `sickEntryId` is a foreign key, so the next insert would throw.
+    if (!getShift(db, input.sickEntry.id)) break;
     const handover = createHandover(db, {
       shiftId: shift.id,
       fromEmployeeId: input.employeeId,

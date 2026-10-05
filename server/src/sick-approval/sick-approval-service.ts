@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
-import { eachDayIso, isAbsence, sickExtensionRuns, type SickApprovalRow, type SickSpan } from "@planer/shared";
+import { eachDayIso, isAbsence, sickExtensionRuns, sickSpanIntersection, type SickApprovalRow, type SickSpan } from "@planer/shared";
 import type { Db } from "../db/client";
-import type { Shift } from "../db/schema";
+import type { Handover, Shift } from "../db/schema";
 import { getEmployeeById, listAdmins } from "../repo/employees";
 import { recordAudit } from "../repo/audit";
 import { deleteShift, getShift, listEmployeeShiftsOverlapping } from "../repo/shifts";
@@ -13,7 +13,9 @@ import {
   listPendingSickLeaves,
   markApprovalRequested,
   restoreApprovedSpan,
+  setApprovedSpan,
 } from "../repo/sick-approvals";
+import { listHandoversForEntry } from "../repo/handovers";
 import { sendTracked } from "../bot/tracked-send";
 import { dayAfterLine } from "../schedule/day-summary";
 import { safeErrorMessage } from "../util/safe-error";
@@ -35,6 +37,7 @@ import {
   sickExtensionWithdrawnText,
   sickApprovedWorkerText,
   sickRejectedWorkerText,
+  type TakenShift,
 } from "./sick-approval-text";
 
 export interface SickApprovalDeps extends HandoverDeps {
@@ -137,6 +140,9 @@ export async function redrawApprovalMessages(deps: SickApprovalDeps, sick: Shift
   if (!deps.bot) return;
   const text = approvalTextFor(deps.db, sick);
   for (const row of listApprovalMessages(deps.db, sick.id)) {
+    // A decision may land while an earlier edit of this loop is in flight: it has already
+    // replaced the buttons and dropped the row, and redrawing now would put them back.
+    if (!listApprovalMessages(deps.db, sick.id).some((m) => m.chatId === row.chatId && m.messageId === row.messageId)) continue;
     try {
       await deps.bot.api.editMessageText(row.chatId, row.messageId, text, { reply_markup: sickApprovalKeyboard(sick.id) });
     } catch (err) {
@@ -146,12 +152,41 @@ export async function redrawApprovalMessages(deps: SickApprovalDeps, sick: Shift
 }
 
 /**
+ * The dates of a still-pending sick leave were edited (by the worker or by an admin): the one
+ * place that decides what the open request becomes. `existing` is the row BEFORE the edit,
+ * `updated` the row after it.
+ *
+ * - An extension edited back inside the approved days has nothing left to ask: withdrawn.
+ * - Otherwise the stored approved span shrinks to what the new dates still cover, so a «Отклонить»
+ *   never gives back a day that was dropped, and the letters are redrawn in place — a second
+ *   letter about the same request would be noise, and its buttons would decide twice.
+ */
+export async function reconcilePendingDateEdit(deps: SickApprovalDeps, existing: Shift, updated: Shift): Promise<"withdrawn" | "redrawn"> {
+  const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
+  const approvedDays =
+    existing.approvedDate == null ? null : new Set(eachDayIso(existing.approvedDate, existing.approvedEndDate ?? existing.approvedDate));
+  if (approvedDays && covered.every((date) => approvedDays.has(date))) {
+    await withdrawExtension(deps, updated);
+    return "withdrawn";
+  }
+  // Empty intersection (or a plain request): no snapshot, so a reject deletes as for any plain request.
+  const kept =
+    existing.approvedDate == null
+      ? null
+      : sickSpanIntersection({ date: existing.approvedDate, endDate: existing.approvedEndDate }, updated);
+  const fresh = existing.approvedDate == null ? updated : (setApprovedSpan(deps.db, updated.id, kept) ?? updated);
+  await redrawApprovalMessages(deps, fresh);
+  return "redrawn";
+}
+
+/**
  * The worker took the extension back (edited the dates inside the approved span again):
  * nothing is left to ask, so the request closes and every admin's buttons say so. The row
  * stays approved, as it was before the extension.
  */
 export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Promise<void> {
-  const cleared = claimPendingSickLeave(deps.db, sick.id, null);
+  // Approver kept: the row goes back to what it was before the extension, and that was approved by someone.
+  const cleared = claimPendingSickLeave(deps.db, sick.id);
   if (!cleared) return;
   const name = cleared.employeeId == null ? undefined : getEmployeeById(deps.db, cleared.employeeId)?.displayName;
   await finishApprovalMessages(deps, sick.id, `${sickExtensionWithdrawnText(name ?? "Работник", cleared)}\n\n↩️ Продление снято — ОК не нужен`);
@@ -168,6 +203,18 @@ export async function finishApprovalMessages(deps: SickApprovalDeps, entryId: nu
   // The outcome is the last paragraph by convention of every caller.
   rememberOutcome(entryId, finalText.split("\n\n").at(-1) ?? finalText);
   await editApprovalMessages(deps, rows, finalText);
+}
+
+/**
+ * A pending sick leave is about to be deleted by the worker or an admin: close its letters.
+ * The row leaves «pending» FIRST, synchronously: the edits below await Telegram, and until
+ * they are done another admin's «ОК» on a not-yet-edited letter would still win the claim,
+ * overwrite «🗑» with «✅» and send the worker a «выбери, кому предложить смены» for a row
+ * that is going away. Safe to call on a row that is not pending (then it only edits nothing).
+ */
+export async function closeRequestForDelete(deps: SickApprovalDeps, existing: Shift, finalLine: string): Promise<void> {
+  if (!claimPendingSickLeave(deps.db, existing.id)) return;
+  await finishApprovalMessages(deps, existing.id, `${approvalTextFor(deps.db, existing)}\n\n${finalLine}`);
 }
 
 /** The Telegram half of `finishApprovalMessages`, for a caller that took its snapshot of the rows earlier. */
@@ -222,12 +269,14 @@ export async function approveSickLeave(
   const adminName = nameOf(db, adminId) ?? "Админ";
   const extension = extensionOf(before);
   recordAudit(db, "sick_leave_approved", adminId, entryAuditPayload(db, claimed));
-  await tellDecided(onDecided);
-  await finishApprovalMessages(deps, entryId, `${approvalTextFor(db, before)}\n\n✅ Подтвердил(а) ${adminName}`);
 
   const owner = claimed.employeeId == null ? undefined : getEmployeeById(db, claimed.employeeId);
+  // The hand-overs come FIRST, before any Telegram await: their database part runs right here,
+  // synchronously, like a reject's. The claim has already made the row look approved, so a
+  // restart during the slower letters below must find the drafts in place — nothing would
+  // create them later. The promise is kept (not awaited yet) so the tap is still answered at once.
+  let started: Promise<Handover[]> | null = null;
   // Observers are out of hand-overs entirely — the same gate as the self-entry route.
-  let hasDrafts = false;
   if (owner && !owner.isObserver) {
     // Exactly what a sick leave created today starts (owner's decision): drafts with no
     // addressee for the worker to pick a colleague, and the existing ladder's timer —
@@ -235,11 +284,22 @@ export async function approveSickLeave(
     // whatever the urgent branch already handed over is skipped.
     // An extension asks only about its new days: the approved ones already have their hand-overs.
     const onlyDates = extension ? new Set(daysAsked(before)) : undefined;
-    const made = await startHandovers(deps, { sickEntry: claimed, employeeId: owner.id, onlyDates });
-    // A shift with nobody free is escalated inside `startHandovers` («fanned» at once);
-    // only an «offered» one is a draft the worker can still act on.
-    hasDrafts = made.some((handover) => handover.status === "offered");
+    started = startHandovers(deps, { sickEntry: claimed, employeeId: owner.id, onlyDates });
+    // Handled here so a failure while the tap is being answered is not reported as unhandled;
+    // the real `await` below still rethrows it.
+    started.catch(() => {});
   }
+  await tellDecided(onDecided);
+  const made = started ? await started : [];
+  await finishApprovalMessages(deps, entryId, `${approvalTextFor(db, before)}\n\n✅ Подтвердил(а) ${adminName}`);
+
+  // The worker may have deleted the row while the letters were being edited. Her
+  // hand-overs were cancelled with it, and «✅ подтвердил(а)» about a sick leave she just
+  // took back would be false.
+  if (!getShift(db, entryId)) return { ok: true, adminName };
+  // A shift with nobody free is escalated inside `startHandovers` («fanned» at once);
+  // only an «offered» one is a draft the worker can still act on.
+  const hasDrafts = made.some((handover) => handover.status === "offered");
   if (owner?.telegramUserId != null && deps.bot) {
     await notifyUser(
       deps.bot,
@@ -251,6 +311,18 @@ export async function approveSickLeave(
   return { ok: true, adminName };
 }
 
+/** One entry per taken hand-over of this sick leave (restricted to `onlyDates` when given), read BEFORE they are detached. */
+function takenHandoverLines(db: Db, entryId: number, onlyDates: ReadonlySet<string> | null): TakenShift[] {
+  const lines: TakenShift[] = [];
+  for (const handover of listHandoversForEntry(db, entryId)) {
+    if (handover.status !== "taken" || handover.shiftId == null || handover.takenByEmployeeId == null) continue;
+    const shift = getShift(db, handover.shiftId);
+    if (!shift || (onlyDates && !onlyDates.has(shift.date))) continue;
+    lines.push({ shiftLine: entryLineOf(shift), takerName: nameOf(db, handover.takenByEmployeeId) ?? "Коллега" });
+  }
+  return lines;
+}
+
 export async function rejectSickLeave(
   deps: SickApprovalDeps,
   entryId: number,
@@ -259,10 +331,14 @@ export async function rejectSickLeave(
 ): Promise<SickDecision> {
   const { db } = deps;
   const before = getShift(db, entryId);
-  const claimed = claimPendingSickLeave(db, entryId, null);
+  // A rejected extension leaves the original approver in place; a plain request is deleted below anyway.
+  const claimed = claimPendingSickLeave(db, entryId);
   if (!claimed || !before) return refusal(db, entryId);
   const adminName = nameOf(db, adminId) ?? "Админ";
   const extension = extensionOf(before);
+  // Hand-overs a colleague already took (the urgent branch): those shifts are no longer the
+  // worker's, and the letter must say so instead of leaving her to turn up for them.
+  const takenAway = takenHandoverLines(db, entryId, extension ? new Set(daysAsked(before)) : null);
   // The whole database part runs before the first await. After the claim the row looks
   // exactly like an approved one (no request, no approver); leaving it so across Telegram
   // calls would let a restart strand an approved-by-nobody sick leave, and a second admin
@@ -292,7 +368,7 @@ export async function rejectSickLeave(
   await editApprovalMessages(deps, messages, `${letter}\n\n❌ Отклонил(а) ${adminName}`);
   await notifyCancelledHandovers(deps, cancelled);
   if (claimed.employeeId != null) {
-    await deps.messenger.plain(claimed.employeeId, sickRejectedWorkerText(claimed, adminName, extension));
+    await deps.messenger.plain(claimed.employeeId, sickRejectedWorkerText(claimed, adminName, extension, takenAway));
   }
   return { ok: true, adminName };
 }

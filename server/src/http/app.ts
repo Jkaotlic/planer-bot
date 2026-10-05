@@ -82,8 +82,10 @@ import { createMyHandoverRoutes } from "./routes/my-handovers";
 import {
   approvalTextFor,
   approveSickLeave,
+  closeRequestForDelete,
   finishApprovalMessages,
   listSickApprovals,
+  reconcilePendingDateEdit,
   rejectSickLeave,
   sickApprovalDeps,
 } from "../sick-approval/sick-approval-service";
@@ -1711,8 +1713,30 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ? listPendingSwapsForShift(db, id).map((request) => ({ request, payload: swapAuditPayload(request) }))
       : [];
 
-    const entry = updateShift(db, id, clearsUnread ? { ...patch, unrecognisedCode: null } : patch);
+    // An entry that stops being a sick leave carries no approval state: the columns would sit
+    // on a row whose letters still show live buttons, and switching back would silently make it
+    // pending again. Written in the SAME update, so a late «ОК» already finds nothing to claim.
+    const leavesSickLeave = existing.category === "sick_leave" && category !== "sick_leave";
+    const wasPending = existing.category === "sick_leave" && existing.approvalRequestedAt != null;
+    const entry = updateShift(db, id, {
+      ...(clearsUnread ? { ...patch, unrecognisedCode: null } : patch),
+      ...(leavesSickLeave ? { approvalRequestedAt: null, approvedByEmployeeId: null, approvedDate: null, approvedEndDate: null } : {}),
+    });
     if (!entry) return c.json({ error: "not_found" }, 404);
+    if (wasPending) {
+      const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+      if (leavesSickLeave) {
+        // The row is no longer pending (cleared above), so only the letters are left to close.
+        await finishApprovalMessages(
+          approvalDeps,
+          id,
+          `${approvalTextFor(db, existing)}\n\n🗑 Больничного уже нет — запись изменил(а) ${nameOfDb(db, c.get("auth").employeeId) ?? "админ"}`,
+        );
+      } else if (entry.date !== existing.date || entry.endDate !== existing.endDate) {
+        // Same decision as for the worker's own date edit: redraw, or withdraw an extension.
+        await reconcilePendingDateEdit(approvalDeps, existing, entry);
+      }
+    }
     if (changesTheTrade) await finalizeTradeChangingSwaps(id, swapsToExpire, c.get("auth").employeeId);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
@@ -1760,11 +1784,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // A pending sick leave has a request out to every admin. The CASCADE would drop the
     // message ids with the row and leave live buttons behind, so they are replaced first.
     if (existing?.category === "sick_leave" && existing.approvalRequestedAt != null) {
-      await finishApprovalMessages(
-        sickApprovalDeps(bot ?? null, db, config),
-        id,
-        `${approvalTextFor(db, existing)}\n\n🗑 Больничного уже нет — запись удалил админ`,
-      );
+      await closeRequestForDelete(sickApprovalDeps(bot ?? null, db, config), existing, "🗑 Больничного уже нет — запись удалил админ");
     }
     // Same reason, for the swaps hanging on it: `deleteShift` expires them and nulls
     // their pointer at this entry, so a line naming the shift can only be built now.

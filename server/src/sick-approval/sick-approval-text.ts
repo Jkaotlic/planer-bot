@@ -65,14 +65,23 @@ export function sickExtensionWithdrawnText(name: string, entry: { date: string; 
   return `🤒 ${name} — продление больничного снято, ОК не нужен\nБольничный ${sickSpanWords(entry.date, entry.endDate)} подтверждён раньше.`;
 }
 
+/** A shift of the sick leave a colleague already took: no longer the worker's. */
+export interface TakenShift {
+  shiftLine: string;
+  takerName: string;
+}
+
 /** Spec item 10, with the neutral verb and no gendered pronoun (controller ruling). */
 export function sickRejectedWorkerText(
   entry: { date: string; endDate: string | null },
   adminName: string,
   extension: readonly SickSpan[] | null = null,
+  taken: readonly TakenShift[] = [],
 ): string {
   const subject = extension
     ? `Продление больничного ${extension.map((run) => sickSpanWords(run.date, run.endDate)).join(" и ")}`
     : `Больничный ${sickSpanWords(entry.date, entry.endDate)}`;
-  return `${subject} не подтвердил(а) ${adminName} — напиши, чтобы разобраться.`;
+  // Same «взял(а)» wording as the handover letters; the shift is named as everywhere else.
+  const gone = taken.map((t) => `Смена ${t.shiftLine} уже не твоя: её взял(а) ${t.takerName}.`);
+  return [`${subject} не подтвердил(а) ${adminName} — напиши, чтобы разобраться.`, ...gone].join("\n");
 }

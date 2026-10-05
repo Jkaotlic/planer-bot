@@ -5,14 +5,15 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, createAdminEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
 import { createShift, deleteShift, getShift, updateShift } from "../repo/shifts";
 import { getHandover, listHandoversForEntry } from "../repo/handovers";
-import { startHandovers } from "../handover/handover-service";
+import { cancelHandoversForEntryDb, detachHandoversFromEntry, startHandovers, takeHandover } from "../handover/handover-service";
 import { listRecentAudit } from "../repo/audit";
 import { claimPendingSickLeave, listApprovalMessages } from "../repo/sick-approvals";
 import { recordApi, stubBotInfo, callbackDataOf } from "../bot/testbot";
+import { entryLineOf } from "../util/message-lines";
 import { teamNow } from "../util/team-time";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
-import { approveSickLeave, finishApprovalMessages, listSickApprovals, rejectSickLeave, requestApproval, sickApprovalDeps } from "./sick-approval-service";
+import { approveSickLeave, finishApprovalMessages, listSickApprovals, redrawApprovalMessages, rejectSickLeave, requestApproval, sickApprovalDeps, withdrawExtension } from "./sick-approval-service";
 
 const config = testConfig();
 const day = (n: number) => addDaysIso(teamNow(config.teamTz).date, n);
@@ -357,5 +358,159 @@ describe("a fresh request", () => {
     await requestApproval(deps, forced);
     // Wrong implementation caught: the extension request would inherit the old mark.
     expect(getShift(db, forced.id)!.handoverForcedAt).toBeNull();
+  });
+});
+
+describe("approveSickLeave — nothing is stranded by a restart or a delete mid-way", () => {
+  /** The worker's own delete, as the route does it: letters closed, handovers cancelled and detached, row gone. */
+  function workerDeletes(db: Db, id: number) {
+    cancelHandoversForEntryDb(db, id, []);
+    detachHandoversFromEntry(db, id);
+    deleteShift(db, id);
+  }
+
+  it("the drafts exist before the first Telegram await: a restart there strands nothing", async () => {
+    const { db, deps, igor, sick, work } = await scene();
+    // A promise that never settles is a process that died at that await.
+    void approveSickLeave(deps, sick.id, igor.id, () => new Promise(() => {}));
+    expect(listHandoversForEntry(db, sick.id).map((h) => [h.shiftId, h.status])).toEqual([[work.id, "offered"]]);
+  });
+
+  it("the drafts exist before the first admin-letter edit as well (a hang there is a restart too)", async () => {
+    const { db, bot, deps, igor, sick, work } = await scene();
+    let seenAtFirstEdit: unknown = "never reached";
+    bot.api.config.use(async (prev, method, payload) => {
+      if (method === "editMessageText" && seenAtFirstEdit === "never reached") {
+        seenAtFirstEdit = listHandoversForEntry(db, sick.id).map((h) => h.shiftId);
+      }
+      return prev(method, payload);
+    });
+    await approveSickLeave(deps, sick.id, igor.id);
+    expect(seenAtFirstEdit).toEqual([work.id]);
+  });
+
+  it("the worker deleting the row while the letters are edited: no foreign-key error, no false letter to her", async () => {
+    const { db, bot, api, deps, igor, sick } = await scene();
+    let fired = false;
+    bot.api.config.use(async (prev, method, payload) => {
+      if (method === "editMessageText" && !fired) {
+        fired = true;
+        workerDeletes(db, sick.id);
+      }
+      return prev(method, payload);
+    });
+    const res = await approveSickLeave(deps, sick.id, igor.id);
+    expect(res.ok).toBe(true);
+    expect(getShift(db, sick.id)).toBeUndefined();
+    // Wrong implementation caught: «✅ Больничный … подтвердил(а)» to a worker who just took it back.
+    expect(api.sent.some((m) => m.chat_id === 201)).toBe(false);
+  });
+
+  it("startHandovers stops cleanly when the sick leave disappears while it escalates an uncovered shift", async () => {
+    const db = makeTestDb();
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    recordApi(bot);
+    // An observer takes no shifts, so nobody is a candidate — yet he still gets the escalation letters.
+    const igor = createAdminEmployee(db, { displayName: "Игорь", telegramUserId: 111 });
+    setEmployeeObserver(db, igor.id, true);
+    const anya = linked(db, 201, "Аня");
+    // Nobody else is free: both shifts escalate at once, with an await between them.
+    createShift(db, { employeeId: anya.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    createShift(db, { employeeId: anya.id, date: day(2), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const sick = createShift(db, { employeeId: anya.id, date: day(1), endDate: day(2), category: "sick_leave" });
+    const deps = sickApprovalDeps(bot, db, config);
+    let fired = false;
+    bot.api.config.use(async (prev, method, payload) => {
+      if (method === "sendMessage" && !fired) {
+        fired = true;
+        workerDeletes(db, sick.id);
+      }
+      return prev(method, payload);
+    });
+    await expect(startHandovers(deps, { sickEntry: sick, employeeId: anya.id })).resolves.toHaveLength(1);
+  });
+});
+
+describe("rejectSickLeave — a shift a colleague already took", () => {
+  it("the worker is told that shift is no longer hers, by name of the taker", async () => {
+    const { db, api, deps, mark, sick, oleg, work } = await scene();
+    const [urgent] = await startHandovers(deps, { sickEntry: getShift(db, sick.id)!, employeeId: sick.employeeId! });
+    expect(await takeHandover(deps, urgent!.id, oleg.id, day(0))).toEqual({ ok: true });
+    api.sent.length = 0;
+
+    await rejectSickLeave(deps, sick.id, mark.id);
+
+    const toWorker = api.sent.filter((m) => m.chat_id === 201);
+    expect(toWorker).toHaveLength(1);
+    const lines = toWorker[0]!.text.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe(`Смена ${entryLineOf(getShift(db, work.id)!)} уже не твоя: её взял(а) Олег.`);
+    // The taken shift stays with its new owner.
+    expect(getShift(db, work.id)!.employeeId).toBe(oleg.id);
+  });
+
+  it("a plain rejection with nothing taken says nothing about shifts", async () => {
+    const { api, deps, mark, sick } = await scene();
+    await rejectSickLeave(deps, sick.id, mark.id);
+    expect(api.sent.find((m) => m.chat_id === 201)!.text).not.toContain("\n");
+  });
+});
+
+describe("redrawApprovalMessages", () => {
+  it("a decision landing between two edits is not undone: the second letter keeps no buttons", async () => {
+    const { db, bot, api, deps, igor, sick } = await scene();
+    let fired = false;
+    bot.api.config.use(async (prev, method, payload) => {
+      const result = await prev(method, payload);
+      if (method === "editMessageText" && !fired) {
+        fired = true;
+        // The first admin presses «ОК» right after the first redraw went out.
+        await approveSickLeave(deps, sick.id, igor.id);
+      }
+      return result;
+    });
+    await redrawApprovalMessages(deps, getShift(db, sick.id)!);
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    // Exactly one redraw (with buttons) and the two decision edits (without): a second redraw would bring the buttons back.
+    expect(edits.filter((e) => e.payload.reply_markup != null)).toHaveLength(1);
+    const lastPerChat = new Map(edits.map((e) => [e.payload.chat_id, e.payload]));
+    expect([...lastPerChat.values()].every((p) => p.reply_markup == null)).toBe(true);
+  });
+});
+
+describe("withdrawExtension and the approver", () => {
+  it("keeps the person who approved the original span", async () => {
+    const base = await scene();
+    const { db, deps, igor, anya } = base;
+    const approved = createShift(db, { employeeId: anya.id, date: day(5), endDate: day(6), category: "sick_leave", approvedByEmployeeId: igor.id });
+    const stretched = updateShift(db, approved.id, { endDate: day(7) })!;
+    const asked = await requestApproval(deps, stretched, { date: approved.date, endDate: approved.endDate });
+    expect(getShift(db, asked.id)!.approvedByEmployeeId).toBe(igor.id); // the request itself keeps it too
+    await withdrawExtension(deps, asked);
+    const row = getShift(db, asked.id)!;
+    expect([row.approvalRequestedAt, row.approvedByEmployeeId]).toEqual([null, igor.id]);
+  });
+
+  it("a rejected extension keeps it as well", async () => {
+    const { db, deps, igor, mark, anya } = await scene();
+    const approved = createShift(db, { employeeId: anya.id, date: day(5), endDate: day(6), category: "sick_leave", approvedByEmployeeId: igor.id });
+    const stretched = updateShift(db, approved.id, { endDate: day(7) })!;
+    const asked = await requestApproval(deps, stretched, { date: approved.date, endDate: approved.endDate });
+    await rejectSickLeave(deps, asked.id, mark.id);
+    expect(getShift(db, asked.id)!.approvedByEmployeeId).toBe(igor.id);
+  });
+});
+
+describe("listSickApprovals — the cap", () => {
+  it("newest requests come first: old undecided ones cannot push a fresh request past the limit", async () => {
+    const { db, anya } = await scene();
+    for (let i = 0; i < 100; i++) {
+      createShift(db, { employeeId: anya.id, date: day(-400 + i), category: "sick_leave", approvalRequestedAt: new Date(Date.UTC(2026, 0, 1, 0, i)) });
+    }
+    const fresh = createShift(db, { employeeId: anya.id, date: day(10), category: "sick_leave", approvalRequestedAt: new Date() });
+    const ids = listSickApprovals(db).map((r) => r.id);
+    expect(ids).toHaveLength(100);
+    expect(ids[0]).toBe(fresh.id);
+    expect(ids).toContain(fresh.id);
   });
 });

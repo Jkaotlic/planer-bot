@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { shifts, sickLeaveApprovalMessages, type Shift } from "../db/schema";
 import type { SickSpan } from "@planer/shared";
@@ -13,7 +13,9 @@ export function markApprovalRequested(db: Db, id: number, at: Date, approved: Si
     .update(shifts)
     .set({
       approvalRequestedAt: at,
-      approvedByEmployeeId: null,
+      // An extension keeps whoever approved the rest: a withdrawn or rejected extension gives the row back
+      // as it was, and «Уже подтвердил(а) …» must keep naming the person who really said yes.
+      ...(approved ? {} : { approvedByEmployeeId: null }),
       approvedDate: approved?.date ?? null,
       approvedEndDate: approved?.endDate ?? null,
       // A new round is a new question: «передача запущена без ОК» belonged to the old one.
@@ -29,12 +31,13 @@ export function markApprovalRequested(db: Db, id: number, at: Date, approved: Si
  * atomically and this process has one connection, so of two admins pressing in the
  * same second exactly one gets the row back. Not inside a transaction with what
  * follows on purpose — `startHandovers` awaits Telegram, and better-sqlite3
- * transactions are synchronous.
+ * transactions are synchronous. `approvedBy` undefined keeps the stored approver (an extension
+ * going back to the state it had before the request).
  */
-export function claimPendingSickLeave(db: Db, id: number, approvedBy: number | null): Shift | undefined {
+export function claimPendingSickLeave(db: Db, id: number, approvedBy?: number | null): Shift | undefined {
   return db
     .update(shifts)
-    .set({ approvalRequestedAt: null, approvedByEmployeeId: approvedBy, approvedDate: null, approvedEndDate: null })
+    .set({ approvalRequestedAt: null, ...(approvedBy === undefined ? {} : { approvedByEmployeeId: approvedBy }), approvedDate: null, approvedEndDate: null })
     .where(and(eq(shifts.id, id), eq(shifts.category, "sick_leave"), isNotNull(shifts.approvalRequestedAt)))
     .returning()
     .get();
@@ -82,13 +85,17 @@ export function deleteApprovalMessages(db: Db, shiftId: number): void {
   db.delete(sickLeaveApprovalMessages).where(eq(sickLeaveApprovalMessages.shiftId, shiftId)).run();
 }
 
-/** «На подтверждение»: oldest dates first, capped — one process also serves the bot's polling. */
+/**
+ * «На подтверждение»: newest requests first, capped — one process also serves the bot's polling.
+ * Newest, not oldest dates: a stale backdated request nobody decides would otherwise sit at the
+ * front forever and, past the cap, push every fresh request out of the lists and the badge.
+ */
 export function listPendingSickLeaves(db: Db, limit = 100): Shift[] {
   return db
     .select()
     .from(shifts)
     .where(and(isNotNull(shifts.approvalRequestedAt), eq(shifts.category, "sick_leave")))
-    .orderBy(asc(shifts.date), asc(shifts.id))
+    .orderBy(desc(shifts.approvalRequestedAt), desc(shifts.id))
     .limit(limit)
     .all();
 }

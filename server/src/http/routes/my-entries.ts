@@ -14,7 +14,6 @@ import {
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { createShift, getShift, updateShift, deleteShift } from "../../repo/shifts";
-import { setApprovedSpan } from "../../repo/sick-approvals";
 import { getEmployeeById } from "../../repo/employees";
 import { listPendingSwapsForShift } from "../../repo/swaps";
 import { recordAudit } from "../../repo/audit";
@@ -35,12 +34,10 @@ import {
   type HandoverDeps,
 } from "../../handover/handover-service";
 import {
-  approvalTextFor,
-  finishApprovalMessages,
-  redrawApprovalMessages,
+  closeRequestForDelete,
+  reconcilePendingDateEdit,
   requestApproval,
   sickApprovalDeps,
-  withdrawExtension,
   type SickApprovalDeps,
 } from "../../sick-approval/sick-approval-service";
 import { createHandoverMessenger } from "../../handover/handover-messenger";
@@ -266,24 +263,13 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       // «Удлинить» = the edit reaches a day the approved span did not. Moving the start
       // later is a shortening; moving the whole span is both, and the new days need an «ОК».
       const extended = covered.some((date) => !before.has(date));
-      const approvedDays =
-        existing.approvedDate == null ? null : new Set(eachDayIso(existing.approvedDate, existing.approvedEndDate ?? existing.approvedDate));
-      if (wasPending && approvedDays && covered.every((date) => approvedDays.has(date))) {
-        // A pending EXTENSION edited back inside the approved span: nothing is left to ask.
-        await withdrawExtension(approvalDeps(), updated);
-        const approvedSpan = { date: existing.approvedDate!, endDate: existing.approvedEndDate };
-        if (covered.length < approvedDays.size) noticeBefore = { ...existing, date: approvedSpan.date, endDate: approvedSpan.endDate };
-      } else if (wasPending) {
-        // The approved span is always what the worker STILL wants of the stored approval, so a
-        // «Отклонить» never gives back a day they dropped. Empty: a plain pending sick leave.
-        const kept =
-          existing.approvedDate == null
-            ? null
-            : sickSpanIntersection({ date: existing.approvedDate, endDate: existing.approvedEndDate }, updated);
-        const fresh = existing.approvedDate == null ? updated : (setApprovedSpan(db, updated.id, kept) ?? updated);
-        // Still waiting: the admins' letter gets the new dates in place — a second letter
-        // about the same request would be noise, and its buttons would decide twice.
-        await redrawApprovalMessages(approvalDeps(), fresh);
+      if (wasPending) {
+        // Withdrawn extension or redrawn letters: the same decision an admin's date edit gets.
+        if ((await reconcilePendingDateEdit(approvalDeps(), existing, updated)) === "withdrawn") {
+          const approvedSpan = { date: existing.approvedDate!, endDate: existing.approvedEndDate };
+          const approvedSize = eachDayIso(approvedSpan.date, approvedSpan.endDate ?? approvedSpan.date).length;
+          if (covered.length < approvedSize) noticeBefore = { ...existing, date: approvedSpan.date, endDate: approvedSpan.endDate };
+        }
       } else if (extended && !me.isAdmin) {
         // Hand-overs for the old days keep running; the new days wait (spec item 13). The
         // approved span is remembered: a «Отклонить» gives the row back as it was.
@@ -345,10 +331,10 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     if (wasPending) {
       // Before the delete: the CASCADE drops the message ids with the row, and every
       // admin would be left holding live buttons for a sick leave that is gone.
-      await finishApprovalMessages(
+      await closeRequestForDelete(
         approvalDeps(),
-        existing.id,
-        `${approvalTextFor(db, existing)}\n\n🗑 Больничного уже нет — ${nameOf(db, employeeId) ?? "работник"} снял(а) сам(а)`,
+        existing,
+        `🗑 Больничного уже нет — ${nameOf(db, employeeId) ?? "работник"} снял(а) сам(а)`,
       );
     }
     if (existing.category === "sick_leave") {
