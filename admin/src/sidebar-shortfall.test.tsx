@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminShortfall } from "@planer/shared";
 import { AuthRequiredError, apiClient } from "./api/client";
 import { App } from "./App";
@@ -16,6 +16,12 @@ import { App } from "./App";
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
+
+// Мок-данные содержат ждущий больничный, и без заглушки метка «На подтверждение»
+// появлялась бы в каждом кейсе про нехватку.
+beforeEach(() => {
+  vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([]);
+});
 
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
@@ -201,5 +207,60 @@ describe("метка нехватки в сайдбаре", () => {
     await act(async () => byText("Да, удалить").click());
     await settle(12);
     expect(badge(el)?.textContent).toBe("3");
+  });
+
+  it("ждущие ОК — своя метка на «На подтверждение» и своя подсказка для читалки", async () => {
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 0, firstDate: null });
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([
+      { id: 7, employeeId: 4, employeeName: "Даша", date: "2026-10-06", endDate: null, requestedAt: "2026-10-05T09:00:00.000Z", shiftLines: [], handoverForced: false },
+    ]);
+    const el = await mount();
+    const item = navButton(el, "На подтверждение");
+    expect(item.querySelector(".sidebar-nav-badge")?.textContent).toBe("1");
+    expect(item.textContent).toContain("ждут подтверждения: 1");
+    expect(navButton(el, "Расписание").querySelector(".sidebar-nav-badge")).toBeNull();
+  });
+
+  it("ручка ждущих упала — метки нет; сессия истекла — экран входа", async () => {
+    const spy = vi.spyOn(apiClient, "getSickApprovals").mockRejectedValue(new Error("сеть"));
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 0, firstDate: null });
+    const el = await mount();
+    expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")).toBeNull();
+    await act(async () => root!.unmount());
+    host?.remove();
+    spy.mockRejectedValue(new AuthRequiredError("auth"));
+    const el2 = await mount();
+    expect(el2.querySelector(".login-screen")).not.toBeNull();
+  });
+
+  it("возврат во вкладку перечитывает ждущих", async () => {
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 0, firstDate: null });
+    const spy = vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([]);
+    const el = await mount();
+    spy.mockResolvedValue([
+      { id: 7, employeeId: 4, employeeName: "Даша", date: "2026-10-06", endDate: null, requestedAt: "2026-10-05T09:00:00.000Z", shiftLines: [], handoverForced: false },
+    ]);
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(2);
+    expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("1");
+  });
+
+  it("запоздавший старый ответ о ждущих не затирает новый", async () => {
+    // Первый запрос отвечает последним, уже после возврата на «Расписание».
+    const one = { id: 7, employeeId: 4, employeeName: "Даша", date: "2026-10-06", endDate: null, requestedAt: "2026-10-05T09:00:00.000Z", shiftLines: [], handoverForced: false };
+    let resolveOld!: (value: typeof one[]) => void;
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 0, firstDate: null });
+    vi.spyOn(apiClient, "getSickApprovals")
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValue([one, { ...one, id: 8 }]);
+    const el = await mount();
+    await act(async () => navButton(el, "Работники").click());
+    await act(async () => navButton(el, "Расписание").click());
+    await settle(4);
+    expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("2");
+    await act(async () => resolveOld([]));
+    await settle(2);
+    expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("2");
   });
 });

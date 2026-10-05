@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { SickApprovalRow } from "@planer/shared";
 import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
@@ -21,6 +22,7 @@ import { ScheduleGrid } from "./components/ScheduleGrid";
 import { WeekShortfallBar } from "./components/WeekShortfallBar";
 import { Sidebar, navLabel, type NavKey } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
+import { SickApprovalsScreen } from "./screens/SickApprovalsScreen";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { ShiftKindsScreen } from "./screens/ShiftKindsScreen";
 import { ChecklistScreen } from "./screens/ChecklistScreen";
@@ -133,6 +135,9 @@ export function App() {
   // Номер последнего запроса: медленный ответ на старый запрос не должен затереть
   // число из нового — после правки записи два запроса идут почти подряд.
   const shortfallSeq = useRef(0);
+  /** Больничные, ждущие ОК, — метка на «На подтверждение»; null — не знаем (ручка упала). */
+  const [sickApprovals, setSickApprovals] = useState<SickApprovalRow[] | null>(null);
+  const sickSeq = useRef(0);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
@@ -213,12 +218,31 @@ export function App() {
     );
   }
 
+  /** Копия `refreshAdminShortfall`: тот же отдельный запрос и та же защита от устаревшего ответа. */
+  function refreshSickApprovals() {
+    const seq = ++sickSeq.current;
+    apiClient.getSickApprovals().then(
+      (rows) => {
+        if (seq !== sickSeq.current) return;
+        setSickApprovals(rows);
+      },
+      (err: unknown) => {
+        if (seq !== sickSeq.current) return;
+        setSickApprovals(null);
+        if (err instanceof AuthRequiredError) setNeedLogin(true);
+      },
+    );
+  }
+
   // Консоль годами висит открытой вкладкой: возвращаясь к ней, человек ждёт
   // свежего числа, а не того, что было при уходе. Тот же запрос с защитой от
   // устаревшего ответа, что и везде.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible") refreshAdminShortfall();
+      if (document.visibilityState === "visible") {
+        refreshAdminShortfall();
+        refreshSickApprovals();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -269,6 +293,7 @@ export function App() {
     // И на первом показе: метке нужен свой первый запрос, а нормы могли
     // поправить на «Видах смен» — число в сайдбаре считает по ним же.
     refreshAdminShortfall();
+    refreshSickApprovals();
     if (!scheduleShown.current) {
       scheduleShown.current = true;
       return;
@@ -313,8 +338,10 @@ export function App() {
     setShiftsFrom(from);
     setCalendarDays(calendar);
     // Все правки записей кончаются здесь (сохранение, диапазон, удаление,
-    // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки.
+    // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки; удаление
+    // ждущего больничного заодно убирает его из очереди «На подтверждение».
     refreshAdminShortfall();
+    refreshSickApprovals();
   }
 
   async function previewRosterFile(file: File) {
@@ -477,7 +504,10 @@ export function App() {
         }}
         adminLabel={viewer ? `${viewer.address} · админ` : "Админ"}
         open={menuOpen}
-        badges={adminShortfall ? { schedule: adminShortfall } : undefined}
+        badges={{
+          ...(adminShortfall ? { schedule: adminShortfall } : {}),
+          ...(sickApprovals?.length ? { approvals: sickApprovals.length } : {}),
+        }}
       />
       {menuOpen && (
         <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />
@@ -529,6 +559,14 @@ export function App() {
           <CollectionsScreen />
         ) : nav === "announce" ? (
           <AnnounceScreen />
+        ) : nav === "approvals" ? (
+          <SickApprovalsScreen
+            onChanged={() => {
+              refreshSickApprovals();
+              refreshAdminShortfall();
+              void refreshSchedule();
+            }}
+          />
         ) : nav === "bugs" ? (
           <BugsScreen />
         ) : nav === "log" ? (
@@ -656,6 +694,9 @@ export function App() {
               text: withNotifyNotice(describeEntryRangeResult(result), result.notified),
             });
           }}
+          handoverForced={editingEntry ? sickApprovals?.find((r) => r.id === editingEntry.id)?.handoverForced : undefined}
+          onApprove={editingEntry?.pending ? async () => { await apiClient.approveSickLeave(editingEntry.id); setEditingEntry(null); refreshSickApprovals(); await refreshSchedule(); } : undefined}
+          onReject={editingEntry?.pending ? async () => { await apiClient.rejectSickLeave(editingEntry.id); setEditingEntry(null); refreshSickApprovals(); refreshAdminShortfall(); await refreshSchedule(); } : undefined}
           onDelete={
             editingEntry
               ? async () => {

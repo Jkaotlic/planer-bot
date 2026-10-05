@@ -287,3 +287,46 @@ describe("AddEntryPanel — «Удалить» спрашивает, а не с�
     expect(el.textContent).toContain("Удалить запись из графика?");
   });
 });
+
+describe("AddEntryPanel — больничный, ждущий ОК", () => {
+  const buttonByText = (el: HTMLElement, text: string) => {
+    const found = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === text);
+    if (!found) throw new Error(`не нашёл кнопку «${text}»`);
+    return found;
+  };
+  const pendingSick: Shift = {
+    id: 11, date: "2026-06-09", start: null, end: null, endDate: "2026-06-10",
+    category: "sick_leave", title: null, location: null, unrecognisedCode: null, templateId: null, employeeId: 1, pending: true,
+  };
+
+  it("«✅ ОК» и «❌ Отклонить», и пометка о срочной передаче", async () => {
+    const onApprove = vi.fn(async () => {});
+    const onReject = vi.fn(async () => {});
+    const el = await mount({ existing: pendingSick, onApprove, onReject, handoverForced: true });
+    expect(el.textContent).toContain("Больничный ждёт ОК");
+    expect(el.textContent).toContain("передача запущена без ОК");
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    expect(onApprove).toHaveBeenCalledOnce();
+    await act(async () => { buttonByText(el, "❌ Отклонить").click(); });
+    expect(onReject).not.toHaveBeenCalled();
+    await act(async () => { buttonByText(el, "Да, отклонить").click(); });
+    expect(onReject).toHaveBeenCalledOnce();
+  });
+
+  it("без срочной передачи пометки нет", async () => {
+    const el = await mount({ existing: pendingSick, onApprove: vi.fn(async () => {}), onReject: vi.fn(async () => {}) });
+    expect(el.textContent).not.toContain("передача запущена без ОК");
+  });
+
+  it("у подтверждённого больничного этих кнопок нет", async () => {
+    const el = await mount({ existing: { ...pendingSick, pending: undefined }, onApprove: vi.fn(), onReject: vi.fn() });
+    expect(el.textContent).not.toContain("✅ ОК");
+  });
+
+  it("отказ сервера — текстом в панели", async () => {
+    const onApprove = vi.fn(async () => { throw new Error("Уже подтвердил(а) Игорь"); });
+    const el = await mount({ existing: pendingSick, onApprove, onReject: vi.fn(async () => {}) });
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    expect(el.querySelector(".error-text")?.textContent).toContain("Уже подтвердил(а) Игорь");
+  });
+});

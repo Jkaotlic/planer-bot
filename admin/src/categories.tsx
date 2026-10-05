@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   categoryChipPalette,
   categoryPalette,
-  exactSchedulePalette,
+  cellSchedulePalette,
   UNRECOGNISED_SCHEDULE_PALETTE,
   type CategoryPalette,
   type EntryCategory,
@@ -30,6 +30,8 @@ interface ColourableEntry {
   templateId: number | null;
   /** Set only on a cell the import could not read — it wins over every other colour. */
   unrecognisedCode?: string | null;
+  /** Больничный ждёт ОК: красится бледной парой, как «Б» в сетке мини-аппа. */
+  pending?: boolean;
 }
 interface AccentedTemplate {
   id: number;
@@ -46,7 +48,8 @@ export function useEntryPalette(entry: ColourableEntry, templates: readonly Acce
   // its own grey whatever category it was filed under.
   if (entry.unrecognisedCode) return { bg: UNRECOGNISED_SCHEDULE_PALETTE.bg, fg: UNRECOGNISED_SCHEDULE_PALETTE.fg };
   const accent = entry.templateId != null ? templates.find((t) => t.id === entry.templateId)?.accent : undefined;
-  const exact = exactSchedulePalette(accent, entry.category);
+  // Бледная «Б» ждущего — та же пара, что в сетке мини-аппа.
+  const exact = cellSchedulePalette(accent, entry.category, entry.pending === true);
   if (exact) return { bg: exact.bg, fg: exact.fg };
   return categoryPalette(entry.category, isDark);
 }

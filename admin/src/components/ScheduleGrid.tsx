@@ -1,4 +1,4 @@
-import { coverageHint, filterPeople, missingCoverage, type CoverageTemplate, type SpecialDay } from "@planer/shared";
+import { SICK_LEAVE_PENDING_OUTLINE, SICK_LEAVE_PENDING_SCHEDULE_PALETTE, coverageHint, filterPeople, missingCoverage, toEntryView, type CoverageTemplate, type SpecialDay } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -65,6 +65,11 @@ function endOf(s: Shift): string {
 /** Entries for a given employee that cover a given day (multi-day spans count on every covered day). */
 function entriesFor(shifts: Shift[], employeeId: number, date: string): Shift[] {
   return shifts.filter((s) => s.employeeId === employeeId && s.date <= date && endOf(s) >= date);
+}
+
+/** «Ждёт ОК» у продления — свойство дня: дни внутри подтверждённого срока рисуются как обычные. */
+function pendingOn(shift: Shift, templates: readonly Template[], date: string): boolean {
+  return toEntryView(shift, templates, date).pending === true;
 }
 
 function hh(time: string): string {
@@ -138,6 +143,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
               {weekDates.map((date) => (
                 <DayCell
                   key={date}
+                  date={date}
                   entries={entriesFor(shifts, employee.id, date)}
                   weekend={isDayOff(date, calendar)}
                   today={date === today}
@@ -151,6 +157,14 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
           ))}
         </tbody>
       </table>
+      {/* У консоли нет легенды букв — чипы подписаны словами. Пунктир — единственное
+          новое обозначение, и объяснить его нужно ровно тогда, когда он на экране. */}
+      {weekDates.some((date) => shifts.some((s) => s.date <= date && endOf(s) >= date && pendingOn(s, templates, date))) && (
+        <div className="grid-pending-legend">
+          <span className="grid-pending-legend__sample" style={{ background: SICK_LEAVE_PENDING_SCHEDULE_PALETTE.bg, outline: SICK_LEAVE_PENDING_OUTLINE }} aria-hidden="true" />
+          Больничный (ждёт ОК) — подтвердить можно в карточке или в «На подтверждение»
+        </div>
+      )}
     </div>
   );
 }
@@ -171,6 +185,7 @@ function EmployeeCell({ employee }: { employee: Employee }) {
 }
 
 function DayCell({
+  date,
   entries,
   weekend,
   today,
@@ -179,6 +194,7 @@ function DayCell({
   onEntryClick,
   templates,
 }: {
+  date: string;
   entries: Shift[];
   weekend: boolean;
   today: boolean;
@@ -193,7 +209,7 @@ function DayCell({
         {entries.length > 0 ? (
           <>
             {entries.map((entryItem) => (
-              <EntryChip key={entryItem.id} entry={entryItem} templates={templates} onClick={() => onEntryClick(entryItem)} />
+              <EntryChip key={entryItem.id} entry={entryItem} pending={pendingOn(entryItem, templates, date)} templates={templates} onClick={() => onEntryClick(entryItem)} />
             ))}
             <button type="button" className="cell-add-more" onClick={onAdd} aria-label="Добавить ещё запись">
               ＋
@@ -209,15 +225,16 @@ function DayCell({
   );
 }
 
-function EntryChip({ entry, templates, onClick }: { entry: Shift; templates: readonly Template[]; onClick: () => void }) {
-  const palette = useEntryPalette(entry, templates);
+function EntryChip({ entry, pending, templates, onClick }: { entry: Shift; pending: boolean; templates: readonly Template[]; onClick: () => void }) {
+  const palette = useEntryPalette({ ...entry, pending }, templates);
+  const label = (entry.title ?? categoryLabel(entry.category)) + (pending ? " · ждёт ОК" : "");
   return (
     <button
       type="button"
-      className="entry-chip"
-      style={{ background: palette.bg, color: palette.fg }}
+      className={`entry-chip${pending ? " is-pending" : ""}`}
+      style={{ background: palette.bg, color: palette.fg, ...(pending ? { outline: SICK_LEAVE_PENDING_OUTLINE, outlineOffset: "-2px" } : {}) }}
       onClick={onClick}
-      title="Изменить запись"
+      title={pending ? "Больничный ждёт ОК — открыть" : "Изменить запись"}
     >
       {entry.unrecognisedCode ? (
         // Not «Смена»: the file said something we could not read, and the chip has
@@ -226,10 +243,10 @@ function EntryChip({ entry, templates, onClick }: { entry: Shift; templates: rea
       ) : entry.start && entry.end ? (
         <>
           <span className="chip-time">{`${hh(entry.start)}–${hh(entry.end)}`}</span>
-          <span className="chip-title">{entry.title ?? categoryLabel(entry.category)}</span>
+          <span className="chip-title">{label}</span>
         </>
       ) : (
-        <span className="chip-title">{entry.title ?? categoryLabel(entry.category)}</span>
+        <span className="chip-title">{label}</span>
       )}
     </button>
   );

@@ -3549,3 +3549,56 @@ textarea {
 .segmented-row {
   margin: 0 0 12px;
 }
+
+/* ---------- «На подтверждение» и ждущий больничный ---------- */
+
+.approval-card {
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-control);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.approval-card-name {
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.approval-card-line {
+  font-size: var(--text-meta);
+}
+
+.approval-card-forced {
+  font-size: var(--text-meta);
+  color: var(--destructive);
+}
+
+.panel-pending {
+  margin-top: 12px;
+}
+
+.panel-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Пунктир чипа — единственное новое обозначение сетки; строка под ней объясняет его. */
+.grid-pending-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: var(--text-meta);
+  color: var(--hint);
+}
+
+.grid-pending-legend__sample {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  outline-offset: -2px;
+  flex: none;
+}

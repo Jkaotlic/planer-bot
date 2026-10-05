@@ -1,4 +1,4 @@
-export type NavKey = "schedule" | "employees" | "groups" | "kinds" | "checklist" | "weekend" | "collections" | "announce" | "bugs" | "log" | "settings";
+export type NavKey = "schedule" | "approvals" | "employees" | "groups" | "kinds" | "checklist" | "weekend" | "collections" | "announce" | "bugs" | "log" | "settings";
 
 export interface SidebarProps {
   active: NavKey;
@@ -16,6 +16,7 @@ export interface SidebarProps {
 
 export const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.Element }> = [
   { key: "schedule", label: "Расписание", icon: <CalendarIcon /> },
+  { key: "approvals", label: "На подтверждение", icon: <ApprovalIcon /> },
   { key: "employees", label: "Работники", icon: <PeopleIcon /> },
   { key: "groups", label: "Группы", icon: <GroupsIcon /> },
   { key: "kinds", label: "Виды смен", icon: <KindsIcon /> },
@@ -27,6 +28,12 @@ export const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.El
   { key: "log", label: "Журнал", icon: <LogIcon /> },
   { key: "settings", label: "Настройки", icon: <GearIcon /> },
 ];
+
+/** Что значит число у пункта — для читалки экрана: у двух меток разный смысл. */
+const BADGE_MEANING: Partial<Record<NavKey, string>> = {
+  schedule: "не хватает людей",
+  approvals: "ждут подтверждения",
+};
 
 /** Подпись экрана для мобильной шапки — та же, что у пункта меню: два разных
  *  названия одного экрана человек читает как два разных места. */
@@ -52,7 +59,7 @@ export function Sidebar({ active, onChange, adminLabel, open, badges }: SidebarP
             {badges?.[item.key] ? (
               <>
                 <span className="sidebar-nav-badge" aria-hidden="true">{badges[item.key]! > 9 ? "9+" : badges[item.key]}</span>
-                <span className="visually-hidden">, не хватает людей: {badges[item.key]}</span>
+                <span className="visually-hidden">, {BADGE_MEANING[item.key] ?? "ждут внимания"}: {badges[item.key]}</span>
               </>
             ) : null}
           </button>
@@ -60,6 +67,16 @@ export function Sidebar({ active, onChange, adminLabel, open, badges }: SidebarP
       </nav>
       <div className="sidebar-footer">{adminLabel}</div>
     </aside>
+  );
+}
+
+/** Галочка в круге — то же действие, что «✅ ОК» в боте. */
+function ApprovalIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12.5l2.7 2.7L16 9.5" />
+    </svg>
   );
 }
 
