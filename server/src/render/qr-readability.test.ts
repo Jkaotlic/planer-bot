@@ -85,3 +85,24 @@ describe("тихая зона", () => {
     expect(nearest).toBeGreaterThanOrEqual(Math.floor(4 * pxPerModule) - 1);
   });
 });
+
+describe("caption stays inside the picture", () => {
+  // Wide capitals run ~0.9-1 em in DejaVu Sans; a caption sized for average glyphs
+  // overflowed the viewBox and was clipped at both edges.
+  it.each(["Ж", "Ш", "W"])("40 × %s leaves the side margins white and the code readable", (glyph) => {
+    const text = SHORT;
+    const image = PNG.sync.read(picture(text, { shape: "classic", color: "black", caption: glyph.repeat(40) }));
+    const margin = 4;
+    for (let y = 0; y < image.height; y += 1) {
+      for (const x of Array.from({ length: margin }, (_, i) => i).flatMap((i) => [i, image.width - 1 - i])) {
+        expect(image.data[(y * image.width + x) * 4]!, `ink at x=${x}, y=${y}`).toBeGreaterThan(200);
+      }
+    }
+    expect(decode(PNG.sync.read(picture(text, { shape: "classic", color: "black", caption: glyph.repeat(40) })))).toBe(text);
+  });
+
+  it("a lone surrogate and U+FFFF in the caption do not make the rasterizer reject the SVG", () => {
+    const png = picture(SHORT, { shape: "dots", color: "blue", caption: "a\uD800b\uDC00c\uFFFFd\uFFFEe" });
+    expect(decode(PNG.sync.read(png))).toBe(SHORT);
+  });
+});

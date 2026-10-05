@@ -81,11 +81,14 @@ function escapeXml(value: string): string {
 
 /**
  * Управляющие символы XML 1.0 не допускает даже экранированными: растеризатор
- * на таком SVG падает целиком. Переводы строк — в пробел: подпись в одну строку.
+ * на таком SVG падает целиком. То же с одиночными суррогатами и U+FFFE/U+FFFF:
+ * в XML они не допустимы, а в JS-строке пришедшей снаружи встречаются. Настоящая
+ * пара (эмодзи) остаётся. Переводы строк — в пробел: подпись в одну строку.
  */
 function cleanCaption(raw: string | undefined): string {
   return (raw ?? "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uFFFE\uFFFF]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -156,7 +159,9 @@ export function renderQr(text: string, style: QrStyle): QrPicture {
   const ink = QR_COLORS[style.color].hex;
   // Подпись ниже тихой зоны, а не в ней: текст у края кода сканер принимает за модули.
   // Кегль подгоняется под длину, чтобы 40 знаков влезли в ширину кода одной строкой.
-  const fontSize = caption ? Math.min(size * 0.07, (size * 0.9) / (caption.length * 0.62)) : 0;
+  // Считаем по самой широкой букве (W, Ж, Ш — до ~1 em в DejaVu Sans), а не по средней
+  // (~0.62): на средней сорок заглавных вылезали за края и обрезались.
+  const fontSize = caption ? Math.min(size * 0.07, (size * 0.9) / caption.length) : 0;
   const heightUnits = caption ? size + Math.round(fontSize * 1.8) : size;
   const label = caption
     ? `<text x="${num(size / 2)}" y="${num(size + fontSize * 0.9)}" text-anchor="middle" font-family="DejaVu Sans, -apple-system, Segoe UI, Roboto, sans-serif" font-size="${num(fontSize)}" fill="${ink}">${escapeXml(caption)}</text>`

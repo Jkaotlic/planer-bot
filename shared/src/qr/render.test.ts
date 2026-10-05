@@ -59,6 +59,11 @@ describe("renderQr — подпись", () => {
     expect(svg).not.toContain("\u0007");
   });
 
+  it("одиночные суррогаты и U+FFFE/U+FFFF вырезаются, а настоящая пара остаётся", () => {
+    const svg = renderQrSvg(SHORT, { shape: "classic", color: "black", caption: "a\uD800b\uDC00c\uFFFFd\uFFFEe 😀" });
+    expect(svg).toContain(">abcde 😀</text>");
+  });
+
   it("подпись делает картинку выше, но не шире", () => {
     const plain = renderQr(SHORT, { shape: "soft", color: "blue" });
     const signed = renderQr(SHORT, { shape: "soft", color: "blue", caption: "Сбор на кофемашину" });
@@ -99,6 +104,12 @@ describe("renderQr — геометрия", () => {
 });
 
 describe("qrPreview", () => {
+  // Не-QrTextError — настоящий сбой, его нельзя выдавать пользователю за «ошибку ввода».
+  it("чужую ошибку не проглатывает", () => {
+    const hostile = { shape: "classic", color: "black", get caption(): string { throw new RangeError("boom"); } } as never;
+    expect(() => qrPreview(SHORT, hostile)).toThrow(RangeError);
+  });
+
   it("пусто — подсказка, ошибка — её текст, иначе картинка data-URL", () => {
     expect(qrPreview("", { shape: "classic", color: "black" })).toEqual({ kind: "empty" });
     expect(qrPreview("a".repeat(1001), { shape: "classic", color: "black" })).toMatchObject({ kind: "error" });
