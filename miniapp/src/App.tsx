@@ -629,6 +629,7 @@ export function App() {
         shifts={data.myShifts}
         templates={data.templates}
         ownShifts={canAddOwnShifts(data.me)}
+        isAdmin={data.me.isAdmin}
         onCancel={() => setSelfEntryMode(null)}
         onCreate={handleCreateSelfEntry}
         onUpdate={handleUpdateSelfEntry}

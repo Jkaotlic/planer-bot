@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { apiClient, type SickApprovalRow } from "../../api/client";
 import { AdminSickApprovals } from "./AdminSickApprovals";
+import { waitFor } from "../../test-wait";
 
 /**
  * «На подтверждение»: что админ видит на карточке и что делают две кнопки. Кнопки
@@ -13,6 +14,8 @@ import { AdminSickApprovals } from "./AdminSickApprovals";
 
 // React проверяет этот флаг, чтобы разрешить `act` вне тест-раннера с DOM.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// Под нагрузкой полного набора ожидание условия длиннее обычного: таймаут теста не должен обрезать `waitFor`.
+vi.setConfig({ testTimeout: 30_000 });
 
 const ROW: SickApprovalRow = {
   id: 7, employeeId: 4, employeeName: "Даша", date: "2026-10-06", endDate: "2026-10-08",
@@ -37,19 +40,21 @@ afterEach(async () => {
   delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
 });
 
-async function settle(times = 6) {
-  for (let i = 0; i < times; i += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    });
-  }
+/**
+ * Витки очереди микрозадач: нужны только перед утверждением «чего-то нет / не звали» — оно
+ * проходило бы и до прихода ответа. Всё, что должно появиться, ждётся через `waitFor`.
+ */
+async function flush(times = 10) {
+  for (let i = 0; i < times; i += 1) await act(async () => {});
 }
 
 async function mount(props: { onChanged?: () => void } = {}) {
   await act(async () => {
     root!.render(createElement(AppRoot, null, createElement(AdminSickApprovals, props)));
   });
-  await settle();
+  // Список запрошен и разобран (карточка, пустое состояние или ошибка уже нарисованы).
+  await waitFor(() => expect(vi.mocked(apiClient.getSickApprovals)).toHaveBeenCalled());
+  await flush();
   return host!;
 }
 
@@ -93,11 +98,12 @@ describe("«На подтверждение» в мини-аппе", () => {
     const onChanged = vi.fn();
     const el = await mount({ onChanged });
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
-    expect(approve).toHaveBeenCalledWith(7);
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(onChanged).toHaveBeenCalled();
-    expect(el.textContent).toContain("Больничных на подтверждение нет");
+    await waitFor(() => {
+      expect(approve).toHaveBeenCalledWith(7);
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(onChanged).toHaveBeenCalled();
+      expect(el.textContent).toContain("Больничных на подтверждение нет");
+    });
   });
 
   it("«Отклонить» спрашивает, и только «Да, отклонить» отклоняет", async () => {
@@ -109,8 +115,8 @@ describe("«На подтверждение» в мини-аппе", () => {
     expect(reject).not.toHaveBeenCalled();
     expect(el.textContent).toContain("Запись удалится");
     await act(async () => { buttonByText(el, "Да, отклонить").click(); });
-    await settle();
-    expect(reject).toHaveBeenCalledWith(7);
+    await waitFor(() => expect(reject).toHaveBeenCalledWith(7));
+    await flush();
     expect(approve).not.toHaveBeenCalled();
   });
 
@@ -120,12 +126,13 @@ describe("«На подтверждение» в мини-аппе", () => {
     const onChanged = vi.fn();
     const el = await mount({ onChanged });
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
-    expect(el.textContent).toContain("Уже подтвердил(а) Игорь");
     // Устаревшая карточка с живыми кнопками — враньё: список перечитан, метка тоже.
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(onChanged).toHaveBeenCalled();
-    expect([...el.querySelectorAll("button")].some((b) => (b.textContent ?? "").includes("✅ ОК"))).toBe(false);
+    await waitFor(() => {
+      expect(el.textContent).toContain("Уже подтвердил(а) Игорь");
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(onChanged).toHaveBeenCalled();
+      expect([...el.querySelectorAll("button")].some((b) => (b.textContent ?? "").includes("✅ ОК"))).toBe(false);
+    });
   });
 
   it("«Больничного уже нет» (404): так же — текст, перечитанный список, onChanged", async () => {
@@ -135,10 +142,11 @@ describe("«На подтверждение» в мини-аппе", () => {
     const el = await mount({ onChanged });
     await act(async () => { buttonByText(el, "❌ Отклонить").click(); });
     await act(async () => { buttonByText(el, "Да, отклонить").click(); });
-    await settle();
-    expect(el.textContent).toContain("Больничного уже нет");
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(onChanged).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(el.textContent).toContain("Больничного уже нет");
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(onChanged).toHaveBeenCalled();
+    });
   });
 
   it("два быстрых тапа «ОК» — один запрос", async () => {
@@ -147,7 +155,9 @@ describe("«На подтверждение» в мини-аппе", () => {
     const el = await mount();
     const ok = buttonByText(el, "✅ ОК");
     await act(async () => { ok.click(); ok.click(); });
-    await settle();
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    // Второй тап мог дойти позже первого: дать ему шанс, прежде чем утверждать «один».
+    await flush();
     expect(approve).toHaveBeenCalledTimes(1);
   });
 
@@ -161,14 +171,13 @@ describe("«На подтверждение» в мини-аппе", () => {
     const approve = vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
     const el = await mount();
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
-    expect(approve).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    await flush();
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
+    await flush();
     expect(approve).toHaveBeenCalledTimes(1);
     await act(async () => { releaseReload([]); });
-    await settle();
-    expect(el.textContent).toContain("Больничных на подтверждение нет");
+    await waitFor(() => expect(el.textContent).toContain("Больничных на подтверждение нет"));
   });
 
   it("onChanged зовётся только после перечитывания списка — запросы идут по очереди", async () => {
@@ -180,8 +189,7 @@ describe("«На подтверждение» в мини-аппе", () => {
     vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
     const el = await mount({ onChanged: () => events.push("changed") });
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
-    expect(events).toEqual(["get", "get", "changed"]);
+    await waitFor(() => expect(events).toEqual(["get", "get", "changed"]));
   });
 
   it("список не загрузился — текст ошибки и «Повторить», который читает заново", async () => {
@@ -189,9 +197,10 @@ describe("«На подтверждение» в мини-аппе", () => {
     const el = await mount();
     expect(el.textContent).toContain("сеть");
     await act(async () => { buttonByText(el, "Повторить").click(); });
-    await settle();
-    expect(get).toHaveBeenCalledTimes(2);
-    expect(el.textContent).toContain("Даша");
+    await waitFor(() => {
+      expect(get).toHaveBeenCalledTimes(2);
+      expect(el.textContent).toContain("Даша");
+    });
   });
 
   it("решение принято, а перечитать список не вышло — так и сказано, а не «не удалось загрузить»", async () => {
@@ -201,10 +210,11 @@ describe("«На подтверждение» в мини-аппе", () => {
     vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
     const el = await mount();
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
-    expect(el.textContent).toContain("Решение принято, но список не удалось обновить");
-    expect(el.textContent).toContain("Повторить");
-    expect(el.textContent).not.toContain("сеть");
+    await waitFor(() => {
+      expect(el.textContent).toContain("Решение принято, но список не удалось обновить");
+      expect(el.textContent).toContain("Повторить");
+      expect(el.textContent).not.toContain("сеть");
+    });
   });
 
   it("отказ сервера и провал перечитывания — это не «решение принято»", async () => {
@@ -212,9 +222,10 @@ describe("«На подтверждение» в мини-аппе", () => {
     vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("Уже подтвердил(а) Игорь"));
     const el = await mount();
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
+    // Сначала дождаться ответа об отказе (позитивное), потом утверждать «не принято».
+    await waitFor(() => expect(el.textContent).toContain("Уже подтвердил(а) Игорь"));
+    await flush();
     expect(el.textContent).not.toContain("Решение принято");
-    expect(el.textContent).toContain("Уже подтвердил(а) Игорь");
   });
 
   it("отказ сервера прокручивается в видимую часть: список под ним может быть длинным", async () => {
@@ -226,8 +237,7 @@ describe("«На подтверждение» в мини-аппе", () => {
     const el = await mount();
     expect(scroll).not.toHaveBeenCalled();
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
-    await settle();
-    expect(scroll).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
     expect((scroll.mock.contexts[0] as HTMLElement).textContent).toContain("Уже подтвердил(а) Игорь");
   });
 });

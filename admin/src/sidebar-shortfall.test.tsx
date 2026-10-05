@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminShortfall } from "@planer/shared";
 import { AuthRequiredError, apiClient } from "./api/client";
 import { App } from "./App";
+import { waitFor } from "./test-wait";
 
 /**
  * Число нехватки на пункте «Расписание» сайдбара — проводка от ручки до метки.
@@ -13,6 +14,8 @@ import { App } from "./App";
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// Под нагрузкой полного набора ожидание условия длиннее обычного: таймаут теста не должен обрезать `waitFor`.
+vi.setConfig({ testTimeout: 30_000 });
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -31,12 +34,19 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function settle(times = 12) {
-  for (let i = 0; i < times; i += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    });
-  }
+/**
+ * Микрозадачи, а не таймеры: ответы мок-ручек — готовые промисы, и им нужны лишь витки очереди,
+ * чтобы экран их разобрал. Это нужно ТОЛЬКО перед утверждением «чего-то нет» (метки, вызова):
+ * такое утверждение проходило бы и до прихода ответа, а ждать наличия нечего.
+ */
+async function flush(times = 10) {
+  for (let i = 0; i < times; i += 1) await act(async () => {});
+}
+
+/** Ручка вызвана не меньше `n` раз, и её ответ уже разобран экраном. */
+async function called(spy: { mock: { calls: unknown[] } }, n = 1) {
+  await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThanOrEqual(n));
+  await flush();
 }
 
 async function mount() {
@@ -46,7 +56,10 @@ async function mount() {
   await act(async () => {
     root!.render(createElement(App));
   });
-  await settle();
+  // Экран нарисован (расписание или вход), обе ручки метки уже позваны и разобраны.
+  await waitFor(() => expect(host!.querySelector(".schedule-table, .login-screen")).not.toBeNull());
+  await called(vi.mocked(apiClient.getAdminShortfall));
+  await called(vi.mocked(apiClient.getSickApprovals));
   return host;
 }
 
@@ -58,7 +71,7 @@ describe("метка нехватки в сайдбаре", () => {
   it("нехватка — число на пункте «Расписание»", async () => {
     vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
     const el = await mount();
-    expect(badge(el)?.textContent).toBe("4");
+    await waitFor(() => expect(badge(el)?.textContent).toBe("4"));
     expect(badge(el)?.closest("button")?.textContent).toContain("Расписание");
   });
 
@@ -89,11 +102,11 @@ describe("метка нехватки в сайдбаре", () => {
     vi.spyOn(apiClient, "setTemplateCoverage").mockResolvedValue(undefined);
     const el = await mount();
     await act(async () => navButton(el, "Виды смен").click());
-    await settle();
+    await waitFor(() => expect(el.querySelector(".kind-card-head")).not.toBeNull());
     const before = getShortfall.mock.calls.length;
     getShortfall.mockResolvedValue({ total: 1, firstDate: "2026-08-26" });
     await act(async () => (el.querySelector(".kind-card-head") as HTMLButtonElement).click());
-    await settle();
+    await waitFor(() => expect(el.querySelector('input[aria-label$=": норма на Пн"]')).not.toBeNull());
     const field = el.querySelector<HTMLInputElement>('input[aria-label$=": норма на Пн"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "5");
@@ -101,37 +114,38 @@ describe("метка нехватки в сайдбаре", () => {
     });
     const save = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Сохранить норму")!;
     await act(async () => save.click());
-    await settle();
-    expect(el.querySelector(".kinds-intro")).not.toBeNull();
-    expect(getShortfall.mock.calls.length).toBeGreaterThan(before);
-    expect(badge(el)?.textContent).toBe("1");
+    await waitFor(() => {
+      expect(el.querySelector(".kinds-intro")).not.toBeNull();
+      expect(getShortfall.mock.calls.length).toBeGreaterThan(before);
+      expect(badge(el)?.textContent).toBe("1");
+    });
   });
 
   it("больше девяти — «9+»", async () => {
     vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 23, firstDate: "2026-08-26" });
-    expect(badge(await mount())?.textContent).toBe("9+");
+    const el = await mount();
+    await waitFor(() => expect(badge(el)?.textContent).toBe("9+"));
   });
 
   it("граница: девять — «9», десять — «9+»", async () => {
     const spy = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 9, firstDate: "2026-08-26" });
     const el = await mount();
-    expect(badge(el)?.textContent).toBe("9");
+    await waitFor(() => expect(badge(el)?.textContent).toBe("9"));
     spy.mockResolvedValue({ total: 10, firstDate: "2026-08-26" });
     await act(async () => navButton(el, "Работники").click());
     await act(async () => navButton(el, "Расписание").click());
-    await settle(4);
-    expect(badge(el)?.textContent).toBe("9+");
+    await waitFor(() => expect(badge(el)?.textContent).toBe("9+"));
   });
 
   it("позднее обновление упало — прежнее число не остаётся", async () => {
     const spy = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
     const el = await mount();
-    expect(badge(el)?.textContent).toBe("4");
+    await waitFor(() => expect(badge(el)?.textContent).toBe("4"));
     spy.mockRejectedValue(new Error("сеть"));
     await act(async () => navButton(el, "Работники").click());
     await act(async () => navButton(el, "Расписание").click());
-    await settle(4);
-    expect(badge(el)).toBeNull();
+    // Метка пропадает по отказу: ждём именно этого, а не просто «прошло время».
+    await waitFor(() => expect(badge(el)).toBeNull());
   });
 
   it("возврат во вкладку перечитывает число; после размонтирования слушателя нет", async () => {
@@ -142,13 +156,14 @@ describe("метка нехватки в сайдбаре", () => {
     const visibility = vi.spyOn(document, "visibilityState", "get");
     visibility.mockReturnValue("hidden");
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    await settle(2);
+    await flush();
     expect(spy.mock.calls.length).toBe(before);
     visibility.mockReturnValue("visible");
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    await settle(2);
-    expect(spy.mock.calls.length).toBe(before + 1);
-    expect(badge(el)?.textContent).toBe("6");
+    await waitFor(() => {
+      expect(spy.mock.calls.length).toBe(before + 1);
+      expect(badge(el)?.textContent).toBe("6");
+    });
     await act(async () => root!.unmount());
     root = null;
     document.dispatchEvent(new Event("visibilitychange"));
@@ -158,7 +173,7 @@ describe("метка нехватки в сайдбаре", () => {
   it("экранному диктору число зачитывается словами, а сама метка скрыта от него", async () => {
     vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-08-26" });
     const el = await mount();
-    expect(badge(el)?.getAttribute("aria-hidden")).toBe("true");
+    await waitFor(() => expect(badge(el)?.getAttribute("aria-hidden")).toBe("true"));
     expect(navButton(el, "Расписание").querySelector(".visually-hidden")?.textContent).toContain("не хватает людей: 4");
   });
 
@@ -172,13 +187,14 @@ describe("метка нехватки в сайдбаре", () => {
     const el = await mount();
     expect(badge(el)).toBeNull();
     await act(async () => navButton(el, "Виды смен").click());
-    await settle(4);
     await act(async () => navButton(el, "Расписание").click());
-    await settle(4);
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(badge(el)?.textContent).toBe("4");
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(badge(el)?.textContent).toBe("4");
+    });
     await act(async () => resolveOld({ total: 1, firstDate: "2026-08-24" }));
-    await settle(2);
+    // Старый ответ разобран (его микрозадачи отработали), и число прежнее.
+    await flush();
     expect(badge(el)?.textContent).toBe("4");
   });
 
@@ -189,8 +205,7 @@ describe("метка нехватки в сайдбаре", () => {
     spy.mockResolvedValue({ total: 2, firstDate: "2026-08-26" });
     await act(async () => navButton(el, "Работники").click());
     await act(async () => navButton(el, "Расписание").click());
-    await settle(4);
-    expect(badge(el)?.textContent).toBe("2");
+    await waitFor(() => expect(badge(el)?.textContent).toBe("2"));
   });
 
   it("после удаления записи число перечитывается", async () => {
@@ -205,8 +220,7 @@ describe("метка нехватки в сайдбаре", () => {
     const byText = (text: string) => [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent ?? "").trim() === text)!;
     await act(async () => byText("Удалить").click());
     await act(async () => byText("Да, удалить").click());
-    await settle(12);
-    expect(badge(el)?.textContent).toBe("3");
+    await waitFor(() => expect(badge(el)?.textContent).toBe("3"));
   });
 
   it("ждущие ОК — своя метка на «На подтверждение» и своя подсказка для читалки", async () => {
@@ -216,7 +230,7 @@ describe("метка нехватки в сайдбаре", () => {
     ]);
     const el = await mount();
     const item = navButton(el, "На подтверждение");
-    expect(item.querySelector(".sidebar-nav-badge")?.textContent).toBe("1");
+    await waitFor(() => expect(item.querySelector(".sidebar-nav-badge")?.textContent).toBe("1"));
     expect(item.textContent).toContain("ждут подтверждения: 1");
     expect(navButton(el, "Расписание").querySelector(".sidebar-nav-badge")).toBeNull();
   });
@@ -230,7 +244,7 @@ describe("метка нехватки в сайдбаре", () => {
     host?.remove();
     spy.mockRejectedValue(new AuthRequiredError("auth"));
     const el2 = await mount();
-    expect(el2.querySelector(".login-screen")).not.toBeNull();
+    await waitFor(() => expect(el2.querySelector(".login-screen")).not.toBeNull());
   });
 
   it("возврат во вкладку перечитывает ждущих", async () => {
@@ -242,8 +256,7 @@ describe("метка нехватки в сайдбаре", () => {
     ]);
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    await settle(2);
-    expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("1");
+    await waitFor(() => expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("1"));
   });
 
   it("запоздавший старый ответ о ждущих не затирает новый", async () => {
@@ -257,10 +270,9 @@ describe("метка нехватки в сайдбаре", () => {
     const el = await mount();
     await act(async () => navButton(el, "Работники").click());
     await act(async () => navButton(el, "Расписание").click());
-    await settle(4);
-    expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("2");
+    await waitFor(() => expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("2"));
     await act(async () => resolveOld([]));
-    await settle(2);
+    await flush();
     expect(navButton(el, "На подтверждение").querySelector(".sidebar-nav-badge")?.textContent).toBe("2");
   });
 });

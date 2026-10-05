@@ -128,6 +128,8 @@ export interface SelfEntryScreenProps {
    *  просто нет, но тот же расчёт отказа не должен молча решать за него иначе,
    *  чем решит сервер. */
   ownShifts: boolean;
+  /** Больничный админа подтверждается сразу (сервер: `needsOk` только у не-админа): подпись про письмо ему врёт. */
+  isAdmin?: boolean;
   onCancel: () => void;
   /** Возвращает смены, оставшиеся без человека, — про них форма спросит вторым шагом. */
   onCreate: (input: SelfEntryInput) => Promise<HandoverDraft[]>;
@@ -153,6 +155,7 @@ export function SelfEntryScreen({
   shifts,
   templates,
   ownShifts,
+  isAdmin = false,
   onCancel,
   onCreate,
   onUpdate,
@@ -345,7 +348,9 @@ export function SelfEntryScreen({
           header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
           footer={
             isSick
-              ? "Админам уйдёт письмо: они подтвердят больничный и увидят, какие смены остались без человека."
+              ? isAdmin
+                ? undefined
+                : "Админам уйдёт письмо: они подтвердят больничный и увидят, какие смены остались без человека."
               : isShift
                 ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
                 : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
