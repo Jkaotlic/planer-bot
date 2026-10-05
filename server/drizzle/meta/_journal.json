@@ -295,6 +295,13 @@
       "when": 1791192368564,
       "tag": "0041_sick_leave_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1791206958134,
+      "tag": "0042_qr_style",
+      "breakpoints": true
     }
   ]
 }

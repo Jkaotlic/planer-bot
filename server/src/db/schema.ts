@@ -56,6 +56,13 @@ export const employees = sqliteTable("employees", {
    * после того, как выбор сохранился.
    */
   startTab: text(),
+  /**
+   * Last QR style this person picked, as JSON `{ shape, color }`. `null` — never picked:
+   * the bot keeps drawing «Классика», black. Text, not two columns: the shape and colour
+   * lists live in `shared/src/qr/style.ts`, and `parseSavedQrStyle` falls back to the
+   * default on anything it no longer recognises instead of failing every link.
+   */
+  qrStyle: text(),
   /** An admin took this person out of AUTOMATIC placement: очередь дежурств
    *  («кому следующему»), the weekend call for volunteers, and weekend assignment.
    *  An admin can still place them by hand — this is not archiving. */

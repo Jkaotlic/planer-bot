@@ -1,3 +1,4 @@
+import type { QrSavedStyle } from "@planer/shared";
 import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, type Employee } from "../db/schema";
@@ -77,6 +78,16 @@ export function setWeekLegend(db: Db, employeeId: number, enabled: boolean): Emp
     .where(eq(employees.id, employeeId))
     .returning()
     .all()[0];
+}
+
+/**
+ * The person's QR style for the bot and the mini app screen. Only the two keys are
+ * written: the HTTP body may carry a caption, and a caption stored here would be
+ * stamped on every link the person ever sends the bot.
+ */
+export function setQrStyle(db: Db, employeeId: number, style: QrSavedStyle): Employee | undefined {
+  const value = JSON.stringify({ shape: style.shape, color: style.color });
+  return db.update(employees).set({ qrStyle: value }).where(eq(employees.id, employeeId)).returning().all()[0];
 }
 
 /** The one setting a worker owns about themselves: shift reminders on or off. */

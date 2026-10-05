@@ -100,6 +100,7 @@ import { createOrderRoutes } from "./routes/orders";
 import { createTeamAudienceRoutes } from "./routes/team-audience";
 import {
   isStartTab,
+  parseSavedQrStyle,
   startTabVisible,
   type StartTab,
   parseCoverage,
@@ -530,6 +531,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
       selfScheduleEnabled: me.selfScheduleEnabled,
       /** С какой вкладки открывать приложение. `null` — «Смены», как было всегда. */
       startTab: me.startTab,
+      /** Parsed, never null: the QR screen opens on it, and the default is a fact, not a gap. */
+      qrStyle: parseSavedQrStyle(me.qrStyle),
       canAnnounce: canAnnounce(me),
     });
   });
