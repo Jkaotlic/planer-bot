@@ -306,3 +306,15 @@ textarea {
     display: inline-flex;
   }
 }
+
+/* Только экран «QR-код»: общие Hint и красный текст трогать нельзя, они стоят по всему
+   приложению. Замер до правки: счётчик подписи 3.57 / 2.81, ошибка длины 3.42 / 3.74
+   (светлая / тёмная); норма 4.5. Смесь с цветом текста тянет серое и красное к
+   контрастному полюсу темы, поэтому одно правило годится для обеих. */
+.ui-hint.qr-hint {
+  color: color-mix(in srgb, var(--tgui--hint_color) 55%, var(--tgui--text_color));
+}
+
+.qr-error {
+  color: color-mix(in srgb, var(--tgui--destructive_text_color) 60%, var(--tgui--text_color));
+}

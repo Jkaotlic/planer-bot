@@ -28,6 +28,8 @@ export function GreetingHero({ name, summary, onSettings, onServices }: Greeting
         <div style={{ fontSize: 18, fontWeight: 700, overflowWrap: "anywhere" }}>Привет, {name} 👋</div>
         <div style={{ fontSize: "var(--app-text-meta)", opacity: 0.92, marginTop: 3 }}>{summary}</div>
       </div>
+      {/* Подложка кнопок тёмная, а не белая: белая 16% давала контраст подписи 1.98–3.08
+          на концах градиента, тёмная 36% — см. замер в коммите (норма 4.5). */}
       {/* «Сервисы» — подписью, а не одной иконкой: владелец выбрал так 05.10.2026,
           иконку без подписи никто не нажимает. Рядом с шестерёнкой, в той же строке,
           чтобы не занимать на экране новое место. */}
@@ -41,7 +43,7 @@ export function GreetingHero({ name, summary, onSettings, onServices }: Greeting
             padding: "0 12px",
             border: 0,
             borderRadius: 12,
-            background: "rgb(255 255 255 / 16%)",
+            background: "rgb(0 0 0 / 36%)",
             color: "#fff",
             display: "inline-flex",
             alignItems: "center",
@@ -67,7 +69,7 @@ export function GreetingHero({ name, summary, onSettings, onServices }: Greeting
             height: 44,
             border: 0,
             borderRadius: 12,
-            background: "rgb(255 255 255 / 16%)",
+            background: "rgb(0 0 0 / 36%)",
             color: "#fff",
             display: "inline-flex",
             alignItems: "center",

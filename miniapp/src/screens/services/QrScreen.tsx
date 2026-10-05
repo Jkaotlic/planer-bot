@@ -77,11 +77,13 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
 
   return (
     <Screen title="QR-код" onBack={leave}>
-      <div style={{ margin: "0 -20px" }}>
+      {/* Поле у tgui со своими боковыми отступами, поэтому выходит к краям Screen. Вылет равен
+          его падингу (--app-gutter, 16px): прежние -20px давали scrollWidth 394 при окне 390. */}
+      <div style={{ margin: "0 calc(-1 * var(--app-gutter))" }}>
         <Textarea header="Ссылка или текст" placeholder="https://…" value={text} onChange={(e) => edit(() => setText(e.target.value))} />
       </div>
       {preview.kind === "error" && (
-        <div role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: 13, margin: "4px 0 8px" }}>
+        <div role="alert" className="qr-error" style={{ fontSize: 13, margin: "4px 0 8px" }}>
           {preview.message}
         </div>
       )}
@@ -107,7 +109,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
       </div>
 
       <Group header="Форма">
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: "clamp(4px, 4.57vw - 9.8px, 8px)" }}>
           {QR_SHAPES.map((shape) => (
             <button
               key={shape}
@@ -118,7 +120,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
                 flex: "1 1 0",
                 minWidth: 0,
                 minHeight: 44,
-                padding: "6px 2px",
+                padding: "6px 0",
                 border: `2px solid ${style.shape === shape ? "var(--tgui--accent_text_color)" : "transparent"}`,
                 borderRadius: 12,
                 background: "var(--tgui--secondary_bg_color)",
@@ -127,7 +129,10 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
                 flexDirection: "column",
                 alignItems: "center",
                 gap: 4,
-                fontSize: 12,
+                // На 320 слово «Скруглённый» при 12px не влезало в кнопку (scrollWidth > clientWidth):
+                // при 10px оно ещё давало 66.7px на 62px места. Поэтому кегль и зазор сжимаются
+                // вместе с окном: 12px на 390 и шире, на 320 — 9px (запас ~4px), зазор 8px сжимается до 4px.
+                fontSize: "clamp(9px, 4.29vw - 4.7px, 12px)",
                 cursor: "pointer",
               }}
             >
@@ -151,9 +156,11 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
                 width: 44,
                 height: 44,
                 borderRadius: "50%",
-                border: `3px solid ${style.color === color ? "var(--tgui--accent_text_color)" : "transparent"}`,
-                outline: "2px solid var(--tgui--bg_color)",
-                outlineOffset: -5,
+                // Выбранный: белая кромка по краю образца (на всех шести тёмных заливках ≥ 3:1, а
+                // акцентная давала 2.44 на зелёном) и внешнее кольцо цвета текста через зазор —
+                // оно видно на странице в обеих темах, где белая кромка сливается со светлым фоном.
+                border: `3px solid ${style.color === color ? "#FFFFFF" : "transparent"}`,
+                boxShadow: style.color === color ? "0 0 0 2px var(--tgui--bg_color), 0 0 0 4px var(--tgui--text_color)" : "none",
                 background: QR_COLORS[color].hex,
                 cursor: "pointer",
               }}
@@ -163,7 +170,7 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
       </Group>
 
       <Group header="Подпись под кодом">
-        <div style={{ margin: "0 -20px" }}>
+        <div style={{ margin: "0 calc(-1 * var(--app-gutter))" }}>
           <Input
             placeholder="Например, «Сбор на кофемашину»"
             value={caption}
@@ -171,9 +178,9 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
             onChange={(e) => edit(() => setCaption(e.target.value))}
           />
         </div>
-        <Hint>
+        <p className="ui-hint qr-hint">
           По желанию, до {QR_CAPTION_MAX} знаков · {caption.length}/{QR_CAPTION_MAX}
-        </Hint>
+        </p>
       </Group>
 
       <ActionButton kind="primary" stretched loading={sending} disabled={preview.kind !== "ok" || sending} onClick={() => void send()}>
