@@ -9,7 +9,7 @@ import {
   type QrSavedStyle,
   type QrStyle,
 } from "@planer/shared";
-import { qrDataUrl, qrPreview, renderQrSvg } from "@planer/shared/qr";
+import { captionHasUnsupportedChars, qrDataUrl, qrPreview, renderQrSvg } from "@planer/shared/qr";
 import { apiClient } from "../../api/client";
 import { ActionButton, Group, Hint, Screen } from "../../ui";
 
@@ -181,6 +181,9 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
         <p className="ui-hint qr-hint">
           По желанию, до {QR_CAPTION_MAX} знаков · {caption.length}/{QR_CAPTION_MAX}
         </p>
+        {captionHasUnsupportedChars(caption) && (
+          <p className="ui-hint qr-hint">Эмодзи и иероглифы в подпись не попадут — их не нарисует картинка для бота</p>
+        )}
       </Group>
 
       <ActionButton kind="primary" stretched loading={sending} disabled={preview.kind !== "ok" || sending} onClick={() => void send()}>

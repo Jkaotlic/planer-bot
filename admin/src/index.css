@@ -3717,6 +3717,15 @@ textarea {
   font-size: var(--text-sub);
 }
 
+/* Подсказка про вырезанные эмодзи: тихая, но читаемая — смесь с цветом текста, как у счётчика
+   подписи в мини-аппе, держит контраст в обеих темах. */
+.qr-caption-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--text-sub);
+  color: color-mix(in srgb, var(--hint) 55%, var(--text));
+}
+
 .qr-notice {
   margin-top: 8px;
   font-size: var(--text-sub);

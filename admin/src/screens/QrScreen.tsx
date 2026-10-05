@@ -9,7 +9,7 @@ import {
   type QrSavedStyle,
   type QrStyle,
 } from "@planer/shared";
-import { qrDataUrl, qrPreview, renderQr, renderQrSvg } from "@planer/shared/qr";
+import { captionHasUnsupportedChars, qrDataUrl, qrPreview, renderQr, renderQrSvg } from "@planer/shared/qr";
 import { copyPngToClipboard, downloadBlob, qrFileName, svgToPngBlob } from "../lib/qr-export";
 
 /**
@@ -127,6 +127,7 @@ export function QrScreen() {
               Подпись под кодом — по желанию, до {QR_CAPTION_MAX} знаков · {caption.length}/{QR_CAPTION_MAX}
             </span>
             <input type="text" maxLength={QR_CAPTION_MAX} placeholder="Например, «Сбор на кофемашину»" value={caption} onChange={(e) => setCaption(e.target.value)} />
+            {captionHasUnsupportedChars(caption) && <span className="qr-caption-hint">Эмодзи и иероглифы в подпись не попадут — их не нарисует картинка для бота</span>}
           </label>
         </div>
         <div className="qr-side">

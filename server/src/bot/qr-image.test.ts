@@ -59,4 +59,15 @@ describe("QR-код по ссылке", () => {
     const res = await buildQrImage("Ж".repeat(1000), { shape: "dots", color: "black" });
     expect(res.kind).toBe("text");
   });
+
+  it("draws the same picture with and without emoji/CJK in the caption (no tofu boxes)", () => {
+    // The rasteriser has DejaVu Sans only, so a glyph it lacks would show up as an empty
+    // box. The shared renderer drops such characters, which makes the PNG byte-identical
+    // to the one for the plain caption — i.e. what the mini app preview shows.
+    const url = "https://example.com/sbor";
+    const plain = renderQrPng(url, { shape: "classic", color: "black", caption: "Сбор на кофе" });
+    expect(renderQrPng(url, { shape: "classic", color: "black", caption: "Сбор 😀 на кофе ☕ 咖啡" }).equals(plain)).toBe(true);
+    // Sanity: a caption really changes the picture, so the equality above is not vacuous.
+    expect(renderQrPng(url, { shape: "classic", color: "black" }).equals(plain)).toBe(false);
+  });
 });

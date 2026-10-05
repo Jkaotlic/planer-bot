@@ -1,7 +1,7 @@
 import QRCode from "qrcode";
 import { describe, expect, it } from "vitest";
 import { QR_MAX_TEXT_LENGTH, QR_RASTER_WIDTH, QR_SHAPES } from "./style";
-import { QR_QUIET_ZONE, QrTextError, qrPreview, renderQr, renderQrSvg } from "./render";
+import { QR_QUIET_ZONE, QrTextError, captionHasUnsupportedChars, qrPreview, renderQr, renderQrSvg } from "./render";
 
 const SHORT = "https://example.com/menu";
 
@@ -60,8 +60,34 @@ describe("renderQr — подпись", () => {
   });
 
   it("одиночные суррогаты и U+FFFE/U+FFFF вырезаются, а настоящая пара остаётся", () => {
-    const svg = renderQrSvg(SHORT, { shape: "classic", color: "black", caption: "a\uD800b\uDC00c\uFFFFd\uFFFEe 😀" });
-    expect(svg).toContain(">abcde 😀</text>");
+    // 𝐀 (U+1D400) — не эмодзи: пара целая, значит, чистка суррогатов не рвёт настоящие пары.
+    const svg = renderQrSvg(SHORT, { shape: "classic", color: "black", caption: "a\uD800b\uDC00c\uFFFFd\uFFFEe 𝐀 \uD800𝐀\uDC00" });
+    expect(svg).toContain(">abcde 𝐀 𝐀</text>");
+  });
+
+  it("эмодзи, иероглифы и невидимые склейки вырезаются: бот их нарисовать не может", () => {
+    const caption = (raw: string) => />([^<]*)<\/text>/.exec(renderQrSvg(SHORT, { shape: "classic", color: "black", caption: raw }))?.[1];
+    expect(caption("Сбор 😀 на кофе")).toBe("Сбор на кофе");
+    expect(caption("Кофе ☕ 🇷🇺 👨‍👩‍👧 ❤️ 1️⃣")).toBe("Кофе ❤ 1");
+    expect(caption("Чай ✅ ⭐ ⚡")).toBe("Чай");
+    // Текстовые по умолчанию, но из астрального блока: DejaVu их не знает.
+    expect(caption("Жара 🌡 🕶")).toBe("Жара");
+    expect(caption("Кофе 咖啡 コーヒー 커피")).toBe("Кофе");
+    expect(caption("Всё ок: © ® ™ ← → ♥ ✓ № € —")).toBe("Всё ок: © ® ™ ← → ♥ ✓ № € —");
+  });
+
+  it("подпись из одних эмодзи — пустая, подписи под кодом нет", () => {
+    expect(renderQrSvg(SHORT, { shape: "classic", color: "black", caption: "😀🎉" })).not.toContain("<text");
+  });
+
+  it("captionHasUnsupportedChars: true только когда вырезано видимое", () => {
+    expect(captionHasUnsupportedChars("Сбор 😀")).toBe(true);
+    expect(captionHasUnsupportedChars("咖啡")).toBe(true);
+    expect(captionHasUnsupportedChars("Чай ✅")).toBe(true);
+    expect(captionHasUnsupportedChars("Сбор на кофе © №1 — ок")).toBe(false);
+    expect(captionHasUnsupportedChars("")).toBe(false);
+    // Тихая чистка (селектор вариантов у ❤️) подсказки не просит — картинка осталась той же.
+    expect(captionHasUnsupportedChars("Сердце ❤\uFE0F")).toBe(false);
   });
 
   it("подпись делает картинку выше, но не шире", () => {

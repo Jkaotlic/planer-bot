@@ -44,6 +44,22 @@ describe("консоль: экран «QR-код»", () => {
     expect(el.querySelector(".qr-shape")!.textContent).toBe("Классика");
   });
 
+  it("эмодзи или иероглиф в подписи — тихая подсказка, обычный текст — без неё", async () => {
+    const el = await render();
+    const caption = el.querySelector<HTMLInputElement>('input[maxlength="40"]')!;
+    await type(el.querySelector("textarea")!, "https://example.com");
+    await type(caption, "Сбор на кофе © №1");
+    expect(el.textContent).not.toContain("Эмодзи и иероглифы");
+    await type(caption, "Сбор 😀");
+    expect(el.textContent).toContain("Эмодзи и иероглифы в подпись не попадут — их не нарисует картинка для бота");
+    expect(decodeURIComponent(el.querySelector<HTMLImageElement>(".qr-preview img")!.src)).toContain(">Сбор</text>");
+    expect(decodeURIComponent(el.querySelector<HTMLImageElement>(".qr-preview img")!.src)).not.toContain("😀");
+    await type(caption, "咖啡");
+    expect(el.textContent).toContain("Эмодзи и иероглифы");
+    await type(caption, "Кофе");
+    expect(el.textContent).not.toContain("Эмодзи и иероглифы");
+  });
+
   it("выбранный цвет и форма помечены aria-pressed", async () => {
     const el = await render();
     expect(button(el, "Чёрный").getAttribute("aria-pressed")).toBe("true");

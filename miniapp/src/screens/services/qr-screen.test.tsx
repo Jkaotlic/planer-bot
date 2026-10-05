@@ -80,6 +80,23 @@ describe("экран «QR-код»", () => {
     expect(el.querySelector('img[src="x"]')).toBeNull();
   });
 
+  it("эмодзи или иероглиф в подписи — тихая подсказка, обычный текст — без неё", async () => {
+    const { el } = await render();
+    const caption = el.querySelector<HTMLInputElement>("input[maxlength]")!;
+    await type(el.querySelector("textarea")!, "https://example.com");
+    await type(caption, "Сбор на кофе © №1");
+    expect(el.textContent).not.toContain("Эмодзи и иероглифы");
+    await type(caption, "Сбор 😀");
+    expect(el.textContent).toContain("Эмодзи и иероглифы в подпись не попадут — их не нарисует картинка для бота");
+    // Предпросмотр рисует ровно то, что останется в картинке для бота.
+    expect(decodeURIComponent(preview(el)!.src)).toContain(">Сбор</text>");
+    expect(decodeURIComponent(preview(el)!.src)).not.toContain("😀");
+    await type(caption, "咖啡");
+    expect(el.textContent).toContain("Эмодзи и иероглифы");
+    await type(caption, "Кофе");
+    expect(el.textContent).not.toContain("Эмодзи и иероглифы");
+  });
+
   it("длиннее 1000 знаков — объяснение словами и кнопка погашена", async () => {
     const { el } = await render();
     await type(el.querySelector("textarea")!, "a".repeat(1001));
