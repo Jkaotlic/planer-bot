@@ -34,6 +34,9 @@ export function EntryChip({ entry, templates, style }: EntryChipProps) {
   // его в обмен, не видел, ЧТО именно берёт. `templates` тут уже есть — их
   // читает палитра.
   const label = entry.title ?? templates.find((t) => t.id === entry.templateId)?.name ?? categoryLabel(entry.category);
+  // Один чип на «Мои смены» и список формы: работник видит, что больничный ещё не
+  // принят, там же, где видит сам больничный, а не в подсказке, до которой не дойдёт.
+  const shown = entry.pending ? `${label} · ждёт ОК` : label;
   const chipStyle: ChipStyle = {
     background: palette.bg,
     "--tgui--plain_foreground": palette.fg,
@@ -47,7 +50,7 @@ export function EntryChip({ entry, templates, style }: EntryChipProps) {
   };
   return (
     <Chip mode="mono" style={chipStyle}>
-      {label}
+      {shown}
     </Chip>
   );
 }

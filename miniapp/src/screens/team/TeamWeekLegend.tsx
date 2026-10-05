@@ -1,3 +1,4 @@
+import { SICK_LEAVE_PENDING_OUTLINE } from "@planer/shared";
 import { categoryPaletteForTheme } from "../../categories";
 import type { WeekLegendItem } from "../../lib/team-schedule";
 
@@ -20,7 +21,7 @@ export function TeamWeekLegend({ items, isDark }: { items: readonly WeekLegendIt
           const palette = item.palette ?? categoryPaletteForTheme(item.category ?? "shift", isDark);
           return (
             <li className="team-legend__item" key={`${item.code}:${item.label}`}>
-              <span className="team-legend__code" style={{ background: palette.bg, color: palette.fg }} aria-hidden="true">
+              <span className="team-legend__code" style={{ background: palette.bg, color: palette.fg, ...(item.pending ? { outline: SICK_LEAVE_PENDING_OUTLINE, outlineOffset: -2 } : {}) }} aria-hidden="true">
                 {item.code}
               </span>
               <span className="team-legend__label">{item.label}</span>

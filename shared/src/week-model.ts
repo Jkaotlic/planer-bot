@@ -31,6 +31,8 @@ export interface ScheduleEntryLike {
   unrecognisedCode?: string | null;
   /** Больничный ждёт ОК админа (сервер шлёт только `true`). */
   pending?: boolean;
+  /** Пока ждёт ОК продление: уже подтверждённый срок — его дни не бледные. */
+  approvedSpan?: { date: string; endDate: string | null };
 }
 
 /** Минимум пресета: сетка берёт из него имя, цвет и порядок сортировки. */
@@ -95,6 +97,9 @@ function templateFor<E extends ScheduleEntryLike>(
 export function toEntryView<E extends ScheduleEntryLike>(
   shift: E,
   templates: readonly SchedulePresetLike[],
+  /** День, который рисуем. Нужен только продлению: «ждёт ОК» у него — свойство дня,
+   *  а не записи (подтверждённые дни красные). Без даты — вся запись как есть. */
+  date?: string,
 ): TeamEntryView<E> {
   const template = templateFor(shift, templates);
   // A cell the import could not read keeps its own grey «?» square and says so in
@@ -103,7 +108,9 @@ export function toEntryView<E extends ScheduleEntryLike>(
     return { shift, title: `Не распознано: «${shift.unrecognisedCode}»`, palette: UNRECOGNISED_SCHEDULE_PALETTE, pending: false };
   }
   // «Ждёт ОК» бывает только у больничного — флаг на другой записи не значит ничего.
-  const pending = shift.pending === true && shift.category === "sick_leave";
+  const insideApproved = date != null && shift.approvedSpan != null
+    && coversDate({ ...shift, date: shift.approvedSpan.date, endDate: shift.approvedSpan.endDate }, date);
+  const pending = shift.pending === true && shift.category === "sick_leave" && !insideApproved;
   return {
     shift,
     // Отличие от копии в мини-аппе: подпись категории берётся из categoryLabel,
@@ -136,7 +143,7 @@ function weekCell<E extends ScheduleEntryLike>(
   const entries = shifts
     .filter((shift) => shift.employeeId === employeeId && coversDate(shift, date))
     .sort((a, b) => compareShifts(a, b, templates))
-    .map((shift) => toEntryView(shift, templates));
+    .map((shift) => toEntryView(shift, templates, date));
   return {
     date,
     entries,

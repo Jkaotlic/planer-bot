@@ -202,6 +202,37 @@ describe("больничный, ждущий ОК", () => {
     expect(legend[0]!.pending).toBe(false);
   });
 
+  it("продление: дни внутри подтверждённого срока красные, только новые — бледные", () => {
+    // Сервер шлёт `approvedSpan`, пока ждёт ОК именно продление: подтверждённые
+    // дни не должны бледнеть, иначе человеку покажут, что у него «отняли» больничный.
+    const extension = entry({
+      date: MONDAY, endDate: "2026-08-06", category: "sick_leave", templateId: null, start: null, end: null,
+      pending: true, approvedSpan: { date: MONDAY, endDate: "2026-08-04" },
+    });
+    const cells = buildWeekModel(MONDAY, { employees: TEAM, shifts: [extension] }, PRESETS).rows[0]!.cells;
+    expect(cells.slice(0, 4).map((cell) => cell.primary!.pending)).toEqual([false, false, true, true]);
+    expect(cells[0]!.primary!.palette?.bg).toBe("#FD0100");
+    expect(cells[2]!.primary!.palette).toEqual(SICK_LEAVE_PENDING_SCHEDULE_PALETTE);
+  });
+
+  it("продление: подтверждённый срок из одного дня (endDate null) закрывает только этот день", () => {
+    const extension = entry({
+      date: MONDAY, endDate: "2026-08-04", category: "sick_leave", templateId: null, start: null, end: null,
+      pending: true, approvedSpan: { date: MONDAY, endDate: null },
+    });
+    const cells = buildWeekModel(MONDAY, { employees: TEAM, shifts: [extension] }, PRESETS).rows[0]!.cells;
+    expect(cells.slice(0, 2).map((cell) => cell.primary!.pending)).toEqual([false, true]);
+  });
+
+  it("легенда продления: строка «ждёт ОК» есть, только когда бледный день на неделе", () => {
+    const extension = entry({
+      date: MONDAY, endDate: "2026-08-04", category: "sick_leave", templateId: null, start: null, end: null,
+      pending: true, approvedSpan: { date: MONDAY, endDate: "2026-08-04" },
+    });
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [extension] }, PRESETS));
+    expect(legend.map((item) => item.label)).toEqual(["Больничный"]);
+  });
+
   it("флаг на не-больничном ничего не меняет", () => {
     const vacation = entry({ date: MONDAY, category: "vacation", templateId: null, start: null, end: null, pending: true });
     const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts: [vacation] }, PRESETS));

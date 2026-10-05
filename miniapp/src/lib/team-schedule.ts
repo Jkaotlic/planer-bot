@@ -125,11 +125,12 @@ function groupEntries(
   shifts: readonly Shift[],
   employees: readonly TeamEmployee[],
   templates: readonly ScheduleTemplate[],
+  date: string,
 ): TodayGroup[] {
   const grouped = new Map<string, TodayGroup>();
   for (const shift of [...shifts].sort((a, b) => compareShifts(a, b, templates))) {
     const key = groupingKey(shift);
-    const entry = toEntryView(shift, templates);
+    const entry = toEntryView(shift, templates, date);
     const group = grouped.get(key) ?? {
       key,
       title: entry.title,
@@ -171,8 +172,8 @@ export function buildTodayModel(
     ),
   );
   return {
-    groups: groupEntries(timed, schedule.employees, templates),
-    noTimeGroups: groupEntries(noTime, schedule.employees, templates)
+    groups: groupEntries(timed, schedule.employees, templates, date),
+    noTimeGroups: groupEntries(noTime, schedule.employees, templates, date)
       .sort((a, b) => a.entries[0]!.shift.category.localeCompare(b.entries[0]!.shift.category)),
     workingCount: working.size,
     absentCount: absent.size,
