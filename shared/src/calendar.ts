@@ -1,4 +1,5 @@
 import { dayOfWeek, isWeekend } from "./time";
+import { weekdayShort } from "./week-dates";
 
 /**
  * Календарь дней: только исключения из правила «суббота и воскресенье — выходные».
@@ -42,6 +43,65 @@ export function dayOffLabel(date: string, kind: DayKind | undefined, note: strin
     const title = note?.trim();
     return title ? `🎉 ${title} — выходной` : "🎉 Выходной по календарю";
   }
-  if (kind === "workday") return dayOfWeek(date) === 0 ? "💼 Рабочее воскресенье" : "💼 Рабочая суббота";
+  if (kind === "workday") {
+    // Будень, возвращённый в работу: «рабочая суббота» на среде соврала бы, а подпись
+    // нужна — редактор дня показывает по ней, что отметка стоит (и снимается).
+    if (!isWeekend(date)) return "💼 Рабочий день";
+    return dayOfWeek(date) === 0 ? "💼 Рабочее воскресенье" : "💼 Рабочая суббота";
+  }
   return null;
+}
+
+/**
+ * Отметка дня для читателя: праздник — всегда, рабочий день — только в субботу и
+ * воскресенье. Будень, возвращённый в работу, для читателя обычен: «рабочей
+ * субботой» он не называется, значка и строки под неделей у него нет. Одно
+ * правило для подписи (`specialDays`) и для значков на клетках — иначе значок
+ * 💼 стоял бы там, где строки о нём нет.
+ */
+export function specialDayKind(date: string, kind: DayKind | undefined): DayKind | undefined {
+  if (kind === "holiday") return "holiday";
+  if (kind === "workday" && isWeekend(date)) return "workday";
+  return undefined;
+}
+
+/** Особый день для подписи человеку: `label` — строка под неделей, `short` — для узкой шапки колонки. */
+export interface SpecialDay {
+  date: string;
+  kind: DayKind;
+  label: string;
+  short: string;
+}
+
+/**
+ * Праздники и рабочие выходные из `dates`, с подписями, по порядку `dates`.
+ *
+ * Идём по списку дат, а не по строкам календаря: строк может быть на месяц, а
+ * нужна одна неделя, и порядок задаёт экран, а не база. Название пишется
+ * текстом на самом экране — подсказки по наведению на телефоне нет.
+ */
+export function specialDays(
+  dates: readonly string[],
+  rows: readonly { date: string; kind: DayKind; note?: string | null }[],
+): SpecialDay[] {
+  const byDate = new Map(rows.map((row) => [row.date, row]));
+  const out: SpecialDay[] = [];
+  for (const date of dates) {
+    const row = byDate.get(date);
+    if (!row || !specialDayKind(date, row.kind)) continue;
+    const when = `${weekdayShort(date)} ${Number(date.slice(8, 10))}`;
+    if (row.kind === "holiday") {
+      const title = row.note?.trim();
+      out.push({
+        date,
+        kind: "holiday",
+        label: `🎉 ${when} — ${title || "выходной по календарю"}`,
+        short: `🎉 ${title || "выходной"}`,
+      });
+    } else {
+      const name = dayOfWeek(date) === 0 ? "рабочее воскресенье" : "рабочая суббота";
+      out.push({ date, kind: "workday", label: `💼 ${when} — ${name}`, short: "💼 рабочая" });
+    }
+  }
+  return out;
 }

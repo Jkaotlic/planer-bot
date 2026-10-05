@@ -1,6 +1,6 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
 import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
-import type { RecipientGroupView, StartTab, TeamScheduleResponse } from "@planer/shared";
+import type { AdminShortfall, RecipientGroupView, StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
@@ -45,6 +45,7 @@ import type {
   SelfEntryInput,
   Shift,
   SwapDirection,
+  MyShifts,
   SwapLockResult,
   SwapRequest,
   SwapShiftSummary,
@@ -379,7 +380,7 @@ const readMock = createReadMock({
   },
 });
 
-export function mockGetMyShifts(): Promise<{ shifts: Shift[]; today: string }> {
+export function mockGetMyShifts(): Promise<MyShifts> {
   return readMock.getMyShifts();
 }
 
@@ -1056,6 +1057,11 @@ export async function mockGetPayrollCsv(from: string, to: string): Promise<strin
 const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<number, number> }>();
 /** DEV-хранилище нормы дня. Пусто — «не считаем», как и в базе по умолчанию. */
 const TEMPLATE_COVERAGE = new Map<number, number[]>();
+
+/** DEV: метка молчит — мок-график нехватку показывает плашкой на самом экране. */
+export async function mockGetAdminShortfall(): Promise<AdminShortfall> {
+  return { total: 0, firstDate: null };
+}
 
 export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
   await delay(180);

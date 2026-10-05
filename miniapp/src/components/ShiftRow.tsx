@@ -21,11 +21,14 @@ export interface ShiftRowProps {
   /** Раскрыт ли лист под строкой. Читается только у раскрываемой строки: скринридеру
    *  надо знать состояние кнопки, а не угадывать его по появившемуся тексту. */
   expanded?: boolean;
+  /** Подпись особого дня («🎉 День России» / «💼 рабочая») — смена выпала на
+   *  праздник или рабочую субботу. Текстом, а не `title`: на телефоне подсказки нет. */
+  special?: string;
 }
 
 /** A single row in "Мои смены": day, time (or "Весь день"), and a chip naming the
  * entry in its preset's colour. */
-export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen, expanded }: ShiftRowProps) {
+export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason, onOpen, expanded, special }: ShiftRowProps) {
   // По той же причине, что в `swap-candidates.ts`: одно правило, один источник.
   // Локальной копии «category === shift» здесь больше нет — с 2026-08-10 ответ
   // на этот вопрос знает только shared.
@@ -78,6 +81,12 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
         <span style={{ fontSize: "var(--app-text-body)", fontWeight: 500 }}>{formatTimeRange(shift)}</span>
         {/* Чип называет запись («Утро» / «Отпуск») цветом своего пресета. */}
         <EntryChip entry={shift} templates={templates} />
+        {/* Обычный цвет, а не hint: серый давал 4.23 (тёмная) и 3.22 (светлая) при нужных 4.5. */}
+        {special && (
+          <span data-special-day style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--text_color)", lineHeight: 1.3 }}>
+            {special}
+          </span>
+        )}
       </div>
       {(isToday || (swappable && onSwap)) && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>

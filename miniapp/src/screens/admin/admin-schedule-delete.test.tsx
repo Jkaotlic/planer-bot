@@ -50,7 +50,7 @@ async function settle(times = 10) {
   }
 }
 
-async function openEdit() {
+async function openEdit(onScheduleChanged?: () => void) {
   vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([EMPLOYEE]);
   vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
   vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
@@ -64,7 +64,7 @@ async function openEdit() {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY })));
+    root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: TODAY, onScheduleChanged })));
   });
   await settle();
 
@@ -90,5 +90,19 @@ describe("«Удалить запись» в расписании — необр
 
     expect(del).not.toHaveBeenCalled();
     expect(el.textContent ?? "").toContain("Удалить эту запись из графика?");
+  });
+
+  it("подтверждённое удаление сообщает наверх, что нехватка могла измениться", async () => {
+    // Метка на вкладке «Админ» живёт в App и сама графика не видит.
+    const changed = vi.fn();
+    vi.spyOn(apiClient, "deleteEntry").mockResolvedValue({ notified: { delivered: 0, intended: 0 } } as never);
+    const el = await openEdit(changed);
+    const ask = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Удалить запись")!;
+    await act(async () => ask.click());
+    const yes = [...el.querySelectorAll("button")].find((b) => /^Да|Удалить$/.test((b.textContent ?? "").trim()) && b !== ask);
+    expect(yes).toBeDefined();
+    await act(async () => yes!.click());
+    await settle();
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 });

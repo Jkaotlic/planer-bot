@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { ActionButton, Screen } from "./ui";
 import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
-import { apiClient, type Me, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
+import { apiClient, type Me, type MyShifts, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
@@ -50,6 +50,8 @@ import { swapUndeliveredNotice } from "./lib/swap-notice";
 interface AppData {
   me: Me;
   myShifts: Shift[];
+  /** Праздники и рабочие субботы в размахе своих смен; пусто, если сервер поля не прислал. */
+  myCalendar: NonNullable<MyShifts["calendar"]>;
   /** Сегодня в часовом поясе команды — пришло вместе с «моими сменами». */
   today: string;
   teamShifts: Shift[];
@@ -155,10 +157,19 @@ export function App() {
   // врёт нулём. Не в `AppData`/bootstrap намеренно — см. комментарий в
   // `loadBootstrap` ниже.
   const [collections, setCollections] = useState<WorkerCollection[] | null>(null);
+  // Нехватка людей для метки на «Админ». `null` — не загрузилась (или упала).
+  const [adminShortfall, setAdminShortfall] = useState<number | null>(null);
+  // Первый день этой нехватки: число на вкладке считает сегодня…+6 и пересекает
+  // границу недели, а плашка видит только свою — по дате она ведёт к дыре.
+  const [adminShortfallFirst, setAdminShortfallFirst] = useState<string | null>(null);
   // Отдельный от `reloadGate` гейт: сборы перечитываются в `reloadData`
   // независимо от bootstrap-запроса (см. там же), и общий счётчик с ним
   // выдавал бы тикеты не по своей, а по чужой последовательности вызовов.
   const collectionsReloadGate = useRef(createLatestRequestGate());
+  // Свой гейт и у нехватки: её перечитывают и после каждой правки графика, и при
+  // возврате в приложение, и более медленный старый ответ не должен затирать
+  // новое число.
+  const shortfallGate = useRef(createLatestRequestGate());
   // Отмена предыдущей ещё не завершённой загрузки — целиком, а не только той
   // её ветки, что уже успела вернуться. Кнопка «Повторить» вызывает
   // `loadBootstrap` напрямую, в обход эффекта, поэтому предыдущий возврат
@@ -166,6 +177,27 @@ export function App() {
   // тапа «Повторить» запускали бы два параллельных запроса, и на экране
   // остался бы тот, чей ответ пришёл позже, а не тот, что запущен позже.
   const cancelLoadRef = useRef<() => void>(() => {});
+
+  // Отдельно от bootstrap и после него — по той же причине, что сборы: один
+  // запрос за раз на HTTP/1.1 до релея. Упало — метки нет, экран не страдает.
+  const refreshAdminShortfall = useCallback(() => {
+    const ticket = shortfallGate.current.begin();
+    apiClient.getAdminShortfall().then(
+      (s) => {
+        if (shortfallGate.current.isLatest(ticket)) {
+          setAdminShortfall(s.total);
+          setAdminShortfallFirst(s.firstDate);
+        }
+      },
+      (err: unknown) => {
+        console.error("Shortfall for badge failed:", err);
+        if (shortfallGate.current.isLatest(ticket)) {
+          setAdminShortfall(null);
+          setAdminShortfallFirst(null);
+        }
+      },
+    );
+  }, []);
 
   /**
    * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
@@ -183,6 +215,9 @@ export function App() {
     let cancelled = false;
     cancelLoadRef.current = () => {
       cancelled = true;
+      // Ответ нехватки брошенной загрузки (размонтирование, «Повторить») не
+      // должен приземлиться после неё.
+      shortfallGate.current.invalidate();
     };
     setError(null);
     const monday = mondayOf(new Date());
@@ -197,7 +232,7 @@ export function App() {
       .getBootstrap(from, to)
       .then(({ me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers }) => {
         if (cancelled) return;
-        setData({ me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
+        setData({ me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
 
         // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
         // «Команда»), и тащить её в общий контракт ради одной метки значило бы
@@ -208,7 +243,10 @@ export function App() {
         // сборы наперегонки делили бы то же узкое место. У админа «Сборы» —
         // консоль, а не список для отметки, метки там не бывает вовсе
         // (`tabBadges`), и звать ручку ради неё незачем.
-        if (me.isAdmin) return;
+        if (me.isAdmin) {
+          refreshAdminShortfall();
+          return;
+        }
         apiClient
           .getMyCollections()
           .then((cs) => {
@@ -222,7 +260,7 @@ export function App() {
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
       });
-  }, []);
+  }, [refreshAdminShortfall]);
 
   useEffect(() => {
     loadBootstrap();
@@ -340,7 +378,7 @@ export function App() {
    *  показывали то, что человек только что сделал. */
   async function refreshMyShifts() {
     const myShifts = await apiClient.getMyShifts();
-    setData((prev) => (prev ? { ...prev, myShifts: myShifts.shifts, today: myShifts.today } : prev));
+    setData((prev) => (prev ? { ...prev, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today } : prev));
   }
 
   /** Ошибку показывает сама форма — она её и ловит, поэтому здесь ничего не
@@ -403,7 +441,7 @@ export function App() {
         prev
           ? // `me` тоже: права и запреты, поменянные админом, иначе не доходили
             // до открытого приложения, пока его не закроешь совсем.
-            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
+            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
           : prev,
       );
       setRefreshError(null);
@@ -419,7 +457,10 @@ export function App() {
     // причина, что у `loadBootstrap`. `me` не пришёл (bootstrap выше упал) —
     // делаем попытку по-старому: узнать админство не от кого, а метка сборов
     // важнее лишнего запроса при и так неудачном обновлении.
-    if (me?.isAdmin) return;
+    if (me?.isAdmin) {
+      refreshAdminShortfall();
+      return;
+    }
 
     // Отдельно от bootstrap-запроса выше, по той же причине, что в
     // `loadBootstrap`: правка (кто-то оплатил сбор, пришёл новый) должна
@@ -615,7 +656,7 @@ export function App() {
     );
   }
 
-  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin });
+  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin, adminShortfall });
 
   return (
     // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
@@ -663,6 +704,7 @@ export function App() {
           me={data.me}
           today={data.today}
           shifts={data.myShifts}
+          calendar={data.myCalendar}
           templates={data.templates}
           // Обмен и «Кто ещё работает» не бывают открыты вместе (см. эффект
           // загрузки дня выше) — уход в обмен закрывает раскрытую строку, а не
@@ -742,6 +784,8 @@ export function App() {
             initialDate={adminDeepDate}
             onInitialDateUsed={consumeAdminDeepDate}
             today={data.today}
+            onScheduleChanged={refreshAdminShortfall}
+            nearestShortfall={adminShortfallFirst}
           />
         </Suspense>
       )}

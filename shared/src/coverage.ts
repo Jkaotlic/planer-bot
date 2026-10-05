@@ -96,6 +96,36 @@ export function coverageSummary(coverage: readonly number[]): string {
   return parts.length === 0 ? "норма не задана" : parts.join(" · ");
 }
 
+const SUNDAY_INDEX = 6;
+const FRIDAY_NORM_INDEX = 4;
+
+/**
+ * По какой колонке нормы считать день. Четыре случая:
+ *
+ * - праздник в будни (Пн–Пт) — колонка воскресенья: обычные смены не нужны,
+ *   дежурство выходного дня нужно;
+ * - праздник в субботу или воскресенье — колонка СВОЕГО дня: решение владельца
+ *   говорит о празднике, выпавшем на будний день, и выходной, совпавший с
+ *   праздником, остаётся собой (норма субботы не превращается в норму воскресенья);
+ * - рабочая суббота/воскресенье по переносу — колонка пятницы: это рабочий день
+ *   перед выходным;
+ * - рабочий день в будни (праздник, возвращённый в работу вручную) — свой день
+ *   недели: понедельник остаётся понедельником, пятничная норма ему не родня;
+ * - всё остальное — свой день недели.
+ *
+ * Решение владельца от 02.10.2026; до него праздник в среду требовал людей по
+ * норме среды, и плашка с вечерним советом звали закрывать день, в который
+ * никто не выходит.
+ */
+export function normWeekday(date: string, calendar: DayCalendar): number {
+  const kind = calendar.get(date);
+  const own = weekdayIndex(date);
+  const weekend = own >= 5;
+  if (kind === "holiday" && !weekend) return SUNDAY_INDEX;
+  if (kind === "workday" && weekend) return FRIDAY_NORM_INDEX;
+  return own;
+}
+
 /**
  * Чего в дне не хватает против нормы.
  *
@@ -106,13 +136,17 @@ export function coverageSummary(coverage: readonly number[]): string {
  * Норму закрывает ЧЕЛОВЕК, а не строка в сетке: у записи без `employeeId` некому
  * выйти. Люди считаются множеством — две записи одного вида на одного человека
  * это один вышедший, а не два.
+ *
+ * Календарь обязателен, без умолчания (как у `isDayOff`): забытый аргумент
+ * молча вернул бы норму по дню недели, и праздник снова звал бы закрывать смены.
  */
 export function missingCoverage(
   entries: readonly CoverageEntry[],
   templates: readonly CoverageTemplate[],
   date: string,
+  calendar: DayCalendar,
 ): MissingKind[] {
-  const weekday = weekdayIndex(date);
+  const weekday = normWeekday(date, calendar);
   const out: MissingKind[] = [];
   for (const template of templates) {
     const need = template.coverage[weekday] ?? 0;
@@ -140,6 +174,34 @@ export function coverageHint(missing: readonly MissingKind[]): string | null {
   if (missing.length === 0) return null;
   return `Не хватает: ${missingList(missing)}`;
 }
+
+/**
+ * Что писать на кнопке дня в плашке нехватки: «Утро −1, День −2» либо, когда
+ * видов больше двух, только итог дня — «−35».
+ *
+ * Перечень видов у тяжёлой недели (7 дней × 4 вида) растягивал плашку до 440px —
+ * 52% экрана 844px, и полоска дней уезжала под таб-бар. Разбивка по видам
+ * никуда не пропадает: она в подсказке дня, куда кнопка ведёт.
+ */
+export function dayShortfallText(missing: readonly MissingKind[]): string {
+  if (missing.length === 0) return "";
+  if (missing.length > 2) return `−${missing.reduce((sum, kind) => sum + (kind.need - kind.have), 0)}`;
+  return missing.map((kind) => `${kind.name} −${kind.need - kind.have}`).join(", ");
+}
+
+/**
+ * Строка плашки, когда ближайшая нехватка лежит за пределами показанной недели:
+ * метка на вкладке считает «сегодня + 6 дней» и пересекает границу недели, а
+ * плашка видит только свою неделю — без этой строки красное число вело бы к
+ * зелёному «Нормы закрыты ✓». Число месяца без названия месяца: дата в пределах
+ * ближайших шести дней однозначна.
+ */
+export function nearestShortfallLabel(date: string): string {
+  return `Ближайшая нехватка: ${weekdayShort(date)} ${Number(date.slice(8, 10))} — показать →`;
+}
+
+/** Подсказка у редакторов нормы: правило календаря невидимо, пока не наступит праздник. */
+export const NORM_CALENDAR_HINT = "В праздник в будни действует норма воскресенья, в рабочую субботу — норма пятницы.";
 
 /** «Утро — 1, Дежурство — 2» — общий хвост подсказки дня и вечернего совета. */
 function missingList(missing: readonly MissingKind[]): string {
@@ -181,7 +243,7 @@ export function scheduleGaps(
 ): DayGap[] {
   const out: DayGap[] = [];
   for (const date of dates) {
-    const missing = missingCoverage(entries, templates, date);
+    const missing = missingCoverage(entries, templates, date, calendar);
     // По календарю, а не по дню недели: в праздник не выходят, и пустой он
     // по праву; рабочая суббота, в которую никто не вышел, — пробел.
     const dayOff = isDayOff(date, calendar);
@@ -258,10 +320,11 @@ export function weekShortfall(
   entries: readonly CoverageEntry[],
   templates: readonly NormTemplate[],
   dates: readonly string[],
+  calendar: DayCalendar,
 ): WeekShortfall {
   const days: ShortDay[] = [];
   for (const date of dates) {
-    const missing = missingCoverage(entries, templates, date);
+    const missing = missingCoverage(entries, templates, date, calendar);
     if (missing.length === 0) continue;
     days.push({ date, missing, short: missing.reduce((sum, kind) => sum + kind.need - kind.have, 0) });
   }
@@ -274,4 +337,38 @@ export function weekShortfall(
     )
     .map((template) => ({ templateId: template.templateId, name: template.name }));
   return { days, total: days.reduce((sum, day) => sum + day.short, 0), withoutNorm };
+}
+
+export type ShortfallState = "closed" | "short" | "no-norms";
+
+export interface ShortfallStatus {
+  state: ShortfallState;
+  /** Сколько видов смен и дежурств без нормы — хвост «без нормы: N» в плашке. */
+  unsetCount: number;
+}
+
+/** Ответ `GET /api/admin/shortfall` — нехватка на 7 дней от командной даты. */
+export interface AdminShortfall {
+  total: number;
+  /** Первый день с дырой; `null`, когда дыр нет. */
+  firstDate: string | null;
+}
+
+/**
+ * Что показывать плашкой над графиком.
+ *
+ * Отдельная функция, а не условие на каждом экране: «закрыто» и «нормы не
+ * заданы» выглядят в `weekShortfall` одинаково (дней с нехваткой нет), и одна
+ * из морд рано или поздно показала бы зелёное там, где считать было не из чего.
+ */
+export function shortfallStatus(week: WeekShortfall, templates: readonly NormTemplate[]): ShortfallStatus {
+  const unsetCount = week.withoutNorm.length;
+  if (week.days.length > 0) return { state: "short", unsetCount };
+  const withNorm = templates.filter(
+    (template) =>
+      (template.category === "shift" || template.category === "duty") &&
+      template.fillMode !== "remainder" &&
+      template.coverage.some((need) => need > 0),
+  ).length;
+  return { state: withNorm === 0 ? "no-norms" : "closed", unsetCount };
 }

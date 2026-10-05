@@ -1,4 +1,4 @@
-import { coverageHint, filterPeople, missingCoverage, type CoverageTemplate } from "@planer/shared";
+import { coverageHint, filterPeople, missingCoverage, type CoverageTemplate, type SpecialDay } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -23,6 +23,12 @@ export interface ScheduleGridProps {
    */
   calendar: DayCalendar;
   /**
+   * Подписи праздников и рабочих суббот недели — их считает `App` из строк
+   * календаря с названиями, а `calendar` (карта «дата → вид») названий не несёт.
+   * Необязателен: без него колонки красятся, как раньше, но без названия.
+   */
+  special?: readonly SpecialDay[];
+  /**
    * Нормы дня по видам смен — из них считается подсказка «чего в дне не хватает».
    * Пусто (или норма нулевая) — подсказки нет вовсе.
    */
@@ -43,8 +49,7 @@ export interface ScheduleGridProps {
  * обрезался многоточием, и именно хвост — второй вид — терялся. Расклад по
  * видам живёт в подсказке и в строке над сеткой (`WeekShortfallBar`).
  */
-function DayShortfall({ date, shifts, coverage }: { date: string; shifts: Shift[]; coverage: readonly CoverageTemplate[] }) {
-  const missing = missingCoverage(shifts, coverage, date);
+function DayShortfall({ missing }: { missing: ReturnType<typeof missingCoverage> }) {
   const hint = coverageHint(missing);
   if (!hint) return null;
   const short = missing.reduce((sum, kind) => sum + kind.need - kind.have, 0);
@@ -67,7 +72,8 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()), highlightDate = null }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, special = [], onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()), highlightDate = null }: ScheduleGridProps) {
+  const specialByDate = new Map(special.map((d) => [d.date, d]));
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
   const visibleEmployees = filterPeople(employees, query ?? "");
@@ -80,10 +86,13 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
             {/* Сегодняшний столбец отмечен: в сетке из семи дней это первый
                 вопрос, который к ней возникает, а до этого сетка отвечала
                 только «где выходные». */}
-            {weekDates.map((date) => (
+            {weekDates.map((date) => {
+              // Один раз на колонку: от неё зависит и красная шапка, и метка в ней.
+              const missing = missingCoverage(shifts, coverage, date, calendar);
+              return (
               <th
                 key={date}
-                className={[isDayOff(date, calendar) ? "weekend-col" : "", date === today ? "today-col" : "", date === highlightDate ? "pointed-col" : ""].filter(Boolean).join(" ") || undefined}
+                className={[isDayOff(date, calendar) ? "weekend-col" : "", missing.length > 0 ? "short-col" : "", date === today ? "today-col" : "", date === highlightDate ? "pointed-col" : ""].filter(Boolean).join(" ") || undefined}
                 aria-current={date === today ? "date" : undefined}
               >
                 <span className="day-col-header">
@@ -92,12 +101,20 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
                       Молчит, пока норма не задана. */}
                   <span className="dow">
                     {weekdayShort(date)}
-                    <DayShortfall date={date} shifts={shifts} coverage={coverage} />
+                    <DayShortfall missing={missing} />
                   </span>
                   <span className="dom">{dayOfMonth(date)}</span>
+                  {/* Название текстом в самой шапке: подсказка по наведению
+                      его не показывает ни на телефоне, ни тому, кто не наводит. */}
+                  {specialByDate.get(date) && (
+                    <span className="day-col-mark" title={specialByDate.get(date)!.label}>
+                      {specialByDate.get(date)!.short}
+                    </span>
+                  )}
                 </span>
               </th>
-            ))}
+              );
+            })}
           </tr>
         </thead>
         <tbody>

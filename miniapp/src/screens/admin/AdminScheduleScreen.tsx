@@ -17,6 +17,9 @@ import {
   planEntryRange,
   resolveShiftTimes,
   takesPartInAssignment,
+  shortfallStatus,
+  specialDayKind,
+  specialDays,
   weekShortfall,
   workPresets,
 } from "@planer/shared";
@@ -32,11 +35,11 @@ import {
 import type { DayCalendar, EntryRangeMode } from "@planer/shared";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
-import { ActionButton, Card, CheckRow, Group, Hint, MenuRow, SelectField } from "../../ui";
+import { ActionButton, Card, CheckRow, Group, Hint, MenuRow, SelectField, ShortfallBanner, SpecialDaysLine } from "../../ui";
 import { AdminRosterCsv } from "./AdminRosterCsv";
 import { AdminShiftKinds } from "./AdminShiftKinds";
 import { AdminKindSettings } from "./AdminKindSettings";
-import { formatTimeRange, notifyPendingNotice, pluralizeRu, withNotifyNotice } from "../../lib/shift";
+import { formatTimeRange, notifyPendingNotice, withNotifyNotice } from "../../lib/shift";
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import { createLatestRequestGate } from "../../lib/request-gate";
@@ -92,7 +95,14 @@ export function showsWeekSwitcher(state: {
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
-export function AdminScheduleScreen({ initialDate, today }: { initialDate?: string; today: string }) {
+export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nearestShortfall = null }: {
+  initialDate?: string;
+  today: string;
+  /** Первый день нехватки из сегодня…+6 (тот же ответ, что у метки на вкладке «Админ»). */
+  nearestShortfall?: string | null;
+  /** Правка графика меняет нехватку, а метка на вкладке «Админ» живёт выше, в App. */
+  onScheduleChanged?: () => void;
+}) {
   // Кнопка «📅 Открыть график» у админской тревоги приходит с датой — экран
   // должен открыться на её неделе, а не на текущей. Без неё — командная дата
   // сервера (`today`), не часы телефона: рядом с полуночью они расходятся, и
@@ -114,6 +124,9 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   const [templates, setTemplates] = useState<Template[]>([]);
   /** Нормы дня по видам смен — из них считается подсказка «чего не хватает». */
   const [templateRoles, setTemplateRoles] = useState<TemplateRolesView[]>([]);
+  // Пока нормы не пришли, пустой список ролей читается как «норм нет»: плашка
+  // на секунду объявила бы «Нормы не заданы» там, где они заданы.
+  const [rolesLoaded, setRolesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
    * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
@@ -174,6 +187,8 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   async function reloadAfterImport() {
     const [emps] = await Promise.all([apiClient.getAdminEmployees(), loadWeek(from, to)]);
     setEmployees(emps.filter((e) => e.isActive));
+    // Импорт переписывает записи недели — метка на вкладке считает по ним же.
+    onScheduleChanged?.();
   }
 
   // Roster + templates load once; they don't change with the visible week.
@@ -185,6 +200,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
         setEmployees(emps.filter((e) => e.isActive));
         setTemplates(tmpls);
         setTemplateRoles(roles);
+        setRolesLoaded(true);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
@@ -232,6 +248,14 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
     setNotice(null);
   }
 
+  /** К дыре за пределами показанной недели: неделя её дня и сам день — как при
+   *  переходе по ссылке бота (`initialDate`). */
+  function goToDate(date: string) {
+    setWeekStart(mondayOf(parseISODate(date)));
+    setSelectedDate(date);
+    setNotice(null);
+  }
+
   /** Back to the current week AND to today. Returning to the week but leaving the
    *  selection on, say, Thursday would drop the admin on a day they never picked. */
   function goToday() {
@@ -254,6 +278,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
     try {
       await apiClient.setCalendarDay(selectedDate, kind);
       await loadWeek(from, to);
+      onScheduleChanged?.();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Не удалось отметить день");
     } finally {
@@ -264,16 +289,16 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   const weekShifts = shifts && shiftsFrom === from ? shifts : null;
   // Только по записям показанной недели; пока их нет — подсказка молчит, а не
   // объявляет нехватку по пустому списку.
-  const dayHint = weekShifts ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate)) : null;
+  const dayHint = weekShifts && rolesLoaded ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate, dayCalendar)) : null;
 
   // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
   // семь дней красным, и закрытая неделя открывалась бы тревогой.
   const week = useMemo(
-    () => (weekShifts ? weekShortfall(weekShifts, templateRoles, weekDates) : null),
-    [weekShifts, templateRoles, weekDates],
+    () => (weekShifts && rolesLoaded ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar) : null),
+    [weekShifts, rolesLoaded, templateRoles, weekDates, dayCalendar],
   );
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
-  const unsetCount = week?.withoutNorm.length ?? 0;
+  const status = week ? shortfallStatus(week, templateRoles) : null;
 
   const dayEntries = (shifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
@@ -282,6 +307,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   async function handleSaved(notified: { delivered: number; intended: number }, summary?: string) {
     setEditing(null);
     await loadWeek(from, to);
+    onScheduleChanged?.();
     // У одиночной записи своего сообщения об успехе нет — «дошло не до всех»
     // говорим, только когда есть что сказать, иначе экран молчит, как раньше.
     // У расстановки диапазоном есть: часть дней могла быть пропущена, и молчание
@@ -292,6 +318,7 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
   async function handleFilled(count: number, notified: { delivered: number; intended: number }) {
     setFillOpen(false);
     await loadWeek(from, to);
+    onScheduleChanged?.();
     const base = count === 0 ? "Ни одного дня не выбрано — ничего не добавлено." : `Заполнено дней: ${count}.`;
     setNotice(count === 0 ? base : withNotifyNotice(base, notified));
   }
@@ -307,6 +334,16 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
           that quietly isn't an option on screen anymore. */}
       {showsWeekSwitcher({ csvOpen, kindsOpen, settingsOpen, fillOpen, editing }) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {week && status && (
+            <ShortfallBanner
+              week={week}
+              status={status}
+              onPickDay={(date) => { setSelectedDate(date); setNotice(null); }}
+              onOpenNorms={() => { setNotice(null); setError(null); setSettingsOpen(true); }}
+              nearestOutside={nearestShortfall && !weekDates.includes(nearestShortfall) ? nearestShortfall : null}
+              onJumpNearest={goToDate}
+            />
+          )}
           <WeekBar
             label={formatWeekRangeLabel(weekStart, addDays(weekStart, 6))}
             backVisible={!isCurrentPeriod("week", toISODate(weekStart), today)}
@@ -314,25 +351,8 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
             onPrev={() => goWeek(-1)}
             onNext={() => goWeek(1)}
           />
-          <DayStrip dates={weekDates} selected={selectedDate} today={today} short={shortByDate} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
-          {/* Тихой строкой, а не предупреждением: вид без нормы — несделанная
-              настройка, а не дыра в графике. Без неё такой вид выглядел бы на
-              полоске так же, как закрытый. Строка — ссылка высотой в строку
-              текста, поэтому зона нажатия набрана `minHeight`, а не кеглем. */}
-          {unsetCount > 0 && (
-            <button
-              type="button"
-              data-norm-unset
-              onClick={() => { setNotice(null); setError(null); setSettingsOpen(true); }}
-              style={{
-                display: "flex", alignItems: "center", width: "100%", minHeight: "var(--app-tap)", border: "none",
-                background: "none", cursor: "pointer", padding: "0 4px", textAlign: "left", font: "inherit",
-                fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)",
-              }}
-            >
-              {`Без нормы: ${unsetCount} ${pluralizeRu(unsetCount, "вид", "вида", "видов")} — задать →`}
-            </button>
-          )}
+          <DayStrip dates={weekDates} selected={selectedDate} today={today} short={shortByDate} calendar={dayCalendar} onSelect={(d) => { setSelectedDate(d); setNotice(null); }} />
+          <SpecialDaysLine days={specialDays(weekDates, calendar)} />
         </div>
       )}
 
@@ -360,6 +380,8 @@ export function AdminScheduleScreen({ initialDate, today }: { initialDate?: stri
             // полоска показывала бы нехватку по нормам, какими они были при
             // открытии экрана. Не сумели — остаются прежние.
             apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+            // И метка на вкладке «Админ»: сервер считает её по тем же нормам.
+            onScheduleChanged?.();
           }}
         />
       ) : csvOpen ? (
@@ -494,26 +516,29 @@ function WeekBar({ label, backVisible, onBack, onPrev, onNext }: {
   );
 }
 
-function DayStrip({ dates, selected, today, short, onSelect }: {
+function DayStrip({ dates, selected, today, short, calendar, onSelect }: {
   dates: readonly string[];
   selected: string;
   today: string;
   /** Сколько людей не хватает в дне против нормы; дня без нехватки здесь нет. */
   short: ReadonlyMap<string, number>;
+  /** Выходной красится по календарю, а не по дню недели: праздник в среду тоже серый. */
+  calendar: DayCalendar;
   onSelect: (iso: string) => void;
 }) {
   return (
     <div style={{ display: "flex", gap: 6 }}>
       {dates.map((iso) => (
-        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} short={short.get(iso) ?? 0} onSelect={() => onSelect(iso)} />
+        <DayChip key={iso} iso={iso} active={iso === selected} isToday={iso === today} short={short.get(iso) ?? 0} calendar={calendar} onSelect={() => onSelect(iso)} />
       ))}
     </div>
   );
 }
 
-function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; active: boolean; isToday: boolean; short: number; onSelect: () => void }) {
+function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: string; active: boolean; isToday: boolean; short: number; calendar: DayCalendar; onSelect: () => void }) {
   const isDark = useIsDark();
-  const weekend = weekdayIndex(iso) >= FRIDAY_INDEX + 1;
+  const weekend = isDayOff(iso, calendar);
+  const kind = specialDayKind(iso, calendar.get(iso));
   // Невыбранный день — карточкой: холст теперь `secondary_bg_color`, и клетка
   // этого цвета на нём не читалась бы вовсе.
   const bg = active ? "var(--tgui--button_color)" : "var(--app-card)";
@@ -523,7 +548,10 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
       type="button"
       onClick={onSelect}
       data-day-chip
+      data-day-kind={kind}
       aria-current={isToday ? "date" : undefined}
+      aria-pressed={active}
+      data-day-short-outline={short > 0 ? "true" : undefined}
       aria-label={`${weekdayShort(iso)} ${dayOfMonth(iso)}${short > 0 ? `, не хватает ${short}` : ""}`}
       style={{
         position: "relative",
@@ -541,7 +569,17 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
         flexDirection: "column",
         alignItems: "center",
         gap: 2,
-        boxShadow: active ? (isDark ? "0 0 0 1px rgba(255,255,255,0.06)" : "0 1px 4px rgba(0,0,0,0.12)") : "none",
+        // Обводка, а не заливка: заливка занята под «выбран».
+        boxShadow: [
+          // Кольцо снаружи клетки, а не внутри: внутреннее на синей заливке выбранного
+          // дня давало контраст 1.46 (тёмная) и 1.72 (светлая). Между клеткой и красным
+          // — волосок цвета холста (1px), чтобы красное граничило с холстом, а не с
+          // заливкой; вместе 3px, то есть ровно половина зазора между клетками (6px).
+          // Красный — сам токен, не затемнённый: затемнённый на тёмном холсте
+          // давал 2.54 при нужных 3.
+          short > 0 ? "0 0 0 1px var(--app-canvas, var(--tgui--secondary_bg_color)), 0 0 0 3px var(--tgui--destructive_text_color)" : null,
+          active ? (isDark ? "0 0 0 1px rgba(255,255,255,0.06)" : "0 1px 4px rgba(0,0,0,0.12)") : null,
+        ].filter(Boolean).join(", ") || "none",
       }}
     >
       {/* В углу клетки, а не третьей строкой: высота полоски не меняется от
@@ -563,7 +601,12 @@ function DayChip({ iso, active, isToday, short, onSelect }: { iso: string; activ
           {short}
         </span>
       )}
-      <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85 }}>{weekdayShort(iso)}</span>
+      {/* Значок рядом с днём недели, а не новой строкой: высота клетки одна на всех. */}
+      {/* Строка фиксированной высоты: эмодзи праздника тянул её, и неделя с отметкой
+          выходила на 5px выше (60 против 55). */}
+      <span style={{ fontSize: 11, lineHeight: "14px", height: 14, fontWeight: 500, opacity: 0.85, whiteSpace: "nowrap" }}>
+        {weekdayShort(iso)}{kind ? ` ${kind === "holiday" ? "🎉" : "💼"}` : ""}
+      </span>
       <span style={{ fontSize: "var(--app-text-body)", fontWeight: 600 }}>{dayOfMonth(iso)}</span>
       {/* «Выбран» and «сегодня» were the same style, so three weeks out you
           could not tell where you were. The dot is drawn independently of the

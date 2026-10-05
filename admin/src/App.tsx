@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, type CsvEncoding } from "@planer/shared";
+import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
   apiClient,
   type CalendarDayDto,
@@ -31,7 +31,7 @@ import { AnnounceScreen } from "./screens/AnnounceScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
-import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, toISODate } from "./lib/week";
+import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
@@ -125,6 +125,14 @@ export function App() {
   /** Filters `ScheduleGrid`'s rows — see `PersonSearch` there for why `BalanceRail` doesn't get it. */
   const [scheduleQuery, setScheduleQuery] = useState("");
   const rosterFileInput = useRef<HTMLInputElement>(null);
+  /** Число нехватки на пункте «Расписание» сайдбара; `null` — не знаем (ручка упала). */
+  const [adminShortfall, setAdminShortfall] = useState<number | null>(null);
+  // Первый день этой нехватки — для строки «Ближайшая нехватка»: число считает
+  // сегодня…+6 и пересекает границу недели, а плашка видит только показанную.
+  const [adminShortfallFirst, setAdminShortfallFirst] = useState<string | null>(null);
+  // Номер последнего запроса: медленный ответ на старый запрос не должен затереть
+  // число из нового — после правки записи два запроса идут почти подряд.
+  const shortfallSeq = useRef(0);
 
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
@@ -185,6 +193,39 @@ export function App() {
     }
   }
 
+  /** Метка в сайдбаре — отдельным запросом: упал — метки нет, а расписание работает. */
+  function refreshAdminShortfall() {
+    const seq = ++shortfallSeq.current;
+    apiClient.getAdminShortfall().then(
+      (s) => {
+        if (seq !== shortfallSeq.current) return;
+        setAdminShortfall(s.total);
+        setAdminShortfallFirst(s.firstDate);
+      },
+      (err: unknown) => {
+        if (seq !== shortfallSeq.current) return;
+        setAdminShortfall(null);
+        setAdminShortfallFirst(null);
+        // Метка может быть единственным запросом, который идёт на скрытой вкладке:
+        // молча проглоченный отказ сессии оставил бы вкладку, где следующая правка падает.
+        if (err instanceof AuthRequiredError) setNeedLogin(true);
+      },
+    );
+  }
+
+  // Консоль годами висит открытой вкладкой: возвращаясь к ней, человек ждёт
+  // свежего числа, а не того, что было при уходе. Тот же запрос с защитой от
+  // устаревшего ответа, что и везде.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshAdminShortfall();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // refreshAdminShortfall держится на рефе и сеттере — привязка один раз безопасна.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function refreshEmployees() {
     setEmployees(await apiClient.getEmployees());
   }
@@ -225,6 +266,9 @@ export function App() {
   const scheduleShown = useRef(false);
   useEffect(() => {
     if (nav !== "schedule") return;
+    // И на первом показе: метке нужен свой первый запрос, а нормы могли
+    // поправить на «Видах смен» — число в сайдбаре считает по ним же.
+    refreshAdminShortfall();
     if (!scheduleShown.current) {
       scheduleShown.current = true;
       return;
@@ -268,6 +312,9 @@ export function App() {
     setShifts(next);
     setShiftsFrom(from);
     setCalendarDays(calendar);
+    // Все правки записей кончаются здесь (сохранение, диапазон, удаление,
+    // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки.
+    refreshAdminShortfall();
   }
 
   async function previewRosterFile(file: File) {
@@ -430,6 +477,7 @@ export function App() {
         }}
         adminLabel={viewer ? `${viewer.address} · админ` : "Админ"}
         open={menuOpen}
+        badges={adminShortfall ? { schedule: adminShortfall } : undefined}
       />
       {menuOpen && (
         <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />
@@ -472,7 +520,7 @@ export function App() {
         ) : nav === "groups" ? (
           <GroupsScreen employees={employees} />
         ) : nav === "kinds" ? (
-          <ShiftKindsScreen employees={employees ?? []} />
+          <ShiftKindsScreen employees={employees ?? []} onNormSaved={refreshAdminShortfall} />
         ) : nav === "checklist" ? (
           <ChecklistScreen templates={templates ?? []} />
         ) : nav === "weekend" ? (
@@ -541,9 +589,15 @@ export function App() {
                 shifts={shifts}
                 templates={templateRoles}
                 weekDates={weekDates}
+                calendar={dayCalendar}
                 pointedDate={pointedInWeek}
                 onPointDay={setPointedDate}
                 onOpenKinds={() => setNav("kinds")}
+                nearestDate={adminShortfallFirst}
+                onJumpNearest={(date) => {
+                  setWeekMonday(mondayOf(parseISODate(date)));
+                  setPointedDate(date);
+                }}
               />}
               <div className="schedule-layout">
                 <ScheduleGrid
@@ -557,6 +611,7 @@ export function App() {
                   query={scheduleQuery}
                   coverage={shortfallReady ? templateRoles : []}
                   calendar={dayCalendar}
+                  special={specialDays(weekDates, calendarDays)}
                 />
                 <aside className="right-rail">
                   <EventsFeed events={events} onOpenJournal={() => setNav("log")} />

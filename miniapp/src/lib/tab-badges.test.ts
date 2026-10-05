@@ -98,4 +98,19 @@ describe("tabBadges", () => {
     // У работника с теми же данными метка есть — разница ровно в `isAdmin`.
     expect(tabBadges({ swaps: [], weekendOffers: [], collections, today: TODAY, isAdmin: false })).toEqual({ collections: 1 });
   });
+
+  const EMPTY = { swaps: [], weekendOffers: [], collections: null, today: TODAY };
+
+  it("нехватка у админа — метка на «Админ»", () => {
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: 3 }).admin).toBe(3);
+  });
+
+  it("ноль и «не загрузилось» метку не дают", () => {
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: 0 })).not.toHaveProperty("admin");
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: null })).not.toHaveProperty("admin");
+  });
+
+  it("не-админу метку «Админ» не кладёт, что бы ни пришло", () => {
+    expect(tabBadges({ ...EMPTY, isAdmin: false, adminShortfall: 3 })).not.toHaveProperty("admin");
+  });
 });

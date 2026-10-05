@@ -1026,6 +1026,22 @@ button {
   opacity: 0.8;
 }
 
+/* Название праздника под датой. `max-width: 0` + `min-width: 100%` — приём для
+   ячейки таблицы: подпись не растягивает колонку, а усекается многоточием по её ширине. */
+.day-col-mark {
+  /* Обычный текст: без этого метка наследует красный цвет выходного и в
+     светлой теме давала 3.71 при нужных 4.5. */
+  color: var(--text);
+  display: block;
+  max-width: 0;
+  min-width: 100%;
+  font-size: var(--text-meta);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .employee-col-header {
   min-width: 172px;
 }
@@ -1328,17 +1344,53 @@ button {
   cursor: help;
 }
 
-/* Строка нехватки над сеткой. Без рамки и подложки: это строка текста под
-   поиском, а не ещё одна плашка — плашек с уведомлениями над сеткой уже две. */
+/* Плашкой, а не строкой мелкого текста: строку над сеткой владелец не
+   заметил вовсе. Отступы — как у сетки под ней, чтобы края совпали. */
 .week-shortfall {
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 6px;
-  padding: 0 24px 10px;
-  font-size: var(--text-meta);
+  margin: 0 24px 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
+  font-size: var(--text-body);
   line-height: 1.5;
+}
+
+.week-shortfall--short {
+  background: var(--surface-secondary);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+}
+
+/* Зелёный — тот же, что у `.roster-notice-success`: нового цвета не заводим. */
+.week-shortfall--closed {
+  background: rgba(28, 163, 91, 0.12);
+  /* Тот же #16824a, что у `.roster-notice-success`, давал на этой подложке 3.73
+     (светлая) — ниже 4.5. Темнее до #0f6b3a; а в тёмной палитре текст —
+     светло-зелёный #86e093, как у `.ui-pill--ok` мини-аппа (замер 3.15 до правки). */
+  color: #0f6b3a;
+}
+
+/* Обычный текст, а не --hint: серый давал 4.19 в светлой теме при нужных 4.5. */
+.week-shortfall--no-norms {
+  background: var(--surface-secondary);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .week-shortfall--closed {
+    color: #86e093;
+  }
+}
+
+/* Итог у зелёной и нейтральной плашек — просто текст, а не красная таблетка. */
+.week-shortfall--closed .week-shortfall-total,
+.week-shortfall--no-norms .week-shortfall-total {
+  background: none;
+  color: inherit;
+  padding-inline: 0;
 }
 
 .week-shortfall-total {
@@ -1372,38 +1424,90 @@ button {
 }
 
 /* Текст «без нормы» встаёт на левый край сетки: отступ кнопки сдвигал его вправо. */
-.week-shortfall .week-shortfall-unset.btn {
+.week-shortfall .week-shortfall-unset.btn-quiet {
   padding-left: 0;
 }
 
+/* Отдельной строкой и обычным цветом текста: серая сноска в зелёной плашке — то,
+   что не заметили бы. Подпись слева, как у «без нормы». */
+.week-shortfall .week-shortfall-nearest.btn-quiet {
+  flex: 1 0 100%;
+  justify-content: flex-start;
+  padding-left: 0;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-align: left;
+}
+
 .week-shortfall-unset {
+  /* Обычный текст, а не синяя ссылка: на подложке плашки она давала 4.16–4.44. */
+  color: var(--text);
   /* Ссылка-кнопка слева, а не серая строчка в правом углу: незаданная норма —
      действие («задать»), и оно должно читаться как кнопка. Вид даёт
      .btn-quiet; тут только то, что нужно строке, — не переносить подпись. */
   white-space: nowrap;
 }
 
+/* Справа в строке пункта, а не на иконке: в сайдбаре есть ширина, и число
+   рядом с подписью читается раньше кружка на 18-пиксельной иконке. Фон и
+   цвет в тёмной теме — в общем правиле с `.week-shortfall-total` ниже. */
+.sidebar-nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  color: #fff;
+  font-size: var(--text-meta);
+  font-weight: 700;
+  /* 18px, а не 20: с 20 пункт «Расписание» выходил на 40px при 38px у соседей. */
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+}
+
 /* Белое на `--destructive` не дотягивает до 4.5: замер дал 4.28 в светлой теме
    и 2.79 в тёмной, где красный светлый. Поэтому в светлой красный затемнён, а
    в тёмной текст метки тёмный. */
 .day-short-badge,
-.week-shortfall-total {
+.week-shortfall-total,
+.sidebar-nav-badge {
   background: var(--destructive);
   background: color-mix(in srgb, var(--destructive) 84%, #000);
 }
 
 @media (prefers-color-scheme: dark) {
   .day-short-badge,
-  .week-shortfall-total {
+  .week-shortfall-total,
+  .sidebar-nav-badge {
     background: var(--destructive);
     color: #14181f;
   }
+}
+
+/* День с дырой — шапка колонки красная целиком, а не только метка «−N»: метку
+   в углу ячейки владелец не замечал. Непрозрачная (микс с --surface): шапка
+   липкая, и сквозь полупрозрачную просвечивали бы строки при прокрутке.
+   Цвет текста — --text и у выходных: красные буквы выходного на красной
+   подложке не читаются, а «выходной» и без того виден по колонке ниже. */
+.schedule-table thead th.short-col {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--destructive) 16%, var(--surface));
+  box-shadow: inset 0 -2px 0 var(--destructive);
+  color: var(--text);
 }
 
 /* Колонка дня, на который показали из строки нехватки. Обводкой по краям, а
    не заливкой: заливка уже занята «сегодня» и выходными. */
 .schedule-table .pointed-col {
   box-shadow: inset 2px 0 0 var(--destructive), inset -2px 0 0 var(--destructive);
+}
+
+/* Показывают всегда на день с дырой, так что шапка бывает и красной, и
+   обведённой: её нижняя черта задана правилом с большим весом и затёрла бы
+   боковую обводку, поэтому тени сложены здесь явно. */
+.schedule-table thead th.short-col.pointed-col {
+  box-shadow: inset 2px 0 0 var(--destructive), inset -2px 0 0 var(--destructive), inset 0 -2px 0 var(--destructive);
 }
 
 .kind-coverage {
@@ -3276,7 +3380,7 @@ textarea {
   /* Строка нехваток — на левый край 14px, как топбар: 24px десктопа сдвигали её
      вправо от края сетки. */
   .week-shortfall {
-    padding-inline: 14px;
+    margin-inline: 14px;
   }
 
   .btn.employee-restrictions-toggle {

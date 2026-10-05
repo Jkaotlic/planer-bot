@@ -15,19 +15,26 @@ import { App } from "./App";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function bootstrapWith(over: { swaps?: SwapRequest[] } = {}) {
+function bootstrapWith(over: { swaps?: SwapRequest[]; me?: Partial<ReturnType<typeof baseMe>> } = {}) {
+  const { me, ...rest } = over;
   return {
-    me: {
-      id: 1, displayName: "Аня", address: "Аня", preferredName: null,
-      isAdmin: false, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
-      isObserver: false, selfScheduleEnabled: false, canAnnounce: false,
-    },
+    me: { ...baseMe(), ...me },
     myShifts: { shifts: [], today: "2026-09-25" },
     teamSchedule: { shifts: [], employees: [] },
     templates: [], swaps: [], weekendSlots: [], weekendOffers: [],
-    ...over,
+    ...rest,
   };
 }
+
+function baseMe() {
+  return {
+    id: 1, displayName: "Аня", address: "Аня", preferredName: null,
+    isAdmin: false, remindersEnabled: true, swapsLocked: false, excludedFromSwaps: false,
+    isObserver: false, selfScheduleEnabled: false, canAnnounce: false,
+  };
+}
+
+const ADMIN_ME = { isAdmin: true };
 
 const INCOMING_SWAP: SwapRequest = {
   id: 1,
@@ -194,5 +201,132 @@ describe("метки на TabBar реагируют на действия, а н
     });
     await settle();
     expect((badgeOf(el, "Сборы")?.textContent ?? "").trim()).toBe("5");
+  });
+
+  it("админ видит на «Админ» число нехватки", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+  });
+
+  it("ручка упала — метки нет, приложение живо", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockRejectedValue(new Error("сеть"));
+    const el = await mount();
+    expect(getShortfall).toHaveBeenCalled();
+    expect(badgeOf(el, "Админ")).toBeNull();
+    expect(el.textContent).toContain("Админ");
+  });
+
+  it("работнику ручку не зовём вовсе", async () => {
+    const spy = vi.spyOn(apiClient, "getAdminShortfall");
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith() as never);
+    vi.spyOn(apiClient, "getMyCollections").mockResolvedValue([]);
+    await mount();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("правка графика пересчитывает метку: новая нехватка доходит без перезапуска", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
+    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(undefined as never);
+    const el = await mount();
+    await act(async () => tabItem(el, "Админ").click());
+    await settle();
+    // «Расписание» — раздел меню админки.
+    const open = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && (n.textContent ?? "").trim() === "Расписание");
+    expect(open, "пункт «Расписание» в меню админки").toBeTruthy();
+    await act(async () => open!.click());
+    await settle();
+    const before = getShortfall.mock.calls.length;
+    getShortfall.mockResolvedValue({ total: 1, firstDate: "2026-09-26" });
+    const mark = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => /выходн/i.test(b.textContent ?? ""));
+    expect(mark).toBeTruthy();
+    await act(async () => mark!.click());
+    await settle();
+    expect(getShortfall.mock.calls.length).toBeGreaterThan(before);
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
+  });
+
+  it("firstDate из ответа доходит до плашки: строка «Ближайшая нехватка» ведёт в следующую неделю", async () => {
+    // Сегодня пятница 25.09, неделя 21–27.09 закрыта, а нехватка — в понедельник 28.09.
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 3, firstDate: "2026-09-28" });
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([{
+      templateId: 10, name: "Утро", category: "shift", accent: "gold", checklistIds: [], sendReminder: false, reminderText: null,
+      coverage: [1, 0, 0, 0, 0, 0, 0], pool: [], preference: {},
+    }] as never);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
+      shifts: [{ id: 1, date: "2026-09-21", endDate: null, start: "08:00", end: "17:00", employeeId: 7, employeeName: "Аня",
+        category: "shift", templateId: 10, title: "Утро", location: null, unrecognisedCode: null }],
+      employees: [], calendar: [],
+    } as never);
+    const el = await mount();
+    await act(async () => tabItem(el, "Админ").click());
+    await settle();
+    const open = [...el.querySelectorAll<HTMLElement>("*")].find((n) => n.children.length === 0 && (n.textContent ?? "").trim() === "Расписание");
+    await act(async () => open!.click());
+    await settle();
+    expect(el.querySelector("[data-shortfall]")?.getAttribute("data-shortfall")).toBe("closed");
+    expect(el.querySelector("[data-nearest-shortfall]")?.textContent).toBe("Ближайшая нехватка: Пн 28 — показать →");
+  });
+
+  /** Возврат в приложение: `reloadData` слушает `visibilitychange`. */
+  async function backToApp() {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await settle();
+  }
+
+  it("возврат в приложение перечитывает нехватку, и метка обновляется", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+    expect(getShortfall).toHaveBeenCalledTimes(1);
+
+    getShortfall.mockResolvedValue({ total: 2, firstDate: "2026-09-26" });
+    await backToApp();
+    expect(getShortfall).toHaveBeenCalledTimes(2);
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("2");
+  });
+
+  it("отказ при перечитывании снимает метку, а не оставляет устаревшее число", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+
+    getShortfall.mockRejectedValue(new Error("сеть"));
+    await backToApp();
+    expect(getShortfall).toHaveBeenCalledTimes(2);
+    expect(badgeOf(el, "Админ")).toBeNull();
+  });
+
+  it("медленный старый ответ нехватки не затирает новое число", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValueOnce({ total: 4, firstDate: null });
+    const resolvers: Array<(v: { total: number; firstDate: string | null }) => void> = [];
+    getShortfall.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
+    const el = await mount();
+
+    await backToApp();
+    await backToApp();
+    expect(resolvers).toHaveLength(2);
+
+    await act(async () => resolvers[1]!({ total: 1, firstDate: null }));
+    await settle();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
+    // Более старый запрос отвечает последним, с другим числом.
+    await act(async () => resolvers[0]!({ total: 9, firstDate: null }));
+    await settle();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("1");
   });
 });

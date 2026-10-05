@@ -78,7 +78,9 @@ describe("отметка дня на экране расписания", () => {
 
     const el = await mount();
 
-    expect(el.textContent ?? "").toContain("Рабочая");
+    // Выбрана среда: подпись «Рабочая суббота» на ней была бы неправдой.
+    expect(el.textContent ?? "").toContain("Рабочий день");
+    expect(el.textContent ?? "").not.toContain("Рабочая суббота");
     expect(el.textContent ?? "").toContain("вручную");
     expect(el.textContent ?? "").toContain("Как в календаре");
   });

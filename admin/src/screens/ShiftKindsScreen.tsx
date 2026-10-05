@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import {
   coverageSummary,
+  NORM_CALENDAR_HINT,
   previewReminderText,
   REMINDER_PLACEHOLDERS,
   exactSchedulePalette,
@@ -38,7 +39,11 @@ export function personSummary(roles: readonly PersonKindRole[]): string {
  * человек. Вопрос, который задают на самом деле, звучит «что может Игорь», и
  * ответ на него собирался обходом девяти карточек.
  */
-export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
+export function ShiftKindsScreen({ employees, onNormSaved }: {
+  employees: Employee[];
+  /** Норма сохранена — число нехватки в сайдбаре (виден на любом экране) считается по ней. */
+  onNormSaved?: () => void;
+}) {
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [openKindId, setOpenKindId] = useState<number | null>(null);
@@ -113,6 +118,7 @@ export function ShiftKindsScreen({ employees }: { employees: Employee[] }) {
     setError(null);
     try {
       await apiClient.setTemplateCoverage(kind.templateId, coverage);
+      onNormSaved?.();
     } catch (err) {
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить норму");
@@ -574,6 +580,7 @@ function CoverageRow({
       <span className="kind-rotation-note">
         Ноль значит «не считаем» — про такой день подсказка в расписании молчит.
       </span>
+      <span className="kind-rotation-note">{NORM_CALENDAR_HINT}</span>
       {dirty && (
         <button
           type="button"

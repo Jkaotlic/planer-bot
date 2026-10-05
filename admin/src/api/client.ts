@@ -3,7 +3,7 @@ import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, 
 export type { CalendarDayDto };
 
 import type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
-import type { ShiftCountsReport } from "@planer/shared";
+import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -68,6 +68,7 @@ import {
   mockSetCollectionPaymentFor,
   mockRemindUnpaid,
   mockDeleteCollection,
+  mockGetAdminShortfall,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -711,6 +712,8 @@ export interface ApiClient {
   /** Дожим по неотметившимся — письмо уходит только им. */
   remindUnpaid(id: number): Promise<{ delivered: number; intended: number }>;
   deleteCollection(id: number): Promise<void>;
+  /** Нехватка на 7 дней от сегодня — для метки на вкладке, а не для экрана графика. */
+  getAdminShortfall(): Promise<AdminShortfall>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -1211,6 +1214,10 @@ export const realClient: ApiClient = {
     return authorizedGet<TemplateQueue>(`/api/admin/templates/${templateId}/queue`);
   },
 
+  getAdminShortfall() {
+    return authorizedGet<AdminShortfall>("/api/admin/shortfall");
+  },
+
   async getTemplateRoles() {
     const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
     return templates;
@@ -1379,6 +1386,7 @@ const devClient: ApiClient = {
   setCollectionPaymentFor: (id, employeeId, paid) => mockSetCollectionPaymentFor(id, employeeId, paid),
   remindUnpaid: (id) => mockRemindUnpaid(id),
   deleteCollection: (id) => mockDeleteCollection(id),
+  getAdminShortfall: () => mockGetAdminShortfall(),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),

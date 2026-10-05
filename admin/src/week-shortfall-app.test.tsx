@@ -83,7 +83,76 @@ describe("строка нехватки в «Расписании»", () => {
     expect(el.querySelector(".week-shortfall-day[aria-pressed='true']")).toBeNull();
   });
 
-  it("норма задана и закрыта записями — ни строки, ни меток", async () => {
+  it("шапка колонки дня с дырой — красная целиком", async () => {
+    const el = await mount([HUGE]);
+    expect(el.querySelectorAll(".schedule-table thead th.short-col").length).toBe(7);
+  });
+
+  // Среда текущей недели — праздник, норма стоит именно на среду, воскресная нулевая.
+  // Календарь, подмененный на пустой (в плашке или в сетке), снова требовал бы людей по среде.
+  describe("праздник и норма на тот же день недели", () => {
+    const WEDNESDAY = toISODate(addDays(mondayOf(new Date()), 2));
+    const wednesdayNorm = role(9004, "Среда", [0, 0, 2, 0, 0, 0, 0]);
+
+    it("праздник считается по воскресенью: плашка закрыта, колонка не красная", async () => {
+      vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue([]);
+      vi.spyOn(apiClient, "getDayCalendar").mockResolvedValue([{ date: WEDNESDAY, kind: "holiday", note: "День теста", source: "manual" }]);
+      const el = await mount([wednesdayNorm]);
+      expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+      expect(el.querySelectorAll("th.short-col")).toHaveLength(0);
+      expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
+    });
+
+    it("контроль: без праздника та же норма — нехватка, красная колонка среды", async () => {
+      vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue([]);
+      vi.spyOn(apiClient, "getDayCalendar").mockResolvedValue([]);
+      const el = await mount([wednesdayNorm]);
+      expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("short");
+      const headers = [...el.querySelectorAll(".schedule-table thead th")];
+      expect(headers.findIndex((th) => th.classList.contains("short-col"))).toBe(3);
+      expect(el.querySelectorAll(".day-short-badge")).toHaveLength(1);
+    });
+  });
+
+  describe("«Ближайшая нехватка»: метка считает сегодня…+6 и пересекает границу недели", () => {
+    const nextMonday = toISODate(addDays(mondayOf(new Date()), 7));
+    const closedWeek = () => {
+      const week = Array.from({ length: 7 }, (_, i) => toISODate(addDays(mondayOf(new Date()), i)));
+      vi.spyOn(apiClient, "getTeamSchedule").mockImplementation(async (from: string) =>
+        from === week[0]
+          ? week.map((date, i) => ({
+              id: 100 + i, date, endDate: null, start: "08:00", end: "17:00", employeeId: 1,
+              category: "shift", templateId: 9005, title: "Закрытая", location: null, unrecognisedCode: null,
+            }))
+          : []);
+      vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 3, firstDate: nextMonday });
+      return mount([role(9005, "Закрытая", [1, 1, 1, 1, 1, 1, 1])]);
+    };
+
+    it("закрытая неделя, а нехватка в следующей — строка видна и ведёт туда: неделя и колонка дня", async () => {
+      const el = await closedWeek();
+      expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+      const line = el.querySelector<HTMLButtonElement>(".week-shortfall-nearest")!;
+      expect(line.textContent).toContain("Ближайшая нехватка: Пн");
+      const getSchedule = vi.mocked(apiClient.getTeamSchedule);
+      getSchedule.mockClear();
+      await act(async () => line.click());
+      await settle(6);
+      expect(getSchedule).toHaveBeenCalledWith(nextMonday, toISODate(addDays(mondayOf(new Date()), 13)));
+      // Колонка понедельника новой недели указана, строка больше не нужна.
+      const headers = [...el.querySelectorAll(".schedule-table thead th")];
+      expect(headers.findIndex((th) => th.classList.contains("pointed-col"))).toBe(1);
+      expect(el.querySelector(".week-shortfall-nearest")).toBeNull();
+    });
+  });
+
+  it("пока неделя грузится, плашки нет", async () => {
+    vi.spyOn(apiClient, "getTeamSchedule").mockReturnValue(new Promise(() => {}));
+    const el = await mount([HUGE]);
+    expect(el.querySelector(".week-shortfall")).toBeNull();
+  });
+
+  it("норма задана и закрыта записями — зелёная плашка, ни меток, ни красных шапок", async () => {
     const week = Array.from({ length: 7 }, (_, i) => toISODate(addDays(mondayOf(new Date()), i)));
     vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue(week.map((date, i) => ({
       id: 100 + i, date, endDate: null, start: "08:00", end: "17:00", employeeId: 1,
@@ -91,8 +160,9 @@ describe("строка нехватки в «Расписании»", () => {
     })));
     const el = await mount([role(9003, "Закрытая", [1, 1, 1, 1, 1, 1, 1])]);
     expect(el.querySelector(".schedule-table")).not.toBeNull();
-    expect(el.querySelector(".week-shortfall")).toBeNull();
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
     expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
+    expect(el.querySelectorAll("th.short-col")).toHaveLength(0);
   });
 
   it("при листании не считает новую неделю по записям прежней", async () => {
@@ -104,10 +174,15 @@ describe("строка нехватки в «Расписании»", () => {
     expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
   });
 
-  it("видов смен нет вовсе — строки нет", async () => {
+  it("видов смен нет вовсе — нейтральная плашка «Нормы не заданы»", async () => {
     const el = await mount([]);
     expect(el.querySelector(".schedule-table")).not.toBeNull();
-    expect(el.querySelector(".week-shortfall")).toBeNull();
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
+    const set = [...el.querySelectorAll<HTMLButtonElement>(".week-shortfall button")].find((b) => b.textContent === "задать →")!;
+    expect(set).toBeDefined();
+    await act(async () => set.click());
+    await settle(4);
+    expect(el.querySelector(".kinds-intro")).not.toBeNull();
   });
 
   it("хвост «без нормы» открывает «Виды смен»", async () => {

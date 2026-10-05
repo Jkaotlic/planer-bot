@@ -1,6 +1,6 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
 import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
-import type { CalendarDayDto, EntryCategory, RecipientGroupView } from "@planer/shared";
+import type { AdminShortfall, CalendarDayDto, EntryCategory, RecipientGroupView } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
@@ -598,6 +598,11 @@ const TEMPLATE_ROLES = new Map<number, { pool: number[]; preference: Record<numb
 const TEMPLATE_COVERAGE = new Map<number, number[]>();
 /** DEV-хранилище своих текстов напоминания. Нет записи — стандартный текст. */
 const TEMPLATE_REMINDER_TEXT = new Map<number, string>();
+
+/** DEV: метка молчит — мок-график нехватку показывает плашкой на самом экране. */
+export async function mockGetAdminShortfall(): Promise<AdminShortfall> {
+  return { total: 0, firstDate: null };
+}
 
 export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {
   await delay(180);

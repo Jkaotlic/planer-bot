@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { coverageSummary, exactSchedulePalette, previewReminderText, REMINDER_PLACEHOLDERS } from "@planer/shared";
+import { coverageSummary, NORM_CALENDAR_HINT, exactSchedulePalette, previewReminderText, REMINDER_PLACEHOLDERS } from "@planer/shared";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Checklist, type TemplateQueue, type TemplateRolesView } from "../../api/client";
 import { useEntryPalette } from "../../categories";
@@ -469,6 +469,7 @@ function CoverageRow({
         ))}
       </div>
       <Hint>Ноль значит «не считаем» — про такой день подсказка в расписании молчит.</Hint>
+      <Hint>{NORM_CALENDAR_HINT}</Hint>
       {dirty && (
         // Единственная primary карточки: «Сохранить текст» ниже — обычная.
         <ActionButton

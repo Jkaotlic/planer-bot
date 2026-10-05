@@ -2,7 +2,7 @@ import { swapBlockedFor } from "../lib/swaps";
 import { nowOnTeamDay } from "../lib/swap-candidates";
 import { useEffect, useRef, useState } from "react";
 import { Placeholder } from "@telegram-apps/telegram-ui";
-import { canAddOwnShifts, isAbsence, swapBlockReason } from "@planer/shared";
+import { canAddOwnShifts, isAbsence, specialDays, swapBlockReason } from "@planer/shared";
 import type { Me, Shift, Template } from "../api/client";
 import type { SelfEntryMode } from "./SelfEntryScreen";
 import { ChecklistCard } from "../components/ChecklistCard";
@@ -46,6 +46,9 @@ export interface MyShiftsScreenProps {
   openDay: { date: string; shifts: Shift[] } | null;
   openDayLoading: boolean;
   openDayError: string | null;
+  /** Праздники и рабочие субботы в размахе смен. Необязателен: старый сервер
+   *  поля не шлёт, и экран тогда просто не помечает дни. */
+  calendar?: readonly { date: string; kind: "holiday" | "workday"; note: string | null }[];
   /** Тап по своей смене: раскрыть её лист (передаётся смена) или закрыть
    *  (передаётся `null`) — экран сам решает, какая строка раскрыта сейчас. */
   onToggleCoworkers: (shift: Shift | null) => void;
@@ -64,6 +67,7 @@ export function MyShiftsScreen({
   openDay,
   openDayLoading,
   openDayError,
+  calendar,
   onToggleCoworkers,
 }: MyShiftsScreenProps) {
   // Какая строка раскрыта — состояние экрана, а не App: тап переключает её
@@ -90,6 +94,7 @@ export function MyShiftsScreen({
     }
   }
 
+  const specialByDate = new Map(specialDays(shifts.map((s) => s.date), calendar ?? []).map((d) => [d.date, d.short]));
   const weeks = groupUpcomingByWeek(shifts, today);
   const rest = remainingThisWeek(shifts, today);
   const summary =
@@ -164,6 +169,7 @@ export function MyShiftsScreen({
                     onOpen={coworkersOpenable(shift) ? handleRowOpen : undefined}
                     expanded={expandedShiftId === shift.id}
                     isToday={shift.date === today}
+                    special={specialByDate.get(shift.date)}
                     swapBlockedReason={swapBlockedFor(shift, today, nowOnTeamDay(today), swapBlockedReason)}
                   />
                   {expandedShiftId === shift.id && (

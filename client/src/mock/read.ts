@@ -92,6 +92,8 @@ export function createReadMock(opts: ReadMockOptions) {
           .sort(byDateThenStart)
           .map(toEntry),
         today,
+        // Мок без базы праздников; пусто — тот же ответ, что у сервера без смен.
+        calendar: [],
       };
     },
 

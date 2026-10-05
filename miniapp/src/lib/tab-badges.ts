@@ -15,6 +15,9 @@ export interface TabBadgesInput {
    *  не список с кнопкой «Я перевёл» (`TeamCollections`): отмечаться там не
    *  за что, и метка на этой вкладке была бы про кнопку, которой у него нет. */
   isAdmin?: boolean;
+  /** Людей не хватает на 7 дней вперёд. `null` — не загрузилось: метка молчит,
+   *  а не врёт нулём. */
+  adminShortfall?: number | null;
 }
 
 /**
@@ -48,6 +51,10 @@ export function tabBadges(input: TabBadgesInput): Partial<Record<TabKey, number>
     const unpaid = input.collections.filter((c) => !c.paid).length;
     if (unpaid > 0) badges.collections = unpaid;
   }
+
+  // «Админ»: сколько людей не хватает на 7 дней вперёд. Единственная метка не
+  // про «ждёт ответа», а про «ждёт дела» — но вкладка одна, и число на ней одно.
+  if (input.isAdmin && input.adminShortfall) badges.admin = input.adminShortfall;
 
   return badges;
 }

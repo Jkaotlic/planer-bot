@@ -536,3 +536,100 @@
   padding: 0;
   background: none;
 }
+
+/* Плашка нехватки. Красная — карточкой с крупным числом, зелёная и нейтральная —
+   одной строкой: тревога должна быть заметнее покоя, иначе глаз привыкнет к обеим. */
+.ui-shortfall {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-card);
+  font-size: var(--app-text-body);
+}
+.ui-shortfall-title { font-weight: 700; }
+.ui-shortfall--short {
+  background: rgb(229 57 53 / 14%);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 14%, transparent);
+}
+/* Заголовок — залитая таблетка, как метка `[data-day-short]` на дне. Красный
+   текст на красной подложке замером давал 3.11 (тёмная) и 3.08 (светлая) при
+   нужных 4.5; белое на затемнённом красном даёт больше. Цвет текста плашки —
+   обычный: он же у «Без нормы…» и у кнопок дней. */
+.ui-shortfall--short .ui-shortfall-title {
+  align-self: flex-start;
+  padding: 2px 12px;
+  border-radius: 999px;
+  font-size: 17px;
+  background: var(--tgui--destructive_text_color, #d33a3a);
+  background: color-mix(in srgb, var(--tgui--destructive_text_color, #d33a3a) 84%, #000);
+  color: #fff;
+}
+.ui-shortfall--closed { color: #1f7a34; background: #e1f6e1; padding-block: 8px; }
+.ui-dark .ui-shortfall--closed { color: #86e093; background: rgb(70 190 90 / 22%); }
+/* Заголовок обычным цветом, а не `hint_color`: серый давал 4.23 (тёмная) и 3.22
+   (светлая) при нужных 4.5. */
+.ui-shortfall--no-norms { color: var(--tgui--text_color); background: var(--app-card); padding-block: 8px; }
+.ui-shortfall-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* Зона нажатия 44px по самой кнопке: у `compact` она 36px плюс невидимое поле. */
+.ui-shortfall-set {
+  min-height: var(--app-tap);
+  flex: none;
+  /* Подпись обычным цветом, а кнопкой её делает рамка цвета ссылки: синий текст
+     «задать →» на синей подложке `--secondary` давал 3.31 (светлая) и белый на
+     залитой `--primary` — 3.31/3.72, оба ниже 4.5. */
+  color: var(--tgui--text_color);
+  box-shadow: inset 0 0 0 1.5px var(--tgui--link_color);
+}
+.ui-shortfall-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-shortfall-day {
+  min-height: var(--app-tap);
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--app-radius-control);
+  background: var(--app-card);
+  color: var(--tgui--text_color);
+  font: inherit;
+  font-size: var(--app-text-meta);
+  text-align: left;
+  cursor: pointer;
+}
+.ui-shortfall-nearest {
+  align-self: flex-start;
+  min-height: var(--app-tap);
+  padding: 0;
+  border: none;
+  background: none;
+  /* Обычный цвет текста и подчёркивание — как у «Без нормы…»: на зелёной и красной
+     подложках только он держит контраст, а ссылочный синий — нет. */
+  color: var(--tgui--text_color);
+  text-decoration: underline;
+  font: inherit;
+  font-size: var(--app-text-body);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ui-shortfall-unset {
+  align-self: flex-start;
+  min-height: var(--app-tap);
+  padding: 0;
+  border: none;
+  background: none;
+  /* Обычный цвет текста: наследуемый красный на красной подложке давал 3.11/3.08. */
+  color: var(--tgui--text_color);
+  text-decoration: underline;
+  font: inherit;
+  font-size: var(--app-text-meta);
+  cursor: pointer;
+}
+
+/* Строка праздников недели: текстом, как подпись под полоской, — не карточка. */
+.ui-special-days {
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--app-text-meta);
+  line-height: 1.35;
+  /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
+     при нужных 4.5. */
+  color: var(--tgui--text_color);
+}

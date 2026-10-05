@@ -2,14 +2,16 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EMPTY_CALENDAR } from "@planer/shared";
 import type { Shift } from "../api/client";
 import { WeekShortfallBar, type WeekShortfallBarProps } from "./WeekShortfallBar";
 
 /**
  * Строка над сеткой недели: «Не хватает 4: Пн Утро −1 · Чт Дежурство −2».
  *
- * Закрытая неделя строки не рисует вовсе — не «всё в порядке» зелёным, а
- * ничего: экран, на котором нечего чинить, не должен ничего сообщать.
+ * Строка стоит всегда: закрытая неделя — зелёная «Нормы закрыты ✓», без норм —
+ * нейтральная «Нормы не заданы». Молчание читалось как «подсказки нет» —
+ * владелец не знал, что она вообще существует.
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -34,7 +36,7 @@ async function mount(props: Partial<WeekShortfallBarProps>) {
   root = createRoot(host);
   await act(async () => {
     root!.render(createElement(WeekShortfallBar, {
-      shifts: [], templates: [], weekDates: WEEK, pointedDate: null, onPointDay: () => {}, onOpenKinds: () => {}, ...props,
+      shifts: [], templates: [], weekDates: WEEK, calendar: EMPTY_CALENDAR, pointedDate: null, onPointDay: () => {}, onOpenKinds: () => {}, ...props,
     }));
   });
   return host;
@@ -46,10 +48,37 @@ const entry = (id: number, date: string, employeeId: number, templateId: number)
 });
 
 describe("строка нехватки над сеткой недели", () => {
-  it("закрытой неделе не достаётся ни одного узла", async () => {
+  it("закрытая неделя — зелёная «Нормы закрыты ✓»", async () => {
     const shifts = [entry(1, WEEK[0]!, 1, 10), entry(2, WEEK[0]!, 2, 10), entry(3, WEEK[3]!, 1, 10)];
     const el = await mount({ shifts, templates: [MORNING] });
-    expect(el.innerHTML).toBe("");
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+    expect(el.textContent).toBe("Нормы закрыты ✓");
+  });
+
+  it("нормы не заданы ни у одного вида — нейтральная, с кнопкой «задать →»", async () => {
+    const onOpenKinds = vi.fn();
+    const el = await mount({ templates: [EVENING], onOpenKinds });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
+    expect(el.textContent).toContain("Нормы не заданы");
+    const set = [...el.querySelectorAll("button")].find((b) => b.textContent === "задать →")!;
+    await act(async () => set.click());
+    expect(onOpenKinds).toHaveBeenCalledTimes(1);
+  });
+
+  it("видов смен нет вовсе — всё равно «Нормы не заданы» и кнопка «задать →»", async () => {
+    const onOpenKinds = vi.fn();
+    const el = await mount({ templates: [], onOpenKinds });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("no-norms");
+    const set = [...el.querySelectorAll("button")].find((b) => b.textContent === "задать →")!;
+    expect(set).toBeDefined();
+    await act(async () => set.click());
+    expect(onOpenKinds).toHaveBeenCalledTimes(1);
+  });
+
+  it("дыра — data-shortfall=short и прежний расклад", async () => {
+    const el = await mount({ templates: [MORNING] });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("short");
+    expect(el.textContent).toContain("Не хватает 3");
   });
 
   it("итог — числом людей, отдельным узлом в начале строки", async () => {
@@ -62,6 +91,14 @@ describe("строка нехватки над сеткой недели", () =>
     const el = await mount({ templates: [MORNING, DUTY] });
     const days = [...el.querySelectorAll(".week-shortfall-day")].map((b) => b.textContent);
     expect(days).toEqual(["Пн Утро −2, Дежурство −1", "Чт Утро −1"]);
+  });
+
+  it("видов с нехваткой больше двух — на кнопке дня только итог, как в мини-аппе", async () => {
+    // Один хелпер на оба фронта: свой формат в консоли разъехался бы с мини-аппом.
+    const third = { templateId: 40, name: "Ночь", category: "shift" as const, coverage: [1, 0, 0, 0, 0, 0, 0] };
+    const el = await mount({ templates: [MORNING, DUTY, third] });
+    const days = [...el.querySelectorAll(".week-shortfall-day")].map((b) => b.textContent);
+    expect(days).toEqual(["Пн −4", "Чт Утро −1"]);
   });
 
   it("клик по дню показывает на его колонку, повторный — снимает", async () => {
@@ -90,9 +127,43 @@ describe("строка нехватки над сеткой недели", () =>
     expect(onOpenKinds).toHaveBeenCalledTimes(1);
   });
 
-  it("дыр нет, а виды без нормы есть — строка состоит из одного хвоста", async () => {
-    const el = await mount({ templates: [EVENING, { ...EVENING, templateId: 31, name: "Ночь" }] });
-    expect(el.querySelector(".week-shortfall-total")).toBeNull();
-    expect(el.querySelector(".week-shortfall")!.textContent).toBe("без нормы: 2 вида →");
+  it("дыр нет, а виды без нормы есть — вместо итога один хвост", async () => {
+    const shifts = [entry(1, WEEK[0]!, 1, 10), entry(2, WEEK[0]!, 2, 10), entry(3, WEEK[3]!, 1, 10)];
+    const el = await mount({ shifts, templates: [MORNING, EVENING, { ...EVENING, templateId: 31, name: "Ночь" }] });
+    expect(el.querySelector(".week-shortfall")!.textContent).toBe("Нормы закрыты ✓без нормы: 2 вида →");
+  });
+});
+
+describe("«Ближайшая нехватка» над сеткой недели", () => {
+  const NEXT_MONDAY = "2026-08-31";
+  const closedShifts = [entry(1, WEEK[0]!, 1, 10), entry(2, WEEK[0]!, 2, 10), entry(3, WEEK[3]!, 1, 10)];
+  const nearest = (el: HTMLElement) => el.querySelector<HTMLButtonElement>(".week-shortfall-nearest");
+
+  it("дата в следующей неделе — строка с днём недели и числом, и в закрытой плашке тоже", async () => {
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: NEXT_MONDAY });
+    expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+    expect(nearest(el)?.textContent).toBe("Ближайшая нехватка: Пн 31 — показать →");
+  });
+
+  it("при красной плашке строка тоже есть", async () => {
+    const el = await mount({ templates: [MORNING], nearestDate: NEXT_MONDAY });
+    expect(nearest(el)?.textContent).toContain("Пн 31");
+  });
+
+  it("дата внутри показанной недели — строки нет", async () => {
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: WEEK[3]! });
+    expect(nearest(el)).toBeNull();
+  });
+
+  it("даты нет — строки нет", async () => {
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: null });
+    expect(nearest(el)).toBeNull();
+  });
+
+  it("нажатие отдаёт дату наверх", async () => {
+    const onJumpNearest = vi.fn();
+    const el = await mount({ shifts: closedShifts, templates: [MORNING], nearestDate: NEXT_MONDAY, onJumpNearest });
+    await act(async () => nearest(el)!.click());
+    expect(onJumpNearest).toHaveBeenCalledWith(NEXT_MONDAY);
   });
 });

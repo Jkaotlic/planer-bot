@@ -7,7 +7,7 @@ import type {
 } from "../../lib/team-schedule";
 import { splitDisplayName } from "../../lib/team-schedule";
 import { weekdayShort } from "../../lib/week";
-import { dayOffLabel, isDayOff, type DayCalendar } from "@planer/shared";
+import { dayOffLabel, isDayOff, specialDayKind, type DayCalendar } from "@planer/shared";
 import { TeamEntryDetails } from "./TeamEntryDetails";
 
 export interface WeekCellSelection {
@@ -66,7 +66,7 @@ export function TeamWeekGrid({
               <span>{day.slice(8, 10)}</span>
               {/* Значок, а не название: в колонку шириной под две цифры имя
                   праздника не влезет, а `title` его показывает по нажатию. */}
-              {calendar.get(day) && (
+              {specialDayKind(day, calendar.get(day)) && (
                 <small title={dayOffLabel(day, calendar.get(day), null) ?? undefined}>
                   {calendar.get(day) === "holiday" ? "🎉" : "💼"}
                 </small>

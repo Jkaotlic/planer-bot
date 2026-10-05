@@ -327,6 +327,34 @@ describe("контракт домена read", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("/api/my/shifts carries the holiday calendar for the span of the returned shifts", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Игорь", 333);
+    createShift(db, { date: "2026-11-04", start: "11:00", end: "20:00", employeeId: w.id });
+    createShift(db, { date: "2026-11-07", start: "11:00", end: "20:00", employeeId: w.id });
+    setManualDay(db, "2026-11-04", "holiday", "День народного единства", new Date());
+    setManualDay(db, "2026-11-07", "workday", null, new Date());
+    // Outside the span of the shifts: must not ride along (no wide query).
+    setManualDay(db, "2026-12-31", "holiday", "Вне диапазона", new Date());
+    const app = createApp({ db, config });
+    const res = await app.request("/api/my/shifts?from=2026-11-01", bearer(await tokenFor(app, 333)));
+    const body = await res.json();
+    expect(body.calendar).toEqual([
+      { date: "2026-11-04", kind: "holiday", note: "День народного единства" },
+      { date: "2026-11-07", kind: "workday", note: null },
+    ]);
+    expect(myShiftsResponseSchema.safeParse(body).success).toBe(true);
+  });
+
+  it("/api/my/shifts without shifts has an empty calendar", async () => {
+    const db = makeTestDb();
+    worker(db, "Игорь", 333);
+    setManualDay(db, "2026-11-04", "holiday", "День народного единства", new Date());
+    const app = createApp({ db, config });
+    const res = await app.request("/api/my/shifts?from=2026-11-01", bearer(await tokenFor(app, 333)));
+    expect((await res.json()).calendar).toEqual([]);
+  });
+
   it("/api/team/schedule отдаёт ровно обещанное", async () => {
     const db = makeTestDb();
     const w = worker(db, "Игорь", 333);
