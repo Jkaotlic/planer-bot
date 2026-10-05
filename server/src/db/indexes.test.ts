@@ -27,6 +27,11 @@ function planFor(sql: string): string {
 describe("индексы под горячие чтения", () => {
   const cases: { what: string; sql: string; index: string }[] = [
     {
+      what: "ждущие ОК больничные (срочная ветка тика каждые пять минут)",
+      sql: "select * from shifts where approval_requested_at is not null and category = 'sick_leave'",
+      index: "shift_pending_approval",
+    },
+    {
       what: "расписание за месяц (обе сетки, отчёты, выгрузка)",
       sql: "select * from shifts where date >= '2026-08-01' and date <= '2026-08-31'",
       index: "shift_date",

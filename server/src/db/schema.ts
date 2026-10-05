@@ -155,6 +155,19 @@ export const shifts = sqliteTable("shifts", {
    * re-import until somebody actually fixes the file. Null on every normal entry.
    */
   unrecognisedCode: text(),
+  /**
+   * Set while a worker's own sick leave waits for any one admin's «ОК»; NULL means
+   * approved. NULL on every row that existed before migration 0041 — those were never
+   * asked about, and the owner ruled them approved (spec item 5), so no backfill.
+   */
+  approvalRequestedAt: integer({ mode: "timestamp" }),
+  /** Who pressed «ОК». SET NULL: the approval stays a fact even if the row were ever deleted. */
+  approvedByEmployeeId: integer().references(() => employees.id, { onDelete: "set null" }),
+  /**
+   * The urgent branch of the handover tick handed a shift over before any «ОК»
+   * (spec item 11). Kept so the admin sees «передача запущена без ОК» on the entry.
+   */
+  handoverForcedAt: integer({ mode: "timestamp" }),
   createdAt: createdAt(),
   updatedAt: createdAt().$onUpdate(() => new Date()),
 },
@@ -165,8 +178,34 @@ export const shifts = sqliteTable("shifts", {
    * отчёты, выгрузка ростера. `(employee_id, date)` — история одного человека:
    * баланс, очередь дежурств, «мои смены». До индексов оба шли полным сканом.
    */
-  (t) => [index("shift_date").on(t.date), index("shift_employee_date").on(t.employeeId, t.date)],
+  (t) => [
+    index("shift_date").on(t.date),
+    index("shift_employee_date").on(t.employeeId, t.date),
+    // The urgent tick reads pending rows every five minutes; without the index that
+    // is a full scan of the fastest-growing table. Partial on purpose: a plain index
+    // is NOT picked for `IS NOT NULL` (SQLite assumes it matches most rows and scans),
+    // and nearly every row is NULL, so the partial one is also near-empty.
+    index("shift_pending_approval").on(t.approvalRequestedAt).where(sql`${t.approvalRequestedAt} is not null`),
+  ],
 );
+
+/**
+ * Which admin chat got which approval letter — so the buttons can be replaced for
+ * EVERY admin once one of them decides (the poll-recipient pattern). CASCADE: a
+ * message about a sick leave that no longer exists has nothing left to point at; the
+ * paths that delete a pending sick leave replace the buttons first (see the service).
+ */
+export const sickLeaveApprovalMessages = sqliteTable(
+  "sick_leave_approval_messages",
+  {
+    shiftId: integer().notNull().references(() => shifts.id, { onDelete: "cascade" }),
+    chatId: integer().notNull(),
+    messageId: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.chatId, t.messageId] }), index("sick_approval_message_shift").on(t.shiftId)],
+);
+
+export type SickLeaveApprovalMessage = typeof sickLeaveApprovalMessages.$inferSelect;
 
 export const swapRequests = sqliteTable("swap_requests", {
   id: integer().primaryKey({ autoIncrement: true }),
