@@ -3723,6 +3723,7 @@ textarea {
   display: block;
   margin-top: 6px;
   font-size: var(--text-sub);
+  color: var(--hint);
   color: color-mix(in srgb, var(--hint) 55%, var(--text));
 }
 
