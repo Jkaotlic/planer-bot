@@ -162,6 +162,17 @@ button {
   color: var(--button-text);
 }
 
+/* Подпись занимает всё, что осталось от иконки и метки, и держится в одну строку:
+   без этого «На подтверждение» с меткой переносилась на вторую строку (пункт 54px
+   при 38px у соседей, замер 1280 и 900). */
+.sidebar-nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sidebar-nav-icon {
   flex: 0 0 20px;
   display: flex;
@@ -3235,7 +3246,10 @@ textarea {
     bottom: 0;
     left: 0;
     z-index: 30;
-    width: 232px;
+    /* 248, а не 232: при 232 пункт «На подтверждение» с меткой оставлял подписи
+       119px при нужных 131 (замер 900) — она обрезалась многоточием. Шторка лежит
+       поверх контента, лишние 16px никого не теснят. */
+    width: 248px;
     flex: none;
     overflow-y: auto;
     transform: translateX(-100%);

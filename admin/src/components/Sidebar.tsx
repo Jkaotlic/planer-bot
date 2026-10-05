@@ -55,7 +55,7 @@ export function Sidebar({ active, onChange, adminLabel, open, badges }: SidebarP
             onClick={() => onChange(item.key)}
           >
             <span className="sidebar-nav-icon">{item.icon}</span>
-            {item.label}
+            <span className="sidebar-nav-label">{item.label}</span>
             {badges?.[item.key] ? (
               <>
                 <span className="sidebar-nav-badge" aria-hidden="true">{badges[item.key]! > 9 ? "9+" : badges[item.key]}</span>
