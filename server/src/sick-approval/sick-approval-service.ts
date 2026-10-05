@@ -56,7 +56,7 @@ export function extensionOf(sick: Shift): SickSpan[] | null {
   return sickExtensionRuns({ date: sick.approvedDate, endDate: sick.approvedEndDate }, sick);
 }
 
-function daysAsked(sick: Shift): string[] {
+export function daysAsked(sick: Shift): string[] {
   const runs = extensionOf(sick);
   return runs ? runs.flatMap((run) => eachDayIso(run.date, run.endDate ?? run.date)) : eachDayIso(sick.date, sick.endDate ?? sick.date);
 }
