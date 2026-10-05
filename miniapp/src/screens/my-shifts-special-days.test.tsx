@@ -43,7 +43,7 @@ async function renderScreen(shifts: Shift[], calendar?: { date: string; kind: "h
   root = createRoot(host);
   const screen = createElement(MyShiftsScreen, {
     me, today: "2026-08-05", shifts, templates: [], calendar,
-    onProposeSwap: () => {}, onSelfEntry: () => {}, onOpenSettings: () => {},
+    onProposeSwap: () => {}, onSelfEntry: () => {}, onOpenSettings: () => {}, onOpenServices: () => {},
     openDay: null, openDayLoading: false, openDayError: null, onToggleCoworkers: () => {},
   });
   await act(async () => root!.render(createElement(AppRoot, null, screen)));

@@ -14,6 +14,8 @@ import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
 import { WeekendScreen } from "./screens/WeekendScreen";
 import { adminSectionFromSearch, scheduleDateFromSearch, type AdminView } from "./screens/admin-section";
 import { foodRouteFromSearch, type FoodRoute } from "./screens/food/food-route";
+import { servicesFromSearch } from "./screens/services/services-route";
+import { ServicesScreen } from "./screens/services/ServicesScreen";
 
 /**
  * Вкладка «Админ» грузится отдельным куском и только когда её открыли.
@@ -104,6 +106,11 @@ export function App() {
   // «Заказы и опросы» — тот же приём, что у формы больничного выше: ссылка из
   // бота (`?screen=orders`) читается один раз при открытии, на один показ.
   const [foodRoute, setFoodRoute] = useState<FoodRoute | null>(() => foodRouteFromSearch(window.location.search));
+  // «Сервисы» — оверлей со списком инструментов; "qr" — экран QR-кода поверх него.
+  // Ссылка бота (`?screen=services`) читается один раз при открытии, как у заказов.
+  const [services, setServices] = useState<"list" | "qr" | null>(() =>
+    servicesFromSearch(window.location.search) ? "list" : null,
+  );
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Sets, not single ids: several rows (two pending swaps, two open weekend
@@ -326,7 +333,7 @@ export function App() {
     // вкладку («📣 Анонс») ставит эффект выше, форму-оверлей («🤒 Больничный»,
     // «📌 Мероприятие») — `selfEntryMode`. Настройка, перебивающая их, сделала бы
     // кнопку в боте враньём.
-    if (adminSectionFromSearch(search) || screenFromSearch(search) || handoverDraftsFromSearch(search) || foodRouteFromSearch(search)) return;
+    if (adminSectionFromSearch(search) || screenFromSearch(search) || handoverDraftsFromSearch(search) || foodRouteFromSearch(search) || servicesFromSearch(search)) return;
     setTab(startTabScreen(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me })));
   }, [data]);
 
@@ -613,6 +620,17 @@ export function App() {
     );
   }
 
+  // Ниже «Заказов»: открытые из списка, они закрываются обратно в список.
+  if (services === "list") {
+    return (
+      <ServicesScreen
+        onOpenFood={() => setFoodRoute({ view: "list" })}
+        onOpenQr={() => setServices("qr")}
+        onClose={() => setServices(null)}
+      />
+    );
+  }
+
   // `?screen=shift` — единственный из трёх адресов, где право на форму не
   // всеобщее: ссылку могли переслать, а тумблер «Веду свой график сам» —
   // выключить (или роль наблюдателя — снять) между открытием меню бота и
@@ -745,6 +763,7 @@ export function App() {
           }}
           onSelfEntry={setSelfEntryMode}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenServices={() => setServices("list")}
           openDay={
             openCoworkersFor && dayShifts?.date === openCoworkersFor.date
               ? { date: dayShifts.date, shifts: dayShifts.shifts }

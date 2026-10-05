@@ -40,6 +40,8 @@ export interface MyShiftsScreenProps {
   onSelfEntry: (mode: SelfEntryMode) => void;
   /** Открывает экран «Настройки» — шестерёнка в приветствии. */
   onOpenSettings: () => void;
+  /** Открывает «Сервисы» — кнопка в приветствии рядом с шестерёнкой. */
+  onOpenServices: () => void;
   /** Расписание дня раскрытой строки — тот же загрузчик, что кормит экран
    *  обмена (см. `App.tsx`). `null`, пока не пришло или дата не совпадает с
    *  раскрытой строкой (предыдущий день ещё висит в памяти, пока грузится новый). */
@@ -64,6 +66,7 @@ export function MyShiftsScreen({
   onProposeSwap,
   onSelfEntry,
   onOpenSettings,
+  onOpenServices,
   openDay,
   openDayLoading,
   openDayError,
@@ -119,7 +122,7 @@ export function MyShiftsScreen({
       {/* `me.address` приходит с сервера: он знает имя из Telegram. Делить
           `displayName` здесь давало «Привет, Петров» — ростер пишется «Фамилия
           Имя». См. `addressOf` в @planer/shared. */}
-      <GreetingHero name={me.address} summary={summary} onSettings={onOpenSettings} />
+      <GreetingHero name={me.address} summary={summary} onSettings={onOpenSettings} onServices={onOpenServices} />
 
       {/* Чек-лист — самое верхнее в день, когда он положен: человек открывает
           мини-апп по кнопке из утреннего сообщения. В остальные дни его нет. */}
