@@ -16,6 +16,8 @@ export function markApprovalRequested(db: Db, id: number, at: Date, approved: Si
       approvedByEmployeeId: null,
       approvedDate: approved?.date ?? null,
       approvedEndDate: approved?.endDate ?? null,
+      // A new round is a new question: «передача запущена без ОК» belonged to the old one.
+      handoverForcedAt: null,
     })
     .where(and(eq(shifts.id, id), eq(shifts.category, "sick_leave")))
     .returning()
@@ -34,6 +36,16 @@ export function claimPendingSickLeave(db: Db, id: number, approvedBy: number | n
     .update(shifts)
     .set({ approvalRequestedAt: null, approvedByEmployeeId: approvedBy, approvedDate: null, approvedEndDate: null })
     .where(and(eq(shifts.id, id), eq(shifts.category, "sick_leave"), isNotNull(shifts.approvalRequestedAt)))
+    .returning()
+    .get();
+}
+
+/** Keep the stored approved span equal to what the worker still wants of it (null: none left). */
+export function setApprovedSpan(db: Db, id: number, span: SickSpan | null): Shift | undefined {
+  return db
+    .update(shifts)
+    .set({ approvedDate: span?.date ?? null, approvedEndDate: span?.endDate ?? null })
+    .where(eq(shifts.id, id))
     .returning()
     .get();
 }

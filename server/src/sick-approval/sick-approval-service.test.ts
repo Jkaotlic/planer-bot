@@ -3,16 +3,16 @@ import { Bot } from "grammy";
 import { addDaysIso } from "@planer/shared";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, createAdminEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
-import { createShift, getShift, updateShift } from "../repo/shifts";
+import { createShift, deleteShift, getShift, updateShift } from "../repo/shifts";
 import { getHandover, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers } from "../handover/handover-service";
 import { listRecentAudit } from "../repo/audit";
-import { listApprovalMessages } from "../repo/sick-approvals";
+import { claimPendingSickLeave, listApprovalMessages } from "../repo/sick-approvals";
 import { recordApi, stubBotInfo, callbackDataOf } from "../bot/testbot";
 import { teamNow } from "../util/team-time";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
-import { approveSickLeave, listSickApprovals, rejectSickLeave, requestApproval, sickApprovalDeps } from "./sick-approval-service";
+import { approveSickLeave, finishApprovalMessages, listSickApprovals, rejectSickLeave, requestApproval, sickApprovalDeps } from "./sick-approval-service";
 
 const config = testConfig();
 const day = (n: number) => addDaysIso(teamNow(config.teamTz).date, n);
@@ -293,5 +293,69 @@ describe("extension of an approved sick leave", () => {
     // Wrong implementation caught: listing day(1)'s shift as taken away by an extension that does not touch it.
     expect(row!.shiftLines).toHaveLength(1);
     expect(row!.shiftLines[0]).toContain("09:00–18:00");
+  });
+});
+
+/**
+ * An EXTENSION request whose send loop is interrupted: right after the first admin's letter is out,
+ * `decide` runs (as that admin pressing a button, or the worker deleting). Returns what the admin
+ * reached LATER (Марк, 112) finally sees under his letter.
+ */
+async function lastLineSeenByLaterAdmin(decide: (ctx: { db: Db; deps: ReturnType<typeof sickApprovalDeps>; sick: { id: number }; igorId: number }) => Promise<void>) {
+  const db = makeTestDb();
+  const bot = stubBotInfo(new Bot("12345:tok"));
+  const api = recordApi(bot);
+  const igor = createAdminEmployee(db, { displayName: "Игорь", telegramUserId: 111 });
+  createAdminEmployee(db, { displayName: "Марк", telegramUserId: 112 });
+  const anya = linked(db, 201, "Аня");
+  const approved = createShift(db, { employeeId: anya.id, date: day(1), endDate: day(2), category: "sick_leave" });
+  const stretched = updateShift(db, approved.id, { endDate: day(3) })!;
+  const deps = sickApprovalDeps(bot, db, config);
+  let fired = false;
+  bot.api.config.use(async (prev, method, payload) => {
+    const result = await prev(method, payload);
+    if (!fired && method === "sendMessage" && (payload as { chat_id: number }).chat_id === 111) {
+      fired = true;
+      await decide({ db, deps, sick: stretched, igorId: igor.id });
+    }
+    return result;
+  });
+  await requestApproval(deps, stretched, { date: approved.date, endDate: approved.endDate });
+  const edit = api.calls.filter((c) => c.method === "editMessageText" && c.payload.chat_id === 112).at(-1);
+  return edit ? (edit.payload.text as string).split("\n\n").at(-1) : null;
+}
+
+describe("the post-loop close names the decision that really happened", () => {
+  it("a ❌ on the extension mid-loop reads «Отклонил(а)», not a false «Подтвердил(а)»", async () => {
+    const seen = await lastLineSeenByLaterAdmin(async ({ deps, sick, igorId }) => {
+      await rejectSickLeave(deps, sick.id, igorId);
+    });
+    // Wrong implementation caught: inferring from row state (present, not pending) says «Подтвердил(а) админ».
+    expect(seen).toBe("❌ Отклонил(а) Игорь");
+  });
+
+  it("the worker deleting mid-loop reads «Больничного уже нет», not «Отклонено»", async () => {
+    const seen = await lastLineSeenByLaterAdmin(async ({ db, deps, sick }) => {
+      await finishApprovalMessages(deps, sick.id, "x\n\n🗑 Больничного уже нет — Аня снял(а) сам(а)");
+      deleteShift(db, sick.id);
+    });
+    expect(seen).toBe("🗑 Больничного уже нет — Аня снял(а) сам(а)");
+  });
+
+  it("an unrecorded change of state reads a neutral «Решение уже принято»", async () => {
+    const seen = await lastLineSeenByLaterAdmin(async ({ db, sick }) => {
+      claimPendingSickLeave(db, sick.id, null);
+    });
+    expect(seen).toBe("Решение уже принято");
+  });
+});
+
+describe("a fresh request", () => {
+  it("forgets «передача запущена без ОК» from an earlier round", async () => {
+    const { db, deps, anya } = await scene();
+    const forced = createShift(db, { employeeId: anya.id, date: day(5), category: "sick_leave", handoverForcedAt: new Date() });
+    await requestApproval(deps, forced);
+    // Wrong implementation caught: the extension request would inherit the old mark.
+    expect(getShift(db, forced.id)!.handoverForcedAt).toBeNull();
   });
 });

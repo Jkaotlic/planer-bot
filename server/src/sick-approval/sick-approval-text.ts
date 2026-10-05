@@ -60,6 +60,11 @@ export function handoverDraftsKeyboard(publicUrl: string): InlineKeyboard {
   return new InlineKeyboard().webApp("🤝 Выбрать коллег", handoverDraftsLink(publicUrl));
 }
 
+/** The edited letter once the worker took the extension back: the request is closed, the approved days stay. */
+export function sickExtensionWithdrawnText(name: string, entry: { date: string; endDate: string | null }): string {
+  return `🤒 ${name} — продление больничного снято, ОК не нужен\nБольничный ${sickSpanWords(entry.date, entry.endDate)} подтверждён раньше.`;
+}
+
 /** Spec item 10, with the neutral verb and no gendered pronoun (controller ruling). */
 export function sickRejectedWorkerText(
   entry: { date: string; endDate: string | null },

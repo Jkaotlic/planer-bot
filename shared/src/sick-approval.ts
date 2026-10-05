@@ -34,6 +34,20 @@ export interface SickSpan {
 }
 
 /**
+ * Общие дни двух сроков, или null. Подтверждённый срок продления всегда пересечение
+ * сохранённого подтверждения с нынешними датами: день, который работник убрал из
+ * больничного, отказом возвращать нельзя.
+ */
+export function sickSpanIntersection(a: SickSpan, b: SickSpan): SickSpan | null {
+  const start = a.date > b.date ? a.date : b.date;
+  const aEnd = a.endDate ?? a.date;
+  const bEnd = b.endDate ?? b.date;
+  const end = aEnd < bEnd ? aEnd : bEnd;
+  if (start > end) return null;
+  return { date: start, endDate: end === start ? null : end };
+}
+
+/**
  * Дни `entry`, которых нет в уже подтверждённом `approved`, — подряд идущими кусками.
  * Два куска бывают, когда больничный потянули в обе стороны сразу; склеить их
  * через подтверждённые дни значило бы спросить ОК и про них.

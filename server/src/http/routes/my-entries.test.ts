@@ -19,7 +19,7 @@ import { addDaysIso } from "@planer/shared";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
 import { cancelHandoversForEntry, detachHandoversFromEntry, startHandovers } from "../../handover/handover-service";
-import { approveSickLeave, sickApprovalDeps } from "../../sick-approval/sick-approval-service";
+import { approveSickLeave, rejectSickLeave, sickApprovalDeps } from "../../sick-approval/sick-approval-service";
 
 /**
  * Спай, а не мок: реализация — настоящая (`importOriginal`), подменяются
@@ -292,7 +292,7 @@ describe("больничный работника ждёт ОК", () => {
     const asked = getShift(db, sick.id)!;
     expect(asked.approvalRequestedAt).not.toBeNull();
     // The approved span is remembered, so a «Отклонить» can give it back and the grid keeps it solid.
-    expect([asked.approvedDate, asked.approvedEndDate]).toEqual([day(1), day(1)]);
+    expect([asked.approvedDate, asked.approvedEndDate]).toEqual([day(1), null]); // one day: no end, like `endDate`
     const live = listHandoversForEntry(db, sick.id).filter((h) => h.status !== "cancelled");
     expect(live).toHaveLength(1);
     expect(live.map((h) => h.shiftId)).not.toContain(newDay.id);
@@ -344,6 +344,75 @@ describe("больничный работника ждёт ОК", () => {
     const row = getShift(db, sick.id)!;
     expect([row.approvalRequestedAt, row.approvedDate]).toEqual([null, null]);
     expect(edits.at(-1)!.text.endsWith("↩️ Продление снято — ОК не нужен")).toBe(true);
+  });
+
+  /** Аня with approved sick leave day(1)..day(3) and a shift on each of day(1)..day(4); the hand-overs for the approved days are live. */
+  async function approvedThreeDays(tg: number) {
+    const db = makeTestDb();
+    const me = worker(db, tg, "Аня");
+    admins(db);
+    worker(db, tg + 50, "Олег");
+    for (const n of [1, 2, 3, 4]) createShift(db, { employeeId: me.id, date: day(n), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const sick = createShift(db, { employeeId: me.id, date: day(1), endDate: day(3), category: "sick_leave" });
+    await startHandovers({ db, config, messenger: { offer: async () => {}, fan: async () => {}, plain: async () => {}, admins: async () => {}, adminsAlways: async () => ({ attempted: 0, delivered: 0 }) } }, { sickEntry: sick, employeeId: me.id });
+    const { bot, sent, edits } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, tg);
+    const patch = (endDate: string, date: string) =>
+      app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date, endDate }, "PATCH")));
+    return { db, sick, patch, sent, edits };
+  }
+
+  it("shorten the front and extend the back: ❌ restores only the STILL-WANTED approved days, not the day the worker dropped", async () => {
+    const { db, sick, patch } = await approvedThreeDays(721);
+    await patch(day(4), day(2));
+    // The approved span is the intersection of the old approval and the new dates.
+    expect([getShift(db, sick.id)!.approvedDate, getShift(db, sick.id)!.approvedEndDate]).toEqual([day(2), day(3)]);
+
+    await rejectSickLeave(sickApprovalDeps(null, db, config), sick.id, 1);
+
+    // Wrong implementation caught: restoring the raw snapshot (day 1–3) resurrects day 1.
+    expect([getShift(db, sick.id)!.date, getShift(db, sick.id)!.endDate]).toEqual([day(2), day(3)]);
+  });
+
+  it("same through the redraw: pending day(1)..day(4) edited to day(2)..day(4) keeps only the surviving approved days", async () => {
+    const { db, sick, patch } = await approvedThreeDays(722);
+    await patch(day(4), day(1));
+    expect([getShift(db, sick.id)!.approvedDate, getShift(db, sick.id)!.approvedEndDate]).toEqual([day(1), day(3)]);
+
+    await patch(day(4), day(2));
+
+    expect([getShift(db, sick.id)!.approvedDate, getShift(db, sick.id)!.approvedEndDate]).toEqual([day(2), day(3)]);
+    await rejectSickLeave(sickApprovalDeps(null, db, config), sick.id, 1);
+    expect([getShift(db, sick.id)!.date, getShift(db, sick.id)!.endDate]).toEqual([day(2), day(3)]);
+  });
+
+  it("an empty intersection is a plain pending sick leave: no snapshot, ❌ deletes", async () => {
+    const { db, sick, patch } = await approvedThreeDays(723);
+    // Moved wholly past the approved days.
+    await patch(day(6), day(5));
+    expect(getShift(db, sick.id)!.approvedDate).toBeNull();
+
+    await rejectSickLeave(sickApprovalDeps(null, db, config), sick.id, 1);
+
+    // Wrong implementation caught: keeping the snapshot would restore days that are not wanted any more.
+    expect(getShift(db, sick.id)).toBeUndefined();
+  });
+
+  it("withdrawing an extension: the edited letter is coherent, and admins learn the approved span got shorter", async () => {
+    const { patch, sent, edits } = await approvedThreeDays(724);
+    await patch(day(4), day(1));
+    const sentBefore = sent.length;
+
+    await patch(day(2), day(1));
+
+    const last = edits.at(-1)!.text;
+    // Wrong implementation caught: the plain letter text («Передача смен начнётся после ОК.») under a withdrawn request.
+    expect(last.startsWith("🤒 Аня — продление больничного снято, ОК не нужен\nБольничный ")).toBe(true);
+    expect(last).not.toContain("Передача смен начнётся");
+    const notices = sent.slice(sentBefore).filter((m) => m.to === 701);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.text).toContain("изменил(а)");
   });
 
   it("DELETE of a pending one: every admin's buttons say «Больничного уже нет», no second letter", async () => {

@@ -32,6 +32,7 @@ import {
   handoverDraftsKeyboard,
   sickApprovalKeyboard,
   sickApprovalText,
+  sickExtensionWithdrawnText,
   sickApprovedWorkerText,
   sickRejectedWorkerText,
 } from "./sick-approval-text";
@@ -75,6 +76,19 @@ export function approvalTextFor(db: Db, sick: Shift): string {
 }
 
 /**
+ * Requests whose send loop is still running, and the outcome of any decision taken meanwhile.
+ * The loop's closing step must say what REALLY happened to the letters it sent late; the row
+ * cannot tell (an extension's ❌ and a withdraw both leave a present, non-pending, approver-less
+ * row). Only in-flight ids are recorded, so nothing accumulates.
+ */
+const inFlight = new Set<number>();
+const outcomes = new Map<number, string>();
+
+function rememberOutcome(entryId: number, outcome: string): void {
+  if (inFlight.has(entryId)) outcomes.set(entryId, outcome);
+}
+
+/**
  * Ask the admins. Our own loop over `listAdmins` + `sendTracked` rather than
  * `notifyAdminsAlways`: that one cannot report message ids, and without them the
  * buttons could not be taken away from the others once one admin decides. Like
@@ -87,19 +101,33 @@ export async function requestApproval(deps: SickApprovalDeps, sick: Shift, appro
   if (!marked) return sick;
   if (!deps.bot) return marked;
   const text = approvalTextFor(deps.db, marked);
-  for (const admin of listAdmins(deps.db)) {
-    if (admin.telegramUserId == null || admin.id === marked.employeeId) continue;
-    const messageId = await sendTracked(deps.bot, admin.telegramUserId, text, sickApprovalKeyboard(marked.id));
-    if (messageId != null) addApprovalMessage(deps.db, marked.id, admin.telegramUserId, messageId);
+  inFlight.add(marked.id);
+  outcomes.delete(marked.id);
+  // Letters sent after the row was already gone (the worker deleted it mid-loop): the
+  // message-id table cannot hold them (FOREIGN KEY), so they are closed from this list.
+  const late: { chatId: number; messageId: number }[] = [];
+  try {
+    for (const admin of listAdmins(deps.db)) {
+      if (admin.telegramUserId == null || admin.id === marked.employeeId) continue;
+      const messageId = await sendTracked(deps.bot, admin.telegramUserId, text, sickApprovalKeyboard(marked.id));
+      if (messageId == null) continue;
+      if (getShift(deps.db, marked.id)) addApprovalMessage(deps.db, marked.id, admin.telegramUserId, messageId);
+      else late.push({ chatId: admin.telegramUserId, messageId });
+    }
+  } finally {
+    inFlight.delete(marked.id);
   }
+  const decided = outcomes.get(marked.id);
+  outcomes.delete(marked.id);
   // An admin may have decided while the loop was still sending: that decision
   // edited only the letters recorded by then, so the ones recorded after it still
   // carry live buttons. Close them with the outcome that did happen.
   const now = getShift(deps.db, marked.id);
-  if (!now || now.approvalRequestedAt == null) {
-    const by = now?.approvedByEmployeeId == null ? null : nameOf(deps.db, now.approvedByEmployeeId);
-    const outcome = now ? `✅ Подтвердил(а) ${by ?? "админ"}` : "❌ Отклонено";
-    await finishApprovalMessages(deps, marked.id, `${text}\n\n${outcome}`);
+  if (decided != null || !now || now.approvalRequestedAt == null) {
+    // The recorded outcome, never one inferred from the row; unknown → neutral words.
+    const finalText = `${text}\n\n${decided ?? "Решение уже принято"}`;
+    await editApprovalMessages(deps, late, finalText);
+    await finishApprovalMessages(deps, marked.id, finalText);
   }
   return marked;
 }
@@ -125,7 +153,8 @@ export async function redrawApprovalMessages(deps: SickApprovalDeps, sick: Shift
 export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Promise<void> {
   const cleared = claimPendingSickLeave(deps.db, sick.id, null);
   if (!cleared) return;
-  await finishApprovalMessages(deps, sick.id, `${approvalTextFor(deps.db, cleared)}\n\n↩️ Продление снято — ОК не нужен`);
+  const name = cleared.employeeId == null ? undefined : getEmployeeById(deps.db, cleared.employeeId)?.displayName;
+  await finishApprovalMessages(deps, sick.id, `${sickExtensionWithdrawnText(name ?? "Работник", cleared)}\n\n↩️ Продление снято — ОК не нужен`);
 }
 
 /**
@@ -136,6 +165,8 @@ export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Pr
 export async function finishApprovalMessages(deps: SickApprovalDeps, entryId: number, finalText: string): Promise<void> {
   const rows = listApprovalMessages(deps.db, entryId);
   deleteApprovalMessages(deps.db, entryId);
+  // The outcome is the last paragraph by convention of every caller.
+  rememberOutcome(entryId, finalText.split("\n\n").at(-1) ?? finalText);
   await editApprovalMessages(deps, rows, finalText);
 }
 
@@ -255,6 +286,7 @@ export async function rejectSickLeave(
     deleteShift(db, entryId);
   }
   recordAudit(db, "sick_leave_rejected", adminId, payload);
+  rememberOutcome(entryId, `❌ Отклонил(а) ${adminName}`);
 
   await tellDecided(onDecided);
   await editApprovalMessages(deps, messages, `${letter}\n\n❌ Отклонил(а) ${adminName}`);

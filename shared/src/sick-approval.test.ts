@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sickExtensionRuns, sickSpanShort, sickSpanWords } from "./sick-approval";
+import { sickExtensionRuns, sickSpanIntersection, sickSpanShort, sickSpanWords } from "./sick-approval";
 
 describe("слова про срок больничного", () => {
   it("в письме работнику — полными словами, месяц один раз", () => {
@@ -35,5 +35,14 @@ describe("дни продления больничного", () => {
 
   it("nothing new when the span only shrank", () => {
     expect(sickExtensionRuns({ date: "2026-10-06", endDate: "2026-10-08" }, { date: "2026-10-06", endDate: null })).toEqual([]);
+  });
+});
+
+describe("общие дни двух сроков", () => {
+  it("overlap, single day, and none", () => {
+    // Wrong implementation caught: taking the union or the first span.
+    expect(sickSpanIntersection({ date: "2026-10-06", endDate: "2026-10-08" }, { date: "2026-10-07", endDate: "2026-10-10" })).toEqual({ date: "2026-10-07", endDate: "2026-10-08" });
+    expect(sickSpanIntersection({ date: "2026-10-06", endDate: "2026-10-08" }, { date: "2026-10-08", endDate: null })).toEqual({ date: "2026-10-08", endDate: null });
+    expect(sickSpanIntersection({ date: "2026-10-06", endDate: null }, { date: "2026-10-08", endDate: "2026-10-09" })).toBeNull();
   });
 });

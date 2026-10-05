@@ -9,10 +9,12 @@ import {
   selfEntryEditRefusal,
   canAddOwnShifts,
   EMPTY_CALENDAR,
+  sickSpanIntersection,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { createShift, getShift, updateShift, deleteShift } from "../../repo/shifts";
+import { setApprovedSpan } from "../../repo/sick-approvals";
 import { getEmployeeById } from "../../repo/employees";
 import { listPendingSwapsForShift } from "../../repo/swaps";
 import { recordAudit } from "../../repo/audit";
@@ -247,6 +249,9 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // whether the request was still open.
     const wasPending = existing.approvalRequestedAt != null;
     let asked = false;
+    // Set when a withdrawn extension also shortened the approved span: the admins' letter is
+    // closed, so they would otherwise never learn the approved days got fewer.
+    let noticeBefore: typeof existing | null = null;
     if (updated.category === "sick_leave") {
       // Порядок важен: сперва гасим дни, которые больничный больше не покрывает,
       // потом открываем те, до которых он теперь дотянулся.
@@ -266,14 +271,24 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       if (wasPending && approvedDays && covered.every((date) => approvedDays.has(date))) {
         // A pending EXTENSION edited back inside the approved span: nothing is left to ask.
         await withdrawExtension(approvalDeps(), updated);
+        const approvedSpan = { date: existing.approvedDate!, endDate: existing.approvedEndDate };
+        if (covered.length < approvedDays.size) noticeBefore = { ...existing, date: approvedSpan.date, endDate: approvedSpan.endDate };
       } else if (wasPending) {
+        // The approved span is always what the worker STILL wants of the stored approval, so a
+        // «Отклонить» never gives back a day they dropped. Empty: a plain pending sick leave.
+        const kept =
+          existing.approvedDate == null
+            ? null
+            : sickSpanIntersection({ date: existing.approvedDate, endDate: existing.approvedEndDate }, updated);
+        const fresh = existing.approvedDate == null ? updated : (setApprovedSpan(db, updated.id, kept) ?? updated);
         // Still waiting: the admins' letter gets the new dates in place — a second letter
         // about the same request would be noise, and its buttons would decide twice.
-        await redrawApprovalMessages(approvalDeps(), updated);
+        await redrawApprovalMessages(approvalDeps(), fresh);
       } else if (extended && !me.isAdmin) {
         // Hand-overs for the old days keep running; the new days wait (spec item 13). The
         // approved span is remembered: a «Отклонить» gives the row back as it was.
-        await requestApproval(approvalDeps(), updated, { date: existing.date, endDate: existing.endDate });
+        // Only the days of it that survive the edit: a day the worker dropped is not given back.
+        await requestApproval(approvalDeps(), updated, sickSpanIntersection(existing, updated));
         asked = true;
       } else if (!me.isObserver) {
         // НОВУЮ лестницу для наблюдателя запускать по-прежнему нельзя — гейт роли, см. POST.
@@ -281,7 +296,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       }
     }
     // A pending or re-asked sick leave already has its one letter (the request).
-    if (bot && !wasPending && !asked) {
+    if (bot && ((!wasPending && !asked) || noticeBefore)) {
       // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
       const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
       const lines = updated.category === "shift" ? [] : riskLines(employeeId, updated);
@@ -289,7 +304,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
         bot,
         db,
         noticeKind,
-        selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", existing, updated, lines),
+        selfEntryUpdatedText(nameOf(db, employeeId) ?? "Работник", noticeBefore ?? existing, getShift(db, updated.id) ?? updated, lines),
       );
     }
     return c.json({ entry: getShift(db, updated.id) ?? updated });
