@@ -40,3 +40,4 @@ export * from "./poll";
 export * from "./food-order";
 export * from "./recipient-group";
 export * from "./sick-approval";
+export * from "./qr/style";
