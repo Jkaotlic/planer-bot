@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
-import { buildQrImage, QR_MAX_TEXT_LENGTH } from "./qr-image";
+import { buildQrImage, QR_MAX_TEXT_LENGTH, renderQrPng } from "./qr-image";
 
 /**
  * Картинка проверяется декодером, а не по сигнатуре PNG: любой PNG прошёл бы
@@ -39,5 +39,24 @@ describe("QR-код по ссылке", () => {
     expect(res.kind).toBe("photo");
     if (res.kind !== "photo") throw new Error("ожидалась картинка");
     expect(decode(res.png)).toBe(url);
+  });
+
+  it("рисует выбранным стилем: тот же PNG, что у «Прислать мне в бота», и его читает сканер", async () => {
+    const res = await buildQrImage("https://example.com/sbor", { shape: "soft", color: "purple" });
+    expect(res.kind).toBe("photo");
+    if (res.kind !== "photo") throw new Error("ожидалась картинка");
+    expect(res.png).toEqual(renderQrPng("https://example.com/sbor", { shape: "soft", color: "purple" }));
+    expect(decode(res.png)).toBe("https://example.com/sbor");
+  });
+
+  it("без стиля — «Классика», чёрный", async () => {
+    const res = await buildQrImage("https://example.com/sbor");
+    if (res.kind !== "photo") throw new Error("ожидалась картинка");
+    expect(res.png).toEqual(renderQrPng("https://example.com/sbor", { shape: "classic", color: "black" }));
+  });
+
+  it("текст, который не влезает в выбранную форму, объясняет словами, а не падает", async () => {
+    const res = await buildQrImage("Ж".repeat(1000), { shape: "dots", color: "black" });
+    expect(res.kind).toBe("text");
   });
 });

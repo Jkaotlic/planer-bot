@@ -5,14 +5,14 @@ import { PNG } from "pngjs";
 import { createBot } from "./bot";
 import { recordApi, stubBotInfo, type ApiCall, type SentMessage } from "./testbot";
 import { makeTestDb } from "../db/testdb";
-import { archiveEmployee, createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin, setQrStyle } from "../repo/employees";
 import { ensureBirthdayRound, upcomingBirthdays } from "../birthdays/birthday-service";
 import { updateCollection } from "../collections/collection-service";
 import { linkPendingFor } from "../repo/link-pending";
 import { openBugPrompt } from "../bugs/bug-service";
 import { testConfig } from "../test-config";
 import { teamNow } from "../util/team-time";
-import { QR_MAX_TEXT_LENGTH } from "./qr-image";
+import { QR_MAX_TEXT_LENGTH, renderQrPng } from "./qr-image";
 import type { Db } from "../db/client";
 
 /**
@@ -152,6 +152,32 @@ describe("QR-код по ссылке от сотрудника", () => {
     await say(bot, 333, "не открывается https://example.com/app");
 
     expect(photos(api.calls)).toHaveLength(0);
+  });
+
+  it("рисует последним стилем, который автор выбрал в мини-аппе; подпись — по-прежнему ссылка", async () => {
+    const { db, bot, api } = stage();
+    const anya = person(db, "Аня", 333, null);
+    setQrStyle(db, anya, { shape: "dots", color: "blue" });
+
+    await say(bot, 333, "https://example.com/menu");
+
+    const [photo] = photos(api.calls);
+    expect(photo!.payload.caption).toBe("https://example.com/menu");
+    expect(Buffer.from(await photo!.payload.photo.toRaw())).toEqual(renderQrPng("https://example.com/menu", { shape: "dots", color: "blue" }));
+    expect(await decodePhoto(photo!)).toBe("https://example.com/menu");
+  });
+
+  it("чужой стиль не подхватывает", async () => {
+    const { db, bot, api } = stage();
+    person(db, "Аня", 333, null);
+    const igor = person(db, "Игорь", 444, null);
+    setQrStyle(db, igor, { shape: "soft", color: "green" });
+
+    await say(bot, 333, "https://example.com/menu");
+
+    expect(Buffer.from(await photos(api.calls)[0]!.payload.photo.toRaw())).toEqual(
+      renderQrPng("https://example.com/menu", { shape: "classic", color: "black" }),
+    );
   });
 });
 

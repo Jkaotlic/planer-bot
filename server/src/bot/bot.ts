@@ -30,7 +30,7 @@ import { ackCoverageDate, reminderHour } from "../repo/settings";
 import { installBlockedTracker, clearBotBlocked } from "./blocked-tracker";
 import { issueToken } from "../auth/jwt";
 import { teamNow } from "../util/team-time";
-import { addressOf, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
+import { addressOf, parseSavedQrStyle, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
@@ -859,8 +859,10 @@ export function createBot(deps: BotDeps): Bot {
   async function sendQr(ctx: Context, url: string): Promise<void> {
     const from = ctx.from;
     if (!from) return;
-    if (!acting(from.id).ok) return;
-    const image = await buildQrImage(url);
+    const who = acting(from.id);
+    if (!who.ok) return;
+    // The sender's own pick from the mini app's QR screen; never picked → «Классика», black.
+    const image = await buildQrImage(url, parseSavedQrStyle(who.me.qrStyle));
     if (image.kind === "text") {
       await ctx.reply(image.text);
       return;
