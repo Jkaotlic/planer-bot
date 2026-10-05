@@ -307,6 +307,12 @@ describe("AddEntryPanel — больничный, ждущий ОК", () => {
     expect(el.textContent).toContain("передача запущена без ОК");
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
     expect(onApprove).toHaveBeenCalledOnce();
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("«❌ Отклонить» сначала спрашивает, потом зовёт onReject", async () => {
+    const onReject = vi.fn(async () => {});
+    const el = await mount({ existing: pendingSick, onApprove: vi.fn(async () => {}), onReject });
     await act(async () => { buttonByText(el, "❌ Отклонить").click(); });
     expect(onReject).not.toHaveBeenCalled();
     await act(async () => { buttonByText(el, "Да, отклонить").click(); });
@@ -328,5 +334,22 @@ describe("AddEntryPanel — больничный, ждущий ОК", () => {
     const el = await mount({ existing: pendingSick, onApprove, onReject: vi.fn(async () => {}) });
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
     expect(el.querySelector(".error-text")?.textContent).toContain("Уже подтвердил(а) Игорь");
+  });
+
+  it("два быстрых тапа «✅ ОК» — один вызов: после успеха кнопка выключена", async () => {
+    const onApprove = vi.fn(async () => {});
+    const el = await mount({ existing: pendingSick, onApprove, onReject: vi.fn(async () => {}) });
+    const button = buttonByText(el, "✅ ОК");
+    await act(async () => { button.click(); });
+    await act(async () => { button.click(); });
+    expect(button.disabled).toBe(true);
+    expect(onApprove).toHaveBeenCalledOnce();
+  });
+
+  it("после отказа сервера кнопка снова доступна", async () => {
+    const onApprove = vi.fn(async () => { throw new Error("сеть"); });
+    const el = await mount({ existing: pendingSick, onApprove, onReject: vi.fn(async () => {}) });
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    expect(buttonByText(el, "✅ ОК").disabled).toBe(false);
   });
 });

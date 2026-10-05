@@ -96,15 +96,51 @@ describe("«На подтверждение» в консоли", () => {
     expect(reject).toHaveBeenCalledWith(7);
   });
 
-  it("отказ сервера — текстом на карточке, onChanged не зовётся", async () => {
-    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([row()]);
+  it("отказ сервера — текст виден, список и метка перечитываются, onChanged зовётся", async () => {
+    // 409 «Уже подтвердил(а) …»: карточки после перечитывания уже нет, и текст
+    // обязан пережить её, иначе админ не поймёт, что произошло.
+    const get = vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([row()]).mockResolvedValue([]);
     vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("Уже подтвердил(а) Игорь"));
     const onChanged = vi.fn();
     const el = await mount(onChanged);
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
     await settle();
-    expect(el.querySelector(".approval-card")?.textContent).toContain("Уже подтвердил(а) Игорь");
-    expect(onChanged).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("Уже подтвердил(а) Игорь");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(el.querySelector(".approval-card")).toBeNull();
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("после отказа кнопки снова доступны, если карточка осталась", async () => {
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([row()]);
+    vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("сеть"));
+    const el = await mount();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(buttonByText(el, "✅ ОК").disabled).toBe(false);
+  });
+
+  it("два быстрых тапа — один запрос: после успеха кнопки выключены, пока карточка не убрана", async () => {
+    // Перечитывание не отвечает: окно, в котором карточка ещё жива.
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([row()]).mockReturnValue(new Promise(() => {}));
+    const approve = vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue(undefined);
+    const el = await mount();
+    const button = buttonByText(el, "✅ ОК");
+    await act(async () => { button.click(); });
+    await settle(3);
+    await act(async () => { button.click(); });
+    expect(button.disabled).toBe(true);
+    expect(approve).toHaveBeenCalledTimes(1);
+  });
+
+  it("решение принято, а перечитать не вышло — так и говорит, не «не получилось»", async () => {
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([row()]).mockRejectedValue(new Error("сеть"));
+    vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue(undefined);
+    const el = await mount();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(el.textContent).toContain("Решение принято, но список не удалось обновить");
+    expect(el.textContent).not.toContain("Не получилось");
   });
 
   it("список не загрузился — ошибка и «Повторить»", async () => {

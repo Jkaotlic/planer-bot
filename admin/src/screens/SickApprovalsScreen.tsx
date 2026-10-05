@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sickSpanWords } from "@planer/shared";
 import { apiClient, type SickApprovalRow } from "../api/client";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -16,6 +16,11 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
   const [error, setError] = useState<string | null>(null);
   /** Bumped by «Повторить» и после каждого решения — иначе перечитать список нечем. */
   const [attempt, setAttempt] = useState(0);
+  /** Отказ сервера на решение. На экране, а не в карточке: после «Уже подтвердил(а) …»
+   *  перечитанный список карточки уже не содержит, и текст пропал бы вместе с ней. */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** После решения провал перечитывания — не «не загрузилось», а «решение принято, список старый». */
+  const decided = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,10 +28,15 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
     apiClient
       .getSickApprovals()
       .then((loaded) => {
-        if (!cancelled) setRows(loaded);
+        if (cancelled) return;
+        decided.current = false;
+        setRows(loaded);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить больничные");
+        if (cancelled) return;
+        setError(decided.current
+          ? "Решение принято, но список не удалось обновить — нажми «Повторить»."
+          : err instanceof Error ? err.message : "Не удалось загрузить больничные");
       });
     return () => {
       cancelled = true;
@@ -34,9 +44,21 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
   }, [attempt]);
 
   async function decide(action: () => Promise<void>) {
-    await action();
+    setNotice(null);
+    try {
+      await action();
+      decided.current = true;
+    } catch (err) {
+      // 409/404 — значит, решение уже есть или записи нет: перечитываем список и
+      // метку, иначе карточка осталась бы с живыми кнопками, а число в сайдбаре — старым.
+      setNotice(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
+      setAttempt((n) => n + 1);
+      onChanged?.();
+      return false;
+    }
     setAttempt((n) => n + 1);
     onChanged?.();
+    return true;
   }
 
   return (
@@ -44,6 +66,8 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
       <div className="employees-header">
         <h2 className="employees-title">На подтверждение</h2>
       </div>
+
+      {notice && <div className="employees-error" role="alert">{notice}</div>}
 
       {error && (
         <div>
@@ -63,21 +87,16 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
-function ApprovalCard({ row, onDecide }: { row: SickApprovalRow; onDecide: (action: () => Promise<void>) => Promise<void> }) {
+function ApprovalCard({ row, onDecide }: { row: SickApprovalRow; onDecide: (action: () => Promise<void>) => Promise<boolean> }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
-    setError(null);
-    try {
-      await onDecide(action);
-    } catch (err) {
-      // Самый частый отказ — другой админ успел раньше; карточка должна это сказать.
-      setError(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
-    } finally {
-      setBusy(false);
-    }
+    const ok = await onDecide(action);
+    // После успеха кнопки остаются выключенными, пока перечитанный список не уберёт
+    // карточку: второй тап в этом окне слал бы второй запрос и получал ложное
+    // «Уже подтвердил(а)». После отказа — включаем, повторить можно.
+    if (!ok) setBusy(false);
   }
 
   return (
@@ -98,7 +117,6 @@ function ApprovalCard({ row, onDecide }: { row: SickApprovalRow; onDecide: (acti
       {row.handoverForced && (
         <div className="approval-card-forced">⚡ передача запущена без ОК — смена была слишком близко</div>
       )}
-      {error && <div className="employees-error">{error}</div>}
       <div className="panel-pending-actions">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void run(() => apiClient.approveSickLeave(row.id))}>
           ✅ ОК

@@ -287,6 +287,14 @@ export function App() {
   // перечитывания по возвращении сетка показывала бы нехватку по нормам,
   // какими они были при загрузке консоли. Первый показ пропускаем: нормы
   // только что пришли в `loadBootstrap`.
+  // Метка «На подтверждение» живёт отдельно от экрана: открыв его, человек видит
+  // свежий список, и число в сайдбаре должно совпасть с ним.
+  useEffect(() => {
+    if (nav === "approvals") refreshSickApprovals();
+    // refreshSickApprovals держится на рефе и сеттере — привязка к nav безопасна.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav]);
+
   const scheduleShown = useRef(false);
   useEffect(() => {
     if (nav !== "schedule") return;
@@ -330,7 +338,7 @@ export function App() {
     }
   }
 
-  async function refreshSchedule() {
+  async function refreshSchedule(): Promise<Shift[]> {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
     const [next, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
@@ -342,6 +350,39 @@ export function App() {
     // ждущего больничного заодно убирает его из очереди «На подтверждение».
     refreshAdminShortfall();
     refreshSickApprovals();
+    return next;
+  }
+
+  /**
+   * ОК/отказ из карточки записи. Отказ сервера (409 «Уже подтвердил(а) …», 404) значит,
+   * что запись уже решена или снята: панель не должна висеть над устаревшей записью
+   * с живыми кнопками — перечитываем, и запись либо перестаёт быть ждущей (кнопок нет,
+   * ошибка остаётся в панели), либо исчезла (панель закрываем, текст — на экране).
+   */
+  async function decideEntry(entry: Shift, action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (err) {
+      try {
+        const next = await refreshSchedule();
+        const fresh = next.find((s) => s.id === entry.id);
+        if (fresh) setEditingEntry(fresh);
+        else {
+          setEditingEntry(null);
+          setScreenNotice({ kind: "error", text: err instanceof Error ? err.message : "Больничного уже нет" });
+        }
+      } catch {
+        // Перечитать не вышло — ошибка решения остаётся в панели, её и покажем.
+      }
+      throw err;
+    }
+    setEditingEntry(null);
+    try {
+      await refreshSchedule();
+    } catch {
+      // Решение принято: ошибку панели («не получилось») тут показывать нельзя.
+      setScreenNotice({ kind: "error", text: "Решение принято, но расписание не удалось обновить — обнови страницу." });
+    }
   }
 
   async function previewRosterFile(file: File) {
@@ -562,9 +603,10 @@ export function App() {
         ) : nav === "approvals" ? (
           <SickApprovalsScreen
             onChanged={() => {
-              refreshSickApprovals();
-              refreshAdminShortfall();
-              void refreshSchedule();
+              // refreshSchedule сам перечитывает и метку ждущих, и нехватку — второй раз не зовём.
+              refreshSchedule().catch(() => {
+                // Сетка обновится при возврате на «Расписание»; экран решений своё уже показал.
+              });
             }}
           />
         ) : nav === "bugs" ? (
@@ -695,8 +737,8 @@ export function App() {
             });
           }}
           handoverForced={editingEntry ? sickApprovals?.find((r) => r.id === editingEntry.id)?.handoverForced : undefined}
-          onApprove={editingEntry?.pending ? async () => { await apiClient.approveSickLeave(editingEntry.id); setEditingEntry(null); refreshSickApprovals(); await refreshSchedule(); } : undefined}
-          onReject={editingEntry?.pending ? async () => { await apiClient.rejectSickLeave(editingEntry.id); setEditingEntry(null); refreshSickApprovals(); refreshAdminShortfall(); await refreshSchedule(); } : undefined}
+          onApprove={editingEntry?.pending ? () => decideEntry(editingEntry, () => apiClient.approveSickLeave(editingEntry.id)) : undefined}
+          onReject={editingEntry?.pending ? () => decideEntry(editingEntry, () => apiClient.rejectSickLeave(editingEntry.id)) : undefined}
           onDelete={
             editingEntry
               ? async () => {

@@ -239,9 +239,10 @@ export function AddEntryPanel({
     setError(null);
     try {
       await action();
+      // Успех: кнопки остаются выключенными до закрытия панели — второй тап в этом
+      // окне слал бы второй запрос и получал ложное «Уже подтвердил(а)».
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
-    } finally {
       setDeciding(false);
     }
   }
