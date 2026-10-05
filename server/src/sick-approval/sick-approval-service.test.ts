@@ -427,7 +427,34 @@ describe("approveSickLeave — nothing is stranded by a restart or a delete mid-
       }
       return prev(method, payload);
     });
-    await expect(startHandovers(deps, { sickEntry: sick, employeeId: anya.id })).resolves.toHaveLength(1);
+    const made = await startHandovers(deps, { sickEntry: sick, employeeId: anya.id });
+    // No foreign-key error. Both drafts were created before any letter went out; the second one
+    // was cancelled with the deleted sick leave, so no escalation is sent for it.
+    expect(made).toHaveLength(2);
+    expect(made.map((h) => getHandover(db, h.id)!.status)).toEqual(["cancelled", "cancelled"]);
+  });
+
+  it("all drafts are created before the first escalation letter: a crash there loses none", async () => {
+    const db = makeTestDb();
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    recordApi(bot);
+    const igor = createAdminEmployee(db, { displayName: "Игорь", telegramUserId: 111 });
+    setEmployeeObserver(db, igor.id, true);
+    const anya = linked(db, 201, "Аня");
+    createShift(db, { employeeId: anya.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    createShift(db, { employeeId: anya.id, date: day(2), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const sick = createShift(db, { employeeId: anya.id, date: day(1), endDate: day(2), category: "sick_leave" });
+    const atFirstLetter: number[] = [];
+    const messenger = {
+      offer: async () => {}, fan: async () => {}, plain: async () => {}, admins: async () => {},
+      adminsAlways: async () => {
+        atFirstLetter.push(listHandoversForEntry(db, sick.id).length);
+        return { attempted: 1, delivered: 1 };
+      },
+    };
+    await startHandovers({ db, config, messenger }, { sickEntry: sick, employeeId: anya.id });
+    // Wrong implementation caught: the second draft is created only after the first letter's await.
+    expect(atFirstLetter[0]).toBe(2);
   });
 });
 
@@ -512,5 +539,31 @@ describe("listSickApprovals — the cap", () => {
     expect(ids).toHaveLength(100);
     expect(ids[0]).toBe(fresh.id);
     expect(ids).toContain(fresh.id);
+  });
+});
+
+describe("a second press right after a decision names what really happened", () => {
+  it("after a rejected extension the late ✅ is not told «Уже подтвердил(а)» about the old approver", async () => {
+    const { db, deps, igor, mark, anya } = await scene();
+    const approved = createShift(db, { employeeId: anya.id, date: day(5), endDate: day(6), category: "sick_leave", approvedByEmployeeId: igor.id });
+    const stretched = updateShift(db, approved.id, { endDate: day(7) })!;
+    const asked = await requestApproval(deps, stretched, { date: approved.date, endDate: approved.endDate });
+    await rejectSickLeave(deps, asked.id, mark.id);
+    // Wrong implementation caught: the row still carries Игорь as approver of the old days.
+    expect(await approveSickLeave(deps, asked.id, mark.id)).toEqual({ ok: false, status: 409, text: "Уже отклонил(а) Марк" });
+  });
+
+  it("after a plain approval the second admin still gets the approver's name", async () => {
+    const { deps, igor, mark, sick } = await scene();
+    await approveSickLeave(deps, sick.id, igor.id);
+    expect(await rejectSickLeave(deps, sick.id, mark.id)).toEqual({ ok: false, status: 409, text: "Уже подтвердил(а) Игорь" });
+  });
+
+  it("after a withdrawn extension the late press is told the extension is gone", async () => {
+    const { db, deps, igor, mark, anya } = await scene();
+    const approved = createShift(db, { employeeId: anya.id, date: day(5), endDate: day(6), category: "sick_leave", approvedByEmployeeId: igor.id });
+    const asked = await requestApproval(deps, updateShift(db, approved.id, { endDate: day(7) })!, { date: approved.date, endDate: approved.endDate });
+    await withdrawExtension(deps, asked);
+    expect(await approveSickLeave(deps, asked.id, mark.id)).toEqual({ ok: false, status: 409, text: "Продление уже снято" });
   });
 });

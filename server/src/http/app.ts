@@ -82,13 +82,15 @@ import { createMyHandoverRoutes } from "./routes/my-handovers";
 import {
   approvalTextFor,
   approveSickLeave,
-  closeRequestForDelete,
+  editClosedRequest,
   finishApprovalMessages,
   listSickApprovals,
   reconcilePendingDateEdit,
   rejectSickLeave,
   sickApprovalDeps,
+  takeRequestOutOfPending,
 } from "../sick-approval/sick-approval-service";
+import { cancelHandoversForEntryDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../handover/handover-service";
 import { createCalendarRoutes } from "./routes/calendar";
 import { createPollRoutes } from "./routes/polls";
 import { createFoodPlaceRoutes } from "./routes/food-places";
@@ -1783,8 +1785,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const existing = getShift(db, id);
     // A pending sick leave has a request out to every admin. The CASCADE would drop the
     // message ids with the row and leave live buttons behind, so they are replaced first.
-    if (existing?.category === "sick_leave" && existing.approvalRequestedAt != null) {
-      await closeRequestForDelete(sickApprovalDeps(bot ?? null, db, config), existing, "🗑 Больничного уже нет — запись удалил админ");
+    // The database part (leave «pending», cancel and detach hand-overs the urgent branch may have
+    // started, and the delete below) runs before the first await; the letters are edited from the
+    // snapshot afterwards, so a restart cannot strand a half-deleted row.
+    const closing = existing?.category === "sick_leave"
+      ? takeRequestOutOfPending(db, existing, "🗑 Больничного уже нет — запись удалил админ")
+      : null;
+    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    let cancelledNow: CancelledHandover[] = [];
+    if (closing) {
+      cancelledNow = cancelHandoversForEntryDb(db, id, []);
+      detachHandoversFromEntry(db, id);
     }
     // Same reason, for the swaps hanging on it: `deleteShift` expires them and nulls
     // their pointer at this entry, so a line naming the shift can only be built now.
@@ -1792,6 +1803,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const { deleted, expiredSwaps } = deleteShift(db, id);
     if (!deleted) return c.json({ error: "not_found" }, 404);
     if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, entryAuditPayload(db, existing));
+    if (closing) await editClosedRequest(approvalDeps, closing);
+    await notifyCancelledHandovers(approvalDeps, cancelledNow);
     for (const request of expiredSwaps) {
       const payload = linesBefore.get(request.id) ?? swapAuditPayload(request);
       // The admin who deleted the entry is the actor — nobody involved in the swap

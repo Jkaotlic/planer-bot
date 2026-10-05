@@ -124,6 +124,18 @@ describe("/api/admin/sick-approvals", () => {
     expect(sent.slice(sentBefore).some((m) => m.to === 401)).toBe(false);
   });
 
+  it("an admin's DELETE: the row is already gone when the first letter is edited", async () => {
+    const { db, app, bot, igorToken, id } = await scene();
+    let seen: unknown = "never reached";
+    const realEdit = bot.api.editMessageText as unknown as (...a: unknown[]) => Promise<unknown>;
+    (bot.api as { editMessageText: unknown }).editMessageText = async (...args: unknown[]) => {
+      if (seen === "never reached") seen = getShift(db, id);
+      return realEdit(...args);
+    };
+    await app.request(new Request(`http://x/api/admin/entries/${id}`, authed(igorToken, undefined, "DELETE")));
+    expect(seen).toBeUndefined();
+  });
+
   it("an admin re-categorising a pending sick leave clears the request: buttons closed, nothing pending now or after switching back", async () => {
     const { db, app, igorToken, markToken, id, edits } = await scene();
     const patch = (body: unknown) => app.request(new Request(`http://x/api/admin/entries/${id}`, authed(igorToken, body, "PATCH")));

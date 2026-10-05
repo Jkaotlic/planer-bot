@@ -18,15 +18,15 @@ describe("слова про срок больничного", () => {
 
 describe("дни продления больничного", () => {
   it("only the days outside the approved span, as contiguous runs", () => {
-    // Wrong implementation caught: returning the whole new span (the letter would
-    // ask about days an admin already approved).
+    // Ловит неверную реализацию: весь новый срок вместо продления (письмо спрашивало бы
+    // про дни, которые админ уже подтвердил).
     expect(sickExtensionRuns({ date: "2026-10-06", endDate: "2026-10-07" }, { date: "2026-10-06", endDate: "2026-10-09" })).toEqual([
       { date: "2026-10-08", endDate: "2026-10-09" },
     ]);
   });
 
   it("a single new day has no end; both sides give two runs", () => {
-    // Wrong implementation caught: merging the two sides into one run across the approved days.
+    // Ловит неверную реализацию: слияние двух сторон в один отрезок через подтверждённые дни.
     expect(sickExtensionRuns({ date: "2026-10-07", endDate: null }, { date: "2026-10-06", endDate: "2026-10-08" })).toEqual([
       { date: "2026-10-06", endDate: null },
       { date: "2026-10-08", endDate: null },
@@ -40,7 +40,7 @@ describe("дни продления больничного", () => {
 
 describe("общие дни двух сроков", () => {
   it("overlap, single day, and none", () => {
-    // Wrong implementation caught: taking the union or the first span.
+    // Ловит неверную реализацию: объединение сроков или просто первый срок.
     expect(sickSpanIntersection({ date: "2026-10-06", endDate: "2026-10-08" }, { date: "2026-10-07", endDate: "2026-10-10" })).toEqual({ date: "2026-10-07", endDate: "2026-10-08" });
     expect(sickSpanIntersection({ date: "2026-10-06", endDate: "2026-10-08" }, { date: "2026-10-08", endDate: null })).toEqual({ date: "2026-10-08", endDate: null });
     expect(sickSpanIntersection({ date: "2026-10-06", endDate: null }, { date: "2026-10-08", endDate: "2026-10-09" })).toBeNull();

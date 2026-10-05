@@ -18,7 +18,7 @@ import { teamNow } from "../../util/team-time";
 import { addDaysIso } from "@planer/shared";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
-import { cancelHandoversForEntry, detachHandoversFromEntry, startHandovers } from "../../handover/handover-service";
+import { cancelHandoversForEntry, cancelHandoversForEntryDb, detachHandoversFromEntry, startHandovers } from "../../handover/handover-service";
 import { approveSickLeave, rejectSickLeave, sickApprovalDeps } from "../../sick-approval/sick-approval-service";
 
 /**
@@ -36,6 +36,7 @@ vi.mock("../../handover/handover-service", async (importOriginal) => {
   return {
     ...actual,
     cancelHandoversForEntry: vi.fn(actual.cancelHandoversForEntry),
+    cancelHandoversForEntryDb: vi.fn(actual.cancelHandoversForEntryDb),
     detachHandoversFromEntry: vi.fn(actual.detachHandoversFromEntry),
     startHandovers: vi.fn(actual.startHandovers),
   };
@@ -462,6 +463,37 @@ describe("больничный работника ждёт ОК", () => {
   });
 });
 
+describe("DELETE of a pending sick leave: the database work finishes before Telegram", () => {
+  it("the row is already gone, and urgent hand-overs already cancelled, when the first letter is edited", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 716, "Аня");
+    worker(db, 717, "Олег");
+    const boss = worker(db, 701, "Игорь");
+    setEmployeeAdmin(db, boss.id, true);
+    createShift(db, { employeeId: me.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const { bot } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 716);
+    const id = (await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json()).entry.id;
+    // As if the urgent branch had already handed the shift over.
+    const [urgent] = await startHandovers(
+      { db, config, messenger: { offer: async () => {}, fan: async () => {}, plain: async () => {}, admins: async () => {}, adminsAlways: async () => ({ attempted: 0, delivered: 0 }) } },
+      { sickEntry: getShift(db, id)!, employeeId: me.id },
+    );
+    let seen: unknown = "never reached";
+    const realEdit = bot.api.editMessageText as unknown as (...a: unknown[]) => Promise<unknown>;
+    (bot.api as { editMessageText: unknown }).editMessageText = async (...args: unknown[]) => {
+      if (seen === "never reached") seen = { row: getShift(db, id), handover: getHandover(db, urgent!.id)!.status };
+      return realEdit(...args);
+    };
+
+    await app.request(new Request(`http://x/api/my/entries/${id}`, authed(token, undefined, "DELETE")));
+
+    // Wrong implementation caught: the delete after the letters leaves a restart-stranded row between the two.
+    expect(seen).toEqual({ row: undefined, handover: "cancelled" });
+  });
+});
+
 describe("PATCH /api/my/entries/:id", () => {
   it("answers 404 for somebody else's entry and leaves it alone", async () => {
     const db = makeTestDb();
@@ -708,7 +740,8 @@ describe("гейт передачи смены — роль закрывает �
     // An APPROVED record (all approval columns NULL), shortened below: a pending one would
     // skip `startHandovers` for the wrong reason — waiting — and this test is about the role gate.
     const entryId = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" }).id;
-    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const cancelCalls = () => vi.mocked(cancelHandoversForEntry).mock.calls.length + vi.mocked(cancelHandoversForEntryDb).mock.calls.length;
+    const cancelBefore = cancelCalls();
     const startBefore = vi.mocked(startHandovers).mock.calls.length;
 
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
@@ -717,7 +750,8 @@ describe("гейт передачи смены — роль закрывает �
 
     expect(res.status).toBe(200);
     // Гашение — не под ролью: зовётся всегда, даже если гасить нечего.
-    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    // A pending request cancels through the synchronous `…Db` half, an approved one through the wrapper.
+    expect(cancelCalls()).toBeGreaterThan(cancelBefore);
     // А новый запуск — под ролью, как и в POST.
     expect(vi.mocked(startHandovers).mock.calls.length).toBe(startBefore);
   });
@@ -734,7 +768,8 @@ describe("гейт передачи смены — роль закрывает �
     // Approved and then SHORTENED: no «ОК» is needed, so a worker's `startHandovers` runs —
     // the reference point that makes the observer's «not called» above prove the role gate.
     const entryId = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" }).id;
-    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const cancelCalls = () => vi.mocked(cancelHandoversForEntry).mock.calls.length + vi.mocked(cancelHandoversForEntryDb).mock.calls.length;
+    const cancelBefore = cancelCalls();
     const startBefore = vi.mocked(startHandovers).mock.calls.length;
 
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, {
@@ -745,7 +780,8 @@ describe("гейт передачи смены — роль закрывает �
     // Опорная точка для теста выше: без роли позваны оба — значит «не позван
     // startHandovers у наблюдателя» доказывает именно гейт, а не то, что
     // вызывать было нечего.
-    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    // A pending request cancels through the synchronous `…Db` half, an approved one through the wrapper.
+    expect(cancelCalls()).toBeGreaterThan(cancelBefore);
     expect(vi.mocked(startHandovers).mock.calls.length).toBeGreaterThan(startBefore);
   });
 
@@ -760,7 +796,8 @@ describe("гейт передачи смены — роль закрывает �
       category: "sick_leave", date: day(1),
     })));
     const entryId = (await created.json()).entry.id;
-    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const cancelCalls = () => vi.mocked(cancelHandoversForEntry).mock.calls.length + vi.mocked(cancelHandoversForEntryDb).mock.calls.length;
+    const cancelBefore = cancelCalls();
     const detachBefore = vi.mocked(detachHandoversFromEntry).mock.calls.length;
 
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, undefined, "DELETE")));
@@ -769,7 +806,8 @@ describe("гейт передачи смены — роль закрывает �
     // Раунд 2 проверял обратное («не позваны») — это и был смазанный гейт.
     // Уборка не под ролью: у наблюдателя оба вызова происходят точно так же,
     // как у обычного работника.
-    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    // A pending request cancels through the synchronous `…Db` half, an approved one through the wrapper.
+    expect(cancelCalls()).toBeGreaterThan(cancelBefore);
     expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBeGreaterThan(detachBefore);
   });
 
@@ -786,13 +824,15 @@ describe("гейт передачи смены — роль закрывает �
       category: "sick_leave", date: day(1),
     })));
     const entryId = (await created.json()).entry.id;
-    const cancelBefore = vi.mocked(cancelHandoversForEntry).mock.calls.length;
+    const cancelCalls = () => vi.mocked(cancelHandoversForEntry).mock.calls.length + vi.mocked(cancelHandoversForEntryDb).mock.calls.length;
+    const cancelBefore = cancelCalls();
     const detachBefore = vi.mocked(detachHandoversFromEntry).mock.calls.length;
 
     const res = await app.request(new Request(`http://x/api/my/entries/${entryId}`, authed(token, undefined, "DELETE")));
 
     expect(res.status).toBe(200);
-    expect(vi.mocked(cancelHandoversForEntry).mock.calls.length).toBeGreaterThan(cancelBefore);
+    // A pending request cancels through the synchronous `…Db` half, an approved one through the wrapper.
+    expect(cancelCalls()).toBeGreaterThan(cancelBefore);
     expect(vi.mocked(detachHandoversFromEntry).mock.calls.length).toBeGreaterThan(detachBefore);
   });
 });

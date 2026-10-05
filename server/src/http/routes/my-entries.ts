@@ -29,15 +29,19 @@ import {
 } from "../../schedule/self-entry-notice";
 import {
   cancelHandoversForEntry,
+  cancelHandoversForEntryDb,
   detachHandoversFromEntry,
+  notifyCancelledHandovers,
+  type CancelledHandover,
   startHandovers,
   type HandoverDeps,
 } from "../../handover/handover-service";
 import {
-  closeRequestForDelete,
+  editClosedRequest,
   reconcilePendingDateEdit,
   requestApproval,
   sickApprovalDeps,
+  takeRequestOutOfPending,
   type SickApprovalDeps,
 } from "../../sick-approval/sick-approval-service";
 import { createHandoverMessenger } from "../../handover/handover-messenger";
@@ -328,16 +332,21 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // обычным работником, а потом стал наблюдателем: `deleteShift` падал на
     // FK, потому что отвязка молча пропускалась вместе с остальным блоком.
     const wasPending = existing.category === "sick_leave" && existing.approvalRequestedAt != null;
-    if (wasPending) {
-      // Before the delete: the CASCADE drops the message ids with the row, and every
-      // admin would be left holding live buttons for a sick leave that is gone.
-      await closeRequestForDelete(
-        approvalDeps(),
-        existing,
-        `🗑 Больничного уже нет — ${nameOf(db, employeeId) ?? "работник"} снял(а) сам(а)`,
-      );
-    }
-    if (existing.category === "sick_leave") {
+    // A pending request: the whole database part (leave «pending», cancel and detach hand-overs, and
+    // below the delete itself) runs before the first await, like a reject's. Letters are edited from
+    // the snapshot afterwards, so a restart cannot strand a half-deleted row.
+    const closing = wasPending
+      ? takeRequestOutOfPending(
+          db,
+          existing,
+          `🗑 Больничного уже нет — ${nameOf(db, employeeId) ?? "работник"} снял(а) сам(а)`,
+        )
+      : null;
+    let cancelledNow: CancelledHandover[] = [];
+    if (closing) {
+      cancelledNow = cancelHandoversForEntryDb(db, existing.id, []);
+      detachHandoversFromEntry(db, existing.id);
+    } else if (existing.category === "sick_leave") {
       await cancelHandoversForEntry(handoverDeps(), existing.id, []);
       // Затем отвязать: `sickEntryId` — внешний ключ, и `deleteShift` без этого
       // отвечает `invalid_reference`. Строки передач остаются как история.
@@ -348,6 +357,8 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const { deleted, expiredSwaps } = deleteShift(db, existing.id);
     if (!deleted) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "self_entry_deleted", employeeId, entryAuditPayload(db, existing));
+    if (closing) await editClosedRequest(approvalDeps(), closing);
+    await notifyCancelledHandovers(handoverDeps(), cancelledNow);
 
     for (const request of expiredSwaps) {
       const payload = linesBefore.get(request.id) ?? swapAuditPayload(db, request);

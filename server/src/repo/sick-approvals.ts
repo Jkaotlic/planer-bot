@@ -100,8 +100,14 @@ export function listPendingSickLeaves(db: Db, limit = 100): Shift[] {
     .all();
 }
 
-/** Pending sick leaves whose span touches [today, horizon] — the urgent tick's working set. */
-export function listPendingSickLeavesWithin(db: Db, today: string, horizon: string): Shift[] {
+/**
+ * The query itself, exposed so a test can EXPLAIN exactly what runs. The `+` before the date
+ * columns is a planner hint, not arithmetic: on a real database most rows are in the past, so
+ * `date <= horizon` looks selective to the planner and it walks `shift_date` instead of the
+ * handful of pending rows. A unary plus makes the date predicates unusable for that index, so
+ * the partial index `shift_pending_approval` (a few rows) is the only way in.
+ */
+export function pendingWithinQuery(db: Db, today: string, horizon: string) {
   return db
     .select()
     .from(shifts)
@@ -109,12 +115,16 @@ export function listPendingSickLeavesWithin(db: Db, today: string, horizon: stri
       and(
         isNotNull(shifts.approvalRequestedAt),
         eq(shifts.category, "sick_leave"),
-        lte(shifts.date, horizon),
-        gte(sql`coalesce(${shifts.endDate}, ${shifts.date})`, today),
+        lte(sql`+${shifts.date}`, horizon),
+        gte(sql`coalesce(${shifts.endDate}, +${shifts.date})`, today),
       ),
     )
-    .limit(100)
-    .all();
+    .limit(100);
+}
+
+/** Pending sick leaves whose span touches [today, horizon] — the urgent tick's working set. */
+export function listPendingSickLeavesWithin(db: Db, today: string, horizon: string): Shift[] {
+  return pendingWithinQuery(db, today, horizon).all();
 }
 
 /** First forced hand-over wins: a later tick handing over the next day keeps the original mark. */

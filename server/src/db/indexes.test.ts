@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openDb, runMigrations } from "./client";
+import { shifts } from "./schema";
+import { pendingWithinQuery } from "../repo/sick-approvals";
 
 /**
  * Горячие чтения идут по индексу, а не полным сканом.
@@ -83,3 +85,31 @@ describe("индексы под горячие чтения", () => {
     expect(planFor("select * from audit_log order by created_at desc, id desc limit 50")).not.toContain("TEMP B-TREE");
   });
 });
+
+describe("urgent branch: ждущие больничные на реалистичной базе", () => {
+  it("запрос тика идёт по частичному индексу, а не по shift_date, когда почти все строки в прошлом", () => {
+    const { db, sqlite } = openDb(":memory:");
+    runMigrations(db, sqlite);
+    // About the live spread: ~2000 rows, nearly all in the past, a handful pending. Without
+    // this, `date <= horizon` matches most of the table and the planner prefers `shift_date`.
+    const rows = Array.from({ length: 2000 }, (_, i) => {
+      const day = new Date(Date.UTC(2026, 0, 1) + (i % 270) * 86_400_000).toISOString().slice(0, 10);
+      const pending = i % 400 === 0;
+      return {
+        date: day,
+        category: pending ? ("sick_leave" as const) : i % 7 === 0 ? ("vacation" as const) : ("shift" as const),
+        ...(pending ? { approvalRequestedAt: new Date(1_790_000_000_000) } : {}),
+      };
+    });
+    for (let i = 0; i < rows.length; i += 200) db.insert(shifts).values(rows.slice(i, i + 200)).run();
+    // No ANALYZE on purpose: the live database has no statistics either, and that is exactly
+    // where the planner picked `shift_date` (measured on a copy of it).
+
+    const { sql, params } = pendingWithinQuery(db, "2026-09-20", "2026-09-25").toSQL();
+    const plan = (sqlite.prepare(`explain query plan ${sql}`).all(...params) as { detail: string }[]).map((r) => r.detail);
+    sqlite.close();
+    expect(plan).toEqual(["SEARCH shifts USING INDEX shift_pending_approval (approval_requested_at>?)"]);
+    expect(plan).toEqual([expect.stringContaining("USING INDEX shift_pending_approval")]);
+  });
+});
+

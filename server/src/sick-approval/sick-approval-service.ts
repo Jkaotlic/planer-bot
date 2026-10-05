@@ -87,6 +87,29 @@ export function approvalTextFor(db: Db, sick: Shift): string {
 const inFlight = new Set<number>();
 const outcomes = new Map<number, string>();
 
+/**
+ * What the last decision on an entry was, for a second press moments later. The row cannot say:
+ * a rejected or withdrawn extension leaves the ORIGINAL approver on it, and «Уже подтвердил(а) …»
+ * about a decision that was a refusal would be false. Short-lived and pruned on write, so it
+ * cannot grow; past the window the stored approver is the best answer there is.
+ */
+const RECENT_MS = 10 * 60 * 1000;
+// Per database handle: ids repeat across databases (tests open many), and a stale name must never cross.
+const recentByDb = new WeakMap<Db, Map<number, { text: string; at: number }>>();
+
+function recentOf(db: Db): Map<number, { text: string; at: number }> {
+  let map = recentByDb.get(db);
+  if (!map) recentByDb.set(db, (map = new Map()));
+  return map;
+}
+
+function rememberDecision(deps: { db: Db; now?: () => number }, entryId: number, text: string): void {
+  const now = (deps.now ?? Date.now)();
+  const recent = recentOf(deps.db);
+  for (const [id, entry] of recent) if (now - entry.at > RECENT_MS) recent.delete(id);
+  recent.set(entryId, { text, at: now });
+}
+
 function rememberOutcome(entryId: number, outcome: string): void {
   if (inFlight.has(entryId)) outcomes.set(entryId, outcome);
 }
@@ -98,6 +121,8 @@ function rememberOutcome(entryId: number, outcome: string): void {
  * `notifyAdminsAlways` it ignores notice mutes — the hand-over hangs on this letter.
  */
 export async function requestApproval(deps: SickApprovalDeps, sick: Shift, approved: SickSpan | null = null): Promise<Shift> {
+  // A new round is a new question: the previous round's outcome must not answer it.
+  recentOf(deps.db).delete(sick.id);
   const marked = markApprovalRequested(deps.db, sick.id, new Date((deps.now ?? Date.now)()), approved);
   // Gone, or not a sick leave any more: nothing to ask about, and a letter with
   // buttons for a row that does not exist could only produce «Больничного уже нет».
@@ -188,6 +213,7 @@ export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Pr
   // Approver kept: the row goes back to what it was before the extension, and that was approved by someone.
   const cleared = claimPendingSickLeave(deps.db, sick.id);
   if (!cleared) return;
+  rememberDecision(deps, sick.id, "Продление уже снято");
   const name = cleared.employeeId == null ? undefined : getEmployeeById(deps.db, cleared.employeeId)?.displayName;
   await finishApprovalMessages(deps, sick.id, `${sickExtensionWithdrawnText(name ?? "Работник", cleared)}\n\n↩️ Продление снято — ОК не нужен`);
 }
@@ -205,16 +231,33 @@ export async function finishApprovalMessages(deps: SickApprovalDeps, entryId: nu
   await editApprovalMessages(deps, rows, finalText);
 }
 
+/** The letters of a request that was taken out of «pending» for a delete: what to edit, and to what. */
+export interface ClosedRequest {
+  messages: { chatId: number; messageId: number }[];
+  text: string;
+}
+
 /**
- * A pending sick leave is about to be deleted by the worker or an admin: close its letters.
- * The row leaves «pending» FIRST, synchronously: the edits below await Telegram, and until
- * they are done another admin's «ОК» on a not-yet-edited letter would still win the claim,
- * overwrite «🗑» with «✅» and send the worker a «выбери, кому предложить смены» for a row
- * that is going away. Safe to call on a row that is not pending (then it only edits nothing).
+ * A pending sick leave is about to be deleted by the worker or an admin. The SYNCHRONOUS half:
+ * the row leaves «pending» (another admin's «ОК» on a not-yet-edited letter would otherwise win
+ * the claim, overwrite «🗑» with «✅» and send the worker a «выбери, кому предложить смены» for a
+ * row that is going away) and the letters are snapshotted. The caller then deletes the row in
+ * the same synchronous stretch and only afterwards edits the letters from the snapshot — a
+ * restart in between must not strand a non-pending row «approved by nobody».
+ * Null when the row is not pending.
  */
-export async function closeRequestForDelete(deps: SickApprovalDeps, existing: Shift, finalLine: string): Promise<void> {
-  if (!claimPendingSickLeave(deps.db, existing.id)) return;
-  await finishApprovalMessages(deps, existing.id, `${approvalTextFor(deps.db, existing)}\n\n${finalLine}`);
+export function takeRequestOutOfPending(db: Db, existing: Shift, finalLine: string): ClosedRequest | null {
+  if (!claimPendingSickLeave(db, existing.id)) return null;
+  const messages = listApprovalMessages(db, existing.id);
+  deleteApprovalMessages(db, existing.id);
+  // A send loop still running for this request closes its late letters with this outcome.
+  rememberOutcome(existing.id, finalLine);
+  return { messages, text: `${approvalTextFor(db, existing)}\n\n${finalLine}` };
+}
+
+/** The Telegram half: replace the buttons in every admin's copy. Cosmetic, never throws. */
+export async function editClosedRequest(deps: SickApprovalDeps, closed: ClosedRequest): Promise<void> {
+  await editApprovalMessages(deps, closed.messages, closed.text);
 }
 
 /** The Telegram half of `finishApprovalMessages`, for a caller that took its snapshot of the rows earlier. */
@@ -248,8 +291,10 @@ async function tellDecided(onDecided: OnDecided | undefined): Promise<void> {
  * not yet deleted) reads as «уже подтверждён» for a few milliseconds — acceptable:
  * the presser is told the request is no longer open, which is true.
  */
-function refusal(db: Db, entryId: number): SickDecision {
+function refusal(db: Db, entryId: number, now: number): SickDecision {
+  const recent = recentOf(db).get(entryId);
   const entry = getShift(db, entryId);
+  if (recent && now - recent.at <= RECENT_MS && entry) return { ok: false, status: 409, text: recent.text };
   if (!entry || entry.category !== "sick_leave") return { ok: false, status: 404, text: "Больничного уже нет" };
   const by = entry.approvedByEmployeeId == null ? null : nameOf(db, entry.approvedByEmployeeId);
   return { ok: false, status: 409, text: by ? `Уже подтвердил(а) ${by}` : "Больничный уже подтверждён" };
@@ -265,14 +310,15 @@ export async function approveSickLeave(
   // Read before the claim clears the snapshot: it says which days this «ОК» is about.
   const before = getShift(db, entryId);
   const claimed = claimPendingSickLeave(db, entryId, adminId);
-  if (!claimed || !before) return refusal(db, entryId);
+  if (!claimed || !before) return refusal(db, entryId, (deps.now ?? Date.now)());
   const adminName = nameOf(db, adminId) ?? "Админ";
   const extension = extensionOf(before);
   recordAudit(db, "sick_leave_approved", adminId, entryAuditPayload(db, claimed));
 
   const owner = claimed.employeeId == null ? undefined : getEmployeeById(db, claimed.employeeId);
-  // The hand-overs come FIRST, before any Telegram await: their database part runs right here,
-  // synchronously, like a reject's. The claim has already made the row look approved, so a
+  // The hand-overs come FIRST, before any Telegram await: every draft row is created right here,
+  // synchronously (only the escalation letters inside `startHandovers` await), like a reject's
+  // database part. The claim has already made the row look approved, so a
   // restart during the slower letters below must find the drafts in place — nothing would
   // create them later. The promise is kept (not awaited yet) so the tap is still answered at once.
   let started: Promise<Handover[]> | null = null;
@@ -333,8 +379,9 @@ export async function rejectSickLeave(
   const before = getShift(db, entryId);
   // A rejected extension leaves the original approver in place; a plain request is deleted below anyway.
   const claimed = claimPendingSickLeave(db, entryId);
-  if (!claimed || !before) return refusal(db, entryId);
+  if (!claimed || !before) return refusal(db, entryId, (deps.now ?? Date.now)());
   const adminName = nameOf(db, adminId) ?? "Админ";
+  rememberDecision(deps, entryId, `Уже отклонил(а) ${adminName}`);
   const extension = extensionOf(before);
   // Hand-overs a colleague already took (the urgent branch): those shifts are no longer the
   // worker's, and the letter must say so instead of leaving her to turn up for them.

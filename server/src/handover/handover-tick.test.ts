@@ -427,6 +427,26 @@ describe("urgent branch: a sick leave still waiting for «ОК»", () => {
     expect(getShift(db, sick.id)!.handoverForcedAt).toEqual(mark);
   });
 
+  it("a later pass that hands over ANOTHER shift keeps the first pass's mark", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = pendingSick(db, anya, "2026-08-12", "2026-08-13");
+    const soon = shift(db, anya, "2026-08-12", "15:00"); // 6 h away
+    const later = shift(db, anya, "2026-08-13", "15:00"); // 30 h away: outside the first window
+    await runHandoverTick(deps(db), NOW);
+    const firstMark = getShift(db, sick.id)!.handoverForcedAt;
+    expect(firstMark).not.toBeNull();
+
+    // 20 h on: the second shift is now inside the window, so this pass really creates a hand-over.
+    await runHandoverTick(deps(db), NOW + 20 * HOUR);
+
+    expect(listHandoversForEntry(db, sick.id).map((h) => h.shiftId).sort()).toEqual([soon.id, later.id].sort());
+    // Wrong implementation caught: the mark follows the latest pass, so «передача запущена без ОК»
+    // would date from the last shift instead of the first.
+    expect(getShift(db, sick.id)!.handoverForcedAt).toEqual(firstMark);
+  });
+
   it("an approved sick leave and an observer's pending one are left to their usual paths", async () => {
     const db = makeTestDb();
     const anya = person(db, "Аня");

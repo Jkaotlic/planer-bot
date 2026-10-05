@@ -171,12 +171,13 @@ export async function startHandovers(
       .map((handover) => handover.shiftId),
   );
 
+  // Pass 1 is synchronous: every draft row exists before the first Telegram await. A crash
+  // during the escalation letters below must not leave an approved sick leave without the
+  // drafts of its later shifts — nothing would ever create them again.
   const made: Handover[] = [];
+  const uncovered: { index: number; shift: Shift }[] = [];
   for (const shift of mine) {
     if (alreadyOffered.has(shift.id)) continue;
-    // The loop awaits Telegram (escalation) between shifts, and the worker may delete the sick
-    // leave meanwhile: `sickEntryId` is a foreign key, so the next insert would throw.
-    if (!getShift(db, input.sickEntry.id)) break;
     const handover = createHandover(db, {
       shiftId: shift.id,
       fromEmployeeId: input.employeeId,
@@ -187,17 +188,22 @@ export async function startHandovers(
     // Nobody free at all: the ladder has no rungs left, so the admins are told at
     // once. Waiting three hours for an answer from nobody would be a lie told by
     // the interface.
-    if (handoverCandidates(db, shift).length === 0) {
-      const escalated = updateHandover(db, handover.id, { status: "fanned", escalatedAt: new Date() })!;
-      recordAudit(db, "handover_escalated", input.employeeId, auditPayload(db, escalated, shift, null));
-      await deps.messenger.adminsAlways(
-        handoverEscalationText(nameOf(db, input.employeeId) ?? "Работник", lineOf(shift), [], 0),
-        scheduleAction(deps.config.publicUrl, shift),
-      );
-      made.push(escalated);
-      continue;
-    }
+    if (handoverCandidates(db, shift).length === 0) uncovered.push({ index: made.length, shift });
     made.push(handover);
+  }
+
+  // Pass 2: the escalations. Each one re-reads its row, because the worker may delete the sick
+  // leave while an earlier letter is in flight — a cancelled draft is not escalated.
+  for (const { index, shift } of uncovered) {
+    const current = getHandover(db, made[index]!.id);
+    if (!current || current.status !== "offered") continue;
+    const escalated = updateHandover(db, current.id, { status: "fanned", escalatedAt: new Date() })!;
+    made[index] = escalated;
+    recordAudit(db, "handover_escalated", input.employeeId, auditPayload(db, escalated, shift, null));
+    await deps.messenger.adminsAlways(
+      handoverEscalationText(nameOf(db, input.employeeId) ?? "Работник", lineOf(shift), [], 0),
+      scheduleAction(deps.config.publicUrl, shift),
+    );
   }
   return made;
 }
