@@ -108,4 +108,24 @@ describe("«Сервисы» в мини-аппе", () => {
     await settle(3);
     expect(el.textContent).toContain("Привет, Аня");
   });
+
+  it("«Сервисы» → «QR-код» → «Назад» в «Сервисы»; выбранный стиль виден при следующем открытии", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith() as never);
+    vi.spyOn(apiClient, "setQrStyle").mockResolvedValue({ shape: "dots", color: "black" });
+    const el = await mount();
+    await act(async () => servicesButton(el).click());
+    await settle(3);
+    const qr = () => [...el.querySelectorAll<HTMLButtonElement>(".ui-menu-row")].find((b) => b.textContent!.includes("QR-код"))!;
+    await act(async () => qr().click());
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("QR-код"));
+    const dots = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Точки")!;
+    await act(async () => dots.click());
+    await act(async () => (el.querySelector('button[aria-label="Назад"]') as HTMLButtonElement).click());
+    await settle(3);
+    expect(el.querySelector("h1")!.textContent).toBe("Сервисы");
+    await act(async () => qr().click());
+    await waitFor(() => expect(el.querySelector("h1")!.textContent).toBe("QR-код"));
+    const again = [...el.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Точки")!;
+    expect(again.getAttribute("aria-pressed")).toBe("true");
+  });
 });

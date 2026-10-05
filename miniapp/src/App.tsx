@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { ActionButton, Screen } from "./ui";
-import { canAddOwnShifts, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
+import { canAddOwnShifts, DEFAULT_QR_STYLE, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
 import { apiClient, type Me, type MyShifts, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
@@ -40,6 +40,9 @@ const AnnounceScreen = lazy(() => import("./screens/admin/AdminAnnounce"));
 // вкладка: тот же приём, что у «Анонса» наблюдателя — код не должен доезжать
 // до тех, кто ссылку не открывал.
 const FoodScreen = lazy(() => import("./screens/food/FoodScreen").then((m) => ({ default: m.FoodScreen })));
+// «QR-код» — тем же приёмом: `qrcode` едет только к тем, кто открыл экран
+// (сторож — `screens/services/qr-bundle.test.ts`).
+const QrScreen = lazy(() => import("./screens/services/QrScreen").then((m) => ({ default: m.QrScreen })));
 import { addDays, mondayOf, toISODate } from "./lib/week";
 import { withBusy, withoutBusy } from "./lib/busy-set";
 import { withError, withoutError, weekendOfferErrorMessage } from "./lib/error-map";
@@ -616,6 +619,21 @@ export function App() {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю…</div>}>
         <FoodScreen initial={foodRoute} onClose={() => setFoodRoute(null)} />
+      </Suspense>
+    );
+  }
+
+  if (services === "qr") {
+    return (
+      <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю…</div>}>
+        <QrScreen
+          initialStyle={data.me.qrStyle ?? DEFAULT_QR_STYLE}
+          onClose={(qrStyle) => {
+            // Следующее открытие — с тем же выбором, без перечитывания `me`.
+            setData((prev) => (prev ? { ...prev, me: { ...prev.me, qrStyle } } : prev));
+            setServices("list");
+          }}
+        />
       </Suspense>
     );
   }
