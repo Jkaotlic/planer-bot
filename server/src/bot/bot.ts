@@ -20,6 +20,7 @@ import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
+import { approveSickLeave, rejectSickLeave, sickApprovalDeps } from "../sick-approval/sick-approval-service";
 import { getVacantSlot } from "../repo/weekend";
 import { collectionsForWorker, getCollection, previewCollection, setCollectionClosed, updateCollection } from "../collections/collection-service";
 import { setPaid } from "../collections/payment-service";
@@ -1769,6 +1770,44 @@ export function createBot(deps: BotDeps): Bot {
     // the text stays. Through `safeEdit`, like every cosmetic edit in this file:
     // a failure here must not reach `bot.catch` as an unexplained handler error.
     await safeEdit(() => ctx.editMessageReplyMarkup());
+  });
+
+  /**
+   * «✅ ОК» / «❌ Отклонить» under a worker's sick leave request.
+   *
+   * `acting` and then `actsAsAdmin`, like `bug:resolve`: the button lives in the chat
+   * forever, and its holder may have been demoted since. The service replaces the
+   * buttons in EVERY admin's copy; this handler only fixes up the pressed message
+   * when the service refused (already decided, or the entry is gone).
+   *
+   * Registered above the callback catch-all at the end of this file — below it the
+   * catch-all would answer «Кнопка устарела» first.
+   */
+  bot.callbackQuery(/^sick:(approve|reject):(\d+)$/, async (ctx) => {
+    const action = ctx.match[1] as "approve" | "reject";
+    const entryId = Number(ctx.match[2]);
+    const who = acting(ctx.from.id);
+    if (!who.ok) {
+      await ctx.answerCallbackQuery({ text: who.text });
+      return;
+    }
+    if (!actsAsAdmin(who.me, ctx.from.id)) {
+      await ctx.answerCallbackQuery({ text: "Это может только админ" });
+      return;
+    }
+    const deps = sickApprovalDeps(bot, db, config);
+    // Answered between the decision and the broadcast — see `OnDecided`.
+    const onDecided = () => ctx.answerCallbackQuery({ text: action === "approve" ? "Подтверждено ✅" : "Отклонено" });
+    const res =
+      action === "approve"
+        ? await approveSickLeave(deps, entryId, who.me.id, onDecided)
+        : await rejectSickLeave(deps, entryId, who.me.id, onDecided);
+    if (res.ok) return;
+    await ctx.answerCallbackQuery({ text: res.text });
+    const message = ctx.callbackQuery.message;
+    const original = message && "text" in message ? message.text : undefined;
+    // The buttons go, the outcome takes their place; the text above stays readable.
+    await safeEdit(() => (original ? ctx.editMessageText(`${original}\n\n${res.text}`) : ctx.editMessageReplyMarkup()));
   });
 
   // Последним: сюда доходит только нажатие, которое не узнал ни один обработчик, —
