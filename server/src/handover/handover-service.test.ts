@@ -149,6 +149,18 @@ describe("startHandovers — only shifts starting before a moment", () => {
     expect(made.map((h) => h.shiftId)).toEqual([near.id]);
     expect(made.map((h) => h.shiftId)).not.toContain(far.id);
   });
+
+  it("the threshold itself is excluded: a shift starting exactly at `startsBefore` waits for the admin", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const sick = db.insert(shifts).values({ date: "2026-08-13", category: "sick_leave", employeeId: anya }).returning().get();
+    const at = shift(db, anya, "2026-08-13", "15:00");
+    const exact = Date.UTC(2026, 7, 13, 12, 0); // 15:00 Moscow
+    expect(await startHandovers(deps(db), { sickEntry: sick, employeeId: anya, startsBefore: exact })).toEqual([]);
+    const made = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya, startsBefore: exact + 1 });
+    expect(made.map((h) => h.shiftId)).toEqual([at.id]);
+  });
 });
 
 describe("offering to one colleague", () => {

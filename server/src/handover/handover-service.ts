@@ -562,10 +562,30 @@ export async function cancelHandoversForEntry(
   sickEntryId: number,
   stillCoveredDates: readonly string[],
 ): Promise<number> {
-  const { db } = deps;
-  const covered = new Set(stillCoveredDates);
-  let killed = 0;
+  const cancelled = cancelHandoversForEntryDb(deps.db, sickEntryId, stillCoveredDates);
+  await notifyCancelledHandovers(deps, cancelled);
+  return cancelled.length;
+}
 
+/** A handover cancelled by `cancelHandoversForEntryDb`, with what the «отбой» letter needs. */
+export interface CancelledHandover {
+  /** As it was BEFORE the cancel: the letter goes to whoever was waiting under that status. */
+  handover: Handover;
+  shift: Shift | undefined;
+}
+
+/**
+ * The synchronous half of `cancelHandoversForEntry`: statuses and audit only, no
+ * Telegram. Split out so a caller that must finish its DB work before the first
+ * await (rejecting a sick leave) can do so and send the letters afterwards.
+ */
+export function cancelHandoversForEntryDb(
+  db: Db,
+  sickEntryId: number,
+  stillCoveredDates: readonly string[],
+): CancelledHandover[] {
+  const covered = new Set(stillCoveredDates);
+  const cancelled: CancelledHandover[] = [];
   for (const handover of listHandoversForEntry(db, sickEntryId)) {
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
@@ -573,10 +593,15 @@ export async function cancelHandoversForEntry(
 
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
-    killed += 1;
-    if (!shift) continue;
-
-    await tellCancelled(deps, handover, shift, sickCancelledText(db, handover, shift));
+    cancelled.push({ handover, shift });
   }
-  return killed;
+  return cancelled;
+}
+
+/** The asynchronous half: tell whoever was waiting that the offer is off. */
+export async function notifyCancelledHandovers(deps: HandoverDeps, cancelled: readonly CancelledHandover[]): Promise<void> {
+  for (const { handover, shift } of cancelled) {
+    if (!shift) continue;
+    await tellCancelled(deps, handover, shift, sickCancelledText(deps.db, handover, shift));
+  }
 }

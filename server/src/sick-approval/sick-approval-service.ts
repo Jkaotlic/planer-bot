@@ -18,7 +18,8 @@ import { dayAfterLine } from "../schedule/day-summary";
 import { safeErrorMessage } from "../util/safe-error";
 import { entryAuditPayload, entryLineOf, nameOf } from "../util/message-lines";
 import {
-  cancelHandoversForEntry,
+  cancelHandoversForEntryDb,
+  notifyCancelledHandovers,
   detachHandoversFromEntry,
   startHandovers,
   type HandoverDeps,
@@ -65,13 +66,25 @@ export function approvalTextFor(db: Db, sick: Shift): string {
  * `notifyAdminsAlways` it ignores notice mutes — the hand-over hangs on this letter.
  */
 export async function requestApproval(deps: SickApprovalDeps, sick: Shift): Promise<Shift> {
-  const marked = markApprovalRequested(deps.db, sick.id, new Date((deps.now ?? Date.now)())) ?? sick;
+  const marked = markApprovalRequested(deps.db, sick.id, new Date((deps.now ?? Date.now)()));
+  // Gone, or not a sick leave any more: nothing to ask about, and a letter with
+  // buttons for a row that does not exist could only produce «Больничного уже нет».
+  if (!marked) return sick;
   if (!deps.bot) return marked;
   const text = approvalTextFor(deps.db, marked);
   for (const admin of listAdmins(deps.db)) {
     if (admin.telegramUserId == null || admin.id === marked.employeeId) continue;
     const messageId = await sendTracked(deps.bot, admin.telegramUserId, text, sickApprovalKeyboard(marked.id));
     if (messageId != null) addApprovalMessage(deps.db, marked.id, admin.telegramUserId, messageId);
+  }
+  // An admin may have decided while the loop was still sending: that decision
+  // edited only the letters recorded by then, so the ones recorded after it still
+  // carry live buttons. Close them with the outcome that did happen.
+  const now = getShift(deps.db, marked.id);
+  if (!now || now.approvalRequestedAt == null) {
+    const by = now?.approvedByEmployeeId == null ? null : nameOf(deps.db, now.approvedByEmployeeId);
+    const outcome = now ? `✅ Подтвердил(а) ${by ?? "админ"}` : "❌ Отклонено";
+    await finishApprovalMessages(deps, marked.id, `${text}\n\n${outcome}`);
   }
   return marked;
 }
@@ -97,6 +110,15 @@ export async function redrawApprovalMessages(deps: SickApprovalDeps, sick: Shift
 export async function finishApprovalMessages(deps: SickApprovalDeps, entryId: number, finalText: string): Promise<void> {
   const rows = listApprovalMessages(deps.db, entryId);
   deleteApprovalMessages(deps.db, entryId);
+  await editApprovalMessages(deps, rows, finalText);
+}
+
+/** The Telegram half of `finishApprovalMessages`, for a caller that took its snapshot of the rows earlier. */
+async function editApprovalMessages(
+  deps: SickApprovalDeps,
+  rows: readonly { chatId: number; messageId: number }[],
+  finalText: string,
+): Promise<void> {
   if (!deps.bot) return;
   for (const row of rows) {
     try {
@@ -177,18 +199,24 @@ export async function rejectSickLeave(
   const claimed = claimPendingSickLeave(db, entryId, null);
   if (!claimed) return refusal(db, entryId);
   const adminName = nameOf(db, adminId) ?? "Админ";
-  // Read before anything goes: the journal and the letters must name what was rejected.
+  // The whole database part runs before the first await. After the claim the row looks
+  // exactly like an approved one (no request, no approver); leaving it so across Telegram
+  // calls would let a restart strand an approved-by-nobody sick leave, and a second admin
+  // would be told «уже подтверждён», which is false. So: snapshot, cancel, delete — then talk.
   const payload = entryAuditPayload(db, claimed);
   const letter = approvalTextFor(db, claimed);
-  await tellDecided(onDecided);
+  const messages = listApprovalMessages(db, entryId);
   // Whatever the urgent branch started dies the way a worker's own delete kills it.
   // Taken hand-overs stay: that shift already has a new owner (`cancelHandoversForEntry`).
-  await cancelHandoversForEntry(deps, entryId, []);
+  const cancelled = cancelHandoversForEntryDb(db, entryId, []);
   detachHandoversFromEntry(db, entryId);
-  // Before the delete: the CASCADE takes the message ids with the row.
-  await finishApprovalMessages(deps, entryId, `${letter}\n\n❌ Отклонил(а) ${adminName}`);
+  // Rows are gone with the sick leave (CASCADE); the snapshot above is what the edits use.
   deleteShift(db, entryId);
   recordAudit(db, "sick_leave_rejected", adminId, payload);
+
+  await tellDecided(onDecided);
+  await editApprovalMessages(deps, messages, `${letter}\n\n❌ Отклонил(а) ${adminName}`);
+  await notifyCancelledHandovers(deps, cancelled);
   if (claimed.employeeId != null) {
     await deps.messenger.plain(claimed.employeeId, sickRejectedWorkerText(claimed, adminName));
   }

@@ -59,7 +59,10 @@ describe("requestApproval", () => {
     setEmployeeObserver(db, dasha.id, true);
     const before = api.sent.length;
     await requestApproval(deps, createShift(db, { employeeId: dasha.id, date: day(1), category: "sick_leave" }));
-    expect(api.sent.slice(before).every((m) => m.text.endsWith("Нужен ОК любого админа."))).toBe(true);
+    const letters = api.sent.slice(before);
+    // Exact admin count: `every` on an empty list would pass for «sent nothing».
+    expect(letters).toHaveLength(2);
+    expect(letters.every((m) => m.text.endsWith("Нужен ОК любого админа."))).toBe(true);
   });
 });
 
@@ -134,7 +137,32 @@ describe("rejectSickLeave", () => {
     const toWorker = api.sent.find((m) => m.chat_id === 201)!;
     expect(toWorker.text).toMatch(/^Больничный с \d+ (по \d+ )?[а-я]+( по \d+ [а-я]+)? не подтвердил\(а\) Марк — напиши, чтобы разобраться\.$/);
     const edits = api.calls.filter((c) => c.method === "editMessageText");
-    expect(edits.every((e) => (e.payload.text as string).endsWith("❌ Отклонил(а) Марк"))).toBe(true);
+    // Exact set of edited chats: `every` on an empty list would pass without the edits.
+    expect(edits.map((e) => e.payload.chat_id).sort()).toEqual([111, 112]);
+    for (const edit of edits) {
+      expect((edit.payload.text as string).endsWith("\n\n❌ Отклонил(а) Марк")).toBe(true);
+      expect(edit.payload.reply_markup).toBeUndefined();
+    }
+  });
+
+  it("finishes its database work before the first Telegram await: the row is gone, handovers cancelled, a late ✅ is told «нет»", async () => {
+    const { db, deps, igor, mark, sick } = await scene();
+    const [forced] = await startHandovers(deps, { sickEntry: getShift(db, sick.id)!, employeeId: sick.employeeId! });
+    let atFirstAwait: unknown = null;
+    // `onDecided` is the first await of the reject: whatever a crash or a second admin
+    // would meet at that moment is what this observes.
+    await rejectSickLeave(deps, sick.id, mark.id, async () => {
+      atFirstAwait = {
+        row: getShift(db, sick.id),
+        handover: getHandover(db, forced!.id)!.status,
+        late: await approveSickLeave(deps, sick.id, igor.id),
+      };
+    });
+    expect(atFirstAwait).toEqual({
+      row: undefined,
+      handover: "cancelled",
+      late: { ok: false, status: 404, text: "Больничного уже нет" },
+    });
   });
 });
 
@@ -147,5 +175,41 @@ describe("listSickApprovals", () => {
     expect(rows[0]!.shiftLines[0]).toContain("08:00–17:00 · Утро");
     await approveSickLeave(deps, sick.id, igor.id);
     expect(listSickApprovals(db)).toEqual([]);
+  });
+});
+
+describe("requestApproval — edges", () => {
+  it("returns early without sending when the entry is gone", async () => {
+    const { deps, api } = await scene();
+    const before = api.sent.length;
+    const ghost = { id: 99_999, category: "sick_leave", employeeId: 1, date: day(1), endDate: null } as Parameters<typeof requestApproval>[1];
+    await requestApproval(deps, ghost);
+    expect(api.sent.length).toBe(before);
+  });
+
+  it("an admin who decides mid-loop does not leave live buttons with the admins reached later", async () => {
+    const db = makeTestDb();
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    const api = recordApi(bot);
+    const igor = createAdminEmployee(db, { displayName: "Игорь", telegramUserId: 111 });
+    createAdminEmployee(db, { displayName: "Марк", telegramUserId: 112 });
+    const anya = linked(db, 201, "Аня");
+    const sick0 = createShift(db, { employeeId: anya.id, date: day(1), category: "sick_leave" });
+    const deps = sickApprovalDeps(bot, db, config);
+    let fired = false;
+    bot.api.config.use(async (prev, method, payload) => {
+      const result = await prev(method, payload);
+      // Right after the first admin's letter is out, that admin presses «ОК» —
+      // before the loop has reached the second one.
+      if (!fired && method === "sendMessage" && (payload as { chat_id: number }).chat_id === 111) {
+        fired = true;
+        await approveSickLeave(deps, sick0.id, igor.id);
+      }
+      return result;
+    });
+    await requestApproval(deps, sick0);
+    const edited = api.calls.filter((c) => c.method === "editMessageText").map((c) => c.payload.chat_id).sort();
+    expect(edited).toEqual([111, 112]);
+    expect(listApprovalMessages(db, sick0.id)).toHaveLength(0);
   });
 });
