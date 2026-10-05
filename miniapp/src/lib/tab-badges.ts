@@ -18,6 +18,8 @@ export interface TabBadgesInput {
   /** Людей не хватает на 7 дней вперёд. `null` — не загрузилось: метка молчит,
    *  а не врёт нулём. */
   adminShortfall?: number | null;
+  /** Больничные, ждущие ОК. `null` — не загрузилось. */
+  sickApprovals?: number | null;
 }
 
 /**
@@ -52,9 +54,12 @@ export function tabBadges(input: TabBadgesInput): Partial<Record<TabKey, number>
     if (unpaid > 0) badges.collections = unpaid;
   }
 
-  // «Админ»: сколько людей не хватает на 7 дней вперёд. Единственная метка не
-  // про «ждёт ответа», а про «ждёт дела» — но вкладка одна, и число на ней одно.
-  if (input.isAdmin && input.adminShortfall) badges.admin = input.adminShortfall;
+  // «Админ»: если больничные ждут ОК — их число (люди ждут решения), иначе нехватка.
+  // Сумма не годится: два числа про разное, и «7» не говорило бы, куда идти.
+  if (input.isAdmin) {
+    if (input.sickApprovals) badges.admin = input.sickApprovals;
+    else if (input.adminShortfall) badges.admin = input.adminShortfall;
+  }
 
   return badges;
 }

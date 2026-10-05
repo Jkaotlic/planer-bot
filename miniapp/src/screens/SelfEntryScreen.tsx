@@ -1,7 +1,7 @@
 import { useTelegramBack } from "../lib/telegram-back";
 import { ActionButton, Card, Group } from "../ui";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Cell, IconButton, Input, Placeholder } from "@telegram-apps/telegram-ui";
 import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
 import type { HandoverDraft, SelfEntryInput, Shift, Template } from "../api/client";
@@ -49,6 +49,15 @@ export function defaultEventEnd(start: string): string {
 export function screenFromSearch(search: string): SelfEntryMode | null {
   const value = new URLSearchParams(search).get("screen");
   return value === "sick" || value === "event" || value === "shift" ? value : null;
+}
+
+/**
+ * Кнопка «🤝 Выбрать коллег» из письма об ОК админа. Своя функция, а не ещё одно
+ * значение `SelfEntryMode`: форма та же — больничный, — а ссылка говорит, что её
+ * второй шаг надо поднять с сервера, потому что человек давно ушёл из формы.
+ */
+export function handoverDraftsFromSearch(search: string): boolean {
+  return new URLSearchParams(search).get("screen") === "handovers";
 }
 
 /**
@@ -115,6 +124,8 @@ export interface SelfEntryScreenProps {
   onDelete: (id: number) => Promise<void>;
   onOfferHandover: (handoverId: number, toEmployeeId: number) => Promise<void>;
   onSkipHandover: (handoverId: number) => Promise<void>;
+  /** Ссылка из письма об ОК: черновики передачи поднимаются с сервера при открытии. */
+  loadDrafts?: () => Promise<HandoverDraft[]>;
 }
 
 /**
@@ -137,11 +148,33 @@ export function SelfEntryScreen({
   onDelete,
   onOfferHandover,
   onSkipHandover,
+  loadDrafts,
 }: SelfEntryScreenProps) {
   // Смены, оставшиеся без человека. Пока список не пуст, форма не закрывается:
   // это единственный момент, когда человек ещё помнит, кого можно попросить.
   const [drafts, setDrafts] = useState<HandoverDraft[]>([]);
   const [handoverBusy, setHandoverBusy] = useState(false);
+  // Черновики после ОК — с сервера, один раз на открытие. Пусто — сказать словами:
+  // пустая форма больничного по кнопке «Выбрать коллег» выглядела бы поломкой.
+  const [draftsGone, setDraftsGone] = useState(false);
+  useEffect(() => {
+    if (!loadDrafts) return;
+    let cancelled = false;
+    loadDrafts().then(
+      (loaded) => {
+        if (cancelled) return;
+        setDrafts(loaded);
+        setDraftsGone(loaded.length === 0);
+      },
+      (err: unknown) => {
+        if (!cancelled) setError(describeError(err));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // Один раз на монтирование: ссылка — одна.
+  }, []);
   // «Назад» с неотданной сменой сначала говорит, что будет, — второе нажатие
   // уходит. Смена не пропадёт (через три часа спросим всех), но человек должен
   // это знать, а не думать, что просто закрыл форму.
@@ -294,7 +327,7 @@ export function SelfEntryScreen({
         header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
         footer={
           isSick
-            ? "Админам уйдёт письмо: они увидят, какие смены остались без человека."
+            ? "Админам уйдёт письмо: они подтвердят больничный и увидят, какие смены остались без человека."
             : isShift
               ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
               : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
@@ -364,6 +397,11 @@ export function SelfEntryScreen({
         )}
       </div>
 
+      {draftsGone && drafts.length === 0 && (
+        <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
+          Смен для передачи не осталось — их уже взяли или предложили всем свободным.
+        </div>
+      )}
       {drafts.length > 0 && leaveWarned && (
         <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--destructive_text_color)" }}>
           Смена ещё не отдана. Если выйти — через три часа спросим всех свободных. Нажми «Назад» ещё раз, чтобы выйти.
@@ -412,6 +450,14 @@ export function SelfEntryScreen({
             </Group>
           ))}
         </>
+      )}
+
+      {/* Вместо черновиков передачи (их нет, пока нет ОК) — что будет дальше. Рядом
+          со списком, а не вверху: экран — один длинный скролл. */}
+      {mine.some((entry) => entry.category === "sick_leave" && entry.pending) && (
+        <div role="status" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
+          Больничный ждёт ОК. Админы подтвердят — после этого предложим твои смены коллегам.
+        </div>
       )}
 
       <Group header="Что ты уже записал себе" footer="Здесь только то, что ещё не кончилось: прошедшее правит админ.">

@@ -73,6 +73,9 @@ async function settle(times = 20) {
 }
 
 async function mount() {
+  // Сидовый мок держит одного ждущего ОК — без заглушки он перебил бы метку нехватки
+  // во всех тестах ниже. Тесты про сами ожидания ставят своё значение до `mount`.
+  if (!vi.isMockFunction(apiClient.getSickApprovals)) vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([]);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -208,6 +211,92 @@ describe("метки на TabBar реагируют на действия, а н
     vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
     const el = await mount();
     expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+  });
+
+  const SICK_ROW = {
+    id: 7, employeeId: 4, employeeName: "Даша", date: "2026-10-06", endDate: null,
+    requestedAt: "2026-10-05T09:00:00.000Z", shiftLines: [], handoverForced: false,
+  };
+
+  it("ждущие ОК больничные главнее нехватки: на «Админ» их число", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([SICK_ROW, { ...SICK_ROW, id: 8 }]);
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("2");
+  });
+
+  it("ждущих спрашивают ПОСЛЕ нехватки, а не параллельно (один запрос за раз до релея)", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const order: string[] = [];
+    vi.spyOn(apiClient, "getAdminShortfall").mockImplementation(async () => {
+      order.push("shortfall:start");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      order.push("shortfall:done");
+      return { total: 4, firstDate: "2026-09-26" };
+    });
+    vi.spyOn(apiClient, "getSickApprovals").mockImplementation(async () => {
+      order.push("approvals:start");
+      return [];
+    });
+    await mount();
+    expect(order).toEqual(["shortfall:start", "shortfall:done", "approvals:start"]);
+  });
+
+  it("в меню админки строка «На подтверждение» несёт своё число, а решение пересчитывает метки", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    const getApprovals = vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([SICK_ROW]);
+    const approve = vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
+    const el = await mount();
+    await act(async () => tabItem(el, "Админ").click());
+    await settle();
+    await act(async () => (el.querySelector('button[aria-label="Разделы"]') as HTMLElement).click());
+    await settle();
+    const row = [...el.querySelectorAll<HTMLElement>("button.ui-menu-row")].find((r) => r.textContent?.includes("На подтверждение"))!;
+    expect(row.querySelector(".ui-menu-row__badge")?.textContent).toBe("1");
+    await act(async () => row.click());
+    await settle();
+    const before = getShortfall.mock.calls.length;
+    getApprovals.mockResolvedValue([]);
+    const ok = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("✅ ОК"))!;
+    await act(async () => ok.click());
+    await settle();
+    expect(approve).toHaveBeenCalledWith(7);
+    // Отказ удаляет запись — нехватка тоже могла измениться, поэтому перечитывается она,
+    // а ждущие — вслед за ней; метка возвращается к числу нехватки.
+    expect(getShortfall.mock.calls.length).toBeGreaterThan(before);
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+  });
+
+  it("запрос ждущих упал — метка снова про нехватку", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
+    vi.spyOn(apiClient, "getSickApprovals").mockRejectedValue(new Error("сеть"));
+    const el = await mount();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("4");
+  });
+
+  it("более медленный старый ответ про ждущих не затирает новый", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith({ me: ADMIN_ME }) as never);
+    vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 0, firstDate: null });
+    let releaseOld: (rows: unknown[]) => void = () => {};
+    const get = vi.spyOn(apiClient, "getSickApprovals")
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseOld = resolve as never; }))
+      .mockResolvedValue([SICK_ROW, { ...SICK_ROW, id: 8 }, { ...SICK_ROW, id: 9 }] as never);
+    const el = await mount();
+    // Возврат в приложение запускает второй круг; первый ответ всё ещё висит.
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("3");
+    await act(async () => { releaseOld([]); });
+    await settle();
+    expect((badgeOf(el, "Админ")?.textContent ?? "").trim()).toBe("3");
   });
 
   it("ручка упала — метки нет, приложение живо", async () => {

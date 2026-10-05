@@ -10,6 +10,7 @@ import { parseISODate, toISODate } from "@planer/shared";
  * вместе с ним, то есть отменил бы разделение.
  */
 export type AdminSection =
+  | "sick-approvals"
   | "schedule"
   | "weekend"
   | "employees"
@@ -28,6 +29,7 @@ export type AdminView = AdminSection | "menu";
  *  (`adminSectionTitle`), и тестам — один источник, без расхождения подписей. */
 export const ADMIN_MENU: readonly { header: string; items: readonly { key: AdminSection; icon: string; title: string; hint: string }[] }[] = [
   { header: "График", items: [
+    { key: "sick-approvals", icon: "🤒", title: "На подтверждение", hint: "Больничные, которые ждут ОК" },
     { key: "schedule", icon: "📅", title: "Расписание", hint: "Кто когда работает, правка смен" },
     { key: "weekend", icon: "🙋", title: "Выходные", hint: "Открыть смену на выходной и назначить" },
   ] },

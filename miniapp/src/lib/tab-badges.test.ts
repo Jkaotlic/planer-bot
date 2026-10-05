@@ -113,4 +113,14 @@ describe("tabBadges", () => {
   it("не-админу метку «Админ» не кладёт, что бы ни пришло", () => {
     expect(tabBadges({ ...EMPTY, isAdmin: false, adminShortfall: 3 })).not.toHaveProperty("admin");
   });
+
+  it("ждущие ОК больничные главнее нехватки: метка «Админ» показывает их", () => {
+    // Сумма не годится — числа про разное (решение в спеке). Пока ждут решения
+    // админа, зовёт именно это; кончились — метка снова про нехватку.
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: 5, sickApprovals: 2 }).admin).toBe(2);
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: 5, sickApprovals: 0 }).admin).toBe(5);
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: 5, sickApprovals: null }).admin).toBe(5);
+    expect(tabBadges({ ...EMPTY, isAdmin: true, adminShortfall: null, sickApprovals: 2 }).admin).toBe(2);
+    expect(tabBadges({ ...EMPTY, isAdmin: false, sickApprovals: 2 })).not.toHaveProperty("admin");
+  });
 });

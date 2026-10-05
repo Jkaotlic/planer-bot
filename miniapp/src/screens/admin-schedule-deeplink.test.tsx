@@ -53,6 +53,9 @@ async function mount(me: Parameters<typeof bootstrapWith>[0], search: string) {
   vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrapWith(me) as never);
   // Экран «Расписание» тянет неделю сам, отдельно от bootstrap.
   vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
+  // Число ждущих ОК кладёт метку в подпись вкладки «Админ», а `goTab` ищет вкладку по
+  // точной подписи; сидовый мок дал бы «Админ1». Эти тесты не про метку.
+  vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([]);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);

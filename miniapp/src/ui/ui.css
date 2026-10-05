@@ -327,6 +327,23 @@
   color: var(--tgui--hint_color);
 }
 
+/* Число ждущих решения — тот же вид, что `.tab-badge` на нижней панели (там же
+   объяснено, почему красный затемнён: белое на чистом красном не дотягивало до 4.5). */
+.ui-menu-row__badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--tgui--destructive_text_color, #e53935) 84%, #000);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+  text-align: center;
+  box-sizing: border-box;
+}
+
 .ui-menu-row__chevron {
   font-size: 22px;
   color: var(--tgui--hint_color);

@@ -102,6 +102,9 @@ async function mount(me: Parameters<typeof bootstrapWith>[0], search = "") {
   vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([] as never);
   vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([] as never);
   vi.spyOn(apiClient, "getAnnouncementRecipients").mockResolvedValue([] as never);
+  // Метка «Админ» и строка «На подтверждение» зависят от этого ответа — без заглушки
+  // тест читал бы сидовый мок, и строка меню без метки не отличалась бы от строки с ней.
+  if (!vi.isMockFunction(apiClient.getSickApprovals)) vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([]);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -145,17 +148,19 @@ describe("админка: меню разделов", () => {
     expect(el.querySelectorAll('[role="tab"]')).toHaveLength(0);
   });
 
-  it("2. «‹ Разделы» ведёт в меню из девяти строк по порядку", async () => {
+  it("2. «‹ Разделы» ведёт в меню из десяти строк по порядку", async () => {
     const el = await mount({ isAdmin: true });
     await click(tabItem(el, "Админ"));
     await untilH1(el, "Расписание");
     await click(backButton(el)!);
     await untilH1(el, "Админ");
     const rows = menuRows(el);
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(10);
+    // Раздел «На подтверждение» — первым в «График»: он про решение, которого ждут люди.
+    expect(rows[0]!.textContent).toContain("На подтверждение");
     // Название строки — ровно из `.ui-menu-row__title`: `toContain` по тексту всей
     // строки пропустил бы подмену названия, пока оно лежит где-то в пояснении.
-    expect(rows.map(rowTitle)).toEqual(["Расписание", "Выходные", "Работники", "Группы", "Анонсы", "Чек-листы", "Журнал", "Баги", "Настройки"]);
+    expect(rows.map(rowTitle)).toEqual(["На подтверждение", "Расписание", "Выходные", "Работники", "Группы", "Анонсы", "Чек-листы", "Журнал", "Баги", "Настройки"]);
     expect(backButton(el)).toBeNull();
   });
 

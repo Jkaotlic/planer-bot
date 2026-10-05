@@ -177,4 +177,22 @@ describe("«Снять» свою запись — необратимое дей
     expect(onDelete).not.toHaveBeenCalled();
     expect(el.textContent ?? "").toContain("Снять эту запись?");
   });
+
+  it("пока больничный ждёт ОК — форма говорит, что смены предложат после ОК, а запись помечена «ждёт ОК»", async () => {
+    const pending = { ...MY_ENTRY, id: 22, category: "sick_leave", title: null, pending: true } as Shift;
+    const el = await render({ shifts: [pending], onCreate: vi.fn(async () => []) });
+    expect(el.textContent).toContain("Админы подтвердят — после этого предложим твои смены коллегам");
+    expect(el.textContent).toContain("ждёт ОК");
+  });
+
+  it("без ждущего больничного этой строки нет", async () => {
+    const el = await render({ shifts: [MY_ENTRY] });
+    expect(el.textContent).not.toContain("Админы подтвердят");
+  });
+
+  it("подтверждённый больничный (без pending) не помечен «ждёт ОК»", async () => {
+    const approved = { ...MY_ENTRY, id: 23, category: "sick_leave", title: null } as Shift;
+    const el = await render({ shifts: [approved] });
+    expect(el.textContent).not.toContain("ждёт ОК");
+  });
 });

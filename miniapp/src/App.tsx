@@ -7,7 +7,7 @@ import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
-import { SelfEntryScreen, screenFromSearch, type SelfEntryMode } from "./screens/SelfEntryScreen";
+import { SelfEntryScreen, handoverDraftsFromSearch, screenFromSearch, type SelfEntryMode } from "./screens/SelfEntryScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
@@ -92,8 +92,11 @@ export function App() {
   // Начальное значение читается из строки запроса: кнопки «🤒 Больничный» и
   // «📌 Мероприятие» в боте открывают мини-апп сразу на нужной форме.
   const [selfEntryMode, setSelfEntryMode] = useState<SelfEntryMode | null>(() =>
-    screenFromSearch(window.location.search),
+    screenFromSearch(window.location.search) ?? (handoverDraftsFromSearch(window.location.search) ? "sick" : null),
   );
+  // Ссылка «🤝 Выбрать коллег» из письма об ОК: форме надо поднять черновики
+  // передачи с сервера. Читается один раз, как и сам режим формы.
+  const [draftsLink] = useState(() => handoverDraftsFromSearch(window.location.search));
   // «Настройки» — оверлей, как форма больничного: без таб-бара, с системной
   // «Назад». Из ссылки бота не открывается (таких ссылок нет), поэтому
   // начальное значение — всегда `false`.
@@ -170,6 +173,11 @@ export function App() {
   // возврате в приложение, и более медленный старый ответ не должен затирать
   // новое число.
   const shortfallGate = useRef(createLatestRequestGate());
+  // И у числа ждущих ОК свой гейт — по той же причине: его перечитывают после
+  // каждого решения и при возврате в приложение.
+  const sickApprovalsGate = useRef(createLatestRequestGate());
+  // Больничные, ждущие ОК, — для метки «Админ» и строки меню. `null` — не загрузилось.
+  const [sickApprovals, setSickApprovals] = useState<number | null>(null);
   // Отмена предыдущей ещё не завершённой загрузки — целиком, а не только той
   // её ветки, что уже успела вернуться. Кнопка «Повторить» вызывает
   // `loadBootstrap` напрямую, в обход эффекта, поэтому предыдущий возврат
@@ -178,8 +186,25 @@ export function App() {
   // остался бы тот, чей ответ пришёл позже, а не тот, что запущен позже.
   const cancelLoadRef = useRef<() => void>(() => {});
 
+  // Число ждущих ОК — для метки «Админ» и пункта меню. Вслед за нехваткой, а не
+  // параллельно: до релея HTTP/1.1, второй запрос до ответа первого поднимал бы
+  // своё TLS-рукопожатие (см. комментарий у `loadBootstrap`).
+  const refreshSickApprovals = useCallback(() => {
+    const ticket = sickApprovalsGate.current.begin();
+    apiClient.getSickApprovals().then(
+      (rows) => {
+        if (sickApprovalsGate.current.isLatest(ticket)) setSickApprovals(rows.length);
+      },
+      (err: unknown) => {
+        console.error("Sick approvals for badge failed:", err);
+        if (sickApprovalsGate.current.isLatest(ticket)) setSickApprovals(null);
+      },
+    );
+  }, []);
+
   // Отдельно от bootstrap и после него — по той же причине, что сборы: один
   // запрос за раз на HTTP/1.1 до релея. Упало — метки нет, экран не страдает.
+  // Ждущие ОК спрашиваются в конце обеих веток — когда этот ответ уже пришёл.
   const refreshAdminShortfall = useCallback(() => {
     const ticket = shortfallGate.current.begin();
     apiClient.getAdminShortfall().then(
@@ -188,6 +213,7 @@ export function App() {
           setAdminShortfall(s.total);
           setAdminShortfallFirst(s.firstDate);
         }
+        refreshSickApprovals();
       },
       (err: unknown) => {
         console.error("Shortfall for badge failed:", err);
@@ -195,9 +221,10 @@ export function App() {
           setAdminShortfall(null);
           setAdminShortfallFirst(null);
         }
+        refreshSickApprovals();
       },
     );
-  }, []);
+  }, [refreshSickApprovals]);
 
   /**
    * Вынесено из эффекта в `useCallback`, чтобы кнопка «Повторить» на экране
@@ -218,6 +245,7 @@ export function App() {
       // Ответ нехватки брошенной загрузки (размонтирование, «Повторить») не
       // должен приземлиться после неё.
       shortfallGate.current.invalidate();
+      sickApprovalsGate.current.invalidate();
     };
     setError(null);
     const monday = mondayOf(new Date());
@@ -298,7 +326,7 @@ export function App() {
     // вкладку («📣 Анонс») ставит эффект выше, форму-оверлей («🤒 Больничный»,
     // «📌 Мероприятие») — `selfEntryMode`. Настройка, перебивающая их, сделала бы
     // кнопку в боте враньём.
-    if (adminSectionFromSearch(search) || screenFromSearch(search) || foodRouteFromSearch(search)) return;
+    if (adminSectionFromSearch(search) || screenFromSearch(search) || handoverDraftsFromSearch(search) || foodRouteFromSearch(search)) return;
     setTab(startTabScreen(startTabFor({ saved: data.me.startTab, deeplink: null, viewer: data.me })));
   }, [data]);
 
@@ -607,6 +635,7 @@ export function App() {
         onDelete={handleDeleteSelfEntry}
         onOfferHandover={handleOfferHandover}
         onSkipHandover={handleSkipHandover}
+        loadDrafts={draftsLink ? () => apiClient.getMyHandoverDrafts() : undefined}
       />
     );
   }
@@ -656,7 +685,7 @@ export function App() {
     );
   }
 
-  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin, adminShortfall });
+  const badges = tabBadges({ swaps: data.swaps, weekendOffers: data.weekendOffers, collections, today: data.today, isAdmin: data.me.isAdmin, adminShortfall, sickApprovals });
 
   return (
     // 100%, а не 100vh: `#root` в полноэкранном режиме уже отдал часть высоты
@@ -786,6 +815,8 @@ export function App() {
             today={data.today}
             onScheduleChanged={refreshAdminShortfall}
             nearestShortfall={adminShortfallFirst}
+            sickApprovals={sickApprovals}
+            onSickApprovalsChanged={refreshAdminShortfall}
           />
         </Suspense>
       )}
