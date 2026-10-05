@@ -1,4 +1,5 @@
 import { MONTH_NAMES } from "./birthday";
+import { addDaysIso, eachDayIso } from "./week-dates";
 
 /**
  * Больничный, ждущий ОК, — строкой списка «На подтверждение» (обе морды).
@@ -17,8 +18,46 @@ export interface SickApprovalRow {
   requestedAt: string;
   /** Смены, которые больничный забирает: «Вт 6 окт · 08:00–17:00 · Утро». */
   shiftLines: string[];
+  /**
+   * Заполнено, только если ждёт ОК именно ПРОДЛЕНИЕ: уже подтверждённый срок. Дни
+   * внутри него подтверждены; спрашивают только про остальные (`sickExtensionRuns`).
+   */
+  approvedSpan?: SickSpan;
   /** Передачу уже запустили без ОК — смена была слишком близко (п. 11 спеки). */
   handoverForced: boolean;
+}
+
+/** Срок больничного: как `date`/`endDate` записи. */
+export interface SickSpan {
+  date: string;
+  endDate: string | null;
+}
+
+/**
+ * Дни `entry`, которых нет в уже подтверждённом `approved`, — подряд идущими кусками.
+ * Два куска бывают, когда больничный потянули в обе стороны сразу; склеить их
+ * через подтверждённые дни значило бы спросить ОК и про них.
+ */
+export function sickExtensionRuns(approved: SickSpan, entry: SickSpan): SickSpan[] {
+  const had = new Set(eachDayIso(approved.date, approved.endDate ?? approved.date));
+  const fresh = eachDayIso(entry.date, entry.endDate ?? entry.date).filter((day) => !had.has(day));
+  const runs: SickSpan[] = [];
+  let start: string | null = null;
+  let prev: string | null = null;
+  const close = () => {
+    if (start != null && prev != null) runs.push({ date: start, endDate: prev === start ? null : prev });
+  };
+  for (const day of fresh) {
+    if (prev != null && addDaysIso(prev, 1) === day) {
+      prev = day;
+      continue;
+    }
+    close();
+    start = day;
+    prev = day;
+  }
+  close();
+  return runs;
 }
 
 function dayMonth(iso: string): { day: number; month: number } {

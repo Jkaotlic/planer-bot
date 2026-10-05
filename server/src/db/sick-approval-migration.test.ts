@@ -22,13 +22,15 @@ function migratedUpTo(stopAt: string): Database.Database {
 const SICK_0041 = files.find((f) => f.startsWith("0041"))!;
 
 describe("migration 0041 — sick leave approval", () => {
-  it("leaves every existing sick leave approved: all three new columns are NULL, no backfill", () => {
+  it("leaves every existing sick leave approved: all new columns are NULL, no backfill", () => {
     const sqlite = migratedUpTo("0041");
     sqlite.exec("INSERT INTO shifts (date, end_date, category) VALUES ('2026-10-06', '2026-10-08', 'sick_leave')");
     sqlite.exec(readFileSync(join(dir, SICK_0041), "utf8"));
     expect(
-      sqlite.prepare("SELECT approval_requested_at, approved_by_employee_id, handover_forced_at FROM shifts").all(),
-    ).toEqual([{ approval_requested_at: null, approved_by_employee_id: null, handover_forced_at: null }]);
+      sqlite.prepare("SELECT approval_requested_at, approved_by_employee_id, handover_forced_at, approved_date, approved_end_date FROM shifts").all(),
+    ).toEqual([
+      { approval_requested_at: null, approved_by_employee_id: null, handover_forced_at: null, approved_date: null, approved_end_date: null },
+    ]);
   });
 
   it("drops a message row with its sick leave and nulls the approver when the employee row goes", () => {
@@ -46,7 +48,7 @@ describe("migration 0041 — sick leave approval", () => {
     expect(sqlite.prepare("SELECT count(*) AS c FROM sick_leave_approval_messages").get()).toEqual({ c: 0 });
   });
 
-  it("touches nothing but the three columns, the index and the new table", () => {
+  it("touches nothing but the five columns, the index and the new table", () => {
     const sql = readFileSync(join(dir, SICK_0041), "utf8");
     // drizzle-kit has replayed old migrations into new files before (see 0036's header);
     // a second CREATE TABLE of an existing table would take the deploy down.

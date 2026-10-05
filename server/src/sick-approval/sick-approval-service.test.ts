@@ -3,7 +3,7 @@ import { Bot } from "grammy";
 import { addDaysIso } from "@planer/shared";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, createAdminEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
-import { createShift, getShift } from "../repo/shifts";
+import { createShift, getShift, updateShift } from "../repo/shifts";
 import { getHandover, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers } from "../handover/handover-service";
 import { listRecentAudit } from "../repo/audit";
@@ -211,5 +211,87 @@ describe("requestApproval — edges", () => {
     const edited = api.calls.filter((c) => c.method === "editMessageText").map((c) => c.payload.chat_id).sort();
     expect(edited).toEqual([111, 112]);
     expect(listApprovalMessages(db, sick0.id)).toHaveLength(0);
+  });
+});
+
+/**
+ * Аня's sick leave day(1)–day(2) is APPROVED (all approval columns NULL, the way an old row or
+ * an admin's entry is written), she works day(1), day(2) and day(3), and now stretches it to day(3).
+ */
+async function extensionScene() {
+  const base = await scene();
+  const { db, deps, anya } = base;
+  const day3 = createShift(db, { employeeId: anya.id, date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День" });
+  const approved = createShift(db, { employeeId: anya.id, date: day(1), endDate: day(2), category: "sick_leave" });
+  const stretched = updateShift(db, approved.id, { endDate: day(3) })!;
+  const asked = await requestApproval(deps, stretched, { date: approved.date, endDate: approved.endDate });
+  const sentBefore = base.api.sent.length;
+  return { ...base, day1: base.work, day3, approved, asked, sentBefore };
+}
+
+describe("extension of an approved sick leave", () => {
+  it("the letter names only the NEW days and carries only their lines; the row remembers the approved span", async () => {
+    const { db, api, asked } = await extensionScene();
+    const row = getShift(db, asked.id)!;
+    expect([row.approvalRequestedAt != null, row.approvedDate, row.approvedEndDate]).toEqual([true, day(1), day(2)]);
+    const letter = api.sent.filter((m) => m.chat_id === 111).at(-1)!;
+    const lines = letter.text.split("\n");
+    // Wrong implementation caught: the whole span in the header (admins re-asked about approved days).
+    expect(lines[0]).toMatch(/^🤒 Аня — продление больничного: \d+ [а-я]+\.?$/);
+    expect(lines[0]).not.toContain("–");
+    // Wrong implementation caught: per-day lines for the approved days.
+    expect(lines.some((l) => l.includes("09:00–18:00 · День"))).toBe(true);
+    expect(lines.some((l) => l.includes("08:00–17:00"))).toBe(false);
+  });
+
+  it("❌ restores the approved span, keeps the old hand-overs, cancels only the new day's, tells the worker, all before the first await", async () => {
+    const { db, api, deps, mark, asked, day1, day3 } = await extensionScene();
+    // Old day hand-over (live since the first approval) and one on the new day (as if the urgent branch ran).
+    const [old] = await startHandovers(deps, { sickEntry: { ...asked, date: day(1), endDate: day(1) }, employeeId: asked.employeeId! });
+    const [fresh] = await startHandovers(deps, { sickEntry: { ...asked, date: day(3), endDate: day(3) }, employeeId: asked.employeeId! });
+    expect([old!.shiftId, fresh!.shiftId]).toEqual([day1.id, day3.id]);
+    let atFirstAwait: unknown = null;
+
+    await rejectSickLeave(deps, asked.id, mark.id, async () => {
+      const row = getShift(db, asked.id)!;
+      atFirstAwait = { span: [row.date, row.endDate], pending: row.approvalRequestedAt, snap: row.approvedDate, old: getHandover(db, old!.id)!.status, fresh: getHandover(db, fresh!.id)!.status };
+    });
+
+    // Wrong implementation caught: deleting the row, or restoring it only after a Telegram await.
+    expect(atFirstAwait).toEqual({ span: [day(1), day(2)], pending: null, snap: null, old: "offered", fresh: "cancelled" });
+    expect(getShift(db, asked.id)!.approvedDate).toBeNull();
+    const toWorker = api.sent.filter((m) => m.chat_id === 201).at(-1)!;
+    expect(toWorker.text).toMatch(/^Продление больничного на \d+ [а-я]+ не подтвердил\(а\) Марк — напиши, чтобы разобраться\.$/);
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits.map((e) => e.payload.chat_id).sort()).toEqual([111, 112]);
+    expect(edits.every((e) => (e.payload.text as string).endsWith("\n\n❌ Отклонил(а) Марк"))).toBe(true);
+  });
+
+  it("✅ clears the snapshot and starts drafts only for the NEW days", async () => {
+    const { db, deps, igor, asked, day3 } = await extensionScene();
+    const res = await approveSickLeave(deps, asked.id, igor.id);
+
+    expect(res.ok).toBe(true);
+    const row = getShift(db, asked.id)!;
+    expect([row.approvalRequestedAt, row.approvedDate, row.approvedEndDate, row.approvedByEmployeeId]).toEqual([null, null, null, igor.id]);
+    // Wrong implementation caught: handing over the whole span (day(1)'s shift also has no hand-over yet here).
+    expect(listHandoversForEntry(db, asked.id).map((h) => h.shiftId)).toEqual([day3.id]);
+  });
+
+  it("the worker's ✅ message speaks of the extension, not of the whole span", async () => {
+    const { api, deps, igor, asked } = await extensionScene();
+    await approveSickLeave(deps, asked.id, igor.id);
+    const toWorker = api.sent.filter((m) => m.chat_id === 201).at(-1)!;
+    expect(toWorker.text).toMatch(/^✅ Продление больничного на \d+ [а-я]+ подтвердил\(а\) Игорь\. Выбери, кому предложить смены$/);
+  });
+
+  it("the approvals list says it is an extension and shows only the new days' shifts", async () => {
+    const { db, asked } = await extensionScene();
+    // The scene's own plain request is in the list too: pick the extension by id.
+    const row = listSickApprovals(db).find((r) => r.id === asked.id);
+    expect(row!.approvedSpan).toEqual({ date: day(1), endDate: day(2) });
+    // Wrong implementation caught: listing day(1)'s shift as taken away by an extension that does not touch it.
+    expect(row!.shiftLines).toHaveLength(1);
+    expect(row!.shiftLines[0]).toContain("09:00–18:00");
   });
 });

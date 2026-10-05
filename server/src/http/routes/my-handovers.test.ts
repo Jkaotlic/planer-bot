@@ -5,8 +5,8 @@ import { approveSickLeave, sickApprovalDeps } from "../../sick-approval/sick-app
 import { createApp } from "../app";
 import { makeTestDb } from "../../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../../repo/employees";
-import { createShift, getShift } from "../../repo/shifts";
-import { getHandover, listHandoversForEntry } from "../../repo/handovers";
+import { createShift, getShift, updateShift } from "../../repo/shifts";
+import { createHandover, getHandover, listHandoversForEntry } from "../../repo/handovers";
 import { signInitData } from "../../auth/telegram";
 import { teamNow } from "../../util/team-time";
 import { addDaysIso } from "@planer/shared";
@@ -52,7 +52,7 @@ describe("POST /api/my/entries — больничный рождает пере�
   it("returns a handover per shift the sick leave covers, with candidates", async () => {
     const db = makeTestDb();
     const me = worker(db, 601, "Аня");
-    const igor = worker(db, 602, "Игорь");
+    worker(db, 602, "Игорь");
     const boss = worker(db, 603, "Марк");
     setEmployeeAdmin(db, boss.id, true);
     createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
@@ -75,7 +75,6 @@ describe("POST /api/my/entries — больничный рождает пере�
 
     const made = listHandoversForEntry(db, body.entry.id);
     expect(made).toHaveLength(2);
-    expect(igor.id).toBeGreaterThan(0);
   });
 
   it("an admin's own sick leave is approved at once and returns the drafts to the form, with candidates", async () => {
@@ -294,5 +293,58 @@ describe("GET /api/my/handovers/drafts", () => {
     const app = createApp({ db, config, bot: undefined });
     const igorToken = await tokenFor(app, 642);
     expect((await (await app.request(new Request("http://x/api/my/handovers/drafts", authed(igorToken, undefined, "GET")))).json()).drafts).toEqual([]);
+  });
+});
+
+describe("GET /api/my/handovers/drafts — which drafts are shown", () => {
+  /** Аня with an approved sick leave over today..day(30) (so a shift today is covered, not void); drafts are written by hand to control each shift. */
+  function sceneWithSick() {
+    const db = makeTestDb();
+    const me = worker(db, 651, "Аня");
+    const igor = worker(db, 652, "Игорь");
+    const sick = createShift(db, { date: today(), endDate: day(30), category: "sick_leave", employeeId: me.id });
+    const draft = (shiftId: number) =>
+      createHandover(db, { shiftId, fromEmployeeId: me.id, sickEntryId: sick.id, status: "offered", offeredToEmployeeId: null });
+    const app = createApp({ db, config, bot: undefined });
+    const list = async () => {
+      const token = await tokenFor(app, 651);
+      return (await (await app.request(new Request("http://x/api/my/handovers/drafts", authed(token, undefined, "GET")))).json()).drafts as { id: number }[];
+    };
+    return { db, me, igor, sick, draft, list };
+  }
+
+  it("leaves out a shift that has already started — offering it would be refused anyway", async () => {
+    const { db, me, draft, list } = sceneWithSick();
+    // Today, 00:00: started for sure, yet its date passes the «today or later» database filter.
+    const started = createShift(db, { date: today(), start: "00:00", end: "23:59", category: "shift", title: "День", employeeId: me.id });
+    const future = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    draft(started.id);
+    const futureDraft = draft(future.id);
+    // Wrong implementation caught: no «already started» check.
+    expect((await list()).map((d) => d.id)).toEqual([futureDraft.id]);
+  });
+
+  it("leaves out a void draft (shift handed to somebody else)", async () => {
+    const { db, me, igor, draft, list } = sceneWithSick();
+    const given = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    const kept = createShift(db, { date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    draft(given.id);
+    const keptDraft = draft(kept.id);
+    updateShift(db, given.id, { employeeId: igor.id });
+    // Wrong implementation caught: no void check — the draft would be offered for a shift Аня no longer owns.
+    expect((await list()).map((d) => d.id)).toEqual([keptDraft.id]);
+  });
+
+  it("filters before capping: 21 void drafts ahead of a live one do not hide it", async () => {
+    const { db, me, igor, draft, list } = sceneWithSick();
+    for (let i = 0; i < 21; i += 1) {
+      const gone = createShift(db, { date: day(2 + (i % 5)), start: "09:00", end: "18:00", category: "shift", title: `Д${i}`, employeeId: me.id });
+      draft(gone.id);
+      updateShift(db, gone.id, { employeeId: igor.id });
+    }
+    const live = createShift(db, { date: day(20), start: "09:00", end: "18:00", category: "shift", title: "Живая", employeeId: me.id });
+    const liveDraft = draft(live.id);
+    // Wrong implementation caught: `limit 20` before the void filter returns an empty list here.
+    expect((await list()).map((d) => d.id)).toEqual([liveDraft.id]);
   });
 });

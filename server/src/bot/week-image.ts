@@ -13,7 +13,7 @@ import { svgToPng } from "../render/rasterize";
  */
 export function scheduleForImage(db: Db, mondayIso: string): TeamScheduleView {
   const schedule = readTeamSchedule(db, mondayIso, addDaysIso(mondayIso, 6));
-  return { ...schedule, shifts: schedule.shifts.map(({ pending: _pending, ...shift }) => shift) };
+  return { ...schedule, shifts: schedule.shifts.map(({ pending: _pending, approvedSpan: _approved, ...shift }) => shift) };
 }
 
 /**

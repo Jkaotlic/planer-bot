@@ -100,4 +100,14 @@ describe("/api/admin/sick-approvals", () => {
     expect(edits.map((e) => e.chat).sort()).toEqual([402, 403]);
     expect(edits.every((e) => e.text.endsWith("🗑 Больничного уже нет — запись удалил админ"))).toBe(true);
   });
+
+  it("a worker cannot approve or reject: 403 and the entry stays pending", async () => {
+    const { db, app, anyaToken, id } = await scene();
+    for (const action of ["approve", "reject"]) {
+      const res = await app.request(new Request(`http://x/api/admin/sick-approvals/${id}/${action}`, authed(anyaToken, {})));
+      // Wrong implementation caught: a route without `requireAdmin` lets the worker approve their own sick leave.
+      expect(res.status).toBe(403);
+    }
+    expect(getShift(db, id)!.approvalRequestedAt).not.toBeNull();
+  });
 });

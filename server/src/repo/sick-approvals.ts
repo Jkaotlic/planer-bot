@@ -1,12 +1,22 @@
 import { and, asc, eq, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { shifts, sickLeaveApprovalMessages, type Shift } from "../db/schema";
+import type { SickSpan } from "@planer/shared";
 
-/** Pending again: a fresh request clears any earlier approver, because the dates it approved changed. */
-export function markApprovalRequested(db: Db, id: number, at: Date): Shift | undefined {
+/**
+ * Pending again: a fresh request clears any earlier approver, because the dates it approved changed.
+ * `approved` is the span an admin already said yes to when this request is an EXTENSION of it;
+ * null for a plain request. It is stored so a reject can give the row back instead of deleting it.
+ */
+export function markApprovalRequested(db: Db, id: number, at: Date, approved: SickSpan | null = null): Shift | undefined {
   return db
     .update(shifts)
-    .set({ approvalRequestedAt: at, approvedByEmployeeId: null })
+    .set({
+      approvalRequestedAt: at,
+      approvedByEmployeeId: null,
+      approvedDate: approved?.date ?? null,
+      approvedEndDate: approved?.endDate ?? null,
+    })
     .where(and(eq(shifts.id, id), eq(shifts.category, "sick_leave")))
     .returning()
     .get();
@@ -22,10 +32,26 @@ export function markApprovalRequested(db: Db, id: number, at: Date): Shift | und
 export function claimPendingSickLeave(db: Db, id: number, approvedBy: number | null): Shift | undefined {
   return db
     .update(shifts)
-    .set({ approvalRequestedAt: null, approvedByEmployeeId: approvedBy })
+    .set({ approvalRequestedAt: null, approvedByEmployeeId: approvedBy, approvedDate: null, approvedEndDate: null })
     .where(and(eq(shifts.id, id), eq(shifts.category, "sick_leave"), isNotNull(shifts.approvalRequestedAt)))
     .returning()
     .get();
+}
+
+/** A rejected extension: the row goes back to the span that was approved before it. */
+export function restoreApprovedSpan(db: Db, id: number, span: SickSpan): void {
+  db.update(shifts).set({ date: span.date, endDate: span.endDate }).where(eq(shifts.id, id)).run();
+}
+
+/**
+ * What the reads report for a sick leave: `pending` only while it waits, and the approved
+ * span only when what waits is an extension. Keys are absent otherwise — old bundles ignore them.
+ */
+export function pendingMarks(shift: Shift): { pending?: true; approvedSpan?: SickSpan } {
+  if (shift.category !== "sick_leave" || shift.approvalRequestedAt == null) return {};
+  return shift.approvedDate != null
+    ? { pending: true, approvedSpan: { date: shift.approvedDate, endDate: shift.approvedEndDate } }
+    : { pending: true };
 }
 
 export function addApprovalMessage(db: Db, shiftId: number, chatId: number, messageId: number): void {

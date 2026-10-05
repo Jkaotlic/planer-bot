@@ -2726,6 +2726,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "approved_date": {
+          "name": "approved_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "approved_end_date": {
+          "name": "approved_end_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",

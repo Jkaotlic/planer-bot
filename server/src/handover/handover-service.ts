@@ -134,11 +134,12 @@ function daysOf(entry: Shift): string[] {
  * form and forgets still gets a fan-out three hours later instead of a shift
  * quietly left on a sick person.
  *
- * `startsBefore` (epoch ms) limits the pass to shifts starting before that moment.
+ * `startsBefore` (epoch ms) limits the pass to shifts starting before that moment;
+ * `onlyDates` to shifts on those days (an approved extension asks only about its new days).
  */
 export async function startHandovers(
   deps: HandoverDeps,
-  input: { sickEntry: Shift; employeeId: number; startsBefore?: number },
+  input: { sickEntry: Shift; employeeId: number; startsBefore?: number; onlyDates?: ReadonlySet<string> },
 ): Promise<Handover[]> {
   const { db } = deps;
   const days = daysOf(input.sickEntry);
@@ -158,7 +159,8 @@ export async function startHandovers(
       !isPast(deps, entry) &&
       // The urgent branch of the tick (sick leave still waiting for an «ОК») hands over
       // only what starts before its threshold; everything later waits for the admin.
-      (input.startsBefore == null || shiftStartMs(entry, deps.config.teamTz) < input.startsBefore),
+      (input.startsBefore == null || shiftStartMs(entry, deps.config.teamTz) < input.startsBefore) &&
+      (input.onlyDates == null || input.onlyDates.has(entry.date)),
   );
 
   // Extending a sick leave runs this again over days that already have offers.

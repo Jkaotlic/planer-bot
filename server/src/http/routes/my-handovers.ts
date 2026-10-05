@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { shiftStartMs } from "@planer/shared";
+import { teamNow } from "../../util/team-time";
 import { z } from "zod";
 import type { Bot } from "grammy";
 import type { Config } from "../../config";
@@ -72,11 +73,14 @@ export function createMyHandoverRoutes(deps: { db: Db; config: Config; bot?: Bot
    */
   routes.get("/api/my/handovers/drafts", requireAuth(db, config.jwtSecret), (c) => {
     const now = Date.now();
-    const open = listOpenDrafts(db, c.get("auth").employeeId).filter((handover) => {
-      if (handoverVoidReason(db, handover)) return false;
-      const shift = handover.shiftId == null ? undefined : getShift(db, handover.shiftId);
-      return shift != null && shiftStartMs(shift, config.teamTz) > now;
-    });
+    // Filter FIRST, cap after: stale rows must not crowd the live ones out of the answer.
+    const open = listOpenDrafts(db, c.get("auth").employeeId, teamNow(config.teamTz).date)
+      .filter((handover) => {
+        if (handoverVoidReason(db, handover)) return false;
+        const shift = handover.shiftId == null ? undefined : getShift(db, handover.shiftId);
+        return shift != null && shiftStartMs(shift, config.teamTz) > now;
+      })
+      .slice(0, 20);
     return c.json({ drafts: handoverDraftViews(db, open) });
   });
 

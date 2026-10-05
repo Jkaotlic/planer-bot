@@ -1,5 +1,5 @@
 import { InlineKeyboard } from "grammy";
-import { sickSpanShort, sickSpanWords } from "@planer/shared";
+import { sickSpanShort, sickSpanWords, type SickSpan } from "@planer/shared";
 
 /**
  * Where the «выбери коллег» button lands: the sick-leave form's second step, loaded
@@ -25,9 +25,13 @@ export function sickApprovalText(
   entry: { date: string; endDate: string | null },
   dayLines: readonly string[],
   observer: boolean,
+  extension: readonly SickSpan[] | null = null,
 ): string {
   return [
-    `🤒 ${name} — больничный ${sickSpanShort(entry.date, entry.endDate)}`,
+    // An extension names only the days nobody has approved yet: the rest is old news.
+    extension
+      ? `🤒 ${name} — продление больничного: ${extension.map((run) => sickSpanShort(run.date, run.endDate)).join(", ")}`
+      : `🤒 ${name} — больничный ${sickSpanShort(entry.date, entry.endDate)}`,
     ...dayLines,
     // An observer hands nothing over, so promising a hand-over would be untrue.
     observer ? "Нужен ОК любого админа." : "Передача смен начнётся после ОК.",
@@ -44,8 +48,11 @@ export function sickApprovedWorkerText(
   entry: { date: string; endDate: string | null },
   adminName: string,
   hasDrafts: boolean,
+  extension: readonly SickSpan[] | null = null,
 ): string {
-  const head = `✅ Больничный ${sickSpanWords(entry.date, entry.endDate)} подтвердил(а) ${adminName}.`;
+  const head = extension
+    ? `✅ Продление больничного ${extension.map((run) => sickSpanWords(run.date, run.endDate)).join(" и ")} подтвердил(а) ${adminName}.`
+    : `✅ Больничный ${sickSpanWords(entry.date, entry.endDate)} подтвердил(а) ${adminName}.`;
   return hasDrafts ? `${head} Выбери, кому предложить смены` : head;
 }
 
@@ -54,6 +61,13 @@ export function handoverDraftsKeyboard(publicUrl: string): InlineKeyboard {
 }
 
 /** Spec item 10, with the neutral verb and no gendered pronoun (controller ruling). */
-export function sickRejectedWorkerText(entry: { date: string; endDate: string | null }, adminName: string): string {
-  return `Больничный ${sickSpanWords(entry.date, entry.endDate)} не подтвердил(а) ${adminName} — напиши, чтобы разобраться.`;
+export function sickRejectedWorkerText(
+  entry: { date: string; endDate: string | null },
+  adminName: string,
+  extension: readonly SickSpan[] | null = null,
+): string {
+  const subject = extension
+    ? `Продление больничного ${extension.map((run) => sickSpanWords(run.date, run.endDate)).join(" и ")}`
+    : `Больничный ${sickSpanWords(entry.date, entry.endDate)}`;
+  return `${subject} не подтвердил(а) ${adminName} — напиши, чтобы разобраться.`;
 }

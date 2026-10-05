@@ -168,6 +168,14 @@ export const shifts = sqliteTable("shifts", {
    * (spec item 11). Kept so the admin sees «передача запущена без ОК» on the entry.
    */
   handoverForcedAt: integer({ mode: "timestamp" }),
+  /**
+   * The span an admin already approved, kept while an EXTENSION of it waits for an «ОК».
+   * NULL on a plain request and on an approved row. `approvedDate` is the presence flag:
+   * `approvedEndDate` is NULL for a one-day span, exactly like `endDate`. A reject restores
+   * the row to this span instead of deleting it, and the grid paints only the days outside it pale.
+   */
+  approvedDate: text(),
+  approvedEndDate: text(),
   createdAt: createdAt(),
   updatedAt: createdAt().$onUpdate(() => new Date()),
 },

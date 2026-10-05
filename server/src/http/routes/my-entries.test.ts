@@ -254,7 +254,7 @@ describe("больничный работника ждёт ОК", () => {
 
   it("PATCH of a pending one (shortened): stays pending, starts nothing, redraws the letter instead of a second one", async () => {
     const db = makeTestDb();
-    const me = worker(db, 706, "Аня");
+    worker(db, 706, "Аня");
     admins(db);
     const { bot, sent, edits } = fakeBot();
     const app = createApp({ db, config, bot });
@@ -271,7 +271,6 @@ describe("больничный работника ждёт ОК", () => {
     expect(sent.length).toBe(sentBefore);
     expect(edits).toHaveLength(1);
     expect(edits[0]!.text.startsWith("🤒 Аня — больничный")).toBe(true);
-    expect(me.id).toBeDefined();
   });
 
   it("PATCH extending an approved one: asks again, old days keep their hand-over, the new day waits", async () => {
@@ -290,7 +289,10 @@ describe("больничный работника ждёт ОК", () => {
 
     await app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(2) }, "PATCH")));
 
-    expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+    const asked = getShift(db, sick.id)!;
+    expect(asked.approvalRequestedAt).not.toBeNull();
+    // The approved span is remembered, so a «Отклонить» can give it back and the grid keeps it solid.
+    expect([asked.approvedDate, asked.approvedEndDate]).toEqual([day(1), day(1)]);
     const live = listHandoversForEntry(db, sick.id).filter((h) => h.status !== "cancelled");
     expect(live).toHaveLength(1);
     expect(live.map((h) => h.shiftId)).not.toContain(newDay.id);
@@ -305,6 +307,43 @@ describe("больничный работника ждёт ОК", () => {
     const token = await tokenFor(app, 709);
     await app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(2) }, "PATCH")));
     expect(getShift(db, sick.id)!.approvalRequestedAt).toBeNull();
+  });
+
+  it("PATCH extending a PENDING one: still one letter, redrawn in place — never a second one", async () => {
+    const db = makeTestDb();
+    worker(db, 711, "Аня");
+    admins(db);
+    const { bot, sent, edits } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 711);
+    const id = (await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json()).entry.id;
+    const sentBefore = sent.length;
+
+    await app.request(new Request(`http://x/api/my/entries/${id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(3) }, "PATCH")));
+
+    // Wrong implementation caught: checking «extended» before «still pending» sends a second letter.
+    expect(sent.length).toBe(sentBefore);
+    expect(edits).toHaveLength(1);
+    expect(getShift(db, id)!.approvedDate).toBeNull();
+  });
+
+  it("PATCH of a pending EXTENSION back inside the approved span withdraws it: approved row, buttons closed", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 712, "Аня");
+    admins(db);
+    const { bot, edits } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const token = await tokenFor(app, 712);
+    const sick = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" });
+    await app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(3) }, "PATCH")));
+    expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+
+    await app.request(new Request(`http://x/api/my/entries/${sick.id}`, authed(token, { category: "sick_leave", date: day(1), endDate: day(2) }, "PATCH")));
+
+    // Wrong implementation caught: redrawing a letter whose request has nothing left to ask.
+    const row = getShift(db, sick.id)!;
+    expect([row.approvalRequestedAt, row.approvedDate]).toEqual([null, null]);
+    expect(edits.at(-1)!.text.endsWith("↩️ Продление снято — ОК не нужен")).toBe(true);
   });
 
   it("DELETE of a pending one: every admin's buttons say «Больничного уже нет», no second letter", async () => {

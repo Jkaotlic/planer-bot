@@ -38,6 +38,7 @@ import {
   redrawApprovalMessages,
   requestApproval,
   sickApprovalDeps,
+  withdrawExtension,
   type SickApprovalDeps,
 } from "../../sick-approval/sick-approval-service";
 import { createHandoverMessenger } from "../../handover/handover-messenger";
@@ -260,13 +261,19 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       // «Удлинить» = the edit reaches a day the approved span did not. Moving the start
       // later is a shortening; moving the whole span is both, and the new days need an «ОК».
       const extended = covered.some((date) => !before.has(date));
-      if (wasPending) {
+      const approvedDays =
+        existing.approvedDate == null ? null : new Set(eachDayIso(existing.approvedDate, existing.approvedEndDate ?? existing.approvedDate));
+      if (wasPending && approvedDays && covered.every((date) => approvedDays.has(date))) {
+        // A pending EXTENSION edited back inside the approved span: nothing is left to ask.
+        await withdrawExtension(approvalDeps(), updated);
+      } else if (wasPending) {
         // Still waiting: the admins' letter gets the new dates in place — a second letter
         // about the same request would be noise, and its buttons would decide twice.
         await redrawApprovalMessages(approvalDeps(), updated);
       } else if (extended && !me.isAdmin) {
-        // Hand-overs for the old days keep running; the new days wait (spec item 13).
-        await requestApproval(approvalDeps(), updated);
+        // Hand-overs for the old days keep running; the new days wait (spec item 13). The
+        // approved span is remembered: a «Отклонить» gives the row back as it was.
+        await requestApproval(approvalDeps(), updated, { date: existing.date, endDate: existing.endDate });
         asked = true;
       } else if (!me.isObserver) {
         // НОВУЮ лестницу для наблюдателя запускать по-прежнему нельзя — гейт роли, см. POST.

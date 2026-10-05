@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { eachDayIso, isAbsence, type SickApprovalRow } from "@planer/shared";
+import { eachDayIso, isAbsence, sickExtensionRuns, type SickApprovalRow, type SickSpan } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Shift } from "../db/schema";
 import { getEmployeeById, listAdmins } from "../repo/employees";
@@ -12,6 +12,7 @@ import {
   listApprovalMessages,
   listPendingSickLeaves,
   markApprovalRequested,
+  restoreApprovedSpan,
 } from "../repo/sick-approvals";
 import { sendTracked } from "../bot/tracked-send";
 import { dayAfterLine } from "../schedule/day-summary";
@@ -46,17 +47,31 @@ export function sickApprovalDeps(bot: Bot | null, db: Db, config: { teamTz: stri
 
 export type SickDecision = { ok: true; adminName: string } | { ok: false; status: 404 | 409; text: string };
 
+/**
+ * The days an admin is being asked about, as runs — only when what waits is an EXTENSION
+ * of an approved span; null for a plain request, which asks about the whole entry.
+ */
+export function extensionOf(sick: Shift): SickSpan[] | null {
+  if (sick.approvedDate == null) return null;
+  return sickExtensionRuns({ date: sick.approvedDate, endDate: sick.approvedEndDate }, sick);
+}
+
+function daysAsked(sick: Shift): string[] {
+  const runs = extensionOf(sick);
+  return runs ? runs.flatMap((run) => eachDayIso(run.date, run.endDate ?? run.date)) : eachDayIso(sick.date, sick.endDate ?? sick.date);
+}
+
 /** Per-day «На Вт 6 окт стоят: …» — the same lines the old self-entry notice carried. */
 function dayLines(db: Db, sick: Shift): string[] {
   if (sick.employeeId == null) return [];
-  return eachDayIso(sick.date, sick.endDate ?? sick.date)
+  return daysAsked(sick)
     .map((date) => dayAfterLine(db, { employeeId: sick.employeeId!, date, keepSilentForEntryId: sick.id, voice: "admins" }))
     .filter((line): line is string => line !== null);
 }
 
 export function approvalTextFor(db: Db, sick: Shift): string {
   const owner = sick.employeeId == null ? undefined : getEmployeeById(db, sick.employeeId);
-  return sickApprovalText(owner?.displayName ?? "Работник", sick, dayLines(db, sick), owner?.isObserver ?? false);
+  return sickApprovalText(owner?.displayName ?? "Работник", sick, dayLines(db, sick), owner?.isObserver ?? false, extensionOf(sick));
 }
 
 /**
@@ -65,8 +80,8 @@ export function approvalTextFor(db: Db, sick: Shift): string {
  * buttons could not be taken away from the others once one admin decides. Like
  * `notifyAdminsAlways` it ignores notice mutes — the hand-over hangs on this letter.
  */
-export async function requestApproval(deps: SickApprovalDeps, sick: Shift): Promise<Shift> {
-  const marked = markApprovalRequested(deps.db, sick.id, new Date((deps.now ?? Date.now)()));
+export async function requestApproval(deps: SickApprovalDeps, sick: Shift, approved: SickSpan | null = null): Promise<Shift> {
+  const marked = markApprovalRequested(deps.db, sick.id, new Date((deps.now ?? Date.now)()), approved);
   // Gone, or not a sick leave any more: nothing to ask about, and a letter with
   // buttons for a row that does not exist could only produce «Больничного уже нет».
   if (!marked) return sick;
@@ -100,6 +115,17 @@ export async function redrawApprovalMessages(deps: SickApprovalDeps, sick: Shift
       console.error("sick approval: cosmetic redraw failed:", safeErrorMessage(err));
     }
   }
+}
+
+/**
+ * The worker took the extension back (edited the dates inside the approved span again):
+ * nothing is left to ask, so the request closes and every admin's buttons say so. The row
+ * stays approved, as it was before the extension.
+ */
+export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Promise<void> {
+  const cleared = claimPendingSickLeave(deps.db, sick.id, null);
+  if (!cleared) return;
+  await finishApprovalMessages(deps, sick.id, `${approvalTextFor(deps.db, cleared)}\n\n↩️ Продление снято — ОК не нужен`);
 }
 
 /**
@@ -158,12 +184,15 @@ export async function approveSickLeave(
   onDecided?: OnDecided,
 ): Promise<SickDecision> {
   const { db } = deps;
+  // Read before the claim clears the snapshot: it says which days this «ОК» is about.
+  const before = getShift(db, entryId);
   const claimed = claimPendingSickLeave(db, entryId, adminId);
-  if (!claimed) return refusal(db, entryId);
+  if (!claimed || !before) return refusal(db, entryId);
   const adminName = nameOf(db, adminId) ?? "Админ";
+  const extension = extensionOf(before);
   recordAudit(db, "sick_leave_approved", adminId, entryAuditPayload(db, claimed));
   await tellDecided(onDecided);
-  await finishApprovalMessages(deps, entryId, `${approvalTextFor(db, claimed)}\n\n✅ Подтвердил(а) ${adminName}`);
+  await finishApprovalMessages(deps, entryId, `${approvalTextFor(db, before)}\n\n✅ Подтвердил(а) ${adminName}`);
 
   const owner = claimed.employeeId == null ? undefined : getEmployeeById(db, claimed.employeeId);
   // Observers are out of hand-overs entirely — the same gate as the self-entry route.
@@ -173,7 +202,9 @@ export async function approveSickLeave(
     // addressee for the worker to pick a colleague, and the existing ladder's timer —
     // silence for `handoverFanHours` fans out to everyone free. Idempotent per shift:
     // whatever the urgent branch already handed over is skipped.
-    const made = await startHandovers(deps, { sickEntry: claimed, employeeId: owner.id });
+    // An extension asks only about its new days: the approved ones already have their hand-overs.
+    const onlyDates = extension ? new Set(daysAsked(before)) : undefined;
+    const made = await startHandovers(deps, { sickEntry: claimed, employeeId: owner.id, onlyDates });
     // A shift with nobody free is escalated inside `startHandovers` («fanned» at once);
     // only an «offered» one is a draft the worker can still act on.
     hasDrafts = made.some((handover) => handover.status === "offered");
@@ -182,7 +213,7 @@ export async function approveSickLeave(
     await notifyUser(
       deps.bot,
       owner.telegramUserId,
-      sickApprovedWorkerText(claimed, adminName, hasDrafts),
+      sickApprovedWorkerText(claimed, adminName, hasDrafts, extension),
       hasDrafts ? handoverDraftsKeyboard(deps.config.publicUrl) : undefined,
     );
   }
@@ -196,29 +227,40 @@ export async function rejectSickLeave(
   onDecided?: OnDecided,
 ): Promise<SickDecision> {
   const { db } = deps;
+  const before = getShift(db, entryId);
   const claimed = claimPendingSickLeave(db, entryId, null);
-  if (!claimed) return refusal(db, entryId);
+  if (!claimed || !before) return refusal(db, entryId);
   const adminName = nameOf(db, adminId) ?? "Админ";
+  const extension = extensionOf(before);
   // The whole database part runs before the first await. After the claim the row looks
   // exactly like an approved one (no request, no approver); leaving it so across Telegram
   // calls would let a restart strand an approved-by-nobody sick leave, and a second admin
   // would be told «уже подтверждён», which is false. So: snapshot, cancel, delete — then talk.
   const payload = entryAuditPayload(db, claimed);
-  const letter = approvalTextFor(db, claimed);
+  const letter = approvalTextFor(db, before);
   const messages = listApprovalMessages(db, entryId);
-  // Whatever the urgent branch started dies the way a worker's own delete kills it.
-  // Taken hand-overs stay: that shift already has a new owner (`cancelHandoversForEntry`).
-  const cancelled = cancelHandoversForEntryDb(db, entryId, []);
-  detachHandoversFromEntry(db, entryId);
-  // Rows are gone with the sick leave (CASCADE); the snapshot above is what the edits use.
-  deleteShift(db, entryId);
+  let cancelled;
+  if (before.approvedDate != null) {
+    // A rejected EXTENSION gives the row back as it was approved: the old days live on
+    // (spec item 13), so only what was started for the new days is cancelled.
+    const approved = { date: before.approvedDate, endDate: before.approvedEndDate };
+    cancelled = cancelHandoversForEntryDb(db, entryId, eachDayIso(approved.date, approved.endDate ?? approved.date));
+    restoreApprovedSpan(db, entryId, approved);
+  } else {
+    // Whatever the urgent branch started dies the way a worker's own delete kills it.
+    // Taken hand-overs stay: that shift already has a new owner (`cancelHandoversForEntry`).
+    cancelled = cancelHandoversForEntryDb(db, entryId, []);
+    detachHandoversFromEntry(db, entryId);
+    // Rows are gone with the sick leave (CASCADE); the snapshot above is what the edits use.
+    deleteShift(db, entryId);
+  }
   recordAudit(db, "sick_leave_rejected", adminId, payload);
 
   await tellDecided(onDecided);
   await editApprovalMessages(deps, messages, `${letter}\n\n❌ Отклонил(а) ${adminName}`);
   await notifyCancelledHandovers(deps, cancelled);
   if (claimed.employeeId != null) {
-    await deps.messenger.plain(claimed.employeeId, sickRejectedWorkerText(claimed, adminName));
+    await deps.messenger.plain(claimed.employeeId, sickRejectedWorkerText(claimed, adminName, extension));
   }
   return { ok: true, adminName };
 }
@@ -226,8 +268,10 @@ export async function rejectSickLeave(
 /** Work the sick leave takes away, one line per shift — the list screens show it under the name. */
 function sickShiftLines(db: Db, sick: Shift): string[] {
   if (sick.employeeId == null) return [];
+  // An extension takes away only the work on its new days.
+  const asked = new Set(daysAsked(sick));
   return listEmployeeShiftsOverlapping(db, sick.employeeId, sick.date, sick.endDate ?? sick.date)
-    .filter((entry) => entry.id !== sick.id && !isAbsence(entry.category) && entry.category !== "offsite")
+    .filter((entry) => entry.id !== sick.id && asked.has(entry.date) && !isAbsence(entry.category) && entry.category !== "offsite")
     .map((entry) => entryLineOf(entry));
 }
 
@@ -243,5 +287,6 @@ export function listSickApprovals(db: Db): SickApprovalRow[] {
       requestedAt: sick.approvalRequestedAt!.toISOString(),
       shiftLines: sickShiftLines(db, sick),
       handoverForced: sick.handoverForcedAt != null,
+      ...(sick.approvedDate != null ? { approvedSpan: { date: sick.approvedDate, endDate: sick.approvedEndDate } } : {}),
     }));
 }

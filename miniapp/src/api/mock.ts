@@ -855,7 +855,7 @@ function mockHandoverDrafts(input: SelfEntryInput, sickId: number): HandoverDraf
   }));
 }
 
-/** Mock of the drafts after an admin's «ОК»: the same drafts the form builds, for my confirmed sick leave. */
+/** Мок черновиков после ОК админа: те же, что строит форма, по моему подтверждённому больничному. */
 export async function mockGetMyHandoverDrafts(): Promise<HandoverDraft[]> {
   await delay(200);
   const sick = ALL_ENTRIES.find((e) => e.employeeId === MOCK_ME.id && e.category === "sick_leave" && !e.pending);
@@ -883,7 +883,7 @@ export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<{ entr
     employeeId: MOCK_ME.id,
     unrecognisedCode: null,
     employeeName: personName(MOCK_ME.id),
-    // The mock repeats the server: an admin's own sick leave is approved at once, anyone else's waits.
+    // Мок повторяет сервер: свой больничный админ подтверждает сам, чужой ждёт ОК.
     ...(input.category === "sick_leave" && !MOCK_ME.isAdmin ? { pending: true as const } : {}),
   };
   ALL_ENTRIES.push(created);
