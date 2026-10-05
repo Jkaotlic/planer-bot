@@ -113,16 +113,74 @@ describe("«На подтверждение» в мини-аппе", () => {
     expect(approve).not.toHaveBeenCalled();
   });
 
-  it("отказ сервера (другой админ успел) — текстом на карточке, а не молча", async () => {
-    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([ROW]);
+  it("отказ сервера (другой админ успел): текст виден, список перечитан, onChanged позван, карточки нет", async () => {
+    const get = vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([ROW]).mockResolvedValue([]);
     vi.spyOn(apiClient, "approveSickLeave").mockRejectedValue(new Error("Уже подтвердил(а) Игорь"));
     const onChanged = vi.fn();
     const el = await mount({ onChanged });
     await act(async () => { buttonByText(el, "✅ ОК").click(); });
     await settle();
     expect(el.textContent).toContain("Уже подтвердил(а) Игорь");
-    // Решения не было — метку перечитывать не за чем.
-    expect(onChanged).not.toHaveBeenCalled();
+    // Устаревшая карточка с живыми кнопками — враньё: список перечитан, метка тоже.
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(onChanged).toHaveBeenCalled();
+    expect([...el.querySelectorAll("button")].some((b) => (b.textContent ?? "").includes("✅ ОК"))).toBe(false);
+  });
+
+  it("«Больничного уже нет» (404): так же — текст, перечитанный список, onChanged", async () => {
+    const get = vi.spyOn(apiClient, "getSickApprovals").mockResolvedValueOnce([ROW]).mockResolvedValue([]);
+    vi.spyOn(apiClient, "rejectSickLeave").mockRejectedValue(new Error("Больничного уже нет"));
+    const onChanged = vi.fn();
+    const el = await mount({ onChanged });
+    await act(async () => { buttonByText(el, "❌ Отклонить").click(); });
+    await act(async () => { buttonByText(el, "Да, отклонить").click(); });
+    await settle();
+    expect(el.textContent).toContain("Больничного уже нет");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("два быстрых тапа «ОК» — один запрос", async () => {
+    vi.spyOn(apiClient, "getSickApprovals").mockResolvedValue([ROW]);
+    const approve = vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
+    const el = await mount();
+    const ok = buttonByText(el, "✅ ОК");
+    await act(async () => { ok.click(); ok.click(); });
+    await settle();
+    expect(approve).toHaveBeenCalledTimes(1);
+  });
+
+  it("второй тап после ответа на «ОК», но до перечитывания списка — всё ещё один запрос", async () => {
+    // Карточка живёт, пока список не вернулся; кнопки в это окно обязаны быть выключены,
+    // иначе второй тап получил бы ложное «Уже подтвердил(а)» от самого себя.
+    let releaseReload: (rows: SickApprovalRow[]) => void = () => {};
+    vi.spyOn(apiClient, "getSickApprovals")
+      .mockResolvedValueOnce([ROW])
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseReload = resolve; }));
+    const approve = vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
+    const el = await mount();
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(approve).toHaveBeenCalledTimes(1);
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(approve).toHaveBeenCalledTimes(1);
+    await act(async () => { releaseReload([]); });
+    await settle();
+    expect(el.textContent).toContain("Больничных на подтверждение нет");
+  });
+
+  it("onChanged зовётся только после перечитывания списка — запросы идут по очереди", async () => {
+    const events: string[] = [];
+    vi.spyOn(apiClient, "getSickApprovals").mockImplementation(async () => {
+      events.push("get");
+      return events.length > 1 ? [] : [ROW];
+    });
+    vi.spyOn(apiClient, "approveSickLeave").mockResolvedValue();
+    const el = await mount({ onChanged: () => events.push("changed") });
+    await act(async () => { buttonByText(el, "✅ ОК").click(); });
+    await settle();
+    expect(events).toEqual(["get", "get", "changed"]);
   });
 
   it("список не загрузился — текст ошибки и «Повторить», который читает заново", async () => {

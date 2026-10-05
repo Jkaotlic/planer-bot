@@ -12,9 +12,9 @@ export interface TeamEntryDetailRow {
 export function toTeamEntryDetailRows(
   entries: readonly TeamEntryView[],
 ): TeamEntryDetailRow[] {
-  return entries.map(({ shift, title }) => ({
+  return entries.map(({ shift, title, pending }) => ({
     id: shift.id,
-    title,
+    title: pending ? `${title} (ждёт ОК)` : title,
     time: shift.start && shift.end ? `${shift.start}–${shift.end}` : "Весь день",
     location: shift.location ? `Место: ${shift.location}` : null,
     dateRange:

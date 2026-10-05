@@ -500,6 +500,37 @@ describe("team schedule UI", () => {
     expect([pendingOn("2026-07-28"), pendingOn("2026-07-29")]).toEqual([false, true]);
   });
 
+  it("«Сегодня»: ждущий ОК — отдельная группа «Больничный · ждёт ОК», обычный рядом — своя", () => {
+    const sick = (id: number, employeeId: number, extra: object) => ({
+      id, employeeId, date: "2026-07-27", endDate: null, start: null, end: null, category: "sick_leave" as const,
+      title: null, templateId: null, location: null, unrecognisedCode: null, ...extra,
+    });
+    const schedule: TeamSchedule = {
+      employees: [
+        { id: 1, displayName: "Аня Первая", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 2, displayName: "Игорь Второй", rosterOrder: 1, excludedFromSwaps: false },
+      ],
+      // Обычный первым: без `pending` в ключе группа взяла бы его палитру и название.
+      shifts: [sick(301, 1, {}), sick(302, 2, { pending: true })],
+      calendar: [],
+    };
+    const model = buildTodayModel("2026-07-27", schedule, fallbackPaletteTemplates);
+    expect(model.noTimeGroups.map((g) => g.title).sort()).toEqual(["Больничный", "Больничный · ждёт ОК"]);
+    const markup = renderToStaticMarkup(createElement(TeamTodayView, { model, isDark: false }));
+    expect(markup).toContain("Больничный · ждёт ОК");
+    expect(markup).toContain("outline:2px dashed #FD0100");
+    expect(markup.match(/outline:2px dashed/g)).toHaveLength(1);
+  });
+
+  it("лист подробностей: ждущая запись подписана «(ждёт ОК)», обычная — нет", () => {
+    const base = { employeeId: 1, date: "2026-07-27", endDate: null, start: null, end: null, category: "sick_leave" as const, title: null, templateId: null, location: null, unrecognisedCode: null };
+    const rows = toTeamEntryDetailRows([
+      { shift: { id: 1, ...base } as never, title: "Больничный", palette: null, pending: true },
+      { shift: { id: 2, ...base } as never, title: "Больничный", palette: null, pending: false },
+    ]);
+    expect(rows.map((r) => r.title)).toEqual(["Больничный (ждёт ОК)", "Больничный"]);
+  });
+
   it("renders all seven dates, active rows, two-line names, exact palettes, and full cell labels", () => {
     const schedule: TeamSchedule = {
       employees: [

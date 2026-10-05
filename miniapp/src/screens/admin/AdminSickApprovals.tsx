@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { sickSpanWords } from "@planer/shared";
 import { apiClient, type SickApprovalRow } from "../../api/client";
@@ -15,8 +15,16 @@ import { ActionButton, Card, Group } from "../../ui";
 export function AdminSickApprovals({ onChanged }: { onChanged?: () => void }) {
   const [rows, setRows] = useState<SickApprovalRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Bumped by «Повторить» и после каждого решения — иначе перечитать список нечем. */
+  /** Отказ последнего решения — на экране, а не на карточке: карточка после отказа
+   *  («Уже подтвердил(а) …», «Больничного уже нет») исчезает вместе со строкой. */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** Bumped by «Повторить» — без него после ошибки перечитать список нечем. */
   const [attempt, setAttempt] = useState(0);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,18 +42,42 @@ export function AdminSickApprovals({ onChanged }: { onChanged?: () => void }) {
     };
   }, [attempt]);
 
+  /**
+   * Решение (или отказ сервера) → перечитать список → и только потом `onChanged`.
+   * По очереди, а не параллельно: до релея HTTP/1.1, и метка в `App` делает ещё
+   * два запроса вслед за нашим. Отказ тоже перечитывает: «уже подтвердил(а)» и
+   * «уже нет» значат, что список устарел, и карточка с живыми кнопками — враньё.
+   */
   async function decide(action: () => Promise<void>) {
-    await action();
-    setAttempt((n) => n + 1);
+    setNotice(null);
+    let failure: string | null = null;
+    try {
+      await action();
+    } catch (err) {
+      failure = err instanceof Error ? err.message : "Не получилось — попробуй ещё раз";
+    }
+    try {
+      const loaded = await apiClient.getSickApprovals();
+      if (alive.current) setRows(loaded);
+    } catch (err) {
+      if (alive.current) setError(err instanceof Error ? err.message : "Не удалось загрузить больничные");
+    }
+    if (alive.current && failure) setNotice(failure);
     onChanged?.();
   }
 
   return (
     <Group>
+      {notice && (
+        <Card>
+          <div role="alert" style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{notice}</div>
+        </Card>
+      )}
+
       {error && (
         <Card>
           <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>
-          <ActionButton stretched onClick={() => setAttempt((n) => n + 1)}>
+          <ActionButton stretched onClick={() => { setNotice(null); setAttempt((n) => n + 1); }}>
             Повторить
           </ActionButton>
         </Card>
@@ -68,16 +100,17 @@ export function AdminSickApprovals({ onChanged }: { onChanged?: () => void }) {
 
 function SickApprovalCard({ row, onDecide }: { row: SickApprovalRow; onDecide: (action: () => Promise<void>) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Реф, а не только `busy`: два тапа в одном кадре видят прежнее `busy === false`,
+  // и сервер получил бы второй запрос (ответ «Уже подтвердил(а) …» самому себе).
+  const inFlight = useRef(false);
   async function run(action: () => Promise<void>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
-    setError(null);
     try {
       await onDecide(action);
-    } catch (err) {
-      // Самый частый отказ — другой админ успел раньше; карточка должна это сказать.
-      setError(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -103,7 +136,6 @@ function SickApprovalCard({ row, onDecide }: { row: SickApprovalRow; onDecide: (
           ⚡ передача запущена без ОК — смена была слишком близко
         </div>
       )}
-      {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <ActionButton kind="primary" stretched loading={busy} disabled={busy} onClick={() => void run(() => apiClient.approveSickLeave(row.id))}>
           ✅ ОК
