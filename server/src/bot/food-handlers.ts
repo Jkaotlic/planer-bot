@@ -25,12 +25,15 @@ export interface FoodHandlerDeps {
  * отдаёт `initData`, и форма падала бы с 401 (см. `mainKeyboard`). Маршрут —
  * в query, а не во фрагменте: фрагмент Telegram занимает под `initData`.
  */
-export function foodMenuKeyboard(publicUrl: string): InlineKeyboard {
+export function servicesMenuKeyboard(publicUrl: string): InlineKeyboard {
   return new InlineKeyboard()
+    // First: the screen this button is named after. The rest are the shortcuts people already use daily.
+    .webApp("🧰 Открыть Сервисы", `${publicUrl}/app/?screen=services`)
+    .row()
     .webApp("🍱 Новый заказ", `${publicUrl}/app/?screen=orders&new=order`)
     .webApp("🗳 Новый опрос", `${publicUrl}/app/?screen=orders&new=poll`)
     .row()
-    .webApp("📋 Открыть", `${publicUrl}/app/?screen=orders`);
+    .webApp("📋 Заказы и опросы", `${publicUrl}/app/?screen=orders`);
 }
 
 /**
@@ -68,11 +71,11 @@ async function safeEdit(fn: () => Promise<unknown>): Promise<void> {
  * Подключается ДО общего `callback_query:data` в `createBot`: тот отвечает
  * «Кнопка устарела» на всё, что до него не поймали.
  */
-export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFoodMenu(ctx: Context): Promise<void> } {
+export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServicesMenu(ctx: Context): Promise<void> } {
   const { db, config, acting, actsAsAdmin } = deps;
   const viewerOf = (me: Employee, tgId: number) => ({ id: me.id, isAdmin: actsAsAdmin(me, tgId) });
 
-  async function sendFoodMenu(ctx: Context): Promise<void> {
+  async function sendServicesMenu(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
     const who = acting(from.id);
@@ -88,7 +91,15 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
       ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`),
     ];
     const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows];
-    await ctx.reply(lines.join("\n"), { reply_markup: foodMenuKeyboard(config.publicUrl) });
+    const text = [
+      "🧰 Сервисы: заказы и опросы, QR-код.",
+      "",
+      ...lines,
+      "",
+      // The bot has drawn QR codes for links since 2026-09-04; this is where people learn it.
+      "QR-код можно и здесь: пришли ссылку — отвечу картинкой.",
+    ].join("\n");
+    await ctx.reply(text, { reply_markup: servicesMenuKeyboard(config.publicUrl) });
   }
 
   /**
@@ -263,5 +274,5 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendFood
     })());
   });
 
-  return { sendFoodMenu };
+  return { sendServicesMenu };
 }

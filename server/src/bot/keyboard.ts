@@ -15,7 +15,14 @@ import { Keyboard } from "grammy";
  */
 export const BTN_WEEK = "📅 График";
 export const BTN_MY_SHIFTS = "📋 Мои смены";
-export const BTN_FOOD = "🍱 Заказы";
+/** Entry to «Сервисы»: food orders and polls, the QR code, and whatever comes next. */
+export const BTN_SERVICES = "🧰 Сервисы";
+/**
+ * The same button's label before 2026-10-05. A persistent keyboard stays on a phone until
+ * the bot sends a new one, so this label keeps arriving for a while and must keep routing.
+ * Not on any keyboard we draw.
+ */
+export const LEGACY_BTN_FOOD = "🍱 Заказы";
 export const BTN_REMINDERS = "🔔 Напоминания";
 export const BTN_ADMIN = "⚙️ Админка";
 export const BTN_BUG = "🐞 Проблема";
@@ -53,7 +60,7 @@ export function mainKeyboard(opts: { isAdmin: boolean }): Keyboard {
   // Третьей в первую строку, а не отдельной строкой: во второй уже три
   // служебные, а лишняя строка — это снова клавиатура на пол-экрана.
   // У всех, наблюдателя тоже: он обедает с командой (решение 2026-09-30).
-  kb.text(BTN_FOOD);
+  kb.text(BTN_SERVICES);
   kb.row().text(BTN_REMINDERS).text(BTN_BUG);
   if (opts.isAdmin) kb.text(BTN_ADMIN);
   // resized — иначе клавиатура занимает пол-экрана. persistent — иначе Telegram

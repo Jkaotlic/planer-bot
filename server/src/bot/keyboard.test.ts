@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { KeyboardButton } from "grammy/types";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_SERVICES, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
 
 /**
  * Метка кнопки. В Bot API кнопка обычной клавиатуры — это либо объект, либо
@@ -26,8 +26,8 @@ describe("mainKeyboard", () => {
     expect(labels(mainKeyboard({ isAdmin: false }))).not.toContain(BTN_ADMIN);
   });
 
-  it("работник получает график, вход в мини-апп, заказы, напоминания и кнопку «Проблема» — и ничего сверх того", () => {
-    expect(labels(mainKeyboard({ isAdmin: false }))).toEqual([BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD, BTN_REMINDERS, BTN_BUG]);
+  it("работник получает график, вход в мини-апп, сервисы, напоминания и кнопку «Проблема» — и ничего сверх того", () => {
+    expect(labels(mainKeyboard({ isAdmin: false }))).toEqual([BTN_WEEK, BTN_MY_SHIFTS, BTN_SERVICES, BTN_REMINDERS, BTN_BUG]);
   });
 
 
@@ -52,6 +52,11 @@ describe("mainKeyboard", () => {
    * живёт в inline-клавиатуре (`miniAppKeyboard` в `bot.ts`) — там `initData`
    * приходит подписанным.
    */
+  it("подпись третьей кнопки — «🧰 Сервисы»: за ней теперь не только заказы", () => {
+    expect(BTN_SERVICES).toBe("🧰 Сервисы");
+    expect(mainKeyboard({ isAdmin: false }).keyboard[0]!.map(labelOf)).toContain("🧰 Сервисы");
+  });
+
   it("не несёт ни одной web_app-кнопки — из обычной клавиатуры мини-апп открывается без подписи и падает с 401", () => {
     const buttons = mainKeyboard({ isAdmin: true }).keyboard.flat();
     expect(buttons.length).toBeGreaterThan(0);
@@ -62,14 +67,14 @@ describe("mainKeyboard", () => {
 
   it("укладывается в две строки — по одной лишней строке на «Напоминания» и «Админку» уходило пол-экрана", () => {
     expect(mainKeyboard({ isAdmin: true }).keyboard.map((row) => row.map(labelOf))).toEqual([
-      [BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD],
+      [BTN_WEEK, BTN_MY_SHIFTS, BTN_SERVICES],
       [BTN_REMINDERS, BTN_BUG, BTN_ADMIN],
     ]);
   });
 
   it("у не-админа вторая строка не пустеет, а остаётся с «Напоминаниями» и «Проблемой»", () => {
     expect(mainKeyboard({ isAdmin: false }).keyboard.map((row) => row.map(labelOf))).toEqual([
-      [BTN_WEEK, BTN_MY_SHIFTS, BTN_FOOD],
+      [BTN_WEEK, BTN_MY_SHIFTS, BTN_SERVICES],
       [BTN_REMINDERS, BTN_BUG],
     ]);
   });

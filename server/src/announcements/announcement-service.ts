@@ -1,4 +1,4 @@
-import type { Bot } from "grammy";
+import type { Bot, InlineKeyboard } from "grammy";
 import { addressOf, announcementRole, type AnnouncementRecipient } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -106,7 +106,7 @@ export async function sendAnnouncement(
   // который объявлен необязательным. Сервер поднимается и с плохим токеном.
   bot: Bot | null | undefined,
   db: Db,
-  input: { senderId: number; text: string; audience: Audience },
+  input: { senderId: number; text: string; audience: Audience; keyboard?: InlineKeyboard },
 ): Promise<{ delivered: number; intended: number; unreachable: string[]; archivedCount: number }> {
   const sender = getEmployeeById(db, input.senderId);
   const { reachable, unreachable, archivedCount } = announcementRecipients(db, input.audience, input.senderId);
@@ -117,7 +117,7 @@ export async function sendAnnouncement(
     if (person.telegramUserId == null) continue;
     // Один закрытый чат не обрывает рассылку: следующие в списке и есть те, до
     // кого ещё можно достучаться. Тот же приём, что в `notifyVacantSlot`.
-    if (bot && (await notifyUser(bot, person.telegramUserId, message))) delivered += 1;
+    if (bot && (await notifyUser(bot, person.telegramUserId, message, input.keyboard))) delivered += 1;
   }
   return { delivered, intended: reachable.length, unreachable, archivedCount };
 }
