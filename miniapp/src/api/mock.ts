@@ -1,5 +1,6 @@
 import { createEmployeesMock, createReadMock } from "@planer/client";
-import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
+import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX, QR_MAX_TEXT_LENGTH } from "@planer/shared";
+import type { QrSavedStyle, QrStyle } from "@planer/shared";
 import type { AdminShortfall, RecipientGroupView, SickApprovalRow, StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
@@ -125,6 +126,7 @@ export const MOCK_ME: Me = {
   // руками, зато экран, скрытый и от админа, и от наблюдателя, виден сразу.
   isObserver: false,
   selfScheduleEnabled: false, startTab: null,
+  qrStyle: { shape: "classic", color: "black" },
   canAnnounce: true,
 };
 
@@ -133,6 +135,25 @@ export async function mockSetStartTab(tab: StartTab | null): Promise<StartTab | 
   await delay(150);
   MOCK_ME.startTab = tab;
   return tab;
+}
+
+/** DEV: стиль QR-кода живёт в том же `MOCK_ME`, что и остальные настройки. */
+export async function mockSetQrStyle(style: QrSavedStyle): Promise<QrSavedStyle> {
+  await delay(150);
+  MOCK_ME.qrStyle = { shape: style.shape, color: style.color };
+  return MOCK_ME.qrStyle;
+}
+
+/**
+ * DEV: «Прислать мне в бота». Без рисования: мок лежит в основном бандле, а
+ * `qrcode` должен приезжать только с ленивым экраном (см. `qr-bundle.test.ts`).
+ */
+export async function mockSendQrToMe(text: string, style: QrStyle): Promise<void> {
+  await delay(300);
+  if (text.length > QR_MAX_TEXT_LENGTH) {
+    throw new Error(`Слишком длинно для QR-кода: ${text.length} знаков, а помещается ${QR_MAX_TEXT_LENGTH}.`);
+  }
+  MOCK_ME.qrStyle = { shape: style.shape, color: style.color };
 }
 
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {

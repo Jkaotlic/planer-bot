@@ -22,6 +22,8 @@ import type {
   TemplateDto,
   StartTab,
   CalendarDayDto,
+  QrSavedStyle,
+  QrStyle,
 } from "@planer/shared";
 // Реэкспорт, а не копия: строка списка отметок описана в shared, потому что её
 // одинаково читают сервер и оба админских экрана.
@@ -36,6 +38,8 @@ import {
   mockGetMe,
   mockSetRemindersEnabled,
   mockSetStartTab,
+  mockSetQrStyle,
+  mockSendQrToMe,
   mockSetSelfScheduleEnabled,
   mockSetPreferredName,
   mockGetCalendarLink,
@@ -214,6 +218,9 @@ export interface Me {
   remindersEnabled: boolean;
   /** С какой вкладки открывать приложение. `null` — «Смены», как было всегда. */
   startTab: StartTab | null;
+  /** Последний выбранный стиль QR-кода. Необязателен: старый сервер поля не шлёт —
+   *  тогда экран открывается на «Классике», как и у того, кто ещё не выбирал. */
+  qrStyle?: QrSavedStyle | null;
   /** Admin's global «Обменять» switch — the screen must grey the button out
    *  rather than show it live and get refused on tap. */
   swapsLocked: boolean;
@@ -888,6 +895,10 @@ export interface ApiClient {
   setRemindersEnabled(enabled: boolean): Promise<boolean>;
   /** Стартовая вкладка. `null` — вернуть к «Сменам». */
   setStartTab(tab: StartTab | null): Promise<StartTab | null>;
+  /** Запомнить форму и цвет QR-кода — ими же бот рисует присланные ссылки. */
+  setQrStyle(style: QrSavedStyle): Promise<QrSavedStyle>;
+  /** «Прислать мне в бота»: бот присылает картинку в личку. Сервер заодно запоминает стиль. */
+  sendQrToMe(text: string, style: QrStyle): Promise<void>;
   /** Тумблер наблюдателя «Веду свой график сам» — 403 у обычного работника,
    *  сервер проверяет `isObserver` сам, экран сюда его и не подпускает. */
   setSelfScheduleEnabled(enabled: boolean): Promise<boolean>;
@@ -1468,6 +1479,16 @@ export const realClient: ApiClient = {
     return tab;
   },
 
+  async setQrStyle(style) {
+    // Только два поля: сервер строг к лишним (подпись — про один код, а не про вкус).
+    const { qrStyle } = await authorizedPutJson<{ qrStyle: QrSavedStyle }>("/api/my/qr-style", { shape: style.shape, color: style.color });
+    return qrStyle;
+  },
+
+  async sendQrToMe(text, style) {
+    await authorizedPostJson<{ ok: true }>("/api/my/qr", { text, style });
+  },
+
   async setSelfScheduleEnabled(enabled) {
     // `/api/me/settings` эхает обратно `remindersEnabled`/`preferredName`/`address`
     // — общий ответ на три разных поля, и `selfScheduleEnabled` среди них нет.
@@ -1943,6 +1964,8 @@ const devClient: ApiClient = {
   getMe: () => mockGetMe(),
   setRemindersEnabled: (enabled) => mockSetRemindersEnabled(enabled),
   setStartTab: (tab) => mockSetStartTab(tab),
+  setQrStyle: (style) => mockSetQrStyle(style),
+  sendQrToMe: (text, style) => mockSendQrToMe(text, style),
   setSelfScheduleEnabled: (enabled) => mockSetSelfScheduleEnabled(enabled),
   setPreferredName: (preferredName) => mockSetPreferredName(preferredName),
   getCalendarLink: () => mockGetCalendarLink(),

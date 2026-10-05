@@ -184,3 +184,44 @@ describe("real announcements client", () => {
     expect(recipients).toEqual([{ id: 2, displayName: "Игорь", reachable: true }]);
   });
 });
+
+describe("QR-код: real client", () => {
+  function stubFetch(log: Array<{ url: string; method: string; body: unknown }>) {
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/auth")) {
+        return new Response(JSON.stringify({ token: "test-token" }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      log.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/api/my/qr-style")) {
+        return new Response(JSON.stringify({ qrStyle: { shape: "dots", color: "blue" } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/api/my/qr")) {
+        return new Response(JSON.stringify({ error: "Не чаще раза в 5 секунд — подожди немного" }), { status: 429, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+  }
+
+  it("setQrStyle шлёт PUT только с формой и цветом", async () => {
+    const log: Array<{ url: string; method: string; body: unknown }> = [];
+    stubFetch(log);
+    const { realClient } = await import("./client");
+    const saved = await realClient.setQrStyle({ shape: "dots", color: "blue", caption: "x" } as never);
+    expect(saved).toEqual({ shape: "dots", color: "blue" });
+    expect(log).toEqual([{ url: expect.stringMatching(/\/api\/my\/qr-style$/), method: "PUT", body: { shape: "dots", color: "blue" } }]);
+  });
+
+  it("sendQrToMe шлёт POST с текстом и стилем и отдаёт отказ сервера его словами", async () => {
+    const log: Array<{ url: string; method: string; body: unknown }> = [];
+    stubFetch(log);
+    const { realClient } = await import("./client");
+    await expect(realClient.sendQrToMe("https://example.com", { shape: "soft", color: "green", caption: "Сбор" }))
+      .rejects.toThrow("Не чаще раза в 5 секунд");
+    expect(log[0]).toEqual({
+      url: expect.stringMatching(/\/api\/my\/qr$/),
+      method: "POST",
+      body: { text: "https://example.com", style: { shape: "soft", color: "green", caption: "Сбор" } },
+    });
+  });
+});
