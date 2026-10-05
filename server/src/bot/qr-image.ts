@@ -3,10 +3,9 @@ import { QrTextError, renderQr } from "@planer/shared/qr";
 import { svgToPng } from "../render/rasterize";
 
 /**
- * QR-код по ссылке: текст → SVG → PNG тем же растеризатором, что рисует неделю.
- *
- * `qrcode` умеет отдавать PNG и сам, но через свой `pngjs`; один растеризатор
- * на весь бот проще, чем два, и шрифты здесь не нужны — только квадраты.
+ * QR-код по ссылке: текст → SVG (`renderQr` из shared, тот же, что рисует мини-апп) →
+ * PNG тем же растеризатором, что рисует неделю. Один растеризатор на весь бот проще,
+ * чем два.
  */
 export type QrImage =
   | { kind: "photo"; png: Buffer; caption: string }

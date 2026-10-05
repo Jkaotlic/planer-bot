@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { GrammyError, InputFile, type Bot } from "grammy";
 import { z } from "zod";
-import { qrSavedStyleSchema, qrStyleSchema } from "@planer/shared";
+import { QR_CAPTION_MAX, qrSavedStyleSchema, qrStyleSchema } from "@planer/shared";
 import { QrTextError } from "@planer/shared/qr";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -48,7 +48,11 @@ export function createMyQrRoutes(deps: { db: Db; config: Config; bot?: Bot; now?
     requireAuth(db, config.jwtSecret),
     async (c) => {
       const parsed = sendBody.safeParse(await c.req.json().catch(() => null));
-      if (!parsed.success) return c.json({ error: "Нужны текст и стиль QR-кода" }, 400);
+      if (!parsed.success) {
+        // The one limit a person can hit by typing; every other failure is a client bug.
+        const tooLongCaption = parsed.error.issues.some((i) => i.code === "too_big" && i.path.join(".") === "style.caption");
+        return c.json({ error: tooLongCaption ? `Подпись — не длиннее ${QR_CAPTION_MAX} знаков` : "Нужны текст и стиль QR-кода" }, 400);
+      }
       const { text, style } = parsed.data;
       if (!bot) return c.json({ error: "Бот сейчас не запущен — попробуй позже" }, 503);
       const id = c.get("auth").employeeId;
@@ -80,7 +84,9 @@ export function createMyQrRoutes(deps: { db: Db; config: Config; bot?: Bot; now?
         await bot.api.sendPhoto(me.telegramUserId, new InputFile(png, "qr.png"), { caption: text });
       } catch (err) {
         // Nothing arrived, so a retry must not wait out the cooldown.
-        lastSentAt.delete(id);
+        // Only our own stamp: if this upload hung past the cooldown, a newer request owns the
+        // stamp now, and deleting it would let a third tap through inside that request's window.
+        if (lastSentAt.get(id) === t) lastSentAt.delete(id);
         console.error("qr: send failed:", safeErrorMessage(err));
         const blocked = err instanceof GrammyError && err.error_code === 403;
         return c.json(

@@ -181,6 +181,73 @@ describe("POST /api/my/qr", () => {
   });
 });
 
+/** A bot whose `sendPhoto` hangs until `release()`: the only deterministic way to have two requests in flight. */
+function heldBot(outcome: "ok" | "fail") {
+  const bot = stubBotInfo(new Bot("12345:tok"));
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let entered!: () => void;
+  const enteredFirst = new Promise<void>((r) => { entered = r; });
+  let attempts = 0;
+  bot.api.config.use(async (_prev, method) => {
+    if (method !== "sendPhoto") return { ok: true, result: {} } as never;
+    attempts += 1;
+    if (attempts > 1) return { ok: true, result: {} } as never;
+    entered();
+    await gate;
+    if (outcome === "fail") throw new Error("telegram down");
+    return { ok: true, result: {} } as never;
+  });
+  return { bot, release, enteredFirst, attempts: () => attempts };
+}
+
+describe("POST /api/my/qr — cooldown while the upload is in flight", () => {
+  const body = { text: URL_TEXT, style: { shape: "classic", color: "black" } };
+
+  it("второй тап, пока первое фото ещё грузится, — 429 и одна отправка", async () => {
+    const held = heldBot("ok");
+    const { db, app } = stage({ bot: held.bot });
+    const anya = linked(db, "Аня", 333);
+    const token = await as(anya.id);
+
+    const a = app.request("/api/my/qr", post(token, body));
+    await held.enteredFirst;
+    const b = await app.request("/api/my/qr", post(token, body));
+
+    expect(b.status).toBe(429);
+    expect(held.attempts()).toBe(1);
+    held.release();
+    expect((await a).status).toBe(200);
+  });
+
+  it("отказ зависшей отправки не снимает метку более новой", async () => {
+    const held = heldBot("fail");
+    const { db, app, tick } = stage({ bot: held.bot });
+    const anya = linked(db, "Аня", 333);
+    const token = await as(anya.id);
+
+    const a = app.request("/api/my/qr", post(token, body));
+    await held.enteredFirst;
+    tick(QR_SEND_COOLDOWN_MS);
+    expect((await app.request("/api/my/qr", post(token, body))).status).toBe(200);
+    held.release();
+    expect((await a).status).toBe(502);
+
+    // B's stamp must survive A's failure: an immediate third tap is still inside B's window.
+    expect((await app.request("/api/my/qr", post(token, body))).status).toBe(429);
+  });
+});
+
+describe("POST /api/my/qr — подпись", () => {
+  it("подпись длиннее 40 знаков — 400 с названием предела", async () => {
+    const { db, app } = stage();
+    const anya = linked(db, "Аня", 333);
+    const res = await app.request("/api/my/qr", post(await as(anya.id), { text: URL_TEXT, style: { shape: "classic", color: "black", caption: "я".repeat(41) } }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Подпись — не длиннее 40 знаков");
+  });
+});
+
 describe("маршруты подключены к приложению", () => {
   it("без токена — 401, а не 404", async () => {
     const app = createApp({ db: makeTestDb(), config });
