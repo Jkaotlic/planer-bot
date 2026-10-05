@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee } from "../repo/employees";
 import { createShift } from "../repo/shifts";
-import { buildWeekImage } from "./week-image";
+import { buildWeekImage, scheduleForImage } from "./week-image";
 
 const MONDAY = "2026-08-03";
 const TODAY = "2026-08-06";
@@ -89,5 +89,16 @@ describe("buildWeekImage", () => {
     expect(b.kind).toBe("photo");
     if (a.kind !== "photo" || b.kind !== "photo") return;
     expect(a.png.equals(b.png)).toBe(true);
+  });
+});
+
+describe("scheduleForImage", () => {
+  it("картинка недели «ждёт ОК» не рисует: у PNG нет пунктира, а лишняя строка легенды объясняла бы невидимое", () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { employeeId: anya.id, date: "2026-08-05", category: "sick_leave", approvalRequestedAt: new Date() });
+    const schedule = scheduleForImage(db, MONDAY);
+    expect(schedule.shifts).toHaveLength(1);
+    expect(schedule.shifts[0]).not.toHaveProperty("pending");
   });
 });

@@ -50,6 +50,12 @@ export const scheduleEntrySchema = z
     unrecognisedCode: z.string().nullable(),
     templateId: z.number().int().nullable(),
     employeeId: z.number().int().nullable(),
+    /**
+     * Больничный ждёт ОК админа. Только `true` и только у ждущего — ключа нет у
+     * всего остального: старый закэшированный мини-апп про поле не знает и рисует
+     * обычную «Б», а строгая схема пропускает и ответ старого сервера без ключа.
+     */
+    pending: z.literal(true).optional(),
   })
   .strict();
 export type ScheduleEntryDto = z.infer<typeof scheduleEntrySchema>;

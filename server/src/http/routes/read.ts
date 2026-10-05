@@ -72,6 +72,7 @@ export function createReadRoutes(deps: { db: Db; config: Config }): Hono<Env> {
         unrecognisedCode: s.unrecognisedCode,
         templateId: s.templateId,
         employeeId: s.employeeId,
+        ...(s.approvalRequestedAt != null ? { pending: true as const } : {}),
       })),
       today,
       calendar,

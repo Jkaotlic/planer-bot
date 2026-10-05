@@ -79,6 +79,14 @@ import { createReadRoutes } from "./routes/read";
 import { createMyEntryRoutes } from "./routes/my-entries";
 import { createChecklistRoutes } from "./routes/checklist";
 import { createMyHandoverRoutes } from "./routes/my-handovers";
+import {
+  approvalTextFor,
+  approveSickLeave,
+  finishApprovalMessages,
+  listSickApprovals,
+  rejectSickLeave,
+  sickApprovalDeps,
+} from "../sick-approval/sick-approval-service";
 import { createCalendarRoutes } from "./routes/calendar";
 import { createPollRoutes } from "./routes/polls";
 import { createFoodPlaceRoutes } from "./routes/food-places";
@@ -122,6 +130,7 @@ import {
   autoSendDateFor,
   isCollectionActive,
   SWAP_MESSAGE_MAX,
+  type SickApprovalRow,
 } from "@planer/shared";
 import {
   postSlot,
@@ -1348,6 +1357,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.json({ id: updated.id, resolvedAt: updated.resolvedAt });
   });
 
+  /**
+   * «На подтверждение»: worker sick leaves waiting for any one admin's «ОК». The same
+   * service the bot buttons call, so a decision from the console and one from the chat
+   * cannot disagree — and two of them in the same second resolve to one (409 for the other).
+   */
+  app.get("/api/admin/sick-approvals", requireAdmin(db, config.jwtSecret), (c) =>
+    c.json({ approvals: listSickApprovals(db) satisfies SickApprovalRow[] }),
+  );
+
+  for (const action of ["approve", "reject"] as const) {
+    app.post(`/api/admin/sick-approvals/:id/${action}`, requireAdmin(db, config.jwtSecret), async (c) => {
+      const deps = sickApprovalDeps(bot ?? null, db, config);
+      const id = Number(c.req.param("id"));
+      const adminId = c.get("auth").employeeId;
+      const res = action === "approve" ? await approveSickLeave(deps, id, adminId) : await rejectSickLeave(deps, id, adminId);
+      return res.ok ? c.json({ ok: true }) : c.json({ error: res.text }, res.status);
+    });
+  }
+
   /** «Кто сколько отдежурил» — people × kinds over a period. */
   app.get("/api/admin/reports/shift-counts", requireAdmin(db, config.jwtSecret), (c) => {
     const from = c.req.query("from");
@@ -1729,6 +1757,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = Number(c.req.param("id"));
     // Read it before it's gone — the feed has to be able to say what was deleted.
     const existing = getShift(db, id);
+    // A pending sick leave has a request out to every admin. The CASCADE would drop the
+    // message ids with the row and leave live buttons behind, so they are replaced first.
+    if (existing?.category === "sick_leave" && existing.approvalRequestedAt != null) {
+      await finishApprovalMessages(
+        sickApprovalDeps(bot ?? null, db, config),
+        id,
+        `${approvalTextFor(db, existing)}\n\n🗑 Больничного уже нет — запись удалил админ`,
+      );
+    }
     // Same reason, for the swaps hanging on it: `deleteShift` expires them and nulls
     // their pointer at this entry, so a line naming the shift can only be built now.
     const linesBefore = new Map(listPendingSwapsForShift(db, id).map((r) => [r.id, swapAuditPayload(r)]));

@@ -1,15 +1,16 @@
 import { Hono } from "hono";
+import { shiftStartMs } from "@planer/shared";
 import { z } from "zod";
 import type { Bot } from "grammy";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import type { Handover } from "../../db/schema";
 import { getShift } from "../../repo/shifts";
-import { getHandover } from "../../repo/handovers";
+import { getHandover, listOpenDrafts } from "../../repo/handovers";
 import { entryLineOf } from "../../util/message-lines";
 import { handoverCandidates } from "../../handover/candidates";
 import { createHandoverMessenger } from "../../handover/handover-messenger";
-import { fanOut, offerTo, type HandoverDeps } from "../../handover/handover-service";
+import { fanOut, handoverVoidReason, offerTo, type HandoverDeps } from "../../handover/handover-service";
 import { type Env, requireAuth } from "../middleware";
 
 /** What the form needs to ask «кому отдать»: the shift in words, and who is free. */
@@ -62,6 +63,22 @@ export function createMyHandoverRoutes(deps: { db: Db; config: Config; bot?: Bot
     if (!handover || handover.fromEmployeeId !== employeeId) return null;
     return handover;
   }
+
+  /**
+   * The form's second step, on demand. After an admin's «ОК» the worker is no longer in
+   * the form that used to show the drafts right away, so the bot's «Выбрать коллег»
+   * button opens the mini app here. Dead ones (shift gone, reassigned, uncovered) and
+   * started ones are left out — offering them would be refused anyway.
+   */
+  routes.get("/api/my/handovers/drafts", requireAuth(db, config.jwtSecret), (c) => {
+    const now = Date.now();
+    const open = listOpenDrafts(db, c.get("auth").employeeId).filter((handover) => {
+      if (handoverVoidReason(db, handover)) return false;
+      const shift = handover.shiftId == null ? undefined : getShift(db, handover.shiftId);
+      return shift != null && shiftStartMs(shift, config.teamTz) > now;
+    });
+    return c.json({ drafts: handoverDraftViews(db, open) });
+  });
 
   routes.post("/api/my/handovers/:id/offer", requireAuth(db, config.jwtSecret), async (c) => {
     const parsed = offerBody.safeParse(await c.req.json().catch(() => ({})));

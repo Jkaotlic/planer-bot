@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { startHandovers } from "../../handover/handover-service";
+import { createHandoverMessenger } from "../../handover/handover-messenger";
 import { approveSickLeave, sickApprovalDeps } from "../../sick-approval/sick-approval-service";
 import { createApp } from "../app";
 import { makeTestDb } from "../../db/testdb";
@@ -256,5 +258,41 @@ describe("снятие и правка больничного гасят пер�
     expect(rows.filter((h) => h.status !== "cancelled")).toHaveLength(3);
     expect(rows.find((h) => h.shiftId === third.id)).toBeDefined();
     expect(getShift(db, third.id)?.employeeId).toBe(me.id);
+  });
+});
+
+describe("GET /api/my/handovers/drafts", () => {
+  it("returns my undecided drafts after an admin's «ОК», and drops one once it is offered", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 631, "Аня");
+    const igor = worker(db, 632, "Игорь");
+    const boss = worker(db, 633, "Марк");
+    setEmployeeAdmin(db, boss.id, true);
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 631);
+    const created = await (await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(1) })))).json();
+    expect((await (await app.request(new Request("http://x/api/my/handovers/drafts", authed(token, undefined, "GET")))).json()).drafts).toEqual([]);
+
+    await approveSickLeave(sickApprovalDeps(null, db, config), created.entry.id, boss.id);
+    const { drafts } = await (await app.request(new Request("http://x/api/my/handovers/drafts", authed(token, undefined, "GET")))).json();
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].shiftLine).toContain("09:00–18:00");
+    expect(drafts[0].candidates.map((c: { id: number }) => c.id)).toContain(igor.id);
+
+    await app.request(new Request(`http://x/api/my/handovers/${drafts[0].id}/offer`, authed(token, { toEmployeeId: igor.id })));
+    expect((await (await app.request(new Request("http://x/api/my/handovers/drafts", authed(token, undefined, "GET")))).json()).drafts).toEqual([]);
+  });
+
+  it("a colleague's drafts are not mine to see", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 641, "Аня");
+    worker(db, 642, "Игорь");
+    createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    const sick = createShift(db, { date: day(1), category: "sick_leave", employeeId: me.id });
+    await startHandovers({ db, config, messenger: createHandoverMessenger(null, db) }, { sickEntry: sick, employeeId: me.id });
+    const app = createApp({ db, config, bot: undefined });
+    const igorToken = await tokenFor(app, 642);
+    expect((await (await app.request(new Request("http://x/api/my/handovers/drafts", authed(igorToken, undefined, "GET")))).json()).drafts).toEqual([]);
   });
 });

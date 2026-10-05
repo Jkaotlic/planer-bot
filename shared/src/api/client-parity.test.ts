@@ -38,6 +38,7 @@ const MINIAPP_ONLY: Record<string, string> = {
   deleteSelfEntry: "самозапись работника",
   offerHandover: "передача смены с больничного — шаг работника",
   skipHandover: "передача смены с больничного — шаг работника",
+  getMyHandoverDrafts: "передача смены с больничного — шаг работника, вход по кнопке из бота",
   expressInterest: "«Хочу» на выходной — работник",
   withdrawInterest: "«Хочу» на выходной — работник",
   getWeekendOffers: "предложения выходных работнику",

@@ -17,6 +17,8 @@ export interface TeamScheduleEntry {
   unrecognisedCode: string | null;
   templateId: number | null;
   employeeId: number | null;
+  /** Sick leave waiting for an admin's «ОК»; the key is absent otherwise. */
+  pending?: true;
 }
 
 export interface TeamScheduleView {
@@ -68,6 +70,7 @@ export function readTeamSchedule(db: Db, from: string, to: string): TeamSchedule
       unrecognisedCode: shift.unrecognisedCode,
       templateId: shift.templateId,
       employeeId: shift.employeeId,
+      ...(shift.approvalRequestedAt != null ? { pending: true as const } : {}),
     }));
   const calendar = listCalendarDays(db, from, to).map(({ date, kind, note, source }) => ({ date, kind, note, source }));
   return { employees, shifts, calendar };

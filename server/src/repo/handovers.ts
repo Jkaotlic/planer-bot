@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { handoverDeclines, handovers, type Handover, type NewHandover } from "../db/schema";
 
@@ -55,4 +55,19 @@ export function listDeclines(db: Db, handoverId: number): number[] {
     .orderBy(asc(handoverDeclines.id))
     .all()
     .map((row) => row.employeeId);
+}
+
+/**
+ * A worker's hand-overs still waiting for them to pick a colleague: offered to nobody,
+ * not fanned, not closed. Capped — the list is one sick leave's shifts, and the process
+ * also serves the bot's polling.
+ */
+export function listOpenDrafts(db: Db, employeeId: number): Handover[] {
+  return db
+    .select()
+    .from(handovers)
+    .where(and(eq(handovers.fromEmployeeId, employeeId), eq(handovers.status, "offered"), isNull(handovers.offeredToEmployeeId)))
+    .orderBy(asc(handovers.id))
+    .limit(20)
+    .all();
 }

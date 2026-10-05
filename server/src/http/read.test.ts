@@ -366,3 +366,24 @@ describe("контракт домена read", () => {
     expect(parsed.success).toBe(true);
   });
 });
+
+describe("«ждёт ОК» в чтении", () => {
+  it("marks a pending sick leave `pending: true` in both reads, and leaves the key off everything else", async () => {
+    const db = makeTestDb();
+    const w = worker(db, "Аня", 333);
+    createShift(db, { date: "2026-07-06", endDate: "2026-07-07", category: "sick_leave", employeeId: w.id, approvalRequestedAt: new Date() });
+    createShift(db, { date: "2026-07-08", start: "11:00", end: "20:00", employeeId: w.id });
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 333);
+
+    const team = await (await app.request("/api/team/schedule?from=2026-07-01&to=2026-07-10", bearer(token))).json();
+    const mine = await (await app.request("/api/my/shifts?from=2026-07-01", bearer(token))).json();
+    for (const body of [team, mine]) {
+      const [sick, work] = body.shifts;
+      expect(sick.pending).toBe(true);
+      expect(work).not.toHaveProperty("pending");
+    }
+    expect(teamScheduleResponseSchema.safeParse(team).success).toBe(true);
+    expect(myShiftsResponseSchema.safeParse(mine).success).toBe(true);
+  });
+});
