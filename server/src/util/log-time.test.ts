@@ -23,4 +23,19 @@ describe("метки времени в логе", () => {
       ["error", "[2026-09-24 07:03:00]", "bot failed:", "409"],
     ]);
   });
+
+  it("stamps warn too — mini-app crash reports go through console.warn", () => {
+    // Without this, «мини-апп не запустился» lines (route /api/client-error) carried
+    // no time at all, and a 2026-10-06 report could only be dated to «between 08:32
+    // and 15:46».
+    const lines: unknown[][] = [];
+    const target = {
+      log: (...args: unknown[]) => lines.push(["log", ...args]),
+      error: (...args: unknown[]) => lines.push(["error", ...args]),
+      warn: (...args: unknown[]) => lines.push(["warn", ...args]),
+    };
+    installLogTimestamps(target, "Europe/Moscow", () => new Date("2026-10-06T06:00:00Z"));
+    target.warn("мини-апп не запустился");
+    expect(lines).toEqual([["warn", "[2026-10-06 09:00:00]", "мини-апп не запустился"]]);
+  });
 });

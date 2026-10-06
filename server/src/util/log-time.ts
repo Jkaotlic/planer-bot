@@ -11,11 +11,16 @@ export function logStamp(at: Date, timeZone: string): string {
   return at.toLocaleString("sv-SE", { timeZone, hour12: false });
 }
 
-type LogTarget = { log: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
+type LogFn = (...args: unknown[]) => void;
+type LogTarget = { log: LogFn; error: LogFn; warn?: LogFn };
 
 export function installLogTimestamps(target: LogTarget, timeZone: string, now: () => Date = () => new Date()): void {
-  for (const level of ["log", "error"] as const) {
-    const original = target[level].bind(target);
+  // `warn` тоже: через него пишет `/api/client-error` («мини-апп не запустился»), и без
+  // метки такой отчёт 2026-10-06 датировался только «между 08:32 и 15:46».
+  for (const level of ["log", "error", "warn"] as const) {
+    const fn = target[level];
+    if (!fn) continue;
+    const original = fn.bind(target);
     target[level] = (...args: unknown[]) => original(`[${logStamp(now(), timeZone)}]`, ...args);
   }
 }
