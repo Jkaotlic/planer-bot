@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
+import { apiClient, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import {
   coverageSummary,
   NORM_CALENDAR_HINT,
@@ -15,6 +15,7 @@ import {
 import { useEntryPalette } from "../categories";
 import { PersonSearch } from "../components/PersonSearch";
 import { initialsOf, personPalette } from "../lib/people";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «допущен к 1 из 9 · любит: 2» — строка под именем человека.
@@ -44,6 +45,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
   /** Норма сохранена — число нехватки в сайдбаре (виден на любом экране) считается по ней. */
   onNormSaved?: () => void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [openKindId, setOpenKindId] = useState<number | null>(null);
@@ -63,7 +65,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
       .getTemplateRoles()
       .then(setKinds)
       .catch((err: unknown) => {
-        if (!(err instanceof AuthRequiredError)) {
+        if (!routeAuthError(err, onAuthRequired)) {
           setError(err instanceof Error ? err.message : "Не удалось загрузить виды смен");
         }
       });

@@ -3,7 +3,7 @@ import { announcementUnreachableLine, filterPeople, presetRecipientIds, type Ann
 import {
   ANNOUNCEMENT_TEXT_MAX,
   apiClient,
-  AuthRequiredError,
+ 
   type AnnouncementRecipient,
   type AnnouncementResult,
   type RecipientGroupView,
@@ -11,6 +11,7 @@ import {
 import { PersonSearch } from "../components/PersonSearch";
 import { Segmented } from "../components/Segmented";
 import { recipientsPhrase } from "./CollectionsScreen";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 const AUDIENCES = [
   { key: "all", label: "Всем" },
@@ -39,6 +40,7 @@ const AUDIENCES = [
  * держать его здесь второй копией значило бы дать ей разъехаться.
  */
 export function AnnounceScreen() {
+  const onAuthRequired = useAuthRequired();
   const [recipients, setRecipients] = useState<AnnouncementRecipient[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -78,7 +80,7 @@ export function AnnounceScreen() {
         if (!cancelled) setRecipients(list);
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof AuthRequiredError) return;
+        if (routeAuthError(err, onAuthRequired)) return;
         setLoadError(err instanceof Error ? err.message : "Не удалось загрузить получателей");
       }
     })();

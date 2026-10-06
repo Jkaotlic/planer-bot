@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { calendarFrom, dayOffLabel, formatAuditMoment, isDayOff, validateReminderHour } from "@planer/shared";
-import { apiClient, AuthRequiredError, type AdminSettings, type CalendarDayDto, type NoticePref, type SwapLockResult } from "../api/client";
+import { apiClient, type AdminSettings, type CalendarDayDto, type NoticePref, type SwapLockResult } from "../api/client";
 import { withNotifyNotice } from "../lib/notify-text";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Настройки»: тумблер замка обменов, час, в который уходят напоминания, и
@@ -17,6 +18,7 @@ import { withNotifyNotice } from "../lib/notify-text";
  * не должен превращаться в тупик без F5, как уже дважды случалось в проекте.
  */
 export function SettingsScreen() {
+  const onAuthRequired = useAuthRequired();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -35,7 +37,7 @@ export function SettingsScreen() {
       // перечитывание после соседнего тумблера стёрло бы набранное.
       setHour((current) => current ?? next.reminderHour);
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить настройки");
     }
   }
@@ -352,6 +354,7 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
  * её отказ не должен гасить замок обменов и час рассылки выше.
  */
 function NoticesCard() {
+  const onAuthRequired = useAuthRequired();
   const [prefs, setPrefs] = useState<NoticePref[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // По виду письма, а не одна общая: переключение «Обмены сменами» не должно
@@ -363,7 +366,7 @@ function NoticesCard() {
       .getNoticePrefs()
       .then(({ kinds }) => setPrefs(kinds))
       .catch((err: unknown) => {
-        if (err instanceof AuthRequiredError) return;
+        if (routeAuthError(err, onAuthRequired)) return;
         setLoadError(err instanceof Error ? err.message : "Не удалось загрузить список уведомлений");
       });
   }, []);

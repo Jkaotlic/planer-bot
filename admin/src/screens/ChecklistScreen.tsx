@@ -9,8 +9,9 @@ import {
   checklistDispatchState,
   checklistHasContent,
 } from "@planer/shared";
-import { apiClient, AuthRequiredError, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../api/client";
+import { apiClient, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../api/client";
 import { toISODate } from "../lib/week";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Чек-листы» — процедуры, которые проходят дежурные, и их сегодняшнее состояние.
@@ -24,6 +25,7 @@ import { toISODate } from "../lib/week";
  * команда, а не этот репозиторий.
  */
 export function ChecklistScreen({ templates }: { templates: readonly Template[] }) {
+  const onAuthRequired = useAuthRequired();
   const [checklists, setChecklists] = useState<Checklist[] | null>(null);
   const [day, setDay] = useState<ChecklistDay | null>(null);
   const [draft, setDraft] = useState("");
@@ -38,7 +40,7 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
       setChecklists(loaded);
       setDay(summary);
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить чек-листы");
     }
   }
@@ -56,7 +58,7 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
       await action();
       await reload();
     } catch (err) {
-      if (!(err instanceof AuthRequiredError)) {
+      if (!routeAuthError(err, onAuthRequired)) {
         setError(err instanceof Error ? err.message : "Не удалось сохранить");
       }
     } finally {

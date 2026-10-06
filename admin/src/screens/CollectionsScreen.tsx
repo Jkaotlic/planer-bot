@@ -9,7 +9,7 @@ import {
 } from "@planer/shared";
 import {
   apiClient,
-  AuthRequiredError,
+ 
   type Collection,
   type CollectionPatch,
   type CollectionPreview,
@@ -23,6 +23,7 @@ import { PersonPicker } from "../components/PersonPicker";
 import { RecipientGroupField } from "../components/RecipientGroupField";
 import { initialsOf, personPalette } from "../lib/people";
 import { withNotifyNotice } from "../lib/notify-text";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Сборы»: деньги, которые команда скидывает — на день рождения или по любому
@@ -179,6 +180,7 @@ function todayIso(): string {
 }
 
 export function CollectionsScreen() {
+  const onAuthRequired = useAuthRequired();
   const [today, setToday] = useState<string>(() => todayIso());
   const [birthdays, setBirthdays] = useState<UpcomingBirthday[] | null>(null);
   const [rows, setRows] = useState<CollectionRow[] | null>(null);
@@ -195,7 +197,7 @@ export function CollectionsScreen() {
       setToday(asOf);
       setBirthdays(birthdays);
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить дни рождения");
     }
   }
@@ -204,7 +206,7 @@ export function CollectionsScreen() {
     try {
       setRows(await apiClient.getCollections());
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setRowsError(err instanceof Error ? err.message : "Не удалось загрузить сборы");
     }
   }
@@ -735,6 +737,7 @@ function CollectionEditor({
   onSent: (delivered: number, intended: number) => void;
   onDeleted: () => void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const { collection } = row;
   const [title, setTitle] = useState(collection.title ?? "");
   const [employeeId, setEmployeeId] = useState(collection.employeeId ?? 0);
@@ -765,7 +768,7 @@ function CollectionEditor({
     try {
       setPreview(await apiClient.getCollectionPreview(collection.id));
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
     }
   }
@@ -1211,6 +1214,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
  * предпросмотра `id: 0`.
  */
 function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "open" | "onToggle">) {
+  const onAuthRequired = useAuthRequired();
   const [collectUrl, setCollectUrl] = useState(birthday.campaign?.collectUrl ?? "");
   const [messageText, setMessageText] = useState(birthday.campaign?.messageText ?? "");
   const [scheduledSendOn, setScheduledSendOn] = useState(birthday.campaign?.scheduledSendOn ?? "");
@@ -1226,7 +1230,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "
     try {
       setPreview(await apiClient.getBirthdayPreview(birthday.employeeId));
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
     }
   }

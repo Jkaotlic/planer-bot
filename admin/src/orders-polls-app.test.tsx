@@ -55,4 +55,13 @@ describe("консоль: пункт «Заказы и опросы»", () => {
     await act(async () => navItem(el, "Заказы и опросы").click());
     await waitFor(() => expect(el.textContent).toContain("Панель администратора"));
   });
+
+  // Другие экраны консоли раньше глотали истёкшую сессию и висели на «Загрузке…»:
+  // теперь они просят вход через контекст, который даёт `App`.
+  it("истёкшая сессия на экране «Группы» — тоже экран входа", async () => {
+    vi.spyOn(apiClient, "getRecipientGroups").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    const el = await mountApp();
+    await act(async () => navItem(el, "Группы").click());
+    await waitFor(() => expect(el.textContent).toContain("Панель администратора"));
+  });
 });

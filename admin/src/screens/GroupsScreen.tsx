@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { filterPeople, RECIPIENT_GROUP_NAME_MAX } from "@planer/shared";
-import { apiClient, AuthRequiredError, type Employee, type RecipientGroupView } from "../api/client";
+import { apiClient, type Employee, type RecipientGroupView } from "../api/client";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { PersonSearch } from "../components/PersonSearch";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Группы» — списки людей, которые админ правит сам и потом выбирает одной
@@ -23,6 +24,7 @@ type Editing = {
 };
 
 export function GroupsScreen({ employees }: { employees: readonly Employee[] }) {
+  const onAuthRequired = useAuthRequired();
   const [groups, setGroups] = useState<RecipientGroupView[] | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [query, setQuery] = useState("");
@@ -37,7 +39,7 @@ export function GroupsScreen({ employees }: { employees: readonly Employee[] }) 
       setGroups(await apiClient.getRecipientGroups());
       setLoadFailed(false);
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить группы");
       setLoadFailed(true);
       // Без этого экран остался бы на «Загрузке» вечно: ошибку некому было бы показать.
@@ -58,7 +60,7 @@ export function GroupsScreen({ employees }: { employees: readonly Employee[] }) 
       await reload();
       return true;
     } catch (err) {
-      if (!(err instanceof AuthRequiredError)) setError(err instanceof Error ? err.message : "Не удалось сохранить");
+      if (!routeAuthError(err, onAuthRequired)) setError(err instanceof Error ? err.message : "Не удалось сохранить");
       return false;
     } finally {
       setBusy(false);
