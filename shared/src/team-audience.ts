@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAbsentOn } from "./absence";
+import type { AnnouncementRole } from "./announce-audience";
 import type { EntryCategory } from "./category";
 
 /**
@@ -52,4 +53,60 @@ export function workingOn(
     ids.add(e.employeeId);
   }
   return [...ids];
+}
+
+/**
+ * Один потенциальный адресат опроса или заказа — контракт `GET /api/team-audience`.
+ * `onShift` — только у этой ручки: анонсам всё равно, кто сегодня на месте. Здесь,
+ * а не в клиенте мини-аппа: тот же выбор с 2026-10-06 рисует и консоль.
+ */
+export interface AudienceCandidate {
+  id: number;
+  displayName: string;
+  reachable: boolean;
+  role: AnnouncementRole;
+  onShift: boolean;
+}
+
+/** «Выбрать» без единой галочки — слать некому; сервер ответил бы «Некому отправить». */
+export function audienceReady(audience: TeamAudience): boolean {
+  return !(audience.kind === "picked" && audience.employeeIds.length === 0);
+}
+
+export interface AudiencePreview {
+  reachable: string[];
+  unreachable: string[];
+  observerCopies: string[];
+}
+
+/**
+ * Кому уйдёт — поимённо, до отправки.
+ *
+ * Наблюдателям сервер шлёт копию любого опроса и заказа, кого бы ни выбрали
+ * (`resolveAudience`, решение 2026-10-06). Без отдельной строки запускающий думал
+ * бы, что их не позвали. Наблюдатель без Telegram в копии не попадает: его не
+ * звали, и в «не дойдёт» ему делать нечего.
+ */
+export function audiencePreview(people: readonly AudienceCandidate[], value: TeamAudience): AudiencePreview {
+  const chosen =
+    value.kind === "team" ? people
+    : value.kind === "on_shift" ? people.filter((p) => p.onShift)
+    : people.filter((p) => value.employeeIds.includes(p.id));
+  const inChosen = new Set(chosen.map((p) => p.id));
+  return {
+    reachable: chosen.filter((p) => p.reachable).map((p) => p.displayName),
+    unreachable: chosen.filter((p) => !p.reachable).map((p) => p.displayName),
+    observerCopies: people
+      .filter((p) => p.role === "observer" && p.reachable && !inChosen.has(p.id))
+      .map((p) => p.displayName),
+  };
+}
+
+/** Строки под выбором. `null` — строки нет вовсе: пустая «Не дойдёт: » читалась бы как сбой. */
+export function audienceLines(preview: AudiencePreview): { goes: string; observers: string | null; unreachable: string | null } {
+  return {
+    goes: preview.reachable.length === 0 ? "Пока никого, кроме тебя." : `Уйдёт: ${preview.reachable.join(", ")} и тебе`,
+    observers: preview.observerCopies.length > 0 ? `Наблюдателям — копия всегда: ${preview.observerCopies.join(", ")}` : null,
+    unreachable: preview.unreachable.length > 0 ? `Не дойдёт: ${preview.unreachable.join(", ")} — не привязан(а) к боту` : null,
+  };
 }

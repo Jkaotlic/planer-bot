@@ -6,12 +6,15 @@ import {
   cancelPollQuestion,
   closeOrderQuestion,
   closePollQuestion,
+  EMPTY_DISH_NAME,
+  FOOD_MENU_FULL_HINT,
   menuItemLabel,
   menuPreview,
   myOrderPayment,
   orderInProgress,
   orderPersonLine,
   orderStatusLabel,
+  placeMenuFromRows,
   pollStatusLabel,
   priceDigits,
   remindResultText,
@@ -128,5 +131,31 @@ describe("вопросы подтверждения: чужой заказ и о
     expect(cancelOrderQuestion({ isCreator: false, creatorName: "Игорь" })).toBe("Отменить чужой заказ (собирает Игорь)?");
     expect(closePollQuestion({ isCreator: false, creatorName: "Игорь" })).toBe("Закрыть чужой опрос (спрашивает Игорь)?");
     expect(cancelPollQuestion({ isCreator: false, creatorName: "Игорь" })).toBe("Отменить чужой опрос (спрашивает Игорь)?");
+  });
+});
+
+describe("placeMenuFromRows — меню из строк редактора", () => {
+  it("новая пустая строка отбрасывается, id существующих сохраняются, цена — числом", () => {
+    expect(
+      placeMenuFromRows([
+        { id: 9, name: " Пицца ", price: "600" },
+        { name: "", price: "" },
+        { name: "Суп", price: "1 200" },
+      ]),
+    ).toEqual({ ok: true, menu: [{ id: 9, name: "Пицца", price: 600 }, { name: "Суп", price: 1200 }] });
+  });
+
+  it("существующее блюдо с пустым именем — ошибка, а не тихое удаление из меню", () => {
+    expect(placeMenuFromRows([{ id: 9, name: "  ", price: "600" }])).toEqual({ ok: false, error: EMPTY_DISH_NAME });
+    expect(EMPTY_DISH_NAME).toBe("У блюда пустое название — впиши или удали строку ✕.");
+  });
+
+  it("блюдо без цены — ошибка с его именем, а не ноль на сервер и общий отказ", () => {
+    expect(placeMenuFromRows([{ name: "Шаурма", price: "" }])).toEqual({ ok: false, error: "У «Шаурма» не указана цена." });
+    expect(placeMenuFromRows([{ name: "Шаурма", price: "0" }])).toEqual({ ok: false, error: "У «Шаурма» не указана цена." });
+  });
+
+  it("подсказка полного меню называет потолок", () => {
+    expect(FOOD_MENU_FULL_HINT).toBe("В меню уже 30 блюд — больше не поместится в кнопки бота.");
   });
 });
