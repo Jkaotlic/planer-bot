@@ -68,3 +68,24 @@ describe("PlaceEditor", () => {
     expect(el.textContent).toContain("У блюда пустое название — впиши или удали строку ✕.");
   });
 });
+
+describe("PlaceEditor — мелочи захода", () => {
+  it("блюдо без цены — ошибка с его именем, сохранение не уходит", async () => {
+    const save = vi.spyOn(apiClient, "saveFoodPlace");
+    const el = await mountEditor({ place: null, onSaved: vi.fn() });
+    await act(async () => type(el.querySelector<HTMLInputElement>("input[name=place-name]")!, "Шаурмечная"));
+    await act(async () => byText(el, "+ Блюдо").click());
+    await act(async () => type(el.querySelector<HTMLInputElement>("input[name=dish-name-0]")!, "Шаурма"));
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    expect(save).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("У «Шаурма» не указана цена.");
+  });
+
+  it("на 30-м блюде «+ Блюдо» пропадает, и видно почему", async () => {
+    const menu = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `Блюдо ${i + 1}`, price: 100 }));
+    const el = await mountEditor({ place: { id: 5, name: "Столовая", menu }, onSaved: vi.fn() });
+    expect(byText(el, "+ Блюдо")).toBeUndefined();
+    expect(el.textContent).toContain("В меню уже 30 блюд — больше не поместится в кнопки бота.");
+  });
+});

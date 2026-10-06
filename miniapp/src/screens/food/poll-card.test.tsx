@@ -66,3 +66,11 @@ describe("PollCard — выбранный голос", () => {
     expect(pressed.filter(([, v]) => v === "false")).toHaveLength(pressed.length - 1);
   });
 });
+
+describe("PollCard — админ у чужого опроса", () => {
+  it("вопрос «Закрыть» называет того, кто спрашивает", async () => {
+    const el = await mountCard({ ...POLL, creatorName: "Игорь", isCreator: false, canManage: true });
+    await act(async () => byText(el, "Закрыть и разослать итог")!.click());
+    expect(el.textContent).toContain("Закрыть чужой опрос (спрашивает Игорь)?");
+  });
+});

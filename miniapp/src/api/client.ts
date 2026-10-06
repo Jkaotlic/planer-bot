@@ -7,9 +7,13 @@ import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
 // реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
 // `POST /api/polls/:id/vote`), — опрос считает и правами, и сроком закрытия
 // сервер, а не мини-апп заново.
-import type { TeamAudience, PollChoice, PollTally, PlaceInput } from "@planer/shared";
+import type { TeamAudience, PollChoice, PlaceInput } from "@planer/shared";
 export type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
 export type { PlaceInput } from "@planer/shared";
+// Ответы ручек опросов, заказов, мест и адресатов — в shared с 2026-10-06: их же
+// читает консоль, а две копии одной формы разъезжаются молча.
+import type { AudienceCandidate, OrderView, PlaceView, PollView } from "@planer/shared";
+export type { AudienceCandidate, OrderView, PlaceView, PollView } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -574,75 +578,6 @@ export interface AnnouncementResult {
  *  Без телефонов и инвайт-токенов: экрану «Анонс» нужны ровно имя и «дойдёт ли». */
 // Тип общий с сервером: роль нужна кнопкам «Админам» / «Работникам».
 export type { AnnouncementRecipient, RecipientGroupView } from "@planer/shared";
-
-/** Один потенциальный адресат опроса или заказа — контракт `GET /api/team-audience`.
- *  `onShift` — только для этой ручки: анонсам всё равно, кто сегодня на месте. */
-export interface AudienceCandidate {
-  id: number;
-  displayName: string;
-  reachable: boolean;
-  role: "admin" | "worker" | "observer";
-  onShift: boolean;
-}
-
-/** Опрос глазами того, кто его открыл — контракт `GET /api/polls`, `GET /api/polls/:id`.
- *  `canManage` уже посчитан сервером (запускающий или админ) — экран не повторяет правило. */
-export interface PollView {
-  id: number;
-  question: string;
-  creatorId: number;
-  creatorName: string;
-  closesAt: string | null;
-  closes: string | null;
-  open: boolean;
-  cancelled: boolean;
-  isCreator: boolean;
-  canManage: boolean;
-  myChoice: PollChoice | null;
-  tally: PollTally;
-  recipientCount: number;
-}
-
-/** Место с меню — контракт `GET /api/food-places`, `POST /api/food-places`,
- *  `PUT /api/food-places/:id`. Общее для всех работников, как и опрос. */
-export interface PlaceView {
-  id: number;
-  name: string;
-  menu: { id: number; name: string; price: number }[];
-}
-
-/** Заказ еды глазами того, кто его открыл — контракт GET /api/orders,
- *  GET /api/orders/:id (см. OrderView в server/src/orders/order-service.ts).
- *  canManage и people уже посчитаны сервером: запускающий или админ, и
- *  список «кто сколько» только им — экран не повторяет ни то, ни другое. */
-export interface OrderView {
-  id: number;
-  creatorId: number;
-  creatorName: string;
-  placeId: number | null;
-  placeName: string | null;
-  menu: { id: number; name: string; price: number }[];
-  note: string | null;
-  payHint: string | null;
-  closesAt: string | null;
-  closes: string | null;
-  open: boolean;
-  closed: boolean;
-  cancelled: boolean;
-  isCreator: boolean;
-  canManage: boolean;
-  myItems: { id: number; name: string; price: number; qty: number }[];
-  myTotal: number;
-  declined: boolean;
-  recipientCount: number;
-  respondedCount: number;
-  dishes: { name: string; price: number; qty: number }[];
-  total: number;
-  people: { employeeId: number; displayName: string; amount: number; declined: boolean }[] | null;
-  /** Кто уже сдал деньги за заказ. `rows` — только запускающему/админу, как
-   *  и `people` выше: сумма и отметка коллеги — не общее знание. */
-  payment: { myPaid: boolean; paidCount: number; total: number; rows: (PaymentRow & { amount: number })[] | null };
-}
 
 /** Один багрепорт списком — ради этого экрана и заводилась таблица: в чате
  *  сообщение тонет за сутки, здесь остаётся, пока его не отметят «Разобрал». */

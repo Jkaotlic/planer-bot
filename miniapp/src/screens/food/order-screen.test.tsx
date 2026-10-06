@@ -225,3 +225,12 @@ describe("OrderScreen — отказ загрузки", () => {
     expect(el.textContent).toContain("Твой заказ");
   });
 });
+
+describe("OrderScreen — админ у чужого заказа", () => {
+  it("вопрос «Закрыть приём» называет того, кто собирает", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, creatorName: "Игорь", isCreator: false, canManage: true });
+    const el = await mountScreen(7);
+    await act(async () => byText(el, "Закрыть приём").click());
+    expect(el.textContent).toContain("Закрыть чужой заказ (собирает Игорь) и разослать «сдай»?");
+  });
+});

@@ -94,7 +94,7 @@ describe("FoodScreen", () => {
     const el = await mount({ view: "places" });
     expect(getFoodPlaces).toHaveBeenCalled();
     expect(el.textContent).toContain("Додо");
-    expect(el.textContent).toContain("Пицца — 500 ₽");
+    expect(el.textContent).toContain("Пицца — 500\u00a0₽");
     expect(el.textContent).not.toContain("Заказы еды появятся в следующем обновлении.");
   });
 
@@ -130,5 +130,16 @@ describe("FoodScreen", () => {
     await act(async () => byText(el, "Удалить").click());
     await settle();
     expect(el.textContent).toContain("Места больше нет.");
+  });
+});
+
+describe("FoodScreen — деньги меню", () => {
+  // Review Focus №4: список мест писал «1200 ₽» без разбивки разрядов, а форма
+  // заказа — «1 200 ₽». Одна строка денег на обе морды — `menuPreview`.
+  it("меню места — те же деньги, что везде: «1 200 ₽»", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }] }]);
+    const el = await mount({ view: "places" });
+    // formatMoney склеивает разряды и «₽» неразрывным пробелом — литерал с обычным пробелом не совпал бы.
+    expect(el.textContent).toContain("Пицца — 1\u00a0200\u00a0₽");
   });
 });

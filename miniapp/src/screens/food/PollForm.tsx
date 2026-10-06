@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Input, Textarea } from "@telegram-apps/telegram-ui";
-import { POLL_QUESTION_MAX } from "@planer/shared";
+import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText } from "@planer/shared";
 import { apiClient, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton } from "../../ui";
@@ -21,7 +21,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
   // Telegram) — точный ответ даёт только сервер, в самом ответе создания.
   const [summary, setSummary] = useState<{ delivered: number; unreachable: string[] } | null>(null);
 
-  const ready = question.trim().length > 0 && !(audience.kind === "picked" && audience.employeeIds.length === 0);
+  const ready = question.trim().length > 0 && audienceReady(audience);
 
   async function submit() {
     setBusy(true);
@@ -45,7 +45,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
       <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
         <h1 className="ui-screen__title">Опрос отправлен</h1>
         <div style={{ fontSize: "var(--app-text-body)", lineHeight: 1.45 }}>
-          Отправлено: {summary.delivered}. Не дошло: {summary.unreachable.join(", ")}
+          {sendReportText(summary)}
         </div>
         <ActionButton kind="primary" onClick={onDone}>ОК</ActionButton>
       </div>
@@ -59,7 +59,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
         onChange={(e) => setQuestion(e.target.value)} disabled={busy} />
       <Input header="Голосуем до (необязательно)" type="time" value={closesTime}
         onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Ответы: 👍 За · 👎 Против · 🤷 Воздержался</div>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{POLL_CHOICES_HINT}</div>
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>

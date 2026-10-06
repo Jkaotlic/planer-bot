@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { POLL_CHOICE_LABEL, POLL_CHOICES } from "@planer/shared";
+import { POLL_CHOICE_LABEL, POLL_CHOICES, cancelPollQuestion, closePollQuestion, pollStatusLabel, pollTallyLines } from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
 import { ActionButton, Card } from "../../ui";
 import { ConfirmButton } from "../../components/ConfirmButton";
-
-const TALLY_LABELS = [["for", "👍 За"], ["against", "👎 Против"], ["abstain", "🤷 Воздержались"], ["silent", "Не ответили"]] as const;
 
 /** Опрос карточкой: голос, итог поимённо, а запускающему — «Закрыть» и «Отменить». */
 export function PollCard({ poll: initial }: { poll: PollView }) {
@@ -34,7 +32,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
     }
   }
 
-  const status = poll.cancelled ? "отменён" : poll.open ? (poll.closes ?? "идёт") : "закрыт";
+  const status = pollStatusLabel(poll);
   return (
     <Card>
       <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🗳 {poll.question}</div>
@@ -48,15 +46,13 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
         </div>
       )}
       <div style={{ fontSize: "var(--app-text-meta)" }}>
-        {TALLY_LABELS.map(([key, label]) => poll.tally[key].length > 0 && (
-          <div key={key}>{label} — {poll.tally[key].length}: {poll.tally[key].join(", ")}</div>
-        ))}
+        {pollTallyLines(poll.tally).map((line) => <div key={line}>{line}</div>)}
       </div>
       {poll.canManage && poll.open && (
         <div style={{ display: "flex", gap: 8 }}>
-          <ConfirmButton label="Закрыть и разослать итог" question="Закрыть опрос?" confirmLabel="Закрыть"
+          <ConfirmButton label="Закрыть и разослать итог" question={closePollQuestion(poll)} confirmLabel="Закрыть"
             onConfirm={() => run(() => apiClient.closePoll(poll.id))} disabled={busy} />
-          <ConfirmButton label="Отменить" question="Отменить опрос?" confirmLabel="Отменить"
+          <ConfirmButton label="Отменить" question={cancelPollQuestion(poll)} confirmLabel="Отменить"
             onConfirm={() => run(() => apiClient.cancelPoll(poll.id))} disabled={busy} />
         </div>
       )}
