@@ -5,6 +5,7 @@ import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { failureText } from "./food-errors";
 import { OrderForm } from "./OrderForm";
 import { OrderScreen } from "./OrderScreen";
+import { PlacesScreen } from "./PlacesScreen";
 import { PollCard } from "./PollCard";
 import { PollForm } from "./PollForm";
 
@@ -50,9 +51,10 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
 
   const toList = () => setRoute({ view: "list" });
   if (route.view === "new-order") {
-    return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} onAuthRequired={onAuthRequired} />;
+    return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} onEditPlaces={() => setRoute({ view: "places" })} onAuthRequired={onAuthRequired} />;
   }
   if (route.view === "new-poll") return <PollForm onDone={toList} onCancel={toList} onAuthRequired={onAuthRequired} />;
+  if (route.view === "places") return <PlacesScreen onBack={toList} onAuthRequired={onAuthRequired} />;
   if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} onAuthRequired={onAuthRequired} />;
 
   const retry = () => setAttempt((n) => n + 1);
@@ -75,6 +77,7 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
       <div className="food-toolbar">
         <button type="button" className="btn btn-primary" onClick={() => setRoute({ view: "new-order" })}>🍱 Новый заказ</button>
         <button type="button" className="btn btn-secondary" onClick={() => setRoute({ view: "new-poll" })}>🗳 Новый опрос</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setRoute({ view: "places" })}>🍴 Места и меню</button>
       </div>
       {(orders === null && !ordersError) || (polls === null && !pollsError) ? (
         <div className="employees-empty">Загрузка…</div>

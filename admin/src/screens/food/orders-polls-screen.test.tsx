@@ -105,4 +105,21 @@ describe("консоль: список «Заказы и опросы»", () => 
     expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы");
     expect(getPolls).toHaveBeenCalledTimes(2);
   });
+
+  it("«🍴 Места и меню» — из шапки и из формы заказа; «‹ Назад» — в список", async () => {
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([]);
+    const el = await mount(OrdersPollsScreen, { onAuthRequired: vi.fn() });
+    await waitFor(() => expect(el.textContent).toContain("Пока ничего не запускали."));
+    await click(button(el, "🍴 Места и меню"));
+    expect(el.querySelector("h2")?.textContent).toBe("Места и меню");
+    await click(button(el, "‹ Назад"));
+    await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы"));
+    await click(button(el, "🍱 Новый заказ"));
+    await click(button(el, "🍴 Места и меню"));
+    expect(el.querySelector("h2")?.textContent).toBe("Места и меню");
+  });
 });
