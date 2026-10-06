@@ -3,6 +3,7 @@ import type { Shift, Template } from "../api/client";
 import { formatTimeRange } from "../lib/shift";
 import { DayBadge } from "./DayBadge";
 import { EntryChip } from "./EntryChip";
+import { mixOr } from "../lib/color-mix";
 
 export interface ShiftRowProps {
   shift: Shift;
@@ -71,7 +72,7 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
               // Рельс, а не залитая строка: чип внутри уже несёт цвет пресета,
               // и два фона спорят.
               boxShadow: "inset 3px 0 var(--tgui--link_color)",
-              background: "color-mix(in srgb, var(--tgui--link_color) 7%, transparent)",
+              background: mixOr("color-mix(in srgb, var(--tgui--link_color) 7%, transparent)", "transparent"),
             }
           : null),
       }}

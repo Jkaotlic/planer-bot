@@ -40,11 +40,24 @@ describe("токены оформления консоли", () => {
     expect(literal.length).toBeGreaterThan(20);
   });
 
-  it("перед каждым color-mix стоит простое значение того же свойства", () => {
+  it("перед каждым color-mix стоит простое значение того же свойства — или смесь под @supports", () => {
     const lines = css.split("\n");
+    // Строки внутри `@supports (… color-mix …) { … }`: там запасное значение стоит в
+    // правиле снаружи блока. Так надёжнее второй строки подряд — её сборщик консоли
+    // склеивал с первой и выбрасывал запасную (замер dist 2026-10-06).
+    const guarded = new Set<number>();
+    lines.forEach((line, start) => {
+      if (!/^@supports[^{]*color-mix/.test(line)) return;
+      let depth = 0;
+      for (let i = start; i < lines.length; i += 1) {
+        depth += (lines[i]!.match(/\{/g) ?? []).length - (lines[i]!.match(/\}/g) ?? []).length;
+        guarded.add(i);
+        if (depth === 0 && i > start) break;
+      }
+    });
     lines.forEach((line, i) => {
       const m = line.match(/^\s*([a-z-]+):\s*color-mix\(/);
-      if (!m) return;
+      if (!m || guarded.has(i)) return;
       expect(lines[i - 1]?.trim().startsWith(`${m[1]}:`), `строка ${i + 1}: ${line.trim()}`).toBe(true);
     });
   });

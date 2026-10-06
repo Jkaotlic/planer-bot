@@ -335,7 +335,9 @@
   height: 18px;
   padding: 0 4px;
   border-radius: 999px;
-  background-color: color-mix(in srgb, var(--tgui--destructive_text_color, #e53935) 84%, #000);
+  /* Без смеси — чистый красный: Safari < 16.2 не знает `color-mix`, и без запасной
+     заливки метка оставалась белыми цифрами на пустом месте. Смесь — ниже, под @supports. */
+  background-color: var(--tgui--destructive_text_color, #e53935);
   color: #fff;
   font-size: 11px;
   line-height: 18px;
@@ -649,4 +651,10 @@
   /* Обычный цвет, а не `hint_color`: серый давал 3.57 (тёмная) и 2.81 (светлая)
      при нужных 4.5. */
   color: var(--tgui--text_color);
+}
+
+@supports (color: color-mix(in srgb, red, blue)) {
+  .ui-menu-row__badge {
+    background-color: color-mix(in srgb, var(--tgui--destructive_text_color, #e53935) 84%, #000);
+  }
 }

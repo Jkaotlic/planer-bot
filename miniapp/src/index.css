@@ -311,10 +311,22 @@ textarea {
    приложению. Замер до правки: счётчик подписи 3.57 / 2.81, ошибка длины 3.42 / 3.74
    (светлая / тёмная); норма 4.5. Смесь с цветом текста тянет серое и красное к
    контрастному полюсу темы, поэтому одно правило годится для обеих. */
+/* Запасной цвет — без смеси, сама смесь под `@supports`: Safari < 16.2 её не знает, а
+   вторую строку `color` в том же правиле сборщик выбрасывает (замер dist 2026-10-06). */
 .ui-hint.qr-hint {
-  color: color-mix(in srgb, var(--tgui--hint_color) 55%, var(--tgui--text_color));
+  color: var(--tgui--text_color);
 }
 
 .qr-error {
-  color: color-mix(in srgb, var(--tgui--destructive_text_color) 60%, var(--tgui--text_color));
+  color: var(--tgui--destructive_text_color);
+}
+
+@supports (color: color-mix(in srgb, red, blue)) {
+  .ui-hint.qr-hint {
+    color: color-mix(in srgb, var(--tgui--hint_color) 55%, var(--tgui--text_color));
+  }
+
+  .qr-error {
+    color: color-mix(in srgb, var(--tgui--destructive_text_color) 60%, var(--tgui--text_color));
+  }
 }

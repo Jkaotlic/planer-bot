@@ -43,6 +43,7 @@ import { formatTimeRange, notifyPendingNotice, withNotifyNotice } from "../../li
 import { initialsOf, personPalette } from "../../lib/people";
 import { useIsDark } from "../../lib/theme";
 import { createLatestRequestGate } from "../../lib/request-gate";
+import { mixOr } from "../../lib/color-mix";
 import {
   addDays,
   dayOfMonth,
@@ -593,7 +594,7 @@ function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: str
             position: "absolute", top: -4, right: -2, minWidth: 16, height: 16, padding: "0 4px", boxSizing: "border-box",
             // Белое на «красном» клиента не дотягивает до 4.5 ни в одной теме
             // (замер: 4.28 и 4.01), поэтому красный затемнён.
-            borderRadius: 999, background: "color-mix(in srgb, var(--tgui--destructive_text_color) 84%, #000)", color: "#fff",
+            borderRadius: 999, background: mixOr("color-mix(in srgb, var(--tgui--destructive_text_color) 84%, #000)", "var(--tgui--destructive_text_color)"), color: "#fff",
             fontSize: 10.5, fontWeight: 700, lineHeight: "16px", textAlign: "center",
             boxShadow: "0 0 0 2px var(--app-canvas, var(--tgui--secondary_bg_color))",
           }}
