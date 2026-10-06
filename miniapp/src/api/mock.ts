@@ -2058,15 +2058,21 @@ export async function mockGetPolls(): Promise<PollView[]> {
 
 /**
  * Кого мок реально позовёт — те же правила, что серверный `resolveAudience`:
- * «команда» берёт всех активных (наблюдателя тоже, с 2026-09-30), «на смене»
+ * «команда» берёт всех активных, «на смене»
  * фильтрует по `mockOnShift`. Раньше «на смене» в DEV слало вообще всем активным —
  * форма спрашивала одно, а получал бы другое.
  */
 function mockAudienceIds(audience: TeamAudience): number[] {
-  if (audience.kind === "picked") return audience.employeeIds;
   const active = EMPLOYEES.filter((e) => e.isActive);
-  if (audience.kind === "team") return active.map((e) => e.id);
-  return active.filter((e) => mockOnShift(e.id)).map((e) => e.id);
+  const chosen = audience.kind === "picked"
+    ? audience.employeeIds
+    : audience.kind === "team"
+      ? active.map((e) => e.id)
+      : active.filter((e) => mockOnShift(e.id)).map((e) => e.id);
+  // Наблюдателям — копия всегда (как `resolveAudience` с 2026-10-06); без Telegram — нет:
+  // его не звали, и в «не дойдёт» он попасть не должен.
+  const observers = active.filter((e) => e.isObserver && e.telegramUserId != null && !chosen.includes(e.id)).map((e) => e.id);
+  return [...chosen, ...observers];
 }
 
 export async function mockCreatePoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }> {

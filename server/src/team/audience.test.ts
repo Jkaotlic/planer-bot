@@ -17,6 +17,50 @@ function shiftFor(db: Db, employeeId: number, category: "shift" | "vacation", da
   db.insert(shifts).values({ employeeId, category, date, start: category === "shift" ? "09:00" : null, end: category === "shift" ? "18:00" : null }).run();
 }
 
+describe("resolveAudience — observers always get a copy (owner's decision 2026-10-06)", () => {
+  it("«on shift» still includes an observer who has no shift today", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const mark = person(db, "Марк", 102);
+    setEmployeeObserver(db, mark, true);
+    shiftFor(db, igor, "shift");
+    const { reachable } = resolveAudience(db, { kind: "on_shift" }, anya, today);
+    expect(reachable.map((e) => e.id)).toEqual([anya, igor, mark]);
+  });
+
+  it("«picked» without the observer still includes the observer", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const mark = person(db, "Марк", 102);
+    setEmployeeObserver(db, mark, true);
+    const { reachable } = resolveAudience(db, { kind: "picked", employeeIds: [igor] }, anya, today);
+    expect(reachable.map((e) => e.id)).toEqual([anya, igor, mark]);
+  });
+
+  it("an observer without Telegram is not added to «unreachable» unless picked", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const mark = person(db, "Марк", null);
+    setEmployeeObserver(db, mark, true);
+    const { reachable, unreachable } = resolveAudience(db, { kind: "picked", employeeIds: [igor] }, anya, today);
+    expect(reachable.map((e) => e.id)).toEqual([anya, igor]);
+    expect(unreachable).toEqual([]);
+  });
+
+  it("an archived observer is never added", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const mark = person(db, "Марк", 102);
+    setEmployeeObserver(db, mark, true);
+    archiveEmployee(db, mark, today);
+    const { reachable } = resolveAudience(db, { kind: "on_shift" }, anya, today);
+    expect(reachable.map((e) => e.id)).toEqual([anya]);
+  });
+});
+
 describe("resolveAudience", () => {
   it("«вся команда» — все активные, наблюдатель тоже; запускающий первым", () => {
     const db = makeTestDb();
