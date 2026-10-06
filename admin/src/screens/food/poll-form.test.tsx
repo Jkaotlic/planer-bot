@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_QUESTION_MAX } from "@planer/shared";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { TEAM, pollView } from "./food-fixtures";
-import { authRequired, button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, release, mount, type, unmount, waitFor } from "./food-test-kit";
 import { PollForm } from "./PollForm";
 
 beforeEach(() => {
@@ -74,7 +74,7 @@ describe("консоль: новый опрос", () => {
     await click(button(el, "Отправить"));
     await click(button(el, "Отправляю…"));
     expect(create).toHaveBeenCalledTimes(1);
-    slow.resolve({ poll: pollView(), delivered: 2, unreachable: [] });
+    await release(slow, { poll: pollView(), delivered: 2, unreachable: [] });
   });
 
   it("истёкшая сессия при отправке — вход, а не красная плашка", async () => {

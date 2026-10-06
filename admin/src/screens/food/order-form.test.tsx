@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { TEAM, orderView } from "./food-fixtures";
-import { authRequired, button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, release, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderForm } from "./OrderForm";
 
 beforeEach(() => {
@@ -81,7 +81,7 @@ describe("консоль: новый заказ", () => {
     await click(button(el, "Разослать"));
     await click(button(el, "Отправляю…"));
     expect(create).toHaveBeenCalledTimes(1);
-    slow.resolve({ order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
+    await release(slow, { order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
   });
 
   it("истёкшая сессия при отправке — вход, а не красная плашка", async () => {

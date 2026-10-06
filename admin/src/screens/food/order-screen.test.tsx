@@ -4,7 +4,7 @@ import { FOOD_TEXT_MAX, formatMoney, menuItemLabel } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { orderView } from "./food-fixtures";
 import { AuthRequiredError } from "../../api/client";
-import { authRequired, button, click, deferred, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, release, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderScreen } from "./OrderScreen";
 
 afterEach(async () => {
@@ -212,7 +212,7 @@ describe("консоль: заказ — действия, которые ран
     await click(button(el, "Больше: Пицца"));
     await click(button(el, "Больше: Пицца"));
     expect(qty).toHaveBeenCalledTimes(1);
-    slow.resolve(mine(2));
+    await release(slow, mine(2));
   });
 
   it("двойной клик по блюду меню — один запрос", async () => {
@@ -222,7 +222,7 @@ describe("консоль: заказ — действия, которые ран
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
     expect(add).toHaveBeenCalledTimes(1);
-    slow.resolve(mine(1));
+    await release(slow, mine(1));
   });
 
   it("«🙅 Не буду» уходит на сервер", async () => {

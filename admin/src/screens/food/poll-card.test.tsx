@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { pollView } from "./food-fixtures";
-import { authRequired, button, click, deferred, maybeButton, mount, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, release, maybeButton, mount, unmount, waitFor } from "./food-test-kit";
 import { PollCard } from "./PollCard";
 
 afterEach(async () => {
@@ -68,7 +68,7 @@ describe("консоль: карточка опроса", () => {
     await click(button(el, "👍 За"));
     await click(button(el, "👍 За"));
     expect(vote).toHaveBeenCalledTimes(1);
-    slow.resolve(pollView({ myChoice: "for" }));
+    await release(slow, pollView({ myChoice: "for" }));
   });
 
   it("«Отменить» — после подтверждения шлёт cancelPoll", async () => {

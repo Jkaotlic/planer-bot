@@ -66,4 +66,12 @@ export function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } 
   return { promise, resolve };
 }
 
+/**
+ * Разрешает «зависшее» действие внутри `act` и ждёт, пока экран обработает ответ:
+ * без этого `setState` после ответа прилетал бы уже после конца теста — в чужой `act`.
+ */
+export async function release<T>(pending: { resolve(value: T): void }, value: T): Promise<void> {
+  await act(async () => pending.resolve(value));
+}
+
 export { waitFor } from "../../test-wait";

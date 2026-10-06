@@ -2,7 +2,7 @@
 import { act, createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthRequiredError, apiClient, type Collection, type CollectionPreview, type UpcomingBirthday } from "./api/client";
+import { AuthRequiredError, apiClient, type Collection, type UpcomingBirthday } from "./api/client";
 import { AuthRequiredProvider } from "./auth-required";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
 import { ChecklistScreen } from "./screens/ChecklistScreen";
@@ -191,7 +191,7 @@ describe("консоль: истёкшая сессия в «Сборах»", ()
     vi.spyOn(apiClient, "getCollections").mockResolvedValue([
       { collection: { ...ROUND, id: 1, kind: "custom", title: "Кофемашина" }, personName: null, title: "Кофемашина", status: "pending", active: true },
     ]);
-    vi.spyOn(apiClient, "getCollectionPreview").mockRejectedValue(expired() as CollectionPreview extends never ? never : Error);
+    vi.spyOn(apiClient, "getCollectionPreview").mockRejectedValue(expired());
     const { el, onAuth } = await mountInApp(CollectionsScreen);
     await waitFor(() => expect(button(el, "Открыть")).toBeTruthy());
     await act(async () => button(el, "Открыть").click());
