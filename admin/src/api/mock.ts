@@ -1,4 +1,4 @@
-import { createEmployeesMock, createReadMock } from "@planer/client";
+import { createEmployeesMock, createFoodMock, createReadMock } from "@planer/client";
 import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
 import type { AdminShortfall, CalendarDayDto, EntryCategory, RecipientGroupView, SickApprovalRow } from "@planer/shared";
 import type {
@@ -207,6 +207,23 @@ function overlapsRange(s: Shift, from: string, to: string): boolean {
  * ведёт себя так же.
  */
 const employeesMock = createEmployeesMock({ delayMs: 200, state: { employees: EMPLOYEES }, inviteLinkFor });
+
+/**
+ * Мок опросов, мест и заказов — общий с мини-аппом (`@planer/client`). Люди — тот
+ * же `EMPLOYEES` по ссылке (правка в «Работниках» сразу видна адресатам), «кто я» —
+ * тот же админ, что подписывает консоль (`viewerEmployeeId`).
+ */
+export const foodMock = createFoodMock({
+  delayMs: 150,
+  state: {
+    get employees() {
+      return EMPLOYEES;
+    },
+    get me() {
+      return { id: viewerEmployeeId(), isAdmin: true };
+    },
+  },
+});
 export { employeesMock };
 
 const readMock = createReadMock({

@@ -64,30 +64,6 @@ const MINIAPP_ONLY: Record<string, string> = {
   // заняты работником, поэтому админские версии там с приставкой.
   getAdminEmployees: "то же, что getEmployees консоли",
   getAdminWeekendSlots: "то же, что getWeekendSlots консоли",
-  // Опросы и заказы еды — дело работников между собой; консоль админа их не
-  // ведёт (спека 2026-09-29, «Вне рамок»).
-  getTeamAudience: "адресаты опроса и заказа еды",
-  getPolls: "опросы работника",
-  getPoll: "опросы работника",
-  createPoll: "опросы работника",
-  votePoll: "опросы работника",
-  closePoll: "опросы работника",
-  cancelPoll: "опросы работника",
-  getFoodPlaces: "места и меню для заказа еды",
-  saveFoodPlace: "места и меню для заказа еды",
-  archiveFoodPlace: "места и меню для заказа еды",
-  getOrders: "заказ еды работника",
-  getOrder: "заказ еды работника",
-  createOrder: "заказ еды работника",
-  addOrderItem: "заказ еды работника",
-  setOrderItemQty: "заказ еды работника",
-  removeOrderItem: "заказ еды работника",
-  declineOrder: "заказ еды работника",
-  closeOrder: "заказ еды работника",
-  cancelOrder: "заказ еды работника",
-  setOrderPaid: "деньги за заказ еды работника",
-  setOrderPaymentFor: "деньги за заказ еды работника",
-  remindOrderUnpaid: "деньги за заказ еды работника",
 };
 
 /** Только в консоли — и почему мини-аппу это не нужно. */
