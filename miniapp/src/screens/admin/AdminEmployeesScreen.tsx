@@ -282,8 +282,9 @@ export function AdminEmployeesScreen() {
               onAction={() => withBusy(e.id, () => apiClient.restoreEmployee(e.id))}
               onRename={(name) => withBusy(e.id, () => apiClient.renameEmployee(e.id, name))}
               onPreferredName={(preferredName) => withBusy(e.id, () => apiClient.setEmployeePreferredName(e.id, preferredName))}
-              onShowInvite={() => void showRowInvite(e)}
-              invite={rowInvite?.employeeId === e.id ? rowInvite : null}
+              // Без «🔗 Ссылка»: архивному сервер ссылку не выдаёт (400 `archived` —
+              // архивную запись привязать нельзя), и кнопка всегда кончалась бы
+              // отказом. Сперва «Вернуть». Так же и в консоли (`EmployeesScreen`).
               error={rowError?.employeeId === e.id ? rowError.message : null}
               onSetRestrictions={(patch) => void setRestriction(e.id, patch)}
               onSetObserver={(isObserver) => void setObserver(e.id, isObserver)}
