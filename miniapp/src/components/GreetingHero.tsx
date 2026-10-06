@@ -1,3 +1,4 @@
+import { mixOr } from "../lib/color-mix";
 export interface GreetingHeroProps {
   name: string;
   summary: string;
@@ -14,8 +15,13 @@ export function GreetingHero({ name, summary, onSettings, onServices }: Greeting
   return (
     <div
       style={{
-        background:
+        // Цвет отдельно от градиента: без `color-mix` (Safari < 16.2) градиент
+        // отбрасывается, а заливка остаётся — белый текст не оказывается на белом.
+        backgroundColor: "var(--tgui--accent_text_color)",
+        backgroundImage: mixOr(
           "linear-gradient(135deg, var(--tgui--accent_text_color), color-mix(in srgb, var(--tgui--accent_text_color) 70%, #7B4DE0))",
+          "none",
+        ),
         color: "#fff",
         borderRadius: "var(--app-radius-card)",
         padding: "14px 8px 14px 16px",

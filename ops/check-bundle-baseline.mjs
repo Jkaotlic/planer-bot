@@ -69,6 +69,49 @@ export function scan(code, rules) {
     .filter((rule) => rule.hits > 0);
 }
 
+/**
+ * `color-mix()` без запасного значения в том же правиле. Safari до 16.2 не знает
+ * `color-mix` и выбрасывает декларацию целиком — текст берёт унаследованный цвет.
+ * Запасная строка в исходнике не спасает: сборщик консоли склеивает две декларации
+ * `color` подряд и оставляет последнюю (замер dist 2026-10-06). Безопасно, если
+ * то же свойство объявлено раньше в этом же правиле ИЛИ правило лежит внутри
+ * `@supports (... color-mix ...)`. Возвращает перечень нарушений для отчёта.
+ */
+export function colorMixWithoutFallback(css) {
+  const guarded = [];
+  const at = /@supports[^{]*color-mix[^{]*\{/g;
+  for (let m; (m = at.exec(css)); ) {
+    let depth = 1;
+    let i = at.lastIndex;
+    while (i < css.length && depth > 0) {
+      if (css[i] === "{") depth += 1;
+      else if (css[i] === "}") depth -= 1;
+      i += 1;
+    }
+    guarded.push([m.index, i]);
+  }
+  const inGuard = (pos) => guarded.some(([a, b]) => pos >= a && pos < b);
+  const found = [];
+  const rule = /([^{}]+)\{([^{}]*)\}/g;
+  for (let m; (m = rule.exec(css)); ) {
+    if (inGuard(m.index)) continue;
+    const decls = m[2].split(";").map((d) => d.trim()).filter(Boolean);
+    decls.forEach((decl, index) => {
+      if (!decl.includes("color-mix(")) return;
+      const prop = decl.slice(0, decl.indexOf(":")).trim();
+      const earlier = decls.slice(0, index).some((d) => d.slice(0, d.indexOf(":")).trim() === prop);
+      if (!earlier) found.push(`${m[1].trim().slice(0, 60)} { ${prop} }`);
+    });
+  }
+  return found;
+}
+
+function cssFiles(dir) {
+  return readdirSync(dir, { recursive: true })
+    .filter((name) => typeof name === "string" && name.endsWith(".css"))
+    .map((name) => join(dir, name));
+}
+
 function jsFiles(dir) {
   return readdirSync(dir, { recursive: true })
     .filter((name) => typeof name === "string" && name.endsWith(".js"))
@@ -103,6 +146,12 @@ function main() {
       for (const found of scan(code, RUNTIME).filter((rule) => !covered.includes(rule.name))) {
         bad += 1;
         console.error(`РАНТАЙМ   ${file}: ${found.name} ×${found.hits} — падает ниже ${found.since}`);
+      }
+    }
+    for (const file of cssFiles(dir)) {
+      for (const where of colorMixWithoutFallback(readFileSync(file, "utf8"))) {
+        bad += 1;
+        console.error(`CSS       ${file}: color-mix без запасного цвета — ${where} (пустой цвет ниже Safari 16.2)`);
       }
     }
   }

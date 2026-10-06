@@ -3724,7 +3724,14 @@ textarea {
   margin-top: 6px;
   font-size: var(--text-sub);
   color: var(--hint);
-  color: color-mix(in srgb, var(--hint) 55%, var(--text));
+}
+
+/* Смесь — под `@supports`, а не второй строкой `color` в том же правиле: сборщик консоли
+   склеивает две декларации подряд и выбрасывает запасную (замер 2026-10-06 по dist). */
+@supports (color: color-mix(in srgb, red, blue)) {
+  .qr-caption-hint {
+    color: color-mix(in srgb, var(--hint) 55%, var(--text));
+  }
 }
 
 .qr-notice {
@@ -3736,5 +3743,10 @@ textarea {
    Только QR: общий `.employees-error` стоит на других экранах. */
 .qr-screen .employees-error {
   color: var(--destructive);
-  color: color-mix(in srgb, var(--destructive) 60%, var(--text));
+}
+
+@supports (color: color-mix(in srgb, red, blue)) {
+  .qr-screen .employees-error {
+    color: color-mix(in srgb, var(--destructive) 60%, var(--text));
+  }
 }
