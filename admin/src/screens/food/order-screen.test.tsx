@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FOOD_TEXT_MAX, formatMoney, menuItemLabel } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { orderView } from "./food-fixtures";
-import { button, click, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
+import { AuthRequiredError } from "../../api/client";
+import { button, click, deferred, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderScreen } from "./OrderScreen";
 
 afterEach(async () => {
@@ -14,9 +15,9 @@ afterEach(async () => {
 const area = (el: HTMLElement, name: string) => el.querySelector<HTMLElement>(`[data-area="${name}"]`);
 const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200 }];
 
-async function open(order = orderView({ menu: DODO_MENU })) {
+async function open(order = orderView({ menu: DODO_MENU }), onAuthRequired = vi.fn()) {
   vi.spyOn(apiClient, "getOrder").mockResolvedValue(order);
-  const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn(), onAuthRequired: vi.fn() });
+  const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn(), onAuthRequired });
   await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe(`🍱 ${order.placeName ?? "Заказ без меню"}`));
   return el;
 }
@@ -191,5 +192,76 @@ describe("консоль: заказ — собирающему и админу"
     await waitFor(() => expect(forPerson).toHaveBeenCalledWith(7, 2, true));
     await click(button(payments, "⏰ Напомнить не сдавшим"));
     await waitFor(() => expect(payments.querySelector('[role="status"]')?.textContent).toBe("Напомнил: 1 из 2. Не дошло: Марк"));
+  });
+});
+
+describe("консоль: заказ — действия, которые раньше не проверялись", () => {
+  const mine = (qty: number) => orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty }], myTotal: 1200 * qty });
+
+  it("«−» шлёт qty − 1", async () => {
+    const qty = vi.spyOn(apiClient, "setOrderItemQty").mockResolvedValue(mine(2));
+    const el = await open(mine(3));
+    await click(button(el, "Меньше: Пицца"));
+    await waitFor(() => expect(qty).toHaveBeenCalledWith(7, 5, 2));
+  });
+
+  it("двойной клик по «+», пока первый идёт, — один запрос, а не два", async () => {
+    const slow = deferred<ReturnType<typeof mine>>();
+    const qty = vi.spyOn(apiClient, "setOrderItemQty").mockReturnValue(slow.promise);
+    const el = await open(mine(1));
+    await click(button(el, "Больше: Пицца"));
+    await click(button(el, "Больше: Пицца"));
+    expect(qty).toHaveBeenCalledTimes(1);
+    slow.resolve(mine(2));
+  });
+
+  it("двойной клик по блюду меню — один запрос", async () => {
+    const slow = deferred<ReturnType<typeof mine>>();
+    const add = vi.spyOn(apiClient, "addOrderItem").mockReturnValue(slow.promise);
+    const el = await open();
+    await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
+    await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
+    expect(add).toHaveBeenCalledTimes(1);
+    slow.resolve(mine(1));
+  });
+
+  it("«🙅 Не буду» уходит на сервер", async () => {
+    const decline = vi.spyOn(apiClient, "declineOrder").mockResolvedValue(orderView({ menu: DODO_MENU, declined: true }));
+    const el = await open();
+    await click(button(el, "🙅 Не буду"));
+    await waitFor(() => expect(decline).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(area(el, "mine")!.textContent).toContain("Ты не заказываешь."));
+  });
+
+  it("«Снять отметку» — после подтверждения, шлёт paid = false", async () => {
+    const marked = orderView({
+      open: false, closed: true, isCreator: false, canManage: false, people: null, myTotal: 600,
+      myItems: [{ id: 5, name: "Суп", price: 600, qty: 1 }], payment: { myPaid: true, paidCount: 1, total: 2, rows: null },
+    });
+    const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...marked, payment: { ...marked.payment, myPaid: false } });
+    const el = await open(marked);
+    await click(button(el, "Снять отметку"));
+    expect(paid).not.toHaveBeenCalled();
+    await click(button(el, "Снять"));
+    await waitFor(() => expect(paid).toHaveBeenCalledWith(7, false));
+  });
+
+  it("«Отменить заказ» — после подтверждения шлёт cancelOrder", async () => {
+    const cancel = vi.spyOn(apiClient, "cancelOrder").mockResolvedValue(orderView({ open: false, cancelled: true }));
+    const el = await open();
+    await click(button(el, "Отменить заказ"));
+    expect(cancel).not.toHaveBeenCalled();
+    await click(button(el, "Отменить"));
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith(7));
+  });
+
+  it("истёкшая сессия на действии — вход, а не красная плашка", async () => {
+    vi.spyOn(apiClient, "addOrderItem").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    const onAuth = vi.fn();
+    const el = await open(orderView({ menu: DODO_MENU }), onAuth);
+    await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
+    await waitFor(() => expect(onAuth).toHaveBeenCalled());
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(area(el, "top")).toBeNull();
   });
 });

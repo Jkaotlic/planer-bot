@@ -50,4 +50,11 @@ export async function type(field: HTMLInputElement | HTMLTextAreaElement, value:
   });
 }
 
+/** Обещание, которое тест разрешает сам: действие «в полёте» — чтобы кликнуть по нему ещё раз. */
+export function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
 export { waitFor } from "../../test-wait";

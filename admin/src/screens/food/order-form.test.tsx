@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiClient } from "../../api/client";
+import { AuthRequiredError, apiClient } from "../../api/client";
 import { TEAM, orderView } from "./food-fixtures";
-import { button, click, mount, type, unmount, waitFor } from "./food-test-kit";
+import { button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderForm } from "./OrderForm";
 
 beforeEach(() => {
@@ -70,5 +70,28 @@ describe("консоль: новый заказ", () => {
     await waitFor(() => expect(el.textContent).toContain("Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню."));
     await click(button(el, "Выбрать"));
     expect(button(el, "Разослать").disabled).toBe(true);
+  });
+
+  it("двойной клик по «Разослать», пока первый идёт, — один заказ, а не два", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    const slow = deferred<{ order: ReturnType<typeof orderView>; delivered: number; unreachable: string[] }>();
+    const create = vi.spyOn(apiClient, "createOrder").mockReturnValue(slow.promise);
+    const el = await mount(OrderForm, props());
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Разослать"));
+    await click(button(el, "Отправляю…"));
+    expect(create).toHaveBeenCalledTimes(1);
+    slow.resolve({ order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
+  });
+
+  it("истёкшая сессия при отправке — вход, а не красная плашка", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "createOrder").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    const p = props();
+    const el = await mount(OrderForm, p);
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Разослать"));
+    await waitFor(() => expect(p.onAuthRequired).toHaveBeenCalled());
+    expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 });

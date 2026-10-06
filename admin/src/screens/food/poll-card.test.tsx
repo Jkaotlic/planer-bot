@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { pollView } from "./food-fixtures";
-import { button, click, maybeButton, mount, unmount, waitFor } from "./food-test-kit";
+import { button, click, deferred, maybeButton, mount, unmount, waitFor } from "./food-test-kit";
 import { PollCard } from "./PollCard";
 
 afterEach(async () => {
@@ -60,5 +60,24 @@ describe("консоль: карточка опроса", () => {
     await click(button(el, "👍 За"));
     await waitFor(() => expect(onAuth).toHaveBeenCalled());
     expect(card(el).querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("двойной клик по голосу, пока первый идёт, — один запрос", async () => {
+    const slow = deferred<ReturnType<typeof pollView>>();
+    const vote = vi.spyOn(apiClient, "votePoll").mockReturnValue(slow.promise);
+    const el = await mount(PollCard, { poll: pollView(), onAuthRequired: vi.fn() });
+    await click(button(el, "👍 За"));
+    await click(button(el, "👍 За"));
+    expect(vote).toHaveBeenCalledTimes(1);
+    slow.resolve(pollView({ myChoice: "for" }));
+  });
+
+  it("«Отменить» — после подтверждения шлёт cancelPoll", async () => {
+    const cancel = vi.spyOn(apiClient, "cancelPoll").mockResolvedValue(pollView({ open: false, cancelled: true }));
+    const el = await mount(PollCard, { poll: pollView(), onAuthRequired: vi.fn() });
+    await click(button(el, "Отменить"));
+    expect(cancel).not.toHaveBeenCalled();
+    await click(button(el, "Отменить"));
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith(3));
   });
 });

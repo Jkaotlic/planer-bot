@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_QUESTION_MAX } from "@planer/shared";
-import { apiClient } from "../../api/client";
+import { AuthRequiredError, apiClient } from "../../api/client";
 import { TEAM, pollView } from "./food-fixtures";
-import { button, click, mount, type, unmount, waitFor } from "./food-test-kit";
+import { button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
 import { PollForm } from "./PollForm";
 
 beforeEach(() => {
@@ -63,5 +63,28 @@ describe("консоль: новый опрос", () => {
     const alert = el.querySelector<HTMLElement>('[role="alert"]')!;
     expect(alert.textContent).toBe("Время уже прошло — поставь позже или оставь пустым.");
     expect(alert.nextElementSibling?.contains(button(el, "Отправить"))).toBe(true);
+  });
+
+  it("двойной клик по «Отправить», пока первый идёт, — один опрос, а не два", async () => {
+    const slow = deferred<{ poll: ReturnType<typeof pollView>; delivered: number; unreachable: string[] }>();
+    const create = vi.spyOn(apiClient, "createPoll").mockReturnValue(slow.promise);
+    const el = await mount(PollForm, props());
+    await type(question(el), "Обед?");
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Отправить"));
+    await click(button(el, "Отправляю…"));
+    expect(create).toHaveBeenCalledTimes(1);
+    slow.resolve({ poll: pollView(), delivered: 2, unreachable: [] });
+  });
+
+  it("истёкшая сессия при отправке — вход, а не красная плашка", async () => {
+    vi.spyOn(apiClient, "createPoll").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    const p = props();
+    const el = await mount(PollForm, p);
+    await type(question(el), "Обед?");
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Отправить"));
+    await waitFor(() => expect(p.onAuthRequired).toHaveBeenCalled());
+    expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 });
