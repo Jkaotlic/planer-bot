@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FOOD_NO_PLACES, formatMoney, menuPreview, orderStatusLabel } from "@planer/shared";
+import { FOOD_NO_PLACES, formatMoney, menuPreview, orderPaymentProgress, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, Hint } from "../../ui";
@@ -62,7 +62,7 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
         <Group>
           {orders.map((o) => {
             // Формула статуса общая с консолью и экраном заказа — `orderStatusLabel`.
-            const status = orderStatusLabel(o);
+            const status = [orderStatusLabel(o), orderPaymentProgress(o)].filter(Boolean).join(" · ");
             return (
               <Card key={`order-${o.id}`}>
                 <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍱 {o.placeName ?? "Заказ без меню"}</div>

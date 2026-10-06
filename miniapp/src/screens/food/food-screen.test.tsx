@@ -72,6 +72,18 @@ describe("FoodScreen", () => {
     expect(el.textContent).not.toContain("до 12:30");
   });
 
+  it("закрытый заказ с несданными деньгами — «сдали 1 из 3», у идущего и отменённого строки нет", async () => {
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([
+      { ...ORDER, id: 8, placeName: "Закрытый", open: false, closed: true, payment: { myPaid: false, paidCount: 1, total: 3, rows: null } },
+      { ...ORDER, id: 9, placeName: "Идущий", payment: { myPaid: false, paidCount: 0, total: 3, rows: null } },
+      { ...ORDER, id: 10, placeName: "Отменённый", open: false, closed: true, cancelled: true, payment: { myPaid: false, paidCount: 0, total: 3, rows: null } },
+    ]);
+    const el = await mount({ view: "list" });
+    expect(el.textContent).toContain("Собирает Аня · приём закрыт · сдали 1 из 3");
+    expect(el.textContent?.match(/сдали/g)).toHaveLength(1);
+  });
+
   // Кнопка «🍱 Новый заказ» в боте и в шапке списка ведёт сюда — форма
   // заказа, а не заглушка «в следующем обновлении». `toContain("Новый заказ")`
   // сам по себе не различает форму от списка — на списке есть кнопка «🍱 Новый

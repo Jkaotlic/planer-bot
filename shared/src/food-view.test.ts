@@ -8,6 +8,7 @@ import {
   FOOD_PAID_MARKED,
   FOOD_UNMARK_QUESTION,
   myOrderEmptyText,
+  orderPaymentProgress,
   payHintLine,
   cancelOrderQuestion,
   cancelPollQuestion,
@@ -180,5 +181,18 @@ describe("тексты экранов заказа, общие для мини-�
     expect(FOOD_CASH_MARK).toBe(" · наличкой");
     expect(FOOD_NO_PLACES).toBe("Мест ещё нет.");
     expect(FOOD_NO_PLACES_HINT).toBe("Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.");
+  });
+});
+
+describe("orderPaymentProgress — «сдали X из Y» в списке заказов", () => {
+  const pay = (paidCount: number, total: number) => ({ myPaid: false, paidCount, total, rows: null });
+  it("закрытый заказ с долгами — сколько сдали", () => {
+    expect(orderPaymentProgress({ cancelled: false, closed: true, payment: pay(1, 3) })).toBe("сдали 1 из 3");
+    expect(orderPaymentProgress({ cancelled: false, closed: true, payment: pay(0, 2) })).toBe("сдали 0 из 2");
+  });
+  it("идущий, отменённый и «никто не должен» — ничего не пишем", () => {
+    expect(orderPaymentProgress({ cancelled: false, closed: false, payment: pay(0, 3) })).toBeNull();
+    expect(orderPaymentProgress({ cancelled: true, closed: true, payment: pay(0, 3) })).toBeNull();
+    expect(orderPaymentProgress({ cancelled: false, closed: true, payment: pay(0, 0) })).toBeNull();
   });
 });

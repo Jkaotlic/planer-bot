@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatMoney, orderInProgress, orderStatusLabel } from "@planer/shared";
+import { formatMoney, orderInProgress, orderPaymentProgress, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PollView } from "../../api/client";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { useAuthRequired } from "../../auth-required";
@@ -120,7 +120,7 @@ function OrderCard({ order, onOpen }: { order: OrderView; onOpen?: () => void })
   return (
     <article className="food-card">
       <div className="food-card-title">🍱 {order.placeName ?? "Заказ без меню"}</div>
-      <div className="food-meta">Собирает {order.creatorName} · {orderStatusLabel(order)}</div>
+      <div className="food-meta">Собирает {order.creatorName} · {[orderStatusLabel(order), orderPaymentProgress(order)].filter(Boolean).join(" · ")}</div>
       {order.myTotal > 0 && <div className="food-note">Твой заказ: {formatMoney(order.myTotal)}</div>}
       {onOpen && (
         <div className="food-buttons">

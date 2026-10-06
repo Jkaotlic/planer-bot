@@ -22,6 +22,18 @@ export function pollStatusLabel(p: Pick<PollView, "cancelled" | "open" | "closes
 }
 
 /**
+ * «сдали X из Y» для карточки закрытого заказа в списке — или `null`, когда писать нечего.
+ *
+ * Закрытый заказ с несданными деньгами остаётся среди идущих (`orderInProgress`), и
+ * без этой строки карточка говорила бы только «приём закрыт» — человек не понимал бы,
+ * почему заказ не уехал в «Прошедшие». Число считает сервер (`payment`), доступно всем.
+ */
+export function orderPaymentProgress(o: Pick<OrderView, "cancelled" | "closed" | "payment">): string | null {
+  if (o.cancelled || !o.closed || o.payment.total === 0) return null;
+  return `сдали ${o.payment.paidCount} из ${o.payment.total}`;
+}
+
+/**
  * Заказ ещё требует внимания — остаётся в «Идут» списка консоли.
  *
  * Не просто `open`: срок мог пройти до того, как тик закрыл приём, а у закрытого

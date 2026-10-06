@@ -24,6 +24,8 @@ describe("консоль: список «Заказы и опросы»", () => 
     await waitFor(() => expect(el.textContent).toContain("Собирает Игорь · до 12:30"));
     expect(el.textContent).toContain("Твой заказ: 1\u00a0200\u00a0₽");
     expect(el.textContent).toContain("Шаурмечная");
+    // Закрытый, но не все сдали: без этой строки карточка молчала бы, почему заказ ещё «идёт».
+    expect(el.textContent).toContain("Собирает Аня · приём закрыт · сдали 1 из 3");
     expect(el.textContent).not.toContain("Суши");
     expect(el.textContent).toContain("Обед?");
     expect(el.textContent).not.toContain("Пятница?");
