@@ -73,4 +73,10 @@ describe("PollCard — админ у чужого опроса", () => {
     await act(async () => byText(el, "Закрыть и разослать итог")!.click());
     expect(el.textContent).toContain("Закрыть чужой опрос (спрашивает Игорь)?");
   });
+
+  it("«Отменить» спрашивает про отмену, а не про закрытие", async () => {
+    const el = await mountCard({ ...POLL, creatorName: "Игорь", isCreator: false, canManage: true });
+    await act(async () => byText(el, "Отменить")!.click());
+    expect(el.textContent).toContain("Отменить чужой опрос (спрашивает Игорь)?");
+  });
 });

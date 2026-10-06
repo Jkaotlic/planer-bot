@@ -11,12 +11,12 @@ import { FOOD_MENU_MAX, type PlaceInput } from "./food-order";
  * мест и «1 200 ₽» в форме заказа.
  */
 
-/** Было: `FoodScreen.tsx:68`, `OrderScreen.tsx:102`. `closes` сам не гаснет — поэтому порядок проверок. */
+/** `closes` сам не гаснет у закрытого и отменённого — поэтому порядок проверок. */
 export function orderStatusLabel(o: Pick<OrderView, "cancelled" | "open" | "closes">): string {
   return o.cancelled ? "отменён" : o.open ? (o.closes ?? "приём идёт") : "приём закрыт";
 }
 
-/** Было: `PollCard.tsx:37`. */
+/** То же для опроса: срок показываем, только пока он идёт. */
 export function pollStatusLabel(p: Pick<PollView, "cancelled" | "open" | "closes">): string {
   return p.cancelled ? "отменён" : p.open ? (p.closes ?? "идёт") : "закрыт";
 }
@@ -25,7 +25,7 @@ export function pollStatusLabel(p: Pick<PollView, "cancelled" | "open" | "closes
  * Заказ ещё требует внимания — остаётся в «Идут» списка консоли.
  *
  * Не просто `open`: срок мог пройти до того, как тик закрыл приём, а у закрытого
- * заказа запускающий ещё неделю собирает деньги — «Кто сдал» и «Напомнить» нужны
+ * заказа запускающий, пока не все сдали, собирает деньги — «Кто сдал» и «Напомнить» нужны
  * ему именно тогда. Уехав в «Прошедшие», такой заказ пропал бы из виду ровно в
  * момент, когда по нему есть дело.
  */
@@ -35,7 +35,7 @@ export function orderInProgress(o: Pick<OrderView, "cancelled" | "open" | "close
   return o.payment.paidCount < o.payment.total;
 }
 
-/** Кнопка блюда в открытом заказе. Было: `OrderScreen.tsx:165`. */
+/** Кнопка блюда в открытом заказе. */
 export function menuItemLabel(m: { name: string; price: number }): string {
   return `${m.name} · ${formatMoney(m.price)}`;
 }
@@ -43,25 +43,25 @@ export function menuItemLabel(m: { name: string; price: number }): string {
 /**
  * Меню строкой — в форме заказа и в списке мест.
  *
- * Было две разные строки: `${m.price} ₽` в списке мест (`FoodScreen.tsx:170`, без
- * разбивки разрядов) и `${m.name} ${formatMoney(m.price)}` в форме (`OrderForm.tsx:104`).
+ * Было две разные строки: `${m.price} ₽` в списке мест (без
+ * разбивки разрядов) и `${m.name} ${formatMoney(m.price)}` в форме.
  */
 export function menuPreview(menu: readonly { name: string; price: number }[]): string {
   return menu.length > 0 ? menu.map((m) => `${m.name} — ${formatMoney(m.price)}`).join(" · ") : "Меню пусто";
 }
 
-/** Строка «Кто сколько». Было: `OrderScreen.tsx:203`. */
+/** Строка «Кто сколько». */
 export function orderPersonLine(p: { displayName: string; amount: number; declined: boolean }): string {
   const what = p.declined ? "не будет" : p.amount > 0 ? formatMoney(p.amount) : "не ответил(а)";
   return `${p.displayName} — ${what}`;
 }
 
-/** Отчёт после рассылки, когда дошло не всем. Было: `PollForm.tsx:48`, `OrderForm.tsx:71`. */
+/** Отчёт после рассылки, когда дошло не всем. */
 export function sendReportText(r: FoodSendReport): string {
   return `Отправлено: ${r.delivered}. Не дошло: ${r.unreachable.join(", ")}`;
 }
 
-/** Итог «Напомнить не сдавшим». Было: `OrderScreen.tsx:72-74`. */
+/** Итог «Напомнить не сдавшим». */
 export function remindResultText(r: OrderRemindResult): string {
   if (r.unpaid === 0) return "Все уже сдали 🎉";
   return `Напомнил: ${r.delivered} из ${r.unpaid}` + (r.unreachable.length > 0 ? `. Не дошло: ${r.unreachable.join(", ")}` : "");
@@ -74,7 +74,7 @@ export interface MyOrderPayment {
   mark: "none" | "can-mark" | "marked";
 }
 
-/** Своя оплата участника. Было: условия трёх блоков `OrderScreen.tsx:137-156`. */
+/** Своя оплата участника. */
 export function myOrderPayment(
   o: Pick<OrderView, "open" | "closed" | "cancelled" | "isCreator" | "myTotal" | "creatorName" | "payment">,
 ): MyOrderPayment {
@@ -108,13 +108,12 @@ export function cancelPollQuestion(p: Pick<PollView, "isCreator" | "creatorName"
 
 /**
  * Цена из поля — только цифры. Строкой, а не числом: иначе «0» нельзя стереть до
- * пустого, чтобы набрать «350». Было: `.replace(/\D/g, "")` в двух экранах.
+ * пустого, чтобы набрать «350».
  */
 export function priceDigits(raw: string): string {
   return raw.replace(/\D/g, "");
 }
 
-/** Было: `PlaceEditor.tsx:28`. */
 export const EMPTY_DISH_NAME = "У блюда пустое название — впиши или удали строку ✕.";
 
 /**

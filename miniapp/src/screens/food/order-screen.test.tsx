@@ -233,4 +233,11 @@ describe("OrderScreen — админ у чужого заказа", () => {
     await act(async () => byText(el, "Закрыть приём").click());
     expect(el.textContent).toContain("Закрыть чужой заказ (собирает Игорь) и разослать «сдай»?");
   });
+
+  it("«Отменить заказ» спрашивает про отмену, а не про закрытие", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, creatorName: "Игорь", isCreator: false, canManage: true });
+    const el = await mountScreen(7);
+    await act(async () => byText(el, "Отменить заказ").click());
+    expect(el.textContent).toContain("Отменить чужой заказ (собирает Игорь)?");
+  });
 });

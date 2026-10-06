@@ -69,7 +69,7 @@ describe("деньги и меню — одной строкой на обе м�
     expect(menuPreview([])).toBe("Меню пусто");
   });
 
-  it("цена из поля — только цифры: «1 200», «350\u00a0₽», «12.50» не становятся NaN", () => {
+  it("цена из поля — только цифры: «1\u00a0200», «350\u00a0₽», «12.50» не становятся NaN", () => {
     expect(priceDigits("1 200")).toBe("1200");
     expect(priceDigits("350 ₽")).toBe("350");
     expect(priceDigits("12.50")).toBe("1250");
@@ -118,7 +118,7 @@ describe("myOrderPayment — своя оплата участника", () => {
   });
 });
 
-describe("вопросы подтверждения: чужой заказ и опрос названы чужими (Review Focus №1)", () => {
+describe("вопросы подтверждения: чужой заказ и опрос названы чужими", () => {
   it("свой — прежний вопрос мини-аппа", () => {
     expect(closeOrderQuestion({ isCreator: true, creatorName: "Аня" })).toBe("Закрыть приём и разослать «сдай»?");
     expect(cancelOrderQuestion({ isCreator: true, creatorName: "Аня" })).toBe("Отменить заказ?");

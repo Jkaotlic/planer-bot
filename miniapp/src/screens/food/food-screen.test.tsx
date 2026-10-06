@@ -134,7 +134,7 @@ describe("FoodScreen", () => {
 });
 
 describe("FoodScreen — деньги меню", () => {
-  // Review Focus №4: список мест писал «1200 ₽» без разбивки разрядов, а форма
+  // Список мест писал «1200 ₽» без разбивки разрядов, а форма
   // заказа — «1 200 ₽». Одна строка денег на обе морды — `menuPreview`.
   it("меню места — те же деньги, что везде: «1 200 ₽»", async () => {
     vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }] }]);
