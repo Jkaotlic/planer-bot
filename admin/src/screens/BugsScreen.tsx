@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatAuditMoment } from "@planer/shared";
 import { apiClient, type BugReportRow } from "../api/client";
 import { Segmented } from "../components/Segmented";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 const BUG_FILTERS = [
   { key: "open", label: "Новые" },
@@ -21,6 +22,7 @@ const BUG_FILTERS = [
  * консольная, как у «Анонсов».
  */
 export function BugsScreen() {
+  const onAuthRequired = useAuthRequired();
   const [status, setStatus] = useState<"open" | "all">("open");
   const [reports, setReports] = useState<BugReportRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export function BugsScreen() {
         if (!cancelled) setReports(rows);
       })
       .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить багрепорты");
       });
     return () => {
@@ -94,6 +97,7 @@ function BugReportCard({
   report: BugReportRow;
   onToggle: (id: number, resolved: boolean) => Promise<void>;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const resolved = report.resolvedAt != null;
@@ -104,6 +108,7 @@ function BugReportCard({
     try {
       await onToggle(report.id, !resolved);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       // Список не перечитался — карточка остаётся в прежнем состоянии, и это
       // видно и без ошибки текстом, но без неё непонятно, почему тап не подействовал.
       setError(err instanceof Error ? err.message : "Не удалось сохранить отметку");

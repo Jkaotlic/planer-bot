@@ -155,6 +155,7 @@ function ShiftCounts() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось выгрузить CSV");
     }
   }

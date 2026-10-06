@@ -221,9 +221,10 @@ export function CollectionsScreen() {
     void (async () => {
       try {
         setEmployees(await apiClient.getEmployees());
-      } catch {
+      } catch (err) {
         // Без списка работников форма всё ещё заводит общий сбор. Своей строки
-        // ошибки нет намеренно: беда списков выше важнее.
+        // ошибки нет намеренно: беда списков выше важнее. Но истёкшая сессия — вход.
+        routeAuthError(err, onAuthRequired);
       }
     })();
     // Loads once; every mutation below reloads explicitly.
@@ -392,6 +393,7 @@ function NewCollectionForm({
   employees: Employee[];
   onCreated: (created: Collection) => Promise<void>;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [title, setTitle] = useState("");
   const [employeeId, setEmployeeId] = useState(0);
   const [eventDate, setEventDate] = useState("");
@@ -435,6 +437,7 @@ function NewCollectionForm({
       reset();
       await onCreated(created);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось создать сбор");
     } finally {
       setBusy(false);
@@ -669,6 +672,7 @@ function CollectionCard({
   onSent: (delivered: number, intended: number) => void;
   onDeleted: () => void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const status = statusOf(row);
   const subtitle = [moneyLine(row.collection), edgeLine(row.collection)].filter(Boolean).join(" · ");
   const [closing, setClosing] = useState(false);
@@ -683,6 +687,7 @@ function CollectionCard({
       await apiClient.setCollectionClosed(row.collection.id, true);
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       console.error("Close collection failed:", err);
       setCloseError("Не получилось закрыть сбор. Попробуй ещё раз.");
     } finally {
@@ -801,6 +806,7 @@ function CollectionEditor({
       await loadPreview();
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
       setSaving(false);
@@ -815,6 +821,7 @@ function CollectionEditor({
       setConfirming(false);
       onSent(result.delivered, result.intended);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось разослать");
       setConfirming(false);
     } finally {
@@ -829,6 +836,7 @@ function CollectionEditor({
       await apiClient.setCollectionClosed(collection.id, closed);
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось закрыть сбор");
     } finally {
       setClosing(false);
@@ -842,6 +850,7 @@ function CollectionEditor({
       await apiClient.deleteCollection(collection.id);
       onDeleted();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось удалить сбор");
       setDeleting(false);
     }
@@ -956,6 +965,7 @@ function CollectionEditor({
  * десяток, а раскрыт один.
  */
 function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canRemind: boolean }) {
+  const onAuthRequired = useAuthRequired();
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [paidCount, setPaidCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -974,7 +984,10 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
         setPaidCount(loaded.paidCount);
         setTotal(loaded.total);
       })
-      .catch(() => { if (alive) setError("Не удалось загрузить отметки"); });
+      .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
+        if (alive) setError("Не удалось загрузить отметки");
+      });
     return () => { alive = false; };
   }, [collectionId]);
 
@@ -993,7 +1006,10 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
       })
       // Пока сервер не подтвердил, экран не перекрашивается: галочка — это
       // утверждение о деньгах, и показать её, не записав, значит соврать.
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отметить"))
+      .catch((err) => {
+        if (routeAuthError(err, onAuthRequired)) return;
+        setError(err instanceof Error ? err.message : "Не удалось отметить");
+      })
       .finally(() => setBusy(false));
   }
 
@@ -1006,7 +1022,10 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
         setConfirming(false);
         setNotice(`Напомнил: дошло до ${result.delivered} из ${result.intended}.`);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось напомнить"))
+      .catch((err) => {
+        if (routeAuthError(err, onAuthRequired)) return;
+        setError(err instanceof Error ? err.message : "Не удалось напомнить");
+      })
       .finally(() => setBusy(false));
   }
 
@@ -1253,6 +1272,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "
       await loadPreview();
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
       setSaving(false);
@@ -1268,6 +1288,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "
       setConfirming(false);
       onSent(result.delivered, result.intended);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось разослать");
       setConfirming(false);
     } finally {

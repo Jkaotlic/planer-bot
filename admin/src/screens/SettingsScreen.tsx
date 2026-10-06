@@ -69,6 +69,7 @@ export function SettingsScreen() {
       // reload() ловит свои ошибки сам — она не может провалить этот try.
       await reload();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить настройку");
       setConfirming(false);
     } finally {
@@ -81,6 +82,7 @@ export function SettingsScreen() {
     try {
       validateReminderHour(value);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setHourError(err instanceof Error ? err.message : "Неверный час");
       return;
     }
@@ -91,6 +93,7 @@ export function SettingsScreen() {
       setHourSaved(true);
       await reload();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setHourError(err instanceof Error ? err.message : "Не удалось сохранить час");
     } finally {
       setSavingHour(false);
@@ -209,6 +212,7 @@ export function SettingsScreen() {
  * это «Правительство пока не утвердило», и пустота читалась бы как сбой.
  */
 function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChanged: () => Promise<void> }) {
+  const onAuthRequired = useAuthRequired();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +230,7 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
     try {
       await action();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : fallback);
     } finally {
       setBusy(false);
@@ -322,9 +327,10 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
             onChange={(e) => {
               setDay(e.target.value);
               setError(null);
-              void readDay(e.target.value).catch((err: unknown) =>
-                setError(err instanceof Error ? err.message : "Не удалось прочитать день"),
-              );
+              void readDay(e.target.value).catch((err: unknown) => {
+                if (routeAuthError(err, onAuthRequired)) return;
+                setError(err instanceof Error ? err.message : "Не удалось прочитать день");
+              });
             }}
           />
         </label>
@@ -388,6 +394,7 @@ function NoticesCard() {
       const saved = await apiClient.setNoticePref(kind, next);
       setEnabled(kind, saved.enabled);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setEnabled(kind, !next);
       setErrors((prev) => ({ ...prev, [kind]: err instanceof Error ? err.message : "Не удалось сохранить" }));
     }

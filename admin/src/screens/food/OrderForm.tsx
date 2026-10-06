@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
-import { useAuthRequired } from "../../auth-required";
+import { routeAuthError, useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 /**
@@ -36,7 +36,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
     // Отказ загрузки мест — не повод класть форму: «Без меню» работает и так.
     apiClient.getFoodPlaces()
       .then((list) => { if (alive) setPlaces(list); })
-      .catch(() => { if (alive) setPlaces([]); })
+      .catch((err: unknown) => { if (!routeAuthError(err, onAuthRequired) && alive) setPlaces([]); })
       .finally(() => { if (alive) setPlacesLoaded(true); });
     return () => { alive = false; };
   }, []);

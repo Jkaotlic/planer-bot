@@ -60,7 +60,10 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
   useEffect(() => {
     // Чек-листы — рядом с видами: без их имён выпадающий список показывать нечем.
     // Молча при отказе: экран про виды смен, и его беда важнее.
-    apiClient.getChecklists().then(setChecklists).catch(() => setChecklists([]));
+    apiClient.getChecklists().then(setChecklists).catch((err: unknown) => {
+      if (routeAuthError(err, onAuthRequired)) return;
+      setChecklists([]);
+    });
     apiClient
       .getTemplateRoles()
       .then(setKinds)
@@ -83,6 +86,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.saveTemplateRoles(next.templateId, next.pool, next.preference);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       // Put the server's version back rather than leaving a lie on screen.
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
@@ -106,6 +110,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.setRotationUnit(kind.templateId, unit);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить очередь");
     } finally {
       setBusyKindId(null);
@@ -122,6 +127,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
       await apiClient.setTemplateCoverage(kind.templateId, coverage);
       onNormSaved?.();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить норму");
     } finally {
@@ -140,6 +146,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.setTemplateReminder(kind.templateId, sendReminder, reminderText);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить напоминание");
     } finally {
@@ -158,6 +165,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.setTemplateChecklists(kind.templateId, checklistIds);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить чек-лист");
     } finally {
@@ -311,6 +319,7 @@ function KindCard({
   onCoverage: (coverage: number[]) => Promise<void>;
   onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
 }) {
+  const onAuthRequired = useAuthRequired();
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
   ]);
@@ -329,7 +338,8 @@ function KindCard({
       .then((next) => {
         if (!cancelled) setQueue(next);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
         if (!cancelled) setQueue(null);
       });
     return () => {

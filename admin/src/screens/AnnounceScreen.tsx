@@ -67,7 +67,7 @@ export function AnnounceScreen() {
     let cancelled = false;
     apiClient.getRecipientGroups()
       .then((list) => { if (!cancelled) setGroups(list); })
-      .catch(() => { /* нет ряда групп — и всё */ });
+      .catch((err: unknown) => { routeAuthError(err, onAuthRequired); /* нет ряда групп — и всё */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -149,6 +149,7 @@ export function AnnounceScreen() {
       setText("");
       setSelectedIds(new Set());
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось отправить");
       setConfirming(false);
     } finally {

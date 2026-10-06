@@ -15,6 +15,7 @@ import type { Employee, NewEntryInput, NewEntryRangeInput, Shift, Template } fro
 import { categoryLabel } from "../categories";
 import { PersonPicker } from "./PersonPicker";
 import { weekdayIndex } from "../lib/week";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 export interface AddEntryPanelProps {
   employees: readonly Employee[];
@@ -92,6 +93,7 @@ export function AddEntryPanel({
   handoverForced,
   calendar,
 }: AddEntryPanelProps) {
+  const onAuthRequired = useAuthRequired();
   // Смены и дежурства одним списком, в порядке `sortOrder` — правило живёт в
   // `@planer/shared`, чтобы мини-апп показывал ровно тот же список.
   const presets = workPresets(templates);
@@ -214,6 +216,7 @@ export function AddEntryPanel({
         await onSave(input);
       }
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить запись");
     } finally {
       setSaving(false);
@@ -227,6 +230,7 @@ export function AddEntryPanel({
     try {
       await onDelete();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось удалить запись");
     } finally {
       setDeleting(false);
@@ -242,6 +246,7 @@ export function AddEntryPanel({
       // Успех: кнопки остаются выключенными до закрытия панели — второй тап в этом
       // окне слал бы второй запрос и получал ложное «Уже подтвердил(а)».
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
       setDeciding(false);
     }

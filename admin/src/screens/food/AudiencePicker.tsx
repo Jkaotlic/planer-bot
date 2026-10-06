@@ -3,7 +3,7 @@ import { audienceLines, audiencePreview, filterPeople, type AudienceCandidate, t
 import { apiClient, type RecipientGroupView } from "../../api/client";
 import { PersonSearch } from "../../components/PersonSearch";
 import { Segmented } from "../../components/Segmented";
-import { useAuthRequired } from "../../auth-required";
+import { routeAuthError, useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 const MODES = [
@@ -39,7 +39,7 @@ export function AudiencePicker({ value, onChange, disabled }: {
     let cancelled = false;
     apiClient.getRecipientGroups()
       .then((list) => { if (!cancelled) setGroups(list); })
-      .catch(() => { /* нет ряда групп — и всё */ });
+      .catch((err: unknown) => { routeAuthError(err, onAuthRequired); /* нет ряда групп — и всё */ });
     return () => { cancelled = true; };
   }, []);
 
