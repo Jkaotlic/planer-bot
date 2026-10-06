@@ -116,4 +116,23 @@ describe("AudiencePicker", () => {
     expect(el.querySelector("[data-testid=group-row]")).toBeNull();
     expect(el.textContent).toContain("Уйдёт: Игорь, Лена, Вера и тебе");
   });
+
+  it("наблюдатель, которого нет в выбранных, назван отдельной строкой: копия ему уходит всегда", async () => {
+    const el = await mount();
+    await act(async () => byText(el, "Выбрать").click());
+    await settle(3);
+    const box = [...el.querySelectorAll("input[type=checkbox]")] as HTMLInputElement[];
+    await act(async () => box[0]!.click()); // Игорь
+    await settle(3);
+    const text = el.textContent ?? "";
+    expect(text).toContain("Уйдёт: Игорь и тебе");
+    expect(text).toContain("Наблюдателям — копия всегда: Лена");
+  });
+
+  it("наблюдатель уже среди адресатов — отдельной строки нет", async () => {
+    const el = await mount();
+    await act(async () => byText(el, "Все").click());
+    await settle(3);
+    expect(el.textContent ?? "").not.toContain("Наблюдателям — копия всегда");
+  });
 });

@@ -15,7 +15,9 @@ type Mode = TeamAudience["kind"];
  *
  * Строка «Уйдёт: …» показывает поимённо, кого бот позовёт, — в режиме «на
  * смене» человек иначе не узнает, кого график посчитал работающим.
- * Наблюдатели входят в «Все» и «На смене» наравне со всеми (решение 2026-09-30).
+ * Наблюдатели получают копию любого опроса и заказа, кого бы ни выбрали (решение
+ * 2026-10-06, сервер — `resolveAudience`); строка ниже называет их, если они не попали
+ * в выбранных, — иначе запускающий думал бы, что их не позвали.
  */
 export function AudiencePicker({ value, onChange, disabled }: {
   value: TeamAudience;
@@ -84,6 +86,10 @@ export function AudiencePicker({ value, onChange, disabled }: {
   // только из отчёта после отправки — а решить «позвать по-другому» до
   // отправки может только здесь.
   const unreachable = preview.filter((p) => !p.reachable).map((p) => p.displayName);
+  const inPreview = new Set(preview.map((p) => p.id));
+  const observerCopies = people
+    .filter((p) => p.role === "observer" && p.reachable && !inPreview.has(p.id))
+    .map((p) => p.displayName);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Ряд кнопок, а не `SegmentedControl`: тот делит ширину на три равные
@@ -118,6 +124,11 @@ export function AudiencePicker({ value, onChange, disabled }: {
       <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
         {reachable.length === 0 ? "Пока никого, кроме тебя." : `Уйдёт: ${reachable.join(", ")} и тебе`}
       </div>
+      {observerCopies.length > 0 && (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
+          Наблюдателям — копия всегда: {observerCopies.join(", ")}
+        </div>
+      )}
       {unreachable.length > 0 && (
         <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
           Не дойдёт: {unreachable.join(", ")} — не привязан(а) к боту

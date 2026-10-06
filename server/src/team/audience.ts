@@ -12,8 +12,9 @@ import { listShiftsOverlapping } from "../repo/shifts";
  * отдельно от `announcementRecipients`: там отправитель, наоборот, исключён —
  * анонс самому себе не нужен.
  *
- * Наблюдатель входит в «вся команда» и, если у него смена, в «на смене»: он
- * обедает и голосует вместе со всеми (решение 2026-09-30). Пресеты анонсов
+ * Наблюдатель получает копию КАЖДОГО опроса и заказа — при «вся команда», «на смене»
+ * и выборе вручную (решение 2026-10-06; до того — только «вся команда» и «на смене»
+ * при смене в графике, решение 2026-09-30). Пресеты анонсов
  * остаются без наблюдателей — там другой вопрос: кому адресована новость.
  */
 export function resolveAudience(
@@ -46,6 +47,16 @@ export function resolveAudience(
     if (!e) continue;
     if (e.telegramUserId == null) unreachable.push(e.displayName);
     else reachable.push(e);
+  }
+  // Observers get a copy of every poll and order, whoever it was addressed to — the
+  // owner's decision of 2026-10-06: they watch the team, and «on shift» or a hand-picked
+  // list silently left them out. Added after the chosen people so the order of the
+  // creator's report stays as picked. An unlinked observer was not asked for, so their
+  // absence is not reported to the creator as «unreachable».
+  for (const e of active) {
+    if (!e.isObserver || seen.has(e.id) || e.telegramUserId == null) continue;
+    seen.add(e.id);
+    reachable.push(e);
   }
   return { reachable, unreachable };
 }
