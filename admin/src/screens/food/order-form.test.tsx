@@ -27,6 +27,7 @@ describe("консоль: новый заказ", () => {
     await click(button(el, "Додо"));
     expect(el.textContent).toContain("Пицца — 1\u00a0200\u00a0₽");
     await type(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Комментарий"]')!, "  к часу  ");
+    expect(el.querySelector<HTMLInputElement>('input[aria-label="Куда сдавать"]')!.getAttribute("type")).toBe("text");
     await type(el.querySelector<HTMLInputElement>('input[aria-label="Куда сдавать"]')!, "Наличкой Ане");
     await type(el.querySelector<HTMLInputElement>('input[aria-label="Приём до"]')!, "12:30");
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));

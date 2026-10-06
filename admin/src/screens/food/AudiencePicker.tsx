@@ -83,11 +83,11 @@ export function AudiencePicker({ value, onChange, disabled, onAuthRequired }: {
         <Segmented aria-label="Кому отправить" options={MODES} value={value.kind} disabled={disabled} onChange={setMode} />
       </div>
       {groups.length > 0 && (
-        <div className="announce-audience" data-testid="group-row" style={{ flexWrap: "wrap" }}>
+        <div className="food-buttons" data-testid="group-row">
           {groups.map((g) => {
             const on = value.kind === "picked" && groupId === g.id;
             return (
-              <button key={g.id} type="button" className={`btn announce-group-chip ${on ? "btn-primary" : "btn-secondary"}`}
+              <button key={g.id} type="button" className="btn btn-secondary announce-group-chip food-chip"
                 aria-pressed={on} disabled={disabled} onClick={() => pickGroup(g)}>
                 {g.name}
               </button>

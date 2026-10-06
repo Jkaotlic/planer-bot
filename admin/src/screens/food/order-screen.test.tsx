@@ -30,7 +30,6 @@ describe("консоль: заказ — своё", () => {
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
     await waitFor(() => expect(area(el, "mine")!.textContent).toContain(`Итого: ${formatMoney(1200)}`));
     expect(add).toHaveBeenCalledWith(7, { menuItemId: 11 });
-    expect(area(el, "mine")!.textContent).toContain("Итого: 1\u00a0200\u00a0₽");
   });
 
   it("своё блюдо: цена — только цифры, уходит числом; поля очищаются", async () => {
@@ -39,6 +38,10 @@ describe("консоль: заказ — своё", () => {
     const name = el.querySelector<HTMLInputElement>('input[aria-label="Своё блюдо"]')!;
     const price = el.querySelector<HTMLInputElement>('input[aria-label="Цена, ₽"]')!;
     expect(name.maxLength).toBe(FOOD_TEXT_MAX);
+    // Поле консоли — `input[type="text"]`: без `type` оно рисовалось голым браузерным.
+    expect(name.getAttribute("type")).toBe("text");
+    expect(price.getAttribute("type")).toBe("text");
+    expect(price.inputMode).toBe("numeric");
     await type(name, "Суп дня");
     await type(price, "1 200 ₽");
     expect(price.value).toBe("1200");
@@ -72,7 +75,30 @@ describe("консоль: заказ — своё", () => {
   it("длинное меню: 30 блюд по 200 знаков — все 30 кнопок на месте (Review Focus №3)", async () => {
     const menu = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `${i + 1} ${"щ".repeat(FOOD_TEXT_MAX - 3)}`, price: 100 }));
     const el = await open(orderView({ menu }));
-    expect(area(el, "menu")!.querySelectorAll("button")).toHaveLength(30);
+    const buttons = [...area(el, "menu")!.querySelectorAll("button")];
+    expect(buttons).toHaveLength(30);
+    // Длинное название переносится внутри кнопки только в `.food-buttons .btn` (а оно
+    // — внутри карточки, где `overflow-wrap: anywhere`): вне этого контейнера кнопка
+    // растянула бы страницу вбок. Правила самих классов держит food-css.test.ts.
+    for (const b of buttons) {
+      expect(b.closest(".food-buttons")).not.toBeNull();
+      expect(b.closest(".food-card")).not.toBeNull();
+    }
+    expect(buttons[0]!.textContent).toContain("щ".repeat(FOOD_TEXT_MAX - 3));
+  });
+
+  it("название блюда в 200 знаков без пробела — внутри карточки, где слово переносится", async () => {
+    const long = "щ".repeat(FOOD_TEXT_MAX);
+    const el = await open(orderView({
+      menu: DODO_MENU, myItems: [{ id: 5, name: long, price: 100, qty: 1 }], myTotal: 100,
+      dishes: [{ name: long, price: 100, qty: 1 }], total: 100,
+      people: [{ employeeId: 2, displayName: "Игорь", amount: 100, declined: false }],
+    }));
+    for (const name of ["mine", "people"]) {
+      const card = area(el, name)!;
+      expect(card.classList.contains("food-card")).toBe(true);
+      expect(card.textContent).toContain(long);
+    }
   });
 });
 

@@ -135,13 +135,13 @@ export function PlaceEditor({ place, onSaved, onCancel, onAuthRequired }: {
       <h2 className="employees-title">{place ? "Место" : "Новое место"}</h2>
       <label className="birthday-label">
         Название
-        <input aria-label="Название места" maxLength={FOOD_TEXT_MAX} value={name} disabled={busy} onChange={(e) => setName(e.target.value)} />
+        <input type="text" aria-label="Название места" maxLength={FOOD_TEXT_MAX} value={name} disabled={busy} onChange={(e) => setName(e.target.value)} />
       </label>
       {rows.map((r, i) => (
         <div key={r.id ?? `new-${i}`} className="food-dish-row" data-testid="dish-row">
-          <input className="food-dish-name" aria-label={`Блюдо ${i + 1}`} placeholder="Блюдо" maxLength={FOOD_TEXT_MAX}
+          <input type="text" className="food-dish-name" aria-label={`Блюдо ${i + 1}`} placeholder="Блюдо" maxLength={FOOD_TEXT_MAX}
             value={r.name} disabled={busy} onChange={(e) => patch(i, { name: e.target.value })} />
-          <input className="food-dish-price" aria-label={`Цена блюда ${i + 1}, ₽`} placeholder="₽" inputMode="numeric"
+          <input type="text" className="food-dish-price" aria-label={`Цена блюда ${i + 1}, ₽`} placeholder="₽" inputMode="numeric"
             value={r.price} disabled={busy} onChange={(e) => patch(i, { price: priceDigits(e.target.value) })} />
           <button type="button" className="btn btn-quiet btn-compact" aria-label={`Убрать блюдо ${i + 1}`} disabled={busy}
             onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}>✕</button>

@@ -56,6 +56,9 @@ describe("консоль: кому уйдёт опрос или заказ", () 
     await click(button(el, "Кухня"));
     expect(last).toEqual({ kind: "picked", employeeIds: [2, 3] });
     expect(button(el, "Кухня").getAttribute("aria-pressed")).toBe("true");
+    // Одна главная кнопка на форму принадлежит «Разослать»: выбранная группа — рамкой.
+    expect(button(el, "Кухня").className).not.toContain("btn-primary");
+    expect(button(el, "Кухня").className).toContain("food-chip");
   });
 
   it("команда не загрузилась — текст ошибки вместо выбора", async () => {

@@ -75,6 +75,8 @@ describe("консоль: места — редактор", () => {
     await type(field(el, "Блюдо 1"), "Шаурма");
     await type(field(el, "Цена блюда 1, ₽"), "1 200 ₽");
     expect(field(el, "Цена блюда 1, ₽").value).toBe("1200");
+    // Без `type="text"` поля рисовались голым браузерным видом, а не как в консоли.
+    for (const label of ["Название места", "Блюдо 1", "Цена блюда 1, ₽"]) expect(field(el, label).getAttribute("type")).toBe("text");
     await click(button(el, "Сохранить"));
     await waitFor(() => expect(p.onSaved).toHaveBeenCalled());
     expect(save).toHaveBeenCalledWith(null, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 1200 }] });

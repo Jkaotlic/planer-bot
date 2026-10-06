@@ -177,9 +177,9 @@ export function OrderScreen({ orderId, onBack, onAuthRequired }: { orderId: numb
             <section className="food-card" data-area="custom">
               <h3 className="food-card-title">Своё блюдо</h3>
               <div className="food-dish-row">
-                <input className="food-dish-name" aria-label="Своё блюдо" placeholder="Что" maxLength={FOOD_TEXT_MAX}
+                <input type="text" className="food-dish-name" aria-label="Своё блюдо" placeholder="Что" maxLength={FOOD_TEXT_MAX}
                   value={customName} disabled={busy} onChange={(e) => setCustomName(e.target.value)} />
-                <input className="food-dish-price" aria-label="Цена, ₽" placeholder="₽" inputMode="numeric"
+                <input type="text" className="food-dish-price" aria-label="Цена, ₽" placeholder="₽" inputMode="numeric"
                   value={customPrice} disabled={busy} onChange={(e) => setCustomPrice(priceDigits(e.target.value))} />
               </div>
               <div className="food-buttons">

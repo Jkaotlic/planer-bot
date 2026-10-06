@@ -98,7 +98,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, onAuthRequired }: {
       </label>
       <label className="birthday-label">
         Куда сдавать (необязательно)
-        <input name="pay-hint" aria-label="Куда сдавать" maxLength={FOOD_NOTE_MAX} value={payHint} disabled={busy} onChange={(e) => setPayHint(e.target.value)} />
+        <input type="text" name="pay-hint" aria-label="Куда сдавать" maxLength={FOOD_NOTE_MAX} value={payHint} disabled={busy} onChange={(e) => setPayHint(e.target.value)} />
       </label>
       <label className="birthday-label">
         Приём до (необязательно)

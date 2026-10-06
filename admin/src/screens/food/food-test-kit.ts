@@ -9,6 +9,9 @@ let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
 export async function mount<P extends object>(component: ComponentType<P>, props: P): Promise<HTMLDivElement> {
+  // Тест, который монтирует второй раз (после `unmount()` внутри него или без него),
+  // иначе терял бы ссылку на первый корень: тот жил бы в `document.body` до конца файла.
+  await unmount();
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
