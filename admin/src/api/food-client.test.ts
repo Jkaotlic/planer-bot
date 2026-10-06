@@ -77,7 +77,7 @@ describe("консоль: ручки заказов, опросов и мест"
     for (const name of FOOD) expect(typeof (realClient as unknown as Record<string, unknown>)[name]).toBe("function");
   });
 
-  // Review Focus №2: сервер говорит «видишь, но нельзя» кодом 409 с причиной.
+  // Сервер говорит «видишь, но нельзя» кодом 409 с причиной.
   // Причина обязана доехать до экрана текстом, а не превратиться в «Сессия
   // истекла» — консоль гасит сессию только на 401/403.
   it("409 «Приём уже закрыт.» — обычная ошибка с текстом сервера, сессия цела", async () => {
@@ -87,6 +87,15 @@ describe("консоль: ручки заказов, опросов и мест"
     expect(failure).not.toBeInstanceOf(AuthRequiredError);
     expect((failure as Error).message).toBe("Приём уже закрыт.");
     expect(window.localStorage.getItem("adminToken")).toBe("token-for-the-test");
+  });
+
+  // Обратный случай к 409: 401/403 — это правда «сессия кончилась», и токен
+  // обязан уйти, иначе экран крутил бы мёртвый вход.
+  it.each([401, 403])("%i на ручке еды — «сессия истекла», токен сброшен", async (status) => {
+    stubFetch({ error: "x" }, status);
+    const failure = await realClient.getOrders().catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(AuthRequiredError);
+    expect(window.localStorage.getItem("adminToken")).toBeNull();
   });
 
   it("404 «Заказ не найден.» — тоже текстом", async () => {

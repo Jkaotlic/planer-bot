@@ -133,7 +133,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   /**
    * Кого мок реально позовёт — те же правила, что серверный `resolveAudience`:
    * «команда» берёт всех активных, «на смене»
-   * фильтрует по `mockOnShift`. Раньше «на смене» в DEV слало вообще всем активным —
+   * фильтрует по `onShift`. Раньше «на смене» в DEV слало вообще всем активным —
    * форма спрашивала одно, а получал бы другое.
    */
   function audienceIds(audience: TeamAudience): number[] {
@@ -294,8 +294,8 @@ export function createFoodMock(opts: FoodMockOptions) {
   // Тот же приём, что у опросов и мест: правила (открыт/закрыт, срок, долг,
   // сводка блюд) считают `isOpenAt`/`debtOf`/`dishSummary`/`orderTotal` из
   // `@planer/shared` — те же функции, что и сервер, а не своя копия здесь.
-  // Мок всегда играет за MOCK_ME (Аня) — как в опросах и обменах, — поэтому
-  // позиции всегда её, а не произвольного employeeId.
+  // Мок играет за того, кто сейчас `me()` у морды, — как в опросах и обменах, —
+  // поэтому позиции всегда его, а не произвольного employeeId.
 
   interface MockOrderItem {
     id: number;
@@ -326,7 +326,7 @@ export function createFoodMock(opts: FoodMockOptions) {
 
   /**
    * Отметки «сдал» за заказ еды: ключ `${orderId}:${employeeId}` → чья рука
-   * поставила. Тот же приём, что `PAYMENTS` у сборов чуть выше, и тот же счёт
+   * поставила. Тот же приём, что у отметок «сдал» по сборам в мини-аппе и консоли, и тот же счёт
    * через `paymentProgress`, что и на сервере, — мок не считает по-своему.
    */
   const ORDER_PAYMENTS = new Map<string, number>();
@@ -459,7 +459,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   }
 
   /** Общий вход правки позиций: закрыт — дальше делать нечего. Мок играет
-   *  только за MOCK_ME, поэтому «чужой заказ» здесь проверять не у кого. */
+   *  только за `me()`, поэтому «чужой заказ» здесь проверять не у кого. */
   function guardOpen(o: MockOrder): void {
     if (!isOpenAt(o, clock())) throw new Error("Приём закрыт.");
   }
@@ -495,7 +495,7 @@ export function createFoodMock(opts: FoodMockOptions) {
     return orderViewOf(o);
   }
 
-  /** Своя позиция или отказ — мок играет только за MOCK_ME, чужих позиций тут нет. */
+  /** Своя позиция или отказ — мок играет только за `me()`, чужих позиций тут нет. */
   function ownItem(o: MockOrder, itemId: number): MockOrderItem {
     const item = o.items.find((i) => i.id === itemId);
     if (!item || item.employeeId !== me().id) throw new Error("Это не твоя позиция.");
@@ -533,7 +533,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   }
 
   // Тот же порядок отказов, что у `closeOrder`/`cancelOrder` на сервере: гонка
-  // двойного тапа (Review Focus №1) не должна закрывать/отменять заказ дважды
+  // двойного тапа не должна закрывать/отменять заказ дважды
   // и не должна слать вторую сводку — второй вызов получает отказ, а не «ok».
   async function closeOrder(id: number): Promise<OrderView> {
     await wait();
@@ -554,7 +554,7 @@ export function createFoodMock(opts: FoodMockOptions) {
 
   /**
    * Отметка «сдал» за заказ еды — те же отказы и тот же текст, что у серверного
-   * `setOrderPaid`. Мок играет только за MOCK_ME, поэтому «виновник» отметки —
+   * `setOrderPaid`. Мок играет только за `me()`, поэтому «виновник» отметки —
    * всегда он: своя галочка ставит его же рукой, чужая — рукой управляющего.
    */
   function markOrderPaid(o: MockOrder, employeeId: number, paid: boolean): void {

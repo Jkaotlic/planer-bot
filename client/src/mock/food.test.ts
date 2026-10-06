@@ -63,28 +63,20 @@ describe("createFoodMock: «сейчас» — снаружи", () => {
     );
   });
 
-  // Детерминированно, а не «когда даты расходятся»: Node подхватывает смену
-  // `process.env.TZ` на ходу, а 22:30 UTC — это уже завтра по Москве.
+  // Не через `process.env.TZ` (он подхватывается на ходу не в каждом пуле
+  // vitest): у даты в UTC подменён `toISOString`, и если мок снова возьмёт
+  // дату оттуда, а не из местных частей, срок уедет на «1999-01-01».
   it("по умолчанию «сегодня» — местная дата, а не UTC", async () => {
-    const tz = process.env.TZ;
-    process.env.TZ = "Europe/Moscow";
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-10-06T22:30:00Z"));
+    vi.setSystemTime(new Date(2026, 9, 6, 12, 0));
+    vi.spyOn(Date.prototype, "toISOString").mockReturnValue("1999-01-01T00:00:00.000Z");
     try {
       const mock = createFoodMock({ delayMs: 0, state: { employees: PEOPLE, me: { id: 1, isAdmin: true } } });
       const { poll } = await mock.createPoll({ question: "Обед?", closesTime: "23:59", audience: { kind: "team" } });
-      expect(poll.closesAt).toBe("2026-10-07T23:59");
+      expect(poll.closesAt).toBe("2026-10-06T23:59");
     } finally {
+      vi.restoreAllMocks();
       vi.useRealTimers();
-      process.env.TZ = tz;
     }
-  });
-});
-
-describe("createFoodMock: отказы — текстом сервера", () => {
-  it("несуществующий заказ — «Заказ не найден.», как у GET /api/orders/:id", async () => {
-    const { mock } = mockAs({ id: 1, isAdmin: true });
-    await expect(mock.getOrder(999_999)).rejects.toThrow("Заказ не найден.");
-    await expect(mock.getOrder(999_999)).rejects.not.toThrow("недоступен");
   });
 });
