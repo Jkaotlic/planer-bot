@@ -1452,7 +1452,10 @@ export const realClient: ApiClient = {
   },
 };
 
-const devClient: ApiClient = {
+// Функцией, а не готовым объектом: в боевой сборке `import.meta.env.DEV` равен false и
+// вызова нет, значит сборщик выбрасывает всю функцию вместе с моками. Объект со
+// спредом (`...employeesMock`) он выбросить не мог — чтение свойств считал эффектом.
+const createDevClient = (): ApiClient => ({
   getMe: async () => ({ id: 1, displayName: "Админов Админ", address: "Админ" }),
 
   getEmployees: () => employeesMock.getAdminEmployees(),
@@ -1567,11 +1570,11 @@ const devClient: ApiClient = {
   getSickApprovals: () => mockGetSickApprovals(),
   approveSickLeave: (id) => mockApproveSickLeave(id),
   rejectSickLeave: (id) => mockRejectSickLeave(id),
-};
+});
 
 /**
  * In dev, short-circuits to realistic mock data so the app renders with no
  * backend running. In production, authenticates via Telegram initData and
  * talks to the real API at `VITE_API_BASE`.
  */
-export const apiClient: ApiClient = import.meta.env.DEV ? devClient : realClient;
+export const apiClient: ApiClient = import.meta.env.DEV ? createDevClient() : realClient;

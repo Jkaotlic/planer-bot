@@ -25,5 +25,19 @@ export default defineConfig({
      * на каждой сборке и лечится полифилом в `index.html`.
      */
     target: ["es2020", "chrome87", "edge88", "firefox78", "safari14", "ios14"],
+    rollupOptions: {
+      treeshake: {
+        /**
+         * DEV-мок (`src/api/mock.ts`) заводит состояние и моки на верхнем уровне
+         * модуля, и сборщик считал это побочными эффектами: сид «Аня Смирнова»,
+         * мок работников, еды и чтения уезжали в боевой бандл (+17–23 КБ,
+         * «Шаурма…» в client-*.js). У мока побочных эффектов и правда нет — он
+         * только заводит данные, — поэтому, пока `createDevClient` вырезан
+         * (`import.meta.env.DEV` ложно), модуль выбрасывается целиком. Страховка —
+         * `ops/check-bundle-baseline.mjs`: ищет маркеры мока в собранном JS.
+         */
+        moduleSideEffects: (id: string) => !/[\\/]src[\\/]api[\\/]mock\.ts$/.test(id),
+      },
+    },
   },
 });
