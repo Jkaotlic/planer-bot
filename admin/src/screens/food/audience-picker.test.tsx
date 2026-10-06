@@ -2,10 +2,10 @@
 import { createElement, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TeamAudience } from "@planer/shared";
-import { apiClient } from "../../api/client";
+import { AuthRequiredError, apiClient } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 import { TEAM } from "./food-fixtures";
-import { button, click, mount, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, mount, unmount, waitFor } from "./food-test-kit";
 
 afterEach(async () => {
   await unmount();
@@ -15,7 +15,7 @@ afterEach(async () => {
 let last: TeamAudience | null = null;
 function Harness() {
   const [value, setValue] = useState<TeamAudience>({ kind: "on_shift" });
-  return createElement(AudiencePicker, { value, onChange: (next) => { last = next; setValue(next); }, onAuthRequired: () => {} });
+  return createElement(AudiencePicker, { value, onChange: (next) => { last = next; setValue(next); } });
 }
 
 async function mountPicker() {
@@ -66,5 +66,13 @@ describe("консоль: кому уйдёт опрос или заказ", () 
     vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([]);
     const el = await mount(Harness, {});
     await waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toContain("Нет связи с сервером"));
+  });
+
+  it("истёкшая сессия при загрузке команды — вход, а не красная плашка", async () => {
+    vi.spyOn(apiClient, "getTeamAudience").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([]);
+    const el = await mount(Harness, {});
+    await waitFor(() => expect(authRequired).toHaveBeenCalled());
+    expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 });

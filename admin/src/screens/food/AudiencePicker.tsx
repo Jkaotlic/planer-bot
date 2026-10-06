@@ -3,6 +3,7 @@ import { audienceLines, audiencePreview, filterPeople, type AudienceCandidate, t
 import { apiClient, type RecipientGroupView } from "../../api/client";
 import { PersonSearch } from "../../components/PersonSearch";
 import { Segmented } from "../../components/Segmented";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 const MODES = [
@@ -20,12 +21,12 @@ const MODES = [
  * бы, что их не позвали. Не общий компонент с «Анонсами»: там два режима и
  * подборки по ролям, здесь три режима и «на смене».
  */
-export function AudiencePicker({ value, onChange, disabled, onAuthRequired }: {
+export function AudiencePicker({ value, onChange, disabled }: {
   value: TeamAudience;
   onChange(next: TeamAudience): void;
   disabled?: boolean;
-  onAuthRequired(): void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [people, setPeople] = useState<AudienceCandidate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");

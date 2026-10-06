@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatMoney, orderInProgress, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PollView } from "../../api/client";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 import { OrderForm } from "./OrderForm";
 import { OrderScreen } from "./OrderScreen";
@@ -22,7 +23,8 @@ export type FoodView =
  * мини-аппе: свои и те, куда позвали (сервер отдаёт до 20 последних каждого вида).
  * Идущие — сразу, прошедшие — свёрнуты: закрытые отодвигали бы живые.
  */
-export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }) {
+export function OrdersPollsScreen() {
+  const onAuthRequired = useAuthRequired();
   const [route, setRoute] = useState<FoodView>({ view: "list" });
   const [orders, setOrders] = useState<OrderView[] | null>(null);
   const [polls, setPolls] = useState<PollView[] | null>(null);
@@ -31,8 +33,8 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
   const [attempt, setAttempt] = useState(0);
 
   // Перечитывается при каждом возврате к списку: заказ мог закрыться тиком, пока
-  // админ был в форме. `onAuthRequired` в зависимостях нет намеренно: `App`
-  // передаёт новую стрелку на каждый свой рендер, и список перечитывался бы зря.
+  // админ был в форме. `onAuthRequired` в зависимостях безопасен: `App` держит его
+  // через `useCallback`, ссылка не меняется между рендерами.
   useEffect(() => {
     if (route.view !== "list") return;
     let alive = true;
@@ -47,15 +49,15 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
       .then((list) => { if (alive) setPolls(list); })
       .catch((err) => { if (alive) setPollsError(failureText(err, "Не удалось загрузить.", onAuthRequired)); });
     return () => { alive = false; };
-  }, [route, attempt]);
+  }, [route, attempt, onAuthRequired]);
 
   const toList = () => setRoute({ view: "list" });
   if (route.view === "new-order") {
-    return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} onEditPlaces={() => setRoute({ view: "places" })} onAuthRequired={onAuthRequired} />;
+    return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} onEditPlaces={() => setRoute({ view: "places" })} />;
   }
-  if (route.view === "new-poll") return <PollForm onDone={toList} onCancel={toList} onAuthRequired={onAuthRequired} />;
-  if (route.view === "places") return <PlacesScreen onBack={toList} onAuthRequired={onAuthRequired} />;
-  if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} onAuthRequired={onAuthRequired} />;
+  if (route.view === "new-poll") return <PollForm onDone={toList} onCancel={toList} />;
+  if (route.view === "places") return <PlacesScreen onBack={toList} />;
+  if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} />;
 
   const retry = () => setAttempt((n) => n + 1);
   const activeOrders = orders?.filter(orderInProgress) ?? [];
@@ -66,7 +68,7 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
     <div className="food-list">{list.map((o) => <OrderCard key={o.id} order={o} onOpen={() => setRoute({ view: "order", orderId: o.id })} />)}</div>
   );
   const renderPolls = (list: readonly PollView[]) => (
-    <div className="food-list">{list.map((p) => <PollCard key={p.id} poll={p} onAuthRequired={onAuthRequired} />)}</div>
+    <div className="food-list">{list.map((p) => <PollCard key={p.id} poll={p} />)}</div>
   );
 
   return (

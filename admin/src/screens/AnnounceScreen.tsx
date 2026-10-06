@@ -3,7 +3,6 @@ import { announcementUnreachableLine, filterPeople, presetRecipientIds, type Ann
 import {
   ANNOUNCEMENT_TEXT_MAX,
   apiClient,
- 
   type AnnouncementRecipient,
   type AnnouncementResult,
   type RecipientGroupView,

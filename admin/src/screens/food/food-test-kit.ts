@@ -1,9 +1,17 @@
 import { act, createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { vi } from "vitest";
+import { AuthRequiredProvider } from "../../auth-required";
 
 // Шесть файлов тестов экранов «Заказы и опросы» рисуют компонент одинаково —
 // один кит вместо шести копий `mount`/`click`/`type`.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/**
+ * Что экран вызывает, когда сессия истекла: тот же контекст, что даёт `App`. Один на
+ * тест — сбрасывается при каждом `mount`, поэтому утверждения не видят чужих вызовов.
+ */
+export const authRequired = vi.fn();
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -12,10 +20,11 @@ export async function mount<P extends object>(component: ComponentType<P>, props
   // Тест, который монтирует второй раз (после `unmount()` внутри него или без него),
   // иначе терял бы ссылку на первый корень: тот жил бы в `document.body` до конца файла.
   await unmount();
+  authRequired.mockClear();
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root!.render(createElement(component, props)));
+  await act(async () => root!.render(createElement(AuthRequiredProvider, { value: authRequired }, createElement(component, props))));
   return host;
 }
 

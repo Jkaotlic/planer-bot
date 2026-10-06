@@ -607,8 +607,8 @@ export function App() {
         ) : nav === "announce" ? (
           <AnnounceScreen />
         ) : nav === "orders" ? (
-          // Истёкшая сессия посреди экрана — тот же экран входа, что при загрузке консоли.
-          <OrdersPollsScreen onAuthRequired={requestLogin} />
+          // Истёкшая сессия посреди экрана — вход через контекст `AuthRequiredProvider`.
+          <OrdersPollsScreen />
         ) : nav === "approvals" ? (
           <SickApprovalsScreen
             onChanged={() => {

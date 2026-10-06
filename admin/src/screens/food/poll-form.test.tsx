@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_QUESTION_MAX } from "@planer/shared";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { TEAM, pollView } from "./food-fixtures";
-import { button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
 import { PollForm } from "./PollForm";
 
 beforeEach(() => {
@@ -15,7 +15,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const props = () => ({ onDone: vi.fn(), onCancel: vi.fn(), onAuthRequired: vi.fn() });
+const props = () => ({ onDone: vi.fn(), onCancel: vi.fn() });
 const question = (el: HTMLElement) => el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Вопрос"]')!;
 
 describe("консоль: новый опрос", () => {
@@ -84,7 +84,7 @@ describe("консоль: новый опрос", () => {
     await type(question(el), "Обед?");
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Отправить"));
-    await waitFor(() => expect(p.onAuthRequired).toHaveBeenCalled());
+    await waitFor(() => expect(authRequired).toHaveBeenCalled());
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 });

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_DISH_NAME, FOOD_MENU_FULL_HINT } from "@planer/shared";
-import { apiClient } from "../../api/client";
-import { button, click, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
+import { AuthRequiredError, apiClient } from "../../api/client";
+import { authRequired, button, click, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
 import { PlaceEditor, PlacesScreen } from "./PlacesScreen";
 
 afterEach(async () => {
@@ -12,25 +12,25 @@ afterEach(async () => {
 
 const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }, { id: 12, name: "Суп", price: 300 }] };
 const field = (el: HTMLElement, label: string) => el.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
-const editorProps = (place: typeof DODO | null = null) => ({ place, onSaved: vi.fn(), onCancel: vi.fn(), onAuthRequired: vi.fn() });
+const editorProps = (place: typeof DODO | null = null) => ({ place, onSaved: vi.fn(), onCancel: vi.fn() });
 
 describe("консоль: места — список", () => {
   it("место с меню строкой shared — деньги как везде", async () => {
     vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([DODO]);
-    const el = await mount(PlacesScreen, { onBack: vi.fn(), onAuthRequired: vi.fn() });
+    const el = await mount(PlacesScreen, { onBack: vi.fn() });
     await waitFor(() => expect(el.textContent).toContain("Пицца — 1\u00a0200\u00a0₽ · Суп — 300\u00a0₽"));
   });
 
   it("мест нет — «Мест ещё нет.»", async () => {
     vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
-    const el = await mount(PlacesScreen, { onBack: vi.fn(), onAuthRequired: vi.fn() });
+    const el = await mount(PlacesScreen, { onBack: vi.fn() });
     await waitFor(() => expect(el.textContent).toContain("Мест ещё нет."));
   });
 
   it("«Удалить» спрашивает, называя место; после ОК — в архив и список перечитан", async () => {
     const list = vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValueOnce([DODO]).mockResolvedValueOnce([]);
     const archive = vi.spyOn(apiClient, "archiveFoodPlace").mockResolvedValue();
-    const el = await mount(PlacesScreen, { onBack: vi.fn(), onAuthRequired: vi.fn() });
+    const el = await mount(PlacesScreen, { onBack: vi.fn() });
     await waitFor(() => expect(el.textContent).toContain("Додо"));
     await click(button(el, "Удалить"));
     expect(el.textContent).toContain("Удалить «Додо»?");
@@ -43,7 +43,7 @@ describe("консоль: места — список", () => {
   it("отказ архивации виден над списком, даже когда места уже нет", async () => {
     vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValueOnce([DODO]).mockResolvedValueOnce([]);
     vi.spyOn(apiClient, "archiveFoodPlace").mockRejectedValue(new Error("Места больше нет."));
-    const el = await mount(PlacesScreen, { onBack: vi.fn(), onAuthRequired: vi.fn() });
+    const el = await mount(PlacesScreen, { onBack: vi.fn() });
     await waitFor(() => expect(el.textContent).toContain("Додо"));
     await click(button(el, "Удалить"));
     await click(button(el.querySelector('[role="group"]')!, "Удалить"));
@@ -54,7 +54,7 @@ describe("консоль: места — список", () => {
   it("«Изменить» открывает редактор, сохранение возвращает к перечитанному списку", async () => {
     vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValueOnce([DODO]).mockResolvedValueOnce([{ ...DODO, name: "Додо пицца" }]);
     const save = vi.spyOn(apiClient, "saveFoodPlace").mockResolvedValue({ ...DODO, name: "Додо пицца" });
-    const el = await mount(PlacesScreen, { onBack: vi.fn(), onAuthRequired: vi.fn() });
+    const el = await mount(PlacesScreen, { onBack: vi.fn() });
     await waitFor(() => expect(el.textContent).toContain("Додо"));
     await click(button(el, "Изменить"));
     await type(field(el, "Название места"), "Додо пицца");
@@ -118,5 +118,19 @@ describe("консоль: места — редактор", () => {
     const alert = el.querySelector<HTMLElement>('[role="alert"]')!;
     expect(alert.textContent).toBe("В меню два блюда с одним названием — в чате их кнопки не различить.");
     expect(alert.nextElementSibling?.contains(button(el, "Сохранить"))).toBe(true);
+  });
+
+  it("истёкшая сессия при сохранении места — вход, а не красная плашка", async () => {
+    vi.spyOn(apiClient, "saveFoodPlace").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    const el = await mount(PlaceEditor, editorProps(DODO));
+    await click(button(el, "Сохранить"));
+    await waitFor(() => expect(authRequired).toHaveBeenCalled());
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("истёкшая сессия при загрузке мест — вход", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
+    await mount(PlacesScreen, { onBack: vi.fn() });
+    await waitFor(() => expect(authRequired).toHaveBeenCalled());
   });
 });

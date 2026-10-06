@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 /**
@@ -9,12 +10,12 @@ import { failureText } from "./food-errors";
  * «На смене» по умолчанию: чаще всего заказывают тех, кто сегодня рядом. Место —
  * из «Мест и меню» или «Без меню», тогда все позиции добавляются своими.
  */
-export function OrderForm({ onDone, onCancel, onEditPlaces, onAuthRequired }: {
+export function OrderForm({ onDone, onCancel, onEditPlaces }: {
   onDone(orderId: number): void;
   onCancel(): void;
   onEditPlaces?(): void;
-  onAuthRequired(): void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [places, setPlaces] = useState<PlaceView[]>([]);
   // Отдельно от `places`: пустой массив — это и «ещё грузится», и «мест правда нет»,
   // а подсказку «Мест пока нет» нельзя мигать на каждую загрузку.
@@ -104,7 +105,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, onAuthRequired }: {
         Приём до (необязательно)
         <input type="time" className="food-time" aria-label="Приём до" value={closesTime} disabled={busy} onChange={(e) => setClosesTime(e.target.value)} />
       </label>
-      <AudiencePicker value={audience} onChange={setAudience} disabled={busy} onAuthRequired={onAuthRequired} />
+      <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div className="employees-error" role="alert">{error}</div>}
       <div className="food-buttons">
         <button type="button" className="btn btn-primary" disabled={!audienceReady(audience) || busy} onClick={() => void submit()}>

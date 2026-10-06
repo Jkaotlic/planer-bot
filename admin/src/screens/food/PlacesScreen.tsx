@@ -4,6 +4,7 @@ import {
 } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 type PlacesView = { mode: "list" } | { mode: "editor"; place: PlaceView | null };
@@ -12,7 +13,8 @@ type PlacesView = { mode: "list" } | { mode: "editor"; place: PlaceView | null }
  * «Места и меню» — общие для всей команды: правит любой работник, ждать админа
  * ради новой цены шаурмы никто не будет (`server/src/http/routes/food-places.ts:10-13`).
  */
-export function PlacesScreen({ onBack, onAuthRequired }: { onBack(): void; onAuthRequired(): void }) {
+export function PlacesScreen({ onBack }: { onBack(): void }) {
+  const onAuthRequired = useAuthRequired();
   const [view, setView] = useState<PlacesView>({ mode: "list" });
   const [places, setPlaces] = useState<PlaceView[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -39,7 +41,6 @@ export function PlacesScreen({ onBack, onAuthRequired }: { onBack(): void; onAut
         place={view.place}
         onCancel={() => setView({ mode: "list" })}
         onSaved={() => { setView({ mode: "list" }); setAttempt((n) => n + 1); }}
-        onAuthRequired={onAuthRequired}
       />
     );
   }
@@ -100,12 +101,12 @@ export function PlacesScreen({ onBack, onAuthRequired }: { onBack(): void; onAut
  * Место и его меню. Цена — строкой, пока её набирают (иначе «0» не стереть до
  * пустого, чтобы набрать «350»); правила строк — `placeMenuFromRows`, общие с мини-аппом.
  */
-export function PlaceEditor({ place, onSaved, onCancel, onAuthRequired }: {
+export function PlaceEditor({ place, onSaved, onCancel }: {
   place: PlaceView | null;
   onSaved(p: PlaceView): void;
   onCancel(): void;
-  onAuthRequired(): void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [name, setName] = useState(place?.name ?? "");
   const [rows, setRows] = useState<PlaceEditorRow[]>(place?.menu.map((m) => ({ id: m.id, name: m.name, price: String(m.price) })) ?? []);
   const [busy, setBusy] = useState(false);

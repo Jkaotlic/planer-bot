@@ -4,13 +4,15 @@ import {
 } from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 /**
  * Опрос карточкой: голос, итог поимённо, а запускающему и админу — «Закрыть» и
  * «Отменить». Поведение — как у `miniapp/src/screens/food/PollCard.tsx`, тексты — из shared.
  */
-export function PollCard({ poll: initial, onAuthRequired }: { poll: PollView; onAuthRequired(): void }) {
+export function PollCard({ poll: initial }: { poll: PollView }) {
+  const onAuthRequired = useAuthRequired();
   const [poll, setPoll] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

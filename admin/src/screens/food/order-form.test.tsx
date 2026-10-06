@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { TEAM, orderView } from "./food-fixtures";
-import { button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderForm } from "./OrderForm";
 
 beforeEach(() => {
@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }] };
-const props = () => ({ onDone: vi.fn(), onCancel: vi.fn(), onAuthRequired: vi.fn() });
+const props = () => ({ onDone: vi.fn(), onCancel: vi.fn() });
 
 describe("консоль: новый заказ", () => {
   it("место, комментарий, срок и адресаты уходят одним телом; без недошедших — сразу к заказу", async () => {
@@ -91,7 +91,7 @@ describe("консоль: новый заказ", () => {
     const el = await mount(OrderForm, p);
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Разослать"));
-    await waitFor(() => expect(p.onAuthRequired).toHaveBeenCalled());
+    await waitFor(() => expect(authRequired).toHaveBeenCalled());
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 });

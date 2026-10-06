@@ -2,6 +2,7 @@ import { useState } from "react";
 import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 /**
@@ -9,7 +10,8 @@ import { failureText } from "./food-errors";
  * смене» по умолчанию: чаще всего спрашивают тех, кто сегодня рядом. Ответы —
  * всегда три (решение 2026-09-29), поэтому вместо полей вариантов — подсказка.
  */
-export function PollForm({ onDone, onCancel, onAuthRequired }: { onDone(): void; onCancel(): void; onAuthRequired(): void }) {
+export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): void }) {
+  const onAuthRequired = useAuthRequired();
   const [question, setQuestion] = useState("");
   const [closesTime, setClosesTime] = useState("");
   const [audience, setAudience] = useState<TeamAudience>({ kind: "on_shift" });
@@ -62,7 +64,7 @@ export function PollForm({ onDone, onCancel, onAuthRequired }: { onDone(): void;
         <input type="time" className="food-time" aria-label="Голосуем до" value={closesTime} disabled={busy} onChange={(e) => setClosesTime(e.target.value)} />
       </label>
       <div className="food-meta">{POLL_CHOICES_HINT}</div>
-      <AudiencePicker value={audience} onChange={setAudience} disabled={busy} onAuthRequired={onAuthRequired} />
+      <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div className="employees-error" role="alert">{error}</div>}
       <div className="food-buttons">
         <button type="button" className="btn btn-primary" disabled={!ready || busy} onClick={() => void submit()}>

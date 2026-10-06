@@ -4,7 +4,7 @@ import { FOOD_TEXT_MAX, formatMoney, menuItemLabel } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { orderView } from "./food-fixtures";
 import { AuthRequiredError } from "../../api/client";
-import { button, click, deferred, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
+import { authRequired, button, click, deferred, maybeButton, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderScreen } from "./OrderScreen";
 
 afterEach(async () => {
@@ -15,9 +15,9 @@ afterEach(async () => {
 const area = (el: HTMLElement, name: string) => el.querySelector<HTMLElement>(`[data-area="${name}"]`);
 const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200 }];
 
-async function open(order = orderView({ menu: DODO_MENU }), onAuthRequired = vi.fn()) {
+async function open(order = orderView({ menu: DODO_MENU })) {
   vi.spyOn(apiClient, "getOrder").mockResolvedValue(order);
-  const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn(), onAuthRequired });
+  const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn() });
   await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe(`🍱 ${order.placeName ?? "Заказ без меню"}`));
   return el;
 }
@@ -133,7 +133,7 @@ describe("консоль: заказ — отказы сервера видны 
 
   it("заказ не загрузился — текст и «Повторить», который грузит снова", async () => {
     const getOrder = vi.spyOn(apiClient, "getOrder").mockRejectedValueOnce(new Error("Заказ не найден.")).mockResolvedValueOnce(orderView());
-    const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn(), onAuthRequired: vi.fn() });
+    const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn() });
     await waitFor(() => expect(el.querySelector('[role="alert"]')?.textContent).toBe("Заказ не найден."));
     await click(button(el, "Повторить"));
     await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("🍱 Додо"));
@@ -257,10 +257,9 @@ describe("консоль: заказ — действия, которые ран
 
   it("истёкшая сессия на действии — вход, а не красная плашка", async () => {
     vi.spyOn(apiClient, "addOrderItem").mockRejectedValue(new AuthRequiredError("Сессия истекла — войди заново"));
-    const onAuth = vi.fn();
-    const el = await open(orderView({ menu: DODO_MENU }), onAuth);
+    const el = await open(orderView({ menu: DODO_MENU }));
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
-    await waitFor(() => expect(onAuth).toHaveBeenCalled());
+    await waitFor(() => expect(authRequired).toHaveBeenCalled());
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(area(el, "top")).toBeNull();
   });

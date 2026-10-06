@@ -5,6 +5,7 @@ import {
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 /** Где нажимали — там и показываем отказ. */
@@ -15,7 +16,8 @@ type Area = "mine" | "menu" | "custom" | "payments" | "manage";
  * Слева своё, справа то, что видит собирающий; права (`canManage`, `people`,
  * `payment.rows`) посчитал сервер.
  */
-export function OrderScreen({ orderId, onBack, onAuthRequired }: { orderId: number; onBack(): void; onAuthRequired(): void }) {
+export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): void }) {
+  const onAuthRequired = useAuthRequired();
   const [order, setOrder] = useState<OrderView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
