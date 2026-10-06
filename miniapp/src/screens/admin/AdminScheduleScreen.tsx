@@ -593,8 +593,9 @@ function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: str
           style={{
             position: "absolute", top: -4, right: -2, minWidth: 16, height: 16, padding: "0 4px", boxSizing: "border-box",
             // Белое на «красном» клиента не дотягивает до 4.5 ни в одной теме
-            // (замер: 4.28 и 4.01), поэтому красный затемнён.
-            borderRadius: 999, background: mixOr("color-mix(in srgb, var(--tgui--destructive_text_color) 84%, #000)", "var(--tgui--destructive_text_color)"), color: "#fff",
+            // (замер: 4.28 и 4.01), поэтому красный затемнён. Без `color-mix` (Safari < 16.2)
+            // — постоянный тёмно-красный #c62828: белый на нём 5.62.
+            borderRadius: 999, background: mixOr("color-mix(in srgb, var(--tgui--destructive_text_color) 84%, #000)", "#c62828"), color: "#fff",
             fontSize: 10.5, fontWeight: 700, lineHeight: "16px", textAlign: "center",
             boxShadow: "0 0 0 2px var(--app-canvas, var(--tgui--secondary_bg_color))",
           }}
