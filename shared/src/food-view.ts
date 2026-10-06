@@ -154,3 +154,23 @@ export function placeMenuFromRows(
   }
   return { ok: true, menu };
 }
+
+/**
+ * Тексты экрана заказа и «Мест и меню» — одни слова в мини-аппе и в консоли: два
+ * набора литералов разъезжались бы при первой же правке формулировки.
+ */
+export const FOOD_PAID_MARKED = "✓ Ты отметился";
+export const FOOD_UNMARK_QUESTION = "Снять отметку о сдаче?";
+/** Хвост строки «Кто сдал»: галочку поставил не сам человек, а собирающий. */
+export const FOOD_CASH_MARK = " · наличкой";
+export const FOOD_NO_PLACES = "Мест ещё нет.";
+export const FOOD_NO_PLACES_HINT = "Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.";
+
+/** Что писать вместо списка своих позиций: отказавшийся и не выбравший — разные люди. */
+export function myOrderEmptyText(declined: boolean): string {
+  return declined ? "Ты не заказываешь." : "Пока пусто.";
+}
+
+export function payHintLine(payHint: string): string {
+  return `Куда сдавать: ${payHint}`;
+}

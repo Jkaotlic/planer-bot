@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Input, Textarea } from "@telegram-apps/telegram-ui";
-import { audienceReady, menuPreview, sendReportText } from "@planer/shared";
+import { FOOD_NO_PLACES_HINT, audienceReady, menuPreview, sendReportText } from "@planer/shared";
 import { apiClient, type PlaceView, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton, Card } from "../../ui";
@@ -93,7 +93,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
         </div>
         {placesLoaded && places.length === 0 && (
           <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", paddingTop: 6 }}>
-            Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.
+            {FOOD_NO_PLACES_HINT}
           </div>
         )}
         {/* Меню выбранного места серым — чтобы было видно, что уйдёт

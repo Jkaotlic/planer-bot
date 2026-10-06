@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
 import {
-  FOOD_QTY_MAX, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, myOrderPayment,
-  orderPersonLine, orderStatusLabel, priceDigits, remindResultText,
+  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, myOrderPayment,
+  myOrderEmptyText, orderPersonLine, orderStatusLabel, payHintLine, priceDigits, remindResultText,
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -113,12 +113,12 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           сразу, а не после прокрутки всех карточек вниз. */}
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       {order.note && <div style={{ fontSize: "var(--app-text-meta)" }}>{order.note}</div>}
-      {order.payHint && <div style={{ fontSize: "var(--app-text-meta)" }}>Куда сдавать: {order.payHint}</div>}
+      {order.payHint && <div style={{ fontSize: "var(--app-text-meta)" }}>{payHintLine(order.payHint)}</div>}
 
       <Group>
         <Card>
           <div style={{ fontWeight: 600 }}>Твой заказ</div>
-          {order.myItems.length === 0 && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{order.declined ? "Ты не заказываешь." : "Пока пусто."}</div>}
+          {order.myItems.length === 0 && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{myOrderEmptyText(order.declined)}</div>}
           {order.myItems.map((item) => (
             <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ flex: 1 }}>{itemLines([item])[0]}</span>
@@ -143,8 +143,8 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           )}
           {pay.mark === "marked" && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span>✓ Ты отметился</span>
-              <ConfirmButton label="Снять отметку" question="Снять отметку о сдаче?" confirmLabel="Снять" mode="plain"
+              <span>{FOOD_PAID_MARKED}</span>
+              <ConfirmButton label="Снять отметку" question={FOOD_UNMARK_QUESTION} confirmLabel="Снять" mode="plain"
                 onConfirm={() => run(() => apiClient.setOrderPaid(order.id, false))} disabled={busy} />
             </div>
           )}
@@ -207,7 +207,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               <label key={r.employeeId} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input type="checkbox" checked={r.paid} disabled={busy}
                   onChange={(e) => run(() => apiClient.setOrderPaymentFor(order.id, r.employeeId, e.target.checked))} />
-                <span style={{ flex: 1 }}>{r.displayName}{r.markedByAdmin ? " · наличкой" : ""}</span>
+                <span style={{ flex: 1 }}>{r.displayName}{r.markedByAdmin ? FOOD_CASH_MARK : ""}</span>
                 <span>{formatMoney(r.amount)}</span>
               </label>
             ))}

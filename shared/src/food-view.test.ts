@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { OrderView } from "./api/food";
 import { formatMoney } from "./collection";
 import {
+  FOOD_CASH_MARK,
+  FOOD_NO_PLACES,
+  FOOD_NO_PLACES_HINT,
+  FOOD_PAID_MARKED,
+  FOOD_UNMARK_QUESTION,
+  myOrderEmptyText,
+  payHintLine,
   cancelOrderQuestion,
   cancelPollQuestion,
   closeOrderQuestion,
@@ -157,5 +164,21 @@ describe("placeMenuFromRows — меню из строк редактора", ()
 
   it("подсказка полного меню называет потолок", () => {
     expect(FOOD_MENU_FULL_HINT).toBe("В меню уже 30 блюд — больше не поместится в кнопки бота.");
+  });
+});
+
+describe("тексты экранов заказа, общие для мини-аппа и консоли", () => {
+  it("свой заказ пуст: отказавшемуся — другое слово, чем тому, кто ещё не выбрал", () => {
+    expect(myOrderEmptyText(false)).toBe("Пока пусто.");
+    expect(myOrderEmptyText(true)).toBe("Ты не заказываешь.");
+  });
+
+  it("куда сдавать, отметка о сдаче, наличка, мест нет", () => {
+    expect(payHintLine("Наличкой Ане")).toBe("Куда сдавать: Наличкой Ане");
+    expect(FOOD_PAID_MARKED).toBe("✓ Ты отметился");
+    expect(FOOD_UNMARK_QUESTION).toBe("Снять отметку о сдаче?");
+    expect(FOOD_CASH_MARK).toBe(" · наличкой");
+    expect(FOOD_NO_PLACES).toBe("Мест ещё нет.");
+    expect(FOOD_NO_PLACES_HINT).toBe("Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.");
   });
 });

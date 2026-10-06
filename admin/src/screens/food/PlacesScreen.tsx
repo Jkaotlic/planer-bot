@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  FOOD_MENU_FULL_HINT, FOOD_MENU_MAX, FOOD_TEXT_MAX, menuPreview, placeMenuFromRows, priceDigits, type PlaceEditorRow,
+  FOOD_MENU_FULL_HINT, FOOD_NO_PLACES, FOOD_MENU_MAX, FOOD_TEXT_MAX, menuPreview, placeMenuFromRows, priceDigits, type PlaceEditorRow,
 } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -76,7 +76,7 @@ export function PlacesScreen({ onBack, onAuthRequired }: { onBack(): void; onAut
         </div>
       )}
       {places === null && !loadError && <div className="employees-empty">Загрузка…</div>}
-      {places?.length === 0 && <div className="empty-state">Мест ещё нет.</div>}
+      {places?.length === 0 && <div className="empty-state">{FOOD_NO_PLACES}</div>}
       {places && places.length > 0 && (
         <div className="food-list">
           {places.map((p) => (

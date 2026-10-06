@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  FOOD_QTY_MAX, FOOD_TEXT_MAX, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel,
-  myOrderPayment, orderPersonLine, orderStatusLabel, priceDigits, remindResultText,
+  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_TEXT_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel,
+  myOrderEmptyText, myOrderPayment, orderPersonLine, orderStatusLabel, payHintLine, priceDigits, remindResultText,
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -113,7 +113,7 @@ export function OrderScreen({ orderId, onBack, onAuthRequired }: { orderId: numb
         Собирает {order.creatorName} · {orderStatusLabel(order)} · ответили {order.respondedCount} из {order.recipientCount}
       </div>
       {order.note && <div className="food-note">{order.note}</div>}
-      {order.payHint && <div className="food-note">Куда сдавать: {order.payHint}</div>}
+      {order.payHint && <div className="food-note">{payHintLine(order.payHint)}</div>}
       {/* Карточка, где нажимали, могла исчезнуть при перечитывании (меню и «Управление»
           гаснут у закрытого заказа) — тогда отказ здесь, а не пропадает вместе с ней. */}
       {failure && !shown[failure.area] && (
@@ -124,7 +124,7 @@ export function OrderScreen({ orderId, onBack, onAuthRequired }: { orderId: numb
         <div className="food-column">
           <section className="food-card" data-area="mine">
             <h3 className="food-card-title">Твой заказ</h3>
-            {order.myItems.length === 0 && <div className="food-meta">{order.declined ? "Ты не заказываешь." : "Пока пусто."}</div>}
+            {order.myItems.length === 0 && <div className="food-meta">{myOrderEmptyText(order.declined)}</div>}
             {order.myItems.map((item) => (
               <div key={item.id} className="food-row">
                 <span className="food-row-name">{itemLines([item])[0]}</span>
@@ -150,8 +150,8 @@ export function OrderScreen({ orderId, onBack, onAuthRequired }: { orderId: numb
             )}
             {pay.mark === "marked" && (
               <div className="food-row">
-                <span>✓ Ты отметился</span>
-                <ConfirmButton label="Снять отметку" question="Снять отметку о сдаче?" confirmLabel="Снять" disabled={busy}
+                <span>{FOOD_PAID_MARKED}</span>
+                <ConfirmButton label="Снять отметку" question={FOOD_UNMARK_QUESTION} confirmLabel="Снять" disabled={busy}
                   onConfirm={() => void run("mine", () => apiClient.setOrderPaid(order.id, false))} />
               </div>
             )}
@@ -219,7 +219,7 @@ export function OrderScreen({ orderId, onBack, onAuthRequired }: { orderId: numb
                 <label key={r.employeeId} className="food-pay-row">
                   <input type="checkbox" checked={r.paid} disabled={busy}
                     onChange={(e) => void run("payments", () => apiClient.setOrderPaymentFor(order.id, r.employeeId, e.target.checked))} />
-                  <span className="food-row-name">{r.displayName}{r.markedByAdmin ? " · наличкой" : ""}</span>
+                  <span className="food-row-name">{r.displayName}{r.markedByAdmin ? FOOD_CASH_MARK : ""}</span>
                   <span>{formatMoney(r.amount)}</span>
                 </label>
               ))}

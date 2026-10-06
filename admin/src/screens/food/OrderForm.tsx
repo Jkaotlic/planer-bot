@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FOOD_NOTE_MAX, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
+import { FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 import { failureText } from "./food-errors";
@@ -87,7 +87,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, onAuthRequired }: {
           ))}
         </div>
         {placesLoaded && places.length === 0 && (
-          <div className="food-meta">Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.</div>
+          <div className="food-meta">{FOOD_NO_PLACES_HINT}</div>
         )}
         {/* Меню выбранного места — чтобы было видно, что уйдёт кнопками, ещё до заказа. */}
         {selected && <div className="food-meta">{menuPreview(selected.menu)}</div>}

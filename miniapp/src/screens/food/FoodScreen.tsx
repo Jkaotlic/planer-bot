@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatMoney, menuPreview, orderStatusLabel } from "@planer/shared";
+import { FOOD_NO_PLACES, formatMoney, menuPreview, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, Hint } from "../../ui";
@@ -157,7 +157,7 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
       {places === "error" && (
         <div>Не удалось загрузить. <ActionButton compact kind="quiet" onClick={() => setAttempt((n) => n + 1)}>Повторить</ActionButton></div>
       )}
-      {Array.isArray(places) && places.length === 0 && <Hint>Мест ещё нет.</Hint>}
+      {Array.isArray(places) && places.length === 0 && <Hint>{FOOD_NO_PLACES}</Hint>}
       {Array.isArray(places) && places.length > 0 && (
         <Group>
           {places.map((p) => (
