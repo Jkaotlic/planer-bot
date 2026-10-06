@@ -54,7 +54,10 @@
     --fallback-hint: #8a93a3;
     --fallback-link: #6ab2f2;
     --fallback-button: #4d8ed6;
-    --fallback-button-text: #ffffff;
+    /* Белый на #4d8ed6 давал 3.41:1 (замер консоли 2026-10-06: «Разослать», «Добавить»,
+       нажатое «👍 За» и все `btn-primary` в тёмной теме) — ниже 4.5. Тёмный текст
+       #14181f на том же фоне: 5.22:1 (замер после правки). Светлую тему не трогаем (белый на #1c73d0 — 4.76:1). */
+    --fallback-button-text: #14181f;
     --fallback-destructive: #ff6b60;
     --fallback-separator: #2a3040;
   }
@@ -2320,6 +2323,16 @@ textarea {
 .btn-danger:hover {
   background: var(--surface-secondary);
   background: color-mix(in srgb, var(--destructive) 20%, transparent);
+  color: var(--destructive);
+}
+
+/* Замер: подложка в 20% при красном тексте давала 4.04:1 на белой карточке (светлая)
+   и 4.19:1 на тёмной. Текст при наведении сдвигается к цвету основного текста —
+   в светлой темняше, в тёмной светлее, то есть всегда от подложки. */
+@supports (color: color-mix(in srgb, red, blue)) {
+  .btn-danger:hover {
+    color: color-mix(in srgb, var(--destructive) 70%, var(--text));
+  }
 }
 .btn-danger:disabled {
   opacity: 0.55;
@@ -3892,6 +3905,14 @@ input.food-dish-name {
 input.food-dish-price {
   flex: none;
   width: 110px;
+}
+
+/* Вид полей блюда — как у поля «Название места» рядом (`.birthday-label input`):
+   замер ДО — 14px и отступ 0 по вертикали против 13px и 8px у соседа. */
+input.food-dish-name,
+input.food-dish-price {
+  padding: 8px 10px;
+  font-size: var(--text-sub);
 }
 
 .food-unreachable {
