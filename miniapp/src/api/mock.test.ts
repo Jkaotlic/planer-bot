@@ -616,7 +616,7 @@ describe("заказы еды: dev-мок", () => {
   });
 
   it("несуществующий заказ отвечает по-русски, а не английским «not_found»", async () => {
-    await expect(mockGetOrder(999_999)).rejects.toThrow("Заказ не найден или недоступен.");
+    await expect(mockGetOrder(999_999)).rejects.toThrow("Заказ не найден.");
   });
 });
 

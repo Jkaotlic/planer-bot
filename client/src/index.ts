@@ -5,3 +5,4 @@ export * from "./read";
 export * from "./mock/delay";
 export * from "./mock/employees";
 export * from "./mock/read";
+export * from "./mock/food";
