@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthRequiredError, apiClient } from "../../api/client";
 import { orderView, pollView } from "./food-fixtures";
-import { button, click, mount, unmount, waitFor } from "./food-test-kit";
+import { button, click, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrdersPollsScreen } from "./OrdersPollsScreen";
 
 afterEach(async () => {
@@ -87,5 +87,22 @@ describe("консоль: список «Заказы и опросы»", () => 
     expect(getOrder).toHaveBeenCalledWith(7);
     await click(button(el, "‹ Назад"));
     await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы"));
+  });
+
+  it("«🗳 Новый опрос» открывает форму; созданный опрос виден в перечитанном списке", async () => {
+    const getPolls = vi.spyOn(apiClient, "getPolls").mockResolvedValueOnce([]).mockResolvedValueOnce([pollView({ question: "Корпоратив?" })]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([]);
+    vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: pollView({ question: "Корпоратив?" }), delivered: 2, unreachable: [] });
+    const el = await mount(OrdersPollsScreen, { onAuthRequired: vi.fn() });
+    await waitFor(() => expect(el.textContent).toContain("Пока ничего не запускали."));
+    await click(button(el, "🗳 Новый опрос"));
+    await type(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Вопрос"]')!, "Корпоратив?");
+    await waitFor(() => expect(button(el, "Отправить").disabled).toBe(false));
+    await click(button(el, "Отправить"));
+    await waitFor(() => expect(el.textContent).toContain("Корпоратив?"));
+    expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы");
+    expect(getPolls).toHaveBeenCalledTimes(2);
   });
 });

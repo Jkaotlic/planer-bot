@@ -6,6 +6,7 @@ import { failureText } from "./food-errors";
 import { OrderForm } from "./OrderForm";
 import { OrderScreen } from "./OrderScreen";
 import { PollCard } from "./PollCard";
+import { PollForm } from "./PollForm";
 
 /** Куда ведёт экран. Навигация — внутри пункта меню, как у «Сборов»: сайдбар остаётся на месте. */
 export type FoodView =
@@ -51,6 +52,7 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
   if (route.view === "new-order") {
     return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} onAuthRequired={onAuthRequired} />;
   }
+  if (route.view === "new-poll") return <PollForm onDone={toList} onCancel={toList} onAuthRequired={onAuthRequired} />;
   if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} onAuthRequired={onAuthRequired} />;
 
   const retry = () => setAttempt((n) => n + 1);
@@ -72,6 +74,7 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
       </div>
       <div className="food-toolbar">
         <button type="button" className="btn btn-primary" onClick={() => setRoute({ view: "new-order" })}>🍱 Новый заказ</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setRoute({ view: "new-poll" })}>🗳 Новый опрос</button>
       </div>
       {(orders === null && !ordersError) || (polls === null && !pollsError) ? (
         <div className="employees-empty">Загрузка…</div>
