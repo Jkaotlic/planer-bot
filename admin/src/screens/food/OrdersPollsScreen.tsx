@@ -3,6 +3,7 @@ import { formatMoney, orderInProgress, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PollView } from "../../api/client";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { failureText } from "./food-errors";
+import { OrderForm } from "./OrderForm";
 import { PollCard } from "./PollCard";
 
 /** Куда ведёт экран. Навигация — внутри пункта меню, как у «Сборов»: сайдбар остаётся на месте. */
@@ -19,8 +20,7 @@ export type FoodView =
  * Идущие — сразу, прошедшие — свёрнуты: закрытые отодвигали бы живые.
  */
 export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }) {
-  // Переходы (`setRoute`) добавляют задачи 7–10 вместе с экранами, куда они ведут.
-  const [route] = useState<FoodView>({ view: "list" });
+  const [route, setRoute] = useState<FoodView>({ view: "list" });
   const [orders, setOrders] = useState<OrderView[] | null>(null);
   const [polls, setPolls] = useState<PollView[] | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
@@ -46,6 +46,12 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
     return () => { alive = false; };
   }, [route, attempt]);
 
+  const toList = () => setRoute({ view: "list" });
+  // Экран заказа появится в задаче 8; до тех пор созданный заказ виден в списке.
+  if (route.view === "new-order") {
+    return <OrderForm onDone={toList} onCancel={toList} onAuthRequired={onAuthRequired} />;
+  }
+
   const retry = () => setAttempt((n) => n + 1);
   const activeOrders = orders?.filter(orderInProgress) ?? [];
   const pastOrders = orders?.filter((o) => !orderInProgress(o)) ?? [];
@@ -62,6 +68,9 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
     <div className="employees-screen">
       <div className="employees-header">
         <h2 className="employees-title">Заказы и опросы</h2>
+      </div>
+      <div className="food-toolbar">
+        <button type="button" className="btn btn-primary" onClick={() => setRoute({ view: "new-order" })}>🍱 Новый заказ</button>
       </div>
       {(orders === null && !ordersError) || (polls === null && !pollsError) ? (
         <div className="employees-empty">Загрузка…</div>

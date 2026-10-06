@@ -60,4 +60,19 @@ describe("консоль: список «Заказы и опросы»", () => 
     await mount(OrdersPollsScreen, { onAuthRequired: onAuth });
     await waitFor(() => expect(onAuth).toHaveBeenCalled());
   });
+
+  it("«🍱 Новый заказ» открывает форму, «Отмена» возвращает к списку и перечитывает его", async () => {
+    const getOrders = vi.spyOn(apiClient, "getOrders").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getRecipientGroups").mockResolvedValue([]);
+    const el = await mount(OrdersPollsScreen, { onAuthRequired: vi.fn() });
+    await waitFor(() => expect(el.textContent).toContain("Пока ничего не запускали."));
+    await click(button(el, "🍱 Новый заказ"));
+    expect(el.querySelector("h2")?.textContent).toBe("Новый заказ");
+    await click(button(el, "Отмена"));
+    await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы"));
+    expect(getOrders).toHaveBeenCalledTimes(2);
+  });
 });
