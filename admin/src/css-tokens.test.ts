@@ -127,4 +127,34 @@ describe("токены оформления консоли", () => {
     expect(ratio(red, card)).toBeGreaterThanOrEqual(4.5);
     expect(ratio(red, errorBg)).toBeGreaterThanOrEqual(4.5);
   });
+
+  // «Опасная» кнопка — красный текст на красной подложке поверх того, что под ней. На
+  // белой карточке выходило 4.59, на фоне страницы 4.01 и на вторичном фоне 3.65: ниже
+  // 4.5. В покое текст, как и при наведении, сдвигается к цвету основного текста.
+  it("«Опасная» кнопка в покое читается на карточке, странице и вторичном фоне: не ниже 4.5", () => {
+    const start = css.indexOf(":root {");
+    const root = css.slice(start, css.indexOf("}", start));
+    const rgb = (name: string) => {
+      const h = root.match(new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`))![1]!;
+      return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    };
+    const lum = (c: number[]) => {
+      const [r, g, b] = c.map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+    };
+    const ratio = (a: number[], b: number[]) => {
+      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+      return (x! + 0.05) / (y! + 0.05);
+    };
+    const mix = (a: number[], b: number[], share: number) => a.map((v, i) => v * (1 - share) + b[i]! * share);
+    const supports = css.slice(css.indexOf("@supports (color: color-mix(in srgb, red, blue)) {\n  .btn-danger {"));
+    const textShare = Number(supports.match(/\.btn-danger \{\s*color: color-mix\(in srgb, var\(--destructive\) (\d+)%, var\(--text\)\)/)![1]) / 100;
+    const tint = Number(css.match(/\.btn-danger \{[^}]*background: color-mix\(in srgb, var\(--destructive\) (\d+)%, transparent\)/)![1]) / 100;
+    const red = rgb("fallback-destructive");
+    const text = rgb("fallback-text");
+    const label = mix(text, red, textShare);
+    for (const surface of ["fallback-section-bg", "fallback-bg", "fallback-secondary-bg"]) {
+      expect(ratio(label, mix(rgb(surface), red, tint)), surface).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 });
