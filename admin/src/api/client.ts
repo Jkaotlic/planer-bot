@@ -3,6 +3,14 @@ import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, 
 export type { CalendarDayDto };
 
 import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from "@planer/shared";
+// Опросы, заказы еды и места — те же ответы и правила, что у мини-аппа (спека
+// 2026-10-06): типы общие из shared, чтобы две морды не разошлись в форме.
+import type {
+  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollView, TeamAudience,
+} from "@planer/shared";
+export type {
+  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollView, TeamAudience,
+} from "@planer/shared";
 export type { SickApprovalRow } from "@planer/shared";
 import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
 import type {
@@ -87,6 +95,7 @@ import {
   mockSetCalendarDay,
   mockGetNoticePrefs,
   mockSetNoticePref,
+  foodMock,
   mockGetAnnouncementRecipients,
   mockGetRecipientGroups,
   mockCreateRecipientGroup,
@@ -746,6 +755,44 @@ export interface ApiClient {
   createRecipientGroup(input: { name: string; memberIds: number[] }): Promise<RecipientGroupView>;
   saveRecipientGroup(id: number, patch: { name?: string; memberIds?: number[] }): Promise<RecipientGroupView>;
   deleteRecipientGroup(id: number): Promise<void>;
+  // --- «Заказы и опросы»: те же ручки, что у мини-аппа --------------------------
+  /** Адресаты опроса и заказа еды — выбор «на смене / все / вручную». */
+  getTeamAudience(): Promise<AudienceCandidate[]>;
+  /** Опросы, которые этот админ запустил или куда его позвали, — как в мини-аппе у него же. */
+  getPolls(): Promise<PollView[]>;
+  /** Один опрос — карточка перечитывает его после отказа действия. */
+  getPoll(id: number): Promise<PollView>;
+  /** Заводит опрос и сразу шлёт приглашения адресатам. */
+  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView } & FoodSendReport>;
+  votePoll(id: number, choice: PollChoice): Promise<PollView>;
+  /** «Закрыть и разослать итог». Админ может и чужой — так решено ещё для мини-аппа. */
+  closePoll(id: number): Promise<PollView>;
+  cancelPoll(id: number): Promise<PollView>;
+  /** Места с меню — общие для всей команды. */
+  getFoodPlaces(): Promise<PlaceView[]>;
+  /** `id: null` — новое место, иначе правка существующего. */
+  saveFoodPlace(id: number | null, input: PlaceInput): Promise<PlaceView>;
+  /** В архив: блюда остаются, на них ссылаются старые заказы. */
+  archiveFoodPlace(id: number): Promise<void>;
+  /** Заказы, которые этот админ собирает или куда его позвали. */
+  getOrders(): Promise<OrderView[]>;
+  getOrder(id: number): Promise<OrderView>;
+  createOrder(input: { placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience }): Promise<{ order: OrderView } & FoodSendReport>;
+  /** Своя позиция: из меню места или своим блюдом с ценой. */
+  addOrderItem(id: number, input: { menuItemId: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
+  setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;
+  removeOrderItem(id: number, itemId: number): Promise<OrderView>;
+  /** «Не буду» — снимает свои позиции и отмечает отказ. */
+  declineOrder(id: number): Promise<OrderView>;
+  /** «Закрыть приём»: всем уходит «сдай» с именем того, кто собирает. */
+  closeOrder(id: number): Promise<OrderView>;
+  cancelOrder(id: number): Promise<OrderView>;
+  /** Своя отметка «Я сдал». */
+  setOrderPaid(id: number, paid: boolean): Promise<OrderView>;
+  /** Галочка за другого: наличка в руки — запускающий или админ. */
+  setOrderPaymentFor(id: number, employeeId: number, paid: boolean): Promise<OrderView>;
+  /** Дожим по неотметившимся: `unpaid` — знаменатель «D из N». */
+  remindOrderUnpaid(id: number): Promise<OrderRemindResult>;
   /** Рассылает объявление команде или выбранным. Подтверждение — на
    *  вызывающем, тот же узор, что у `sendCollection`. */
   sendAnnouncement(text: string, audience: AnnouncementAudience): Promise<AnnouncementResult>;
@@ -1316,6 +1363,69 @@ export const realClient: ApiClient = {
   deleteRecipientGroup: async (id) => {
     await authorizedDelete<{ ok: true }>(`/api/admin/recipient-groups/${id}`);
   },
+  async getTeamAudience() {
+    return (await authorizedGet<{ candidates: AudienceCandidate[] }>("/api/team-audience")).candidates;
+  },
+  async getPolls() {
+    return (await authorizedGet<{ polls: PollView[] }>("/api/polls")).polls;
+  },
+  async getPoll(id) {
+    return (await authorizedGet<{ poll: PollView }>(`/api/polls/${id}`)).poll;
+  },
+  createPoll: (input) => authorizedPostJson<{ poll: PollView } & FoodSendReport>("/api/polls", input),
+  async votePoll(id, choice) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/vote`, { choice })).poll;
+  },
+  async closePoll(id) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/close`, {})).poll;
+  },
+  async cancelPoll(id) {
+    return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/cancel`, {})).poll;
+  },
+  async getFoodPlaces() {
+    return (await authorizedGet<{ places: PlaceView[] }>("/api/food-places")).places;
+  },
+  async saveFoodPlace(id, input) {
+    const res = id == null
+      ? await authorizedPostJson<{ place: PlaceView }>("/api/food-places", input)
+      : await authorizedPutJson<{ place: PlaceView }>(`/api/food-places/${id}`, input);
+    return res.place;
+  },
+  async archiveFoodPlace(id) {
+    await authorizedDelete<{ ok: true }>(`/api/food-places/${id}`);
+  },
+  async getOrders() {
+    return (await authorizedGet<{ orders: OrderView[] }>("/api/orders")).orders;
+  },
+  async getOrder(id) {
+    return (await authorizedGet<{ order: OrderView }>(`/api/orders/${id}`)).order;
+  },
+  createOrder: (input) => authorizedPostJson<{ order: OrderView } & FoodSendReport>("/api/orders", input),
+  async addOrderItem(id, input) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/items`, input)).order;
+  },
+  async setOrderItemQty(id, itemId, qty) {
+    return (await authorizedPatchJson<{ order: OrderView }>(`/api/orders/${id}/items/${itemId}`, { qty })).order;
+  },
+  async removeOrderItem(id, itemId) {
+    return (await authorizedDelete<{ order: OrderView }>(`/api/orders/${id}/items/${itemId}`)).order;
+  },
+  async declineOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/decline`, {})).order;
+  },
+  async closeOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/close`, {})).order;
+  },
+  async cancelOrder(id) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/cancel`, {})).order;
+  },
+  async setOrderPaid(id, paid) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/paid`, { paid })).order;
+  },
+  async setOrderPaymentFor(id, employeeId, paid) {
+    return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/payments/${employeeId}`, { paid })).order;
+  },
+  remindOrderUnpaid: (id) => authorizedPostJson<OrderRemindResult>(`/api/orders/${id}/remind`, {}),
   async getAnnouncementRecipients() {
     const { recipients } = await authorizedGet<{ recipients: AnnouncementRecipient[] }>("/api/announcements/recipients");
     return recipients;
@@ -1342,7 +1452,10 @@ export const realClient: ApiClient = {
   },
 };
 
-const devClient: ApiClient = {
+// Функцией, а не готовым объектом: в боевой сборке `import.meta.env.DEV` равен false и
+// вызова нет, значит сборщик выбрасывает всю функцию вместе с моками. Объект со
+// спредом (`...employeesMock`) он выбросить не мог — чтение свойств считал эффектом.
+const createDevClient = (): ApiClient => ({
   getMe: async () => ({ id: 1, displayName: "Админов Админ", address: "Админ" }),
 
   getEmployees: () => employeesMock.getAdminEmployees(),
@@ -1429,17 +1542,39 @@ const devClient: ApiClient = {
   createRecipientGroup: (input) => mockCreateRecipientGroup(input),
   saveRecipientGroup: (id, patch) => mockSaveRecipientGroup(id, patch),
   deleteRecipientGroup: (id) => mockDeleteRecipientGroup(id),
+  getTeamAudience: () => foodMock.getTeamAudience(),
+  getPolls: () => foodMock.getPolls(),
+  getPoll: (id) => foodMock.getPoll(id),
+  createPoll: (input) => foodMock.createPoll(input),
+  votePoll: (id, choice) => foodMock.votePoll(id, choice),
+  closePoll: (id) => foodMock.closePoll(id),
+  cancelPoll: (id) => foodMock.cancelPoll(id),
+  getFoodPlaces: () => foodMock.getFoodPlaces(),
+  saveFoodPlace: (id, input) => foodMock.saveFoodPlace(id, input),
+  archiveFoodPlace: (id) => foodMock.archiveFoodPlace(id),
+  getOrders: () => foodMock.getOrders(),
+  getOrder: (id) => foodMock.getOrder(id),
+  createOrder: (input) => foodMock.createOrder(input),
+  addOrderItem: (id, input) => foodMock.addOrderItem(id, input),
+  setOrderItemQty: (id, itemId, qty) => foodMock.setOrderItemQty(id, itemId, qty),
+  removeOrderItem: (id, itemId) => foodMock.removeOrderItem(id, itemId),
+  declineOrder: (id) => foodMock.declineOrder(id),
+  closeOrder: (id) => foodMock.closeOrder(id),
+  cancelOrder: (id) => foodMock.cancelOrder(id),
+  setOrderPaid: (id, paid) => foodMock.setOrderPaid(id, paid),
+  setOrderPaymentFor: (id, employeeId, paid) => foodMock.setOrderPaymentFor(id, employeeId, paid),
+  remindOrderUnpaid: (id) => foodMock.remindOrderUnpaid(id),
   sendAnnouncement: (text, audience) => mockSendAnnouncement(text, audience),
   getBugReports: (status) => mockGetBugReports(status),
   resolveBugReport: (id, resolved) => mockResolveBugReport(id, resolved),
   getSickApprovals: () => mockGetSickApprovals(),
   approveSickLeave: (id) => mockApproveSickLeave(id),
   rejectSickLeave: (id) => mockRejectSickLeave(id),
-};
+});
 
 /**
  * In dev, short-circuits to realistic mock data so the app renders with no
  * backend running. In production, authenticates via Telegram initData and
  * talks to the real API at `VITE_API_BASE`.
  */
-export const apiClient: ApiClient = import.meta.env.DEV ? devClient : realClient;
+export const apiClient: ApiClient = import.meta.env.DEV ? createDevClient() : realClient;

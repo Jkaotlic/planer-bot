@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
-import { FOOD_QTY_MAX, formatMoney, itemLines } from "@planer/shared";
+import {
+  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, myOrderPayment,
+  myOrderEmptyText, orderPersonLine, orderStatusLabel, payHintLine, priceDigits, remindResultText,
+} from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, Hint } from "../../ui";
@@ -68,11 +71,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
     setError(null);
     setRemindResult(null);
     try {
-      const { delivered, unpaid, unreachable } = await apiClient.remindOrderUnpaid(id);
-      const text = unpaid === 0
-        ? "Все уже сдали 🎉"
-        : `Напомнил: ${delivered} из ${unpaid}` + (unreachable.length > 0 ? `. Не дошло: ${unreachable.join(", ")}` : "");
-      setRemindResult(text);
+      setRemindResult(remindResultText(await apiClient.remindOrderUnpaid(id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не получилось");
       try {
@@ -99,7 +98,8 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
   }
   if (order === null) return <div className="ui-page"><Hint>Загружаю заказ…</Hint></div>;
 
-  const status = order.cancelled ? "отменён" : order.open ? (order.closes ?? "приём идёт") : "приём закрыт";
+  const status = orderStatusLabel(order);
+  const pay = myOrderPayment(order);
   return (
     <div className="ui-page">
       <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
@@ -113,12 +113,12 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           сразу, а не после прокрутки всех карточек вниз. */}
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       {order.note && <div style={{ fontSize: "var(--app-text-meta)" }}>{order.note}</div>}
-      {order.payHint && <div style={{ fontSize: "var(--app-text-meta)" }}>Куда сдавать: {order.payHint}</div>}
+      {order.payHint && <div style={{ fontSize: "var(--app-text-meta)" }}>{payHintLine(order.payHint)}</div>}
 
       <Group>
         <Card>
           <div style={{ fontWeight: 600 }}>Твой заказ</div>
-          {order.myItems.length === 0 && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{order.declined ? "Ты не заказываешь." : "Пока пусто."}</div>}
+          {order.myItems.length === 0 && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{myOrderEmptyText(order.declined)}</div>}
           {order.myItems.map((item) => (
             <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ flex: 1 }}>{itemLines([item])[0]}</span>
@@ -132,25 +132,19 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             </div>
           ))}
           {order.myTotal > 0 && <div style={{ fontWeight: 600 }}>Итого: {formatMoney(order.myTotal)}</div>}
-          {/* Дательный падеж от одного `displayName` не построить — та же причина,
-              что у `collectionMessage`: «сбор на Пётр Иванов» уже ловили на ревью. */}
-          {!order.open && !order.cancelled && order.myTotal > 0 && !order.isCreator && (
-            <div>Сдать: {formatMoney(order.myTotal)} — {order.creatorName}</div>
-          )}
-          {/* Отметка — не тумблер: кнопка «Ты отметился ✓» снимала «сдал» одним
-              тапом, и промах пальцем молча стирал его. Галочка — просто текст,
-              снять — отдельно и с подтверждением, как в боте (там повторный
-              тап вообще ничего не снимает). */}
-          {order.closed && !order.isCreator && order.myTotal > 0 && !order.payment.myPaid && (
+          {pay.oweLine && <div>{pay.oweLine}</div>}
+          {/* Отметка — не тумблер: «Ты отметился ✓» снимала «сдал» одним тапом, и промах
+              пальцем молча стирал его. Снять — отдельно и с подтверждением, как в боте. */}
+          {pay.mark === "can-mark" && (
             <ActionButton compact disabled={busy}
               onClick={() => run(() => apiClient.setOrderPaid(order.id, true))}>
               💸 Я сдал
             </ActionButton>
           )}
-          {order.closed && !order.isCreator && order.myTotal > 0 && order.payment.myPaid && (
+          {pay.mark === "marked" && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span>✓ Ты отметился</span>
-              <ConfirmButton label="Снять отметку" question="Снять отметку о сдаче?" confirmLabel="Снять" mode="plain"
+              <span>{FOOD_PAID_MARKED}</span>
+              <ConfirmButton label="Снять отметку" question={FOOD_UNMARK_QUESTION} confirmLabel="Снять" mode="plain"
                 onConfirm={() => run(() => apiClient.setOrderPaid(order.id, false))} disabled={busy} />
             </div>
           )}
@@ -162,7 +156,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {order.menu.map((m) => (
                 <ActionButton key={m.id} compact disabled={busy}
-                  onClick={() => run(() => apiClient.addOrderItem(order.id, { menuItemId: m.id }))}>{`${m.name} · ${formatMoney(m.price)}`}</ActionButton>
+                  onClick={() => run(() => apiClient.addOrderItem(order.id, { menuItemId: m.id }))}>{menuItemLabel(m)}</ActionButton>
               ))}
             </div>
           </Card>
@@ -177,7 +171,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               </div>
               <div style={{ width: 90, flex: "none" }}>
                 <Input name="custom-price" placeholder="₽" inputMode="numeric" value={customPrice}
-                  onChange={(e) => setCustomPrice(e.target.value.replace(/\D/g, ""))} disabled={busy} />
+                  onChange={(e) => setCustomPrice(priceDigits(e.target.value))} disabled={busy} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -200,7 +194,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             {order.dishes.map((d) => <div key={`${d.name}-${d.price}`}>{itemLines([d])[0]}</div>)}
             <div style={{ fontWeight: 600, marginTop: 6 }}>Кто сколько</div>
             {order.people.map((p) => (
-              <div key={p.employeeId}>{p.displayName} — {p.declined ? "не будет" : p.amount > 0 ? formatMoney(p.amount) : "не ответил(а)"}</div>
+              <div key={p.employeeId}>{orderPersonLine(p)}</div>
             ))}
             <div style={{ fontWeight: 600 }}>Итого: {formatMoney(order.total)}</div>
           </Card>
@@ -213,7 +207,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
               <label key={r.employeeId} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input type="checkbox" checked={r.paid} disabled={busy}
                   onChange={(e) => run(() => apiClient.setOrderPaymentFor(order.id, r.employeeId, e.target.checked))} />
-                <span style={{ flex: 1 }}>{r.displayName}{r.markedByAdmin ? " · наличкой" : ""}</span>
+                <span style={{ flex: 1 }}>{r.displayName}{r.markedByAdmin ? FOOD_CASH_MARK : ""}</span>
                 <span>{formatMoney(r.amount)}</span>
               </label>
             ))}
@@ -227,9 +221,9 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
 
       {order.canManage && order.open && (
         <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
-          <ConfirmButton label="Закрыть приём" question="Закрыть приём и разослать «сдай»?" confirmLabel="Закрыть"
+          <ConfirmButton label="Закрыть приём" question={closeOrderQuestion(order)} confirmLabel="Закрыть"
             onConfirm={() => run(() => apiClient.closeOrder(order.id))} disabled={busy} />
-          <ConfirmButton label="Отменить заказ" question="Отменить заказ?" confirmLabel="Отменить"
+          <ConfirmButton label="Отменить заказ" question={cancelOrderQuestion(order)} confirmLabel="Отменить"
             onConfirm={() => run(() => apiClient.cancelOrder(order.id))} disabled={busy} />
         </div>
       )}

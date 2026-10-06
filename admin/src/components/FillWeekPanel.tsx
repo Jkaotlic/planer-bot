@@ -5,6 +5,7 @@ import { apiClient, type Employee, type NewEntryInput, type Template } from "../
 import { categoryLabel } from "../categories";
 import { formatDayLabel } from "../lib/week";
 import { PersonPicker } from "./PersonPicker";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /** Категории, которые форма предлагает, — в том же порядке, что и мини-апп. */
 const ORDERED_CATEGORIES: readonly EntryCategory[] = ["shift", "vacation", "sick_leave", "duty", "offsite", "business_trip", "weekend_work"];
@@ -34,6 +35,7 @@ export interface FillWeekPanelProps {
  * день, Чт дежурство, Пт отпуск» диапазоном не выразить.
  */
 export function FillWeekPanel({ employees, templates, weekDates, calendar, onCancel, onFilled }: FillWeekPanelProps) {
+  const onAuthRequired = useAuthRequired();
   // Никто не выбран, в отличие от мини-аппа (там — первый в списке): у консоли
   // список с поиском и строкой «Выбран», и неделя, залитая первому по алфавиту,
   // пока админ искал нужного, — худшая ошибка, чем лишний клик.
@@ -92,6 +94,7 @@ export function FillWeekPanel({ employees, templates, weekDates, calendar, onCan
       const { created, notified } = await apiClient.createEntries(inputs);
       await onFilled(created, notified);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось заполнить неделю");
     } finally {
       setSaving(false);

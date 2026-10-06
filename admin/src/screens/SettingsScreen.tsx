@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { calendarFrom, dayOffLabel, formatAuditMoment, isDayOff, validateReminderHour } from "@planer/shared";
-import { apiClient, AuthRequiredError, type AdminSettings, type CalendarDayDto, type NoticePref, type SwapLockResult } from "../api/client";
+import { apiClient, type AdminSettings, type CalendarDayDto, type NoticePref, type SwapLockResult } from "../api/client";
 import { withNotifyNotice } from "../lib/notify-text";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Настройки»: тумблер замка обменов, час, в который уходят напоминания, и
@@ -17,6 +18,7 @@ import { withNotifyNotice } from "../lib/notify-text";
  * не должен превращаться в тупик без F5, как уже дважды случалось в проекте.
  */
 export function SettingsScreen() {
+  const onAuthRequired = useAuthRequired();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -35,7 +37,7 @@ export function SettingsScreen() {
       // перечитывание после соседнего тумблера стёрло бы набранное.
       setHour((current) => current ?? next.reminderHour);
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить настройки");
     }
   }
@@ -67,6 +69,7 @@ export function SettingsScreen() {
       // reload() ловит свои ошибки сам — она не может провалить этот try.
       await reload();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить настройку");
       setConfirming(false);
     } finally {
@@ -79,6 +82,7 @@ export function SettingsScreen() {
     try {
       validateReminderHour(value);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setHourError(err instanceof Error ? err.message : "Неверный час");
       return;
     }
@@ -89,6 +93,7 @@ export function SettingsScreen() {
       setHourSaved(true);
       await reload();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setHourError(err instanceof Error ? err.message : "Не удалось сохранить час");
     } finally {
       setSavingHour(false);
@@ -207,6 +212,7 @@ export function SettingsScreen() {
  * это «Правительство пока не утвердило», и пустота читалась бы как сбой.
  */
 function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChanged: () => Promise<void> }) {
+  const onAuthRequired = useAuthRequired();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +230,7 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
     try {
       await action();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : fallback);
     } finally {
       setBusy(false);
@@ -320,9 +327,10 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
             onChange={(e) => {
               setDay(e.target.value);
               setError(null);
-              void readDay(e.target.value).catch((err: unknown) =>
-                setError(err instanceof Error ? err.message : "Не удалось прочитать день"),
-              );
+              void readDay(e.target.value).catch((err: unknown) => {
+                if (routeAuthError(err, onAuthRequired)) return;
+                setError(err instanceof Error ? err.message : "Не удалось прочитать день");
+              });
             }}
           />
         </label>
@@ -352,6 +360,7 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
  * её отказ не должен гасить замок обменов и час рассылки выше.
  */
 function NoticesCard() {
+  const onAuthRequired = useAuthRequired();
   const [prefs, setPrefs] = useState<NoticePref[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // По виду письма, а не одна общая: переключение «Обмены сменами» не должно
@@ -363,7 +372,7 @@ function NoticesCard() {
       .getNoticePrefs()
       .then(({ kinds }) => setPrefs(kinds))
       .catch((err: unknown) => {
-        if (err instanceof AuthRequiredError) return;
+        if (routeAuthError(err, onAuthRequired)) return;
         setLoadError(err instanceof Error ? err.message : "Не удалось загрузить список уведомлений");
       });
   }, []);
@@ -385,6 +394,7 @@ function NoticesCard() {
       const saved = await apiClient.setNoticePref(kind, next);
       setEnabled(kind, saved.enabled);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setEnabled(kind, !next);
       setErrors((prev) => ({ ...prev, [kind]: err instanceof Error ? err.message : "Не удалось сохранить" }));
     }

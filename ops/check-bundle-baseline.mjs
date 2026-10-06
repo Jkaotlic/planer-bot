@@ -62,6 +62,18 @@ const RUNTIME = [
   { name: "crypto.randomUUID", pattern: /\bcrypto\.randomUUID\b/g, since: "Safari 15.4" },
 ];
 
+/**
+ * Строки, которые бывают только в DEV-моках (`client/src/mock/*`, `src/api/mock.ts`
+ * обеих морд). Их присутствие в собранном JS значит, что сборщик не выбросил мок:
+ * +17–23 КБ мёртвого кода и сид команды в боевом бандле (замер 2026-10-06, мок
+ * еды: «Шаурма…» лежала в client-*.js). Новый мок с новой строкой — добавить сюда.
+ */
+export const MOCK_MARKERS = ["Шаурм", "Работник не найден", "Заказ не найден", "Опрос не найден", "Аня Смирнова"];
+
+export function mockLeaks(code) {
+  return MOCK_MARKERS.filter((marker) => code.includes(marker));
+}
+
 /** Считает попадания каждого правила в тексте. Пустой массив — чисто. */
 export function scan(code, rules) {
   return rules
@@ -139,6 +151,10 @@ function main() {
     if (covered.length > 0) console.log(`  ${dir}: подменено в index.html — ${covered.join(", ")}`);
     for (const file of jsFiles(dir)) {
       const code = readFileSync(file, "utf8");
+      for (const marker of mockLeaks(code)) {
+        bad += 1;
+        console.error(`МОК       ${file}: «${marker}» — DEV-мок попал в боевой бандл (см. moduleSideEffects в vite.config.ts)`);
+      }
       for (const found of scan(code, SYNTAX)) {
         bad += 1;
         console.error(`СИНТАКСИС ${file}: ${found.name} ×${found.hits} — не работает ниже ${found.since}`);
@@ -157,8 +173,8 @@ function main() {
   }
 
   if (bad > 0) {
-    console.error(`\n✗ бандл не откроется на ${BASELINE}: нарушений ${bad}.`);
-    console.error("  Синтаксис лечится build.target в vite.config.ts, рантайм — полифилом в index.html.");
+    console.error(`\n✗ бандл не прошёл проверку (планка ${BASELINE}, мок вне боевой сборки): нарушений ${bad}.`);
+    console.error("  Синтаксис лечится build.target в vite.config.ts, рантайм — полифилом в index.html, мок — moduleSideEffects там же.");
     process.exit(1);
   }
   console.log(`✓ бандл открывается на ${BASELINE}`);

@@ -9,7 +9,6 @@ import {
 } from "@planer/shared";
 import {
   apiClient,
-  AuthRequiredError,
   type Collection,
   type CollectionPatch,
   type CollectionPreview,
@@ -23,6 +22,7 @@ import { PersonPicker } from "../components/PersonPicker";
 import { RecipientGroupField } from "../components/RecipientGroupField";
 import { initialsOf, personPalette } from "../lib/people";
 import { withNotifyNotice } from "../lib/notify-text";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Сборы»: деньги, которые команда скидывает — на день рождения или по любому
@@ -179,6 +179,7 @@ function todayIso(): string {
 }
 
 export function CollectionsScreen() {
+  const onAuthRequired = useAuthRequired();
   const [today, setToday] = useState<string>(() => todayIso());
   const [birthdays, setBirthdays] = useState<UpcomingBirthday[] | null>(null);
   const [rows, setRows] = useState<CollectionRow[] | null>(null);
@@ -195,7 +196,7 @@ export function CollectionsScreen() {
       setToday(asOf);
       setBirthdays(birthdays);
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить дни рождения");
     }
   }
@@ -204,7 +205,7 @@ export function CollectionsScreen() {
     try {
       setRows(await apiClient.getCollections());
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setRowsError(err instanceof Error ? err.message : "Не удалось загрузить сборы");
     }
   }
@@ -220,9 +221,10 @@ export function CollectionsScreen() {
     void (async () => {
       try {
         setEmployees(await apiClient.getEmployees());
-      } catch {
+      } catch (err) {
         // Без списка работников форма всё ещё заводит общий сбор. Своей строки
-        // ошибки нет намеренно: беда списков выше важнее.
+        // ошибки нет намеренно: беда списков выше важнее. Но истёкшая сессия — вход.
+        routeAuthError(err, onAuthRequired);
       }
     })();
     // Loads once; every mutation below reloads explicitly.
@@ -391,6 +393,7 @@ function NewCollectionForm({
   employees: Employee[];
   onCreated: (created: Collection) => Promise<void>;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [title, setTitle] = useState("");
   const [employeeId, setEmployeeId] = useState(0);
   const [eventDate, setEventDate] = useState("");
@@ -434,6 +437,7 @@ function NewCollectionForm({
       reset();
       await onCreated(created);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось создать сбор");
     } finally {
       setBusy(false);
@@ -668,6 +672,7 @@ function CollectionCard({
   onSent: (delivered: number, intended: number) => void;
   onDeleted: () => void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const status = statusOf(row);
   const subtitle = [moneyLine(row.collection), edgeLine(row.collection)].filter(Boolean).join(" · ");
   const [closing, setClosing] = useState(false);
@@ -682,6 +687,7 @@ function CollectionCard({
       await apiClient.setCollectionClosed(row.collection.id, true);
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       console.error("Close collection failed:", err);
       setCloseError("Не получилось закрыть сбор. Попробуй ещё раз.");
     } finally {
@@ -735,6 +741,7 @@ function CollectionEditor({
   onSent: (delivered: number, intended: number) => void;
   onDeleted: () => void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const { collection } = row;
   const [title, setTitle] = useState(collection.title ?? "");
   const [employeeId, setEmployeeId] = useState(collection.employeeId ?? 0);
@@ -765,7 +772,7 @@ function CollectionEditor({
     try {
       setPreview(await apiClient.getCollectionPreview(collection.id));
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
     }
   }
@@ -799,6 +806,7 @@ function CollectionEditor({
       await loadPreview();
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
       setSaving(false);
@@ -813,6 +821,7 @@ function CollectionEditor({
       setConfirming(false);
       onSent(result.delivered, result.intended);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось разослать");
       setConfirming(false);
     } finally {
@@ -827,6 +836,7 @@ function CollectionEditor({
       await apiClient.setCollectionClosed(collection.id, closed);
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось закрыть сбор");
     } finally {
       setClosing(false);
@@ -840,6 +850,7 @@ function CollectionEditor({
       await apiClient.deleteCollection(collection.id);
       onDeleted();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось удалить сбор");
       setDeleting(false);
     }
@@ -954,6 +965,7 @@ function CollectionEditor({
  * десяток, а раскрыт один.
  */
 function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canRemind: boolean }) {
+  const onAuthRequired = useAuthRequired();
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [paidCount, setPaidCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -972,7 +984,10 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
         setPaidCount(loaded.paidCount);
         setTotal(loaded.total);
       })
-      .catch(() => { if (alive) setError("Не удалось загрузить отметки"); });
+      .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
+        if (alive) setError("Не удалось загрузить отметки");
+      });
     return () => { alive = false; };
   }, [collectionId]);
 
@@ -991,7 +1006,10 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
       })
       // Пока сервер не подтвердил, экран не перекрашивается: галочка — это
       // утверждение о деньгах, и показать её, не записав, значит соврать.
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось отметить"))
+      .catch((err) => {
+        if (routeAuthError(err, onAuthRequired)) return;
+        setError(err instanceof Error ? err.message : "Не удалось отметить");
+      })
       .finally(() => setBusy(false));
   }
 
@@ -1004,7 +1022,10 @@ function PaymentsBlock({ collectionId, canRemind }: { collectionId: number; canR
         setConfirming(false);
         setNotice(`Напомнил: дошло до ${result.delivered} из ${result.intended}.`);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось напомнить"))
+      .catch((err) => {
+        if (routeAuthError(err, onAuthRequired)) return;
+        setError(err instanceof Error ? err.message : "Не удалось напомнить");
+      })
       .finally(() => setBusy(false));
   }
 
@@ -1200,7 +1221,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
         </label>
       )}
 
-      {open && <BirthdayEditor birthday={birthday} onChanged={onChanged} onSent={onSent} />}
+      {open && <BirthdayEditor birthday={birthday} today={today} onChanged={onChanged} onSent={onSent} />}
     </div>
   );
 }
@@ -1210,9 +1231,11 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
  * раунда может ещё не быть, он заводится первым сохранением, и до него у
  * предпросмотра `id: 0`.
  */
-function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" | "onToggle" | "today">) {
+function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "open" | "onToggle">) {
+  const onAuthRequired = useAuthRequired();
   const [collectUrl, setCollectUrl] = useState(birthday.campaign?.collectUrl ?? "");
   const [messageText, setMessageText] = useState(birthday.campaign?.messageText ?? "");
+  const [scheduledSendOn, setScheduledSendOn] = useState(birthday.campaign?.scheduledSendOn ?? "");
   const [recipientGroupId, setRecipientGroupId] = useState<number | null>(birthday.campaign?.recipientGroupId ?? null);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1225,7 +1248,7 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
     try {
       setPreview(await apiClient.getBirthdayPreview(birthday.employeeId));
     } catch (err) {
-      if (err instanceof AuthRequiredError) return;
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось собрать предпросмотр");
     }
   }
@@ -1243,11 +1266,13 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
       await apiClient.saveBirthdayRound(birthday.employeeId, {
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        scheduledSendOn: scheduledSendOn || null,
         recipientGroupId,
       });
       await loadPreview();
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
       setSaving(false);
@@ -1263,6 +1288,7 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
       setConfirming(false);
       onSent(result.delivered, result.intended);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось разослать");
       setConfirming(false);
     } finally {
@@ -1301,6 +1327,27 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
                 setConfirming(false);
               }}
             />
+          </label>
+
+          {/* Напоминание себе, а не рассылка: в этот день бот пишет админам, команде
+              сбор по-прежнему уходит только кнопкой. Минимум — командный `today`
+              (`asOf`), а не часы браузера; максимум — сам день рождения, позже
+              напоминать уже не о чем. Тексты — как в мини-аппе. */}
+          <label className="birthday-label">
+            Напомнить мне
+            <input
+              type="date"
+              aria-label="Дата напоминания о сборе"
+              value={scheduledSendOn}
+              min={today}
+              max={birthday.celebratedOn}
+              disabled={busy}
+              onChange={(e) => {
+                setScheduledSendOn(e.target.value);
+                setConfirming(false);
+              }}
+            />
+            <span>В этот день бот напишет админам. Команде — по-прежнему только по твоему тапу.</span>
           </label>
 
           {/* The placeholder is a hint, not the default text: the default is shown

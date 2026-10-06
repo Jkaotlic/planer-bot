@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
-import { FOOD_MENU_MAX } from "@planer/shared";
+import { FOOD_MENU_FULL_HINT, FOOD_MENU_MAX, placeMenuFromRows, priceDigits, type PlaceEditorRow } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { ActionButton } from "../../ui";
-
-type Row = { id?: number; name: string; price: string };
 
 /**
  * Место и его меню. Цена вводится строкой и переводится в число только при
@@ -12,27 +10,24 @@ type Row = { id?: number; name: string; price: string };
  */
 export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | null; onSaved(p: PlaceView): void; onCancel(): void }) {
   const [name, setName] = useState(place?.name ?? "");
-  const [rows, setRows] = useState<Row[]>(place?.menu.map((m) => ({ id: m.id, name: m.name, price: String(m.price) })) ?? []);
+  const [rows, setRows] = useState<PlaceEditorRow[]>(place?.menu.map((m) => ({ id: m.id, name: m.name, price: String(m.price) })) ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const patch = (i: number, next: Partial<Row>) => setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...next } : r)));
+  const patch = (i: number, next: Partial<PlaceEditorRow>) => setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...next } : r)));
 
   async function save() {
-    // Пустая строка у СУЩЕСТВУЮЩЕГО блюда (есть id) — не тихий пропуск, а
-    // ошибка: молча выбросить его значило бы стереть блюдо из меню, хотя
-    // человек мог просто не закончить правку имени. Новая пустая строка (без
-    // id) по-прежнему отбрасывается сама — это то, чем она и была «+ Блюдо»
-    // без единого символа в ней.
-    if (rows.some((r) => r.id != null && !r.name.trim())) {
-      setError("У блюда пустое название — впиши или удали строку ✕.");
+    // Правила строк (пустое имя у существующего блюда, блюдо без цены) — общие с
+    // консолью: `placeMenuFromRows`.
+    const built = placeMenuFromRows(rows);
+    if (!built.ok) {
+      setError(built.error);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const menu = rows.filter((r) => r.name.trim()).map((r) => ({ ...(r.id != null ? { id: r.id } : {}), name: r.name.trim(), price: Number(r.price) }));
-      onSaved(await apiClient.saveFoodPlace(place?.id ?? null, { name: name.trim(), menu }));
+      onSaved(await apiClient.saveFoodPlace(place?.id ?? null, { name: name.trim(), menu: built.menu }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
     } finally {
@@ -56,13 +51,15 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
           </div>
           <div style={{ width: 110, flex: "none" }}>
             <Input name={`dish-price-${i}`} placeholder="₽" inputMode="numeric" value={r.price}
-              onChange={(e) => patch(i, { price: e.target.value.replace(/\D/g, "") })} disabled={busy} />
+              onChange={(e) => patch(i, { price: priceDigits(e.target.value) })} disabled={busy} />
           </div>
           <ActionButton compact kind="quiet" onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))} disabled={busy}>✕</ActionButton>
         </div>
       ))}
-      {rows.length < FOOD_MENU_MAX && (
+      {rows.length < FOOD_MENU_MAX ? (
         <ActionButton compact onClick={() => setRows((prev) => [...prev, { name: "", price: "" }])} disabled={busy}>+ Блюдо</ActionButton>
+      ) : (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{FOOD_MENU_FULL_HINT}</div>
       )}
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>

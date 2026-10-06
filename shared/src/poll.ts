@@ -123,12 +123,23 @@ const TALLY_ROWS: readonly [keyof PollTally, string][] = [
   ["silent", "Не ответили"],
 ];
 
-/** Итог, который уходит всем участникам при закрытии. Пустые группы не печатаются. */
-export function pollResultText(question: string, tally: PollTally): string {
-  const lines = [`📊 Итоги опроса: ${question}`, ""];
-  for (const [key, label] of TALLY_ROWS) {
-    const names = tally[key];
-    if (names.length > 0) lines.push(`${label} — ${names.length}: ${names.join(", ")}`);
-  }
-  return lines.join("\n");
+/**
+ * Итог поимённо строками, пустые группы не печатаются.
+ *
+ * Одна функция на письмо бота, карточку мини-аппа и карточку консоли: подписи
+ * групп раньше жили второй копией в `PollCard.tsx` (`TALLY_LABELS`), и правка
+ * одной не доезжала бы до другой.
+ */
+export function pollTallyLines(tally: PollTally): string[] {
+  return TALLY_ROWS.filter(([key]) => tally[key].length > 0).map(
+    ([key, label]) => `${label} — ${tally[key].length}: ${tally[key].join(", ")}`,
+  );
 }
+
+/** Итог, который уходит всем участникам при закрытии. */
+export function pollResultText(question: string, tally: PollTally): string {
+  return [`📊 Итоги опроса: ${question}`, "", ...pollTallyLines(tally)].join("\n");
+}
+
+/** Подсказка в форме опроса — из тех же подписей, что и кнопки голоса. */
+export const POLL_CHOICES_HINT = `Ответы: ${POLL_CHOICES.map((c) => POLL_CHOICE_LABEL[c]).join(" · ")}`;

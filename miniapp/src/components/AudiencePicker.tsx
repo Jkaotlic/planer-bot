@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { filterPeople } from "@planer/shared";
+import { useEffect, useState } from "react";
+import { audienceLines, audiencePreview, filterPeople } from "@planer/shared";
 import { apiClient, type AudienceCandidate, type RecipientGroupView, type TeamAudience } from "../api/client";
 import { ActionButton } from "../ui";
 import { PersonSearch } from "./PersonSearch";
@@ -50,12 +50,6 @@ export function AudiencePicker({ value, onChange, disabled }: {
   }, []);
 
   const picked = value.kind === "picked" ? new Set(value.employeeIds) : new Set<number>();
-  const preview = useMemo(() => {
-    if (!people) return [];
-    if (value.kind === "team") return people;
-    if (value.kind === "on_shift") return people.filter((p) => p.onShift);
-    return people.filter((p) => value.kind === "picked" && value.employeeIds.includes(p.id));
-  }, [people, value]);
 
   function setMode(mode: Mode) {
     setGroupId(null);
@@ -81,15 +75,7 @@ export function AudiencePicker({ value, onChange, disabled }: {
   if (loadError) return <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{loadError}</div>;
   if (!people) return <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Загружаю команду…</div>;
 
-  const reachable = preview.filter((p) => p.reachable).map((p) => p.displayName);
-  // Отдельной строкой, а не молча: запускающий иначе узнаёт про недошедших
-  // только из отчёта после отправки — а решить «позвать по-другому» до
-  // отправки может только здесь.
-  const unreachable = preview.filter((p) => !p.reachable).map((p) => p.displayName);
-  const inPreview = new Set(preview.map((p) => p.id));
-  const observerCopies = people
-    .filter((p) => p.role === "observer" && p.reachable && !inPreview.has(p.id))
-    .map((p) => p.displayName);
+  const lines = audienceLines(audiencePreview(people, value));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* Ряд кнопок, а не `SegmentedControl`: тот делит ширину на три равные
@@ -121,18 +107,13 @@ export function AudiencePicker({ value, onChange, disabled }: {
           ))}
         </div>
       )}
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
-        {reachable.length === 0 ? "Пока никого, кроме тебя." : `Уйдёт: ${reachable.join(", ")} и тебе`}
-      </div>
-      {observerCopies.length > 0 && (
-        <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
-          Наблюдателям — копия всегда: {observerCopies.join(", ")}
-        </div>
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{lines.goes}</div>
+      {lines.observers && (
+        <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{lines.observers}</div>
       )}
-      {unreachable.length > 0 && (
-        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>
-          Не дойдёт: {unreachable.join(", ")} — не привязан(а) к боту
-        </div>
+      {/* До отправки, а не только в отчёте после: решить «позвать по-другому» можно только здесь. */}
+      {lines.unreachable && (
+        <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{lines.unreachable}</div>
       )}
     </div>
   );

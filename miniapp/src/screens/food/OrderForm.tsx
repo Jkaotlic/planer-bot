@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Input, Textarea } from "@telegram-apps/telegram-ui";
-import { formatMoney } from "@planer/shared";
+import { FOOD_NO_PLACES_HINT, audienceReady, menuPreview, sendReportText } from "@planer/shared";
 import { apiClient, type PlaceView, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton, Card } from "../../ui";
@@ -44,7 +44,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
     return () => { alive = false; };
   }, []);
 
-  const ready = !(audience.kind === "picked" && audience.employeeIds.length === 0);
+  const ready = audienceReady(audience);
   const selectedPlace = places.find((p) => p.id === placeId) ?? null;
 
   async function submit() {
@@ -68,7 +68,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
         <h1 className="ui-screen__title">Заказ отправлен</h1>
         <div style={{ fontSize: "var(--app-text-body)", lineHeight: 1.45 }}>
-          Отправлено: {summary.delivered}. Не дошло: {summary.unreachable.join(", ")}
+          {sendReportText(summary)}
         </div>
         <ActionButton kind="primary" onClick={() => onDone(summary.orderId)}>ОК</ActionButton>
       </div>
@@ -93,16 +93,14 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
         </div>
         {placesLoaded && places.length === 0 && (
           <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", paddingTop: 6 }}>
-            Мест пока нет — добавь через «🍴 Места и меню» или заказывай без меню.
+            {FOOD_NO_PLACES_HINT}
           </div>
         )}
         {/* Меню выбранного места серым — чтобы было видно, что уйдёт
             кнопками в заказ, ещё до того, как заказ заведён. */}
         {selectedPlace && (
           <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", paddingTop: 6 }}>
-            {selectedPlace.menu.length > 0
-              ? selectedPlace.menu.map((m) => `${m.name} ${formatMoney(m.price)}`).join(" · ")
-              : "Меню пусто"}
+            {menuPreview(selectedPlace.menu)}
           </div>
         )}
       </div>

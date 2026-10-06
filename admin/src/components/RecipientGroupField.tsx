@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiClient, type RecipientGroupView } from "../api/client";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «Рассылаем»: кому уйдёт первая рассылка сбора — всей команде или одной группе.
@@ -29,6 +30,7 @@ export function RecipientGroupField({
   knownName?: string | null;
   disabled?: boolean;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [groups, setGroups] = useState<RecipientGroupView[] | null>(null);
 
   // Сбой загрузки не ломает форму: без списка остаётся «Вся команда» и текущая группа.
@@ -36,7 +38,11 @@ export function RecipientGroupField({
     let cancelled = false;
     apiClient.getRecipientGroups()
       .then((list) => { if (!cancelled) setGroups(list); })
-      .catch(() => { if (!cancelled) setGroups([]); });
+      .catch((err: unknown) => {
+        // Истёкшая сессия — вход, а не тихое «групп нет»: иначе форма выглядела бы живой.
+        if (routeAuthError(err, onAuthRequired)) return;
+        if (!cancelled) setGroups([]);
+      });
     return () => { cancelled = true; };
   }, []);
 

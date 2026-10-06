@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatMoney } from "@planer/shared";
+import { FOOD_NO_PLACES, formatMoney, menuPreview, orderPaymentProgress, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, Hint } from "../../ui";
@@ -61,11 +61,8 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
       {Array.isArray(orders) && orders.length > 0 && (
         <Group>
           {orders.map((o) => {
-            // Та же формула, что в OrderScreen/PollCard: `o.closes` — просто
-            // форматированный срок, он не гаснет сам, когда заказ закрыт или
-            // отменён (ревью раунд 1, находка №1) — карточка иначе показывала
-            // бы «до 12:30» и закрытому, и отменённому заказу.
-            const status = o.cancelled ? "отменён" : o.open ? (o.closes ?? "приём идёт") : "приём закрыт";
+            // Формула статуса общая с консолью и экраном заказа — `orderStatusLabel`.
+            const status = [orderStatusLabel(o), orderPaymentProgress(o)].filter(Boolean).join(" · ");
             return (
               <Card key={`order-${o.id}`}>
                 <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
@@ -160,14 +157,14 @@ function PlacesScreen({ onBack }: { onBack(): void }) {
       {places === "error" && (
         <div>Не удалось загрузить. <ActionButton compact kind="quiet" onClick={() => setAttempt((n) => n + 1)}>Повторить</ActionButton></div>
       )}
-      {Array.isArray(places) && places.length === 0 && <Hint>Мест ещё нет.</Hint>}
+      {Array.isArray(places) && places.length === 0 && <Hint>{FOOD_NO_PLACES}</Hint>}
       {Array.isArray(places) && places.length > 0 && (
         <Group>
           {places.map((p) => (
             <Card key={p.id}>
               <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍴 {p.name}</div>
               <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
-                {p.menu.length > 0 ? p.menu.map((m) => `${m.name} — ${m.price} ₽`).join(", ") : "Меню пусто"}
+                {menuPreview(p.menu)}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <ActionButton compact onClick={() => setView({ mode: "editor", place: p })}>Изменить</ActionButton>

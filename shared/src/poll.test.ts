@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, pollInviteText, pollResultText, pollTally } from "./poll";
+import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, pollInviteText, pollResultText, pollTally, pollTallyLines, POLL_CHOICES_HINT } from "./poll";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -85,5 +85,21 @@ describe("тексты", () => {
     expect(text).not.toContain("Против");
     expect(text).toContain("🤷 Воздержались — 1: Игорь");
     expect(text).toContain("Не ответили — 1: Лена");
+  });
+});
+
+describe("pollTallyLines", () => {
+  it("строка на непустую группу, в порядке За / Против / Воздержались / Не ответили", () => {
+    const lines = pollTallyLines({ for: ["Аня", "Игорь"], against: [], abstain: ["Марк"], silent: ["Лена"] });
+    expect(lines).toEqual(["👍 За — 2: Аня, Игорь", "🤷 Воздержались — 1: Марк", "Не ответили — 1: Лена"]);
+  });
+
+  it("итог письма — те же строки под заголовком: карточка и бот не разъезжаются", () => {
+    const tally = { for: ["Аня"], against: ["Игорь"], abstain: [], silent: [] };
+    expect(pollResultText("Обед?", tally)).toBe(["📊 Итоги опроса: Обед?", "", ...pollTallyLines(tally)].join("\n"));
+  });
+
+  it("подсказка формы перечисляет ровно кнопки голоса", () => {
+    expect(POLL_CHOICES_HINT).toBe("Ответы: 👍 За · 👎 Против · 🤷 Воздержался");
   });
 });

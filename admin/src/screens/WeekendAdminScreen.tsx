@@ -4,6 +4,7 @@ import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 import { formatDayLabel } from "../lib/week";
 import { CategoryChip } from "../categories";
 import { ConfirmButton } from "../components/ConfirmButton";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /** First & last calendar day of the month containing `d`, as "YYYY-MM-DD". */
 function monthRange(d: Date): { from: string; to: string } {
@@ -47,6 +48,7 @@ export function closeNotice(toldOff: number): string {
 }
 
 export function WeekendAdminScreen() {
+  const onAuthRequired = useAuthRequired();
   const [slots, setSlots] = useState<AdminSlotView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,6 +69,7 @@ export function WeekendAdminScreen() {
         if (!cancelled) setSlots(s);
       })
       .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
         if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить биржу");
       });
     return () => {
@@ -83,6 +86,7 @@ export function WeekendAdminScreen() {
       setWarning(assignNotice(notified));
       await reloadSlots();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось назначить");
     } finally {
       setBusy(false);
@@ -96,6 +100,7 @@ export function WeekendAdminScreen() {
       await apiClient.unassignSlot(assignmentId);
       await reloadSlots();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось снять");
     } finally {
       setBusy(false);
@@ -111,6 +116,7 @@ export function WeekendAdminScreen() {
       setNotice(closeNotice(toldOff));
       await reloadSlots();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось закрыть смену");
     } finally {
       setBusy(false);
@@ -308,6 +314,7 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
  * нажатие живёт здесь же — см. `miniapp/src/screens/admin/AdminWeekendScreen.tsx`.
  */
 function PayrollSection() {
+  const onAuthRequired = useAuthRequired();
   const initial = monthRange(new Date());
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
@@ -321,6 +328,7 @@ function PayrollSection() {
     try {
       setRows(await apiClient.getPayroll(from, to));
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось загрузить учёт часов");
     } finally {
       setLoading(false);
@@ -348,6 +356,7 @@ function PayrollSection() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось выгрузить CSV");
     }
   }
@@ -412,6 +421,7 @@ function PayrollSection() {
 }
 
 function PostSlotDialog({ onCancel, onCreated, onError }: { onCancel: () => void; onCreated: (reach: { delivered: number; intended: number }) => Promise<void>; onError: (msg: string | null) => void }) {
+  const onAuthRequired = useAuthRequired();
   const [date, setDate] = useState("");
   const [start, setStart] = useState("10:00");
   const [end, setEnd] = useState("18:00");
@@ -437,6 +447,7 @@ function PostSlotDialog({ onCancel, onCreated, onError }: { onCancel: () => void
       const created = await apiClient.postSlot({ date, start, end, title: title || undefined, location: location || undefined, note: note || undefined });
       await onCreated(created);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setLocalError(err instanceof Error ? err.message : "Не удалось открыть смену");
     } finally {
       setSaving(false);

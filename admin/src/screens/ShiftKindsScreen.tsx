@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiClient, AuthRequiredError, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
+import { apiClient, type Checklist, type Employee, type TemplateQueue, type TemplateRolesView } from "../api/client";
 import {
   coverageSummary,
   NORM_CALENDAR_HINT,
@@ -15,6 +15,7 @@ import {
 import { useEntryPalette } from "../categories";
 import { PersonSearch } from "../components/PersonSearch";
 import { initialsOf, personPalette } from "../lib/people";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «допущен к 1 из 9 · любит: 2» — строка под именем человека.
@@ -44,6 +45,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
   /** Норма сохранена — число нехватки в сайдбаре (виден на любом экране) считается по ней. */
   onNormSaved?: () => void;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [kinds, setKinds] = useState<TemplateRolesView[] | null>(null);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [openKindId, setOpenKindId] = useState<number | null>(null);
@@ -58,12 +60,15 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
   useEffect(() => {
     // Чек-листы — рядом с видами: без их имён выпадающий список показывать нечем.
     // Молча при отказе: экран про виды смен, и его беда важнее.
-    apiClient.getChecklists().then(setChecklists).catch(() => setChecklists([]));
+    apiClient.getChecklists().then(setChecklists).catch((err: unknown) => {
+      if (routeAuthError(err, onAuthRequired)) return;
+      setChecklists([]);
+    });
     apiClient
       .getTemplateRoles()
       .then(setKinds)
       .catch((err: unknown) => {
-        if (!(err instanceof AuthRequiredError)) {
+        if (!routeAuthError(err, onAuthRequired)) {
           setError(err instanceof Error ? err.message : "Не удалось загрузить виды смен");
         }
       });
@@ -81,6 +86,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.saveTemplateRoles(next.templateId, next.pool, next.preference);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       // Put the server's version back rather than leaving a lie on screen.
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить");
@@ -104,6 +110,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.setRotationUnit(kind.templateId, unit);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось сохранить очередь");
     } finally {
       setBusyKindId(null);
@@ -120,6 +127,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
       await apiClient.setTemplateCoverage(kind.templateId, coverage);
       onNormSaved?.();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить норму");
     } finally {
@@ -138,6 +146,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.setTemplateReminder(kind.templateId, sendReminder, reminderText);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить напоминание");
     } finally {
@@ -156,6 +165,7 @@ export function ShiftKindsScreen({ employees, onNormSaved }: {
     try {
       await apiClient.setTemplateChecklists(kind.templateId, checklistIds);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setKinds(await apiClient.getTemplateRoles().catch(() => null));
       setError(err instanceof Error ? err.message : "Не удалось сохранить чек-лист");
     } finally {
@@ -309,6 +319,7 @@ function KindCard({
   onCoverage: (coverage: number[]) => Promise<void>;
   onReminder: (sendReminder: boolean, reminderText: string | null) => Promise<void>;
 }) {
+  const onAuthRequired = useAuthRequired();
   const palette = useEntryPalette({ templateId: kind.templateId, category: kind.category }, [
     { id: kind.templateId, accent: kind.accent },
   ]);
@@ -327,7 +338,8 @@ function KindCard({
       .then((next) => {
         if (!cancelled) setQueue(next);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
         if (!cancelled) setQueue(null);
       });
     return () => {

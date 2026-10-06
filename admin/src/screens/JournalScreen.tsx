@@ -13,11 +13,12 @@ import {
   type CountsKey,
   type ShiftCountsKind,
 } from "@planer/shared";
-import { apiClient, AuthRequiredError, type JournalPage, type ShiftCountsReport } from "../api/client";
+import { apiClient, type JournalPage, type ShiftCountsReport } from "../api/client";
 import { DownloadIcon } from "../components/DownloadIcon";
 import { Segmented } from "../components/Segmented";
 import { initialsOf, personPalette } from "../lib/people";
 import { toISODate } from "../lib/week";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /** Одна строка ленты «кто что менял»: значок, фраза, кто и когда, подробности.
  *  Текст целиком приходит из `describeAuditEvent` — тот же, что видит мини-апп. */
@@ -77,6 +78,7 @@ function KindSwatch({ kind }: { kind: ShiftCountsKind }) {
 }
 
 function ShiftCounts() {
+  const onAuthRequired = useAuthRequired();
   // Локальная дата, как во всей консоли (`toISODate`), а не UTC: с `toISOString`
   // 1-го числа до трёх ночи по Москве «Этот месяц» показывал прошлый.
   const today = toISODate(new Date());
@@ -97,7 +99,7 @@ function ShiftCounts() {
     try {
       setReport(await apiClient.getShiftCounts(range.from, range.to));
     } catch (err) {
-      if (!(err instanceof AuthRequiredError)) setError(err instanceof Error ? err.message : "Не удалось построить отчёт");
+      if (!routeAuthError(err, onAuthRequired)) setError(err instanceof Error ? err.message : "Не удалось построить отчёт");
     } finally {
       setBusy(false);
     }
@@ -153,6 +155,7 @@ function ShiftCounts() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось выгрузить CSV");
     }
   }
@@ -274,6 +277,7 @@ function ShiftCounts() {
 const PAGE = 50;
 
 function History() {
+  const onAuthRequired = useAuthRequired();
   const [page, setPage] = useState<JournalPage | null>(null);
   const [types, setTypes] = useState<string[]>([]);
   const [actor, setActor] = useState("");
@@ -294,7 +298,7 @@ function History() {
         setError(null);
       })
       .catch((err: unknown) => {
-        if (cancelled || err instanceof AuthRequiredError) return;
+        if (cancelled || routeAuthError(err, onAuthRequired)) return;
         setError(err instanceof Error ? err.message : "Не удалось загрузить журнал");
       });
     return () => {

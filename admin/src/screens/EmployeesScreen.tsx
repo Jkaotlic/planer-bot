@@ -6,6 +6,7 @@ import { useCategoryPalette } from "../categories";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
 import { PersonSearch } from "../components/PersonSearch";
 import { initialsOf, personPalette } from "../lib/people";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 export interface EmployeesScreenProps {
   employees: readonly Employee[];
@@ -49,6 +50,7 @@ export function refusalText(message: string): string {
  * actions, plus a dialog to add a new worker and hand them an invite link.
  */
 export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onObserverSaved }: EmployeesScreenProps) {
+  const onAuthRequired = useAuthRequired();
   const [busyId, setBusyId] = useState<number | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [invite, setInvite] = useState<CreateEmployeeResult | null>(null);
@@ -76,6 +78,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
       await action();
       await onChanged();
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось выполнить действие" });
     } finally {
       setBusyId(null);
@@ -98,6 +101,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
       await apiClient.setEmployeeRestrictions(id, patch);
       onRestrictionsSaved(id, patch);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось сохранить ограничение" });
     } finally {
       setBusyId(null);
@@ -114,6 +118,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
       await apiClient.setEmployeeObserver(id, isObserver);
       onObserverSaved(id, isObserver);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setRowError({ employeeId: id, message: err instanceof Error ? refusalText(err.message) : "Не удалось сохранить роль" });
     } finally {
       setBusyId(null);
@@ -126,6 +131,7 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
       const info = await apiClient.getEmployeeInvite(employee.id, regenerate);
       setInvite({ employee, inviteToken: info.inviteToken, inviteLink: info.inviteLink });
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setRowError({ employeeId: employee.id, message: err instanceof Error ? refusalText(err.message) : "Не удалось получить ссылку" });
     }
   }
@@ -566,6 +572,7 @@ function AddEmployeeDialog({
   onCancel: () => void;
   onCreated: (result: CreateEmployeeResult) => Promise<void>;
 }) {
+  const onAuthRequired = useAuthRequired();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -582,6 +589,7 @@ function AddEmployeeDialog({
       const result = await apiClient.createEmployee(trimmed);
       await onCreated(result);
     } catch (err) {
+      if (routeAuthError(err, onAuthRequired)) return;
       setError(err instanceof Error ? err.message : "Не удалось создать работника");
     } finally {
       setSaving(false);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SickApprovalRow } from "@planer/shared";
 import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
@@ -30,11 +30,13 @@ import { GroupsScreen } from "./screens/GroupsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
+import { OrdersPollsScreen } from "./screens/food/OrdersPollsScreen";
 import { QrScreen } from "./screens/QrScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
+import { AuthRequiredProvider } from "./auth-required";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
@@ -116,6 +118,8 @@ export function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
+  // Устойчивая ссылка: её получают экраны через контекст и держат в эффектах загрузки.
+  const requestLogin = useCallback(() => setNeedLogin(true), []);
   /** Кто вошёл — для подписи в футере сайдбара. */
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
@@ -535,6 +539,7 @@ export function App() {
   if (needLogin) return <LoginScreen />;
 
   return (
+    <AuthRequiredProvider value={requestLogin}>
     <div className="app-shell">
       <Sidebar
         active={nav}
@@ -601,6 +606,9 @@ export function App() {
           <CollectionsScreen />
         ) : nav === "announce" ? (
           <AnnounceScreen />
+        ) : nav === "orders" ? (
+          // Истёкшая сессия посреди экрана — вход через контекст `AuthRequiredProvider`.
+          <OrdersPollsScreen />
         ) : nav === "approvals" ? (
           <SickApprovalsScreen
             onChanged={() => {
@@ -894,6 +902,7 @@ export function App() {
         </div>
       )}
     </div>
+    </AuthRequiredProvider>
   );
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { sickSpanWords } from "@planer/shared";
 import { apiClient, type SickApprovalRow } from "../api/client";
 import { ConfirmButton } from "../components/ConfirmButton";
+import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
  * «На подтверждение» (admin): больничные, ждущие ОК любого админа.
@@ -12,6 +13,7 @@ import { ConfirmButton } from "../components/ConfirmButton";
  * только работник. Поведение то же, что у `AdminSickApprovals` в мини-аппе.
  */
 export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
+  const onAuthRequired = useAuthRequired();
   const [rows, setRows] = useState<SickApprovalRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Bumped by «Повторить» и после каждого решения — иначе перечитать список нечем. */
@@ -40,6 +42,7 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
         setRows(loaded);
       })
       .catch((err: unknown) => {
+        if (routeAuthError(err, onAuthRequired)) return;
         if (cancelled) return;
         setError(decided.current
           ? "Решение принято, но список не удалось обновить — нажми «Повторить»."
@@ -56,6 +59,8 @@ export function SickApprovalsScreen({ onChanged }: { onChanged?: () => void }) {
       await action();
       decided.current = true;
     } catch (err) {
+      // Вход заменит экран: решение не принято, карточке отвечаем «нет».
+      if (routeAuthError(err, onAuthRequired)) return false;
       // 409/404 — значит, решение уже есть или записи нет: перечитываем список и
       // метку, иначе карточка осталась бы с живыми кнопками, а число в сайдбаре — старым.
       setNotice(err instanceof Error ? err.message : "Не получилось — попробуй ещё раз");
