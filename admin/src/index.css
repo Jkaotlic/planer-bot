@@ -27,7 +27,12 @@
      текста, рамки и кольца фокуса. */
   --fallback-button: #1c73d0;
   --fallback-button-text: #ffffff;
-  --fallback-destructive: #e23b32;
+  /* Красный текст отказов (`.employees-error`) и заливка `.btn-danger`: прежний
+     #e23b32 давал 4.29:1 на белой карточке и 3.73:1 на подложке ошибки (10%
+     красного поверх карточки) — ниже 4.5. #c4302b: 5.51:1 и 4.73:1; белый текст
+     на заливке `.btn-danger` — те же 5.51:1. Тёмную палитру (#ff6b60 — 5.6:1 на
+     #1e232d) не трогаем. */
+  --fallback-destructive: #c4302b;
   --fallback-separator: #dcdbe3;
 }
 
@@ -3749,4 +3754,159 @@ textarea {
   .qr-screen .employees-error {
     color: color-mix(in srgb, var(--destructive) 60%, var(--text));
   }
+}
+
+/* ── «Заказы и опросы» ─────────────────────────────────────────────────────
+   Те же экраны, что в мини-аппе, на классах консоли. Своих цветов нет — только
+   токены: обе темы и тема Telegram приходят даром, а `color-mix` не нужен.
+   Название блюда бывает в 200 знаков (FOOD_TEXT_MAX), меню — в 30 кнопок
+   (FOOD_MENU_MAX): всё, где они печатаются, переносится внутри себя, иначе одна
+   длинная строка уводила бы страницу вбок. */
+.food-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.food-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.food-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-card);
+  background: var(--surface-section);
+  font-size: var(--text-body);
+}
+
+.food-card-title {
+  margin: 0;
+  font-size: var(--text-head);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.food-meta {
+  color: var(--hint);
+  font-size: var(--text-sub);
+  overflow-wrap: anywhere;
+}
+
+.food-note {
+  font-size: var(--text-sub);
+  overflow-wrap: anywhere;
+}
+
+.food-total {
+  font-weight: 600;
+}
+
+.food-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Кнопка блюда и места: высота по тексту, а не ровно 36px — длинное название
+   переносится внутри кнопки, а не режется и не растягивает ряд. */
+.food-buttons .btn {
+  max-width: 100%;
+  height: auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* Выбранное место и режим — рамкой, а не заливкой: заливка `--button` здесь одна
+   и принадлежит «Разослать», иначе в форме две главные кнопки. Текст остаётся
+   цветом `--text` — синий текст на сером фоне `btn-secondary` не дотягивает до 4.5. */
+.food-chip[aria-pressed="true"] {
+  border-color: var(--button);
+  box-shadow: inset 0 0 0 1px var(--button);
+  font-weight: 600;
+}
+
+.food-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.food-row-name {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Экран заказа: слева то, что делает каждый (свой заказ, меню, своё блюдо),
+   справа то, что видит собирающий (сводка, кто сдал, управление). На узком —
+   одной колонкой, своё сверху. */
+.food-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+@media (min-width: 1100px) {
+  .food-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.food-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.food-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.food-time {
+  max-width: 160px;
+}
+
+.food-dish-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.food-dish-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.food-dish-price {
+  flex: none;
+  width: 110px;
+}
+
+.food-unreachable {
+  color: var(--destructive);
+  font-size: var(--text-sub);
+}
+
+.food-pay-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

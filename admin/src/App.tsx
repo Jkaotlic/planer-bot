@@ -30,6 +30,7 @@ import { GroupsScreen } from "./screens/GroupsScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
+import { OrdersPollsScreen } from "./screens/food/OrdersPollsScreen";
 import { QrScreen } from "./screens/QrScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
@@ -601,6 +602,9 @@ export function App() {
           <CollectionsScreen />
         ) : nav === "announce" ? (
           <AnnounceScreen />
+        ) : nav === "orders" ? (
+          // Истёкшая сессия посреди экрана — тот же экран входа, что при загрузке консоли.
+          <OrdersPollsScreen onAuthRequired={() => setNeedLogin(true)} />
         ) : nav === "approvals" ? (
           <SickApprovalsScreen
             onChanged={() => {

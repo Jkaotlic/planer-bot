@@ -102,4 +102,29 @@ describe("токены оформления консоли", () => {
     expect(m![1]).not.toContain(":not(");
     expect(m![1]).toContain('input[type="url"]');
   });
+
+  // Отказ сервера в «Заказах и опросах» (и в 18 других экранах) — класс
+  // `.employees-error`: красный текст на карточке и на подложке «10% красного
+  // поверх карточки». Прежний #e23b32 давал 4.29 и 3.73 — ниже 4.5.
+  it("красный текст ошибки читается: на карточке и на подложке ошибки не ниже 4.5", () => {
+    const start = css.indexOf(":root {");
+    const root = css.slice(start, css.indexOf("}", start));
+    const rgb = (name: string) => {
+      const h = root.match(new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`))![1]!;
+      return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    };
+    const lum = (c: number[]) => {
+      const [r, g, b] = c.map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+    };
+    const ratio = (a: number[], b: number[]) => {
+      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+      return (x! + 0.05) / (y! + 0.05);
+    };
+    const red = rgb("fallback-destructive");
+    const card = rgb("fallback-section-bg");
+    const errorBg = card.map((c, i) => c * 0.9 + red[i]! * 0.1);
+    expect(ratio(red, card)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(red, errorBg)).toBeGreaterThanOrEqual(4.5);
+  });
 });

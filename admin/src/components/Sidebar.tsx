@@ -1,4 +1,4 @@
-export type NavKey = "schedule" | "approvals" | "employees" | "groups" | "kinds" | "checklist" | "weekend" | "collections" | "announce" | "qr" | "bugs" | "log" | "settings";
+export type NavKey = "schedule" | "approvals" | "employees" | "groups" | "kinds" | "checklist" | "weekend" | "collections" | "announce" | "orders" | "qr" | "bugs" | "log" | "settings";
 
 export interface SidebarProps {
   active: NavKey;
@@ -24,6 +24,7 @@ export const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; icon: JSX.El
   { key: "weekend", label: "Работа в выходные", icon: <MarketIcon /> },
   { key: "collections", label: "Сборы", icon: <CakeIcon /> },
   { key: "announce", label: "Анонсы", icon: <AnnounceIcon /> },
+  { key: "orders", label: "Заказы и опросы", icon: <FoodIcon /> },
   { key: "qr", label: "QR-код", icon: <QrIcon /> },
   { key: "bugs", label: "Баги", icon: <BugIcon /> },
   { key: "log", label: "Журнал", icon: <LogIcon /> },
@@ -200,6 +201,17 @@ function QrIcon() {
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <path d="M14 14h3v3M21 14v7h-7" />
+    </svg>
+  );
+}
+
+/** Миска с палочками — тот же смысл, что у «🍱» в мини-аппе: опросы живут рядом с едой и там. */
+function FoodIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 11h18a9 9 0 0 1-18 0z" />
+      <path d="M8 21h8" />
+      <path d="M14 3l-3 8M20 4l-6 7" />
     </svg>
   );
 }
