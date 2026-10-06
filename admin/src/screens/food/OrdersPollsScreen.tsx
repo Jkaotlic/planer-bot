@@ -4,6 +4,7 @@ import { apiClient, type OrderView, type PollView } from "../../api/client";
 import { CollapsibleArchive } from "../../components/CollapsibleArchive";
 import { failureText } from "./food-errors";
 import { OrderForm } from "./OrderForm";
+import { OrderScreen } from "./OrderScreen";
 import { PollCard } from "./PollCard";
 
 /** Куда ведёт экран. Навигация — внутри пункта меню, как у «Сборов»: сайдбар остаётся на месте. */
@@ -47,10 +48,10 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
   }, [route, attempt]);
 
   const toList = () => setRoute({ view: "list" });
-  // Экран заказа появится в задаче 8; до тех пор созданный заказ виден в списке.
   if (route.view === "new-order") {
-    return <OrderForm onDone={toList} onCancel={toList} onAuthRequired={onAuthRequired} />;
+    return <OrderForm onDone={(orderId) => setRoute({ view: "order", orderId })} onCancel={toList} onAuthRequired={onAuthRequired} />;
   }
+  if (route.view === "order") return <OrderScreen orderId={route.orderId} onBack={toList} onAuthRequired={onAuthRequired} />;
 
   const retry = () => setAttempt((n) => n + 1);
   const activeOrders = orders?.filter(orderInProgress) ?? [];
@@ -58,7 +59,7 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
   const activePolls = polls?.filter((p) => p.open) ?? [];
   const pastPolls = polls?.filter((p) => !p.open) ?? [];
   const renderOrders = (list: readonly OrderView[]) => (
-    <div className="food-list">{list.map((o) => <OrderCard key={o.id} order={o} />)}</div>
+    <div className="food-list">{list.map((o) => <OrderCard key={o.id} order={o} onOpen={() => setRoute({ view: "order", orderId: o.id })} />)}</div>
   );
   const renderPolls = (list: readonly PollView[]) => (
     <div className="food-list">{list.map((p) => <PollCard key={p.id} poll={p} onAuthRequired={onAuthRequired} />)}</div>
@@ -106,7 +107,7 @@ export function OrdersPollsScreen({ onAuthRequired }: { onAuthRequired(): void }
   );
 }
 
-/** Карточка заказа в списке. «Открыть» появляется вместе с экраном заказа (задача 8). */
+/** Карточка заказа в списке; «Открыть» ведёт на экран заказа. */
 function OrderCard({ order, onOpen }: { order: OrderView; onOpen?: () => void }) {
   return (
     <article className="food-card">

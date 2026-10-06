@@ -75,4 +75,17 @@ describe("консоль: список «Заказы и опросы»", () => 
     await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы"));
     expect(getOrders).toHaveBeenCalledTimes(2);
   });
+
+  it("«Открыть» ведёт на экран заказа, «‹ Назад» — обратно", async () => {
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([orderView({ id: 7, placeName: "Додо" })]);
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    const getOrder = vi.spyOn(apiClient, "getOrder").mockResolvedValue(orderView({ id: 7, placeName: "Додо" }));
+    const el = await mount(OrdersPollsScreen, { onAuthRequired: vi.fn() });
+    await waitFor(() => expect(el.textContent).toContain("Додо"));
+    await click(button(el, "Открыть"));
+    await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("🍱 Додо"));
+    expect(getOrder).toHaveBeenCalledWith(7);
+    await click(button(el, "‹ Назад"));
+    await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe("Заказы и опросы"));
+  });
 });
