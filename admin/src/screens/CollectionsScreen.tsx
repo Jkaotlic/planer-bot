@@ -1200,7 +1200,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
         </label>
       )}
 
-      {open && <BirthdayEditor birthday={birthday} onChanged={onChanged} onSent={onSent} />}
+      {open && <BirthdayEditor birthday={birthday} today={today} onChanged={onChanged} onSent={onSent} />}
     </div>
   );
 }
@@ -1210,9 +1210,10 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
  * раунда может ещё не быть, он заводится первым сохранением, и до него у
  * предпросмотра `id: 0`.
  */
-function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" | "onToggle" | "today">) {
+function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "open" | "onToggle">) {
   const [collectUrl, setCollectUrl] = useState(birthday.campaign?.collectUrl ?? "");
   const [messageText, setMessageText] = useState(birthday.campaign?.messageText ?? "");
+  const [scheduledSendOn, setScheduledSendOn] = useState(birthday.campaign?.scheduledSendOn ?? "");
   const [recipientGroupId, setRecipientGroupId] = useState<number | null>(birthday.campaign?.recipientGroupId ?? null);
   const [preview, setPreview] = useState<CollectionPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1243,6 +1244,7 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
       await apiClient.saveBirthdayRound(birthday.employeeId, {
         collectUrl: collectUrl.trim() || null,
         messageText: messageText.trim() || null,
+        scheduledSendOn: scheduledSendOn || null,
         recipientGroupId,
       });
       await loadPreview();
@@ -1301,6 +1303,27 @@ function BirthdayEditor({ birthday, onChanged, onSent }: Omit<RowProps, "open" |
                 setConfirming(false);
               }}
             />
+          </label>
+
+          {/* Напоминание себе, а не рассылка: в этот день бот пишет админам, команде
+              сбор по-прежнему уходит только кнопкой. Минимум — командный `today`
+              (`asOf`), а не часы браузера; максимум — сам день рождения, позже
+              напоминать уже не о чем. Тексты — как в мини-аппе. */}
+          <label className="birthday-label">
+            Напомнить мне
+            <input
+              type="date"
+              aria-label="Дата напоминания о сборе"
+              value={scheduledSendOn}
+              min={today}
+              max={birthday.celebratedOn}
+              disabled={busy}
+              onChange={(e) => {
+                setScheduledSendOn(e.target.value);
+                setConfirming(false);
+              }}
+            />
+            <span>В этот день бот напишет админам. Команде — по-прежнему только по твоему тапу.</span>
           </label>
 
           {/* The placeholder is a hint, not the default text: the default is shown
