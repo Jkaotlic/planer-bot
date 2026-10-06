@@ -38,6 +38,7 @@ export * from "./announce-audience";
 export * from "./team-audience";
 export * from "./poll";
 export * from "./food-order";
+export * from "./food-view";
 export * from "./recipient-group";
 export * from "./sick-approval";
 export * from "./qr/style";
