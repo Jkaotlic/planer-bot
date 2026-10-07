@@ -80,9 +80,9 @@ async function click(el: HTMLElement) {
   await settle();
 }
 
-async function open(payments = PAYMENTS) {
+async function open(payments = PAYMENTS, row = ROW) {
   vi.spyOn(apiClient, "getBirthdays").mockResolvedValue({ asOf: "2026-01-01", birthdays: [] });
-  vi.spyOn(apiClient, "getCollections").mockResolvedValue([ROW]);
+  vi.spyOn(apiClient, "getCollections").mockResolvedValue([row]);
   vi.spyOn(apiClient, "getCollectionPreview").mockResolvedValue(PREVIEW);
   vi.spyOn(apiClient, "getCollectionPayments").mockResolvedValue(payments);
   host = document.createElement("div");
@@ -112,6 +112,19 @@ describe("список отметок в консоли", () => {
   it("когда отметились все, дожимать некого — кнопка выключена", async () => {
     const el = await open({ rows: PAYMENTS.rows.map((r) => ({ ...r, paid: true })), paidCount: 3, total: 3 });
     expect(buttonByText(el, "Напомнить не сдавшим").disabled).toBe(true);
+  });
+
+  it("сбор ещё не рассылали (sendCount: 0): кнопка погашена и сказано почему, хотя несдавшие есть", async () => {
+    const el = await open(PAYMENTS, { ...ROW, collection: { ...ROW.collection, sendCount: 0 } });
+    expect(PAYMENTS.rows.filter((r) => !r.paid)).toHaveLength(2);
+    expect(buttonByText(el, "Напомнить не сдавшим").disabled).toBe(true);
+    expect(el.textContent ?? "").toContain("Сбор ещё не рассылали — дожимать нечего.");
+  });
+
+  it("сбор рассылали (sendCount: 1): кнопка живая, подсказки нет", async () => {
+    const el = await open();
+    expect(buttonByText(el, "Напомнить не сдавшим").disabled).toBe(false);
+    expect(el.textContent ?? "").not.toContain("дожимать нечего");
   });
 
   it("тап админа по чужой строке ставит галочку", async () => {

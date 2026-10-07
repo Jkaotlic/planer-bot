@@ -121,6 +121,20 @@ describe("список отметок в карточке сбора", () => {
     expect(buttonContaining(el, "Напомнить не сдавшим")!.disabled).toBe(true);
   });
 
+  it("сбор ещё не рассылали (sendCount: 0): кнопка погашена и сказано почему, хотя несдавшие есть", async () => {
+    const el = await open(PAYMENTS, { ...ROW, collection: { ...COLLECTION, sendCount: 0 } });
+    // Несдавшие есть (2), так что гасит кнопку именно условие рассылки, а не пустой список.
+    expect(PAYMENTS.rows.filter((r) => !r.paid)).toHaveLength(2);
+    expect(buttonContaining(el, "Напомнить не сдавшим")!.disabled).toBe(true);
+    expect(el.textContent ?? "").toContain("Сбор ещё не рассылали — дожимать нечего.");
+  });
+
+  it("сбор рассылали (sendCount: 1): кнопка живая, подсказки нет", async () => {
+    const el = await open();
+    expect(buttonContaining(el, "Напомнить не сдавшим")!.disabled).toBe(false);
+    expect(el.textContent ?? "").not.toContain("дожимать нечего");
+  });
+
   it("тап админа по чужой строке ставит галочку", async () => {
     const el = await open();
     const mark = vi.spyOn(apiClient, "setCollectionPaymentFor").mockResolvedValue({
