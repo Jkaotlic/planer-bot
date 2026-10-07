@@ -131,6 +131,9 @@ const SEED_ENTRIES: Shift[] = [
   entry({ date: dayIso(0), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: 2 }),
   entry({ date: dayIso(0), start: "09:00", end: "18:00", endDate: null, category: "shift", title: "День", employeeId: 4 }),
 
+  // Открытая смена без человека — чтобы строку «Не назначено» было видно в dev-моке.
+  entry({ date: dayIso(2), start: "08:00", end: "17:00", endDate: null, category: "shift", title: "Утро", employeeId: null }),
+
   // Вт–Ср: Игорь в командировке (одна запись на диапазон)
   entry({ date: dayIso(1), start: null, end: null, endDate: dayIso(2), category: "business_trip", title: null, employeeId: 2 }),
   // Вт
