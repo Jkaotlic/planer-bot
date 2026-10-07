@@ -800,9 +800,11 @@ export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise
   shift.endDate = input.endDate ?? null;
   shift.title = input.title ?? null;
   shift.location = input.location ?? null;
-  if (input.employeeId != null) {
+  // Как сервер (`updateEntrySchema.partial`): пропущенное поле — «не менять»,
+  // `null` — снять человека с записи.
+  if (input.employeeId !== undefined) {
     shift.employeeId = input.employeeId;
-    shift.employeeName = personName(input.employeeId);
+    shift.employeeName = input.employeeId != null ? personName(input.employeeId) : undefined;
   }
   return { entry: shift, notified: mockReach(shift.employeeId != null ? [shift.employeeId] : []) };
 }
