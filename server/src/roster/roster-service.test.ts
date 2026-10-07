@@ -9,7 +9,7 @@ import { listActiveTemplates } from "../repo/templates";
 import { swapRequests, handovers } from "../db/schema";
 
 function decode(perPerson: DecodeResult["perPerson"]): DecodeResult {
-  return { perPerson, unknowns: [], preserved: [], proposedHolidays: [] };
+  return { perPerson, unknowns: [], preserved: [] };
 }
 
 /** A plain timed 'День' entry — the shape the codec both writes and can encode back. */

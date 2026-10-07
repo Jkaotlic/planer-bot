@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
-import { formatDayLabel } from "../lib/week";
+import { formatDayLabel, parseISODate } from "../lib/week";
+import { useTeamToday } from "../lib/team-today";
 import { CategoryChip } from "../categories";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { routeAuthError, useAuthRequired } from "../auth-required";
@@ -315,7 +316,8 @@ function InterestRow({ person, recommended, busy, onAssign }: { person: SlotInte
  */
 function PayrollSection() {
   const onAuthRequired = useAuthRequired();
-  const initial = monthRange(new Date());
+  // Месяц команды, а не браузера: 1-го числа рядом с полуночью они расходятся.
+  const initial = monthRange(parseISODate(useTeamToday()));
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [rows, setRows] = useState<PayrollRow[] | null>(null);

@@ -1,5 +1,5 @@
 import { and, eq, isNull, lte } from "drizzle-orm";
-import { autoSendDateFor, autoSendLabel, daysUntilBirthday, describeDaysUntil, formatBirthDate, formatDayMonth, isCollectionActive, parseBirthDate, type CollectionKind } from "@planer/shared";
+import { autoSendDateFor, autoSendLabel, daysUntilBirthday, describeDaysUntil, pluralDays, formatBirthDate, formatDayMonth, isCollectionActive, parseBirthDate, type CollectionKind } from "@planer/shared";
 import type { Db } from "../db/client";
 import { collections, employees, type Collection } from "../db/schema";
 import { listActive } from "../repo/employees";
@@ -318,6 +318,24 @@ export function roundsToAutoSend(db: Db, date: string): Collection[] {
     .filter((round) => isCollectionActive(round, date));
 }
 
+/**
+ * Раунды, чей день автоотправки настал, а праздник (и дедлайн) уже прошёл, и
+ * ничего не разослано: `roundsToAutoSend` их отсекает через `isCollectionActive`,
+ * и без этого списка они выпадали молча — подарка нет, а админы не знают.
+ *
+ * Закрытый раунд не берём: его закрыли руками, это решение, а не провал. Как и
+ * тот, что админ разослал сам (`sendCount > 0`).
+ */
+export function roundsMissedAutoSend(db: Db, date: string): Collection[] {
+  return db
+    .select()
+    .from(collections)
+    .where(and(lte(collections.autoSendOn, date), isNull(collections.autoSentAt), isNull(collections.closedAt)))
+    .all()
+    .filter((round) => round.kind === "birthday" && round.sendCount === 0)
+    .filter((round) => !isCollectionActive(round, date));
+}
+
 /** Отмечает, что попытка автоотправки была — удачная или нет. */
 export function markAutoSent(db: Db, roundId: number, when: Date): void {
   db.update(collections).set({ autoSentAt: when }).where(eq(collections.id, roundId)).run();
@@ -355,6 +373,12 @@ export function autoSentMessage(name: string, delivered: number, intended: numbe
  * второй способ сказать одно и то же.
  */
 export function autoSendFailedMessage(name: string, reason: string, daysUntil: number): string {
+  // Дни со знаком: у прошедшего праздника «сегодня» и просьба прислать ссылку врут —
+  // рассылать уже поздно, и ссылка ничего не изменит.
+  if (daysUntil < 0) {
+    const ago = -daysUntil;
+    return [`⚠️ Сбор на ${name} не ушёл. День рождения был ${ago} ${pluralDays(ago)} назад.`, "", reason].join("\n");
+  }
   return [
     `⚠️ Сбор на ${name} не ушёл. День рождения ${describeDaysUntil(daysUntil)}.`,
     "",

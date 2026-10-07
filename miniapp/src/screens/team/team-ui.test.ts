@@ -354,7 +354,7 @@ describe("team schedule UI", () => {
     expect(markup).toContain("07:00–16:00");
     expect(markup).toContain("Орлов Дмитрий Сергеевич");
     expect(markup).toContain('class="team-group__marker" style="background:#CBC04D"');
-    expect(markup).toContain('<h3 class="ui-group__header">Без времени</h3>');
+    expect(markup).toContain('<h2 class="ui-group__header">Без времени</h2>');
     expect(markup).toContain("Отпуск");
     expect(markup).toContain("Весь день");
     expect(markup).toContain("Соколов Максим");

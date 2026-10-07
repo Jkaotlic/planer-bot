@@ -508,6 +508,30 @@ describe("POST /api/admin/employees/:id/role", () => {
     expect(demoted).toBeDefined();
   });
 
+  it("архивация админа снимает его меню /admin, восстановление возвращает; у обычного работника меню не трогают", async () => {
+    // Иначе архивный админ видел бы `/admin` до рестарта сервера, а восстановленный не получал бы его вовсе.
+    const db = makeTestDb();
+    const boss = worker(db, "Игорь", 333);
+    setEmployeeAdmin(db, boss.id, true);
+    const plain = worker(db, "Аня", 444);
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    const { calls } = recordApi(bot);
+    const app = createApp({ db, config, bot });
+    const adminToken = await tokenFor(app, 111);
+    const menuCallsFor = (chat: number) =>
+      calls.filter((c) => (c.method === "setMyCommands" || c.method === "deleteMyCommands") && (c.payload as { scope?: { chat_id?: number } }).scope?.chat_id === chat).map((c) => c.method);
+
+    expect((await app.request(`/api/admin/employees/${boss.id}/archive`, authedJson(adminToken, {}))).status).toBe(200);
+    expect(menuCallsFor(333)).toEqual(["deleteMyCommands"]);
+
+    expect((await app.request(`/api/admin/employees/${boss.id}/restore`, authedJson(adminToken, {}))).status).toBe(200);
+    expect(menuCallsFor(333)).toEqual(["deleteMyCommands", "setMyCommands"]);
+
+    await app.request(`/api/admin/employees/${plain.id}/archive`, authedJson(adminToken, {}));
+    await app.request(`/api/admin/employees/${plain.id}/restore`, authedJson(adminToken, {}));
+    expect(menuCallsFor(444)).toEqual([]);
+  });
+
   it("rejects a worker calling it (403)", async () => {
     const db = makeTestDb();
     const w = worker(db, "Игорь", 333);

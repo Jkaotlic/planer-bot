@@ -73,3 +73,19 @@ export function isWeekend(date: string): boolean {
   const dow = dayOfWeek(date);
   return dow === 0 || dow === 6;
 }
+
+/**
+ * «12.09» — день, с которого бот не может достучаться, по поясу команды.
+ *
+ * Метка времени лежит в UTC; `getDate()` браузера брал бы пояс машины админа, и
+ * рядом с полуночью мини-апп и консоль показывали бы разные дни (а оба — не тот,
+ * что видит команда). Без `teamTz` (старый сервер его не шлёт) считает по поясу
+ * машины, как было раньше.
+ */
+export function formatBlockedSince(iso: string, teamTz?: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: teamTz, day: "2-digit", month: "2-digit" }).formatToParts(at);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("day")}.${part("month")}`;
+}

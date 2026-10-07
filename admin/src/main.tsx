@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 
 import { App } from "./App";
+import { CrashBoundary } from "./components/CrashBoundary";
 import { init } from "./init";
 
 init();
@@ -17,8 +18,12 @@ if (!container) {
   throw new Error("#root element not found");
 }
 
+// Граница снаружи `App`: упавший экран оставляет на месте белой страницы объяснение
+// и кнопку «Обновить страницу», а не пустоту, неотличимую от «консоль не открылась».
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <CrashBoundary>
+      <App />
+    </CrashBoundary>
   </StrictMode>,
 );

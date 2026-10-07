@@ -36,32 +36,38 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
   const swappable = isSwappable(shift.category);
 
   const openable = onOpen != null;
+  const inner = (
+    <>
+      <DayBadge date={shift.date} endDate={shift.endDate} />
+      {/* `span`, а не `div`: внутри `<button>` допустим только фразовый контент. */}
+      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+        <span style={{ fontSize: "var(--app-text-body)", fontWeight: 500 }}>{formatTimeRange(shift)}</span>
+        {/* Чип называет запись («Утро» / «Отпуск») цветом своего пресета. */}
+        <EntryChip entry={shift} templates={templates} />
+        {/* Обычный цвет, а не hint: серый давал 4.23 (тёмная) и 3.22 (светлая) при нужных 4.5. */}
+        {special && (
+          <span data-special-day style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--text_color)", lineHeight: 1.3 }}>
+            {special}
+          </span>
+        )}
+      </span>
+    </>
+  );
   return (
     // Своя строка, а не `Cell`: тот несёт «андроидные» поля (24px) и рипл на
     // весь блок, который перехватывал нажатия по «Обменять» (см. `SwapChip`).
     <div
       data-testid="shift-row"
       className="shift-row"
-      role={openable ? "button" : undefined}
-      tabIndex={openable ? 0 : undefined}
-      aria-expanded={openable ? (expanded ?? false) : undefined}
+      // Нажатие по любому месту строки (полям, «Сегодня») тоже раскрывает её, но
+      // для клавиатуры и чтеца экрана контрол — настоящая кнопка `shift-row__toggle`
+      // ниже: сама строка не `role="button"`, иначе «Обменять» оказывалась кнопкой
+      // внутри кнопки. Нажатие на саму кнопку всплывает сюда же — отдельного
+      // обработчика у неё нет, иначе `onOpen` сработал бы дважды.
       onClick={openable ? () => onOpen(shift) : undefined}
-      onKeyDown={
-        openable
-          ? (e) => {
-              // Только своё нажатие: Enter/пробел на вложенной «Обменять» всплывает
-              // сюда же и раскрыл бы строку заодно с обменом.
-              if (e.target !== e.currentTarget) return;
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onOpen(shift);
-              }
-            }
-          : undefined
-      }
       style={{
         display: "grid",
-        gridTemplateColumns: "auto minmax(0, 1fr) auto",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
         alignItems: "center",
         gap: 12,
         padding: "12px 14px",
@@ -77,18 +83,15 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
           : null),
       }}
     >
-      <DayBadge date={shift.date} endDate={shift.endDate} />
-      <div style={{ minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-        <span style={{ fontSize: "var(--app-text-body)", fontWeight: 500 }}>{formatTimeRange(shift)}</span>
-        {/* Чип называет запись («Утро» / «Отпуск») цветом своего пресета. */}
-        <EntryChip entry={shift} templates={templates} />
-        {/* Обычный цвет, а не hint: серый давал 4.23 (тёмная) и 3.22 (светлая) при нужных 4.5. */}
-        {special && (
-          <span data-special-day style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--text_color)", lineHeight: 1.3 }}>
-            {special}
-          </span>
-        )}
-      </div>
+      {/* Левая часть — одна кнопка: день и название записи читаются как «раскрыть
+          смену», а «Обменять» и «Сегодня» — соседи справа, не потомки. */}
+      {openable ? (
+        <button type="button" className="shift-row__toggle" aria-expanded={expanded ?? false} style={TOGGLE_STYLE}>
+          {inner}
+        </button>
+      ) : (
+        <div style={TOGGLE_STYLE}>{inner}</div>
+      )}
       {(isToday || (swappable && onSwap)) && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
           {isToday && <TodayChip />}
@@ -98,6 +101,24 @@ export function ShiftRow({ shift, templates, onSwap, isToday, swapBlockedReason,
     </div>
   );
 }
+
+/** Левая часть строки: день и запись рядом. У кнопки сброшено всё «кнопочное»,
+ *  чтобы выглядела так же, как у нераскрываемой строки. */
+const TOGGLE_STYLE = {
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 12,
+  minWidth: 0,
+  margin: 0,
+  padding: 0,
+  border: "none",
+  background: "none",
+  font: "inherit",
+  color: "inherit",
+  textAlign: "left",
+  cursor: "inherit",
+} as const;
 
 /** The text half of the "today" signal — colour is never the only carrier. */
 function TodayChip() {

@@ -6,6 +6,7 @@ import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
 import {
   adminRecipients,
+  adminRecipientsAlways,
   claimCollectionSend,
   collectionAudience,
   getCollection,
@@ -24,6 +25,7 @@ import {
   markAdminNotified,
   markAutoSent,
   markScheduleNotified,
+  roundsMissedAutoSend,
   roundsScheduledFor,
   roundsToAutoSend,
   scheduleNoticeMessage,
@@ -103,6 +105,30 @@ export async function runBirthdayNoticeTick(
     sent += delivered;
   }
 
+  // Раунды, которые не успели: праздник прошёл раньше дня автоотправки. Метим ДО письма
+  // (как ниже) и говорим админам, а не теряем молча. Старше двух недель — только метим:
+  // это история, а не новость, и первый тик после выкатки не должен её вываливать.
+  for (const missed of roundsMissedAutoSend(db, today)) {
+    markAutoSent(db, missed.id, new Date());
+    const daysUntil = missed.celebratedOn ? daysBetween(today, missed.celebratedOn) : 0;
+    if (daysUntil < -MISSED_NOTICE_DAYS) continue;
+    const personName = missed.employeeId != null ? (getEmployeeById(db, missed.employeeId)?.displayName ?? null) : null;
+    // The failure alarm goes through the mute: «Дни рождения и сборы» is about congratulations, not about a gift that will not happen.
+    const admins = adminRecipientsAlways(db, missed.employeeId);
+    // The cause decides the words: an admin can push the deadline into the past while the birthday is still ahead.
+    const reason = missed.deadline != null && missed.deadline < today
+      ? "Срок сбора истёк раньше, чем бот успел разослать."
+      : "Праздник прошёл раньше, чем бот успел разослать сбор.";
+    const text = autoSendFailedMessage(personName ?? "именинника", reason, daysUntil);
+    let adminsTold = 0;
+    for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
+    // Не дошло ни до кого — обрыв сети, а не молчание по решению: отметку снимаем.
+    if (admins.length > 0 && adminsTold === 0) clearAutoSent(db, missed.id);
+    recordAudit(db, "collection_auto_send_failed", null, {
+      collectionId: missed.id, employeeId: missed.employeeId, title: collectionTitle(missed, personName), reason,
+    });
+  }
+
   /**
    * Единственное место, где бот пишет КОМАНДЕ без человека.
    *
@@ -139,15 +165,17 @@ export async function runBirthdayNoticeTick(
 
     const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
     const admins = adminRecipients(db, round.employeeId);
+    // The failure alarms below are not congratulations: they ignore the «celebrations» mute.
+    const alarmAdmins = adminRecipientsAlways(db, round.employeeId);
     const preview = previewCollection(db, round, today);
-    const daysUntil = round.celebratedOn ? Math.max(0, daysBetween(today, round.celebratedOn)) : 0;
+    const daysUntil = round.celebratedOn ? daysBetween(today, round.celebratedOn) : 0;
 
     if (preview.blocker) {
       const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
       let adminsTold = 0;
-      for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
+      for (const admin of alarmAdmins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
       // Как ниже: «подарка не будет», которое не дошло ни до кого, — не сказанное.
-      if (admins.length > 0 && adminsTold === 0) clearAutoSent(db, round.id);
+      if (alarmAdmins.length > 0 && adminsTold === 0) clearAutoSent(db, round.id);
       recordAudit(db, "collection_auto_send_failed", null, {
         collectionId: round.id, employeeId: round.employeeId, title: preview.title, reason: preview.blocker,
       });
@@ -188,8 +216,9 @@ export async function runBirthdayNoticeTick(
         : autoSendFailedMessage(personName ?? "именинника", "Telegram не принял ни одного письма.", daysUntil);
       // Ноль доставленных — это провал, а не тихий успех: `markCollectionSent`
       // выше его не засчитал, и админ обязан узнать об этом словами.
+      // Провал — сквозь выключатель, отчёт об успехе — по нему.
       let adminsTold = 0;
-      for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, report)) adminsTold += 1;
+      for (const admin of delivered > 0 ? admins : alarmAdmins) if (await notifyUser(bot, admin.telegramUserId!, report)) adminsTold += 1;
       // Не узнал никто — ни команда, ни админы: это обрыв сети, а не отказ, и
       // отметку о попытке надо снять, иначе сбор пропадёт молча (пять обрывов
       // ENOTFOUND за сентябрь 2026). Второго письма это не открывает — первого
@@ -244,6 +273,9 @@ export async function runBirthdayNoticeTick(
 
   return sent;
 }
+
+/** How far back a missed round still deserves a letter; older ones are marked silently. */
+const MISSED_NOTICE_DAYS = 14;
 
 /** Сколько дней от `from` до `to`, обе — YYYY-MM-DD. */
 function daysBetween(from: string, to: string): number {

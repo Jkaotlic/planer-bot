@@ -743,6 +743,25 @@ describe("«Завтра с тобой»: кто ещё работает в эт
     expect(anyaMsg.text).not.toContain("Семён");
   });
 
+  it("многодневная запись с часами, начатая вчера, не делает человека соседом на завтра", async () => {
+    // Записи дня читаются с пересечением (ради больничных), поэтому запись Марка, начатая вчера и
+    // идущая до завтра, попадает в выборку. Он начинает не завтра, и «с тобой» его быть не должно.
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 960);
+    const igor = linkedEmployee(db, "Игорь", 961);
+    const mark = linkedEmployee(db, "Марк", 962);
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id });
+    createShift(db, { date: TODAY, endDate: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id });
+    const { bot, sent } = testBot();
+
+    await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+    const anyaMsg = sent.find((s) => s.chat_id === 960)!;
+    expect(anyaMsg.text).toContain("👥 Завтра с тобой: Игорь");
+    expect(anyaMsg.text).not.toContain("Марк");
+  });
+
   it("вечерний видит вечерних, а не утренних и не дневных", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 970);

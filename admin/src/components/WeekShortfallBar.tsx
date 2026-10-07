@@ -9,6 +9,8 @@ export interface WeekShortfallBarProps {
   weekDates: readonly string[];
   /** Праздники и рабочие выходные: от них зависит, по какой колонке нормы считать день. */
   calendar: DayCalendar;
+  /** Даты с отметкой «Знаю про дату»: плашка считает их закрытыми, как бейдж сайдбара. */
+  ackedDates?: ReadonlySet<string>;
   /** День, колонка которого сейчас выделена в сетке. */
   pointedDate: string | null;
   onPointDay: (date: string | null) => void;
@@ -31,8 +33,8 @@ export interface WeekShortfallBarProps {
  * это не поломка, а несделанная настройка, и кричать о ней наравне с дырой
  * в графике значило бы приучить глаз строку пропускать.
  */
-export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, calendar, onPointDay, onOpenKinds, nearestDate = null, onJumpNearest }: WeekShortfallBarProps) {
-  const week = weekShortfall(shifts, templates, weekDates, calendar);
+export function WeekShortfallBar({ shifts, templates, weekDates, pointedDate, calendar, ackedDates, onPointDay, onOpenKinds, nearestDate = null, onJumpNearest }: WeekShortfallBarProps) {
+  const week = weekShortfall(shifts, templates, weekDates, calendar, ackedDates);
   const { days, total, withoutNorm } = week;
   const status = shortfallStatus(week, templates);
   // Число в сайдбаре считает сегодня…+6 и пересекает границу недели, а плашка видит

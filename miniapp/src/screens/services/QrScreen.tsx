@@ -22,7 +22,13 @@ function sameStyle(a: QrSavedStyle, b: QrSavedStyle): boolean {
  * «Прислать мне в бота». Рисует в браузере тем же `renderQr`, что бот и консоль, —
  * без запроса на каждое касание. Экран грузится ленивым куском (см. `qr-bundle.test.ts`).
  */
-export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle; onClose(style: QrSavedStyle): void }) {
+export function QrScreen({ initialStyle, onClose, onSaved }: {
+  initialStyle: QrSavedStyle;
+  /** Закрыли экран; `style` — тот выбор, что точно лежит на сервере (уход не ждёт сеть). */
+  onClose(style: QrSavedStyle): void;
+  /** Сервер принял новый выбор уже после ухода — родитель обновляет свою копию только теперь. */
+  onSaved?(style: QrSavedStyle): void;
+}) {
   const [text, setText] = useState("");
   const [caption, setCaption] = useState("");
   const [style, setStyle] = useState<QrSavedStyle>(initialStyle);
@@ -51,8 +57,13 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
 
   function leave() {
     if (!sameStyle(style, saved)) {
-      // Человек уже уходит: неудача значит лишь, что бот нарисует прежним стилем.
-      void apiClient.setQrStyle(style).catch(() => {});
+      // Человек уже уходит и ждать сеть не должен, поэтому `onClose` получает то, что
+      // на сервере сейчас, а новый выбор родитель принимает через `onSaved` — после
+      // ответа. Раньше он писался в `me` сразу, и при отказе экран обещал стиль,
+      // которым бот рисовать не станет.
+      void apiClient.setQrStyle(style).then(() => onSaved?.(style), () => {});
+      onClose(saved);
+      return;
     }
     onClose(style);
   }
@@ -186,17 +197,31 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
         )}
       </Group>
 
-      <ActionButton kind="primary" stretched loading={sending} disabled={preview.kind !== "ok" || sending} onClick={() => void send()}>
-        Прислать мне в бота
-      </ActionButton>
-      {status && (
-        <div
-          role="status"
-          style={{ fontSize: 13, marginTop: 8, color: status.ok ? "var(--tgui--text_color)" : "var(--tgui--destructive_text_color)" }}
-        >
-          {status.text}
-        </div>
-      )}
+      {/* Прилипает к низу окна: от поля до кнопки — предпросмотр, форма, цвета и
+          подпись, и кнопка уезжала на 150–450px ниже экрана, так что «Прислать»
+          искали прокруткой. Итог отправки стоит над кнопкой внутри того же блока —
+          под ней он остался бы за краем и отказ сервера никто бы не увидел. */}
+      <div
+        style={{
+          position: "sticky",
+          bottom: 0,
+          zIndex: 1,
+          padding: "8px 0 calc(8px + env(safe-area-inset-bottom, 0px))",
+          background: "var(--app-canvas, var(--tgui--secondary_bg_color))",
+        }}
+      >
+        {status && (
+          <div
+            role="status"
+            style={{ fontSize: 13, marginBottom: 8, color: status.ok ? "var(--tgui--text_color)" : "var(--tgui--destructive_text_color)" }}
+          >
+            {status.text}
+          </div>
+        )}
+        <ActionButton kind="primary" stretched loading={sending} disabled={preview.kind !== "ok" || sending} onClick={() => void send()}>
+          Прислать мне в бота
+        </ActionButton>
+      </div>
       <Hint>
         Бот пришлёт картинку в личку — оттуда её можно переслать или сохранить. Ссылку можно прислать боту и просто
         так: он ответит кодом в этом же стиле.

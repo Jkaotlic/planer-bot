@@ -1,6 +1,7 @@
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
-import { filterPeople, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
+import { useTeamTz } from "../lib/team-today";
+import { filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
@@ -328,6 +329,8 @@ function EmployeeRow({
   onSetObserver: (isObserver: boolean) => void;
 }) {
   const palette = personPalette(employee.id);
+  // Пояс команды для даты метки «заблокировал бота» (см. `formatBlockedSince`).
+  const teamTz = useTeamTz();
   const linked = employee.telegramUserId != null;
   // "Привязан" reuses the weekend_work category's green so linked-status reads
   // as a system color rather than a one-off, and stays legible in both themes.
@@ -409,7 +412,7 @@ function EmployeeRow({
               с какого дня: «не слышит с 12-го» объясняет, почему он не ответил. */}
           {linked && employee.botBlockedAt && (
             <span className="status-chip status-chip-alert" title="Telegram отвечает, что бот заблокирован. Снимется, когда человек снова напишет боту">
-              🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}
+              🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt, teamTz)}
             </span>
           )}
           {employee.isAdmin && <span className="admin-badge">админ</span>}
@@ -798,8 +801,3 @@ function BirthDateField({
 /** February gets 29: a birthday on the 29th is real, whatever the year holds. */
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-/** «12.09» — день, с которого бот не может достучаться. */
-function formatBlockedSince(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
-}

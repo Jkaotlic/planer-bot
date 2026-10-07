@@ -1,4 +1,5 @@
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { useTelegramBack } from "../../lib/telegram-back";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Cell, Input, Spinner } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
@@ -6,9 +7,10 @@ import {
   ABSENCE_CATEGORIES,
   coverageHint,
   calendarFrom,
+  dayOfWeek,
   dayOffLabel,
   isDayOff,
-  missingCoverage,
+  missingCoverageUnlessAcked,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   describeEntryRangeResult,
@@ -96,13 +98,16 @@ export function showsWeekSwitcher(state: {
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
-export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nearestShortfall = null }: {
+export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nearestShortfall = null, onFormOpenChange }: {
   initialDate?: string;
   today: string;
   /** Первый день нехватки из сегодня…+6 (тот же ответ, что у метки на вкладке «Админ»). */
   nearestShortfall?: string | null;
   /** Правка графика меняет нехватку, а метка на вкладке «Админ» живёт выше, в App. */
   onScheduleChanged?: () => void;
+  /** Открыта ли панель с вводом (запись, «Заполнить неделю», CSV): раздел выше по
+   *  этому флагу переспрашивает «‹ Разделы», а не стирает набранное. */
+  onFormOpenChange?: (open: boolean) => void;
 }) {
   // Кнопка «📅 Открыть график» у админской тревоги приходит с датой — экран
   // должен открыться на её неделе, а не на текущей. Без неё — командная дата
@@ -129,6 +134,10 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   // на секунду объявила бы «Нормы не заданы» там, где они заданы.
   const [rolesLoaded, setRolesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Отказ загрузки людей, видов и норм — отдельно от `error`: у него есть
+  // «Повторить», а без норм нет и плашки нехватки, так что красный текст без
+  // кнопки оставлял экран без неё до перезахода в приложение.
+  const [baseError, setBaseError] = useState<string | null>(null);
   /**
    * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
    * которая не загрузилась, обязана сказать это на месте дня: иначе она либо
@@ -148,6 +157,18 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   const [kindsOpen, setKindsOpen] = useState(false);
   /** When true, the day view is replaced by the «виды смен» editor. */
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Системная «Назад» из вложенной панели закрывает ПАНЕЛЬ (как её «Назад к
+  // расписанию» / «Отмена»), а не раздел целиком: стек обработчиков отдаёт её
+  // последней зарегистрированной, пока панель открыта.
+  const panelOpen = fillOpen || csvOpen || kindsOpen || settingsOpen || editing !== null;
+  useTelegramBack(closePanel, panelOpen);
+  // Панели с набранным вводом: уйти из раздела, не дописав, значит потерять их.
+  const formOpen = fillOpen || csvOpen || editing !== null;
+  useEffect(() => {
+    onFormOpenChange?.(formOpen);
+    return () => onFormOpenChange?.(false);
+  }, [formOpen]);
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
@@ -183,6 +204,25 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
     }
   }
 
+  /** Закрыть открытую панель — то же, что её собственная кнопка «назад». */
+  function closePanel() {
+    if (fillOpen) setFillOpen(false);
+    else if (kindsOpen) setKindsOpen(false);
+    else if (settingsOpen) closeSettings();
+    else if (csvOpen) setCsvOpen(false);
+    else setEditing(null);
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false);
+    // Норму правят там, а считают по ней здесь: без перечитывания
+    // полоска показывала бы нехватку по нормам, какими они были при
+    // открытии экрана. Не сумели — остаются прежние.
+    apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+    // И метка на вкладке «Админ»: сервер считает её по тем же нормам.
+    onScheduleChanged?.();
+  }
+
   /** A CSV import renames and creates people and rewrites entries, so both the
    *  roster and the visible week have to come back from the server. */
   async function reloadAfterImport() {
@@ -192,9 +232,12 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
     onScheduleChanged?.();
   }
 
+  // Ключ перечитывания людей, видов и норм: «Повторить» после отказа.
+  const [baseReload, setBaseReload] = useState(0);
   // Roster + templates load once; they don't change with the visible week.
   useEffect(() => {
     let cancelled = false;
+    setBaseError(null);
     Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates(), apiClient.getTemplateRoles()])
       .then(([emps, tmpls, roles]) => {
         if (cancelled) return;
@@ -204,12 +247,12 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
         setRolesLoaded(true);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+        if (!cancelled) setBaseError(err instanceof Error ? err.message : "Не удалось загрузить данные");
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [baseReload]);
 
   // Schedule reloads whenever the visible week changes. Registers with the same
   // gate as `loadWeek` — navigating here must supersede a still-running
@@ -241,6 +284,21 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
       cancelled = true;
     };
   }, [from, to]);
+
+  // Отмеченные «Знаю про дату» дни показанной недели: бейдж и совет бота их уже не считают, и
+  // плашка с метками не вправе краснеть по дате, о которой админы сказали «знаем». Ключ — начало
+  // недели, как у `shiftsFrom`: пока ответ другой недели, меток нет, а не чужие. Ошибка чтения —
+  // «отметок нет»: лишняя красная метка лучше, чем экран без нехватки.
+  const [acks, setAcks] = useState<{ from: string; dates: string[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getCoverageAcks(from, to)
+      .then((res) => { if (!cancelled) setAcks({ from, dates: res?.dates ?? [] }); })
+      .catch(() => { if (!cancelled) setAcks({ from, dates: [] }); });
+    return () => { cancelled = true; };
+  }, [from, to]);
+  const ackedDates = useMemo(() => new Set(acks && acks.from === from ? acks.dates : []), [acks, from]);
 
   function goWeek(deltaWeeks: number) {
     const nextStart = addDays(weekStart, deltaWeeks * 7);
@@ -290,18 +348,20 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   const weekShifts = shifts && shiftsFrom === from ? shifts : null;
   // Только по записям показанной недели; пока их нет — подсказка молчит, а не
   // объявляет нехватку по пустому списку.
-  const dayHint = weekShifts && rolesLoaded ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate, dayCalendar)) : null;
+  // Отметки «Знаю про дату» — той же недели (`acks.from`): пока ответ чужой, закрытый день
+  // на миг показал бы подсказку о нехватке.
+  const dayHint = weekShifts && rolesLoaded && acks?.from === from ? coverageHint(missingCoverageUnlessAcked(weekShifts, templateRoles, selectedDate, dayCalendar, ackedDates)) : null;
 
   // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
   // семь дней красным, и закрытая неделя открывалась бы тревогой.
   const week = useMemo(
-    () => (weekShifts && rolesLoaded ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar) : null),
-    [weekShifts, rolesLoaded, templateRoles, weekDates, dayCalendar],
+    () => (weekShifts && rolesLoaded && acks?.from === from ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar, ackedDates) : null),
+    [weekShifts, rolesLoaded, templateRoles, weekDates, dayCalendar, ackedDates, acks, from],
   );
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
   const status = week ? shortfallStatus(week, templateRoles) : null;
 
-  const dayEntries = (shifts ?? [])
+  const dayEntries = (weekShifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
     .sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""));
 
@@ -358,6 +418,14 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
       )}
 
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>}
+      {baseError && (
+        <Card>
+          <span style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{baseError}</span>
+          <ActionButton compact stretched onClick={() => setBaseReload((n) => n + 1)}>
+            Повторить
+          </ActionButton>
+        </Card>
+      )}
       {notice && <Hint>{notice}</Hint>}
 
       {fillOpen ? (
@@ -374,17 +442,7 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
       ) : kindsOpen ? (
         <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
       ) : settingsOpen ? (
-        <AdminKindSettings
-          onClose={() => {
-            setSettingsOpen(false);
-            // Норму правят там, а считают по ней здесь: без перечитывания
-            // полоска показывала бы нехватку по нормам, какими они были при
-            // открытии экрана. Не сумели — остаются прежние.
-            apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
-            // И метка на вкладке «Админ»: сервер считает её по тем же нормам.
-            onScheduleChanged?.();
-          }}
-        />
+        <AdminKindSettings onClose={closeSettings} />
       ) : csvOpen ? (
         <AdminRosterCsv
           employees={employees}
@@ -419,7 +477,10 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
                   Повторить
                 </ActionButton>
               </Card>
-            ) : shifts === null ? (
+            ) : weekShifts === null ? (
+              // Не `shifts === null`: при листании `shifts` ещё хранит прежнюю неделю,
+              // а день уже новый — без этой проверки экран писал бы «ничего не
+              // запланировано» про день, ответ про который ещё в пути.
               <Card>
                 <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
                   <Spinner size="m" />
@@ -553,7 +614,9 @@ function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: str
       aria-current={isToday ? "date" : undefined}
       aria-pressed={active}
       data-day-short-outline={short > 0 ? "true" : undefined}
-      aria-label={`${weekdayShort(iso)} ${dayOfMonth(iso)}${short > 0 ? `, не хватает ${short}` : ""}`}
+      // Праздник и рабочая суббота названы в подписи, а не только значком 🎉/💼:
+      // значок скрыт от чтеца экрана вместе с остальной вёрсткой, и день читался бы обычным.
+      aria-label={`${weekdayShort(iso)} ${dayOfMonth(iso)}${kind === "holiday" ? ", праздник" : kind === "workday" ? `, ${dayOfWeek(iso) === 0 ? "рабочее воскресенье" : "рабочая суббота"}` : ""}${short > 0 ? `, не хватает ${short}` : ""}`}
       style={{
         position: "relative",
         flex: 1,

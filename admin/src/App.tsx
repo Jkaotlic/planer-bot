@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SickApprovalRow } from "@planer/shared";
 import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
@@ -31,14 +31,20 @@ import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
 import { OrdersPollsScreen } from "./screens/food/OrdersPollsScreen";
-import { QrScreen } from "./screens/QrScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
+import { CrashBoundary } from "./components/CrashBoundary";
 import { AuthRequiredProvider } from "./auth-required";
+import { TeamTodayContext, TeamTzContext } from "./lib/team-today";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
+
+// Отдельным куском: `qrcode` весил +32,5 КБ в стартовом бандле консоли ради экрана, который
+// открывают раз в неделю. Не загрузившийся кусок (после выкатки старого файла уже нет) ловит
+// `CrashBoundary` на месте экрана — с просьбой обновить страницу, а не белым экраном.
+const QrScreen = lazy(() => import("./screens/QrScreen").then((m) => ({ default: m.QrScreen })));
 
 interface PanelTarget {
   /** `null` — «＋» из строки «Не назначено». */
@@ -123,6 +129,8 @@ export function App() {
   const requestLogin = useCallback(() => setNeedLogin(true), []);
   /** Кто вошёл — для подписи в футере сайдбара. */
   const [viewer, setViewer] = useState<Viewer | null>(null);
+  /** Командная «сегодня» с сервера; `null` — ещё не пришла (см. `TeamTodayContext`). */
+  const [teamToday, setTeamToday] = useState<string | null>(null);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
@@ -148,7 +156,28 @@ export function App() {
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
   // даты нет, и «нажатый» день в строке указывал бы в никуда.
-  const shortfallReady = shiftsFrom === weekDates[0];
+  // «Знаю про дату» показанной недели: дни закрыты и в плашке, и в шапках колонок, как в бейдже.
+  // Ключ — понедельник: пока ответ чужой недели, плашки нет вовсе (а не красной на секунду).
+  // Ошибка чтения — «отметок нет»: лишний красный день лучше экрана без нехватки.
+  const [acks, setAcks] = useState<{ from: string; dates: string[] } | null>(null);
+  const shortfallReady = shiftsFrom === weekDates[0] && acks?.from === weekDates[0];
+  // Записи показанной недели; записи прежней при листании в состоянии стоят до ответа.
+  const weekShifts = shifts && shiftsFrom === weekDates[0] ? shifts : null;
+  // Понедельник, который открыт сейчас: перечитывание, начатое на прежней неделе,
+  // не должно приземлиться после листания (см. `refreshSchedule`).
+  const shownMonday = useRef(weekDates[0]!);
+  shownMonday.current = weekDates[0]!;
+  const ackedDates = useMemo(() => new Set(acks?.from === weekDates[0] ? acks.dates : []), [acks, weekDates[0]]);
+  useEffect(() => {
+    let cancelled = false;
+    const from = weekDates[0]!;
+    apiClient
+      .getCoverageAcks(from, weekDates[6]!)
+      .then((res) => { if (!cancelled) setAcks({ from, dates: res?.dates ?? [] }); })
+      .catch(() => { if (!cancelled) setAcks({ from, dates: [] }); });
+    return () => { cancelled = true; };
+    // weekDates is derived fresh each render; the Monday is the real dependency.
+  }, [weekDates[0]]);
   const pointedInWeek = pointedDate && weekDates.includes(pointedDate) ? pointedDate : null;
   const weekLabel = formatWeekRangeLabel(weekMonday, addDays(weekMonday, 6));
 
@@ -194,7 +223,16 @@ export function App() {
       void apiClient
         .getMe()
         .then((me) => {
-          if (!cancelled()) setViewer(me);
+          if (cancelled()) return;
+          setViewer(me);
+          if (me.teamToday) {
+            setTeamToday(me.teamToday);
+            // Неделя открыта по часам браузера, пока сервер не ответил: если человек
+            // ещё не листал и неделя команды другая — переходим на неё.
+            setWeekMonday((current) =>
+              toISODate(current) === toISODate(mondayOf(new Date())) ? mondayOf(parseISODate(me.teamToday!)) : current,
+            );
+          }
         })
         .catch(() => {});
     } catch (err) {
@@ -323,8 +361,8 @@ export function App() {
     };
   }, [nav]);
 
-  /** The visible week's entries. `shifts` is dropped first: a failed reload must not
-   *  leave the previous week's rows standing under the new week's dates. */
+  /** Записи показанной недели. При отказе `shifts` сбрасываются, а при листании
+   *  прежние записи не рисуются, пока `shiftsFrom` не совпал с неделей (`weekShifts`). */
   async function loadWeek(cancelled: () => boolean = () => false) {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
@@ -348,9 +386,13 @@ export function App() {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
     const [next, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
-    setShifts(next);
-    setShiftsFrom(from);
-    setCalendarDays(calendar);
+    // Админ успел перелистнуть, пока шло перечитывание: ответ старой недели
+    // затёр бы состояние новой (а `shiftsFrom` соврал бы, что оно ей принадлежит).
+    if (shownMonday.current === from) {
+      setShifts(next);
+      setShiftsFrom(from);
+      setCalendarDays(calendar);
+    }
     // Все правки записей кончаются здесь (сохранение, диапазон, удаление,
     // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки; удаление
     // ждущего больничного заодно убирает его из очереди «На подтверждение».
@@ -541,6 +583,8 @@ export function App() {
 
   return (
     <AuthRequiredProvider value={requestLogin}>
+    <TeamTodayContext.Provider value={teamToday}>
+    <TeamTzContext.Provider value={viewer?.teamTz}>
     <div className="app-shell">
       <Sidebar
         active={nav}
@@ -620,7 +664,11 @@ export function App() {
             }}
           />
         ) : nav === "qr" ? (
-          <QrScreen />
+          <CrashBoundary>
+            <Suspense fallback={<div className="centered-fill in-section">Загрузка…</div>}>
+              <QrScreen />
+            </Suspense>
+          </CrashBoundary>
         ) : nav === "bugs" ? (
           <BugsScreen />
         ) : nav === "log" ? (
@@ -671,17 +719,20 @@ export function App() {
                   Повторить
                 </button>
               </div>
-            ) : !shifts ? (
+            ) : !weekShifts ? (
+              // `shifts` при листании ещё хранит прежнюю неделю: рисовать её под
+              // датами новой значило бы показать чужие записи за свои.
               <div className="centered-fill in-section">Загрузка…</div>
             ) : (
               <>
               {/* Над сеткой, а не в правой колонке: ниже 1600px колонка уезжает
                   под сетку, и нехватку пришлось бы искать прокруткой. */}
               {shortfallReady && <WeekShortfallBar
-                shifts={shifts}
+                shifts={weekShifts}
                 templates={templateRoles}
                 weekDates={weekDates}
                 calendar={dayCalendar}
+                ackedDates={ackedDates}
                 pointedDate={pointedInWeek}
                 onPointDay={setPointedDate}
                 onOpenKinds={() => setNav("kinds")}
@@ -695,7 +746,7 @@ export function App() {
                 <ScheduleGrid
                   highlightDate={pointedInWeek}
                   employees={activeEmployees}
-                  shifts={shifts}
+                  shifts={weekShifts}
                   templates={templates}
                   weekDates={weekDates}
                   onAddClick={openAddPanel}
@@ -703,6 +754,7 @@ export function App() {
                   query={scheduleQuery}
                   coverage={shortfallReady ? templateRoles : []}
                   calendar={dayCalendar}
+                  ackedDates={ackedDates}
                   special={specialDays(weekDates, calendarDays)}
                 />
                 <aside className="right-rail">
@@ -905,6 +957,8 @@ export function App() {
         </div>
       )}
     </div>
+    </TeamTzContext.Provider>
+    </TeamTodayContext.Provider>
     </AuthRequiredProvider>
   );
 }

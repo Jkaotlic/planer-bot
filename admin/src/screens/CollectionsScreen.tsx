@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTeamToday } from "../lib/team-today";
 import {
   autoSendLabel,
   collectionStatus,
@@ -166,21 +167,11 @@ function moneyValue(raw: string): number | null {
   return Number.isFinite(parsed) ? Math.round(parsed) : null;
 }
 
-/**
- * Часы браузера — только запасной вариант для самого первого кадра, пока
- * `GET /api/admin/birthdays` ещё не ответил своим `asOf` (команднАЯ дата,
- * `teamNow` на сервере). Разошедшиеся часы админа держали бы статус карточки
- * и минимум даты напоминания неверными вплоть до первой перезагрузки списка —
- * баг из ledger.
- */
-function todayIso(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
 export function CollectionsScreen() {
   const onAuthRequired = useAuthRequired();
-  const [today, setToday] = useState<string>(() => todayIso());
+  // Первый кадр — командная дата из `/api/me`, а часы браузера только если её ещё нет.
+  const teamToday = useTeamToday();
+  const [today, setToday] = useState<string>(teamToday);
   const [birthdays, setBirthdays] = useState<UpcomingBirthday[] | null>(null);
   const [rows, setRows] = useState<CollectionRow[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -1217,7 +1208,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
             aria-label="Бот рассылает сам"
             onChange={() => void toggleAutoSend(birthday)}
           />
-          {autoSendLabel(birthday.campaign.autoSendOn, today) ?? "Разошлёшь сам — бот ждёт твоей кнопки"}
+          {autoSendLabel(birthday.campaign.autoSendOn, today, birthday.campaign) ?? "Разошлёшь сам — бот ждёт твоей кнопки"}
         </label>
       )}
 

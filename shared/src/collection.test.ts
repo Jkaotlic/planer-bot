@@ -364,15 +364,31 @@ describe("autoSendDateFor", () => {
 
 describe("autoSendLabel", () => {
   it("молчит, когда автоотправка выключена", () => {
-    expect(autoSendLabel(null, "2026-09-01")).toBeNull();
+    expect(autoSendLabel(null, "2026-09-01", { autoSentAt: null, sendCount: 0 })).toBeNull();
   });
 
   it("называет день", () => {
-    expect(autoSendLabel("2026-09-04", "2026-09-01")).toBe("Бот разошлёт команде 4 сентября");
+    expect(autoSendLabel("2026-09-04", "2026-09-01", { autoSentAt: null, sendCount: 0 })).toBe("Бот разошлёт команде 4 сентября");
   });
 
   it("говорит «сегодня», когда день уже настал или прошёл", () => {
-    expect(autoSendLabel("2026-09-04", "2026-09-04")).toBe("Бот разошлёт команде сегодня");
-    expect(autoSendLabel("2026-09-03", "2026-09-04")).toBe("Бот разошлёт команде сегодня");
+    expect(autoSendLabel("2026-09-04", "2026-09-04", { autoSentAt: null, sendCount: 0 })).toBe("Бот разошлёт команде сегодня");
+    expect(autoSendLabel("2026-09-03", "2026-09-04", { autoSentAt: null, sendCount: 0 })).toBe("Бот разошлёт команде сегодня");
+  });
+
+  it("после неудачной попытки не обещает рассылку: попытка была, никто не получил", () => {
+    // `autoSentAt` ставится и при провале — без `sendCount` карточка врала «сегодня» всем трём дням.
+    const failed = { autoSentAt: "2026-09-04T09:00:00Z", sendCount: 0 };
+    expect(autoSendLabel("2026-09-04", "2026-09-04", failed)).toBe("Бот пробовал и не смог — разошли сам");
+  });
+
+  it("после удачной рассылки возвращается к обычной подписи — карточку при этом экран не рисует", () => {
+    expect(autoSendLabel("2026-09-04", "2026-09-04", { autoSentAt: "2026-09-04T09:00:00Z", sendCount: 12 })).toBe(
+      "Бот разошлёт команде сегодня",
+    );
+  });
+
+  it("без попытки подпись прежняя", () => {
+    expect(autoSendLabel("2026-09-04", "2026-09-04", { autoSentAt: null, sendCount: 0 })).toBe("Бот разошлёт команде сегодня");
   });
 });

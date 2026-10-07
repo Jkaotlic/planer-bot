@@ -12,7 +12,7 @@ export type {
   AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollView, TeamAudience,
 } from "@planer/shared";
 export type { SickApprovalRow } from "@planer/shared";
-import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
+import type { ShiftCountsReport, AdminShortfall, CoverageAcks } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -78,6 +78,7 @@ import {
   mockRemindUnpaid,
   mockDeleteCollection,
   mockGetAdminShortfall,
+  mockGetCoverageAcks,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -633,6 +634,11 @@ export interface Viewer {
   id: number;
   displayName: string;
   address: string;
+  /** Командная дата сервера (`YYYY-MM-DD`). Необязательна: старый сервер поля не шлёт —
+   *  тогда консоль считает «сегодня» по часам браузера, как раньше. */
+  teamToday?: string;
+  /** Часовой пояс команды (IANA), там же. */
+  teamTz?: string;
 }
 
 export interface ApiClient {
@@ -728,6 +734,8 @@ export interface ApiClient {
   deleteCollection(id: number): Promise<void>;
   /** Нехватка на 7 дней от сегодня — для метки на вкладке, а не для экрана графика. */
   getAdminShortfall(): Promise<AdminShortfall>;
+  /** Даты диапазона (до 31 дня) с отметкой «Знаю про дату» — экран графика считает их закрытыми. */
+  getCoverageAcks(from: string, to: string): Promise<CoverageAcks>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -1276,6 +1284,10 @@ export const realClient: ApiClient = {
     return authorizedGet<AdminShortfall>("/api/admin/shortfall");
   },
 
+  getCoverageAcks(from, to) {
+    return authorizedGet<CoverageAcks>(`/api/admin/coverage-acks?from=${from}&to=${to}`);
+  },
+
   async getTemplateRoles() {
     const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
     return templates;
@@ -1521,6 +1533,7 @@ const createDevClient = (): ApiClient => ({
   remindUnpaid: (id) => mockRemindUnpaid(id),
   deleteCollection: (id) => mockDeleteCollection(id),
   getAdminShortfall: () => mockGetAdminShortfall(),
+  getCoverageAcks: (from, to) => mockGetCoverageAcks(from, to),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),

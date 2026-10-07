@@ -145,9 +145,21 @@ export function autoSendDateFor(
   return lead > today ? lead : today;
 }
 
-/** «Бот разошлёт команде 4 сентября» — одна подпись на обе консоли. */
-export function autoSendLabel(autoSendOn: string | null, today: string): string | null {
+/**
+ * «Бот разошлёт команде 4 сентября» — одна подпись на обе консоли.
+ *
+ * `autoSentAt` ставится при ЛЮБОЙ попытке, и неудачной тоже, а тик такой раунд
+ * больше не берёт. Раунд с отметкой и `sendCount === 0` — это «бот пробовал и не
+ * смог»: обещать ему «разошлёт сегодня» значит врать до самого праздника.
+ * Без `attempt` — свежая подпись только что вооружённого раунда (письма в боте): попытки ещё не было.
+ */
+export function autoSendLabel(
+  autoSendOn: string | null,
+  today: string,
+  attempt: { autoSentAt: string | null; sendCount: number } = { autoSentAt: null, sendCount: 0 },
+): string | null {
   if (!autoSendOn) return null;
+  if (attempt.autoSentAt && attempt.sendCount === 0) return "Бот пробовал и не смог — разошли сам";
   if (autoSendOn <= today) return "Бот разошлёт команде сегодня";
   return `Бот разошлёт команде ${formatDayMonth(autoSendOn)}`;
 }

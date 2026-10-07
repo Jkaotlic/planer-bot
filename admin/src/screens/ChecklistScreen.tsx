@@ -10,7 +10,7 @@ import {
   checklistHasContent,
 } from "@planer/shared";
 import { apiClient, type Checklist, type ChecklistDay, type ChecklistItem, type Template } from "../api/client";
-import { toISODate } from "../lib/week";
+import { useTeamToday } from "../lib/team-today";
 import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /**
@@ -32,7 +32,8 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
   const [openId, setOpenId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const today = toISODate(new Date());
+  // Командная дата, а не часы браузера (см. `useTeamToday`).
+  const today = useTeamToday();
 
   async function reload() {
     try {

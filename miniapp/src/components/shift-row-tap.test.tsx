@@ -58,56 +58,57 @@ describe("строка смены: два разных нажатия", () => {
     const row = el.querySelector('[data-testid="shift-row"]') as HTMLElement;
     expect(row.getAttribute("role")).toBeNull();
     expect(row.getAttribute("tabindex")).toBeNull();
+    expect(el.querySelector(".shift-row__toggle")).toBeNull();
   });
 
-  it("раскрываемая строка сообщает, раскрыта ли она; нераскрываемая — ничего", async () => {
+  it("раскрываемая строка сообщает, раскрыта ли она, на своей кнопке; нераскрываемая — ничего", async () => {
     const closed = await renderRow({ onOpen: vi.fn() });
-    expect(closed.querySelector('[data-testid="shift-row"]')!.getAttribute("aria-expanded")).toBe("false");
+    expect(closed.querySelector(".shift-row__toggle")!.getAttribute("aria-expanded")).toBe("false");
     await act(async () => root!.unmount());
     host!.remove();
     const open = await renderRow({ onOpen: vi.fn(), expanded: true });
-    expect(open.querySelector('[data-testid="shift-row"]')!.getAttribute("aria-expanded")).toBe("true");
+    expect(open.querySelector(".shift-row__toggle")!.getAttribute("aria-expanded")).toBe("true");
     await act(async () => root!.unmount());
     host!.remove();
     const plain = await renderRow({ expanded: true });
     expect(plain.querySelector('[data-testid="shift-row"]')!.hasAttribute("aria-expanded")).toBe(false);
+    expect(plain.querySelector("[aria-expanded]")).toBeNull();
   });
 
-  it("раскрываемая строка доступна с клавиатуры: role=button и Enter", async () => {
+  it("раскрывающий контрол — настоящая <button>, а строка не role=button: вложенной интерактивности нет", async () => {
+    const el = await renderRow({ onSwap: vi.fn(), onOpen: vi.fn() });
+    const row = el.querySelector('[data-testid="shift-row"]') as HTMLElement;
+    expect(row.getAttribute("role")).toBeNull();
+    expect(row.hasAttribute("tabindex")).toBe(false);
+    const toggle = el.querySelector(".shift-row__toggle") as HTMLElement;
+    expect(toggle.tagName).toBe("BUTTON");
+    // Ни кнопка в кнопке, ни кнопка в role=button: «Обменять» — соседка, не потомок.
+    expect(el.querySelector('button button, [role="button"] button, button [role="button"]')).toBeNull();
+    expect(toggle.contains([...el.querySelectorAll("button")].find((b) => b.textContent === "Обменять")!)).toBe(false);
+  });
+
+  it("нажатие на раскрывающую кнопку зовёт onOpen ровно один раз", async () => {
     const onOpen = vi.fn();
     const el = await renderRow({ onOpen });
-    const row = el.querySelector('[data-testid="shift-row"]') as HTMLElement;
-    expect(row.getAttribute("role")).toBe("button");
-    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    await act(async () => (el.querySelector(".shift-row__toggle") as HTMLElement).click());
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it("Enter на «Обменять» не раскрывает строку заодно", async () => {
+  // Enter/пробел на настоящей <button> браузер превращает в `click`, который всплывает к строке:
+  // не дать ему раскрыть строку заодно с обменом — дело `stopPropagation` в `SwapChip`.
+  it("нажатие «Обменять» (в том числе с клавиатуры — это click) не раскрывает строку заодно", async () => {
     const onOpen = vi.fn();
-    const el = await renderRow({ onSwap: vi.fn(), onOpen });
+    const onSwap = vi.fn();
+    const el = await renderRow({ onSwap, onOpen });
     const swap = [...el.querySelectorAll("button")].find((b) => b.textContent === "Обменять")!;
-    await act(async () => swap.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    expect(onOpen).not.toHaveBeenCalled();
-  });
-
-  it("пробел на строке раскрывает её", async () => {
-    const onOpen = vi.fn();
-    const el = await renderRow({ onOpen });
-    const row = el.querySelector('[data-testid="shift-row"]') as HTMLElement;
-    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })));
-    expect(onOpen).toHaveBeenCalledTimes(1);
-  });
-
-  it("пробел на «Обменять» не раскрывает строку заодно", async () => {
-    const onOpen = vi.fn();
-    const el = await renderRow({ onSwap: vi.fn(), onOpen });
-    const swap = [...el.querySelectorAll("button")].find((b) => b.textContent === "Обменять")!;
-    await act(async () => swap.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })));
+    await act(async () => swap.click());
+    expect(onSwap).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("раскрываемая строка несёт класс с видимой рамкой фокуса", async () => {
     const el = await renderRow({ onOpen: vi.fn() });
     expect(el.querySelector('[data-testid="shift-row"]')!.classList.contains("shift-row")).toBe(true);
+    expect(el.querySelector(".shift-row__toggle")).not.toBeNull();
   });
 });

@@ -1383,7 +1383,7 @@ function BirthdayCard({ birthday, today, open, onToggle, onChanged, onSent }: Ca
               />
             }
             subtitle={
-              autoSendLabel(birthday.campaign.autoSendOn, today) ??
+              autoSendLabel(birthday.campaign.autoSendOn, today, birthday.campaign) ??
               "Разошлёшь сам — бот ждёт твоей кнопки"
             }
           >

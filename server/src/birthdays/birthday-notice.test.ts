@@ -16,6 +16,7 @@ import {
   frozenAudienceIds,
 } from "../collections/collection-service";
 import { archiveGroup, createGroup } from "../groups/group-service";
+import { setNoticeMuted } from "../repo/notice-prefs";
 import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
@@ -664,24 +665,17 @@ describe("автоотправка сбора", () => {
   });
 
   /**
-   * Задача 8, ревью раунда 1: без `deadline` и без `eventDate` на раунде,
-   * `isCollectionActive` падает до своей последней ветки — `celebratedOn >=
-   * today` — и `roundsToAutoSend` отсеивает прошедший день рождения раньше,
-   * чем до него доходит `previewCollection`. В ЭТОМ узком случае (нет
-   * дедлайна) для автотика ничего не меняется: он такой раунд не трогает
-   * вовсе. Это НЕ общее правило — `isCollectionActive` проверяет `deadline`
-   * ПЕРВЫМ, и раунд с дедлайном позже праздника остаётся «активным» и после
-   * дня рождения; этот случай — отдельным тестом ниже, и именно там
-   * действительно срабатывает новый блокер через автотик.
+   * Раньше такой раунд выпадал молча: `isCollectionActive` отсекал его раньше, чем
+   * тик успевал сказать хоть слово, — а подарка не будет, и никто не узнает. Теперь
+   * админам уходит «⚠️ не ушёл», на раунде стоит отметка (повторять нечего), команде
+   * не уходит ничего.
    */
-  it("прошедший день рождения без дедлайна и без единой попытки: автотик его не трогает вовсе", async () => {
+  it("прошедший день рождения без дедлайна и без единой попытки: админам «не ушёл», команде ничего", async () => {
     const db = makeTestDb();
     const { bot, sent } = fakeBot();
     const mark = person(db, "Марк", 1, "07-13");
     person(db, "Аня", 2, null);
     person(db, "Игорь", 3, null, true);
-    // Раунд без единой попытки автоотправки: `autoSentAt` не тронут, ссылка
-    // так и не появилась до самого праздника, дедлайна на раунде нет.
     const round = db.insert(collections).values({
       kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13",
       autoSendOn: "2026-07-10",
@@ -689,8 +683,73 @@ describe("автоотправка сбора", () => {
 
     await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
 
+    expect(sent.map((m) => m.to)).toEqual([3]);
+    expect(sent[0]!.text).toContain("⚠️ Сбор на Марк не ушёл");
+    expect(sent[0]!.text).toContain("Праздник прошёл раньше, чем бот успел разослать сбор.");
+    // Праздник был вчера: ни «сегодня», ни просьбы о ссылке.
+    expect(sent[0]!.text).toContain("был 1 день назад");
+    expect(sent[0]!.text).not.toContain("сегодня");
+    expect(sent[0]!.text).not.toContain("Пришли ссылку");
+    expect(getCollection(db, round.id)!.autoSentAt).not.toBeNull();
+    expect(listRecentAudit(db, 20).some((e) => e.type === "collection_auto_send_failed")).toBe(true);
+
+    // Второй тик молчит: отметка стоит.
+    sent.length = 0;
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:05" });
     expect(sent).toEqual([]);
-    expect(getCollection(db, round.id)!.autoSentAt).toBeNull();
+  });
+
+  it("раунд закрыт сроком, а праздник ещё впереди: причина — срок сбора, а не «праздник прошёл»", async () => {
+    // Админ поставил дедлайн в прошлое обычной правкой сбора: праздник через шесть дней, но раунд уже неактивен.
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "07-20");
+    person(db, "Игорь", 3, null, true);
+    db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-20", deadline: "2026-07-12", autoSendOn: "2026-07-10",
+    }).run();
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    // The week-ahead nudge may also fire for the birthday six days out; only the alarm is under test.
+    const alarms = sent.filter((m) => m.text.startsWith("⚠️"));
+    expect(alarms).toHaveLength(1);
+    expect(alarms[0]!.text).toContain("Срок сбора истёк раньше, чем бот успел разослать.");
+    expect(alarms[0]!.text).not.toContain("Праздник прошёл");
+    const logged = listRecentAudit(db, 20).find((e) => e.type === "collection_auto_send_failed");
+    expect(JSON.stringify(logged?.payload)).toContain("Срок сбора истёк");
+  });
+
+  it("давно прошедший раунд (старше двух недель) метится молча — иначе первый тик после выкатки завалил бы админов историей", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "03-01");
+    person(db, "Игорь", 3, null, true);
+    const round = db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-03-01", autoSendOn: "2026-02-26",
+    }).returning().all()[0]!;
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(sent).toEqual([]);
+    expect(getCollection(db, round.id)!.autoSentAt).not.toBeNull();
+  });
+
+  it("прошедший раунд, который уже разослан или закрыт, молчит", async () => {
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "07-13");
+    person(db, "Игорь", 3, null, true);
+    db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13", autoSendOn: "2026-07-10", sendCount: 1,
+    }).run();
+    db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2025, celebratedOn: "2026-07-12", autoSendOn: "2026-07-09", closedAt: new Date(),
+    }).run();
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(sent).toEqual([]);
   });
 
   /**
@@ -718,7 +777,78 @@ describe("автоотправка сбора", () => {
     const warning = sent.find((m) => m.text.startsWith("⚠️"));
     expect(warning?.to).toBe(3);
     expect(warning?.text).toContain("День рождения уже прошёл — рассылать поздно.");
+    // The deadline keeps the round active, so this goes through the main loop: days are signed there too.
+    expect(warning?.text).toContain("был 1 день назад");
+    expect(warning?.text).not.toContain("Пришли ссылку");
     expect(getCollection(db, round.id)!.sendCount).toBe(0);
+  });
+
+  describe("«⚠️ сбор не ушёл» доходит и до того, кто выключил «Дни рождения и сборы»", () => {
+    // Выключатель про поздравления, а не про провал: тишина читается как «всё под контролем»,
+    // а подарка не будет. Обычные письма (нудж, отчёт об успехе) выключаемыми остаются.
+    it("блокер (праздник прошёл, дедлайн держит раунд активным)", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const mark = person(db, "Марк", 1, "07-13");
+      person(db, "Аня", 2, null);
+      const igor = person(db, "Игорь", 3, null, true);
+      setNoticeMuted(db, igor, "celebrations", true);
+      db.insert(collections).values({
+        kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13",
+        deadline: "2026-07-20", collectUrl: "https://example.com/sbor", autoSendOn: "2026-07-10",
+      }).run();
+
+      await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+      expect(sent.filter((m) => m.text.startsWith("⚠️")).map((m) => m.to)).toEqual([3]);
+    });
+
+    it("раунд, не успевший до праздника", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const mark = person(db, "Марк", 1, "07-13");
+      const igor = person(db, "Игорь", 3, null, true);
+      setNoticeMuted(db, igor, "celebrations", true);
+      db.insert(collections).values({
+        kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13", autoSendOn: "2026-07-10",
+      }).run();
+
+      await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+      expect(sent.filter((m) => m.text.startsWith("⚠️")).map((m) => m.to)).toEqual([3]);
+    });
+
+    it("команде не ушло ни одного письма; а отчёт об успехе выключаемый и молчит", async () => {
+      const failing = (rejectTeam: boolean) => {
+        const sent: { to: number; text: string }[] = [];
+        const bot = {
+          api: {
+            sendMessage: vi.fn(async (to: number, text: string) => {
+              if (rejectTeam && text.includes("Сбор на подарок")) throw new Error("Bad Request: message is too long");
+              sent.push({ to, text });
+            }),
+          },
+        } as unknown as Bot;
+        return { bot, sent };
+      };
+      for (const rejectTeam of [true, false]) {
+        const db = makeTestDb();
+        const { bot, sent } = failing(rejectTeam);
+        const mark = person(db, "Марк", 1, "09-07");
+        person(db, "Аня", 2, null);
+        const igor = person(db, "Игорь", 3, null, true);
+        setNoticeMuted(db, igor, "celebrations", true);
+        const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+        updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+        markAdminNotified(db, round.id, new Date());
+
+        await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+        const toIgor = sent.filter((m) => m.to === 3 && !m.text.includes("Сбор на подарок")).map((m) => m.text);
+        if (rejectTeam) expect(toIgor.some((t) => t.startsWith("⚠️") && t.includes("Telegram не принял"))).toBe(true);
+        else expect(toIgor).toEqual([]);
+      }
+    });
   });
 
   it("сеть лежала целиком — никто ничего не узнал, и следующий тик рассылает сбор", async () => {

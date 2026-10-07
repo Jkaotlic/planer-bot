@@ -25,8 +25,9 @@ export function entryTimesError(v: { category: EntryCategory; start?: string | n
  * Category↔date coherence.
  *
  * "Работа в выходной" is by definition a day off that got worked, so it can't land
- * on a weekday. (Weekend = Sat/Sun — there's no holiday calendar, so a public
- * holiday on a weekday isn't recognised as a day off yet.)
+ * on an ordinary working day. What counts as a day off comes from the holiday
+ * calendar the caller passes in (`categoryFitsDate`): Sat/Sun by default, plus the
+ * public holidays and minus the transferred working Saturdays that calendar lists.
  *
  * And only the three absences live as a range: both consoles offer «по какой день»
  * for those alone (`isMultiDay`), and the update path already drops `endDate` from

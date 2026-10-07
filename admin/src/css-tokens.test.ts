@@ -83,6 +83,18 @@ describe("токены оформления консоли", () => {
     expect(lightContrast("fallback-link", "fallback-section-bg")).toBeGreaterThanOrEqual(4.5);
   });
 
+  // Вторичный фон (#e4e3ea) — подложка наведения тихой кнопки и серых плашек: на нём прежние
+  // #1767bd (4.44) и #666b77 (4.19) не дотягивали до порога, хотя на карточке и холсте проходили.
+  it("серый текст и тихая кнопка при наведении читаются на вторичном фоне: не ниже 4.5", () => {
+    expect(lightContrast("fallback-hint", "fallback-secondary-bg")).toBeGreaterThanOrEqual(4.5);
+    expect(lightContrast("fallback-link", "fallback-secondary-bg")).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("серый текст и ссылка читаются на холсте страницы: не ниже 4.5", () => {
+    expect(lightContrast("fallback-hint", "fallback-bg")).toBeGreaterThanOrEqual(4.5);
+    expect(lightContrast("fallback-link", "fallback-bg")).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("белый текст на залитой синей кнопке читается: контраст светлой палитры не ниже 4.5", () => {
     expect(lightContrast("fallback-button-text", "fallback-button")).toBeGreaterThanOrEqual(4.5);
   });

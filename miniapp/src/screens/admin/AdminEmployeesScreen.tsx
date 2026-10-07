@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { filterPeople, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
+import { filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { Avatar, Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
@@ -39,7 +39,8 @@ export function refusalText(message: string): string {
  * inline "add worker" form that hands back a copyable invite link. Mirrors the
  * desktop `EmployeesScreen`, rebuilt as a single mobile column.
  */
-export function AdminEmployeesScreen() {
+/** `teamTz` — пояс команды (`me.teamTz`): по нему считается день метки «заблокировал бота». */
+export function AdminEmployeesScreen({ teamTz }: { teamTz?: string }) {
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -242,6 +243,7 @@ export function AdminEmployeesScreen() {
             <EmployeeRow
               key={e.id}
               employee={e}
+              teamTz={teamTz}
               // Позиция — место в РОСТЕРЕ, а не в том, что осталось после
               // поиска: считать её по видимому индексу значило бы
               // переставлять человека не туда, стоило кому-то что-нибудь
@@ -277,6 +279,7 @@ export function AdminEmployeesScreen() {
             <EmployeeRow
               key={e.id}
               employee={e}
+              teamTz={teamTz}
               actionLabel="Вернуть"
               busy={busyId === e.id}
               onAction={() => withBusy(e.id, () => apiClient.restoreEmployee(e.id))}
@@ -315,8 +318,11 @@ export function EmployeeRow({
   onSetRestrictions,
   onSetObserver,
   restrictionError,
+  teamTz,
 }: {
   employee: Employee;
+  /** Пояс команды: по нему считается день метки «заблокировал бота». */
+  teamTz?: string;
   /** The link this row asked for, shown right here — see the note on `rowInvite`. */
   invite?: { inviteToken: string; inviteLink: string | null } | null;
   /** Why this row's last action was refused, shown right here — see `rowError`. */
@@ -445,7 +451,7 @@ export function EmployeeRow({
               {linked && !employee.remindersEnabled && <StatusPill tone="bad">напоминания выключены</StatusPill>}
               {/* Зеркало консольной метки: «привязан», а не доходит ничего. */}
               {linked && employee.botBlockedAt && (
-                <StatusPill tone="bad">🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt)}</StatusPill>
+                <StatusPill tone="bad">🚫 заблокировал бота с {formatBlockedSince(employee.botBlockedAt, teamTz)}</StatusPill>
               )}
               {employee.isAdmin && <StatusPill tone="need">админ</StatusPill>}
             </div>
@@ -799,8 +805,3 @@ function BirthDateField({
   );
 }
 
-/** «12.09» — день, с которого бот не может достучаться. */
-function formatBlockedSince(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
-}

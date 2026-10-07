@@ -28,10 +28,13 @@ afterEach(async () => {
   root = null;
 });
 
-function Screen({ onBack }: { onBack: () => void }) {
-  useTelegramBack(onBack);
+function Screen({ onBack, enabled }: { onBack: () => void; enabled?: boolean }) {
+  useTelegramBack(onBack, enabled);
   return null;
 }
+
+// Нажатие системной «Назад»: Telegram зовёт ВСЕХ подписанных, как и настоящий SDK.
+const press = () => [...sdk.listeners].forEach((listener) => listener());
 
 describe("useTelegramBack", () => {
   it("показывает системную «Назад», её нажатие зовёт обработчик экрана, уход экрана прячет её", async () => {
@@ -47,5 +50,43 @@ describe("useTelegramBack", () => {
     root = null;
     expect(sdk.hideBackButton).toHaveBeenCalled();
     expect(sdk.listeners).toHaveLength(0);
+  });
+
+  it("вложенная панель перехватывает «Назад»: срабатывает последний зарегистрированный, а не все", async () => {
+    const outer = vi.fn();
+    const inner = vi.fn();
+    root = createRoot(document.createElement("div"));
+    await act(async () => root!.render(createElement("div", null, createElement(Screen, { onBack: outer }), createElement(Screen, { onBack: inner }))));
+
+    press();
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
+
+    // Панель закрыли — «Назад» снова ведёт на экран под ней.
+    await act(async () => root!.render(createElement("div", null, createElement(Screen, { onBack: outer }))));
+    press();
+    expect(outer).toHaveBeenCalledTimes(1);
+    expect(inner).toHaveBeenCalledTimes(1);
+  });
+
+  it("кнопка прячется, только когда ушли все экраны со стеком", async () => {
+    sdk.hideBackButton.mockClear();
+    root = createRoot(document.createElement("div"));
+    await act(async () => root!.render(createElement("div", null, createElement(Screen, { onBack: vi.fn() }), createElement(Screen, { onBack: vi.fn() }))));
+    await act(async () => root!.render(createElement("div", null, createElement(Screen, { onBack: vi.fn() }))));
+    expect(sdk.hideBackButton).not.toHaveBeenCalled();
+    await act(async () => root!.render(createElement("div", null)));
+    expect(sdk.hideBackButton).toHaveBeenCalled();
+    expect(sdk.listeners).toHaveLength(0);
+  });
+
+  it("с enabled=false обработчик не регистрируется", async () => {
+    const outer = vi.fn();
+    const inner = vi.fn();
+    root = createRoot(document.createElement("div"));
+    await act(async () => root!.render(createElement("div", null, createElement(Screen, { onBack: outer }), createElement(Screen, { onBack: inner, enabled: false }))));
+    press();
+    expect(outer).toHaveBeenCalledTimes(1);
+    expect(inner).not.toHaveBeenCalled();
   });
 });

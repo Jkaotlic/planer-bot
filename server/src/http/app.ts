@@ -19,7 +19,7 @@ import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping,
 import { loadCalendar, setManualDay } from "../repo/calendar-days";
 import { refreshHolidays } from "../holidays/holiday-tick";
 import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
-import { holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
+import { acknowledgedCoverageDates, holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -109,6 +109,7 @@ import {
   addDaysIso,
   weekShortfall,
   type AdminShortfall,
+  type CoverageAcks,
   isDayOff,
   isAbsence,
   countsForBalance,
@@ -535,6 +536,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
       /** Parsed, never null: the QR screen opens on it, and the default is a fact, not a gap. */
       qrStyle: parseSavedQrStyle(me.qrStyle),
       canAnnounce: canAnnounce(me),
+      /** The team's calendar date and zone. Clients must not decide «today» from
+       *  the device clock: near midnight the browser and the team disagree, and
+       *  the web console (which has no bootstrap with `myShifts.today`) used to
+       *  open on the wrong day. Additive: old bundles ignore the fields. */
+      teamToday: teamNow(config.teamTz).date,
+      teamTz: config.teamTz,
     });
   });
 
@@ -1730,8 +1737,22 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(leavesSickLeave ? { approvalRequestedAt: null, approvedByEmployeeId: null, approvedDate: null, approvedEndDate: null } : {}),
     });
     if (!entry) return c.json({ error: "not_found" }, 404);
+    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    // A fan-out the sick leave started would otherwise outlive the category: a colleague pressing
+    // «Беру» would take the shift of somebody who is no longer sick. The statuses are written in the
+    // same synchronous stretch as the update above (before the first await), the letters go out after.
+    // Not detached: the row stays, so the foreign key is fine and history keeps pointing at it.
+    // The same goes for an approved sick leave that is moved or shortened: the days it no longer covers lose
+    // their fan-out now, with the admin's text. Left to the tick, `voidHandover` would tell the colleagues
+    // «Аня снял(а) больничный», which the worker did not do.
+    const sickSpanChanged = existing.category === "sick_leave" && entry.category === "sick_leave"
+      && (entry.date !== existing.date || entry.endDate !== existing.endDate);
+    const cancelledNow = leavesSickLeave
+      ? cancelHandoversForEntryDb(db, id, [])
+      : sickSpanChanged
+        ? cancelHandoversForEntryDb(db, id, eachDayIso(entry.date, entry.endDate ?? entry.date))
+        : [];
     if (wasPending) {
-      const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
       if (leavesSickLeave) {
         // The row is no longer pending (cleared above), so only the letters are left to close.
         await finishApprovalMessages(
@@ -1744,6 +1765,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         await reconcilePendingDateEdit(approvalDeps, existing, entry);
       }
     }
+    await notifyCancelledHandovers(approvalDeps, cancelledNow, { byAdmin: true });
     if (changesTheTrade) await finalizeTradeChangingSwaps(id, swapsToExpire, c.get("auth").employeeId);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
@@ -1797,8 +1819,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ? takeRequestOutOfPending(db, existing, "🗑 Больничного уже нет — запись удалил админ")
       : null;
     const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    // Any sick leave, approved or not: an approved one can carry a fan-out too, and leaving it for
+    // the tick makes «Беру» answer «Смены больше нет» with no «отбой» to the colleagues.
     let cancelledNow: CancelledHandover[] = [];
-    if (closing) {
+    if (existing?.category === "sick_leave") {
       cancelledNow = cancelHandoversForEntryDb(db, id, []);
       detachHandoversFromEntry(db, id);
     }
@@ -1809,7 +1833,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!deleted) return c.json({ error: "not_found" }, 404);
     if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, entryAuditPayload(db, existing));
     if (closing) await editClosedRequest(approvalDeps, closing);
-    await notifyCancelledHandovers(approvalDeps, cancelledNow);
+    await notifyCancelledHandovers(approvalDeps, cancelledNow, { byAdmin: true });
     for (const request of expiredSwaps) {
       const payload = linesBefore.get(request.id) ?? swapAuditPayload(request);
       // The admin who deleted the entry is the actor — nobody involved in the swap
@@ -2035,8 +2059,30 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }));
     // `listShiftsOverlapping`, not `listShiftsInRange`: a week-long duty that
     // began before the window still covers its days inside it.
-    const week = weekShortfall(listShiftsOverlapping(db, from, to), templates, eachDayIso(from, to), loadCalendar(db, from, to));
+    // Read live on every call: an admin pressing «Знаю про дату» shows up at the next badge refresh.
+    const days = eachDayIso(from, to);
+    const week = weekShortfall(listShiftsOverlapping(db, from, to), templates, days, loadCalendar(db, from, to), acknowledgedCoverageDates(db, days));
     const body: AdminShortfall = { total: week.total, firstDate: week.days[0]?.date ?? null };
+    return c.json(body);
+  });
+
+  /**
+   * Dates with «Знаю про дату» inside a range, so the schedule screens can treat them as closed
+   * the way the badge does. A separate small route rather than a field on a response old cached
+   * bundles parse: they simply never call it. Capped at 31 days — same reason as the badge's fixed
+   * range, this process also runs the bot's long polling.
+   */
+  app.get("/api/admin/coverage-acks", requireAdmin(db, config.jwtSecret), (c) => {
+    const from = c.req.query("from") ?? "";
+    const to = c.req.query("to") ?? "";
+    if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success || to < from) {
+      return c.json({ error: "from и to должны быть датами ГГГГ-ММ-ДД, to не раньше from" }, 400);
+    }
+    // Compared as strings BEFORE expanding: `eachDayIso` over a ten-thousand-year range is the request this cap exists to refuse.
+    if (to > addDaysIso(from, 30)) return c.json({ error: "Диапазон не длиннее 31 дня" }, 400);
+    const days = eachDayIso(from, to);
+    const acked = acknowledgedCoverageDates(db, days);
+    const body: CoverageAcks = { dates: days.filter((d) => acked.has(d)) };
     return c.json(body);
   });
 
