@@ -41,14 +41,15 @@ describe("personPalette", () => {
   });
 
   // Первые пять цветов остались на своих местах намеренно: у людей с id 1..5
-  // цвет не должен смениться из-за того, что палитру расширили. Оранжевый —
-  // единственное исключение: он не проходил порог контраста и затемнён.
+  // цвет не должен смениться из-за того, что палитру расширили. Исключение —
+  // цвета, не державшие порог контраста: они затемнены в ТОМ ЖЕ оттенке
+  // (синий, оранжевый, зелёный, бирюзовый), поэтому узнаются прежними.
   it("не перекрашивает тех, кто уже был раскрашен", () => {
-    expect(personPalette(1).bg).toBe("#3390EC");
-    expect(personPalette(2).bg).toBe("#CE780A");
-    expect(personPalette(3).bg).toBe("#2AA84F");
+    expect(personPalette(1).bg).toBe("#1475D6");
+    expect(personPalette(2).bg).toBe("#AC6408");
+    expect(personPalette(3).bg).toBe("#228740");
     expect(personPalette(4).bg).toBe("#8A55E0");
-    expect(personPalette(5).bg).toBe("#0F9AA8");
+    expect(personPalette(5).bg).toBe("#0D828E");
   });
 
   it("вакансию без человека красит первым цветом, а не падает", () => {
@@ -62,13 +63,15 @@ describe("personPalette", () => {
   // Белый текст на этих фонах читается только если фон достаточно тёмный.
   // Проверяется формулой контраста, а не глазами: цвет добавят позже и глазами
   // проверять не станут.
-  it("держит контраст белого текста на каждом фоне не ниже 3:1", () => {
+  // 4.5, а не 3: инициалы — обычный текст в 12–14 px, а не крупный; 3:1 было
+  // порогом для крупного, и на 3.31 светлая сетка консоли теряла буквы.
+  it("держит контраст белого текста на каждом фоне не ниже 4.5:1", () => {
     for (const swatch of AVATAR_PALETTE) {
       expect({ bg: swatch.bg, ratio: contrastWithWhite(swatch.bg) }).toEqual({
         bg: swatch.bg,
         ratio: expect.any(Number),
       });
-      expect(contrastWithWhite(swatch.bg)).toBeGreaterThanOrEqual(3);
+      expect(contrastWithWhite(swatch.bg)).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

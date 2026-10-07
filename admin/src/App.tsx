@@ -41,7 +41,8 @@ import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
 interface PanelTarget {
-  employeeId: number;
+  /** `null` — «＋» из строки «Не назначено». */
+  employeeId: number | null;
   date: string;
 }
 
@@ -494,7 +495,7 @@ export function App() {
     }
   }
 
-  function openAddPanel(employeeId: number, date: string) {
+  function openAddPanel(employeeId: number | null, date: string) {
     setPanelTarget({ employeeId, date });
   }
 
@@ -720,7 +721,9 @@ export function App() {
           key={editingEntry ? `edit-${editingEntry.id}` : `new-${panelTarget?.employeeId}-${panelTarget?.date}`}
           employees={activeEmployees}
           templates={templates}
-          initialEmployeeId={panelTarget?.employeeId ?? activeEmployees[0]?.id ?? 0}
+          // Из строки «Не назначено» приходит null — это 0 («никого»), а не
+          // «первый из списка»: `??` тут подставил бы работника вместо пустоты.
+          initialEmployeeId={panelTarget ? (panelTarget.employeeId ?? 0) : (activeEmployees[0]?.id ?? 0)}
           initialDate={panelTarget?.date ?? weekDates[0]!}
           calendar={dayCalendar}
           existing={editingEntry}

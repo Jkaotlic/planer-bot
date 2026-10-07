@@ -98,7 +98,10 @@ export function AddEntryPanel({
   // `@planer/shared`, чтобы мини-апп показывал ровно тот же список.
   const presets = workPresets(templates);
 
-  const [employeeId, setEmployeeId] = useState(existing?.employeeId ?? initialEmployeeId);
+  // 0 — «не назначен» (так кодирует и `PersonPicker`). Правка ничьей записи
+  // открывается с 0, а не с `initialEmployeeId`: тот при правке равен первому
+  // работнику списка, и запись без человека молча «получила» бы его при сохранении.
+  const [employeeId, setEmployeeId] = useState(existing ? (existing.employeeId ?? 0) : initialEmployeeId);
   const [from, setFrom] = useState(existing?.date ?? initialDate);
   const [to, setTo] = useState(existing?.endDate ?? existing?.date ?? initialDate);
   const [choice, setChoice] = useState<Choice>(() => initialChoice(existing, presets));
@@ -162,6 +165,10 @@ export function AddEntryPanel({
 
   /** Общая часть тела для обеих ручек — одна, чтобы они не разъехались. */
   function entryFields(): Omit<NewEntryInput, "date"> & { templateId?: number } {
+    // `null`, а не отсутствие поля: у правки пропущенное поле значит «не менять»,
+    // и снять человека с записи иначе нельзя. Сервер принимает null и при
+    // создании, и при правке (`employeeId: z.number().int().nullish()`).
+    const owner = employeeId || null;
     if (selectedPreset) {
       const times = resolveShiftTimes(selectedPreset, from);
       return {
@@ -172,26 +179,22 @@ export function AddEntryPanel({
         // Подпись всегда идёт за выбранным пресетом: иначе правка записи «День»
         // на пресет «Утро» оставила бы старое имя.
         title: selectedPreset.name,
-        employeeId,
+        employeeId: owner,
       };
     }
-    if (absence) return { category, employeeId };
+    if (absence) return { category, employeeId: owner };
     return {
       category,
       start,
       end,
       // Место дежурства и мероприятия несёт подпись; у смены со своим временем её нет.
       title: category === "duty" || category === "offsite" ? title.trim() || null : null,
-      employeeId,
+      employeeId: owner,
     };
   }
 
   async function handleSave() {
     setError(null);
-    if (!employeeId) {
-      setError("Выберите работника");
-      return;
-    }
     if (!selectedPreset && !absence && (!start || !end)) {
       setError("Укажите время начала и окончания");
       return;
@@ -202,6 +205,14 @@ export function AddEntryPanel({
     }
     if (rangeAllowed && isRange && plan.days.length === 0) {
       setError("В этом диапазоне не остаётся ни одного дня");
+      return;
+    }
+
+    // Расстановка без человека — нет: сервер требует его (`rangeEntrySchema`), а
+    // «какие дни заняты» без человека спросить не у кого. Мини-апп говорит то же
+    // и теми же словами; одиночная запись и отсутствие без человека допустимы.
+    if (rangeAllowed && isRange && !employeeId) {
+      setError("Выберите работника");
       return;
     }
 
@@ -268,7 +279,13 @@ export function AddEntryPanel({
 
         <div className="field-row">
           <div className="field-group" style={{ flex: 1 }}>
-            <PersonPicker label="Работник" people={employees} value={employeeId} onChange={setEmployeeId} />
+            <PersonPicker
+              label="Работник"
+              people={employees}
+              value={employeeId}
+              onChange={setEmployeeId}
+              emptyOptionLabel="— не назначен —"
+            />
           </div>
           <div className="field-group" style={{ flex: showTo ? 0.7 : 1 }}>
             <label className="field-label" htmlFor="entry-from">

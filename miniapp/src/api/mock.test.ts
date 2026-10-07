@@ -156,6 +156,29 @@ describe("team schedule development mock", () => {
   });
 });
 
+describe("мок записи без работника — как сервер", () => {
+  const base = { date: "2099-02-02", start: "09:00", end: "18:00", category: "shift" as const, title: null };
+
+  it("employeeId: null снимает человека с записи, а пропущенное поле его не трогает", async () => {
+    const { entry } = await mockCreateEntry({ ...base, employeeId: 1 });
+    createdEntryIds.push(entry.id);
+
+    // Сервер: `undefined` — «не менять» (updateEntrySchema.partial), `null` — снять.
+    const kept = await mockUpdateEntry(entry.id, { ...base });
+    expect(kept.entry.employeeId).toBe(1);
+
+    const cleared = await mockUpdateEntry(entry.id, { ...base, employeeId: null });
+    expect(cleared.entry.employeeId).toBeNull();
+    expect(cleared.entry.employeeName).toBeUndefined();
+  });
+
+  it("создание с employeeId: null даёт ничью запись", async () => {
+    const { entry } = await mockCreateEntry({ ...base, employeeId: null });
+    createdEntryIds.push(entry.id);
+    expect(entry.employeeId).toBeNull();
+  });
+});
+
 describe("roster CSV development mock", () => {
   /** The month around today — what the export button in the Mini App asks for. */
   function thisMonth() {

@@ -68,6 +68,18 @@ describe("нехватка по норме в шапке колонки дня",
     expect(badges(render({ shifts, coverage: [MORNING] }))).toEqual(["−1"]);
   });
 
+  it("ничья смена видна строкой «Не назначено», но норму дня не закрывает", () => {
+    // Строка без человека теперь в сетке, и глаз легко прочтёт её как «Утро
+    // стоит». Метка «−2» обязана остаться: некому выйти — значит, не хватает.
+    const shifts: Shift[] = [{
+      id: 2, date: WEEK[0]!, endDate: null, start: "08:00", end: "17:00", employeeId: null,
+      category: "shift", templateId: 10, title: "Утро", location: null, unrecognisedCode: null,
+    }];
+    const html = render({ shifts, coverage: [MORNING] });
+    expect(html).toContain("Не назначено");
+    expect(badges(html)).toEqual(["−2"]);
+  });
+
   it("складывает виды в одно число, а расклад отдаёт подсказке", () => {
     const duty = { templateId: 20, name: "Дежурство", coverage: [1, 0, 0, 0, 0, 0, 0] };
     const html = render({ coverage: [MORNING, duty] });

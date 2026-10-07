@@ -800,7 +800,10 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
 
   /** Общая часть тела для обеих ручек — одна, чтобы они не разъехались. */
   function entryFields(): Omit<NewEntryInput, "date"> | null {
-    const base = employeeId ? { employeeId } : {};
+    // `null`, а не пропущенное поле: у правки пропуск для сервера значит «не
+    // менять», и выбор «— не назначен —» оставлял запись у прежнего человека.
+    // Сервер принимает null и при создании, и при правке (`nullish`).
+    const base = { employeeId: employeeId || null };
     if (selectedPreset) {
       const times = resolveShiftTimes(selectedPreset, from);
       return {

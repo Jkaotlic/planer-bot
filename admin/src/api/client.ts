@@ -174,7 +174,8 @@ export interface NewEntryInput {
   end?: string;
   endDate?: string;
   templateId?: number;
-  employeeId?: number;
+  /** `null` — запись без человека («— не назначен —»); у правки так же снимается назначенный. */
+  employeeId?: number | null;
   location?: string;
   /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
   title?: string | null;
