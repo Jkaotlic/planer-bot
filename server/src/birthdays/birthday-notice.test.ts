@@ -685,6 +685,7 @@ describe("автоотправка сбора", () => {
 
     expect(sent.map((m) => m.to)).toEqual([3]);
     expect(sent[0]!.text).toContain("⚠️ Сбор на Марк не ушёл");
+    expect(sent[0]!.text).toContain("Праздник прошёл раньше, чем бот успел разослать сбор.");
     // Праздник был вчера: ни «сегодня», ни просьбы о ссылке.
     expect(sent[0]!.text).toContain("был 1 день назад");
     expect(sent[0]!.text).not.toContain("сегодня");
@@ -696,6 +697,25 @@ describe("автоотправка сбора", () => {
     sent.length = 0;
     await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:05" });
     expect(sent).toEqual([]);
+  });
+
+  it("раунд закрыт сроком, а праздник ещё впереди: причина — срок сбора, а не «праздник прошёл»", async () => {
+    // Админ поставил дедлайн в прошлое обычной правкой сбора: праздник через шесть дней, но раунд уже неактивен.
+    const db = makeTestDb();
+    const { bot, sent } = fakeBot();
+    const mark = person(db, "Марк", 1, "07-20");
+    person(db, "Игорь", 3, null, true);
+    db.insert(collections).values({
+      kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-20", deadline: "2026-07-12", autoSendOn: "2026-07-10",
+    }).run();
+
+    await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("Срок сбора истёк раньше, чем бот успел разослать.");
+    expect(sent[0]!.text).not.toContain("Праздник прошёл");
+    const logged = listRecentAudit(db, 20).find((e) => e.type === "collection_auto_send_failed");
+    expect(JSON.stringify(logged?.payload)).toContain("Срок сбора истёк");
   });
 
   it("давно прошедший раунд (старше двух недель) метится молча — иначе первый тик после выкатки завалил бы админов историей", async () => {

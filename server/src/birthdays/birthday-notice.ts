@@ -131,7 +131,10 @@ export async function runBirthdayNoticeTick(
     const personName = missed.employeeId != null ? (getEmployeeById(db, missed.employeeId)?.displayName ?? null) : null;
     // The failure alarm goes through the mute: «Дни рождения и сборы» is about congratulations, not about a gift that will not happen.
     const admins = adminRecipientsAlways(db, missed.employeeId);
-    const reason = "Праздник прошёл раньше, чем бот успел разослать сбор.";
+    // The cause decides the words: an admin can push the deadline into the past while the birthday is still ahead.
+    const reason = missed.deadline != null && missed.deadline < today
+      ? "Срок сбора истёк раньше, чем бот успел разослать."
+      : "Праздник прошёл раньше, чем бот успел разослать сбор.";
     const text = autoSendFailedMessage(personName ?? "именинника", reason, daysUntil);
     let adminsTold = 0;
     for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
@@ -271,10 +274,10 @@ export async function runBirthdayNoticeTick(
   return sent;
 }
 
-/** Сколько дней от `from` до `to`, обе — YYYY-MM-DD. */
 /** How far back a missed round still deserves a letter; older ones are marked silently. */
 const MISSED_NOTICE_DAYS = 14;
 
+/** Сколько дней от `from` до `to`, обе — YYYY-MM-DD. */
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
