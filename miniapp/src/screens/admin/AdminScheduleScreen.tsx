@@ -1,4 +1,5 @@
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { useTelegramBack } from "../../lib/telegram-back";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, Cell, Input, Spinner } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
@@ -97,13 +98,16 @@ export function showsWeekSwitcher(state: {
  * week grid doesn't fit a phone, so this is rebuilt day-first from the same
  * data + entry rules (`AddEntryPanel`).
  */
-export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nearestShortfall = null }: {
+export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nearestShortfall = null, onFormOpenChange }: {
   initialDate?: string;
   today: string;
   /** Первый день нехватки из сегодня…+6 (тот же ответ, что у метки на вкладке «Админ»). */
   nearestShortfall?: string | null;
   /** Правка графика меняет нехватку, а метка на вкладке «Админ» живёт выше, в App. */
   onScheduleChanged?: () => void;
+  /** Открыта ли панель с вводом (запись, «Заполнить неделю», CSV): раздел выше по
+   *  этому флагу переспрашивает «‹ Разделы», а не стирает набранное. */
+  onFormOpenChange?: (open: boolean) => void;
 }) {
   // Кнопка «📅 Открыть график» у админской тревоги приходит с датой — экран
   // должен открыться на её неделе, а не на текущей. Без неё — командная дата
@@ -154,6 +158,18 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   /** When true, the day view is replaced by the «виды смен» editor. */
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Системная «Назад» из вложенной панели закрывает ПАНЕЛЬ (как её «Назад к
+  // расписанию» / «Отмена»), а не раздел целиком: стек обработчиков отдаёт её
+  // последней зарегистрированной, пока панель открыта.
+  const panelOpen = fillOpen || csvOpen || kindsOpen || settingsOpen || editing !== null;
+  useTelegramBack(closePanel, panelOpen);
+  // Панели с набранным вводом: уйти из раздела, не дописав, значит потерять их.
+  const formOpen = fillOpen || csvOpen || editing !== null;
+  useEffect(() => {
+    onFormOpenChange?.(formOpen);
+    return () => onFormOpenChange?.(false);
+  }, [formOpen]);
+
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i))), [weekStart]);
   const from = weekDates[0]!;
   const to = weekDates[6]!;
@@ -186,6 +202,25 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
     } catch (err) {
       if (gate.current.isLatest(id)) setScheduleError(err instanceof Error ? err.message : "Не удалось загрузить расписание");
     }
+  }
+
+  /** Закрыть открытую панель — то же, что её собственная кнопка «назад». */
+  function closePanel() {
+    if (fillOpen) setFillOpen(false);
+    else if (kindsOpen) setKindsOpen(false);
+    else if (settingsOpen) closeSettings();
+    else if (csvOpen) setCsvOpen(false);
+    else setEditing(null);
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false);
+    // Норму правят там, а считают по ней здесь: без перечитывания
+    // полоска показывала бы нехватку по нормам, какими они были при
+    // открытии экрана. Не сумели — остаются прежние.
+    apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
+    // И метка на вкладке «Админ»: сервер считает её по тем же нормам.
+    onScheduleChanged?.();
   }
 
   /** A CSV import renames and creates people and rewrites entries, so both the
@@ -405,17 +440,7 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
       ) : kindsOpen ? (
         <AdminShiftKinds employees={employees} onClose={() => setKindsOpen(false)} />
       ) : settingsOpen ? (
-        <AdminKindSettings
-          onClose={() => {
-            setSettingsOpen(false);
-            // Норму правят там, а считают по ней здесь: без перечитывания
-            // полоска показывала бы нехватку по нормам, какими они были при
-            // открытии экрана. Не сумели — остаются прежние.
-            apiClient.getTemplateRoles().then(setTemplateRoles, () => {});
-            // И метка на вкладке «Админ»: сервер считает её по тем же нормам.
-            onScheduleChanged?.();
-          }}
-        />
+        <AdminKindSettings onClose={closeSettings} />
       ) : csvOpen ? (
         <AdminRosterCsv
           employees={employees}

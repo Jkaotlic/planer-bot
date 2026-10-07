@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AdminScheduleScreen } from "./admin/AdminScheduleScreen";
 import { AdminWeekendScreen } from "./admin/AdminWeekendScreen";
 import { AdminEmployeesScreen } from "./admin/AdminEmployeesScreen";
@@ -10,7 +10,7 @@ import { AdminGroups } from "./admin/AdminGroups";
 import { AdminChecklists } from "./admin/AdminChecklists";
 import { AdminMenu } from "./admin/AdminMenu";
 import { AdminSickApprovals } from "./admin/AdminSickApprovals";
-import { Screen } from "../ui";
+import { Hint, Screen } from "../ui";
 import { adminSectionTitle, type AdminView } from "./admin-section";
 
 /**
@@ -57,6 +57,20 @@ export function AdminScreen({
     // Пустые зависимости намеренно: дата — одна, на монтирование.
   }, []);
 
+  // Открыта ли в расписании панель с набранным вводом: тогда «‹ Разделы» не уходит
+  // с первого нажатия — оно стёрло бы форму без единого слова (системная «Назад»
+  // закрывает саму панель, см. `useTelegramBack`).
+  const [formOpen, setFormOpen] = useState(false);
+  const [leaveWarned, setLeaveWarned] = useState(false);
+  useEffect(() => { if (!formOpen) setLeaveWarned(false); }, [formOpen]);
+  function leaveSection() {
+    if (formOpen && !leaveWarned) {
+      setLeaveWarned(true);
+      return;
+    }
+    onViewChange("menu");
+  }
+
   if (view === "menu") {
     return (
       <Screen title="Админ">
@@ -66,9 +80,10 @@ export function AdminScreen({
   }
 
   return (
-    <Screen title={adminSectionTitle(view)} onBack={() => onViewChange("menu")} backLabel="Разделы" tabBar>
+    <Screen title={adminSectionTitle(view)} onBack={leaveSection} backLabel="Разделы" tabBar>
+      {leaveWarned && <Hint>Изменения в форме не сохранены. Нажми «Разделы» ещё раз, чтобы выйти без сохранения.</Hint>}
       {view === "sick-approvals" && <AdminSickApprovals onChanged={onSickApprovalsChanged} />}
-      {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} nearestShortfall={nearestShortfall} />}
+      {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} nearestShortfall={nearestShortfall} onFormOpenChange={setFormOpen} />}
       {view === "weekend" && <AdminWeekendScreen today={today} />}
       {view === "employees" && <AdminEmployeesScreen />}
       {view === "checklists" && <AdminChecklists />}
