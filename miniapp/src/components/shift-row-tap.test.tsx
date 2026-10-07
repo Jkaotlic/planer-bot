@@ -94,11 +94,15 @@ describe("строка смены: два разных нажатия", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it("Enter на «Обменять» не раскрывает строку заодно", async () => {
+  // Enter/пробел на настоящей <button> браузер превращает в `click`, который всплывает к строке:
+  // не дать ему раскрыть строку заодно с обменом — дело `stopPropagation` в `SwapChip`.
+  it("нажатие «Обменять» (в том числе с клавиатуры — это click) не раскрывает строку заодно", async () => {
     const onOpen = vi.fn();
-    const el = await renderRow({ onSwap: vi.fn(), onOpen });
+    const onSwap = vi.fn();
+    const el = await renderRow({ onSwap, onOpen });
     const swap = [...el.querySelectorAll("button")].find((b) => b.textContent === "Обменять")!;
-    await act(async () => swap.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    await act(async () => swap.click());
+    expect(onSwap).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
 

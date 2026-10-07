@@ -135,3 +135,29 @@ describe("подпись клетки дня", () => {
     expect(labels.find((l) => l.includes("23"))).not.toMatch(/праздник|рабочая/);
   });
 });
+
+describe("подсказка дня и «Знаю про дату»", () => {
+  it("пока ответ об отметках не пришёл, закрытый день не показывает подсказку нехватки", async () => {
+    let release!: (value: { dates: string[] }) => void;
+    const acks = new Promise<{ dates: string[] }>((resolve) => { release = resolve; });
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([EMPLOYEE]);
+    vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue(ROLES);
+    vi.spyOn(apiClient, "getCoverageAcks").mockReturnValue(acks);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ employees: [], shifts: [], calendar: [] });
+    const el = await mount();
+    // Записей нет, норма есть — день недобран, но отметки ещё неизвестны.
+    expect(el.querySelector('[role="status"]:not(.ui-shortfall)')).toBeNull();
+
+    release({ dates: ["2026-09-23"] });
+    await settle();
+    expect(el.querySelector('[role="status"]:not(.ui-shortfall)')).toBeNull(); // отмечен — молчит и после
+
+    // Контроль: без отметки подсказка после ответа есть, иначе тест ничего не доказывает.
+    await act(async () => root!.unmount());
+    host!.remove();
+    vi.spyOn(apiClient, "getCoverageAcks").mockResolvedValue({ dates: [] });
+    const control = await mount();
+    expect(control.querySelector('[role="status"]:not(.ui-shortfall)')).not.toBeNull();
+  });
+});

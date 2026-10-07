@@ -348,7 +348,9 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   const weekShifts = shifts && shiftsFrom === from ? shifts : null;
   // Только по записям показанной недели; пока их нет — подсказка молчит, а не
   // объявляет нехватку по пустому списку.
-  const dayHint = weekShifts && rolesLoaded ? coverageHint(missingCoverageUnlessAcked(weekShifts, templateRoles, selectedDate, dayCalendar, ackedDates)) : null;
+  // Отметки «Знаю про дату» — той же недели (`acks.from`): пока ответ чужой, закрытый день
+  // на миг показал бы подсказку о нехватке.
+  const dayHint = weekShifts && rolesLoaded && acks?.from === from ? coverageHint(missingCoverageUnlessAcked(weekShifts, templateRoles, selectedDate, dayCalendar, ackedDates)) : null;
 
   // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
   // семь дней красным, и закрытая неделя открывалась бы тревогой.

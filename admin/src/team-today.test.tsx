@@ -8,7 +8,7 @@ import { ChecklistScreen } from "./screens/ChecklistScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { ScheduleGrid } from "./components/ScheduleGrid";
-import { TeamTodayContext, useTeamToday } from "./lib/team-today";
+import { TeamTodayContext, TeamTzContext, useTeamToday } from "./lib/team-today";
 import { toISODate } from "./lib/week";
 
 /**
@@ -142,5 +142,46 @@ describe("App", () => {
     await act(async () => (item as HTMLElement).click());
     await settle();
     expect(host.textContent ?? "").toContain("заблокировал бота с 11.09");
+  });
+});
+
+describe("useTeamToday не замерзает на загрузке", () => {
+  it("вкладка, открытая с вечера, утром видит новую дату команды без перезагрузки", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // 20:00Z 26 авг — 23:00 в Москве; ответ /api/me «заморожен» на 26-м.
+      vi.setSystemTime(new Date("2026-08-26T20:00:00Z"));
+      host = document.createElement("div");
+      document.body.appendChild(host);
+      root = createRoot(host);
+      const tree = createElement(
+        TeamTzContext.Provider,
+        { value: "Europe/Moscow" },
+        createElement(TeamTodayContext.Provider, { value: "2026-08-26" }, createElement(Probe)),
+      );
+      await act(async () => { root!.render(tree); });
+      expect(host.querySelector("[data-probe]")!.textContent).toBe("2026-08-26");
+
+      // Через полночь по Москве (22:30Z = 01:30 27-го) страница не перезагружалась.
+      vi.setSystemTime(new Date("2026-08-26T22:30:00Z"));
+      await act(async () => { root!.render(createElement(TeamTzContext.Provider, { value: "Europe/Moscow" }, createElement(TeamTodayContext.Provider, { value: "2026-08-26" }, createElement(Probe, { key: "again" })))); });
+      expect(host.querySelector("[data-probe]")!.textContent).toBe("2026-08-27");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("без пояса остаётся значение сервера, неизвестный пояс не роняет экран", async () => {
+    const noTz = await mountWith(createElement(Probe), "2026-08-26");
+    expect(noTz.querySelector("[data-probe]")!.textContent).toBe("2026-08-26");
+    await act(async () => root!.unmount());
+    host!.remove();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(TeamTzContext.Provider, { value: "Не/Пояс" }, createElement(TeamTodayContext.Provider, { value: "2026-08-26" }, createElement(Probe))));
+    });
+    expect(host.querySelector("[data-probe]")!.textContent).toBe("2026-08-26");
   });
 });

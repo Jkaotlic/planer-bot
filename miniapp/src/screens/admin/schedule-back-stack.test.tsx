@@ -95,7 +95,7 @@ describe("«Назад» из вложенной панели расписани
 
     await act(async () => button(el, "Разделы").click());
     expect(onViewChange).not.toHaveBeenCalled();
-    expect(el.textContent ?? "").toContain("не сохранены");
+    expect(el.textContent ?? "").toContain("Открыта форма");
 
     await act(async () => button(el, "Разделы").click());
     expect(onViewChange).toHaveBeenCalledWith("menu");

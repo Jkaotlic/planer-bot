@@ -84,7 +84,7 @@ export function AdminScreen({
 
   return (
     <Screen title={adminSectionTitle(view)} onBack={leaveSection} backLabel="Разделы" tabBar>
-      {leaveWarned && <Hint>Изменения в форме не сохранены. Нажми «Разделы» ещё раз, чтобы выйти без сохранения.</Hint>}
+      {leaveWarned && <Hint>Открыта форма — нажми «Разделы» ещё раз, чтобы выйти.</Hint>}
       {view === "sick-approvals" && <AdminSickApprovals onChanged={onSickApprovalsChanged} />}
       {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} nearestShortfall={nearestShortfall} onFormOpenChange={setFormOpen} />}
       {view === "weekend" && <AdminWeekendScreen today={today} />}
