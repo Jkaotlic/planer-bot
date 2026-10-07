@@ -3,6 +3,7 @@ import { compress } from "hono/compress";
 import { z } from "zod";
 import type { Bot } from "grammy";
 import { refreshAdminCommands } from "../bot/bot";
+import type { TelegramLiveness } from "../bot/telegram-liveness";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import { validateInitData, type TelegramUser } from "../auth/telegram";
@@ -189,6 +190,8 @@ export interface AppDeps {
   db: Db;
   config: Config;
   bot?: Bot;
+  /** Когда Telegram отвечал в последний раз — см. `telegram-liveness.ts`. */
+  liveness?: TelegramLiveness;
   /**
    * Откуда брать производственный календарь по кнопке «Обновить сейчас».
    * Подменяется в тестах; в проде это тот же загрузчик, что у суточного тика.
@@ -342,9 +345,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Про бота тоже: 7 сентября процесс жил, HTTP отвечал, а опрос Telegram был
   // мёртв — кнопки не работали ни у кого, и health этого не видел. Без бота
   // (тесты HTTP-слоя) проверять нечего.
-  app.get("/api/health", (c) =>
-    bot && !bot.isRunning() ? c.json({ ok: false, bot: "down" }, 503) : c.json({ ok: true }),
-  );
+  // И опрос, который числится запущенным, ещё не связь: 07.10 бот 18 минут не
+  // достучался до Telegram, а health оставался зелёным. Этот ответ читает
+  // значок меню на маке — единственный канал, который не зависит от Telegram.
+  app.get("/api/health", (c) => {
+    if (bot && !bot.isRunning()) return c.json({ ok: false, bot: "down" }, 503);
+    const link = deps.liveness?.status();
+    if (link && !link.reachable) {
+      return c.json({ ok: false, bot: "unreachable", since: link.since.toISOString() }, 503);
+    }
+    return c.json({ ok: true });
+  });
 
   /**
    * Куда мини-апп жалуется, что не открылся. Без токена — по устройству и

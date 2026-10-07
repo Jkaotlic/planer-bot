@@ -124,6 +124,68 @@ private func serverIsUp() -> Bool {
     return connected
 }
 
+/// What the server says about itself, not just whether its port is open.
+///
+/// 07.10.2026 the port was open and `/api/health` green for 18 minutes while the
+/// bot could not reach Telegram — the team noticed before anyone at the Mac did.
+/// The server now reports that (`bot: "unreachable"`), and this menu is the one
+/// place that can show it: a warning sent through Telegram would not arrive.
+private enum Health: Equatable {
+    case stopped
+    case ok
+    /// Polling loop is not running at all (`bot: "down"`).
+    case botStopped
+    case telegramUnreachable(since: Date?)
+    /// Port open, but the health request itself failed or timed out.
+    case noAnswer
+
+    var serverRunning: Bool { self != .stopped }
+    var needsAttention: Bool {
+        switch self {
+        case .stopped, .ok: return false
+        default: return true
+        }
+    }
+}
+
+private func fetchHealth() -> Health {
+    guard serverIsUp() else { return .stopped }
+    guard let url = URL(string: "http://127.0.0.1:\(Config.port)/api/health") else { return .noAnswer }
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 2
+    var body: Data?
+    let done = DispatchSemaphore(value: 0)
+    URLSession.shared.dataTask(with: request) { data, _, _ in
+        body = data
+        done.signal()
+    }.resume()
+    _ = done.wait(timeout: .now() + 3)
+    guard let data = body,
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .noAnswer }
+    if json["ok"] as? Bool == true { return .ok }
+    switch json["bot"] as? String {
+    case "down": return .botStopped
+    case "unreachable":
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return .telegramUnreachable(since: (json["since"] as? String).flatMap(iso.date(from:)))
+    default: return .noAnswer
+    }
+}
+
+/// A macOS notification without an .app bundle: UNUserNotificationCenter needs
+/// one, `osascript` does not.
+private func notify(_ title: String, _ text: String) {
+    let escape = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
+    _ = run("/usr/bin/osascript", ["-e", "display notification \"\(escape(text))\" with title \"\(escape(title))\" sound name \"Basso\""])
+}
+
+private func clock(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    return formatter.string(from: date)
+}
+
 /// "сегодня в 04:30" for the newest file in the backup folder, or nil if empty.
 private func lastBackupDescription() -> String? {
     let fm = FileManager.default
@@ -158,6 +220,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let restartItem = NSMenuItem(title: "Перезапустить", action: #selector(doRestart), keyEquivalent: "")
 
     private var running = false
+    /// nil until the first check: a menu started during an outage should still
+    /// announce it once.
+    private var lastHealth: Health?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Accessory, not regular: a menu-bar tool has no business in the Dock or
@@ -206,22 +271,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refresh() {
         DispatchQueue.global(qos: .utility).async {
-            let up = serverIsUp()
+            let health = fetchHealth()
             let backup = lastBackupDescription()
-            DispatchQueue.main.async { self.apply(running: up, backup: backup) }
+            DispatchQueue.main.async { self.apply(health: health, backup: backup) }
         }
     }
 
-    private func apply(running up: Bool, backup: String?) {
+    private func apply(health: Health, backup: String?) {
+        let up = health.serverRunning
         if up != running || statusItem.button?.image == nil {
             statusItem.button?.image = makeIcon(running: up)
         }
         running = up
-        statusLine.title = up ? "Сервер работает · :\(Config.port)" : "Сервер остановлен"
+        // A mark beside the icon rather than a recoloured icon: the icon is a
+        // template image and macOS owns its colour.
+        statusItem.button?.title = health.needsAttention ? "⚠︎" : ""
+        statusItem.button?.imagePosition = .imageLeft
+        statusLine.title = describe(health)
+        announceChange(from: lastHealth, to: health)
+        lastHealth = health
         backupLine.title = backup.map { "Последний бэкап: \($0)" } ?? "Бэкапов пока нет"
         startItem.isHidden = up
         stopItem.isHidden = !up
         restartItem.isHidden = !up
+    }
+
+    private func describe(_ health: Health) -> String {
+        switch health {
+        case .stopped: return "Сервер остановлен"
+        case .ok: return "Сервер работает · :\(Config.port)"
+        case .botStopped: return "⚠︎ Бот не опрашивает Telegram"
+        case .telegramUnreachable(let since):
+            return "⚠︎ Нет связи с Telegram" + (since.map { " с \(clock($0))" } ?? "")
+        case .noAnswer: return "⚠︎ Сервер не отвечает на проверку"
+        }
+    }
+
+    /// Only on the edge, not every five seconds: a sound per poll would be muted
+    /// within a minute, and then the one that matters is muted too.
+    private func announceChange(from old: Health?, to new: Health) {
+        let wasBad = old?.needsAttention ?? false
+        if new.needsAttention && !wasBad {
+            notify("planer-bot", describe(new).replacingOccurrences(of: "⚠︎ ", with: "") + " — команда не получает ответов бота")
+        } else if wasBad && new == .ok {
+            notify("planer-bot", "Связь с Telegram вернулась")
+        }
     }
 
     /// Runs a privileged launchctl command, then re-checks status. Any failure is

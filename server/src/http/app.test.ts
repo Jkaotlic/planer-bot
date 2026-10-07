@@ -36,6 +36,23 @@ describe("app auth", () => {
     expect(await res.json()).toEqual({ ok: false, bot: "down" });
   });
 
+  it("health краснеет, когда опрос числится, но Telegram давно не отвечает (07.10, 18 минут молчания)", async () => {
+    const bot = { isRunning: () => true } as never;
+    const since = new Date(Date.UTC(2026, 9, 7, 17, 2));
+    const liveness = { recordOk() {}, recordFailure() {}, status: () => ({ reachable: false as const, since }) };
+    const res = await createApp({ db: makeTestDb(), config, bot, liveness }).request("/api/health");
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, bot: "unreachable", since: "2026-10-07T17:02:00.000Z" });
+  });
+
+  it("health зелёный, когда Telegram отвечает", async () => {
+    const bot = { isRunning: () => true } as never;
+    const liveness = { recordOk() {}, recordFailure() {}, status: () => ({ reachable: true as const }) };
+    const res = await createApp({ db: makeTestDb(), config, bot, liveness }).request("/api/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
   it("health зелёный, пока опрос идёт", async () => {
     const bot = { isRunning: () => true } as never;
     const res = await createApp({ db: makeTestDb(), config, bot }).request("/api/health");
