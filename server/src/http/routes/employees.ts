@@ -400,10 +400,15 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
         if (tg != null && payload) await notifyUser(bot, tg, swapExpiredText(payload, "employee_archived"));
       }
     }
+    // The archived admin keeps `isAdmin`, so without this the `/admin` entry stays in his menu until
+    // the next server restart (`publishBotCommands` skips archived people).
+    if (bot && target.isAdmin && target.telegramUserId != null) {
+      await refreshAdminCommands(bot, target.telegramUserId, false);
+    }
     return c.json({ ok: true, freedShifts, expiredSwaps: pending.length, removedAbsences, unassignedWeekend });
   });
 
-  routes.post("/api/admin/employees/:id/restore", requireAdmin(db, config.jwtSecret), (c) => {
+  routes.post("/api/admin/employees/:id/restore", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     // While he was in the archive somebody took his ФИО. Bringing him back would put
     // two identical rows in the roster export — say so instead, and let the admin
@@ -416,6 +421,10 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     const employee = restoreEmployee(db, id);
     if (!employee) return c.json({ error: "not_found" }, 404);
     recordAudit(db, "employee_restored", c.get("auth").employeeId, { employeeId: id, displayName: employee.displayName });
+    // Mirror of the archive: the admin menu comes back with the person, not at the next restart.
+    if (bot && employee.isAdmin && employee.telegramUserId != null) {
+      await refreshAdminCommands(bot, employee.telegramUserId, true);
+    }
     return c.json({ ok: true });
   });
 
