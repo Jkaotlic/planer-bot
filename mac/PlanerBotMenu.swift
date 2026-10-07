@@ -314,7 +314,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if new.needsAttention && !wasBad {
             notify("planer-bot", describe(new).replacingOccurrences(of: "⚠︎ ", with: "") + " — команда не получает ответов бота")
         } else if wasBad && new == .ok {
-            notify("planer-bot", "Связь с Telegram вернулась")
+            // Говорить о том, что пропадало: «связь вернулась» после зависшего
+            // сервера сбивает с толку, когда в следующий раз ищешь причину.
+            if case .telegramUnreachable = old {
+                notify("planer-bot", "Связь с Telegram вернулась")
+            } else {
+                notify("planer-bot", "Бот снова в порядке")
+            }
         }
     }
 
