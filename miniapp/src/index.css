@@ -283,10 +283,9 @@ textarea {
   width: 100%;
 }
 
-/* Раскрываемая строка смены берёт фокус с клавиатуры (`tabIndex=0`), но
-   у `div[role=button]` браузер рисует его по-разному, а `Card flush` с
-   `overflow: hidden` обрезал бы внешнюю обводку — поэтому она внутри строки. */
-.shift-row:focus-visible {
+/* Раскрывающая кнопка строки смены берёт фокус с клавиатуры, а `Card flush` с
+   `overflow: hidden` обрезал бы внешнюю обводку — поэтому она внутри. */
+.shift-row__toggle:focus-visible {
   outline: 2px solid var(--tgui--link_color);
   outline-offset: -2px;
 }
