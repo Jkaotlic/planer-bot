@@ -6,6 +6,7 @@ import { recordAudit } from "../repo/audit";
 import { getEmployeeById } from "../repo/employees";
 import {
   adminRecipients,
+  adminRecipientsAlways,
   claimCollectionSend,
   collectionAudience,
   getCollection,
@@ -128,7 +129,8 @@ export async function runBirthdayNoticeTick(
     const daysUntil = missed.celebratedOn ? daysBetween(today, missed.celebratedOn) : 0;
     if (daysUntil < -MISSED_NOTICE_DAYS) continue;
     const personName = missed.employeeId != null ? (getEmployeeById(db, missed.employeeId)?.displayName ?? null) : null;
-    const admins = adminRecipients(db, missed.employeeId);
+    // The failure alarm goes through the mute: «Дни рождения и сборы» is about congratulations, not about a gift that will not happen.
+    const admins = adminRecipientsAlways(db, missed.employeeId);
     const reason = "Праздник прошёл раньше, чем бот успел разослать сбор.";
     const text = autoSendFailedMessage(personName ?? "именинника", reason, daysUntil);
     let adminsTold = 0;
@@ -160,15 +162,17 @@ export async function runBirthdayNoticeTick(
 
     const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
     const admins = adminRecipients(db, round.employeeId);
+    // The failure alarms below are not congratulations: they ignore the «celebrations» mute.
+    const alarmAdmins = adminRecipientsAlways(db, round.employeeId);
     const preview = previewCollection(db, round, today);
     const daysUntil = round.celebratedOn ? daysBetween(today, round.celebratedOn) : 0;
 
     if (preview.blocker) {
       const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
       let adminsTold = 0;
-      for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
+      for (const admin of alarmAdmins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
       // Как ниже: «подарка не будет», которое не дошло ни до кого, — не сказанное.
-      if (admins.length > 0 && adminsTold === 0) clearAutoSent(db, round.id);
+      if (alarmAdmins.length > 0 && adminsTold === 0) clearAutoSent(db, round.id);
       recordAudit(db, "collection_auto_send_failed", null, {
         collectionId: round.id, employeeId: round.employeeId, title: preview.title, reason: preview.blocker,
       });
@@ -209,8 +213,9 @@ export async function runBirthdayNoticeTick(
         : autoSendFailedMessage(personName ?? "именинника", "Telegram не принял ни одного письма.", daysUntil);
       // Ноль доставленных — это провал, а не тихий успех: `markCollectionSent`
       // выше его не засчитал, и админ обязан узнать об этом словами.
+      // Провал — сквозь выключатель, отчёт об успехе — по нему.
       let adminsTold = 0;
-      for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, report)) adminsTold += 1;
+      for (const admin of delivered > 0 ? admins : alarmAdmins) if (await notifyUser(bot, admin.telegramUserId!, report)) adminsTold += 1;
       // Не узнал никто — ни команда, ни админы: это обрыв сети, а не отказ, и
       // отметку о попытке надо снять, иначе сбор пропадёт молча (пять обрывов
       // ENOTFOUND за сентябрь 2026). Второго письма это не открывает — первого

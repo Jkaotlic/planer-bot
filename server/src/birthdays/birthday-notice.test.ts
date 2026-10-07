@@ -16,6 +16,7 @@ import {
   frozenAudienceIds,
 } from "../collections/collection-service";
 import { archiveGroup, createGroup } from "../groups/group-service";
+import { setNoticeMuted } from "../repo/notice-prefs";
 import { collections } from "../db/schema";
 import type { Db } from "../db/client";
 
@@ -758,6 +759,74 @@ describe("автоотправка сбора", () => {
     expect(warning?.text).toContain("был 1 день назад");
     expect(warning?.text).not.toContain("Пришли ссылку");
     expect(getCollection(db, round.id)!.sendCount).toBe(0);
+  });
+
+  describe("«⚠️ сбор не ушёл» доходит и до того, кто выключил «Дни рождения и сборы»", () => {
+    // Выключатель про поздравления, а не про провал: тишина читается как «всё под контролем»,
+    // а подарка не будет. Обычные письма (нудж, отчёт об успехе) выключаемыми остаются.
+    it("блокер (праздник прошёл, дедлайн держит раунд активным)", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const mark = person(db, "Марк", 1, "07-13");
+      person(db, "Аня", 2, null);
+      const igor = person(db, "Игорь", 3, null, true);
+      setNoticeMuted(db, igor, "celebrations", true);
+      db.insert(collections).values({
+        kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13",
+        deadline: "2026-07-20", collectUrl: "https://example.com/sbor", autoSendOn: "2026-07-10",
+      }).run();
+
+      await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+      expect(sent.filter((m) => m.text.startsWith("⚠️")).map((m) => m.to)).toEqual([3]);
+    });
+
+    it("раунд, не успевший до праздника", async () => {
+      const db = makeTestDb();
+      const { bot, sent } = fakeBot();
+      const mark = person(db, "Марк", 1, "07-13");
+      const igor = person(db, "Игорь", 3, null, true);
+      setNoticeMuted(db, igor, "celebrations", true);
+      db.insert(collections).values({
+        kind: "birthday", employeeId: mark, year: 2026, celebratedOn: "2026-07-13", autoSendOn: "2026-07-10",
+      }).run();
+
+      await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
+
+      expect(sent.filter((m) => m.text.startsWith("⚠️")).map((m) => m.to)).toEqual([3]);
+    });
+
+    it("команде не ушло ни одного письма; а отчёт об успехе выключаемый и молчит", async () => {
+      const failing = (rejectTeam: boolean) => {
+        const sent: { to: number; text: string }[] = [];
+        const bot = {
+          api: {
+            sendMessage: vi.fn(async (to: number, text: string) => {
+              if (rejectTeam && text.includes("Сбор на подарок")) throw new Error("Bad Request: message is too long");
+              sent.push({ to, text });
+            }),
+          },
+        } as unknown as Bot;
+        return { bot, sent };
+      };
+      for (const rejectTeam of [true, false]) {
+        const db = makeTestDb();
+        const { bot, sent } = failing(rejectTeam);
+        const mark = person(db, "Марк", 1, "09-07");
+        person(db, "Аня", 2, null);
+        const igor = person(db, "Игорь", 3, null, true);
+        setNoticeMuted(db, igor, "celebrations", true);
+        const round = ensureBirthdayRound(db, mark, "2026-09-01")!;
+        updateCollection(db, round.id, { collectUrl: "https://example.com/sbor" });
+        markAdminNotified(db, round.id, new Date());
+
+        await runBirthdayNoticeTick(db, bot, { date: "2026-09-04", time: "10:00" });
+
+        const toIgor = sent.filter((m) => m.to === 3 && !m.text.includes("Сбор на подарок")).map((m) => m.text);
+        if (rejectTeam) expect(toIgor.some((t) => t.startsWith("⚠️") && t.includes("Telegram не принял"))).toBe(true);
+        else expect(toIgor).toEqual([]);
+      }
+    });
   });
 
   it("сеть лежала целиком — никто ничего не узнал, и следующий тик рассылает сбор", async () => {
