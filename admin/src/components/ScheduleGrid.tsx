@@ -1,4 +1,4 @@
-import { SICK_LEAVE_PENDING_OUTLINE, SICK_LEAVE_PENDING_SCHEDULE_PALETTE, coverageHint, filterPeople, missingCoverage, toEntryView, type CoverageTemplate, type SpecialDay } from "@planer/shared";
+import { SICK_LEAVE_PENDING_OUTLINE, SICK_LEAVE_PENDING_SCHEDULE_PALETTE, coverageHint, filterPeople, missingCoverage, missingCoverageUnlessAcked, toEntryView, type CoverageTemplate, type SpecialDay } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -22,6 +22,8 @@ export interface ScheduleGridProps {
    * Праздники и рабочие субботы недели. Обязательный: сетка, забывшая праздник,
    * красит его как рабочий день, а сервер в этот день записи уже не примет.
    */
+  /** Даты с отметкой «Знаю про дату»: закрыты везде, красной шапки и метки у них нет. */
+  ackedDates?: ReadonlySet<string>;
   calendar: DayCalendar;
   /**
    * Подписи праздников и рабочих суббот недели — их считает `App` из строк
@@ -50,6 +52,8 @@ export interface ScheduleGridProps {
  * обрезался многоточием, и именно хвост — второй вид — терялся. Расклад по
  * видам живёт в подсказке и в строке над сеткой (`WeekShortfallBar`).
  */
+const NO_ACKED: ReadonlySet<string> = new Set();
+
 function DayShortfall({ missing }: { missing: ReturnType<typeof missingCoverage> }) {
   const hint = coverageHint(missing);
   if (!hint) return null;
@@ -85,7 +89,7 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, special = [], onAddClick, onEntryClick, query, coverage = [], today = toISODate(new Date()), highlightDate = null }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, special = [], onAddClick, onEntryClick, query, coverage = [], ackedDates = NO_ACKED, today = toISODate(new Date()), highlightDate = null }: ScheduleGridProps) {
   const specialByDate = new Map(special.map((d) => [d.date, d]));
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
@@ -107,7 +111,7 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
                 только «где выходные». */}
             {weekDates.map((date) => {
               // Один раз на колонку: от неё зависит и красная шапка, и метка в ней.
-              const missing = missingCoverage(shifts, coverage, date, calendar);
+              const missing = missingCoverageUnlessAcked(shifts, coverage, date, calendar, ackedDates);
               return (
               <th
                 key={date}

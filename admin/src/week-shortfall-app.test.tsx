@@ -88,6 +88,28 @@ describe("строка нехватки в «Расписании»", () => {
     expect(el.querySelectorAll(".schedule-table thead th.short-col").length).toBe(7);
   });
 
+  describe("«Знаю про дату» закрывает день и в консоли", () => {
+    const week = () => Array.from({ length: 7 }, (_, i) => toISODate(addDays(mondayOf(new Date()), i)));
+
+    it("все дни недели отмечены: «Нормы закрыты», колонки не красные, меток нет", async () => {
+      vi.spyOn(apiClient, "getCoverageAcks").mockResolvedValue({ dates: week() });
+      const el = await mount([HUGE]);
+      expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("closed");
+      expect(el.querySelectorAll(".schedule-table thead th.short-col")).toHaveLength(0);
+      expect(el.querySelectorAll(".day-short-badge")).toHaveLength(0);
+      expect(el.querySelectorAll(".week-shortfall-day")).toHaveLength(0);
+    });
+
+    it("отмечен один день из семи: его колонка не красная, остальные шесть красные", async () => {
+      vi.spyOn(apiClient, "getCoverageAcks").mockResolvedValue({ dates: [week()[2]!] });
+      const el = await mount([HUGE]);
+      expect(el.querySelector(".week-shortfall")?.getAttribute("data-shortfall")).toBe("short");
+      expect(el.querySelectorAll(".schedule-table thead th.short-col")).toHaveLength(6);
+      const headers = [...el.querySelectorAll(".schedule-table thead th")];
+      expect(headers[3]!.classList.contains("short-col")).toBe(false);
+    });
+  });
+
   // Среда текущей недели — праздник, норма стоит именно на среду, воскресная нулевая.
   // Календарь, подмененный на пустой (в плашке или в сетке), снова требовал бы людей по среде.
   describe("праздник и норма на тот же день недели", () => {

@@ -8,7 +8,7 @@ import {
   calendarFrom,
   dayOffLabel,
   isDayOff,
-  missingCoverage,
+  missingCoverageUnlessAcked,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   describeEntryRangeResult,
@@ -242,6 +242,21 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
     };
   }, [from, to]);
 
+  // Отмеченные «Знаю про дату» дни показанной недели: бейдж и совет бота их уже не считают, и
+  // плашка с метками не вправе краснеть по дате, о которой админы сказали «знаем». Ключ — начало
+  // недели, как у `shiftsFrom`: пока ответ другой недели, меток нет, а не чужие. Ошибка чтения —
+  // «отметок нет»: лишняя красная метка лучше, чем экран без нехватки.
+  const [acks, setAcks] = useState<{ from: string; dates: string[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getCoverageAcks(from, to)
+      .then((res) => { if (!cancelled) setAcks({ from, dates: res?.dates ?? [] }); })
+      .catch(() => { if (!cancelled) setAcks({ from, dates: [] }); });
+    return () => { cancelled = true; };
+  }, [from, to]);
+  const ackedDates = useMemo(() => new Set(acks && acks.from === from ? acks.dates : []), [acks, from]);
+
   function goWeek(deltaWeeks: number) {
     const nextStart = addDays(weekStart, deltaWeeks * 7);
     setWeekStart(nextStart);
@@ -290,13 +305,13 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   const weekShifts = shifts && shiftsFrom === from ? shifts : null;
   // Только по записям показанной недели; пока их нет — подсказка молчит, а не
   // объявляет нехватку по пустому списку.
-  const dayHint = weekShifts && rolesLoaded ? coverageHint(missingCoverage(weekShifts, templateRoles, selectedDate, dayCalendar)) : null;
+  const dayHint = weekShifts && rolesLoaded ? coverageHint(missingCoverageUnlessAcked(weekShifts, templateRoles, selectedDate, dayCalendar, ackedDates)) : null;
 
   // Пока неделя грузится, меток нет: пустой список на секунду покрасил бы все
   // семь дней красным, и закрытая неделя открывалась бы тревогой.
   const week = useMemo(
-    () => (weekShifts && rolesLoaded ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar) : null),
-    [weekShifts, rolesLoaded, templateRoles, weekDates, dayCalendar],
+    () => (weekShifts && rolesLoaded && acks?.from === from ? weekShortfall(weekShifts, templateRoles, weekDates, dayCalendar, ackedDates) : null),
+    [weekShifts, rolesLoaded, templateRoles, weekDates, dayCalendar, ackedDates, acks, from],
   );
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
   const status = week ? shortfallStatus(week, templateRoles) : null;

@@ -1,7 +1,7 @@
 import { createEmployeesMock, createFoodMock, createReadMock } from "@planer/client";
 import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX, QR_MAX_TEXT_LENGTH } from "@planer/shared";
 import type { QrSavedStyle, QrStyle } from "@planer/shared";
-import type { AdminShortfall, RecipientGroupView, SickApprovalRow, StartTab, TeamScheduleResponse } from "@planer/shared";
+import type { AdminShortfall, CoverageAcks, RecipientGroupView, SickApprovalRow, StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
 import type {
   AdminSettings,
@@ -1077,6 +1077,11 @@ const TEMPLATE_COVERAGE = new Map<number, number[]>();
 /** DEV: метка молчит — мок-график нехватку показывает плашкой на самом экране. */
 export async function mockGetAdminShortfall(): Promise<AdminShortfall> {
   return { total: 0, firstDate: null };
+}
+
+/** DEV: отметок «Знаю про дату» нет. */
+export async function mockGetCoverageAcks(_from: string, _to: string): Promise<CoverageAcks> {
+  return { dates: [] };
 }
 
 export async function mockGetTemplateRoles(): Promise<TemplateRolesView[]> {

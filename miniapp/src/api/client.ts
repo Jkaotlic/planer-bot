@@ -2,7 +2,7 @@ import { createEmployeesApi, createReadApi, createTransport } from "@planer/clie
 import { readInitData } from "./init-data";
 import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from "@planer/shared";
 export type { SickApprovalRow } from "@planer/shared";
-import type { ShiftCountsReport, AdminShortfall } from "@planer/shared";
+import type { ShiftCountsReport, AdminShortfall, CoverageAcks } from "@planer/shared";
 // Импорт для собственного использования ниже (`PollView`, `ApiClient`) плюс
 // реэкспорт: те же формы, что и у сервера (`GET /api/polls`,
 // `POST /api/polls/:id/vote`), — опрос считает и правами, и сроком закрытия
@@ -110,6 +110,7 @@ import {
   mockDeleteCollection,
   mockGetMyCollections,
   mockGetAdminShortfall,
+  mockGetCoverageAcks,
   mockGetTemplateRoles,
   mockGetTemplateQueue,
   mockSetRotationUnit,
@@ -969,6 +970,8 @@ export interface ApiClient {
   getMyCollections(): Promise<WorkerCollection[]>;
   /** Нехватка на 7 дней от сегодня — для метки на вкладке, а не для экрана графика. */
   getAdminShortfall(): Promise<AdminShortfall>;
+  /** Даты диапазона (до 31 дня) с отметкой «Знаю про дату» — экран графика считает их закрытыми. */
+  getCoverageAcks(from: string, to: string): Promise<CoverageAcks>;
   getTemplateRoles(): Promise<TemplateRolesView[]>;
   getTemplateQueue(templateId: number): Promise<TemplateQueue>;
   setRotationUnit(templateId: number, rotationUnit: "day" | "week"): Promise<void>;
@@ -1701,6 +1704,10 @@ export const realClient: ApiClient = {
     return authorizedGet<AdminShortfall>("/api/admin/shortfall");
   },
 
+  getCoverageAcks(from, to) {
+    return authorizedGet<CoverageAcks>(`/api/admin/coverage-acks?from=${from}&to=${to}`);
+  },
+
   async getTemplateRoles() {
     const { templates } = await authorizedGet<{ templates: TemplateRolesView[] }>("/api/admin/templates/roles");
     return templates;
@@ -1979,6 +1986,7 @@ const createDevClient = (): ApiClient => ({
   deleteCollection: (id) => mockDeleteCollection(id),
   getMyCollections: () => mockGetMyCollections(),
   getAdminShortfall: () => mockGetAdminShortfall(),
+  getCoverageAcks: (from, to) => mockGetCoverageAcks(from, to),
   getTemplateRoles: () => mockGetTemplateRoles(),
   getTemplateQueue: (templateId) => mockGetTemplateQueue(templateId),
   setRotationUnit: (templateId, unit) => mockSetRotationUnit(templateId, unit),

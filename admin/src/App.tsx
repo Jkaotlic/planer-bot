@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SickApprovalRow } from "@planer/shared";
 import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
@@ -148,7 +148,22 @@ export function App() {
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekMonday, i)));
   // Выделение принадлежит неделе, на которой его поставили: на соседней той
   // даты нет, и «нажатый» день в строке указывал бы в никуда.
-  const shortfallReady = shiftsFrom === weekDates[0];
+  // «Знаю про дату» показанной недели: дни закрыты и в плашке, и в шапках колонок, как в бейдже.
+  // Ключ — понедельник: пока ответ чужой недели, плашки нет вовсе (а не красной на секунду).
+  // Ошибка чтения — «отметок нет»: лишний красный день лучше экрана без нехватки.
+  const [acks, setAcks] = useState<{ from: string; dates: string[] } | null>(null);
+  const shortfallReady = shiftsFrom === weekDates[0] && acks?.from === weekDates[0];
+  const ackedDates = useMemo(() => new Set(acks?.from === weekDates[0] ? acks.dates : []), [acks, weekDates[0]]);
+  useEffect(() => {
+    let cancelled = false;
+    const from = weekDates[0]!;
+    apiClient
+      .getCoverageAcks(from, weekDates[6]!)
+      .then((res) => { if (!cancelled) setAcks({ from, dates: res?.dates ?? [] }); })
+      .catch(() => { if (!cancelled) setAcks({ from, dates: [] }); });
+    return () => { cancelled = true; };
+    // weekDates is derived fresh each render; the Monday is the real dependency.
+  }, [weekDates[0]]);
   const pointedInWeek = pointedDate && weekDates.includes(pointedDate) ? pointedDate : null;
   const weekLabel = formatWeekRangeLabel(weekMonday, addDays(weekMonday, 6));
 
@@ -682,6 +697,7 @@ export function App() {
                 templates={templateRoles}
                 weekDates={weekDates}
                 calendar={dayCalendar}
+                ackedDates={ackedDates}
                 pointedDate={pointedInWeek}
                 onPointDay={setPointedDate}
                 onOpenKinds={() => setNav("kinds")}
@@ -703,6 +719,7 @@ export function App() {
                   query={scheduleQuery}
                   coverage={shortfallReady ? templateRoles : []}
                   calendar={dayCalendar}
+                  ackedDates={ackedDates}
                   special={specialDays(weekDates, calendarDays)}
                 />
                 <aside className="right-rail">
