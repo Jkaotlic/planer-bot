@@ -711,9 +711,11 @@ describe("автоотправка сбора", () => {
 
     await runBirthdayNoticeTick(db, bot, { date: "2026-07-14", time: "10:00" });
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toContain("Срок сбора истёк раньше, чем бот успел разослать.");
-    expect(sent[0]!.text).not.toContain("Праздник прошёл");
+    // The week-ahead nudge may also fire for the birthday six days out; only the alarm is under test.
+    const alarms = sent.filter((m) => m.text.startsWith("⚠️"));
+    expect(alarms).toHaveLength(1);
+    expect(alarms[0]!.text).toContain("Срок сбора истёк раньше, чем бот успел разослать.");
+    expect(alarms[0]!.text).not.toContain("Праздник прошёл");
     const logged = listRecentAudit(db, 20).find((e) => e.type === "collection_auto_send_failed");
     expect(JSON.stringify(logged?.payload)).toContain("Срок сбора истёк");
   });
