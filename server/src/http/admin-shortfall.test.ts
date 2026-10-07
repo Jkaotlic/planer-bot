@@ -6,6 +6,7 @@ import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates, setCoverage } from "../repo/templates";
 import { setManualDay } from "../repo/calendar-days";
+import { ackCoverageDate } from "../repo/settings";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
@@ -109,6 +110,29 @@ describe("GET /api/admin/shortfall", () => {
     expect(await shortfall(app, admin)).toEqual({ total: 2, firstDate: "2026-08-27" });
     setManualDay(db, "2026-08-27", "holiday", null, new Date());
     expect(await shortfall(app, admin)).toEqual({ total: 0, firstDate: null });
+  });
+
+  it("an acknowledged day («Знаю про дату») is not a shortfall: total and firstDate skip it, and a fresh ack shows on the next read", async () => {
+    const { app, admin, db } = await setup();
+    fillWindow(db, FROM, TO, { skip: "2026-08-27" });
+    expect(await shortfall(app, admin)).toEqual({ total: 2, firstDate: "2026-08-27" });
+    ackCoverageDate(db, "2026-08-27");
+    expect(await shortfall(app, admin)).toEqual({ total: 0, firstDate: null });
+  });
+
+  it("GET /api/admin/coverage-acks lists acknowledged dates of the range, admin only, capped at 31 days", async () => {
+    const { app, admin, db, workerToken } = await setup();
+    ackCoverageDate(db, "2026-08-27");
+    ackCoverageDate(db, "2026-09-20");
+    const read = async (qs: string, token = admin) => app.request(`/api/admin/coverage-acks?${qs}`, bearer(token));
+    const ok = await read("from=2026-08-24&to=2026-08-30");
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ dates: ["2026-08-27"] });
+    expect(await (await read("from=2026-08-24&to=2026-09-23")).json()).toEqual({ dates: ["2026-08-27", "2026-09-20"] });
+    expect((await read("from=2026-08-24&to=2026-09-24")).status).toBe(400);
+    expect((await read("from=2026-08-30&to=2026-08-24")).status).toBe(400);
+    expect((await read("from=nope&to=2026-08-24")).status).toBe(400);
+    expect((await read("from=2026-08-24&to=2026-08-30", workerToken)).status).toBe(403);
   });
 
   it("starts the window from the team date, not the UTC date, near midnight", async () => {

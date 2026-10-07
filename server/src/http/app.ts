@@ -19,7 +19,7 @@ import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping,
 import { loadCalendar, setManualDay } from "../repo/calendar-days";
 import { refreshHolidays } from "../holidays/holiday-tick";
 import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
-import { holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
+import { acknowledgedCoverageDates, holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
 import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
@@ -109,6 +109,7 @@ import {
   addDaysIso,
   weekShortfall,
   type AdminShortfall,
+  type CoverageAcks,
   isDayOff,
   isAbsence,
   countsForBalance,
@@ -2043,8 +2044,30 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }));
     // `listShiftsOverlapping`, not `listShiftsInRange`: a week-long duty that
     // began before the window still covers its days inside it.
-    const week = weekShortfall(listShiftsOverlapping(db, from, to), templates, eachDayIso(from, to), loadCalendar(db, from, to));
+    // Read live on every call: an admin pressing «Знаю про дату» shows up at the next badge refresh.
+    const days = eachDayIso(from, to);
+    const week = weekShortfall(listShiftsOverlapping(db, from, to), templates, days, loadCalendar(db, from, to), acknowledgedCoverageDates(db, days));
     const body: AdminShortfall = { total: week.total, firstDate: week.days[0]?.date ?? null };
+    return c.json(body);
+  });
+
+  /**
+   * Dates with «Знаю про дату» inside a range, so the schedule screens can treat them as closed
+   * the way the badge does. A separate small route rather than a field on a response old cached
+   * bundles parse: they simply never call it. Capped at 31 days — same reason as the badge's fixed
+   * range, this process also runs the bot's long polling.
+   */
+  app.get("/api/admin/coverage-acks", requireAdmin(db, config.jwtSecret), (c) => {
+    const from = c.req.query("from") ?? "";
+    const to = c.req.query("to") ?? "";
+    if (!dateStr.safeParse(from).success || !dateStr.safeParse(to).success || to < from) {
+      return c.json({ error: "from и to должны быть датами ГГГГ-ММ-ДД, to не раньше from" }, 400);
+    }
+    // Compared as strings BEFORE expanding: `eachDayIso` over a ten-thousand-year range is the request this cap exists to refuse.
+    if (to > addDaysIso(from, 30)) return c.json({ error: "Диапазон не длиннее 31 дня" }, 400);
+    const days = eachDayIso(from, to);
+    const acked = acknowledgedCoverageDates(db, days);
+    const body: CoverageAcks = { dates: days.filter((d) => acked.has(d)) };
     return c.json(body);
   });
 

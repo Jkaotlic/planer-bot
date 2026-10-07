@@ -6,6 +6,7 @@ import {
   coverageSummary,
   dayShortfallText,
   missingCoverage,
+  missingCoverageUnlessAcked,
   NORM_CALENDAR_HINT,
   nearestShortfallLabel,
   normWeekday,
@@ -263,6 +264,26 @@ describe("weekShortfall — нехватка недели одним ответ�
   it("итог недели — люди, а не дни", () => {
     // Понедельник: Утро −2 и Дежурство −1, среда: Утро −1. Дней два, людей четыре.
     expect(weekShortfall([], [morning, duty], WEEK, EMPTY_CALENDAR).total).toBe(4);
+  });
+
+  it("день с отметкой «Знаю про дату» не считается нехваткой: ни в днях, ни в итоге", () => {
+    // Знает один админ — знает команда; отмеченный день закрыт везде, а не только в совете бота.
+    const acked = new Set([WEEK[0]!]);
+    const result = weekShortfall([], [morning, duty], WEEK, EMPTY_CALENDAR, acked);
+    expect(result.days.map((day) => day.date)).toEqual([WEEK[2]]);
+    expect(result.total).toBe(1);
+    // Неделя, у которой отмечены все дыры, читается как закрытая, а не как «норм нет».
+    const all = weekShortfall([], [morning, duty], WEEK, EMPTY_CALENDAR, new Set([WEEK[0]!, WEEK[2]!]));
+    expect(all.days).toEqual([]);
+    expect(shortfallStatus(all, [morning, duty]).state).toBe("closed");
+  });
+
+  it("missingCoverageUnlessAcked: у отмеченного дня пусто, у остальных как у missingCoverage", () => {
+    const acked = new Set([WEEK[0]!]);
+    expect(missingCoverageUnlessAcked([], [morning], WEEK[0]!, EMPTY_CALENDAR, acked)).toEqual([]);
+    expect(missingCoverageUnlessAcked([], [morning], WEEK[2]!, EMPTY_CALENDAR, acked)).toEqual(
+      missingCoverage([], [morning], WEEK[2]!, EMPTY_CALENDAR),
+    );
   });
 
   it("называет смены и дежурства, которым норму не задали", () => {

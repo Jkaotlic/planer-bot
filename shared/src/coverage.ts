@@ -305,6 +305,19 @@ export interface WeekShortfall {
   withoutNorm: { templateId: number; name: string }[];
 }
 
+const NO_ACKED_DATES: ReadonlySet<string> = new Set();
+
+/** `missingCoverage`, который молчит о дате с отметкой «Знаю про дату» — для меток дня и подсказок. */
+export function missingCoverageUnlessAcked(
+  entries: readonly CoverageEntry[],
+  templates: readonly CoverageTemplate[],
+  date: string,
+  calendar: DayCalendar,
+  ackedDates: ReadonlySet<string>,
+): MissingKind[] {
+  return ackedDates.has(date) ? [] : missingCoverage(entries, templates, date, calendar);
+}
+
 /**
  * Нехватка недели одним ответом — для метки дня, строки над сеткой и точек на
  * полоске дней в мини-аппе.
@@ -321,9 +334,13 @@ export function weekShortfall(
   templates: readonly NormTemplate[],
   dates: readonly string[],
   calendar: DayCalendar,
+  ackedDates: ReadonlySet<string> = NO_ACKED_DATES,
 ): WeekShortfall {
   const days: ShortDay[] = [];
   for (const date of dates) {
+    // «Знаю про дату» закрывает день везде: бот уже его не советует, и бейдж с плашкой
+    // не вправе краснеть по дате, о которой админы сказали «знаем».
+    if (ackedDates.has(date)) continue;
     const missing = missingCoverage(entries, templates, date, calendar);
     if (missing.length === 0) continue;
     days.push({ date, missing, short: missing.reduce((sum, kind) => sum + kind.need - kind.have, 0) });
@@ -345,6 +362,11 @@ export interface ShortfallStatus {
   state: ShortfallState;
   /** Сколько видов смен и дежурств без нормы — хвост «без нормы: N» в плашке. */
   unsetCount: number;
+}
+
+/** Ответ `GET /api/admin/coverage-acks` — даты диапазона с отметкой «Знаю про дату», по возрастанию. */
+export interface CoverageAcks {
+  dates: string[];
 }
 
 /** Ответ `GET /api/admin/shortfall` — нехватка на 7 дней от командной даты. */
