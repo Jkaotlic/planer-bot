@@ -12,7 +12,8 @@ export interface ScheduleGridProps {
   templates: readonly Template[];
   /** The 7 ISO dates of the currently displayed week, Monday first. */
   weekDates: readonly string[];
-  onAddClick: (employeeId: number, date: string) => void;
+  /** `null` — «＋» в строке «Не назначено»: панель открывается без выбранного человека. */
+  onAddClick: (employeeId: number | null, date: string) => void;
   /** Clicking an existing entry opens it for editing. */
   onEntryClick: (entry: Shift) => void;
   /** From `PersonSearch` in `App.tsx` — filters which rows render. Absent/empty shows everyone. */
@@ -58,12 +59,19 @@ function DayShortfall({ missing }: { missing: ReturnType<typeof missingCoverage>
   );
 }
 
+/** Название строки без человека. «Не назначено» (строка), в отличие от «— не назначен —» (выбор в списке). */
+const UNASSIGNED_LABEL = "Не назначено";
+
 function endOf(s: Shift): string {
   return s.endDate ?? s.date;
 }
 
-/** Entries for a given employee that cover a given day (multi-day spans count on every covered day). */
-function entriesFor(shifts: Shift[], employeeId: number, date: string): Shift[] {
+/**
+ * Entries for a given employee that cover a given day (multi-day spans count on every covered day).
+ * `null` — записи без человека: тот же отбор, поэтому чипы и полосы в строке
+ * «Не назначено» ведут себя в точности как у людей.
+ */
+function entriesFor(shifts: Shift[], employeeId: number | null, date: string): Shift[] {
   return shifts.filter((s) => s.employeeId === employeeId && s.date <= date && endOf(s) >= date);
 }
 
@@ -82,6 +90,12 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.
   const visibleEmployees = filterPeople(employees, query ?? "");
+  // Строка «Не назначено» — только когда в показанной неделе есть что в ней
+  // показать: пустая строка в тихой неделе была бы шумом на каждом экране.
+  // Поиск её не прячет, пока запрос пуст, а с запросом оставляет, лишь если он
+  // подходит к её названию — как подошёл бы к имени человека.
+  const hasUnassigned = weekDates.some((date) => entriesFor(shifts, null, date).length > 0);
+  const showUnassigned = hasUnassigned && filterPeople([{ displayName: UNASSIGNED_LABEL }], query ?? "").length > 0;
   return (
     <div className="grid-scroll">
       <table className="schedule-table">
@@ -128,11 +142,39 @@ export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar
               совпали с запросом. Пустой ПОЛНЫЙ `employees` (ростер без единого
               работника) по-прежнему не рисует ничего — это другая причина, и
               подменять её этой строкой не стоит. */}
-          {visibleEmployees.length === 0 && employees.length > 0 && (
+          {visibleEmployees.length === 0 && !showUnassigned && employees.length > 0 && (
             <tr>
               <td className="employees-empty" colSpan={weekDates.length + 1}>
                 Никого с таким именем нет.
               </td>
+            </tr>
+          )}
+          {/* ПЕРВОЙ, над людьми, а не в конце: открытая смена — то, что надо
+              закрыть, и при двадцати работниках строка внизу уезжала бы за
+              первый экран ровно там, где её ищут. В тихой неделе её нет вовсе,
+              так что верх таблицы у остальных не сдвигается. */}
+          {showUnassigned && (
+            <tr className="unassigned-row">
+              <td className="employee-cell">
+                <div className="employee-row">
+                  {/* «?» — тот же знак, что на аватаре ничьей смены в мини-аппе. */}
+                  <span className="avatar" aria-hidden="true">?</span>
+                  <span className="employee-name" title={UNASSIGNED_LABEL}>{UNASSIGNED_LABEL}</span>
+                </div>
+              </td>
+              {weekDates.map((date) => (
+                <DayCell
+                  key={date}
+                  date={date}
+                  entries={entriesFor(shifts, null, date)}
+                  weekend={isDayOff(date, calendar)}
+                  today={date === today}
+                  pointed={date === highlightDate}
+                  onAdd={() => onAddClick(null, date)}
+                  onEntryClick={onEntryClick}
+                  templates={templates}
+                />
+              ))}
             </tr>
           )}
           {visibleEmployees.map((employee) => (

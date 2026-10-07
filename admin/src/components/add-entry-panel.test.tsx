@@ -353,3 +353,99 @@ describe("AddEntryPanel — больничный, ждущий ОК", () => {
     expect(buttonByText(el, "✅ ОК").disabled).toBe(false);
   });
 });
+
+/**
+ * «— не назначен —»: открытая смена без человека. Мини-апп умеет ставить такую
+ * с самого начала; консоль требовала работника, и открытые смены (в том числе
+ * будущие смены архивного работника, которые архивация превращает в ничьи) с
+ * компьютера были не создать и не увидеть.
+ *
+ * Границы — ровно мини-аппа и сервера: одиночная запись и полоса отсутствия
+ * без человека допустимы (`createEntrySchema`/`updateEntrySchema` принимают
+ * `employeeId: null`), расстановка диапазоном — нет (`rangeEntrySchema`: человек
+ * обязателен, а «занят ли день» без человека спросить не у кого).
+ */
+describe("AddEntryPanel — «— не назначен —»", () => {
+  const unassigned: Shift = {
+    id: 20, date: "2026-06-09", start: "08:00", end: "17:00", endDate: null,
+    category: "shift", title: "Утро", location: null, unrecognisedCode: null,
+    templateId: 1, employeeId: null,
+  };
+  const save = (el: HTMLElement) =>
+    act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+  const pickRow = (el: HTMLElement, text: string) =>
+    act(async () => [...el.querySelectorAll<HTMLButtonElement>(".person-picker-row")].find((b) => b.textContent === text)!.click());
+
+  it("список работников предлагает строку «— не назначен —»", async () => {
+    const el = await mount();
+    const rows = [...el.querySelectorAll(".person-picker-row")].map((n) => n.textContent);
+    expect(rows).toContain("— не назначен —");
+  });
+
+  it("выбранная строка отправляется как employeeId: null", async () => {
+    let saved: NewEntryInput | null = null;
+    const el = await mount({ onSave: async (input) => { saved = input; } });
+    await pickRow(el, "— не назначен —");
+    await save(el);
+    expect(saved).not.toBeNull();
+    expect(saved!.employeeId).toBeNull();
+  });
+
+  it("«+» из строки «Не назначено» открывает панель без выбранного человека", async () => {
+    const el = await mount({ initialEmployeeId: 0 });
+    expect(el.querySelector(".person-picker-chosen")!.textContent).toContain("— не назначен —");
+  });
+
+  it("правка ничьей записи показывает «— не назначен —», а не первого работника", async () => {
+    // initialEmployeeId: 1 — как в App, где при правке он равен первому из
+    // списка: запись без человека не должна «получить» его молча.
+    const el = await mount({ existing: unassigned, initialEmployeeId: 1 });
+    expect(el.querySelector(".person-picker-chosen")!.textContent).toContain("— не назначен —");
+    const selected = [...el.querySelectorAll(".person-picker-row.selected")].map((n) => n.textContent);
+    expect(selected).toEqual(["— не назначен —"]);
+  });
+
+  it("ничью запись можно назначить человеку", async () => {
+    let saved: NewEntryInput | null = null;
+    const el = await mount({ existing: unassigned, initialEmployeeId: 1, onSave: async (input) => { saved = input; } });
+    await pickRow(el, "Иванов Иван");
+    await save(el);
+    expect(saved!.employeeId).toBe(1);
+  });
+
+  it("правка назначенной записи в «— не назначен —» снимает человека (null), а не молчит", async () => {
+    let saved: NewEntryInput | null = null;
+    const assigned: Shift = { ...unassigned, employeeId: 1 };
+    const el = await mount({ existing: assigned, onSave: async (input) => { saved = input; } });
+    await pickRow(el, "— не назначен —");
+    await save(el);
+    expect(saved!.employeeId).toBeNull();
+  });
+
+  it("отсутствие без человека допустимо, как и в мини-аппе: одиночная запись", async () => {
+    let saved: NewEntryInput | null = null;
+    const el = await mount({ onSave: async (input) => { saved = input; } });
+    await pickRow(el, "— не назначен —");
+    await act(async () => optionByText(el, "Отпуск").click());
+    await save(el);
+    expect(saved).toMatchObject({ category: "vacation", employeeId: null });
+  });
+
+  it("диапазон без человека не уходит: «Выберите работника», запроса нет", async () => {
+    let ranged = 0;
+    const el = await mount({ onSaveRange: async () => { ranged += 1; } });
+    await pickRow(el, "— не назначен —");
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+    await save(el);
+    expect(ranged).toBe(0);
+    expect(el.querySelector(".error-text")!.textContent).toBe("Выберите работника");
+  });
+
+  it("диапазон с человеком по-прежнему уходит", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    const el = await mount({ onSaveRange: async (input) => { saved = input; } });
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+    await save(el);
+    expect(saved).toMatchObject({ employeeId: 1 });
+  });
+});
