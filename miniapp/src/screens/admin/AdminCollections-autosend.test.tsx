@@ -77,6 +77,14 @@ describe("автоотправка на карточке дня рождения
     expect(el.textContent).not.toContain("Бот разошлёт");
   });
 
+  it("после неудачной автоотправки карточка не обещает рассылку, а просит разослать самому", async () => {
+    // `autoSentAt` стоит, `sendCount` 0: бот пробовал и не смог.
+    const el = await mount({ ...BIRTHDAY, campaign: { ...ROUND, autoSentAt: "2099-09-04T10:00:00Z" } });
+
+    expect(el.textContent).toContain("Бот пробовал и не смог — разошли сам");
+    expect(el.textContent).not.toContain("Бот разошлёт");
+  });
+
   it("тумблер выключает автоотправку — на сервер уходит null", async () => {
     const update = vi.spyOn(apiClient, "saveBirthdayRound").mockResolvedValue({} as never);
     const el = await mount(BIRTHDAY);

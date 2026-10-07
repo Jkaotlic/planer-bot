@@ -1217,7 +1217,7 @@ function BirthdayRow({ birthday, today, open, onToggle, onChanged, onSent }: Row
             aria-label="Бот рассылает сам"
             onChange={() => void toggleAutoSend(birthday)}
           />
-          {autoSendLabel(birthday.campaign.autoSendOn, today) ?? "Разошлёшь сам — бот ждёт твоей кнопки"}
+          {autoSendLabel(birthday.campaign.autoSendOn, today, birthday.campaign) ?? "Разошлёшь сам — бот ждёт твоей кнопки"}
         </label>
       )}
 
