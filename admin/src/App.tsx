@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SickApprovalRow } from "@planer/shared";
 import { calendarFrom, describeEntryRangeResult, pluralRecords, readCsvFile, rosterImportSummaryLine, specialDays, type CsvEncoding } from "@planer/shared";
 import {
@@ -31,15 +31,20 @@ import { JournalScreen } from "./screens/JournalScreen";
 import { CollectionsScreen } from "./screens/CollectionsScreen";
 import { AnnounceScreen } from "./screens/AnnounceScreen";
 import { OrdersPollsScreen } from "./screens/food/OrdersPollsScreen";
-import { QrScreen } from "./screens/QrScreen";
 import { BugsScreen } from "./screens/BugsScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
+import { CrashBoundary } from "./components/CrashBoundary";
 import { AuthRequiredProvider } from "./auth-required";
 import { TeamTodayContext, TeamTzContext } from "./lib/team-today";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
+
+// Отдельным куском: `qrcode` весил +32,5 КБ в стартовом бандле консоли ради экрана, который
+// открывают раз в неделю. Не загрузившийся кусок (после выкатки старого файла уже нет) ловит
+// `CrashBoundary` на месте экрана — с просьбой обновить страницу, а не белым экраном.
+const QrScreen = lazy(() => import("./screens/QrScreen").then((m) => ({ default: m.QrScreen })));
 
 interface PanelTarget {
   /** `null` — «＋» из строки «Не назначено». */
@@ -659,7 +664,11 @@ export function App() {
             }}
           />
         ) : nav === "qr" ? (
-          <QrScreen />
+          <CrashBoundary>
+            <Suspense fallback={<div className="centered-fill in-section">Загрузка…</div>}>
+              <QrScreen />
+            </Suspense>
+          </CrashBoundary>
         ) : nav === "bugs" ? (
           <BugsScreen />
         ) : nav === "log" ? (

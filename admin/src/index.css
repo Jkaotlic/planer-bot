@@ -2028,6 +2028,29 @@ textarea {
   margin-top: 6px;
 }
 
+.crash-notice {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  line-height: 1.45;
+  font-size: var(--text-body);
+}
+.crash-notice h2 {
+  margin: 0 0 12px;
+  font-size: var(--text-head);
+}
+.crash-notice p {
+  margin: 0 0 12px;
+}
+.crash-notice .btn {
+  margin: 4px 0 12px;
+}
+.crash-notice .crash-notice-detail {
+  font-size: var(--text-meta);
+  color: var(--hint);
+  overflow-wrap: anywhere;
+}
+
 .centered-fill {
   min-height: 100vh;
   display: flex;
