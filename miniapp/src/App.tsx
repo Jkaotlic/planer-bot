@@ -59,7 +59,9 @@ interface AppData {
   myCalendar: NonNullable<MyShifts["calendar"]>;
   /** Сегодня в часовом поясе команды — пришло вместе с «моими сменами». */
   today: string;
-  teamShifts: Shift[];
+  // Командного расписания в состоянии нет: вкладка «Команда» грузит свою неделю сама,
+  // а копия из bootstrap никем не читалась. Сам `teamSchedule` из ответа не убран —
+  // старые кэшированные бандлы и сторож контракта ждут его.
   /** Presets — the entry rows colour themselves by the one each entry came from. */
   templates: Template[];
   swaps: SwapRequest[];
@@ -268,9 +270,9 @@ export function App() {
     // HTTP/1.1 — под каждый параллельный запрос браузер поднимает своё.
     apiClient
       .getBootstrap(from, to)
-      .then(({ me, myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers }) => {
+      .then(({ me, myShifts, templates, swaps, weekendSlots, weekendOffers }) => {
         if (cancelled) return;
-        setData({ me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, teamShifts: teamSchedule.shifts, templates, swaps, weekendSlots, weekendOffers });
+        setData({ me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, templates, swaps, weekendSlots, weekendOffers });
 
         // Не в bootstrap: сборы для работника — уже отдельная ручка (вкладка
         // «Команда»), и тащить её в общий контракт ради одной метки значило бы
@@ -472,14 +474,13 @@ export function App() {
       const ticket = reloadGate.current.begin();
       const bootstrap = await apiClient.getBootstrap(from, to);
       me = bootstrap.me;
-      const { myShifts, teamSchedule, templates, swaps, weekendSlots, weekendOffers } = bootstrap;
+      const { myShifts, templates, swaps, weekendSlots, weekendOffers } = bootstrap;
       if (!reloadGate.current.isLatest(ticket)) return;
-      const teamShifts = teamSchedule.shifts;
       setData((prev) =>
         prev
           ? // `me` тоже: права и запреты, поменянные админом, иначе не доходили
             // до открытого приложения, пока его не закроешь совсем.
-            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, teamShifts, templates, swaps, weekendSlots, weekendOffers }
+            { ...prev, me: bootstrap.me, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today, templates, swaps, weekendSlots, weekendOffers }
           : prev,
       );
       setRefreshError(null);
