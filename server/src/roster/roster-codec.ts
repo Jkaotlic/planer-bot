@@ -154,14 +154,12 @@ export type DecodeResult = {
   perPerson: { name: string; entries: DecodedEntry[] }[];
   unknowns: UnknownCell[];
   preserved: PreservedCell[];
-  proposedHolidays: string[];
 };
 
 export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): DecodeResult {
   const byName = new Map(templates.map((t) => [t.name, t] as const));
   const unknowns: UnknownCell[] = [];
   const preserved: PreservedCell[] = [];
-  const workersByDate = new Map<string, number>(); // count of WORK-code cells per date
 
   const perPerson = parsed.people.map((p) => {
     const entries: DecodedEntry[] = [];
@@ -181,12 +179,10 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
 
       // '?' is our own export marker for an entry the vocabulary can't express
       // (weekend work, a one-off custom time). Re-importing that file must leave
-      // the existing entry alone rather than refusing the whole file — but the day
-      // still counts as worked, so it is never mistaken for a holiday.
+      // the existing entry alone rather than refusing the whole file.
       if (code === UNENCODABLE_CODE) {
         flush();
         preserved.push({ name: p.name, date: cell.date });
-        workersByDate.set(cell.date, (workersByDate.get(cell.date) ?? 0) + 1);
         continue;
       }
 
@@ -213,8 +209,6 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
           date: cell.date, endDate: null, category: "shift", templateId: null,
           location: null, start: null, end: null, title: null, unrecognisedCode: code,
         });
-        // Somebody is down for that day, so it is not a company holiday.
-        workersByDate.set(cell.date, (workersByDate.get(cell.date) ?? 0) + 1);
         continue;
       }
       const { start, end } = resolveShiftTimes(preset, cell.date);
@@ -222,15 +216,12 @@ export function decodeRoster(parsed: ParsedRoster, templates: ShiftTemplate[]): 
         date: cell.date, endDate: null, category: preset.category, templateId: preset.id,
         location: preset.location, start, end, title: preset.name,
       });
-      workersByDate.set(cell.date, (workersByDate.get(cell.date) ?? 0) + 1);
     }
     flush();
     return { name: p.name, entries };
   });
 
-  // A day is non-working iff nobody has a work code on it (§5). Absences don't count as work.
-  const proposedHolidays = parsed.dates.filter((d) => (workersByDate.get(d) ?? 0) === 0);
-  return { perPerson, unknowns, preserved, proposedHolidays };
+  return { perPerson, unknowns, preserved };
 }
 
 /** One (person, day) cell of the roster grid. */

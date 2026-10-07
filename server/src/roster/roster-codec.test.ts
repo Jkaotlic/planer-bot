@@ -132,12 +132,6 @@ describe("decodeRoster (against the synthetic fixture)", () => {
     expect({ start: cell.start, end: cell.end }).toEqual({ start: null, end: null });
   });
 
-  it("proposes the columns nobody works on as holidays", () => {
-    // 07-04/07-05 (weekend) have zero work codes — every cell is 'holiday' or an
-    // absence code, and absences don't count as work (§5).
-    expect(decoded.proposedHolidays).toContain("2026-07-04");
-    expect(decoded.proposedHolidays).toContain("2026-07-05");
-  });
 });
 
 describe("CODE_TO_PRESET_NAME stays resolvable (Stage 3 preset-editor guard)", () => {
@@ -165,11 +159,6 @@ describe("UNENCODABLE_CODE ('?') round-trip closure", () => {
     expect(decoded.perPerson).toEqual([{ name: "Иван", entries: [] }]);
   });
 
-  it("a '?' day counts as worked, so it is never proposed as a holiday", () => {
-    const text = "﻿;01.06.2026;02.06.2026\r\nИван;?;holiday";
-    const decoded = decodeRoster(parseRosterCsv(text), listActiveTemplates(makeTestDb()));
-    expect(decoded.proposedHolidays).toEqual(["2026-06-02"]);
-  });
 });
 
 describe("prototype-chain-safe code lookups", () => {
@@ -193,16 +182,6 @@ describe("rezerv — резервный дежурный", () => {
     expect(entry.title).toBe("Дежурство · Резерв");
     expect(entry.category).toBe("duty");
     expect(entry.start).toBe("09:00");
-  });
-
-  it("counts as somebody covering the day, so a reserve-only weekend is not a holiday", () => {
-    // In the August file every rezerv falls on a Saturday or Sunday. If it did not
-    // count as work, importing would propose those days as company holidays and
-    // then write «не работает» over them.
-    const parsed = parseRosterCsv("﻿;08.08.2026;09.08.2026\r\nИван;rezerv;holiday");
-    const decoded = decodeRoster(parsed, templates());
-
-    expect(decoded.proposedHolidays).toEqual(["2026-08-09"]);
   });
 
   it("survives the export/import round trip", () => {
