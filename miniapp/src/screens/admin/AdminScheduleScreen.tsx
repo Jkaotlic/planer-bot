@@ -6,6 +6,7 @@ import {
   ABSENCE_CATEGORIES,
   coverageHint,
   calendarFrom,
+  dayOfWeek,
   dayOffLabel,
   isDayOff,
   missingCoverageUnlessAcked,
@@ -129,6 +130,10 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   // на секунду объявила бы «Нормы не заданы» там, где они заданы.
   const [rolesLoaded, setRolesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Отказ загрузки людей, видов и норм — отдельно от `error`: у него есть
+  // «Повторить», а без норм нет и плашки нехватки, так что красный текст без
+  // кнопки оставлял экран без неё до перезахода в приложение.
+  const [baseError, setBaseError] = useState<string | null>(null);
   /**
    * Отдельно от `error`, потому что это беда одной секции, а не экрана. Неделя,
    * которая не загрузилась, обязана сказать это на месте дня: иначе она либо
@@ -192,9 +197,12 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
     onScheduleChanged?.();
   }
 
+  // Ключ перечитывания людей, видов и норм: «Повторить» после отказа.
+  const [baseReload, setBaseReload] = useState(0);
   // Roster + templates load once; they don't change with the visible week.
   useEffect(() => {
     let cancelled = false;
+    setBaseError(null);
     Promise.all([apiClient.getAdminEmployees(), apiClient.getTemplates(), apiClient.getTemplateRoles()])
       .then(([emps, tmpls, roles]) => {
         if (cancelled) return;
@@ -204,12 +212,12 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
         setRolesLoaded(true);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+        if (!cancelled) setBaseError(err instanceof Error ? err.message : "Не удалось загрузить данные");
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [baseReload]);
 
   // Schedule reloads whenever the visible week changes. Registers with the same
   // gate as `loadWeek` — navigating here must supersede a still-running
@@ -316,7 +324,7 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   const shortByDate = new Map(week?.days.map((day) => [day.date, day.short]));
   const status = week ? shortfallStatus(week, templateRoles) : null;
 
-  const dayEntries = (shifts ?? [])
+  const dayEntries = (weekShifts ?? [])
     .filter((s) => s.date <= selectedDate && (s.endDate ?? s.date) >= selectedDate)
     .sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""));
 
@@ -373,6 +381,14 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
       )}
 
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{error}</div>}
+      {baseError && (
+        <Card>
+          <span style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-body)" }}>{baseError}</span>
+          <ActionButton compact stretched onClick={() => setBaseReload((n) => n + 1)}>
+            Повторить
+          </ActionButton>
+        </Card>
+      )}
       {notice && <Hint>{notice}</Hint>}
 
       {fillOpen ? (
@@ -434,7 +450,10 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
                   Повторить
                 </ActionButton>
               </Card>
-            ) : shifts === null ? (
+            ) : weekShifts === null ? (
+              // Не `shifts === null`: при листании `shifts` ещё хранит прежнюю неделю,
+              // а день уже новый — без этой проверки экран писал бы «ничего не
+              // запланировано» про день, ответ про который ещё в пути.
               <Card>
                 <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
                   <Spinner size="m" />
@@ -568,7 +587,9 @@ function DayChip({ iso, active, isToday, short, calendar, onSelect }: { iso: str
       aria-current={isToday ? "date" : undefined}
       aria-pressed={active}
       data-day-short-outline={short > 0 ? "true" : undefined}
-      aria-label={`${weekdayShort(iso)} ${dayOfMonth(iso)}${short > 0 ? `, не хватает ${short}` : ""}`}
+      // Праздник и рабочая суббота названы в подписи, а не только значком 🎉/💼:
+      // значок скрыт от чтеца экрана вместе с остальной вёрсткой, и день читался бы обычным.
+      aria-label={`${weekdayShort(iso)} ${dayOfMonth(iso)}${kind === "holiday" ? ", праздник" : kind === "workday" ? `, ${dayOfWeek(iso) === 0 ? "рабочее воскресенье" : "рабочая суббота"}` : ""}${short > 0 ? `, не хватает ${short}` : ""}`}
       style={{
         position: "relative",
         flex: 1,
