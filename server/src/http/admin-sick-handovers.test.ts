@@ -51,6 +51,17 @@ function fakeBot() {
   return { bot: bot as unknown as Bot, sent, edits };
 }
 
+/**
+ * The «отбой» to a colleague on an ADMIN path: it must say the admin changed the schedule and must not
+ * blame the worker («снял(а) больничный»), who did nothing here.
+ */
+function expectAdminCancelText(sent: { to: number; text: string }[]) {
+  const letter = sent.find((m) => m.to === 403)!;
+  expect(letter.text).toContain("админ");
+  expect(letter.text).not.toContain("снял(а) больничный");
+  expect(letter.text).not.toContain("Аня");
+}
+
 /** Team dates, never the machine's. */
 const day = (offset: number) => addDaysIso(teamNow(config.teamTz).date, offset);
 
@@ -82,7 +93,7 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
 
     // A colleague taking the shift of someone who is no longer sick is the defect.
     expect(getHandover(db, handover.id)!.status).toBe("cancelled");
-    expect(sent.some((m) => m.to === 403)).toBe(true);
+    expectAdminCancelText(sent);
     const take = await takeHandover(deps, handover.id, marat.id, day(0));
     expect(take.ok).toBe(false);
     expect(getShift(db, work.id)!.employeeId).toBe(anya.id);
@@ -96,7 +107,7 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
 
     expect(getHandover(db, handover.id)!.status).toBe("cancelled");
     expect(getHandover(db, handover.id)!.sickEntryId).toBeNull();
-    expect(sent.some((m) => m.to === 403)).toBe(true);
+    expectAdminCancelText(sent);
   });
 
   it("archiving the worker with a PENDING sick leave closes the admins' letters and cancels the fan-out", async () => {
@@ -111,6 +122,6 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     expect(edits[0]!.text).toContain("Больничного уже нет");
     expect(getShift(db, sick.id)).toBeUndefined();
     expect(getHandover(db, handover.id)!.status).toBe("cancelled");
-    expect(sent.some((m) => m.to === 403)).toBe(true);
+    expectAdminCancelText(sent);
   });
 });

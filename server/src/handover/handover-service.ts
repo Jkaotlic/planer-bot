@@ -19,6 +19,7 @@ import { handoverCandidates } from "./candidates";
 import {
   handoverCancelledText,
   handoverClosedText,
+  handoverWithdrawnByAdminText,
   handoverEscalationText,
   handoverFanText,
   handoverOfferText,
@@ -613,9 +614,15 @@ export function cancelHandoversForEntryDb(
 }
 
 /** The asynchronous half: tell whoever was waiting that the offer is off. */
-export async function notifyCancelledHandovers(deps: HandoverDeps, cancelled: readonly CancelledHandover[]): Promise<void> {
+export async function notifyCancelledHandovers(
+  deps: HandoverDeps,
+  cancelled: readonly CancelledHandover[],
+  opts: { byAdmin?: boolean } = {},
+): Promise<void> {
   for (const { handover, shift } of cancelled) {
     if (!shift) continue;
-    await tellCancelled(deps, handover, shift, sickCancelledText(deps.db, handover, shift));
+    // «Снял(а) больничный» is true only on the worker's own path; on an admin path it would blame the worker.
+    const text = opts.byAdmin ? handoverWithdrawnByAdminText(lineOf(shift)) : sickCancelledText(deps.db, handover, shift);
+    await tellCancelled(deps, handover, shift, text);
   }
 }

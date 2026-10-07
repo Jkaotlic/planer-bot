@@ -413,7 +413,7 @@ export async function rejectSickLeave(
 
   await tellDecided(onDecided);
   await editApprovalMessages(deps, messages, `${letter}\n\n❌ Отклонил(а) ${adminName}`);
-  await notifyCancelledHandovers(deps, cancelled);
+  await notifyCancelledHandovers(deps, cancelled, { byAdmin: true });
   if (claimed.employeeId != null) {
     await deps.messenger.plain(claimed.employeeId, sickRejectedWorkerText(claimed, adminName, extension, takenAway));
   }

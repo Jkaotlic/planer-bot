@@ -1756,7 +1756,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         await reconcilePendingDateEdit(approvalDeps, existing, entry);
       }
     }
-    await notifyCancelledHandovers(approvalDeps, cancelledNow);
+    await notifyCancelledHandovers(approvalDeps, cancelledNow, { byAdmin: true });
     if (changesTheTrade) await finalizeTradeChangingSwaps(id, swapsToExpire, c.get("auth").employeeId);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
@@ -1824,7 +1824,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!deleted) return c.json({ error: "not_found" }, 404);
     if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, entryAuditPayload(db, existing));
     if (closing) await editClosedRequest(approvalDeps, closing);
-    await notifyCancelledHandovers(approvalDeps, cancelledNow);
+    await notifyCancelledHandovers(approvalDeps, cancelledNow, { byAdmin: true });
     for (const request of expiredSwaps) {
       const payload = linesBefore.get(request.id) ?? swapAuditPayload(request);
       // The admin who deleted the entry is the actor — nobody involved in the swap

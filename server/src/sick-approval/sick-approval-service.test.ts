@@ -5,7 +5,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, createAdminEmployee, linkTelegramAccount, setEmployeeObserver } from "../repo/employees";
 import { createShift, deleteShift, getShift, updateShift } from "../repo/shifts";
 import { getHandover, listHandoversForEntry } from "../repo/handovers";
-import { cancelHandoversForEntryDb, detachHandoversFromEntry, startHandovers, takeHandover } from "../handover/handover-service";
+import { cancelHandoversForEntryDb, detachHandoversFromEntry, startHandovers, takeHandover, fanOut } from "../handover/handover-service";
 import { listRecentAudit } from "../repo/audit";
 import { claimPendingSickLeave, listApprovalMessages } from "../repo/sick-approvals";
 import { recordApi, stubBotInfo, callbackDataOf } from "../bot/testbot";
@@ -127,6 +127,7 @@ describe("rejectSickLeave", () => {
     const { db, api, deps, mark, sick } = await scene();
     // As if the urgent branch had already handed the shift over.
     const [forced] = await startHandovers(deps, { sickEntry: getShift(db, sick.id)!, employeeId: sick.employeeId! });
+    await fanOut(deps, forced!.id); // Олег is now waiting for an answer
 
     const res = await rejectSickLeave(deps, sick.id, mark.id);
 
@@ -135,6 +136,9 @@ describe("rejectSickLeave", () => {
     expect(listHandoversForEntry(db, sick.id)).toHaveLength(0); // detached
     expect(getHandover(db, forced!.id)!.status).toBe("cancelled");
     expect(listRecentAudit(db, 20).map((r) => r.type)).toContain("sick_leave_rejected");
+    // The colleague who was asked hears that the admin withdrew the request — not that the worker took the sick leave off.
+    expect(api.sent.some((m) => m.chat_id === 202 && m.text.includes("Просьба подменить снята — админ изменил график"))).toBe(true);
+    expect(api.sent.some((m) => m.text.includes("снял(а) больничный"))).toBe(false);
     const toWorker = api.sent.find((m) => m.chat_id === 201)!;
     expect(toWorker.text).toMatch(/^Больничный с \d+ (по \d+ )?[а-я]+( по \d+ [а-я]+)? не подтвердил\(а\) Марк — напиши, чтобы разобраться\.$/);
     const edits = api.calls.filter((c) => c.method === "editMessageText");

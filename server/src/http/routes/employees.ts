@@ -391,7 +391,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     for (const payload of payloads) recordAudit(db, "swap_expired", actorId, payload);
     const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
     for (const closed of closedRequests) await editClosedRequest(approvalDeps, closed);
-    await notifyCancelledHandovers(approvalDeps, cancelledHandovers);
+    await notifyCancelledHandovers(approvalDeps, cancelledHandovers, { byAdmin: true });
     if (bot) {
       for (const request of pending) {
         const other = request.fromEmployeeId === id ? request.toEmployeeId : request.fromEmployeeId;
