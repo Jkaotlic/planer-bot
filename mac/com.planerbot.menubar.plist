@@ -28,7 +28,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/user/planer-bot/mac/build/PlanerBotMenu</string>
+        <string>/Users/user/planer-bot-prod/mac/build/PlanerBotMenu</string>
     </array>
 
     <key>RunAtLoad</key>

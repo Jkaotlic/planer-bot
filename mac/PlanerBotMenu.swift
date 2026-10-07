@@ -25,7 +25,7 @@ private enum Config {
     static let port: UInt16 = 8090
     static let logPath = NSString(string: "~/planer-bot.log").expandingTildeInPath
     static let backupDir = NSString(string: "~/planer-bot-backups").expandingTildeInPath
-    static let envPath = NSString(string: "~/planer-bot/server/.env").expandingTildeInPath
+    static let envPath = NSString(string: "~/planer-bot-prod/server/.env").expandingTildeInPath
     /// How often the status is re-checked. Five seconds is responsive enough to
     /// feel live without waking the CPU for nothing.
     static let pollSeconds: TimeInterval = 5
