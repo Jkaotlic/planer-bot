@@ -120,7 +120,9 @@ describe("GET /api/admin/shortfall", () => {
   });
 
   it("refuses a non-admin", async () => {
-    const { app, workerToken } = await setup();
+    const { app, admin, workerToken } = await setup();
+    // The same route answers an admin: without this a missing route (404) would pass for «refused».
+    expect((await app.request("/api/admin/shortfall", bearer(admin))).status).toBe(200);
     expect((await app.request("/api/admin/shortfall", bearer(workerToken))).status).toBe(403);
   });
 });
