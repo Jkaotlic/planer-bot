@@ -24,6 +24,7 @@ import {
   markAdminNotified,
   markAutoSent,
   markScheduleNotified,
+  roundsMissedAutoSend,
   roundsScheduledFor,
   roundsToAutoSend,
   scheduleNoticeMessage,
@@ -119,6 +120,26 @@ export async function runBirthdayNoticeTick(
    * рассылку дня рождения. А если не ушло ни одного письма, `sendCount` остался
    * нулём — и напоминание уйдёт, потому что разослать руками снова осмысленно.
    */
+  // Раунды, которые не успели: праздник прошёл раньше дня автоотправки. Метим ДО письма
+  // (как ниже) и говорим админам, а не теряем молча. Старше двух недель — только метим:
+  // это история, а не новость, и первый тик после выкатки не должен её вываливать.
+  for (const missed of roundsMissedAutoSend(db, today)) {
+    markAutoSent(db, missed.id, new Date());
+    const daysUntil = missed.celebratedOn ? daysBetween(today, missed.celebratedOn) : 0;
+    if (daysUntil < -MISSED_NOTICE_DAYS) continue;
+    const personName = missed.employeeId != null ? (getEmployeeById(db, missed.employeeId)?.displayName ?? null) : null;
+    const admins = adminRecipients(db, missed.employeeId);
+    const reason = "Праздник прошёл раньше, чем бот успел разослать сбор.";
+    const text = autoSendFailedMessage(personName ?? "именинника", reason, daysUntil);
+    let adminsTold = 0;
+    for (const admin of admins) if (await notifyUser(bot, admin.telegramUserId!, text)) adminsTold += 1;
+    // Не дошло ни до кого — обрыв сети, а не молчание по решению: отметку снимаем.
+    if (admins.length > 0 && adminsTold === 0) clearAutoSent(db, missed.id);
+    recordAudit(db, "collection_auto_send_failed", null, {
+      collectionId: missed.id, employeeId: missed.employeeId, title: collectionTitle(missed, personName), reason,
+    });
+  }
+
   for (const stale of roundsToAutoSend(db, today)) {
     // Помечаем ДО отправки: падение посреди цикла не должно обернуться вторым
     // письмом всей команде на следующем тике. Тот же довод, что у `markAdminNotified`.
@@ -140,7 +161,7 @@ export async function runBirthdayNoticeTick(
     const personName = round.employeeId != null ? (getEmployeeById(db, round.employeeId)?.displayName ?? null) : null;
     const admins = adminRecipients(db, round.employeeId);
     const preview = previewCollection(db, round, today);
-    const daysUntil = round.celebratedOn ? Math.max(0, daysBetween(today, round.celebratedOn)) : 0;
+    const daysUntil = round.celebratedOn ? daysBetween(today, round.celebratedOn) : 0;
 
     if (preview.blocker) {
       const text = autoSendFailedMessage(personName ?? "именинника", preview.blocker, daysUntil);
@@ -246,6 +267,9 @@ export async function runBirthdayNoticeTick(
 }
 
 /** Сколько дней от `from` до `to`, обе — YYYY-MM-DD. */
+/** How far back a missed round still deserves a letter; older ones are marked silently. */
+const MISSED_NOTICE_DAYS = 14;
+
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }

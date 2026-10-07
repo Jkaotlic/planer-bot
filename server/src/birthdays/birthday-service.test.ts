@@ -13,6 +13,7 @@ import {
   markScheduleNotified,
   roundsToAutoSend,
   markAutoSent,
+  autoSendFailedMessage,
 } from "./birthday-service";
 import { createCustomCollection, markCollectionSent, updateCollection } from "../collections/collection-service";
 import { collections } from "../db/schema";
@@ -358,5 +359,22 @@ describe("roundsToAutoSend", () => {
     db.update(collections).set({ autoSendOn: "2026-09-01" }).where(eq(collections.id, 1)).run();
 
     expect(roundsToAutoSend(db, "2026-09-04")).toHaveLength(0);
+  });
+});
+
+describe("autoSendFailedMessage", () => {
+  it("будущий праздник — как раньше: срок и просьба прислать ссылку", () => {
+    const text = autoSendFailedMessage("Марк", "Нет ссылки.", 0);
+    expect(text).toContain("День рождения сегодня.");
+    expect(text).toContain("Пришли ссылку сюда");
+  });
+
+  it("прошедший праздник — «был N дн. назад» и без просьбы о ссылке", () => {
+    const text = autoSendFailedMessage("Марк", "Праздник прошёл.", -3);
+    expect(text).toContain("День рождения был 3 дня назад.");
+    expect(text).not.toContain("сегодня");
+    expect(text).not.toContain("Пришли ссылку");
+    expect(autoSendFailedMessage("Марк", "x", -1)).toContain("был 1 день назад");
+    expect(autoSendFailedMessage("Марк", "x", -5)).toContain("был 5 дней назад");
   });
 });
