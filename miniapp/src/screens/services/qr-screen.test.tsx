@@ -211,4 +211,16 @@ describe("экран «QR-код»", () => {
     expect(onClose).toHaveBeenCalledWith({ shape: "classic", color: "black" });
     expect(onSaved).not.toHaveBeenCalled();
   });
+
+  // Раскладку меряет браузер (см. замер в отчёте); здесь — чтобы прилипание не потерялось молча.
+  it("«Прислать мне в бота» и итог отправки стоят в одном прилипающем к низу блоке", async () => {
+    vi.spyOn(apiClient, "sendQrToMe").mockRejectedValue(new Error("Не чаще раза в 5 секунд"));
+    const { el } = await render();
+    await type(el.querySelector("textarea")!, "https://example.com");
+    await act(async () => button(el, "Прислать мне в бота").click());
+    const dock = button(el, "Прислать мне в бота").parentElement as HTMLElement;
+    expect(dock.style.position).toBe("sticky");
+    expect(dock.style.bottom).toBe("0px");
+    expect(dock.contains(el.querySelector('[role="status"]'))).toBe(true);
+  });
 });

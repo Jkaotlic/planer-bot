@@ -197,17 +197,31 @@ export function QrScreen({ initialStyle, onClose, onSaved }: {
         )}
       </Group>
 
-      <ActionButton kind="primary" stretched loading={sending} disabled={preview.kind !== "ok" || sending} onClick={() => void send()}>
-        Прислать мне в бота
-      </ActionButton>
-      {status && (
-        <div
-          role="status"
-          style={{ fontSize: 13, marginTop: 8, color: status.ok ? "var(--tgui--text_color)" : "var(--tgui--destructive_text_color)" }}
-        >
-          {status.text}
-        </div>
-      )}
+      {/* Прилипает к низу окна: от поля до кнопки — предпросмотр, форма, цвета и
+          подпись, и кнопка уезжала на 150–450px ниже экрана, так что «Прислать»
+          искали прокруткой. Итог отправки стоит над кнопкой внутри того же блока —
+          под ней он остался бы за краем и отказ сервера никто бы не увидел. */}
+      <div
+        style={{
+          position: "sticky",
+          bottom: 0,
+          zIndex: 1,
+          padding: "8px 0 calc(8px + env(safe-area-inset-bottom, 0px))",
+          background: "var(--app-canvas, var(--tgui--secondary_bg_color))",
+        }}
+      >
+        {status && (
+          <div
+            role="status"
+            style={{ fontSize: 13, marginBottom: 8, color: status.ok ? "var(--tgui--text_color)" : "var(--tgui--destructive_text_color)" }}
+          >
+            {status.text}
+          </div>
+        )}
+        <ActionButton kind="primary" stretched loading={sending} disabled={preview.kind !== "ok" || sending} onClick={() => void send()}>
+          Прислать мне в бота
+        </ActionButton>
+      </div>
       <Hint>
         Бот пришлёт картинку в личку — оттуда её можно переслать или сохранить. Ссылку можно прислать боту и просто
         так: он ответит кодом в этом же стиле.
