@@ -34,7 +34,8 @@ export function TeamTodayView({
           ))}
           {model.noTimeGroups.length > 0 && (
             <section className="team-no-time">
-              <h3 className="ui-group__header">Без времени</h3>
+              {/* h2, как у `ui/Group`: h3 без h2 над ним ломал порядок заголовков для чтеца экрана. */}
+              <h2 className="ui-group__header">Без времени</h2>
               {model.noTimeGroups.map((group) => (
                 <TodayGroupCard key={group.key} group={group} isDark={isDark} />
               ))}
