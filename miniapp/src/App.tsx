@@ -858,6 +858,7 @@ export function App() {
             nearestShortfall={adminShortfallFirst}
             sickApprovals={sickApprovals}
             onSickApprovalsChanged={refreshAdminShortfall}
+            teamTz={data.me.teamTz}
           />
         </Suspense>
       )}

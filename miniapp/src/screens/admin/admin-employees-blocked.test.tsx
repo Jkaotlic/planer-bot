@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
 import { apiClient, type Employee } from "../../api/client";
+import { AdminScreen } from "../AdminScreen";
 import { AdminEmployeesScreen } from "./AdminEmployeesScreen";
 
 /** Зеркало консольного теста метки «заблокировал бота». */
@@ -43,11 +44,40 @@ describe("«Работники» мини-аппа: заблокировал б�
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
-    await act(async () => { root!.render(createElement(AppRoot, null, createElement(AdminEmployeesScreen, null))); });
+    await act(async () => { root!.render(createElement(AppRoot, null, createElement(AdminEmployeesScreen, {}))); });
     await settle();
 
     const text = host.textContent ?? "";
     expect(text).toContain("заблокировал бота с 12.09");
     expect(text.match(/заблокировал бота/g)).toHaveLength(1);
+  });
+
+  // Дата метки — по поясу команды, а не машины админа: рядом с полуночью они дают разные дни.
+  // Гавайи выбраны нарочно: машина тестов в Москве, и без пояса вышло бы 12.09.
+  it("день метки считается по поясу команды", async () => {
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([
+      person(2, "Игорь", { botBlockedAt: "2026-09-11T22:30:00.000Z" }),
+    ]);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => { root!.render(createElement(AppRoot, null, createElement(AdminEmployeesScreen, { teamTz: "Pacific/Honolulu" }))); });
+    await settle();
+    expect(host.textContent ?? "").toContain("заблокировал бота с 11.09");
+  });
+
+  // Пояс доходит от раздела «Админ» до строки работника: без этой проводки экран считал бы по поясу устройства.
+  it("AdminScreen передаёт пояс команды в «Работники»", async () => {
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([
+      person(2, "Игорь", { botBlockedAt: "2026-09-11T22:30:00.000Z" }),
+    ]);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(AdminScreen, { view: "employees", onViewChange: () => {}, today: "2026-09-12", teamTz: "Pacific/Honolulu" })));
+    });
+    await settle();
+    expect(host.textContent ?? "").toContain("заблокировал бота с 11.09");
   });
 });

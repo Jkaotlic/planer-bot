@@ -127,4 +127,20 @@ describe("App", () => {
     await settle();
     expect(day).toHaveBeenCalledWith(TEAM_TODAY);
   });
+
+  it("раздаёт пояс команды: метка «заблокировал бота» в «Работниках» считается по нему", async () => {
+    vi.spyOn(apiClient, "getMe").mockResolvedValue({ id: 1, displayName: "Админов Админ", address: "Админ", teamToday: TEAM_TODAY, teamTz: "Pacific/Honolulu" });
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue([]);
+    const base = await apiClient.getEmployees();
+    vi.spyOn(apiClient, "getEmployees").mockResolvedValue([{ ...base[0]!, telegramUserId: 77, botBlockedAt: "2026-09-11T22:30:00.000Z" }]);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => { root!.render(createElement(App)); });
+    await settle(24);
+    const item = [...host.querySelectorAll(".sidebar-nav-item")].find((n) => (n.textContent ?? "").includes("Работники"));
+    await act(async () => (item as HTMLElement).click());
+    await settle();
+    expect(host.textContent ?? "").toContain("заблокировал бота с 11.09");
+  });
 });

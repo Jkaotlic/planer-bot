@@ -37,7 +37,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
 import { AuthRequiredProvider } from "./auth-required";
-import { TeamTodayContext } from "./lib/team-today";
+import { TeamTodayContext, TeamTzContext } from "./lib/team-today";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
@@ -579,6 +579,7 @@ export function App() {
   return (
     <AuthRequiredProvider value={requestLogin}>
     <TeamTodayContext.Provider value={teamToday}>
+    <TeamTzContext.Provider value={viewer?.teamTz}>
     <div className="app-shell">
       <Sidebar
         active={nav}
@@ -947,6 +948,7 @@ export function App() {
         </div>
       )}
     </div>
+    </TeamTzContext.Provider>
     </TeamTodayContext.Provider>
     </AuthRequiredProvider>
   );

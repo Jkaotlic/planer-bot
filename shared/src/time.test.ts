@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, nextDate, prevDate,
+  toMinutes, dayOfWeek, resolveShiftTimes, shiftDurationHours, isNightShift, isWeekend, nextDate, prevDate, formatBlockedSince,
 } from "./time";
 import type { ShiftTemplate } from "./types";
 
@@ -59,5 +59,27 @@ describe("prevDate", () => {
 
   it("зеркалит nextDate", () => {
     expect(prevDate(nextDate("2026-02-28"))).toBe("2026-02-28");
+  });
+});
+
+describe("formatBlockedSince", () => {
+  it("день и месяц по поясу команды, а не по поясу машины", () => {
+    // 22:30Z 11 сентября — уже 01:30 12 сентября в Москве, но 11-е в UTC и на Гавайях.
+    expect(formatBlockedSince("2026-09-11T22:30:00Z", "Europe/Moscow")).toBe("12.09");
+    expect(formatBlockedSince("2026-09-11T22:30:00Z", "UTC")).toBe("11.09");
+    expect(formatBlockedSince("2026-09-11T22:30:00Z", "Pacific/Honolulu")).toBe("11.09");
+  });
+
+  it("с двузначными числами и месяцем без ведущего нуля в источнике", () => {
+    expect(formatBlockedSince("2026-01-05T10:00:00Z", "Europe/Moscow")).toBe("05.01");
+    expect(formatBlockedSince("2026-12-31T10:00:00Z", "Europe/Moscow")).toBe("31.12");
+  });
+
+  it("без пояса — запасной вариант, не падает", () => {
+    expect(formatBlockedSince("2026-09-11T10:00:00Z")).toMatch(/^\d{2}\.\d{2}$/);
+  });
+
+  it("мусор вместо даты не рисует «NaN.NaN»", () => {
+    expect(formatBlockedSince("не дата", "Europe/Moscow")).toBe("");
   });
 });

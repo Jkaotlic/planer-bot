@@ -13,3 +13,10 @@ export const TeamTodayContext = createContext<string | null>(null);
 export function useTeamToday(): string {
   return useContext(TeamTodayContext) ?? toISODate(new Date());
 }
+
+/** Пояс команды (`teamTz` из `/api/me`); `undefined` — не пришёл, считают по поясу машины. */
+export const TeamTzContext = createContext<string | undefined>(undefined);
+
+export function useTeamTz(): string | undefined {
+  return useContext(TeamTzContext);
+}

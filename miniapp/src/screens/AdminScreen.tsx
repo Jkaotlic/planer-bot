@@ -31,6 +31,7 @@ export function AdminScreen({
   nearestShortfall,
   sickApprovals,
   onSickApprovalsChanged,
+  teamTz,
 }: {
   view: AdminView;
   onViewChange: (view: AdminView) => void;
@@ -49,6 +50,8 @@ export function AdminScreen({
   sickApprovals?: number | null;
   /** Решили больничный — `App` перечитает метку на вкладке (и нехватку: отказ удаляет запись). */
   onSickApprovalsChanged?: () => void;
+  /** Пояс команды (`me.teamTz`): даты-метки времени в разделах показываются по нему. */
+  teamTz?: string;
 }) {
   // Дата нужна графику только при первом монтировании (`useState` внутри);
   // сразу после — отдаём, что использовали.
@@ -85,7 +88,7 @@ export function AdminScreen({
       {view === "sick-approvals" && <AdminSickApprovals onChanged={onSickApprovalsChanged} />}
       {view === "schedule" && <AdminScheduleScreen initialDate={initialDate} today={today} onScheduleChanged={onScheduleChanged} nearestShortfall={nearestShortfall} onFormOpenChange={setFormOpen} />}
       {view === "weekend" && <AdminWeekendScreen today={today} />}
-      {view === "employees" && <AdminEmployeesScreen />}
+      {view === "employees" && <AdminEmployeesScreen teamTz={teamTz} />}
       {view === "checklists" && <AdminChecklists />}
       {view === "announce" && <AdminAnnounce />}
       {view === "groups" && <AdminGroups />}

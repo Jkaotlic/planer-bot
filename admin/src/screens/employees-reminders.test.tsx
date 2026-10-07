@@ -3,6 +3,7 @@ import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Employee } from "../api/client";
+import { TeamTzContext } from "../lib/team-today";
 import { EmployeesScreen } from "./EmployeesScreen";
 
 /**
@@ -40,21 +41,21 @@ async function settle(times = 8) {
   }
 }
 
-function Harness({ initial }: { initial: Employee[] }) {
+function Harness({ initial, tz }: { initial: Employee[]; tz?: string }) {
   const [employees] = useState(initial);
-  return createElement(EmployeesScreen, {
+  return createElement(TeamTzContext.Provider, { value: tz }, createElement(EmployeesScreen, {
     employees,
     onChanged: async () => {},
     onRestrictionsSaved: () => {},
     onObserverSaved: () => {},
-  });
+  }));
 }
 
-async function mountWith(initial: Employee[]) {
+async function mountWith(initial: Employee[], tz?: string) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(Harness, { initial })); });
+  await act(async () => { root!.render(createElement(Harness, { initial, tz })); });
   await settle();
   return host;
 }
@@ -93,5 +94,12 @@ describe("«Работники»: заблокировал бота", () => {
     const el = await mountWith([person(1, "Аня"), person(2, "Игорь", { botBlockedAt: "2026-09-12T10:00:00.000Z" })]);
     expect(rowOf(el, 2).textContent).toContain("заблокировал бота");
     expect(rowOf(el, 1).textContent).not.toContain("заблокировал бота");
+  });
+
+  // Дата метки — по поясу команды, а не машины админа. Гавайи выбраны нарочно: машина
+  // тестов в Москве, и без пояса вышло бы 12.09.
+  it("день метки считается по поясу команды", async () => {
+    const el = await mountWith([person(2, "Игорь", { botBlockedAt: "2026-09-11T22:30:00.000Z" })], "Pacific/Honolulu");
+    expect(rowOf(el, 2).textContent).toContain("заблокировал бота с 11.09");
   });
 });

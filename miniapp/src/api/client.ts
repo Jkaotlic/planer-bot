@@ -244,6 +244,9 @@ export interface Me {
    *  (`canAnnounce` в `access.ts`), уже посчитано сервером, чтобы клиент не
    *  дублировал правило. */
   canAnnounce: boolean;
+  /** Часовой пояс команды (IANA) — по нему считаются даты, пришедшие меткой времени.
+   *  Необязателен: старый сервер поля не шлёт, тогда считается по поясу устройства. */
+  teamTz?: string;
 }
 
 export type SwapStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
