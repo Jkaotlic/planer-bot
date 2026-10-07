@@ -8,6 +8,7 @@ import { assertBuilt, mountSpa } from "./http/spa";
 import { createBot, publishBotCommands } from "./bot/bot";
 import { shutdownSafely } from "./bot/lifecycle";
 import { keepPolling } from "./bot/polling";
+import { createTelegramLiveness } from "./bot/telegram-liveness";
 import { runReminderTick } from "./reminders/reminder-service";
 import { runChecklistTick } from "./reminders/checklist-tick";
 import { runCoverageAdviceTick } from "./reminders/coverage-advice";
@@ -34,7 +35,9 @@ installLogTimestamps(console, config.teamTz);
 const { db, sqlite } = openDb(config.databaseUrl);
 runMigrations(db, sqlite);
 
-const bot = createBot({ db, config });
+// Один трекер на бота и на HTTP: бот о нём отчитывается, `/api/health` его читает.
+const liveness = createTelegramLiveness({ now: Date.now, log: (line) => console.error(line), teamTz: config.teamTz });
+const bot = createBot({ db, config, liveness });
 // Long-polling runs in the background; a bad/placeholder token must not crash the
 // HTTP server, but a dead poll must not outlive the process either — see polling.ts.
 void keepPolling({
@@ -89,7 +92,7 @@ const tickRound = createTickScheduler([
 setInterval(tickRound, REMINDER_TICK_MS);
 
 let flushPending: (() => Promise<void>) | undefined;
-const app = createApp({ db, config, bot, onFlushPending: (flush) => { flushPending = flush; } });
+const app = createApp({ db, config, bot, liveness, onFlushPending: (flush) => { flushPending = flush; } });
 
 // Serve the built mini app (/app) and admin (/admin) SPAs from this same process.
 // This file lives at <repoRoot>/server/src/index.ts, so the repo root is always two

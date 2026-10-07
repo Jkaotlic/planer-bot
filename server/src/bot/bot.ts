@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Bot, InlineKeyboard, InputFile, Keyboard, type ApiClientOptions, type Context } from "grammy";
 import { DEFAULT_API_TIMEOUTS, installApiTimeouts, type ApiTimeouts } from "./api-timeouts";
+import { installLivenessTracker, type TelegramLiveness } from "./telegram-liveness";
 import type { Db } from "../db/client";
 import type { Config } from "../config";
 import type { Employee } from "../db/schema";
@@ -117,6 +118,8 @@ export interface BotDeps {
   client?: ApiClientOptions;
   /** Сроки вызовов Telegram; в проде — значения по умолчанию, см. `api-timeouts.ts`. */
   apiTimeouts?: Partial<ApiTimeouts>;
+  /** Куда отчитываться об ответах Telegram; его же читает `/api/health`. */
+  liveness?: TelegramLiveness;
 }
 
 /** Maps a swap-service failure reason to a short Russian message for the tapping user. */
@@ -312,6 +315,8 @@ export function createBot(deps: BotDeps): Bot {
   // Первым перехватчиком: тестовые `recordApi` встают снаружи и в сеть не ходят,
   // а настоящий вызов получает свой срок.
   installApiTimeouts(bot, { ...DEFAULT_API_TIMEOUTS, ...deps.apiTimeouts });
+  // Сразу за сроками — значит, снаружи них: их обрыв трекер видит как отказ.
+  if (deps.liveness) installLivenessTracker(bot, deps.liveness);
   installBlockedTracker(bot, db);
 
   // Написал или нажал — значит, бот ему снова доступен (см. `installBlockedTracker`).
