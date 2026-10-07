@@ -634,6 +634,11 @@ export interface Viewer {
   id: number;
   displayName: string;
   address: string;
+  /** Командная дата сервера (`YYYY-MM-DD`). Необязательна: старый сервер поля не шлёт —
+   *  тогда консоль считает «сегодня» по часам браузера, как раньше. */
+  teamToday?: string;
+  /** Часовой пояс команды (IANA), там же. */
+  teamTz?: string;
 }
 
 export interface ApiClient {

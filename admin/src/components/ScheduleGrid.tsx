@@ -2,7 +2,8 @@ import { SICK_LEAVE_PENDING_OUTLINE, SICK_LEAVE_PENDING_SCHEDULE_PALETTE, covera
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
-import { dayOfMonth, toISODate, weekdayShort } from "../lib/week";
+import { dayOfMonth, weekdayShort } from "../lib/week";
+import { useTeamToday } from "../lib/team-today";
 import { isDayOff, type DayCalendar } from "@planer/shared";
 
 export interface ScheduleGridProps {
@@ -38,7 +39,7 @@ export interface ScheduleGridProps {
   coverage?: readonly CoverageTemplate[];
   /**
    * Сегодняшняя дата. Параметром, а не `new Date()` внутри: неделю рисуют и
-   * тесты, и им нужен свой «сегодня». По умолчанию — день браузера.
+   * тесты, и им нужен свой «сегодня». По умолчанию — командная дата (`useTeamToday`).
    */
   today?: string;
   /** День, на который показали из строки нехватки над сеткой, — его колонка выделяется. */
@@ -89,7 +90,10 @@ function hh(time: string): string {
 }
 
 /** The core "работники × дни" table: rows = workers, columns = week days, cells = category-colored entry chips. */
-export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, special = [], onAddClick, onEntryClick, query, coverage = [], ackedDates = NO_ACKED, today = toISODate(new Date()), highlightDate = null }: ScheduleGridProps) {
+export function ScheduleGrid({ employees, shifts, templates, weekDates, calendar, special = [], onAddClick, onEntryClick, query, coverage = [], ackedDates = NO_ACKED, today: todayProp, highlightDate = null }: ScheduleGridProps) {
+  // Явный `today` — у тестов; иначе командная дата (`useTeamToday`), а не часы браузера.
+  const teamToday = useTeamToday();
+  const today = todayProp ?? teamToday;
   const specialByDate = new Map(special.map((d) => [d.date, d]));
   // Поиск фильтрует людей, а не дни — шапка недели рисуется от полного
   // `weekDates` независимо от того, что набрано в поле.

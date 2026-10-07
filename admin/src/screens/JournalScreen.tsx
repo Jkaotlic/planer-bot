@@ -17,7 +17,7 @@ import { apiClient, type JournalPage, type ShiftCountsReport } from "../api/clie
 import { DownloadIcon } from "../components/DownloadIcon";
 import { Segmented } from "../components/Segmented";
 import { initialsOf, personPalette } from "../lib/people";
-import { toISODate } from "../lib/week";
+import { useTeamToday } from "../lib/team-today";
 import { routeAuthError, useAuthRequired } from "../auth-required";
 
 /** Одна строка ленты «кто что менял»: значок, фраза, кто и когда, подробности.
@@ -79,9 +79,10 @@ function KindSwatch({ kind }: { kind: ShiftCountsKind }) {
 
 function ShiftCounts() {
   const onAuthRequired = useAuthRequired();
-  // Локальная дата, как во всей консоли (`toISODate`), а не UTC: с `toISOString`
-  // 1-го числа до трёх ночи по Москве «Этот месяц» показывал прошлый.
-  const today = toISODate(new Date());
+  // Командная дата сервера, а не часы браузера и не UTC: с `toISOString` 1-го числа
+  // до трёх ночи по Москве «Этот месяц» показывал прошлый, а часы браузера другого пояса
+  // расходятся с командой так же (см. `useTeamToday`).
+  const today = useTeamToday();
   const initial = auditMonthRange(today);
   const presets = countsPeriodPresets(today);
   const [from, setFrom] = useState(initial.from);

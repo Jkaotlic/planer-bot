@@ -37,6 +37,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { WeekendAdminScreen } from "./screens/WeekendAdminScreen";
 import { addDays, formatPeriod, formatWeekRangeLabel, mondayOf, monthRangeOf, parseISODate, toISODate } from "./lib/week";
 import { AuthRequiredProvider } from "./auth-required";
+import { TeamTodayContext } from "./lib/team-today";
 import { BOT_USERNAME } from "./lib/bot";
 import { withNotifyNotice } from "./lib/notify-text";
 
@@ -123,6 +124,8 @@ export function App() {
   const requestLogin = useCallback(() => setNeedLogin(true), []);
   /** Кто вошёл — для подписи в футере сайдбара. */
   const [viewer, setViewer] = useState<Viewer | null>(null);
+  /** Командная «сегодня» с сервера; `null` — ещё не пришла (см. `TeamTodayContext`). */
+  const [teamToday, setTeamToday] = useState<string | null>(null);
   const [panelTarget, setPanelTarget] = useState<PanelTarget | null>(null);
   /** The entry currently open for editing (clicking a chip in the grid). */
   const [editingEntry, setEditingEntry] = useState<Shift | null>(null);
@@ -215,7 +218,16 @@ export function App() {
       void apiClient
         .getMe()
         .then((me) => {
-          if (!cancelled()) setViewer(me);
+          if (cancelled()) return;
+          setViewer(me);
+          if (me.teamToday) {
+            setTeamToday(me.teamToday);
+            // Неделя открыта по часам браузера, пока сервер не ответил: если человек
+            // ещё не листал и неделя команды другая — переходим на неё.
+            setWeekMonday((current) =>
+              toISODate(current) === toISODate(mondayOf(new Date())) ? mondayOf(parseISODate(me.teamToday!)) : current,
+            );
+          }
         })
         .catch(() => {});
     } catch (err) {
@@ -566,6 +578,7 @@ export function App() {
 
   return (
     <AuthRequiredProvider value={requestLogin}>
+    <TeamTodayContext.Provider value={teamToday}>
     <div className="app-shell">
       <Sidebar
         active={nav}
@@ -934,6 +947,7 @@ export function App() {
         </div>
       )}
     </div>
+    </TeamTodayContext.Provider>
     </AuthRequiredProvider>
   );
 }
