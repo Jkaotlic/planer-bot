@@ -1212,9 +1212,13 @@ button {
   border-radius: var(--radius-control);
   border: none;
   background: transparent;
-  color: var(--hint);
+  /* Основной цвет текста при 0.7, а не `--hint` при 0.35: замер 2026-10-07 с
+     учётом прозрачности дал 1.57 (светлая) / 1.79 (тёмная) — «＋» была почти
+     невидима, а чтобы найти пустую клетку, её надо видеть. 0.7 держит ≥ 4.5 и на
+     подкрашенных колонках («сегодня», выходной), где серый --hint давал 4.2. */
+  color: var(--text);
   font-size: var(--text-head);
-  opacity: 0.35;
+  opacity: 0.7;
   cursor: pointer;
 }
 
@@ -2301,10 +2305,11 @@ textarea {
   border: none;
   border-radius: var(--radius-control);
   background: transparent;
-  color: var(--hint);
+  /* Тот же довод, что у `.empty-cell-add`: было `--hint` при 0.3 — 1.43. */
+  color: var(--text);
   font-size: var(--text-sub);
   line-height: 1;
-  opacity: 0.3;
+  opacity: 0.7;
   cursor: pointer;
 }
 .cell-add-more:hover {
