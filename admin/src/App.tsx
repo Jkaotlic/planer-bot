@@ -153,6 +153,12 @@ export function App() {
   // Ошибка чтения — «отметок нет»: лишний красный день лучше экрана без нехватки.
   const [acks, setAcks] = useState<{ from: string; dates: string[] } | null>(null);
   const shortfallReady = shiftsFrom === weekDates[0] && acks?.from === weekDates[0];
+  // Записи показанной недели; записи прежней при листании в состоянии стоят до ответа.
+  const weekShifts = shifts && shiftsFrom === weekDates[0] ? shifts : null;
+  // Понедельник, который открыт сейчас: перечитывание, начатое на прежней неделе,
+  // не должно приземлиться после листания (см. `refreshSchedule`).
+  const shownMonday = useRef(weekDates[0]!);
+  shownMonday.current = weekDates[0]!;
   const ackedDates = useMemo(() => new Set(acks?.from === weekDates[0] ? acks.dates : []), [acks, weekDates[0]]);
   useEffect(() => {
     let cancelled = false;
@@ -338,8 +344,8 @@ export function App() {
     };
   }, [nav]);
 
-  /** The visible week's entries. `shifts` is dropped first: a failed reload must not
-   *  leave the previous week's rows standing under the new week's dates. */
+  /** Записи показанной недели. При отказе `shifts` сбрасываются, а при листании
+   *  прежние записи не рисуются, пока `shiftsFrom` не совпал с неделей (`weekShifts`). */
   async function loadWeek(cancelled: () => boolean = () => false) {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
@@ -363,9 +369,13 @@ export function App() {
     const from = weekDates[0]!;
     const to = weekDates[6]!;
     const [next, calendar] = await Promise.all([apiClient.getTeamSchedule(from, to), apiClient.getDayCalendar(from, to)]);
-    setShifts(next);
-    setShiftsFrom(from);
-    setCalendarDays(calendar);
+    // Админ успел перелистнуть, пока шло перечитывание: ответ старой недели
+    // затёр бы состояние новой (а `shiftsFrom` соврал бы, что оно ей принадлежит).
+    if (shownMonday.current === from) {
+      setShifts(next);
+      setShiftsFrom(from);
+      setCalendarDays(calendar);
+    }
     // Все правки записей кончаются здесь (сохранение, диапазон, удаление,
     // «Заполнить неделю», импорт CSV), и каждая меняет число нехватки; удаление
     // ждущего больничного заодно убирает его из очереди «На подтверждение».
@@ -686,14 +696,16 @@ export function App() {
                   Повторить
                 </button>
               </div>
-            ) : !shifts ? (
+            ) : !weekShifts ? (
+              // `shifts` при листании ещё хранит прежнюю неделю: рисовать её под
+              // датами новой значило бы показать чужие записи за свои.
               <div className="centered-fill in-section">Загрузка…</div>
             ) : (
               <>
               {/* Над сеткой, а не в правой колонке: ниже 1600px колонка уезжает
                   под сетку, и нехватку пришлось бы искать прокруткой. */}
               {shortfallReady && <WeekShortfallBar
-                shifts={shifts}
+                shifts={weekShifts}
                 templates={templateRoles}
                 weekDates={weekDates}
                 calendar={dayCalendar}
@@ -711,7 +723,7 @@ export function App() {
                 <ScheduleGrid
                   highlightDate={pointedInWeek}
                   employees={activeEmployees}
-                  shifts={shifts}
+                  shifts={weekShifts}
                   templates={templates}
                   weekDates={weekDates}
                   onAddClick={openAddPanel}

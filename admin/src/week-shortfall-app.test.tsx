@@ -159,7 +159,9 @@ describe("строка нехватки в «Расписании»", () => {
       const getSchedule = vi.mocked(apiClient.getTeamSchedule);
       getSchedule.mockClear();
       await act(async () => line.click());
-      await settle(6);
+      // Дольше прежнего: до ответа новой недели сетки нет вовсе (спиннер), колонка
+      // появляется вместе с ней.
+      await settle(20);
       expect(getSchedule).toHaveBeenCalledWith(nextMonday, toISODate(addDays(mondayOf(new Date()), 13)));
       // Колонка понедельника новой недели указана, строка больше не нужна.
       const headers = [...el.querySelectorAll(".schedule-table thead th")];
