@@ -21,11 +21,12 @@ afterEach(async () => {
 
 async function render(initialStyle: QrSavedStyle = { shape: "classic", color: "black" }) {
   const onClose = vi.fn();
+  const onSaved = vi.fn();
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root!.render(createElement(AppRoot, null, createElement(QrScreen, { initialStyle, onClose }))));
-  return { el: host, onClose };
+  await act(async () => root!.render(createElement(AppRoot, null, createElement(QrScreen, { initialStyle, onClose, onSaved }))));
+  return { el: host, onClose, onSaved };
 }
 
 async function type(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
@@ -128,7 +129,9 @@ describe("экран «QR-код»", () => {
     await act(async () => button(first.el, "Мягкий").click());
     await act(async () => button(first.el, "Назад").click());
     expect(save).toHaveBeenCalledWith({ shape: "soft", color: "black" });
-    expect(first.onClose).toHaveBeenCalledWith({ shape: "soft", color: "black" });
+    // Уход не ждёт сеть: пока ответа нет, наружу отдан тот стиль, что точно на сервере.
+    expect(first.onClose).toHaveBeenCalledWith({ shape: "classic", color: "black" });
+    expect(first.onSaved).toHaveBeenCalledWith({ shape: "soft", color: "black" });
 
     await act(async () => root!.unmount());
     host!.remove();
@@ -197,5 +200,15 @@ describe("экран «QR-код»", () => {
     await act(async () => button(el, "Прислать мне в бота").click());
     await act(async () => button(el, "Назад").click());
     expect(save).toHaveBeenCalledWith({ shape: "dots", color: "black" });
+  });
+
+  it("отказ сохранения стиля при уходе: наружу не уходит несохранённый выбор", async () => {
+    vi.spyOn(apiClient, "setQrStyle").mockRejectedValue(new Error("сеть"));
+    const { el, onClose, onSaved } = await render();
+    await act(async () => button(el, "Мягкий").click());
+    await act(async () => button(el, "Назад").click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(onClose).toHaveBeenCalledWith({ shape: "classic", color: "black" });
+    expect(onSaved).not.toHaveBeenCalled();
   });
 });

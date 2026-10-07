@@ -634,6 +634,8 @@ export function App() {
             setData((prev) => (prev ? { ...prev, me: { ...prev.me, qrStyle } } : prev));
             setServices("list");
           }}
+          // Новый выбор доезжает позже ухода — и только если сервер его принял.
+          onSaved={(qrStyle) => setData((prev) => (prev ? { ...prev, me: { ...prev.me, qrStyle } } : prev))}
         />
       </Suspense>
     );

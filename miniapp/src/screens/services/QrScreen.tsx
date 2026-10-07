@@ -22,7 +22,13 @@ function sameStyle(a: QrSavedStyle, b: QrSavedStyle): boolean {
  * «Прислать мне в бота». Рисует в браузере тем же `renderQr`, что бот и консоль, —
  * без запроса на каждое касание. Экран грузится ленивым куском (см. `qr-bundle.test.ts`).
  */
-export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle; onClose(style: QrSavedStyle): void }) {
+export function QrScreen({ initialStyle, onClose, onSaved }: {
+  initialStyle: QrSavedStyle;
+  /** Закрыли экран; `style` — тот выбор, что точно лежит на сервере (уход не ждёт сеть). */
+  onClose(style: QrSavedStyle): void;
+  /** Сервер принял новый выбор уже после ухода — родитель обновляет свою копию только теперь. */
+  onSaved?(style: QrSavedStyle): void;
+}) {
   const [text, setText] = useState("");
   const [caption, setCaption] = useState("");
   const [style, setStyle] = useState<QrSavedStyle>(initialStyle);
@@ -51,8 +57,13 @@ export function QrScreen({ initialStyle, onClose }: { initialStyle: QrSavedStyle
 
   function leave() {
     if (!sameStyle(style, saved)) {
-      // Человек уже уходит: неудача значит лишь, что бот нарисует прежним стилем.
-      void apiClient.setQrStyle(style).catch(() => {});
+      // Человек уже уходит и ждать сеть не должен, поэтому `onClose` получает то, что
+      // на сервере сейчас, а новый выбор родитель принимает через `onSaved` — после
+      // ответа. Раньше он писался в `me` сразу, и при отказе экран обещал стиль,
+      // которым бот рисовать не станет.
+      void apiClient.setQrStyle(style).then(() => onSaved?.(style), () => {});
+      onClose(saved);
+      return;
     }
     onClose(style);
   }
