@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import Database from "better-sqlite3";
 
 /**
@@ -24,7 +25,15 @@ import Database from "better-sqlite3";
  * их и ищем.
  */
 const repoRoot = resolve(__dirname, "../../..");
-const dbPath = resolve(repoRoot, "data/planer.db");
+// With the 2026-10-07 move the live database left the repo for ~/planer-data: with only
+// the old `data/planer.db` path this guard silently turned into a skip. `PLANER_DB`
+// wins, then the repo-local path (a fresh clone with its own copy), then the prod location.
+const dbCandidates = [
+  process.env.PLANER_DB,
+  resolve(repoRoot, "data/planer.db"),
+  resolve(homedir(), "planer-data/planer.db"),
+].filter((p): p is string => typeof p === "string" && p.length > 0);
+const dbPath = dbCandidates.find((p) => existsSync(p)) ?? dbCandidates[0]!;
 const hasLiveDb = existsSync(dbPath);
 
 describe.skipIf(!hasLiveDb)("в git не лежит ни одного настоящего имени", () => {
