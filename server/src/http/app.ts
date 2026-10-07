@@ -536,6 +536,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
       /** Parsed, never null: the QR screen opens on it, and the default is a fact, not a gap. */
       qrStyle: parseSavedQrStyle(me.qrStyle),
       canAnnounce: canAnnounce(me),
+      /** The team's calendar date and zone. Clients must not decide «today» from
+       *  the device clock: near midnight the browser and the team disagree, and
+       *  the web console (which has no bootstrap with `myShifts.today`) used to
+       *  open on the wrong day. Additive: old bundles ignore the fields. */
+      teamToday: teamNow(config.teamTz).date,
+      teamTz: config.teamTz,
     });
   });
 
