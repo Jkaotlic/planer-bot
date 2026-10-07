@@ -4,6 +4,8 @@ import { addDaysIso } from "@planer/shared";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
+import { eq } from "drizzle-orm";
+import { shifts as shiftsTable } from "../db/schema";
 import { createShift, getShift } from "../repo/shifts";
 import { createHandover, getHandover } from "../repo/handovers";
 import { addApprovalMessage } from "../repo/sick-approvals";
@@ -97,6 +99,24 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     const take = await takeHandover(deps, handover.id, marat.id, day(0));
     expect(take.ok).toBe(false);
     expect(getShift(db, work.id)!.employeeId).toBe(anya.id);
+  });
+
+  it("moving or shortening an approved sick leave cancels the fan-outs of dropped days at once, with the admin text; covered days stay", async () => {
+    const { db, app, sent, sick, work, handover, anya, igorToken } = await scene({ pending: false });
+    // The sick leave covers day(1) only in the scene; stretch it to day(2) first, with a second shift and fan-out on day(2).
+    db.update(shiftsTable).set({ endDate: day(2) }).where(eq(shiftsTable.id, sick.id)).run();
+    const work2 = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const handover2 = createHandover(db, { shiftId: work2.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: new Date() });
+
+    const res = await app.request(new Request(`http://x/api/admin/entries/${sick.id}`, authed(igorToken, { endDate: day(1) }, "PATCH")));
+    expect(res.status).toBe(200);
+
+    // Straight after the PATCH, not at the next tick: the tick's own void letter would blame the worker.
+    expect(getHandover(db, handover2.id)!.status).toBe("cancelled");
+    expect(getHandover(db, handover.id)!.status).toBe("fanned");
+    expect(getShift(db, work.id)!.employeeId).toBe(anya.id);
+    expectAdminCancelText(sent);
+    expect(sent.filter((m) => m.to === 403)).toHaveLength(1);
   });
 
   it("deleting an APPROVED sick leave cancels the fan-out and tells the colleagues", async () => {

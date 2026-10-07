@@ -1742,7 +1742,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // «Беру» would take the shift of somebody who is no longer sick. The statuses are written in the
     // same synchronous stretch as the update above (before the first await), the letters go out after.
     // Not detached: the row stays, so the foreign key is fine and history keeps pointing at it.
-    const cancelledNow = leavesSickLeave ? cancelHandoversForEntryDb(db, id, []) : [];
+    // The same goes for an approved sick leave that is moved or shortened: the days it no longer covers lose
+    // their fan-out now, with the admin's text. Left to the tick, `voidHandover` would tell the colleagues
+    // «Аня снял(а) больничный», which the worker did not do.
+    const sickSpanChanged = existing.category === "sick_leave" && entry.category === "sick_leave"
+      && (entry.date !== existing.date || entry.endDate !== existing.endDate);
+    const cancelledNow = leavesSickLeave
+      ? cancelHandoversForEntryDb(db, id, [])
+      : sickSpanChanged
+        ? cancelHandoversForEntryDb(db, id, eachDayIso(entry.date, entry.endDate ?? entry.date))
+        : [];
     if (wasPending) {
       if (leavesSickLeave) {
         // The row is no longer pending (cleared above), so only the letters are left to close.
