@@ -425,7 +425,9 @@ export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise
     endDate: input.endDate ?? null,
     category: input.category,
     title: input.title ?? null,
-    employeeId: input.employeeId ?? null,
+    // Как сервер: поля нет — человек прежний, `null` — снять. Раньше пропуск превращался
+    // в «снять», и DEV вёл себя не так, как прод.
+    employeeId: input.employeeId !== undefined ? input.employeeId : ENTRIES[index]!.employeeId,
   };
   ENTRIES[index] = updated;
   return { entry: updated, notified: mockReach(updated.employeeId != null ? [updated.employeeId] : []) };
