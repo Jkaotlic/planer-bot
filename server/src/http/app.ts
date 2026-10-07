@@ -1730,8 +1730,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ...(leavesSickLeave ? { approvalRequestedAt: null, approvedByEmployeeId: null, approvedDate: null, approvedEndDate: null } : {}),
     });
     if (!entry) return c.json({ error: "not_found" }, 404);
+    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    // A fan-out the sick leave started would otherwise outlive the category: a colleague pressing
+    // «Беру» would take the shift of somebody who is no longer sick. The statuses are written in the
+    // same synchronous stretch as the update above (before the first await), the letters go out after.
+    // Not detached: the row stays, so the foreign key is fine and history keeps pointing at it.
+    const cancelledNow = leavesSickLeave ? cancelHandoversForEntryDb(db, id, []) : [];
     if (wasPending) {
-      const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
       if (leavesSickLeave) {
         // The row is no longer pending (cleared above), so only the letters are left to close.
         await finishApprovalMessages(
@@ -1744,6 +1749,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         await reconcilePendingDateEdit(approvalDeps, existing, entry);
       }
     }
+    await notifyCancelledHandovers(approvalDeps, cancelledNow);
     if (changesTheTrade) await finalizeTradeChangingSwaps(id, swapsToExpire, c.get("auth").employeeId);
     recordAudit(db, "entry_updated", c.get("auth").employeeId, { before: entryAuditPayload(db, existing), after: entryAuditPayload(db, entry) });
     const notified = noticeBuffer.register({
@@ -1797,8 +1803,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
       ? takeRequestOutOfPending(db, existing, "🗑 Больничного уже нет — запись удалил админ")
       : null;
     const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    // Any sick leave, approved or not: an approved one can carry a fan-out too, and leaving it for
+    // the tick makes «Беру» answer «Смены больше нет» with no «отбой» to the colleagues.
     let cancelledNow: CancelledHandover[] = [];
-    if (closing) {
+    if (existing?.category === "sick_leave") {
       cancelledNow = cancelHandoversForEntryDb(db, id, []);
       detachHandoversFromEntry(db, id);
     }

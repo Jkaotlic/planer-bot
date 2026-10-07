@@ -665,3 +665,21 @@ describe("«Беру» и «предложить» — только по жив�
     expect(sent.filter((m) => m.to === "admins")).toHaveLength(1);
   });
 });
+
+describe("«Беру» после смены категории больничного", () => {
+  it("отказывает, если запись-основание стала отпуском, и смена остаётся у дающего", async () => {
+    // Сама передача не гасится — проверяем именно правило у передачи, независимо от путей правки.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const marat = person(db, "Марат");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12", "18:00", "23:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    db.update(shifts).set({ category: "vacation" }).where(eq(shifts.id, sick.id)).run();
+
+    const outcome = await takeHandover(deps(db), handover!.id, marat, TODAY);
+
+    expect(outcome.ok).toBe(false);
+    expect(getShift(db, work.id)!.employeeId).toBe(anya);
+  });
+});

@@ -522,6 +522,9 @@ export function handoverVoidReason(db: Db, handover: Handover): VoidReason | nul
   if (shift.employeeId !== handover.fromEmployeeId) return "reassigned";
   const sick = handover.sickEntryId == null ? undefined : getShift(db, handover.sickEntryId);
   if (!sick) return "gone";
+  // Админ мог перевести запись в отпуск или другой вид: строка жива, дни те же, а
+  // больного уже нет. Без этой проверки «Беру» забирало смену у здорового.
+  if (sick.category !== "sick_leave") return "uncovered";
   // Пересечение промежутков, а не «дата смены внутри больничного»: недельное
   // дежурство с понедельника при больничном со среды — та же передача, и
   // `shift.date` у него остаётся понедельником всю неделю.

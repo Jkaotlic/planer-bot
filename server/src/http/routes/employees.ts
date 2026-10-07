@@ -18,6 +18,8 @@ import {
 } from "@planer/shared";
 import { notifyUser, swapExpiredText } from "../../bot/notify";
 import { deleteShift, listShiftsByEmployee } from "../../repo/shifts";
+import { cancelHandoversForEntryDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
+import { editClosedRequest, sickApprovalDeps, takeRequestOutOfPending, type ClosedRequest } from "../../sick-approval/sick-approval-service";
 import { getVacantSlot, listAssignmentsForEmployee, removeAllInterestOf } from "../../repo/weekend";
 import { unassign } from "../../weekend/weekend-service";
 import { refreshAdminCommands } from "../../bot/bot";
@@ -343,6 +345,11 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     // Всё — одной транзакцией (вложенные станут точками сохранения): сбой
     // посередине иначе гасил обмен молча — без письма и журнала, — а человек
     // оставался в команде. Письма и журнал — после, когда всё записано.
+    // A pending sick leave deleted below has a request out to every admin, and its fan-out may be
+    // live: both are closed inside the transaction (database only), the letters go out afterwards —
+    // the same split as the admin DELETE, so the ОК buttons never outlive the row.
+    const closedRequests: ClosedRequest[] = [];
+    const cancelledHandovers: CancelledHandover[] = [];
     const done = db.transaction(() => {
       for (const request of pending) {
         db.update(swapRequests).set({ status: "expired", resolvedAt: new Date() }).where(eq(swapRequests.id, request.id)).run();
@@ -362,6 +369,12 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       let removedAbsences = 0;
       for (const entry of listShiftsByEmployee(db, id)) {
         if (!isAbsence(entry.category) || entry.date < today) continue;
+        if (entry.category === "sick_leave") {
+          const closed = takeRequestOutOfPending(db, entry, "🗑 Больничного уже нет — сотрудника убрали в архив");
+          if (closed) closedRequests.push(closed);
+          cancelledHandovers.push(...cancelHandoversForEntryDb(db, entry.id, []));
+          detachHandoversFromEntry(db, entry.id);
+        }
         if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
       }
       // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
@@ -376,6 +389,9 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
       employeeId: id, displayName: employee.displayName, freedShifts, expiredSwaps: pending.length, removedAbsences, unassignedWeekend,
     });
     for (const payload of payloads) recordAudit(db, "swap_expired", actorId, payload);
+    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    for (const closed of closedRequests) await editClosedRequest(approvalDeps, closed);
+    await notifyCancelledHandovers(approvalDeps, cancelledHandovers);
     if (bot) {
       for (const request of pending) {
         const other = request.fromEmployeeId === id ? request.toEmployeeId : request.fromEmployeeId;
