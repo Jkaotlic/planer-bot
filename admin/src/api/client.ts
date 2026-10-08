@@ -786,7 +786,11 @@ export interface ApiClient {
   /** Заказы, которые этот админ собирает или куда его позвали. */
   getOrders(): Promise<OrderView[]>;
   getOrder(id: number): Promise<OrderView>;
-  createOrder(input: { placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience }): Promise<{ order: OrderView } & FoodSendReport>;
+  createOrder(input: {
+    placeId: number | null; title: string | null; allowCustom: boolean; note: string | null; payHint: string | null;
+    // `YYYY-MM-DDTHH:MM` по команде; консоль прежнее `closesTime` больше не шлёт.
+    closesAt: string | null; audience: TeamAudience;
+  }): Promise<{ order: OrderView } & FoodSendReport>;
   /** Своя позиция: из меню места или своим блюдом с ценой. */
   addOrderItem(id: number, input: { menuItemId: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
   setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;

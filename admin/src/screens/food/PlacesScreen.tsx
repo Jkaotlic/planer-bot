@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   FOOD_MENU_FULL_HINT, FOOD_NO_PLACES, FOOD_MENU_MAX, FOOD_TEXT_MAX, menuPreview, placeMenuFromRows, placeRowsFromMenu, priceDigits, type PlaceEditorRow,
 } from "@planer/shared";
@@ -139,14 +139,29 @@ export function PlaceEditor({ place, onSaved, onCancel }: {
         <input type="text" aria-label="Название места" maxLength={FOOD_TEXT_MAX} value={name} disabled={busy} onChange={(e) => setName(e.target.value)} />
       </label>
       {rows.map((r, i) => (
-        <div key={r.id ?? `new-${i}`} className="food-dish-row" data-testid="dish-row">
+        <Fragment key={r.id ?? `new-${i}`}>
+        <div className="food-dish-row" data-testid="dish-row">
           <input type="text" className="food-dish-name" aria-label={`Блюдо ${i + 1}`} placeholder="Блюдо" maxLength={FOOD_TEXT_MAX}
             value={r.name} disabled={busy} onChange={(e) => patch(i, { name: e.target.value })} />
-          <input type="text" className="food-dish-price" aria-label={`Цена блюда ${i + 1}, ₽`} placeholder="₽" inputMode="numeric"
+          <input type="text" className="food-dish-price" aria-label={`Цена блюда ${i + 1}, ₽`} placeholder={r.unit === "kg" ? "₽ за шаг" : "₽ за шт"} inputMode="numeric"
             value={r.price} disabled={busy} onChange={(e) => patch(i, { price: priceDigits(e.target.value) })} />
           <button type="button" className="btn btn-quiet btn-compact" aria-label={`Убрать блюдо ${i + 1}`} disabled={busy}
             onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}>✕</button>
         </div>
+        {/* Единица — вторым рядом: в один с названием, ценой и ✕ она не помещается на 375 px. */}
+        <div className="food-dish-row food-dish-unit">
+          <div className="food-buttons" role="group" aria-label={`Единица блюда ${i + 1}`}>
+            <button type="button" className="btn btn-secondary btn-compact food-chip" aria-pressed={r.unit === "pcs"} disabled={busy}
+              onClick={() => patch(i, { unit: "pcs", step: "" })}>шт</button>
+            <button type="button" className="btn btn-secondary btn-compact food-chip" aria-pressed={r.unit === "kg"} disabled={busy}
+              onClick={() => patch(i, { unit: "kg" })}>кг</button>
+          </div>
+          {r.unit === "kg" && (
+            <input type="text" className="food-dish-step" aria-label={`Шаг блюда ${i + 1}, кг`} placeholder="шаг, кг" inputMode="decimal"
+              value={r.step} disabled={busy} onChange={(e) => patch(i, { step: e.target.value })} />
+          )}
+        </div>
+        </Fragment>
       ))}
       {rows.length < FOOD_MENU_MAX ? (
         <div className="food-buttons">

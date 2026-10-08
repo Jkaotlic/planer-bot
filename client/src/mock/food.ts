@@ -1,6 +1,6 @@
 import {
-  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
-  isFutureClose, isOpenAt, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
+  isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
   type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
 } from "@planer/shared";
@@ -316,6 +316,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     placeId: number | null;
     note: string | null;
     payHint: string | null;
+    title: string | null;
+    allowCustom: boolean;
     closesAt: string | null;
     closedAt: string | null;
     cancelledAt: string | null;
@@ -362,9 +364,9 @@ export function createFoodMock(opts: FoodMockOptions) {
       creatorId: o.createdBy,
       creatorName: nameOf(o.createdBy),
       placeId: o.placeId,
-      title: null,
+      title: o.title,
       placeName: place?.name ?? null,
-      allowCustom: true,
+      allowCustom: o.allowCustom,
       // Меню — только пока приём идёт: у закрытого заказа кнопки добавлять уже нечего.
       menu: open && place ? place.menu.map((m) => ({ ...m })) : [],
       note: o.note,
@@ -431,13 +433,19 @@ export function createFoodMock(opts: FoodMockOptions) {
   }
 
   async function createOrder(input: {
-    placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience;
+    placeId: number | null; title?: string | null; allowCustom?: boolean; note: string | null; payHint: string | null;
+    // `closesTime` — прежнее поле мини-аппа (как у `POST /api/orders`): срок на сегодня.
+    closesAt?: string | null; closesTime?: string | null; audience: TeamAudience;
   }): Promise<{ order: OrderView } & FoodSendReport> {
     await wait();
     const now = clock();
-    const closesAt = closesAtFromTime(input.closesTime, now.date);
+    const allowCustom = input.allowCustom ?? true;
+    // Тот же отказ и тот же текст, что у `POST /api/orders`: сбор без меню и без своих позиций пуст.
+    if (input.placeId == null && !allowCustom) throw new Error("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    const closesAt = input.closesAt ?? closesAtFromTime(input.closesTime ?? null, now.date);
     // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
     if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+    if (!isWithinCloseHorizon(closesAt, now.date)) throw new Error(`Срок — не дальше ${FOOD_CLOSE_HORIZON_DAYS} дней.`);
     if (input.placeId != null && !PLACES.some((p) => p.id === input.placeId && !p.archived)) {
       throw new Error("Такого места больше нет.");
     }
@@ -453,6 +461,8 @@ export function createFoodMock(opts: FoodMockOptions) {
       id: nextOrderId++,
       createdBy: me().id,
       placeId: input.placeId,
+      title: input.title?.trim() || null,
+      allowCustom,
       note: input.note,
       payHint: input.payHint,
       closesAt,
@@ -496,6 +506,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       else if (tooMany) throw new Error(tooManyError);
       else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });
     } else {
+      if (!o.allowCustom) throw new Error("В этом сборе только позиции из списка.");
       if (tooMany) throw new Error(tooManyError);
       o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty, unit: "pcs", stepGrams: null });
     }

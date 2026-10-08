@@ -3925,6 +3925,52 @@ textarea {
   max-width: 160px;
 }
 
+/* Дата и время рядом, поровну и одной высоты; на узком экране — столбиком, иначе
+   нативный `type=date` с иконкой не помещается рядом со временем. */
+.food-when {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* Замер: нативное поле времени в Chromium выходит 37,6px при min-height 36, дата — ровно 36;
+   фиксируем высоту, чтобы пара стояла вровень. */
+.food-when input {
+  height: var(--control-h);
+}
+
+@media (max-width: 420px) {
+  .food-when {
+    grid-template-columns: 1fr;
+  }
+}
+
+.food-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Ряд «шт / кг + шаг» под строкой блюда: кнопки по содержимому, шаг узкий. */
+.food-dish-unit {
+  margin-top: -4px;
+}
+
+input.food-dish-step {
+  flex: none;
+  width: 110px;
+  padding: 8px 10px;
+  font-size: var(--text-sub);
+}
+
+.food-dish-unit .food-buttons {
+  flex-wrap: nowrap;
+}
+
+.food-person-line {
+  white-space: pre-wrap;
+}
+
 .food-dish-row {
   display: flex;
   align-items: center;

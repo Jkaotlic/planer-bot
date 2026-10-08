@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FOOD_TEXT_MAX, formatMoney, menuItemLabel } from "@planer/shared";
+import { FOOD_TEXT_MAX, formatMoney, menuItemLabel, orderHeadline, orderPersonBlock } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { orderView } from "./food-fixtures";
 import { AuthRequiredError } from "../../api/client";
@@ -18,7 +18,7 @@ const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200, unit: "pcs" as con
 async function open(order = orderView({ menu: DODO_MENU })) {
   vi.spyOn(apiClient, "getOrder").mockResolvedValue(order);
   const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn() });
-  await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe(`🍱 ${order.placeName ?? "Заказ без меню"}`));
+  await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe(`🍱 ${orderHeadline(order)}`));
   return el;
 }
 
@@ -262,5 +262,29 @@ describe("консоль: заказ — действия, которые ран
     await waitFor(() => expect(authRequired).toHaveBeenCalled());
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(area(el, "top")).toBeNull();
+  });
+
+  it("allowCustom: false — блока «Своё блюдо» нет, меню на месте", async () => {
+    const el = await open(orderView({ menu: DODO_MENU, allowCustom: false }));
+    expect(area(el, "custom")).toBeNull();
+    expect(area(el, "menu")).not.toBeNull();
+  });
+
+  it("«Не буду» не пропадает вместе с блоком «Своё блюдо» у сбора без своих позиций", async () => {
+    const el = await open(orderView({ menu: DODO_MENU, allowCustom: false }));
+    expect(maybeButton(el, "🙅 Не буду")).toBeTruthy();
+  });
+
+  it("заголовок экрана — название сбора, иначе место", async () => {
+    const el = await open(orderView({ menu: DODO_MENU, title: "Икра, доставка 09.10" }));
+    expect(el.querySelector("h2")?.textContent).toBe("🍱 Икра, доставка 09.10");
+  });
+
+  it("у организатора «Кто что» печатает orderPersonBlock — позиции под именем", async () => {
+    const person = { employeeId: 2, displayName: "Игорь", amount: 360, declined: false, items: [{ name: "Икра", price: 900, qty: 1, unit: "kg" as const, stepGrams: 400 }] };
+    const el = await open(orderView({ menu: DODO_MENU, people: [person] }));
+    const text = area(el, "people")!.textContent!;
+    for (const line of orderPersonBlock(person)) expect(text).toContain(line.trim());
+    expect(area(el, "people")!.querySelectorAll("[data-person-line]").length).toBe(orderPersonBlock(person).length);
   });
 });

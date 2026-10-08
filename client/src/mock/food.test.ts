@@ -80,3 +80,21 @@ describe("createFoodMock: «сейчас» — снаружи", () => {
     }
   });
 });
+
+describe("createFoodMock: сбор — название, срок на дату, свои позиции", () => {
+  const base = { note: null, payHint: null, audience: { kind: "team" as const } };
+
+  it("closesAt, title и allowCustom доходят до вида заказа; свои позиции при запрете отклоняются", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const { order } = await mock.createOrder({ ...base, placeId: 1, title: " Икра, доставка 09.10 ", allowCustom: false, closesAt: "2026-10-09T16:00" });
+    expect(order).toMatchObject({ title: "Икра, доставка 09.10", allowCustom: false, closesAt: "2026-10-09T16:00" });
+    await expect(mock.addOrderItem(order.id, { name: "Суп", price: 100 })).rejects.toThrow("В этом сборе только позиции из списка.");
+  });
+
+  it("отказы как у сервера: без меню и без своих позиций, срок за горизонтом", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    await expect(mock.createOrder({ ...base, placeId: null, allowCustom: false, closesAt: null })).rejects.toThrow("Без меню нужны свои позиции");
+    await expect(mock.createOrder({ ...base, placeId: null, closesAt: "2026-10-21T10:00" })).rejects.toThrow("Срок — не дальше 14 дней.");
+  });
+});
+

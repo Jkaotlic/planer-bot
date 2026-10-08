@@ -26,7 +26,7 @@ const O = { id: 7, placeName: "Додо" };
 const C = { id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true };
 const AUD = { kind: "team" } as const;
 const PLACE = { name: "Додо", menu: [{ name: "Пицца", price: 600, unit: "pcs" as const, stepGrams: null }] };
-const NEW_ORDER = { placeId: 4, note: null, payHint: null, closesTime: "12:30", audience: AUD };
+const NEW_ORDER = { placeId: 4, title: "Икра", allowCustom: false, note: null, payHint: null, closesAt: "2026-10-09T12:30", audience: AUD };
 
 type Case = { name: string; call: () => Promise<unknown>; method: string; path: string; body?: unknown; response: unknown; result: unknown };
 
