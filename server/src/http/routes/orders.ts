@@ -100,7 +100,7 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     let delivered: number;
     try {
       order = createOrder(db, {
-        createdBy: viewer.id, placeId: parsed.data.placeId, note: parsed.data.note, payHint: parsed.data.payHint,
+        createdBy: viewer.id, placeId: parsed.data.placeId, title: null, allowCustom: true, note: parsed.data.note, payHint: parsed.data.payHint,
         closesAt, recipientIds: reachable.map((e) => e.id),
       });
       delivered = await sendOrderInvites(bot, db, order, now, config.publicUrl);

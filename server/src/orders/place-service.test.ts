@@ -16,6 +16,19 @@ describe("места", () => {
     expect(place.menu.map((m) => [m.name, m.price])).toEqual([["Шаурма", 350], ["Лаваш", 200]]);
   });
 
+  it("кг-позиция сохраняет единицу и шаг при создании и правке; меню без unit остаётся штуками", () => {
+    const { db, anya, place } = stage();
+    expect(place.menu.map((m) => [m.unit, m.stepGrams])).toEqual([["pcs", null], ["pcs", null]]);
+    const caviar = createPlace(db, { name: "Икра", menu: [{ name: "Кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    expect(caviar.menu[0]).toMatchObject({ unit: "kg", stepGrams: 400 });
+    const id = caviar.menu[0]!.id;
+    const edited = updatePlace(db, caviar.id, { name: "Икра", menu: [{ id, name: "Кетовая", price: 2400, unit: "kg", stepGrams: 500 }, { name: "Красная", price: 1900, unit: "kg", stepGrams: 250 }] });
+    expect(edited.place!.menu.map((m) => [m.unit, m.stepGrams])).toEqual([["kg", 500], ["kg", 250]]);
+    // Возврат в штуки обнуляет шаг, а не оставляет его висеть.
+    const back = updatePlace(db, caviar.id, { name: "Икра", menu: [{ id, name: "Кетовая", price: 2400, unit: "pcs", stepGrams: null }] });
+    expect(back.place!.menu[0]).toMatchObject({ unit: "pcs", stepGrams: null });
+  });
+
   it("правка: блюдо с id меняет цену, новое добавляется, пропавшее уходит в архив", () => {
     const { db, place } = stage();
     const [shawarma, lavash] = place.menu;

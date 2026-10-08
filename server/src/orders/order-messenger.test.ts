@@ -22,7 +22,7 @@ function stage() {
   const igor = person(db, "Игорь", 101);
   const mark = person(db, "Марк", 102);
   const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }, { name: "Чай", price: 50, unit: "pcs", stepGrams: null }] }, anya.id);
-  const order = createOrder(db, { createdBy: anya.id, placeId: place.id, note: null, payHint: "Наличкой мне", closesAt: "2026-09-29T12:30", recipientIds: [anya.id, igor.id, mark.id] });
+  const order = createOrder(db, { createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: "Наличкой мне", closesAt: "2026-09-29T12:30", recipientIds: [anya.id, igor.id, mark.id] });
   return { db, anya, igor, mark, place, order };
 }
 

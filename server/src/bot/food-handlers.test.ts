@@ -30,7 +30,7 @@ function stage() {
   const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
   const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }, anya.id);
   const order = createOrder(db, {
-    createdBy: anya.id, placeId: place.id, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+    createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
   });
   const bot = stubBotInfo(createBot({ db, config }), { id: 1, first_name: "P", username: "p_bot" });
   return { db, bot, anya, igor, mark, poll, order, shawarmaId: place.menu[0]!.id };
@@ -336,7 +336,7 @@ describe("деньги заказа в боте", () => {
     // Своя пара получателей: Игорь (с Telegram) и Настя (без) — оба заказали.
     const nastya = createEmployee(db, { displayName: "Настя" });
     const order = createOrder(db, {
-      createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null,
+      createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null,
       recipientIds: [anya.id, igor.id, nastya.id],
     });
     const now = { date: "2026-09-29", time: "12:00" };

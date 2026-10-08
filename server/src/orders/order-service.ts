@@ -1,5 +1,8 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
-import { FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal, type PaymentRow } from "@planer/shared";
+import {
+  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal,
+  type FoodDishShape, type FoodMenuItemShape, type PaymentRow,
+} from "@planer/shared";
 import type { Db } from "../db/client";
 import {
   employees, foodOrderDeclines, foodOrderItems, foodOrderRecipients, foodOrders, foodPlaces,
@@ -12,7 +15,7 @@ import { activeMenuItem, menuForOrder } from "./place-service";
 type Viewer = { id: number; isAdmin: boolean };
 
 export function createOrder(db: Db, input: {
-  createdBy: number; placeId: number | null; note: string | null; payHint: string | null; closesAt: string | null; recipientIds: number[];
+  createdBy: number; placeId: number | null; title: string | null; allowCustom: boolean; note: string | null; payHint: string | null; closesAt: string | null; recipientIds: number[];
 }): FoodOrder {
   return db.transaction((tx) => {
     const { recipientIds, ...values } = input;
@@ -103,16 +106,22 @@ export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuIt
   if (!dish) return { ok: false, error: "Этого блюда нет в меню." };
   // Прибавляем к строке с той же ценой: если цену поправили посреди приёма,
   // новый тап — новая строка, и старый долг не переписывается задним числом.
+  // Тот же принцип с единицей и шагом: шаг поменяли посреди приёма — новая строка,
+  // иначе «2 × 0,4 кг» молча стало бы «2 × 0,5 кг».
   const same = db.select().from(foodOrderItems).where(and(
     eq(foodOrderItems.orderId, order.id), eq(foodOrderItems.employeeId, employeeId),
     eq(foodOrderItems.menuItemId, menuItemId), eq(foodOrderItems.price, dish.price),
+    eq(foodOrderItems.unit, dish.unit),
+    dish.stepGrams == null ? isNull(foodOrderItems.stepGrams) : eq(foodOrderItems.stepGrams, dish.stepGrams),
   )).get();
   if (same) {
     if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: `Больше ${FOOD_QTY_MAX} одного блюда — это уже не обед.` };
     db.update(foodOrderItems).set({ qty: same.qty + 1 }).where(eq(foodOrderItems.id, same.id)).run();
   } else {
     if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
-    db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId, name: dish.name, price: dish.price, qty: 1 }).run();
+    db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId, name: dish.name, price: dish.price, qty: 1,
+      unit: dish.unit, stepGrams: dish.stepGrams,
+    }).run();
   }
   clearDecline(db, order.id, employeeId);
   return { ok: true };
@@ -123,6 +132,9 @@ export function addCustomItem(
 ): Result {
   const allowed = guard(db, order, employeeId, now);
   if (!allowed.ok) return allowed;
+  // Проверка здесь, а не только в экране: кнопку «Своё блюдо» в уже разосланных письмах
+  // и во вкладке, открытой до сбора, никто не убирает задним числом.
+  if (!order.allowCustom) return { ok: false, error: "В этом сборе только позиции из списка." };
   if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
   db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId: null, ...input }).run();
   clearDecline(db, order.id, employeeId);
@@ -206,8 +218,11 @@ export interface OrderView {
   creatorId: number;
   creatorName: string;
   placeId: number | null;
+  /** Название сбора; `null` — обычный заказ по месту. */
+  title: string | null;
   placeName: string | null;
-  menu: { id: number; name: string; price: number }[];
+  allowCustom: boolean;
+  menu: FoodMenuItemShape[];
   note: string | null;
   payHint: string | null;
   closesAt: string | null;
@@ -217,14 +232,14 @@ export interface OrderView {
   cancelled: boolean;
   isCreator: boolean;
   canManage: boolean;
-  myItems: { id: number; name: string; price: number; qty: number }[];
+  myItems: (FoodDishShape & { id: number })[];
   myTotal: number;
   declined: boolean;
   recipientCount: number;
   respondedCount: number;
-  dishes: { name: string; price: number; qty: number }[];
+  dishes: FoodDishShape[];
   total: number;
-  people: { employeeId: number; displayName: string; amount: number; declined: boolean }[] | null;
+  people: { employeeId: number; displayName: string; amount: number; declined: boolean; items: FoodDishShape[] }[] | null;
   payment: {
     myPaid: boolean;
     paidCount: number;
@@ -255,7 +270,9 @@ export function orderView(db: Db, order: FoodOrder, viewer: Viewer, now: TeamClo
     creatorName: recipients.find((r) => r.employeeId === order.createdBy)?.displayName
       ?? db.select({ n: employees.displayName }).from(employees).where(eq(employees.id, order.createdBy)).get()?.n ?? "—",
     placeId: order.placeId,
+    title: order.title,
     placeName: place?.name ?? null,
+    allowCustom: order.allowCustom,
     menu: open && order.placeId != null ? menuForOrder(db, order.placeId) : [],
     note: order.note,
     payHint: order.payHint,
@@ -266,7 +283,7 @@ export function orderView(db: Db, order: FoodOrder, viewer: Viewer, now: TeamClo
     cancelled: order.cancelledAt != null,
     isCreator: order.createdBy === viewer.id,
     canManage: manage,
-    myItems: mine.map(({ id, name, price, qty }) => ({ id, name, price, qty })),
+    myItems: mine.map(({ id, name, price, qty, unit, stepGrams }) => ({ id, name, price, qty, unit, stepGrams })),
     myTotal: debtOf(items, viewer.id),
     declined: declines.has(viewer.id),
     recipientCount: recipients.length,
@@ -274,7 +291,8 @@ export function orderView(db: Db, order: FoodOrder, viewer: Viewer, now: TeamClo
     dishes: dishSummary(items),
     total: orderTotal(items),
     people: manage
-      ? recipients.map((r) => ({ employeeId: r.employeeId, displayName: r.displayName, amount: debtOf(items, r.employeeId), declined: declines.has(r.employeeId) }))
+      ? recipients.map((r) => ({ employeeId: r.employeeId, displayName: r.displayName, amount: debtOf(items, r.employeeId), declined: declines.has(r.employeeId),
+          items: dishSummary(items.filter((i) => i.employeeId === r.employeeId)) }))
       : null,
     payment: (() => {
       const progress = orderPayments(db, order);

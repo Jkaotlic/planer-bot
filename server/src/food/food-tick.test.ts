@@ -28,7 +28,7 @@ describe("runFoodTick", () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-a" });
     linkTelegramAccount(db, "inv-a", 100);
-    const order = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: "2026-09-29T11:00", recipientIds: [anya.id] });
+    const order = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-29T11:00", recipientIds: [anya.id] });
     const { bot } = silentBot();
     const api = recordApi(bot);
     const now = { date: "2026-09-29", time: "12:00" };
