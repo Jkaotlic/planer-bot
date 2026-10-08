@@ -87,7 +87,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     const open = listPollsFor(db, viewerOf(who.me, from.id), now).filter((p) => p.open);
     const orders = listOrdersFor(db, viewerOf(who.me, from.id), now).filter((o) => o.open);
     const rows = [
-      ...orders.map((o) => `🍱 ${o.creatorName}: ${o.placeName ?? "заказ без меню"}${o.closes ? ` (${o.closes})` : ""}`),
+      ...orders.map((o) => `${o.title ? "🛒" : "🍱"} ${o.creatorName}: ${o.title ?? o.placeName ?? "заказ без меню"}${o.closes ? ` (${o.closes})` : ""}`),
       ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`),
     ];
     const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows];

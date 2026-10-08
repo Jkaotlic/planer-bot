@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import {
-  closesLabel, debtors, formatMoney, isOpenAt, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
+  type FoodMenuItemShape, closesLabel, debtors, formatMoney, isOpenAt, menuItemLabel, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
 } from "@planer/shared";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
@@ -22,15 +22,17 @@ import { unpaidDebtors } from "./order-payment-service";
  * превращаются в переписку с ботом, которую легко сбить.
  */
 export function orderKeyboard(
-  order: FoodOrder, menu: readonly { id: number; name: string; price: number }[], publicUrl: string, isCreator: boolean,
+  order: FoodOrder, menu: readonly FoodMenuItemShape[], publicUrl: string, isCreator: boolean,
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
   menu.forEach((m, i) => {
-    kb.text(`${m.name} · ${formatMoney(m.price)}`, `order:add:${order.id}:${m.id}`);
+    kb.text(menuItemLabel(m), `order:add:${order.id}:${m.id}`);
     if (i % 2 === 1) kb.row();
   });
   if (menu.length % 2 === 1) kb.row();
-  kb.webApp("✍️ Своё блюдо", `${publicUrl}/app/?screen=orders&order=${order.id}`).text("↩️ Убрать", `order:undo:${order.id}`).row();
+  // В сборе закупки своих позиций нет: вход в мини-апп оттуда вёл бы в форму, которую сервер отклонит.
+  if (order.allowCustom) kb.webApp("✍️ Своё блюдо", `${publicUrl}/app/?screen=orders&order=${order.id}`);
+  kb.text("↩️ Убрать", `order:undo:${order.id}`).row();
   kb.text("🙅 Не буду", `order:no:${order.id}`);
   if (isCreator) kb.row().text("🔒 Закрыть приём", `order:close:${order.id}`);
   return kb;
@@ -50,11 +52,16 @@ export function placeName(db: Db, order: FoodOrder): string | null {
   return order.placeId == null ? null : db.select({ n: foodPlaces.name }).from(foodPlaces).where(eq(foodPlaces.id, order.placeId)).get()?.n ?? null;
 }
 
+/** Заголовок заказа в письмах: название сбора, иначе место; `null` — заказ без меню. */
+export function orderHeading(db: Db, order: FoodOrder): string | null {
+  return order.title ?? placeName(db, order);
+}
+
 export function orderTextFor(db: Db, order: FoodOrder, employeeId: number, today: string): string {
   const { byId } = names(db, order);
   return orderInviteText({
     creatorName: byId.get(order.createdBy) ?? "Коллега",
-    title: null,
+    title: order.title,
     placeName: placeName(db, order),
     note: order.note,
     payHint: order.payHint,
@@ -121,11 +128,13 @@ export function remindKeyboard(orderId: number): InlineKeyboard {
 export async function remindUnpaid(bot: Bot, db: Db, order: FoodOrder): Promise<{ delivered: number; unpaid: number; unreachable: string[] }> {
   const creator = orderRecipientRows(db, order.id).find((r) => r.employeeId === order.createdBy)?.displayName ?? "Коллега";
   const debtors_ = unpaidDebtors(db, order);
+  // «за заказ еды» узнаётся только у обычного заказа; у сбора с названием — по названию.
+  const heading = order.title;
   let delivered = 0;
   const unreachable: string[] = [];
   for (const d of debtors_) {
     if (d.telegramUserId == null) { unreachable.push(d.displayName); continue; }
-    const text = `⏰ Напоминаю: за заказ еды сдай ${formatMoney(d.amount)} — ${creator}.${order.payHint ? `\nКуда: ${order.payHint}` : ""}`;
+    const text = `⏰ Напоминаю: за ${heading ? `«${heading}»` : "заказ еды"} сдай ${formatMoney(d.amount)} — ${creator}.${order.payHint ? `\nКуда: ${order.payHint}` : ""}`;
     if (await notifyUser(bot, d.telegramUserId, text, payKeyboard(order.id))) delivered += 1;
     else unreachable.push(d.displayName);
   }
@@ -164,7 +173,8 @@ export async function finishOrderMessages(
   }
   const place = placeName(db, order);
   if (reason === "cancelled") {
-    for (const r of rows) if (r.telegramUserId != null) await notifyUser(bot, r.telegramUserId, `🚫 Заказ${place ? ` из «${place}»` : ""} отменён.`);
+    const what = order.title ? `Сбор «${order.title}»` : `Заказ${place ? ` из «${place}»` : ""}`;
+    for (const r of rows) if (r.telegramUserId != null) await notifyUser(bot, r.telegramUserId, `🚫 ${what} отменён.`);
     return;
   }
   const items = itemsOf(db, order.id);
@@ -173,7 +183,7 @@ export async function finishOrderMessages(
     // Сводка большой команды может не влезть в одно письмо (лимит Telegram —
     // 4096 знаков): режем по строкам, «Напомнить» — под последним куском,
     // после «Итого».
-    const parts = splitAtLines(organizerSummaryText({ title: null, placeName: place, items, names: byId }));
+    const parts = splitAtLines(organizerSummaryText({ title: order.title, placeName: place, items, names: byId }));
     for (const [i, part] of parts.entries()) {
       await notifyUser(bot, creator.telegramUserId, part, i === parts.length - 1 ? remindKeyboard(order.id) : undefined);
     }
@@ -181,6 +191,6 @@ export async function finishOrderMessages(
   for (const d of debtors(items, order.createdBy)) {
     const tg = rows.find((r) => r.employeeId === d.employeeId)?.telegramUserId;
     if (tg == null) continue;
-    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", title: null, placeName: place, amount: d.amount, payHint: order.payHint }), payKeyboard(order.id));
+    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", title: order.title, placeName: place, amount: d.amount, payHint: order.payHint }), payKeyboard(order.id));
   }
 }
