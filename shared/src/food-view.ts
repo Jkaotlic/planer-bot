@@ -1,7 +1,7 @@
 import type { FoodSendReport, OrderRemindResult, OrderView, PollView } from "./api/food";
 import { formatMoney } from "./collection";
 import {
-  FOOD_MENU_MAX, FOOD_STEP_GRAMS_MAX, FOOD_STEP_GRAMS_MIN, type FoodUnit, type PlaceInput, formatKg, itemLines, unitPart,
+  FOOD_MENU_MAX, FOOD_STEP_GRAMS_MAX, FOOD_STEP_GRAMS_MIN, type FoodMenuItemShape, type FoodUnit, type PlaceInput, formatKg, itemLines, unitPart,
 } from "./food-order";
 
 /**
@@ -159,7 +159,7 @@ export function parseStepKg(raw: string): number | null {
 
 /** Строки редактора из меню места — один путь на оба редактора (мини-апп и консоль). */
 export function placeRowsFromMenu(
-  menu: readonly { id: number; name: string; price: number; unit: FoodUnit; stepGrams: number | null }[],
+  menu: readonly FoodMenuItemShape[],
 ): PlaceEditorRow[] {
   return menu.map((m) => ({
     id: m.id,
@@ -203,7 +203,14 @@ export function placeMenuFromRows(
     let stepGrams: number | null = null;
     if (r.unit === "kg") {
       stepGrams = parseStepKg(r.step);
-      if (stepGrams == null) return { ok: false, error: `У «${name}» не указан шаг в кг.` };
+      if (stepGrams == null) {
+        return {
+          ok: false,
+          error: r.step.trim()
+            ? `У «${name}» шаг — от ${formatKg(FOOD_STEP_GRAMS_MIN)} до ${formatKg(FOOD_STEP_GRAMS_MAX)} кг.`
+            : `У «${name}» не указан шаг в кг.`,
+        };
+      }
     }
     menu.push({ ...(r.id != null ? { id: r.id } : {}), name, price, unit: r.unit, stepGrams });
   }

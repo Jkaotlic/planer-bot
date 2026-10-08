@@ -1,4 +1,4 @@
-import type { FoodUnit } from "../food-order";
+import type { FoodDishShape, FoodMenuItemShape } from "../food-order";
 import type { PaymentRow } from "../collection-payment";
 import type { PollChoice, PollTally } from "../poll";
 
@@ -34,7 +34,7 @@ export interface PollView {
 export interface PlaceView {
   id: number;
   name: string;
-  menu: { id: number; name: string; price: number; unit: FoodUnit; stepGrams: number | null }[];
+  menu: FoodMenuItemShape[];
 }
 
 export interface OrderView {
@@ -47,7 +47,7 @@ export interface OrderView {
   placeName: string | null;
   /** Можно ли добавлять позиции вне меню. */
   allowCustom: boolean;
-  menu: { id: number; name: string; price: number; unit: FoodUnit; stepGrams: number | null }[];
+  menu: FoodMenuItemShape[];
   note: string | null;
   payHint: string | null;
   closesAt: string | null;
@@ -57,12 +57,12 @@ export interface OrderView {
   cancelled: boolean;
   isCreator: boolean;
   canManage: boolean;
-  myItems: { id: number; name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }[];
+  myItems: (FoodDishShape & { id: number })[];
   myTotal: number;
   declined: boolean;
   recipientCount: number;
   respondedCount: number;
-  dishes: { name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }[];
+  dishes: FoodDishShape[];
   total: number;
   people:
     | {
@@ -70,7 +70,7 @@ export interface OrderView {
         displayName: string;
         amount: number;
         declined: boolean;
-        items: { name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }[];
+        items: FoodDishShape[];
       }[]
     | null;
   /** Кто уже сдал. `rows` — только запускающему/админу, как и `people`. */

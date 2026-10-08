@@ -306,6 +306,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     name: string;
     price: number;
     qty: number;
+    unit: FoodUnit;
+    stepGrams: number | null;
   }
 
   interface MockOrder {
@@ -374,7 +376,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       cancelled: o.cancelledAt != null,
       isCreator: o.createdBy === me().id,
       canManage: manage,
-      myItems: mine.map(({ id, name, price, qty }) => ({ id, name, price, qty, unit: "pcs" as const, stepGrams: null })),
+      myItems: mine.map(({ id, name, price, qty, unit, stepGrams }) => ({ id, name, price, qty, unit, stepGrams })),
       myTotal: debtOf(o.items, me().id),
       declined: o.declines.has(me().id),
       recipientCount: o.recipients.length,
@@ -384,7 +386,9 @@ export function createFoodMock(opts: FoodMockOptions) {
       // Поимённо — только запускающему/админу, как на сервере (`orderView`):
       // сумма коллеги — не общее знание.
       people: manage
-        ? o.recipients.map((id) => ({ employeeId: id, displayName: nameOf(id), amount: debtOf(o.items, id), declined: o.declines.has(id), items: [] }))
+        ? o.recipients.map((id) => ({ employeeId: id, displayName: nameOf(id), amount: debtOf(o.items, id), declined: o.declines.has(id),
+            items: o.items.filter((i) => i.employeeId === id).map(({ name, price, qty, unit, stepGrams }) => ({ name, price, qty, unit, stepGrams })),
+          }))
         : null,
       payment: (() => {
         const progress = orderPaymentProgress(o);
@@ -490,10 +494,10 @@ export function createFoodMock(opts: FoodMockOptions) {
       const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price);
       if (same) same.qty += 1;
       else if (tooMany) throw new Error(tooManyError);
-      else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1 });
+      else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });
     } else {
       if (tooMany) throw new Error(tooManyError);
-      o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty });
+      o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty, unit: "pcs", stepGrams: null });
     }
     o.declines.delete(me().id);
     return orderViewOf(o);

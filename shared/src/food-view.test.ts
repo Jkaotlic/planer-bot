@@ -221,6 +221,12 @@ describe("шаг в редакторе", () => {
     expect(placeMenuFromRows([{ name: "Икра", price: "2400", unit: "kg", step: "" }]))
       .toEqual({ ok: false, error: "У «Икра» не указан шаг в кг." });
   });
+  it("кг с набранным, но невозможным шагом — называет границы, а не «не указан»", () => {
+    for (const step of ["200", "0,001"]) {
+      expect(placeMenuFromRows([{ name: "Икра", price: "2400", unit: "kg", step }]))
+        .toEqual({ ok: false, error: "У «Икра» шаг — от 0,01 до 100 кг." });
+    }
+  });
   it("кг с шагом и шт — в меню с единицами", () => {
     expect(placeMenuFromRows([
       { name: "Икра", price: "2400", unit: "kg", step: "0,4" },

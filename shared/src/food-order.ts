@@ -74,7 +74,25 @@ export const placeInputSchema = z
 
 export type PlaceInput = z.infer<typeof placeInputSchema>;
 
-export type FoodUnit = "pcs" | "kg";
+export type FoodUnit = z.infer<typeof foodUnitSchema>;
+
+/** Блюдо меню, как его видят экраны: единица и шаг идут вместе с ценой. */
+export interface FoodMenuItemShape {
+  id: number;
+  name: string;
+  price: number;
+  unit: FoodUnit;
+  stepGrams: number | null;
+}
+
+/** Позиция заказа без id: строка сводки, «кто что». */
+export interface FoodDishShape {
+  name: string;
+  price: number;
+  qty: number;
+  unit: FoodUnit;
+  stepGrams: number | null;
+}
 
 /**
  * Вес — целыми граммами, печать — килограммами. Не float: `0.4 * 3` в JS даёт
@@ -86,6 +104,7 @@ export function formatKg(grams: number): string {
   return rest ? `${whole},${rest}` : String(whole);
 }
 
+// кг без шага печатается как штуки намеренно: старые и битые данные терпим, схема их не пропускает.
 export function unitPart(m: { unit?: FoodUnit; stepGrams?: number | null }): string | null {
   return m.unit === "kg" && m.stepGrams ? `${formatKg(m.stepGrams)} кг` : null;
 }
@@ -125,8 +144,8 @@ export function orderTotal(items: readonly OrderItemLike[]): number {
  */
 export function dishSummary(
   items: readonly OrderItemLike[],
-): { name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }[] {
-  const byKey = new Map<string, { name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }>();
+): FoodDishShape[] {
+  const byKey = new Map<string, FoodDishShape>();
   for (const i of items) {
     const key = `${i.name}\u0000${i.price}\u0000${i.unit ?? "pcs"}\u0000${i.stepGrams ?? ""}`;
     const row = byKey.get(key) ?? { name: i.name, price: i.price, qty: 0, unit: i.unit ?? "pcs", stepGrams: i.stepGrams ?? null };
