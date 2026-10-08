@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { orderTotal, pollChoiceSchema } from "@planer/shared";
+import { formatKg, orderTotal, pollChoiceSchema } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -172,7 +172,9 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     const result = addMenuItem(db, order, who.me.id, Number(ctx.match[2]), teamNow(config.teamTz));
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     const last = itemsOf(db, order.id).filter((i) => i.employeeId === who.me.id && i.menuItemId === Number(ctx.match[2])).at(-1);
-    await ctx.answerCallbackQuery({ text: last ? `＋ ${last.name} (×${last.qty})` : "Добавил" });
+    // У кг-позиции «×3» ничего не говорит человеку — он набирает вес, а не шаги.
+    const amount = last && last.unit === "kg" && last.stepGrams ? `${formatKg(last.qty * last.stepGrams)} кг` : last ? `×${last.qty}` : "";
+    await ctx.answerCallbackQuery({ text: last ? `＋ ${last.name} (${amount})` : "Добавил" });
     await redrawOrder(ctx, order.id, who.me);
   });
 

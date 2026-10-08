@@ -140,6 +140,18 @@ describe("закрытие", () => {
     expect(closeDueOrders(db, now)).toHaveLength(0);
   });
 
+  it("заказ со сроком на завтра переживает сегодняшний тик и закрывается ровно один раз в свой день", () => {
+    const { db, anya } = stage();
+    const tomorrow = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-30T10:00", recipientIds: [anya.id] });
+    // Конец сегодняшнего дня: время «23:59» позже «10:00», но дата раньше — сравнивается строка целиком.
+    expect(closeDueOrders(db, { date: "2026-09-29", time: "23:59" })).toHaveLength(0);
+    expect(getOrder(db, tomorrow.id)!.closedAt).toBeNull();
+    expect(closeDueOrders(db, { date: "2026-09-30", time: "09:59" })).toHaveLength(0);
+    expect(closeDueOrders(db, { date: "2026-09-30", time: "10:00" }).map((o) => o.id)).toEqual([tomorrow.id]);
+    expect(closeDueOrders(db, { date: "2026-09-30", time: "10:01" })).toHaveLength(0);
+    expect(getOrder(db, tomorrow.id)!.closedAt).not.toBeNull();
+  });
+
   it("closeDueOrders не трогает заказ со сроком в будущем и заказ без срока", () => {
     const { db, anya } = stage();
     const future = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-29T13:00", recipientIds: [anya.id] });

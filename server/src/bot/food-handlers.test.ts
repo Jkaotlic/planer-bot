@@ -198,6 +198,19 @@ describe("колбэки заказа", () => {
     expect(api.calls.find((c) => c.method === "editMessageText")!.payload.text).toContain("Твой заказ:");
   });
 
+  it("тап по кг-позиции показывает вес, а не количество шагов; штуки — как раньше", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    const place = createPlace(db, { name: "Рынок", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const market = createOrder(db, {
+      createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+    });
+    const api = recordApi(bot);
+    for (let k = 0; k < 3; k++) await tap(bot, 333, `order:add:${market.id}:${place.menu[0]!.id}`);
+    expect(api.answers.at(-1)).toBe("＋ Икра кетовая (1,2 кг)");
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    expect(api.answers.at(-1)).toBe("＋ Шаурма (×1)");
+  });
+
   it("«Убрать» и «Не буду» работают; посторонний получает отказ", async () => {
     const { db, bot, order, shawarmaId } = stage();
     const api = recordApi(bot);
