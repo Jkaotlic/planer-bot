@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { FOOD_QTY_MAX, formatMoney } from "@planer/shared";
+import { FOOD_QTY_MAX, formatMoney, orderPersonBlock } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { OrderScreen } from "./OrderScreen";
 
@@ -241,3 +241,43 @@ describe("OrderScreen — админ у чужого заказа", () => {
     expect(el.textContent).toContain("Отменить чужой заказ (собирает Игорь)?");
   });
 });
+
+describe("OrderScreen — сбор без своих позиций, название, «Кто что»", () => {
+  it("allowCustom: false — блока «Своё блюдо» нет, меню на месте", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, allowCustom: false });
+    const el = await mountScreen(7);
+    expect(el.querySelector("input[name=custom-name]")).toBeNull();
+    expect(el.textContent).not.toContain("Своё блюдо");
+    expect(el.textContent).toContain("Меню");
+  });
+
+  for (const allowCustom of [true, false]) {
+    it(`«🙅 Не буду» есть при allowCustom=${allowCustom}, пока приём открыт и позиций нет`, async () => {
+      vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, allowCustom });
+      const el = await mountScreen(7);
+      expect(byText(el, "🙅 Не буду")).toBeTruthy();
+    });
+  }
+
+  it("«Не буду» нет, если уже отказался, и нет у закрытого заказа", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, allowCustom: false, declined: true });
+    const el = await mountScreen(7);
+    expect(byText(el, "🙅 Не буду")).toBeUndefined();
+  });
+
+  it("заголовок — название сбора, иначе место, иначе «Заказ без меню»", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, title: "Икра, доставка 09.10" });
+    const el = await mountScreen(7);
+    expect(el.querySelector("h1")?.textContent).toBe("🍱 Икра, доставка 09.10");
+  });
+
+  it("«Кто что»: строка человека и позиции под ним — дословно orderPersonBlock", async () => {
+    const person = { employeeId: 2, displayName: "Игорь", amount: 360, declined: false, items: [{ name: "Икра", price: 900, qty: 1, unit: "kg" as const, stepGrams: 400 }] };
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, isCreator: true, canManage: true, people: [person], total: 360 });
+    const el = await mountScreen(7);
+    const lines = [...el.querySelectorAll("[data-person-line]")].map((n) => n.textContent);
+    expect(lines).toEqual(orderPersonBlock(person));
+    expect(lines[1]!.startsWith("  ")).toBe(true);
+  });
+});
+

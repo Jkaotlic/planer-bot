@@ -20,7 +20,7 @@ async function mount(initial: FoodRoute) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(AppRoot, null, createElement(FoodScreen, { initial, onClose: vi.fn() }))); });
+  await act(async () => { root!.render(createElement(AppRoot, null, createElement(FoodScreen, { initial, onClose: vi.fn(), today: "2026-10-08" }))); });
   await settle();
   return host;
 }
@@ -155,3 +155,14 @@ describe("FoodScreen — деньги меню", () => {
     expect(el.textContent).toContain("Пицца — 1\u00a0200\u00a0₽");
   });
 });
+
+describe("FoodScreen — заголовок заказа в списке", () => {
+  it("карточка называется по названию сбора, иначе по месту", async () => {
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([{ ...ORDER, id: 8, title: "Икра, доставка 09.10" }, ORDER]);
+    const el = await mount({ view: "list" });
+    expect(el.textContent).toContain("🍱 Икра, доставка 09.10");
+    expect(el.textContent).toContain("🍱 Шаурмечная");
+  });
+});
+

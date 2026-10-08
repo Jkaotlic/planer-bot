@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
 import {
   FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, myOrderPayment,
-  myOrderEmptyText, orderPersonLine, orderStatusLabel, payHintLine, priceDigits, remindResultText,
+  myOrderEmptyText, orderHeadline, orderPersonBlock, orderStatusLabel, payHintLine, priceDigits, remindResultText,
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -103,7 +103,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
   return (
     <div className="ui-page">
       <ActionButton compact kind="quiet" onClick={onBack}>‹ Назад</ActionButton>
-      <h1 className="ui-screen__title">🍱 {order.placeName ?? "Заказ без меню"}</h1>
+      <h1 className="ui-screen__title">🍱 {orderHeadline(order)}</h1>
       {/* Нижний отступ: `ui-page` не ставит зазор между детьми, и строка статуса липла к первой карточке. */}
       <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", marginBottom: 8 }}>
         Собирает {order.creatorName} · {status} · ответили {order.respondedCount} из {order.recipientCount}
@@ -162,7 +162,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           </Card>
         )}
 
-        {order.open && (
+        {order.open && order.allowCustom && (
           <Card>
             <div style={{ fontWeight: 600 }}>Своё блюдо</div>
             <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
@@ -181,11 +181,14 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
                   setCustomName(""); setCustomPrice("");
                   return next;
                 })}>Добавить</ActionButton>
-              {order.myItems.length === 0 && !order.declined && (
-                <ActionButton compact kind="quiet" disabled={busy} onClick={() => run(() => apiClient.declineOrder(order.id))}>🙅 Не буду</ActionButton>
-              )}
             </div>
           </Card>
+        )}
+
+        {/* Вне блока «Своё блюдо»: у сбора без своих позиций тот блок не рисуется, а отказаться
+            от участия должно быть можно всегда, пока приём открыт. */}
+        {order.open && order.myItems.length === 0 && !order.declined && (
+          <ActionButton compact kind="quiet" disabled={busy} onClick={() => run(() => apiClient.declineOrder(order.id))}>🙅 Не буду</ActionButton>
         )}
 
         {order.people && (
@@ -194,7 +197,10 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             {order.dishes.map((d) => <div key={`${d.name}-${d.price}`}>{itemLines([d])[0]}</div>)}
             <div style={{ fontWeight: 600, marginTop: 6 }}>Кто сколько</div>
             {order.people.map((p) => (
-              <div key={p.employeeId}>{orderPersonLine(p)}</div>
+              <div key={p.employeeId}>
+                {/* white-space: pre — двухпробельный отступ позиций под именем иначе схлопнется. */}
+                {orderPersonBlock(p).map((line, i) => <div key={i} data-person-line style={{ whiteSpace: "pre-wrap" }}>{line}</div>)}
+              </div>
             ))}
             <div style={{ fontWeight: 600 }}>Итого: {formatMoney(order.total)}</div>
           </Card>

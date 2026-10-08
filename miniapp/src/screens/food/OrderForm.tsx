@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Input, Textarea } from "@telegram-apps/telegram-ui";
-import { FOOD_NO_PLACES_HINT, audienceReady, menuPreview, sendReportText } from "@planer/shared";
+import { Cell, Input, Switch, Textarea } from "@telegram-apps/telegram-ui";
+import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText } from "@planer/shared";
 import { apiClient, type PlaceView, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton, Card } from "../../ui";
@@ -16,7 +16,13 @@ import { ActionButton, Card } from "../../ui";
  * шапке списка «Заказы и опросы» — иначе человек без единого заведённого
  * места не видит, куда идти, до того как отменит форму.
  */
-export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: number): void; onCancel(): void; onEditPlaces?(): void }) {
+export function OrderForm({ onDone, onCancel, onEditPlaces, today }: {
+  onDone(orderId: number): void;
+  onCancel(): void;
+  onEditPlaces?(): void;
+  /** Командная дата (`myShifts.today` из bootstrap), не часы телефона: граница дня следует за командой. */
+  today: string;
+}) {
   const [places, setPlaces] = useState<PlaceView[]>([]);
   // Отдельно от `places`: пустой массив — это и «ещё грузится», и «мест
   // правда нет», а подсказку «Мест пока нет» нельзя мигать на каждую загрузку.
@@ -24,6 +30,10 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
   const [placeId, setPlaceId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [payHint, setPayHint] = useState("");
+  const [title, setTitle] = useState("");
+  // Что человек отметил для места; «Без меню» перекрывает это принудительно (см. `allowCustom`).
+  const [allowCustomPick, setAllowCustomPick] = useState(true);
+  const [closesDate, setClosesDate] = useState("");
   const [closesTime, setClosesTime] = useState("");
   const [audience, setAudience] = useState<TeamAudience>({ kind: "on_shift" });
   const [busy, setBusy] = useState(false);
@@ -47,12 +57,19 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
   const ready = audienceReady(audience);
   const selectedPlace = places.find((p) => p.id === placeId) ?? null;
 
+  // Без меню и без своих позиций заказывать нечего — сервер такое отклоняет (400),
+  // поэтому форма не даёт его собрать, а не показывает отказ после нажатия.
+  const allowCustom = placeId === null ? true : allowCustomPick;
+  // Дата без времени срока не задаёт: молча выбрать «00:00» значило бы закрыть сбор до начала.
+  const dateWithoutTime = closesDate !== "" && closesTime === "";
+  const closesAt = closesTime ? `${closesDate || today}T${closesTime}` : null;
+
   async function submit() {
     setBusy(true);
     setError(null);
     try {
       const result = await apiClient.createOrder({
-        placeId, note: note.trim() || null, payHint: payHint.trim() || null, closesTime: closesTime || null, audience,
+        placeId, title: title.trim() || null, allowCustom, note: note.trim() || null, payHint: payHint.trim() || null, closesAt, audience,
       });
       if (result.unreachable.length > 0) setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable });
       else onDone(result.order.id);
@@ -107,14 +124,30 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: { onDone(orderId: 
       {/* Поля `Input`/`Textarea` красят свой фон прямоугольником без скругления;
           в карточке он сливается с её цветом, и форма — одного вида с остальными. */}
       <Card>
+        <Input header="Название (необязательно)" name="order-title" placeholder="Например: Икра, доставка 09.10" maxLength={FOOD_TEXT_MAX}
+          value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy} />
         <Textarea header="Комментарий (необязательно)" value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
         <Input header="Куда сдавать (необязательно)" name="pay-hint" value={payHint} onChange={(e) => setPayHint(e.target.value)} disabled={busy} />
-        <Input header="Приём до (необязательно)" type="time" value={closesTime} onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
+        {/* Друг под другом, а не рядом: две половинки по ~95px на 320px обрезали и подпись, и саму
+            дату (замер 2026-10-08), а у даты формат `дд.мм.гггг` не сжимается. */}
+        <Input header="Дата (необязательно)" name="closes-date" type="date" min={today} max={addDaysIso(today, FOOD_CLOSE_HORIZON_DAYS)}
+          value={closesDate} onChange={(e) => setClosesDate(e.target.value)} disabled={busy} />
+        <Input header="Приём до (необязательно)" name="closes-time" type="time" value={closesTime} onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
+        {dateWithoutTime && (
+          <div role="status" style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", padding: "0 22px 8px" }}>
+            Укажи и время — дата без времени срок не задаёт.
+          </div>
+        )}
+        <Cell Component="label" multiline
+          after={<Switch name="allow-custom" checked={allowCustom} disabled={busy || placeId === null} onChange={(e) => setAllowCustomPick(e.target.checked)} />}
+          description={placeId === null ? "Без меню позиции — только свои." : undefined}>
+          Можно добавлять свои позиции
+        </Cell>
       </Card>
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <ActionButton kind="primary" disabled={!ready || busy} loading={busy} onClick={submit}>Разослать</ActionButton>
+        <ActionButton kind="primary" disabled={!ready || dateWithoutTime || busy} loading={busy} onClick={submit}>Разослать</ActionButton>
         <ActionButton kind="quiet" disabled={busy} onClick={onCancel}>Отмена</ActionButton>
       </div>
     </div>

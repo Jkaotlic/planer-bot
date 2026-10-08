@@ -89,3 +89,60 @@ describe("PlaceEditor — мелочи захода", () => {
     expect(el.textContent).toContain("В меню уже 30 блюд — больше не поместится в кнопки бота.");
   });
 });
+
+describe("PlaceEditor — кг", () => {
+  const dish = (i: number, key: "name" | "price" | "step") => `input[name=dish-${key}-${i}]`;
+  const q = (el: HTMLElement, sel: string) => el.querySelector<HTMLInputElement>(sel)!;
+  const unitBtn = (el: HTMLElement, label: string) => byText(el, label);
+
+  it("у строки переключатель шт / кг, шаг только у кг; «0,4» уходит граммами", async () => {
+    const save = vi.spyOn(apiClient, "saveFoodPlace").mockResolvedValue({ id: 1, name: "Рынок", menu: [] });
+    const el = await mountEditor({ place: null, onSaved: vi.fn() });
+    await act(async () => type(q(el, "input[name=place-name]"), "Рынок"));
+    await act(async () => byText(el, "+ Блюдо").click());
+    await act(async () => type(q(el, dish(0, "name")), "Икра"));
+    await act(async () => type(q(el, dish(0, "price")), "900"));
+    expect(q(el, dish(0, "step"))).toBeNull();
+    await act(async () => unitBtn(el, "кг").click());
+    expect(unitBtn(el, "кг").getAttribute("aria-pressed")).toBe("true");
+    await act(async () => type(q(el, dish(0, "step")), "0,4"));
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    expect(save).toHaveBeenCalledWith(null, { name: "Рынок", menu: [{ name: "Икра", price: 900, unit: "kg", stepGrams: 400 }] });
+  });
+
+  it("кг без шага — ошибка с названием, без вызова API", async () => {
+    const save = vi.spyOn(apiClient, "saveFoodPlace");
+    const el = await mountEditor({ place: null, onSaved: vi.fn() });
+    await act(async () => type(q(el, "input[name=place-name]"), "Рынок"));
+    await act(async () => byText(el, "+ Блюдо").click());
+    await act(async () => type(q(el, dish(0, "name")), "Икра"));
+    await act(async () => type(q(el, dish(0, "price")), "900"));
+    await act(async () => unitBtn(el, "кг").click());
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    expect(save).not.toHaveBeenCalled();
+    expect(el.textContent).toContain("У «Икра» не указан шаг в кг.");
+  });
+
+  it("кг -> шт -> кг: набранный шаг не теряется", async () => {
+    const el = await mountEditor({ place: null, onSaved: vi.fn() });
+    await act(async () => byText(el, "+ Блюдо").click());
+    await act(async () => unitBtn(el, "кг").click());
+    await act(async () => type(q(el, dish(0, "step")), "0,4"));
+    await act(async () => unitBtn(el, "шт").click());
+    expect(q(el, dish(0, "step"))).toBeNull();
+    await act(async () => unitBtn(el, "кг").click());
+    expect(q(el, dish(0, "step")).value).toBe("0,4");
+  });
+
+  it("нетронутое кг-блюдо сохраняется с id, unit и stepGrams как было", async () => {
+    const save = vi.spyOn(apiClient, "saveFoodPlace").mockResolvedValue({ id: 3, name: "Рынок", menu: [] });
+    const el = await mountEditor({ place: { id: 3, name: "Рынок", menu: [{ id: 31, name: "Икра", price: 900, unit: "kg", stepGrams: 400 }] }, onSaved: vi.fn() });
+    expect(q(el, dish(0, "step")).value).toBe("0,4");
+    await act(async () => byText(el, "Сохранить").click());
+    await settle();
+    expect(save).toHaveBeenCalledWith(3, { name: "Рынок", menu: [{ id: 31, name: "Икра", price: 900, unit: "kg", stepGrams: 400 }] });
+  });
+});
+
