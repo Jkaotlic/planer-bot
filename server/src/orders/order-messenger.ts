@@ -54,6 +54,7 @@ export function orderTextFor(db: Db, order: FoodOrder, employeeId: number, today
   const { byId } = names(db, order);
   return orderInviteText({
     creatorName: byId.get(order.createdBy) ?? "Коллега",
+    title: null,
     placeName: placeName(db, order),
     note: order.note,
     payHint: order.payHint,
@@ -172,7 +173,7 @@ export async function finishOrderMessages(
     // Сводка большой команды может не влезть в одно письмо (лимит Telegram —
     // 4096 знаков): режем по строкам, «Напомнить» — под последним куском,
     // после «Итого».
-    const parts = splitAtLines(organizerSummaryText({ placeName: place, items, names: byId }));
+    const parts = splitAtLines(organizerSummaryText({ title: null, placeName: place, items, names: byId }));
     for (const [i, part] of parts.entries()) {
       await notifyUser(bot, creator.telegramUserId, part, i === parts.length - 1 ? remindKeyboard(order.id) : undefined);
     }
@@ -180,6 +181,6 @@ export async function finishOrderMessages(
   for (const d of debtors(items, order.createdBy)) {
     const tg = rows.find((r) => r.employeeId === d.employeeId)?.telegramUserId;
     if (tg == null) continue;
-    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", placeName: place, amount: d.amount, payHint: order.payHint }), payKeyboard(order.id));
+    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", title: null, placeName: place, amount: d.amount, payHint: order.payHint }), payKeyboard(order.id));
   }
 }

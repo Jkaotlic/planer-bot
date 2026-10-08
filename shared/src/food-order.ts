@@ -52,11 +52,39 @@ export const placeInputSchema = z
 
 export type PlaceInput = z.infer<typeof placeInputSchema>;
 
+export type FoodUnit = "pcs" | "kg";
+
+/**
+ * Вес — целыми граммами, печать — килограммами. Не float: `0.4 * 3` в JS даёт
+ * `1.2000000000000002`, а эта строка уходит людям в сводку закупки.
+ */
+export function formatKg(grams: number): string {
+  const whole = Math.floor(grams / 1000);
+  const rest = String(grams % 1000).padStart(3, "0").replace(/0+$/, "");
+  return rest ? `${whole},${rest}` : String(whole);
+}
+
+export function unitPart(m: { unit?: FoodUnit; stepGrams?: number | null }): string | null {
+  return m.unit === "kg" && m.stepGrams ? `${formatKg(m.stepGrams)} кг` : null;
+}
+
 export interface OrderItemLike {
   employeeId: number;
   name: string;
   price: number;
   qty: number;
+  // Необязательные: позиции без единицы (старые вызовы, чат) — штуки.
+  unit?: FoodUnit;
+  stepGrams?: number | null;
+}
+
+type LineItem = Pick<OrderItemLike, "name" | "price" | "qty" | "unit" | "stepGrams">;
+
+function itemLine(i: LineItem): string {
+  const step = unitPart(i);
+  if (!step) return `${i.name}${i.qty > 1 ? ` ×${i.qty}` : ""} — ${formatMoney(i.price * i.qty)}`;
+  const weight = i.qty > 1 ? `${i.qty} × ${step} (${formatKg(i.qty * i.stepGrams!)} кг)` : step;
+  return `${i.name} — ${weight} — ${formatMoney(i.price * i.qty)}`;
 }
 
 export function debtOf(items: readonly OrderItemLike[], employeeId: number): number {
@@ -70,13 +98,16 @@ export function orderTotal(items: readonly OrderItemLike[]): number {
 /**
  * Что заказывать — одинаковое сложено. Разная цена у одного блюда — разные
  * строки: так бывает, когда меню поправили посреди приёма, и тот, кто
- * заказывает, должен это увидеть, а не получить среднюю цену.
+ * заказывает, должен это увидеть, а не получить среднюю цену. Разный шаг —
+ * тоже разные строки: 2 × 0,4 и 1 × 0,5 не складываются в штуки.
  */
-export function dishSummary(items: readonly OrderItemLike[]): { name: string; price: number; qty: number }[] {
-  const byKey = new Map<string, { name: string; price: number; qty: number }>();
+export function dishSummary(
+  items: readonly OrderItemLike[],
+): { name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }[] {
+  const byKey = new Map<string, { name: string; price: number; qty: number; unit: FoodUnit; stepGrams: number | null }>();
   for (const i of items) {
-    const key = `${i.name}\u0000${i.price}`;
-    const row = byKey.get(key) ?? { name: i.name, price: i.price, qty: 0 };
+    const key = `${i.name}\u0000${i.price}\u0000${i.unit ?? "pcs"}\u0000${i.stepGrams ?? ""}`;
+    const row = byKey.get(key) ?? { name: i.name, price: i.price, qty: 0, unit: i.unit ?? "pcs", stepGrams: i.stepGrams ?? null };
     row.qty += i.qty;
     byKey.set(key, row);
   }
@@ -93,8 +124,8 @@ export function debtors(items: readonly OrderItemLike[], creatorId: number): { e
   return order.map((employeeId) => ({ employeeId, amount: debtOf(items, employeeId) })).filter((d) => d.amount > 0);
 }
 
-export function itemLines(items: readonly Pick<OrderItemLike, "name" | "price" | "qty">[]): string[] {
-  return items.map((i) => `${i.name}${i.qty > 1 ? ` ×${i.qty}` : ""} — ${formatMoney(i.price * i.qty)}`);
+export function itemLines(items: readonly LineItem[]): string[] {
+  return items.map(itemLine);
 }
 
 /**
@@ -104,14 +135,19 @@ export function itemLines(items: readonly Pick<OrderItemLike, "name" | "price" |
  */
 export function orderInviteText(input: {
   creatorName: string;
+  title: string | null;
   placeName: string | null;
   note: string | null;
   payHint: string | null;
   closes: string | null;
-  myItems: readonly Pick<OrderItemLike, "name" | "price" | "qty">[];
+  myItems: readonly LineItem[];
   declined: boolean;
 }): string {
-  const lines = [`🍱 ${input.creatorName} собирает заказ${input.placeName ? `: ${input.placeName}` : ""}`];
+  const lines = [
+    input.title
+      ? `🛒 ${input.creatorName} собирает: ${input.title}`
+      : `🍱 ${input.creatorName} собирает заказ${input.placeName ? `: ${input.placeName}` : ""}`,
+  ];
   if (input.closes) lines.push(`Приём ${input.closes}`);
   if (input.note) lines.push("", input.note);
   if (input.payHint) lines.push("", `Куда сдавать: ${input.payHint}`);
@@ -124,20 +160,25 @@ export function orderInviteText(input: {
   return lines.join("\n");
 }
 
-/** Сводка тому, кто оформляет заказ: сначала что заказать, потом кто сколько. */
+/** Сводка тому, кто оформляет заказ: сначала что заказать, потом кто что. */
 export function organizerSummaryText(input: {
+  title: string | null;
   placeName: string | null;
   items: readonly OrderItemLike[];
   names: ReadonlyMap<number, string>;
 }): string {
-  const lines = [`📋 Заказ${input.placeName ? ` из «${input.placeName}»` : ""} закрыт.`, "", "Что заказать:"];
-  for (const d of dishSummary(input.items)) {
-    lines.push(`${d.name}${d.qty > 1 ? ` ×${d.qty}` : ""} — ${formatMoney(d.price * d.qty)}`);
-  }
-  lines.push("", "Кто сколько:");
+  const head = input.title
+    ? `📋 Сбор «${input.title}» закрыт.`
+    : `📋 Заказ${input.placeName ? ` из «${input.placeName}»` : ""} закрыт.`;
+  const lines = [head, "", "Что заказать:"];
+  for (const d of dishSummary(input.items)) lines.push(itemLine(d));
+  lines.push("", "Кто что:");
   const people: number[] = [];
   for (const i of input.items) if (!people.includes(i.employeeId)) people.push(i.employeeId);
-  for (const id of people) lines.push(`${input.names.get(id) ?? "—"} — ${formatMoney(debtOf(input.items, id))}`);
+  for (const id of people) {
+    lines.push(`${input.names.get(id) ?? "—"} — ${formatMoney(debtOf(input.items, id))}`);
+    for (const i of input.items) if (i.employeeId === id) lines.push(`  ${itemLine(i)}`);
+  }
   lines.push("", `Итого: ${formatMoney(orderTotal(input.items))}`);
   return lines.join("\n");
 }
@@ -169,8 +210,15 @@ export function splitAtLines(text: string, max = TELEGRAM_TEXT_SAFE_MAX): string
   return parts.map((p) => p.replace(/^\n+|\n+$/g, "")).filter((p) => p.length > 0);
 }
 
-export function payRequestText(input: { creatorName: string; placeName: string | null; amount: number; payHint: string | null }): string {
-  const head = `💸 Заказ${input.placeName ? ` из «${input.placeName}»` : ""} закрыт. Сдай ${formatMoney(input.amount)} — ${input.creatorName}.`;
+export function payRequestText(input: {
+  creatorName: string;
+  title: string | null;
+  placeName: string | null;
+  amount: number;
+  payHint: string | null;
+}): string {
+  const what = input.title ? `Сбор «${input.title}»` : `Заказ${input.placeName ? ` из «${input.placeName}»` : ""}`;
+  const head = `💸 ${what} закрыт. Сдай ${formatMoney(input.amount)} — ${input.creatorName}.`;
   return input.payHint ? `${head}\nКуда: ${input.payHint}` : head;
 }
 

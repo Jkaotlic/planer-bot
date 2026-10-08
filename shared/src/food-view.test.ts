@@ -196,3 +196,14 @@ describe("orderPaymentProgress — «сдали X из Y» в списке за�
     expect(orderPaymentProgress({ cancelled: false, closed: true, payment: pay(0, 0) })).toBeNull();
   });
 });
+
+describe("подпись кг-позиции", () => {
+  it("кнопка кг-позиции называет шаг", () => {
+    expect(menuItemLabel({ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 })).toBe(`Икра кетовая · 0,4 кг · ${formatMoney(2400)}`);
+    expect(menuItemLabel({ name: "Шаурма", price: 350 })).toBe(`Шаурма · ${formatMoney(350)}`);
+  });
+  it("превью меню: шаг между названием и ценой", () => {
+    expect(menuPreview([{ name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }, { name: "Чай", price: 50 }]))
+      .toBe(`Икра — 0,4 кг — ${formatMoney(2400)} · Чай — ${formatMoney(50)}`);
+  });
+});

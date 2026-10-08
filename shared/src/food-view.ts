@@ -1,6 +1,6 @@
 import type { FoodSendReport, OrderRemindResult, OrderView, PollView } from "./api/food";
 import { formatMoney } from "./collection";
-import { FOOD_MENU_MAX, type PlaceInput } from "./food-order";
+import { FOOD_MENU_MAX, type FoodUnit, type PlaceInput, unitPart } from "./food-order";
 
 /**
  * Что экран говорит про заказ еды и опрос — одними словами в мини-аппе и в консоли.
@@ -48,8 +48,8 @@ export function orderInProgress(o: Pick<OrderView, "cancelled" | "open" | "close
 }
 
 /** Кнопка блюда в открытом заказе. */
-export function menuItemLabel(m: { name: string; price: number }): string {
-  return `${m.name} · ${formatMoney(m.price)}`;
+export function menuItemLabel(m: { name: string; price: number; unit?: FoodUnit; stepGrams?: number | null }): string {
+  return [m.name, unitPart(m), formatMoney(m.price)].filter(Boolean).join(" · ");
 }
 
 /**
@@ -58,8 +58,10 @@ export function menuItemLabel(m: { name: string; price: number }): string {
  * Было две разные строки: `${m.price} ₽` в списке мест (без
  * разбивки разрядов) и `${m.name} ${formatMoney(m.price)}` в форме.
  */
-export function menuPreview(menu: readonly { name: string; price: number }[]): string {
-  return menu.length > 0 ? menu.map((m) => `${m.name} — ${formatMoney(m.price)}`).join(" · ") : "Меню пусто";
+export function menuPreview(menu: readonly { name: string; price: number; unit?: FoodUnit; stepGrams?: number | null }[]): string {
+  return menu.length > 0
+    ? menu.map((m) => [m.name, unitPart(m), formatMoney(m.price)].filter(Boolean).join(" — ")).join(" · ")
+    : "Меню пусто";
 }
 
 /** Строка «Кто сколько». */
