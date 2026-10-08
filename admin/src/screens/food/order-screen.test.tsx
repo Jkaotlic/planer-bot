@@ -283,8 +283,8 @@ describe("консоль: заказ — действия, которые ран
   it("у организатора «Кто что» печатает orderPersonBlock — позиции под именем", async () => {
     const person = { employeeId: 2, displayName: "Игорь", amount: 360, declined: false, items: [{ name: "Икра", price: 900, qty: 1, unit: "kg" as const, stepGrams: 400 }] };
     const el = await open(orderView({ menu: DODO_MENU, people: [person] }));
-    const text = area(el, "people")!.textContent!;
-    for (const line of orderPersonBlock(person)) expect(text).toContain(line.trim());
-    expect(area(el, "people")!.querySelectorAll("[data-person-line]").length).toBe(orderPersonBlock(person).length);
+    // Дословно, без trim: двухпробельный отступ позиций под именем — часть вида.
+    const lines = [...area(el, "people")!.querySelectorAll("[data-person-line]")].map((n) => n.textContent);
+    expect(lines).toEqual(orderPersonBlock(person));
   });
 });

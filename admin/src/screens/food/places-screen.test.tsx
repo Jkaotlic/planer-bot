@@ -166,6 +166,42 @@ describe("консоль: места — редактор", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("кг -> шт -> кг: набранный шаг не теряется", async () => {
+    const el = await mount(PlaceEditor, editorProps());
+    await click(button(el, "+ Блюдо"));
+    await click(button(el, "кг"));
+    await type(field(el, "Шаг блюда 1, кг"), "0,4");
+    await click(button(el, "шт"));
+    expect(el.querySelector('input[aria-label="Шаг блюда 1, кг"]')).toBeNull();
+    await click(button(el, "кг"));
+    expect(field(el, "Шаг блюда 1, кг").value).toBe("0,4");
+  });
+
+  it("шт после кг сохраняется без шага, даже если он набран", async () => {
+    const save = vi.spyOn(apiClient, "saveFoodPlace").mockResolvedValue({ id: 2, name: "Рынок", menu: [] });
+    const el = await mount(PlaceEditor, editorProps());
+    await type(field(el, "Название места"), "Рынок");
+    await click(button(el, "+ Блюдо"));
+    await type(field(el, "Блюдо 1"), "Хлеб");
+    await type(field(el, "Цена блюда 1, ₽"), "50");
+    await click(button(el, "кг"));
+    await type(field(el, "Шаг блюда 1, кг"), "0,4");
+    await click(button(el, "шт"));
+    await click(button(el, "Сохранить"));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save).toHaveBeenCalledWith(null, { name: "Рынок", menu: [{ name: "Хлеб", price: 50, unit: "pcs", stepGrams: null }] });
+  });
+
+  it("нетронутое кг-блюдо сохраняется с id, unit и stepGrams как было", async () => {
+    const place = { id: 3, name: "Рынок", menu: [{ id: 31, name: "Икра", price: 900, unit: "kg" as const, stepGrams: 400 }] };
+    const save = vi.spyOn(apiClient, "saveFoodPlace").mockResolvedValue(place);
+    const p = editorProps(place as never);
+    const el = await mount(PlaceEditor, p);
+    await click(button(el, "Сохранить"));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save).toHaveBeenCalledWith(3, { name: "Рынок", menu: [{ id: 31, name: "Икра", price: 900, unit: "kg", stepGrams: 400 }] });
+  });
+
   it("существующее кг-блюдо открывается с шагом в кг", async () => {
     const el = await mount(PlaceEditor, editorProps({ id: 3, name: "Рынок", menu: [{ id: 31, name: "Икра", price: 900, unit: "kg" as const, stepGrams: 400 }] } as never));
     expect(button(el, "кг").getAttribute("aria-pressed")).toBe("true");

@@ -1,5 +1,5 @@
 import {
-  FOOD_CLOSE_HORIZON_DAYS, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
+  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
   isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
   type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
@@ -442,6 +442,10 @@ export function createFoodMock(opts: FoodMockOptions) {
     const allowCustom = input.allowCustom ?? true;
     // Тот же отказ и тот же текст, что у `POST /api/orders`: сбор без меню и без своих позиций пуст.
     if (input.placeId == null && !allowCustom) throw new Error("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    // Тот же формат и тот же календарь, что у схемы `POST /api/orders`: регэксп пропускает 31 сентября.
+    if (input.closesAt != null && !(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/.test(input.closesAt) && dateStr.safeParse(input.closesAt.slice(0, 10)).success)) {
+      throw new Error("Проверь место, срок и адресатов.");
+    }
     const closesAt = input.closesAt ?? closesAtFromTime(input.closesTime ?? null, now.date);
     // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
     if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");

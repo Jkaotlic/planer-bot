@@ -152,7 +152,7 @@ export function PlaceEditor({ place, onSaved, onCancel }: {
         <div className="food-dish-row food-dish-unit">
           <div className="food-buttons" role="group" aria-label={`Единица блюда ${i + 1}`}>
             <button type="button" className="btn btn-secondary btn-compact food-chip" aria-pressed={r.unit === "pcs"} disabled={busy}
-              onClick={() => patch(i, { unit: "pcs", step: "" })}>шт</button>
+              onClick={() => patch(i, { unit: "pcs" })}>шт</button>
             <button type="button" className="btn btn-secondary btn-compact food-chip" aria-pressed={r.unit === "kg"} disabled={busy}
               onClick={() => patch(i, { unit: "kg" })}>кг</button>
           </div>
