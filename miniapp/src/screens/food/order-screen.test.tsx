@@ -31,8 +31,8 @@ async function mountScreen(orderId: number) {
 }
 
 const BASE: OrderView = {
-  id: 7, creatorId: 1, creatorName: "Аня", placeId: 3, placeName: "Шаурмечная",
-  menu: [{ id: 11, name: "Шаурма", price: 350 }, { id: 12, name: "Чай", price: 50 }],
+  id: 7, creatorId: 1, creatorName: "Аня", placeId: 3, title: null, placeName: "Шаурмечная", allowCustom: true,
+  menu: [{ id: 11, name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }, { id: 12, name: "Чай", price: 50, unit: "pcs", stepGrams: null }],
   note: null, payHint: "Наличкой мне", closesAt: "2026-09-29T12:30", closes: "до 12:30",
   open: true, closed: false, cancelled: false, isCreator: false, canManage: false,
   myItems: [], myTotal: 0, declined: false, recipientCount: 3, respondedCount: 1,
@@ -43,7 +43,7 @@ const BASE: OrderView = {
 describe("OrderScreen — участник", () => {
   it("тап по блюду меню вызывает addOrderItem с его id", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue(BASE);
-    const add = vi.spyOn(apiClient, "addOrderItem").mockResolvedValue({ ...BASE, myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1 }], myTotal: 350 });
+    const add = vi.spyOn(apiClient, "addOrderItem").mockResolvedValue({ ...BASE, myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 350 });
     const el = await mountScreen(7);
     await act(async () => byText(el, `Шаурма · ${formatMoney(350)}`).click());
     await settle();
@@ -63,14 +63,14 @@ describe("OrderScreen — участник", () => {
   });
 
   it("закрытый заказ не даёт добавлять и показывает, сколько сдать", async () => {
-    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1 }], myTotal: 350 });
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 350 });
     const el = await mountScreen(7);
     expect(el.textContent).toContain(`Сдать: ${formatMoney(350)} — Аня`);
     expect(el.querySelector("input[name=custom-name]")).toBeNull();
   });
 
   it("«+» гаснет на потолке количества (FOOD_QTY_MAX), «−» — на единице", async () => {
-    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, myItems: [{ id: 1, name: "Шаурма", price: 350, qty: FOOD_QTY_MAX }, { id: 2, name: "Чай", price: 50, qty: 1 }], myTotal: 350 * FOOD_QTY_MAX + 50 });
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, myItems: [{ id: 1, name: "Шаурма", price: 350, qty: FOOD_QTY_MAX, unit: "pcs", stepGrams: null }, { id: 2, name: "Чай", price: 50, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 350 * FOOD_QTY_MAX + 50 });
     const el = await mountScreen(7);
     const plus = [...el.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "+") as HTMLButtonElement[];
     const minus = [...el.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "−") as HTMLButtonElement[];
@@ -89,8 +89,8 @@ describe("OrderScreen — запускающий", () => {
   it("видит «кто сколько», сводку и кнопку закрытия", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue({
       ...BASE, isCreator: true, canManage: true, total: 350,
-      dishes: [{ name: "Шаурма", price: 350, qty: 1 }],
-      people: [{ employeeId: 2, displayName: "Игорь", amount: 350, declined: false }, { employeeId: 3, displayName: "Марк", amount: 0, declined: true }],
+      dishes: [{ name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }],
+      people: [{ employeeId: 2, displayName: "Игорь", amount: 350, declined: false, items: [] }, { employeeId: 3, displayName: "Марк", amount: 0, declined: true, items: [] }],
     });
     const el = await mountScreen(7);
     expect(el.textContent).toContain("Кто сколько");
@@ -102,7 +102,7 @@ describe("OrderScreen — запускающий", () => {
 
 describe("OrderScreen — деньги", () => {
   it("участник после закрытия жмёт «Я сдал»", async () => {
-    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1 }], myTotal: 350, payment: { myPaid: false, paidCount: 0, total: 1, rows: null } });
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 350, payment: { myPaid: false, paidCount: 0, total: 1, rows: null } });
     const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...BASE, open: false, closed: true, payment: { myPaid: true, paidCount: 1, total: 1, rows: null } });
     const el = await mountScreen(7);
     await act(async () => byText(el, "💸 Я сдал").click());
@@ -114,7 +114,7 @@ describe("OrderScreen — деньги", () => {
   // промахнувшийся по экрану, молча стирал «сдал». Теперь галочка — просто
   // текст, а снять можно только через подтверждение.
   it("«✓ Ты отметился» — текст, тап по нему ничего не делает; «Снять отметку» — через подтверждение", async () => {
-    const PAID: OrderView = { ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1 }], myTotal: 350, payment: { myPaid: true, paidCount: 1, total: 1, rows: null } };
+    const PAID: OrderView = { ...BASE, open: false, closed: true, menu: [], myItems: [{ id: 1, name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 350, payment: { myPaid: true, paidCount: 1, total: 1, rows: null } };
     vi.spyOn(apiClient, "getOrder").mockResolvedValue(PAID);
     const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...PAID, payment: { myPaid: false, paidCount: 0, total: 1, rows: null } });
     const el = await mountScreen(7);

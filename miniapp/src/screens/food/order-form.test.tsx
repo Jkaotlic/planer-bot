@@ -31,7 +31,7 @@ async function mountForm(onDone: (orderId: number) => void, onEditPlaces?: () =>
 
 describe("OrderForm", () => {
   it("по умолчанию «на смене»; выбранное место и «куда сдавать» уходят в createOrder", async () => {
-    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 3, name: "Шаурмечная", menu: [{ id: 11, name: "Шаурма", price: 350 }] }]);
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 3, name: "Шаурмечная", menu: [{ id: 11, name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }]);
     vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([{ id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true }]);
     const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: { id: 7 } as never, delivered: 2, unreachable: [] });
     const onDone = vi.fn();

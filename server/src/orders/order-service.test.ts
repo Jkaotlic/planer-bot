@@ -15,7 +15,7 @@ function stage(closesAt: string | null = null) {
   const anya = { id: createEmployee(db, { displayName: "Аня" }).id, isAdmin: false };
   const igor = { id: createEmployee(db, { displayName: "Игорь" }).id, isAdmin: false };
   const mark = { id: createEmployee(db, { displayName: "Марк" }).id, isAdmin: false };
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }, { name: "Чай", price: 50 }] }, anya.id);
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }, { name: "Чай", price: 50, unit: "pcs", stepGrams: null }] }, anya.id);
   const order = createOrder(db, { createdBy: anya.id, placeId: place.id, note: null, payHint: null, closesAt, recipientIds: [anya.id, igor.id] });
   const [shawarma, tea] = place.menu;
   return { db, anya, igor, mark, place, order, shawarma: shawarma!, tea: tea! };
@@ -32,21 +32,21 @@ describe("позиции", () => {
   it("правка цены в меню после заказа не меняет долг", () => {
     const { db, igor, order, place, shawarma, tea } = stage();
     addMenuItem(db, order, igor.id, shawarma.id, now);
-    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 999 }, { id: tea.id, name: "Чай", price: 50 }] });
+    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 999, unit: "pcs", stepGrams: null }, { id: tea.id, name: "Чай", price: 50, unit: "pcs", stepGrams: null }] });
     expect(debtOf(itemsOf(db, order.id), igor.id)).toBe(350);
   });
 
   it("после правки цены тап даёт новую строку с новой ценой — старую не переписывает", () => {
     const { db, igor, order, place, shawarma, tea } = stage();
     addMenuItem(db, order, igor.id, shawarma.id, now);
-    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 400 }, { id: tea.id, name: "Чай", price: 50 }] });
+    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 400, unit: "pcs", stepGrams: null }, { id: tea.id, name: "Чай", price: 50, unit: "pcs", stepGrams: null }] });
     addMenuItem(db, order, igor.id, shawarma.id, now);
     expect(itemsOf(db, order.id).map((i) => [i.price, i.qty])).toEqual([[350, 1], [400, 1]]);
   });
 
   it("блюдо чужого места или из архива — отказ", () => {
     const { db, anya, igor, order, place, shawarma } = stage();
-    const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600 }] }, anya.id);
+    const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600, unit: "pcs", stepGrams: null }] }, anya.id);
     expect(addMenuItem(db, order, igor.id, other.menu[0]!.id, now)).toEqual({ ok: false, error: "Этого блюда нет в меню." });
     updatePlace(db, place.id, { name: "Шаурмечная", menu: [] });
     expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: false, error: "Этого блюда нет в меню." });

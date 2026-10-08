@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
-import { FOOD_MENU_FULL_HINT, FOOD_MENU_MAX, placeMenuFromRows, priceDigits, type PlaceEditorRow } from "@planer/shared";
+import { FOOD_MENU_FULL_HINT, FOOD_MENU_MAX, placeMenuFromRows, placeRowsFromMenu, priceDigits, type PlaceEditorRow } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { ActionButton } from "../../ui";
 
@@ -10,7 +10,7 @@ import { ActionButton } from "../../ui";
  */
 export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | null; onSaved(p: PlaceView): void; onCancel(): void }) {
   const [name, setName] = useState(place?.name ?? "");
-  const [rows, setRows] = useState<PlaceEditorRow[]>(place?.menu.map((m) => ({ id: m.id, name: m.name, price: String(m.price) })) ?? []);
+  const [rows, setRows] = useState<PlaceEditorRow[]>(place ? placeRowsFromMenu(place.menu) : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,7 +57,7 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
         </div>
       ))}
       {rows.length < FOOD_MENU_MAX ? (
-        <ActionButton compact onClick={() => setRows((prev) => [...prev, { name: "", price: "" }])} disabled={busy}>+ Блюдо</ActionButton>
+        <ActionButton compact onClick={() => setRows((prev) => [...prev, { name: "", price: "", unit: "pcs", step: "" }])} disabled={busy}>+ Блюдо</ActionButton>
       ) : (
         <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{FOOD_MENU_FULL_HINT}</div>
       )}

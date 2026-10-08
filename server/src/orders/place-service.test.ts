@@ -6,7 +6,7 @@ import { activeMenuItem, archivePlace, createPlace, getPlaceView, listPlaces, up
 function stage() {
   const db = makeTestDb();
   const anya = createEmployee(db, { displayName: "Аня" });
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }, { name: "Лаваш", price: 200 }] }, anya.id);
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }, { name: "Лаваш", price: 200, unit: "pcs", stepGrams: null }] }, anya.id);
   return { db, anya, place };
 }
 
@@ -19,7 +19,7 @@ describe("места", () => {
   it("правка: блюдо с id меняет цену, новое добавляется, пропавшее уходит в архив", () => {
     const { db, place } = stage();
     const [shawarma, lavash] = place.menu;
-    const result = updatePlace(db, place.id, { name: "Шаурмечная у метро", menu: [{ id: shawarma!.id, name: "Шаурма", price: 380 }, { name: "Чай", price: 50 }] });
+    const result = updatePlace(db, place.id, { name: "Шаурмечная у метро", menu: [{ id: shawarma!.id, name: "Шаурма", price: 380, unit: "pcs", stepGrams: null }, { name: "Чай", price: 50, unit: "pcs", stepGrams: null }] });
     expect(result.ok).toBe(true);
     expect(getPlaceView(db, place.id)!.menu.map((m) => [m.name, m.price])).toEqual([["Шаурма", 380], ["Чай", 50]]);
     expect(activeMenuItem(db, place.id, lavash!.id)).toBeUndefined();
@@ -28,8 +28,8 @@ describe("места", () => {
 
   it("чужое блюдо по id не правится — id другого места", () => {
     const { db, anya, place } = stage();
-    const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600 }] }, anya.id);
-    const result = updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: other.menu[0]!.id, name: "Пицца", price: 1 }] });
+    const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600, unit: "pcs", stepGrams: null }] }, anya.id);
+    const result = updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: other.menu[0]!.id, name: "Пицца", price: 1, unit: "pcs", stepGrams: null }] });
     expect(result).toEqual({ ok: false, error: "Меню уже поменяли — открой место заново." });
     expect(getPlaceView(db, other.id)!.menu[0]!.price).toBe(600);
   });
@@ -41,7 +41,7 @@ describe("места", () => {
     const { db, place } = stage();
     const [shawarma] = place.menu;
     expect(updatePlace(db, place.id, { name: "Шаурмечная", menu: [] }).ok).toBe(true);
-    const stale = updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma!.id, name: "Шаурма", price: 350 }] });
+    const stale = updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma!.id, name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] });
     expect(stale).toEqual({ ok: false, error: "Меню уже поменяли — открой место заново." });
   });
 

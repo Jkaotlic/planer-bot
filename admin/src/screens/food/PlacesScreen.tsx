@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  FOOD_MENU_FULL_HINT, FOOD_NO_PLACES, FOOD_MENU_MAX, FOOD_TEXT_MAX, menuPreview, placeMenuFromRows, priceDigits, type PlaceEditorRow,
+  FOOD_MENU_FULL_HINT, FOOD_NO_PLACES, FOOD_MENU_MAX, FOOD_TEXT_MAX, menuPreview, placeMenuFromRows, placeRowsFromMenu, priceDigits, type PlaceEditorRow,
 } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -108,7 +108,7 @@ export function PlaceEditor({ place, onSaved, onCancel }: {
 }) {
   const onAuthRequired = useAuthRequired();
   const [name, setName] = useState(place?.name ?? "");
-  const [rows, setRows] = useState<PlaceEditorRow[]>(place?.menu.map((m) => ({ id: m.id, name: m.name, price: String(m.price) })) ?? []);
+  const [rows, setRows] = useState<PlaceEditorRow[]>(place ? placeRowsFromMenu(place.menu) : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -151,7 +151,7 @@ export function PlaceEditor({ place, onSaved, onCancel }: {
       {rows.length < FOOD_MENU_MAX ? (
         <div className="food-buttons">
           <button type="button" className="btn btn-secondary btn-compact" disabled={busy}
-            onClick={() => setRows((prev) => [...prev, { name: "", price: "" }])}>+ Блюдо</button>
+            onClick={() => setRows((prev) => [...prev, { name: "", price: "", unit: "pcs", step: "" }])}>+ Блюдо</button>
         </div>
       ) : (
         <div className="food-meta">{FOOD_MENU_FULL_HINT}</div>

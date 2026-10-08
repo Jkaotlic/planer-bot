@@ -13,6 +13,13 @@ export const FOOD_NOTE_MAX = 300;
 export const FOOD_MENU_MAX = 30;
 export const FOOD_PRICE_MAX = 100_000;
 export const FOOD_QTY_MAX = 20;
+export const FOOD_STEP_GRAMS_MIN = 10;
+export const FOOD_STEP_GRAMS_MAX = 100_000;
+/**
+ * Дальше двух недель срок не ставится: забытый сбор держит кнопки в чатах всей
+ * команды, а закупку на месяц вперёд никто не собирает (спека 2026-10-08).
+ */
+export const FOOD_CLOSE_HORIZON_DAYS = 14;
 /**
  * Строк своих позиций на человека в одном заказе. Не вкус, а сводка
  * запускающему: 20 строк × 200 знаков названия на каждого — и так уже
@@ -26,12 +33,27 @@ export const TELEGRAM_TEXT_SAFE_MAX = 4000;
 /** Цена — целые рубли: копейки в обеде никто не сдаёт, а дробь в долге — повод для спора. */
 export const foodPriceSchema = z.number().int().min(1).max(FOOD_PRICE_MAX);
 const foodText = z.string().trim().min(1).max(FOOD_TEXT_MAX);
+export const foodUnitSchema = z.enum(["pcs", "kg"]);
+const stepGrams = z.number().int().min(FOOD_STEP_GRAMS_MIN).max(FOOD_STEP_GRAMS_MAX).nullable().default(null);
 
 export const placeInputSchema = z
   .object({
     name: foodText,
     menu: z
-      .array(z.object({ id: z.number().int().positive().optional(), name: foodText, price: foodPriceSchema }).strict())
+      .array(
+        z
+          .object({
+            id: z.number().int().positive().optional(),
+            name: foodText,
+            price: foodPriceSchema,
+            unit: foodUnitSchema.default("pcs"),
+            stepGrams,
+          })
+          .strict()
+          .refine((m) => (m.unit === "kg") === (m.stepGrams != null), {
+            message: "Шаг указывается только у позиции в кг — и у неё обязателен.",
+          }),
+      )
       .max(FOOD_MENU_MAX),
   })
   .strict()

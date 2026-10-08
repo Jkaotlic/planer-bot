@@ -8,6 +8,10 @@ import {
   FOOD_PAID_MARKED,
   FOOD_UNMARK_QUESTION,
   myOrderEmptyText,
+  orderHeadline,
+  parseStepKg,
+  placeRowsFromMenu,
+  orderPersonBlock,
   orderPaymentProgress,
   payHintLine,
   cancelOrderQuestion,
@@ -146,21 +150,21 @@ describe("placeMenuFromRows — меню из строк редактора", ()
   it("новая пустая строка отбрасывается, id существующих сохраняются, цена — числом", () => {
     expect(
       placeMenuFromRows([
-        { id: 9, name: " Пицца ", price: "600" },
-        { name: "", price: "" },
-        { name: "Суп", price: "1 200" },
+        { id: 9, name: " Пицца ", price: "600", unit: "pcs", step: "" },
+        { name: "", price: "", unit: "pcs", step: "" },
+        { name: "Суп", price: "1 200", unit: "pcs", step: "" },
       ]),
-    ).toEqual({ ok: true, menu: [{ id: 9, name: "Пицца", price: 600 }, { name: "Суп", price: 1200 }] });
+    ).toEqual({ ok: true, menu: [{ id: 9, name: "Пицца", price: 600, unit: "pcs", stepGrams: null }, { name: "Суп", price: 1200, unit: "pcs", stepGrams: null }] });
   });
 
   it("существующее блюдо с пустым именем — ошибка, а не тихое удаление из меню", () => {
-    expect(placeMenuFromRows([{ id: 9, name: "  ", price: "600" }])).toEqual({ ok: false, error: EMPTY_DISH_NAME });
+    expect(placeMenuFromRows([{ id: 9, name: "  ", price: "600", unit: "pcs", step: "" }])).toEqual({ ok: false, error: EMPTY_DISH_NAME });
     expect(EMPTY_DISH_NAME).toBe("У блюда пустое название — впиши или удали строку ✕.");
   });
 
   it("блюдо без цены — ошибка с его именем, а не ноль на сервер и общий отказ", () => {
-    expect(placeMenuFromRows([{ name: "Шаурма", price: "" }])).toEqual({ ok: false, error: "У «Шаурма» не указана цена." });
-    expect(placeMenuFromRows([{ name: "Шаурма", price: "0" }])).toEqual({ ok: false, error: "У «Шаурма» не указана цена." });
+    expect(placeMenuFromRows([{ name: "Шаурма", price: "", unit: "pcs", step: "" }])).toEqual({ ok: false, error: "У «Шаурма» не указана цена." });
+    expect(placeMenuFromRows([{ name: "Шаурма", price: "0", unit: "pcs", step: "" }])).toEqual({ ok: false, error: "У «Шаурма» не указана цена." });
   });
 
   it("подсказка полного меню называет потолок", () => {
@@ -205,5 +209,43 @@ describe("подпись кг-позиции", () => {
   it("превью меню: шаг между названием и ценой", () => {
     expect(menuPreview([{ name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }, { name: "Чай", price: 50 }]))
       .toBe(`Икра — 0,4 кг — ${formatMoney(2400)} · Чай — ${formatMoney(50)}`);
+  });
+});
+
+describe("шаг в редакторе", () => {
+  it("запятая и точка, без ведущего нуля; мусор и ноль — null", () => {
+    expect(["0,4", "0.4", ",4", "1", "0,25", " 2 "].map(parseStepKg)).toEqual([400, 400, 400, 1000, 250, 2000]);
+    expect(["", "0", "abc", "0,001", "101", "1,2,3"].map(parseStepKg)).toEqual([null, null, null, null, null, null]);
+  });
+  it("кг без шага — ошибка с именем позиции", () => {
+    expect(placeMenuFromRows([{ name: "Икра", price: "2400", unit: "kg", step: "" }]))
+      .toEqual({ ok: false, error: "У «Икра» не указан шаг в кг." });
+  });
+  it("кг с шагом и шт — в меню с единицами", () => {
+    expect(placeMenuFromRows([
+      { name: "Икра", price: "2400", unit: "kg", step: "0,4" },
+      { id: 7, name: "Чай", price: "50", unit: "pcs", step: "" },
+    ])).toEqual({ ok: true, menu: [
+      { name: "Икра", price: 2400, unit: "kg", stepGrams: 400 },
+      { id: 7, name: "Чай", price: 50, unit: "pcs", stepGrams: null },
+    ] });
+  });
+  it("строки редактора из меню и обратно не теряют шаг", () => {
+    const menu = [{ id: 1, name: "Икра", price: 2400, unit: "kg" as const, stepGrams: 250 }, { id: 2, name: "Чай", price: 50, unit: "pcs" as const, stepGrams: null }];
+    expect(placeRowsFromMenu(menu)).toEqual([
+      { id: 1, name: "Икра", price: "2400", unit: "kg", step: "0,25" },
+      { id: 2, name: "Чай", price: "50", unit: "pcs", step: "" },
+    ]);
+  });
+  it("заголовок заказа: название, иначе место, иначе «Заказ без меню»", () => {
+    expect(orderHeadline({ title: "Икра, 09.10", placeName: "Икра" })).toBe("Икра, 09.10");
+    expect(orderHeadline({ title: null, placeName: "Додо" })).toBe("Додо");
+    expect(orderHeadline({ title: null, placeName: null })).toBe("Заказ без меню");
+  });
+  it("блок человека: строка и под ней его позиции", () => {
+    expect(orderPersonBlock({
+      employeeId: 2, displayName: "Игорь", amount: 7200, declined: false,
+      items: [{ name: "Икра", price: 2400, qty: 3, unit: "kg", stepGrams: 400 }],
+    })).toEqual([`Игорь — ${formatMoney(7200)}`, `  Икра — 3 × 0,4 кг (1,2 кг) — ${formatMoney(7200)}`]);
   });
 });

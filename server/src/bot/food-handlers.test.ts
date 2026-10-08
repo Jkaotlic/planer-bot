@@ -28,7 +28,7 @@ function stage() {
   const igor = person(db, "Игорь", 333);
   const mark = person(db, "Марк", 444);
   const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya.id);
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }, anya.id);
   const order = createOrder(db, {
     createdBy: anya.id, placeId: place.id, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
   });

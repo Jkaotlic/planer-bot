@@ -14,7 +14,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }] };
+const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200, unit: "pcs" as const, stepGrams: null }] };
 const props = () => ({ onDone: vi.fn(), onCancel: vi.fn() });
 
 describe("консоль: новый заказ", () => {

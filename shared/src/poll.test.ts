@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, pollInviteText, pollResultText, pollTally, pollTallyLines, POLL_CHOICES_HINT } from "./poll";
+import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, isWithinCloseHorizon, pollInviteText, pollResultText, pollTally, pollTallyLines, POLL_CHOICES_HINT } from "./poll";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -101,5 +101,13 @@ describe("pollTallyLines", () => {
 
   it("подсказка формы перечисляет ровно кнопки голоса", () => {
     expect(POLL_CHOICES_HINT).toBe("Ответы: 👍 За · 👎 Против · 🤷 Воздержался");
+  });
+});
+
+describe("горизонт срока", () => {
+  it("ровно 14 дней — да, 15-й день — нет, без срока — да", () => {
+    expect(isWithinCloseHorizon("2026-10-22T23:59", "2026-10-08")).toBe(true);
+    expect(isWithinCloseHorizon("2026-10-23T00:00", "2026-10-08")).toBe(false);
+    expect(isWithinCloseHorizon(null, "2026-10-08")).toBe(true);
   });
 });

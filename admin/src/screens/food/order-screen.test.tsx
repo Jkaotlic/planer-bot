@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 const area = (el: HTMLElement, name: string) => el.querySelector<HTMLElement>(`[data-area="${name}"]`);
-const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200 }];
+const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200, unit: "pcs" as const, stepGrams: null }];
 
 async function open(order = orderView({ menu: DODO_MENU })) {
   vi.spyOn(apiClient, "getOrder").mockResolvedValue(order);
@@ -25,7 +25,7 @@ async function open(order = orderView({ menu: DODO_MENU })) {
 describe("консоль: заказ — своё", () => {
   it("блюдо из меню: кнопка с ценой как в мини-аппе, позиция уходит по id, итог — formatMoney", async () => {
     const add = vi.spyOn(apiClient, "addOrderItem").mockResolvedValue(
-      orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1 }], myTotal: 1200 }),
+      orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 1200 }),
     );
     const el = await open();
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
@@ -52,7 +52,7 @@ describe("консоль: заказ — своё", () => {
   });
 
   it("количество: «−» погашен на одной штуке, «+» шлёт qty + 1, «✕» убирает", async () => {
-    const mine = orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1 }], myTotal: 1200 });
+    const mine = orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 1200 });
     const qty = vi.spyOn(apiClient, "setOrderItemQty").mockResolvedValue(mine);
     const remove = vi.spyOn(apiClient, "removeOrderItem").mockResolvedValue(orderView({ menu: DODO_MENU }));
     const el = await open(mine);
@@ -64,7 +64,7 @@ describe("консоль: заказ — своё", () => {
   });
 
   it("закрыт и должен — «Сдать: … — Аня» и «💸 Я сдал»", async () => {
-    const owe = orderView({ open: false, closed: true, isCreator: false, canManage: false, myTotal: 600, myItems: [{ id: 5, name: "Суп", price: 600, qty: 1 }], people: null, payment: { myPaid: false, paidCount: 0, total: 2, rows: null } });
+    const owe = orderView({ open: false, closed: true, isCreator: false, canManage: false, myTotal: 600, myItems: [{ id: 5, name: "Суп", price: 600, qty: 1, unit: "pcs", stepGrams: null }], people: null, payment: { myPaid: false, paidCount: 0, total: 2, rows: null } });
     const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...owe, payment: { ...owe.payment, myPaid: true } });
     const el = await open(owe);
     expect(area(el, "mine")!.textContent).toContain("Сдать: 600\u00a0₽ — Аня");
@@ -74,7 +74,7 @@ describe("консоль: заказ — своё", () => {
   });
 
   it("длинное меню: 30 блюд по 200 знаков — все 30 кнопок на месте (Review Focus №3)", async () => {
-    const menu = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `${i + 1} ${"щ".repeat(FOOD_TEXT_MAX - 3)}`, price: 100 }));
+    const menu = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `${i + 1} ${"щ".repeat(FOOD_TEXT_MAX - 3)}`, price: 100, unit: "pcs" as const, stepGrams: null }));
     const el = await open(orderView({ menu }));
     const buttons = [...area(el, "menu")!.querySelectorAll("button")];
     expect(buttons).toHaveLength(30);
@@ -91,9 +91,9 @@ describe("консоль: заказ — своё", () => {
   it("название блюда в 200 знаков без пробела — внутри карточки, где слово переносится", async () => {
     const long = "щ".repeat(FOOD_TEXT_MAX);
     const el = await open(orderView({
-      menu: DODO_MENU, myItems: [{ id: 5, name: long, price: 100, qty: 1 }], myTotal: 100,
-      dishes: [{ name: long, price: 100, qty: 1 }], total: 100,
-      people: [{ employeeId: 2, displayName: "Игорь", amount: 100, declined: false }],
+      menu: DODO_MENU, myItems: [{ id: 5, name: long, price: 100, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 100,
+      dishes: [{ name: long, price: 100, qty: 1, unit: "pcs", stepGrams: null }], total: 100,
+      people: [{ employeeId: 2, displayName: "Игорь", amount: 100, declined: false, items: [] }],
     }));
     for (const name of ["mine", "people"]) {
       const card = area(el, name)!;
@@ -155,11 +155,11 @@ describe("консоль: заказ — собирающему и админу"
 
   it("«Что заказать» и «Кто сколько» — строками shared; без права управлять — карточки нет", async () => {
     const el = await open(orderView({
-      dishes: [{ name: "Пицца", price: 1200, qty: 2 }], total: 2400,
+      dishes: [{ name: "Пицца", price: 1200, qty: 2, unit: "pcs", stepGrams: null }], total: 2400,
       people: [
-        { employeeId: 2, displayName: "Игорь", amount: 0, declined: true },
-        { employeeId: 3, displayName: "Марк", amount: 1200, declined: false },
-        { employeeId: 5, displayName: "Лена", amount: 0, declined: false },
+        { employeeId: 2, displayName: "Игорь", amount: 0, declined: true, items: [] },
+        { employeeId: 3, displayName: "Марк", amount: 1200, declined: false, items: [] },
+        { employeeId: 5, displayName: "Лена", amount: 0, declined: false, items: [] },
       ],
     }));
     const people = area(el, "people")!.textContent!;
@@ -196,7 +196,7 @@ describe("консоль: заказ — собирающему и админу"
 });
 
 describe("консоль: заказ — действия, которые раньше не проверялись", () => {
-  const mine = (qty: number) => orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty }], myTotal: 1200 * qty });
+  const mine = (qty: number) => orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty, unit: "pcs", stepGrams: null }], myTotal: 1200 * qty });
 
   it("«−» шлёт qty − 1", async () => {
     const qty = vi.spyOn(apiClient, "setOrderItemQty").mockResolvedValue(mine(2));
@@ -236,7 +236,7 @@ describe("консоль: заказ — действия, которые ран
   it("«Снять отметку» — после подтверждения, шлёт paid = false", async () => {
     const marked = orderView({
       open: false, closed: true, isCreator: false, canManage: false, people: null, myTotal: 600,
-      myItems: [{ id: 5, name: "Суп", price: 600, qty: 1 }], payment: { myPaid: true, paidCount: 1, total: 2, rows: null },
+      myItems: [{ id: 5, name: "Суп", price: 600, qty: 1, unit: "pcs", stepGrams: null }], payment: { myPaid: true, paidCount: 1, total: 2, rows: null },
     });
     const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...marked, payment: { ...marked.payment, myPaid: false } });
     const el = await open(marked);

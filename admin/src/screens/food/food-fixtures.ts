@@ -3,8 +3,8 @@ import type { AudienceCandidate, OrderView, PollView } from "@planer/shared";
 /** Заказ, который Аня собирает сама; поля меняются под случай теста. */
 export function orderView(over: Partial<OrderView> = {}): OrderView {
   return {
-    id: 7, creatorId: 1, creatorName: "Аня", placeId: 1, placeName: "Додо",
-    menu: [{ id: 11, name: "Пицца", price: 600 }], note: null, payHint: null, closesAt: null, closes: null,
+    id: 7, creatorId: 1, creatorName: "Аня", placeId: 1, title: null, placeName: "Додо", allowCustom: true,
+    menu: [{ id: 11, name: "Пицца", price: 600, unit: "pcs", stepGrams: null }], note: null, payHint: null, closesAt: null, closes: null,
     open: true, closed: false, cancelled: false, isCreator: true, canManage: true,
     myItems: [], myTotal: 0, declined: false, recipientCount: 4, respondedCount: 1,
     dishes: [], total: 0, people: [], payment: { myPaid: false, paidCount: 0, total: 0, rows: [] },

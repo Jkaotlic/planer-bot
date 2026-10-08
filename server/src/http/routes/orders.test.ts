@@ -73,7 +73,7 @@ async function stage() {
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   const mark = person(db, "Марк", 102);
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya);
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }, anya);
   return {
     db, app, sent, failFor, hold, api, anya, igor, mark, placeId: place.id,
     anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102),

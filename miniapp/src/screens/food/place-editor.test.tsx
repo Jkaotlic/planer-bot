@@ -42,16 +42,16 @@ describe("PlaceEditor", () => {
     await act(async () => type(el.querySelector<HTMLInputElement>("input[name=dish-price-0]")!, "350"));
     await act(async () => byText(el, "Сохранить").click());
     await settle();
-    expect(save).toHaveBeenCalledWith(null, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] });
+    expect(save).toHaveBeenCalledWith(null, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] });
     expect(onSaved).toHaveBeenCalled();
   });
 
   it("при правке сохраняет id блюд — кнопки в разосланных письмах не ломаются", async () => {
     const save = vi.spyOn(apiClient, "saveFoodPlace").mockResolvedValue({ id: 5, name: "Додо", menu: [] });
-    const el = await mountEditor({ place: { id: 5, name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600 }] }, onSaved: vi.fn() });
+    const el = await mountEditor({ place: { id: 5, name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600, unit: "pcs", stepGrams: null }] }, onSaved: vi.fn() });
     await act(async () => byText(el, "Сохранить").click());
     await settle();
-    expect(save).toHaveBeenCalledWith(5, { name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600 }] });
+    expect(save).toHaveBeenCalledWith(5, { name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600, unit: "pcs", stepGrams: null }] });
   });
 
   // Пустое имя у СУЩЕСТВУЮЩЕГО блюда (есть id) — не то же самое, что пустая
@@ -60,7 +60,7 @@ describe("PlaceEditor", () => {
   // имя и не закончил.
   it("пустое имя у существующего блюда — ошибка, сохранение не отправляется", async () => {
     const save = vi.spyOn(apiClient, "saveFoodPlace");
-    const el = await mountEditor({ place: { id: 5, name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600 }] }, onSaved: vi.fn() });
+    const el = await mountEditor({ place: { id: 5, name: "Додо", menu: [{ id: 9, name: "Пицца", price: 600, unit: "pcs", stepGrams: null }] }, onSaved: vi.fn() });
     await act(async () => type(el.querySelector<HTMLInputElement>("input[name=dish-name-0]")!, "  "));
     await act(async () => byText(el, "Сохранить").click());
     await settle();
@@ -83,7 +83,7 @@ describe("PlaceEditor — мелочи захода", () => {
   });
 
   it("на 30-м блюде «+ Блюдо» пропадает, и видно почему", async () => {
-    const menu = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `Блюдо ${i + 1}`, price: 100 }));
+    const menu = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `Блюдо ${i + 1}`, price: 100, unit: "pcs" as const, stepGrams: null }));
     const el = await mountEditor({ place: { id: 5, name: "Столовая", menu }, onSaved: vi.fn() });
     expect(byText(el, "+ Блюдо")).toBeUndefined();
     expect(el.textContent).toContain("В меню уже 30 блюд — больше не поместится в кнопки бота.");

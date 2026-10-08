@@ -10,7 +10,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }, { id: 12, name: "Суп", price: 300 }] };
+const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200, unit: "pcs" as const, stepGrams: null }, { id: 12, name: "Суп", price: 300, unit: "pcs" as const, stepGrams: null }] };
 const field = (el: HTMLElement, label: string) => el.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
 const editorProps = (place: typeof DODO | null = null) => ({ place, onSaved: vi.fn(), onCancel: vi.fn() });
 
@@ -60,7 +60,7 @@ describe("консоль: места — список", () => {
     await type(field(el, "Название места"), "Додо пицца");
     await click(button(el, "Сохранить"));
     await waitFor(() => expect(el.textContent).toContain("🍴 Додо пицца"));
-    expect(save).toHaveBeenCalledWith(1, { name: "Додо пицца", menu: [{ id: 11, name: "Пицца", price: 1200 }, { id: 12, name: "Суп", price: 300 }] });
+    expect(save).toHaveBeenCalledWith(1, { name: "Додо пицца", menu: [{ id: 11, name: "Пицца", price: 1200, unit: "pcs", stepGrams: null }, { id: 12, name: "Суп", price: 300, unit: "pcs", stepGrams: null }] });
   });
 });
 
@@ -79,7 +79,7 @@ describe("консоль: места — редактор", () => {
     for (const label of ["Название места", "Блюдо 1", "Цена блюда 1, ₽"]) expect(field(el, label).getAttribute("type")).toBe("text");
     await click(button(el, "Сохранить"));
     await waitFor(() => expect(p.onSaved).toHaveBeenCalled());
-    expect(save).toHaveBeenCalledWith(null, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 1200 }] });
+    expect(save).toHaveBeenCalledWith(null, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 1200, unit: "pcs", stepGrams: null }] });
   });
 
   it("блюдо без цены — ошибка с его именем, на сервер ничего не ушло", async () => {
@@ -103,7 +103,7 @@ describe("консоль: места — редактор", () => {
   });
 
   it("30 блюд — «+ Блюдо» нет, и сказано почему (Review Focus №3)", async () => {
-    const menu = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `Блюдо ${i + 1}`, price: 100 }));
+    const menu = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, name: `Блюдо ${i + 1}`, price: 100, unit: "pcs" as const, stepGrams: null }));
     const el = await mount(PlaceEditor, editorProps({ id: 5, name: "Столовая", menu }));
     expect(el.querySelectorAll('[data-testid="dish-row"]')).toHaveLength(30);
     expect(maybeButton(el, "+ Блюдо")).toBeUndefined();
