@@ -16,7 +16,7 @@ describe("места", () => {
     expect(place.menu.map((m) => [m.name, m.price])).toEqual([["Шаурма", 350], ["Лаваш", 200]]);
   });
 
-  it("кг-позиция сохраняет единицу и шаг при создании и правке; меню без unit остаётся штуками", () => {
+  it("кг-позиция сохраняет единицу и шаг при создании и правке, возврат в штуки обнуляет шаг", () => {
     const { db, anya, place } = stage();
     expect(place.menu.map((m) => [m.unit, m.stepGrams])).toEqual([["pcs", null], ["pcs", null]]);
     const caviar = createPlace(db, { name: "Икра", menu: [{ name: "Кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);

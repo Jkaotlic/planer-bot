@@ -442,6 +442,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     const allowCustom = input.allowCustom ?? true;
     // Тот же отказ и тот же текст, что у `POST /api/orders`: сбор без меню и без своих позиций пуст.
     if (input.placeId == null && !allowCustom) throw new Error("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    // Схема сервера принимает срок одним полем: оба сразу — 400 с тем же текстом.
+    if (input.closesAt != null && input.closesTime != null) throw new Error("Проверь место, срок и адресатов.");
     // Тот же формат и тот же календарь, что у схемы `POST /api/orders`: регэксп пропускает 31 сентября.
     if (input.closesAt != null && !(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/.test(input.closesAt) && dateStr.safeParse(input.closesAt.slice(0, 10)).success)) {
       throw new Error("Проверь место, срок и адресатов.");

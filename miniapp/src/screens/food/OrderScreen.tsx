@@ -198,7 +198,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
             <div style={{ fontWeight: 600, marginTop: 6 }}>Кто сколько</div>
             {order.people.map((p) => (
               <div key={p.employeeId}>
-                {/* white-space: pre — двухпробельный отступ позиций под именем иначе схлопнется. */}
+                {/* white-space: pre-wrap — двухпробельный отступ позиций под именем иначе схлопнется. */}
                 {orderPersonBlock(p).map((line, i) => <div key={i} data-person-line style={{ whiteSpace: "pre-wrap" }}>{line}</div>)}
               </div>
             ))}

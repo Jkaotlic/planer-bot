@@ -259,16 +259,34 @@ describe("OrderScreen — сбор без своих позиций, назва�
     });
   }
 
-  it("«Не буду» нет, если уже отказался, и нет у закрытого заказа", async () => {
+  it("«Не буду» нет, если уже отказался", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, allowCustom: false, declined: true });
     const el = await mountScreen(7);
     expect(byText(el, "🙅 Не буду")).toBeUndefined();
   });
 
-  it("заголовок — название сбора, иначе место, иначе «Заказ без меню»", async () => {
+  it("«Не буду» нет у закрытого заказа", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, allowCustom: false, open: false, closed: true, menu: [] });
+    const el = await mountScreen(7);
+    expect(byText(el, "🙅 Не буду")).toBeUndefined();
+  });
+
+  it("заголовок — название сбора, если оно есть", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, title: "Икра, доставка 09.10" });
     const el = await mountScreen(7);
     expect(el.querySelector("h1")?.textContent).toBe("🍱 Икра, доставка 09.10");
+  });
+
+  it("заголовок без названия — место", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, title: null });
+    const el = await mountScreen(7);
+    expect(el.querySelector("h1")?.textContent).toBe("🍱 Шаурмечная");
+  });
+
+  it("заголовок без названия и места — «Заказ без меню»", async () => {
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({ ...BASE, title: null, placeId: null, placeName: null });
+    const el = await mountScreen(7);
+    expect(el.querySelector("h1")?.textContent).toBe("🍱 Заказ без меню");
   });
 
   it("«Кто что»: строка человека и позиции под ним — дословно orderPersonBlock", async () => {

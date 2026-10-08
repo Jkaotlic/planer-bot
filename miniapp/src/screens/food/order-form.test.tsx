@@ -24,7 +24,7 @@ async function mountForm(onDone: (orderId: number) => void, onEditPlaces?: () =>
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(AppRoot, null, createElement(OrderForm, { onDone, onCancel: vi.fn(), onEditPlaces, today: "2026-10-08" }))); });
+  await act(async () => { root!.render(createElement(AppRoot, null, createElement(OrderForm, { onDone, onCancel: vi.fn(), onEditPlaces, today: "2030-01-15" }))); });
   await settle();
   return host;
 }
@@ -119,19 +119,19 @@ describe("OrderForm", () => {
     const { el, create } = await mountWithPlace();
     await act(async () => byText(el, "Додо").click());
     await act(async () => type(field(el, "order-title"), "  Икра, доставка 09.10 "));
-    await act(async () => type(field(el, "closes-date"), "2026-10-09"));
+    await act(async () => type(field(el, "closes-date"), "2030-01-16"));
     await act(async () => type(field(el, "closes-time"), "16:00"));
     await act(async () => field(el, "allow-custom").click());
     await act(async () => byText(el, "Разослать").click());
     await settle();
     expect(create).toHaveBeenCalledWith({
-      placeId: 3, title: "Икра, доставка 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2026-10-09T16:00", audience: { kind: "on_shift" },
+      placeId: 3, title: "Икра, доставка 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2030-01-16T16:00", audience: { kind: "on_shift" },
     });
   });
 
   it("дата без времени гасит «Разослать» с подсказкой; только время — сегодня командное", async () => {
     const { el, create } = await mountWithPlace();
-    await act(async () => type(field(el, "closes-date"), "2026-10-09"));
+    await act(async () => type(field(el, "closes-date"), "2030-01-16"));
     expect(byText(el, "Разослать").disabled).toBe(true);
     expect(el.textContent).toContain("Укажи и время");
     await act(async () => type(field(el, "closes-date"), ""));
@@ -139,13 +139,13 @@ describe("OrderForm", () => {
     expect(byText(el, "Разослать").disabled).toBe(false);
     await act(async () => byText(el, "Разослать").click());
     await settle();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ closesAt: "2026-10-08T23:30" }));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ closesAt: "2030-01-15T23:30" }));
   });
 
   it("дата ограничена сегодня..+14 дней", async () => {
     const { el } = await mountWithPlace();
-    expect(field(el, "closes-date").min).toBe("2026-10-08");
-    expect(field(el, "closes-date").max).toBe("2026-10-22");
+    expect(field(el, "closes-date").min).toBe("2030-01-15");
+    expect(field(el, "closes-date").max).toBe("2030-01-29");
   });
 
   it("«Без меню» принудительно включает и гасит «свои позиции»", async () => {

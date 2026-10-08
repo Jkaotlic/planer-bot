@@ -91,6 +91,11 @@ describe("createFoodMock: сбор — название, срок на дату,
     await expect(mock.addOrderItem(order.id, { name: "Суп", price: 100 })).rejects.toThrow("В этом сборе только позиции из списка.");
   });
 
+  it("closesAt и closesTime вместе — отказ, как у сервера", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    await expect(mock.createOrder({ ...base, placeId: null, closesAt: "2026-10-09T16:00", closesTime: "23:59" })).rejects.toThrow("Проверь место, срок и адресатов.");
+  });
+
   it("срок проверяется как на сервере: формат и настоящий календарь, потом прошлое", async () => {
     const { mock } = mockAs({ id: 1, isAdmin: true });
     for (const bad of ["2026-10-09 16:00", "2026-10-09T24:00", "2026-09-31T10:00"]) {
