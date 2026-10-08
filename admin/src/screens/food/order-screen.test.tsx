@@ -153,7 +153,23 @@ describe("консоль: заказ — собирающему и админу"
     await waitFor(() => expect(close).toHaveBeenCalledWith(7));
   });
 
-  it("«Что заказать» и «Кто сколько» — строками shared; без права управлять — карточки нет", async () => {
+  it("одно блюдо с разным шагом — две строки без предупреждения React о дубле ключа", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const el = await open(orderView({
+      dishes: [
+        { name: "Икра", price: 2400, qty: 1, unit: "kg", stepGrams: 400 },
+        { name: "Икра", price: 2400, qty: 1, unit: "kg", stepGrams: 500 },
+      ],
+      total: 4800,
+      people: [{ employeeId: 3, displayName: "Марк", amount: 4800, declined: false, items: [] }],
+    }));
+    expect(area(el, "people")!.textContent).toContain("0,4 кг");
+    expect(area(el, "people")!.textContent).toContain("0,5 кг");
+    expect(err.mock.calls.flat().join(" ")).not.toContain("same key");
+    err.mockRestore();
+  });
+
+  it("«Что заказать» и «Кто что» — строками shared; без права управлять — карточки нет", async () => {
     const el = await open(orderView({
       dishes: [{ name: "Пицца", price: 1200, qty: 2, unit: "pcs", stepGrams: null }], total: 2400,
       people: [
@@ -163,6 +179,8 @@ describe("консоль: заказ — собирающему и админу"
       ],
     }));
     const people = area(el, "people")!.textContent!;
+    expect(people).toContain("Кто что");
+    expect(people).not.toContain("Кто сколько");
     expect(people).toContain("Пицца ×2 — 2\u00a0400\u00a0₽");
     expect(people).toContain("Игорь — не будет");
     expect(people).toContain("Марк — 1\u00a0200\u00a0₽");

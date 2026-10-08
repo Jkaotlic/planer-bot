@@ -29,6 +29,17 @@ describe("места", () => {
     expect(back.place!.menu[0]).toMatchObject({ unit: "pcs", stepGrams: null });
   });
 
+  it("правка без единицы в теле (вкладка до выкатки) не превращает кг-позицию в штуки", () => {
+    const { db, anya } = stage();
+    const caviar = createPlace(db, { name: "Икра", menu: [{ name: "Кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const id = caviar.menu[0]!.id;
+    const edited = updatePlace(db, caviar.id, { name: "Икра", menu: [{ id, name: "Кетовая", price: 2500 }, { name: "Новая", price: 100 }] });
+    expect(edited.place!.menu.map((m) => [m.price, m.unit, m.stepGrams])).toEqual([[2500, "kg", 400], [100, "pcs", null]]);
+    // Явное «pcs» — осознанная правка, она по-прежнему переводит в штуки.
+    const back = updatePlace(db, caviar.id, { name: "Икра", menu: [{ id, name: "Кетовая", price: 2500, unit: "pcs" }] });
+    expect(back.place!.menu[0]).toMatchObject({ unit: "pcs", stepGrams: null });
+  });
+
   it("правка: блюдо с id меняет цену, новое добавляется, пропавшее уходит в архив", () => {
     const { db, place } = stage();
     const [shawarma, lavash] = place.menu;

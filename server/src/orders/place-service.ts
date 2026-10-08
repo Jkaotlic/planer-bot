@@ -36,7 +36,7 @@ export function createPlace(db: Db, input: PlaceInput, createdBy: number): Place
   const id = db.transaction((tx) => {
     const place = tx.insert(foodPlaces).values({ name: input.name, createdBy }).returning().get();
     input.menu.forEach((m, position) => {
-      tx.insert(foodMenuItems).values({ placeId: place.id, name: m.name, price: m.price, unit: m.unit, stepGrams: m.stepGrams, position }).run();
+      tx.insert(foodMenuItems).values({ placeId: place.id, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null, position }).run();
     });
     return place.id;
   });
@@ -65,9 +65,14 @@ export function updatePlace(db: Db, id: number, input: PlaceInput): Result & { p
     input.menu.forEach((m, position) => {
       if (m.id != null) {
         kept.add(m.id);
-        tx.update(foodMenuItems).set({ name: m.name, price: m.price, unit: m.unit, stepGrams: m.stepGrams, position }).where(eq(foodMenuItems.id, m.id)).run();
+        // Без единицы в теле — клиент старой сборки, не знающий про кг: оставляем
+        // сохранённую единицу и шаг, а не превращаем кг-позицию в штуки.
+        const stored = current.get(m.id)!;
+        const unit = m.unit ?? stored.unit;
+        const step = m.unit === undefined ? stored.stepGrams : (m.stepGrams ?? null);
+        tx.update(foodMenuItems).set({ name: m.name, price: m.price, unit, stepGrams: step, position }).where(eq(foodMenuItems.id, m.id)).run();
       } else {
-        tx.insert(foodMenuItems).values({ placeId: id, name: m.name, price: m.price, unit: m.unit, stepGrams: m.stepGrams, position }).run();
+        tx.insert(foodMenuItems).values({ placeId: id, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null, position }).run();
       }
     });
     for (const oldId of current.keys()) {

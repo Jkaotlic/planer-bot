@@ -194,8 +194,8 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
         {order.people && (
           <Card>
             <div style={{ fontWeight: 600 }}>Что заказать</div>
-            {order.dishes.map((d) => <div key={`${d.name}-${d.price}`}>{itemLines([d])[0]}</div>)}
-            <div style={{ fontWeight: 600, marginTop: 6 }}>Кто сколько</div>
+            {order.dishes.map((d) => <div key={`${d.name}-${d.price}-${d.unit}-${d.stepGrams ?? ""}`}>{itemLines([d])[0]}</div>)}
+            <div style={{ fontWeight: 600, marginTop: 6 }}>Кто что</div>
             {order.people.map((p) => (
               <div key={p.employeeId}>
                 {/* white-space: pre-wrap — двухпробельный отступ позиций под именем иначе схлопнется. */}

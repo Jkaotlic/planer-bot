@@ -265,7 +265,7 @@ export function createFoodMock(opts: FoodMockOptions) {
     // сервере — иначе DEV пропустил бы то, что живой сервер отклонит.
     if (!parsed.success) throw new Error("Проверь название, блюда и цены (целые рубли, до 100 000).");
     if (id == null) {
-      const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: nextMenuItemId++, name: m.name, price: m.price, unit: m.unit, stepGrams: m.stepGrams }));
+      const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: nextMenuItemId++, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null }));
       const place: MockPlace = { id: nextPlaceId++, name: parsed.data.name, menu, archived: false };
       PLACES.push(place);
       return { id: place.id, name: place.name, menu: place.menu };
@@ -279,7 +279,13 @@ export function createFoodMock(opts: FoodMockOptions) {
     if (parsed.data.menu.some((m) => m.id != null && !currentIds.has(m.id))) {
       throw new Error("Меню уже поменяли — открой место заново.");
     }
-    const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: m.id ?? nextMenuItemId++, name: m.name, price: m.price, unit: m.unit, stepGrams: m.stepGrams }));
+    // Как в `updatePlace`: тело без единицы у существующего блюда не стирает кг.
+    const stored = new Map(place.menu.map((m) => [m.id, m]));
+    const menu: MockMenuItem[] = parsed.data.menu.map((m) => {
+      const old = m.id != null ? stored.get(m.id) : undefined;
+      if (old && m.unit === undefined) return { id: old.id, name: m.name, price: m.price, unit: old.unit, stepGrams: old.stepGrams };
+      return { id: m.id ?? nextMenuItemId++, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null };
+    });
     place.name = parsed.data.name;
     place.menu = menu;
     return { id: place.id, name: place.name, menu: place.menu };

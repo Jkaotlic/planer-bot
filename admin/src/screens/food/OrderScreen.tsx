@@ -212,8 +212,8 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           {order.people && (
             <section className="food-card" data-area="people">
               <h3 className="food-card-title">Что заказать</h3>
-              {order.dishes.map((d) => <div key={`${d.name}-${d.price}`}>{itemLines([d])[0]}</div>)}
-              <h3 className="food-card-title">Кто сколько</h3>
+              {order.dishes.map((d) => <div key={`${d.name}-${d.price}-${d.unit}-${d.stepGrams ?? ""}`}>{itemLines([d])[0]}</div>)}
+              <h3 className="food-card-title">Кто что</h3>
               {order.people.map((p) => (
                 <div key={p.employeeId}>
                   {orderPersonBlock(p).map((line, i) => <div key={i} data-person-line className="food-person-line">{line}</div>)}

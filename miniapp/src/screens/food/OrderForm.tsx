@@ -62,14 +62,17 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, today }: {
   const allowCustom = placeId === null ? true : allowCustomPick;
   // Дата без времени срока не задаёт: молча выбрать «00:00» значило бы закрыть сбор до начала.
   const dateWithoutTime = closesDate !== "" && closesTime === "";
-  const closesAt = closesTime ? `${closesDate || today}T${closesTime}` : null;
+  // Без даты шлём только время (`closesTime`): «сегодня» достраивает сервер по командным
+  // часам. Своё `today` здесь — с момента открытия формы, и после полуночи оно вчерашнее.
+  const closesAt = closesTime && closesDate ? `${closesDate}T${closesTime}` : null;
+  const legacyTime = closesTime && !closesDate ? { closesTime } : {};
 
   async function submit() {
     setBusy(true);
     setError(null);
     try {
       const result = await apiClient.createOrder({
-        placeId, title: title.trim() || null, allowCustom, note: note.trim() || null, payHint: payHint.trim() || null, closesAt, audience,
+        placeId, title: title.trim() || null, allowCustom, note: note.trim() || null, payHint: payHint.trim() || null, closesAt, ...legacyTime, audience,
       });
       if (result.unreachable.length > 0) setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable });
       else onDone(result.order.id);

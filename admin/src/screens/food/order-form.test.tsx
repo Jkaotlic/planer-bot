@@ -122,7 +122,7 @@ describe("консоль: новый заказ", () => {
     });
   });
 
-  it("дата без времени — «Разослать» погашена, подсказка просит время; только время — сегодня", async () => {
+  it("дата без времени — «Разослать» погашена, подсказка просит время; только время — уходит closesTime", async () => {
     vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
     const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
     const el = await mount(FormToday, props());
@@ -134,7 +134,10 @@ describe("консоль: новый заказ", () => {
     await type(input(el, "Приём до"), "23:30");
     expect(button(el, "Разослать").disabled).toBe(false);
     await click(button(el, "Разослать"));
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ closesAt: "2030-01-15T23:30" }));
+    // Только время: «сегодня» достраивает сервер, а не часы клиента (после полуночи они вчерашние).
+    const sent = create.mock.calls[0]![0];
+    expect(sent.closesTime).toBe("23:30");
+    expect(sent.closesAt).toBeNull();
   });
 
   it("дата ограничена сегодня..+14 дней по командному календарю", async () => {

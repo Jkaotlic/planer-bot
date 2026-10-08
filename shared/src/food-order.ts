@@ -34,7 +34,7 @@ export const TELEGRAM_TEXT_SAFE_MAX = 4000;
 export const foodPriceSchema = z.number().int().min(1).max(FOOD_PRICE_MAX);
 const foodText = z.string().trim().min(1).max(FOOD_TEXT_MAX);
 export const foodUnitSchema = z.enum(["pcs", "kg"]);
-const stepGrams = z.number().int().min(FOOD_STEP_GRAMS_MIN).max(FOOD_STEP_GRAMS_MAX).nullable().default(null);
+const stepGrams = z.number().int().min(FOOD_STEP_GRAMS_MIN).max(FOOD_STEP_GRAMS_MAX).nullable().optional();
 
 export const placeInputSchema = z
   .object({
@@ -46,11 +46,15 @@ export const placeInputSchema = z
             id: z.number().int().positive().optional(),
             name: foodText,
             price: foodPriceSchema,
-            unit: foodUnitSchema.default("pcs"),
+            // Без значения по умолчанию: вкладка консоли, открытая до выкатки,
+            // шлёт существующее блюдо без единицы, и «по умолчанию штуки» тихо
+            // переписало бы кг-позицию. Что значит отсутствие — решает сервис:
+            // у блюда с id единица остаётся прежней, у нового — штуки.
+            unit: foodUnitSchema.optional(),
             stepGrams,
           })
           .strict()
-          .refine((m) => (m.unit === "kg") === (m.stepGrams != null), {
+          .refine((m) => (m.unit === undefined ? m.stepGrams == null : (m.unit === "kg") === (m.stepGrams != null)), {
             message: "Шаг указывается только у позиции в кг — и у неё обязателен.",
           }),
       )

@@ -8,7 +8,7 @@ import {
 describe("placeInputSchema", () => {
   it("принимает место с меню и обрезает пробелы", () => {
     const parsed = placeInputSchema.parse({ name: "  Шаурмечная ", menu: [{ name: " Шаурма ", price: 350 }] });
-    expect(parsed).toEqual({ name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] });
+    expect(parsed).toEqual({ name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] });
   });
 
   it("место без меню допустимо — меню по желанию", () => {
@@ -218,9 +218,14 @@ describe("закупка с названием", () => {
 
 describe("меню с единицами", () => {
   const base = { name: "Икра", menu: [] as unknown[] };
-  it("старое тело без unit — штуки", () => {
+  // Что значит «без единицы» — решает сервис (у блюда с id единица остаётся прежней, у нового — штуки),
+  // поэтому схема ничего не подставляет.
+  it("старое тело без unit проходит как есть, без подстановки штук", () => {
     const p = placeInputSchema.parse({ ...base, menu: [{ name: "Чай", price: 50 }] });
-    expect(p.menu[0]).toMatchObject({ unit: "pcs", stepGrams: null });
+    expect(p.menu[0]).toEqual({ name: "Чай", price: 50 });
+  });
+  it("шаг без единицы — отказ", () => {
+    expect(placeInputSchema.safeParse({ ...base, menu: [{ name: "Икра", price: 2400, stepGrams: 400 }] }).success).toBe(false);
   });
   it("кг без шага — отказ; шт с шагом — отказ; кг с шагом — да", () => {
     expect(placeInputSchema.safeParse({ ...base, menu: [{ name: "Икра", price: 2400, unit: "kg", stepGrams: null }] }).success).toBe(false);

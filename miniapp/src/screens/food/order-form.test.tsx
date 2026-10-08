@@ -129,7 +129,7 @@ describe("OrderForm", () => {
     });
   });
 
-  it("дата без времени гасит «Разослать» с подсказкой; только время — сегодня командное", async () => {
+  it("дата без времени гасит «Разослать» с подсказкой; только время — уходит closesTime, сегодня достраивает сервер", async () => {
     const { el, create } = await mountWithPlace();
     await act(async () => type(field(el, "closes-date"), "2030-01-16"));
     expect(byText(el, "Разослать").disabled).toBe(true);
@@ -139,7 +139,10 @@ describe("OrderForm", () => {
     expect(byText(el, "Разослать").disabled).toBe(false);
     await act(async () => byText(el, "Разослать").click());
     await settle();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ closesAt: "2030-01-15T23:30" }));
+    // Только время: «сегодня» достраивает сервер, а не часы клиента (после полуночи они вчерашние).
+    const sent = create.mock.calls[0]![0];
+    expect(sent.closesTime).toBe("23:30");
+    expect(sent.closesAt).toBeNull();
   });
 
   it("дата ограничена сегодня..+14 дней", async () => {

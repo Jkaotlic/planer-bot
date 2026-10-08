@@ -57,6 +57,20 @@ describe("места по HTTP", () => {
     expect(place.menu.map((m: { unit: string; stepGrams: number | null }) => [m.unit, m.stepGrams])).toEqual([["pcs", null], ["kg", 400]]);
   });
 
+  it("PUT меню без unit поверх кг-позиции оставляет кг и шаг; явный pcs переводит в штуки", async () => {
+    const { app, anyaT } = await stage();
+    const created = await (await app.request(new Request("http://x/api/food-places",
+      send(anyaT, { name: "Рынок", menu: [{ name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }] })))).json();
+    const id = created.place.menu[0].id;
+    const old = await app.request(new Request(`http://x/api/food-places/${created.place.id}`,
+      send(anyaT, { name: "Рынок", menu: [{ id, name: "Икра", price: 2500 }] }, "PUT")));
+    expect(old.status).toBe(200);
+    expect((await old.json()).place.menu[0]).toMatchObject({ price: 2500, unit: "kg", stepGrams: 400 });
+    const explicit = await app.request(new Request(`http://x/api/food-places/${created.place.id}`,
+      send(anyaT, { name: "Рынок", menu: [{ id, name: "Икра", price: 2500, unit: "pcs" }] }, "PUT")));
+    expect((await explicit.json()).place.menu[0]).toMatchObject({ unit: "pcs", stepGrams: null });
+  });
+
   it("кривое меню — 400 с русской причиной", async () => {
     const { app, anyaT } = await stage();
     const res = await app.request(new Request("http://x/api/food-places",

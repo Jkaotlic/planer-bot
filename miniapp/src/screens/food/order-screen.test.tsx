@@ -78,22 +78,40 @@ describe("OrderScreen — участник", () => {
     expect(minus.map((b) => b.disabled)).toEqual([false, true]);
   });
 
-  it("участник не видит список «кто сколько»", async () => {
+  it("участник не видит список «кто что»", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue(BASE);
     const el = await mountScreen(7);
-    expect(el.textContent).not.toContain("Кто сколько");
+    expect(el.textContent).not.toContain("Кто что");
   });
 });
 
 describe("OrderScreen — запускающий", () => {
-  it("видит «кто сколько», сводку и кнопку закрытия", async () => {
+  it("одно блюдо с разным шагом — две строки без предупреждения React о дубле ключа", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(apiClient, "getOrder").mockResolvedValue({
+      ...BASE, isCreator: true, canManage: true, total: 4800,
+      dishes: [
+        { name: "Икра", price: 2400, qty: 1, unit: "kg", stepGrams: 400 },
+        { name: "Икра", price: 2400, qty: 1, unit: "kg", stepGrams: 500 },
+      ],
+      people: [{ employeeId: 2, displayName: "Игорь", amount: 4800, declined: false, items: [] }],
+    });
+    const el = await mountScreen(7);
+    expect(el.textContent).toContain("0,4 кг");
+    expect(el.textContent).toContain("0,5 кг");
+    expect(err.mock.calls.flat().join(" ")).not.toContain("same key");
+    err.mockRestore();
+  });
+
+  it("видит «кто что», сводку и кнопку закрытия", async () => {
     vi.spyOn(apiClient, "getOrder").mockResolvedValue({
       ...BASE, isCreator: true, canManage: true, total: 350,
       dishes: [{ name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }],
       people: [{ employeeId: 2, displayName: "Игорь", amount: 350, declined: false, items: [] }, { employeeId: 3, displayName: "Марк", amount: 0, declined: true, items: [] }],
     });
     const el = await mountScreen(7);
-    expect(el.textContent).toContain("Кто сколько");
+    expect(el.textContent).toContain("Кто что");
+    expect(el.textContent).not.toContain("Кто сколько");
     expect(el.textContent).toContain(`Игорь — ${formatMoney(350)}`);
     expect(el.textContent).toContain("Марк — не будет");
     expect(byText(el, "Закрыть приём")).toBeTruthy();
