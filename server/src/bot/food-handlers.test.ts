@@ -273,6 +273,16 @@ describe("колбэки заказа", () => {
     expect(text).toContain("🍱 Аня: Шаурмечная");
     expect(text).toContain("🗳 Пицца?");
   });
+
+  it("сбор с названием в «Сервисах» — со значком 🛒 и названием вместо места", async () => {
+    const { db, bot, anya, igor, order } = stage();
+    createOrder(db, { createdBy: anya.id, placeId: order.placeId, title: "Икра, 09.10", allowCustom: false, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id] });
+    const api = recordApi(bot);
+    await say(bot, 333, BTN_SERVICES);
+    const text = api.sent.at(-1)!.text;
+    expect(text).toContain("🛒 Аня: Икра, 09.10");
+    expect(text).toContain("🍱 Аня: Шаурмечная");
+  });
 });
 
 describe("деньги заказа в боте", () => {

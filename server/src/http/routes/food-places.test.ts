@@ -48,6 +48,15 @@ describe("места по HTTP", () => {
     expect((await edited.json()).place.menu[0].price).toBe(380);
   });
 
+  it("меню без unit и шага — по умолчанию штуки; кг сохраняется с шагом", async () => {
+    const { app, anyaT } = await stage();
+    const res = await app.request(new Request("http://x/api/food-places",
+      send(anyaT, { name: "Рынок", menu: [{ name: "Шаурма", price: 350 }, { name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }] })));
+    expect(res.status).toBe(201);
+    const { place } = await res.json();
+    expect(place.menu.map((m: { unit: string; stepGrams: number | null }) => [m.unit, m.stepGrams])).toEqual([["pcs", null], ["kg", 400]]);
+  });
+
   it("кривое меню — 400 с русской причиной", async () => {
     const { app, anyaT } = await stage();
     const res = await app.request(new Request("http://x/api/food-places",

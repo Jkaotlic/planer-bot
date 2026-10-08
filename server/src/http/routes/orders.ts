@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
-  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -32,7 +32,9 @@ const createSchema = z.object({
   note: optionalText,
   payHint: optionalText,
   // `closesTime` — прежнее поле: вкладка мини-аппа, открытая до выкатки, шлёт его.
-  closesAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
+  closesAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/)
+    // Регэксп пропускает 31 сентября; `dateStr` проверяет настоящий календарь.
+    .refine((s) => dateStr.safeParse(s.slice(0, 10)).success, "Такой даты нет.").nullable().optional(),
   closesTime: timeStr.nullable().optional(),
   audience: teamAudienceSchema,
 }).strict().refine((b) => !(b.closesAt && b.closesTime), { message: "Срок — одним полем." });
@@ -79,6 +81,10 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   app.post("/api/orders", auth, async (c) => {
     const parsed = createSchema.safeParse(await jsonBody(c));
     if (!parsed.success) return c.json({ error: "Проверь место, срок и адресатов.", issues: parsed.error.issues }, 400);
+    // Сбор без меню и без своих позиций — пустая комната: ни выбрать, ни вписать.
+    if (parsed.data.placeId == null && !parsed.data.allowCustom) {
+      return c.json({ error: "Без меню нужны свои позиции — иначе заказать будет нечего." }, 400);
+    }
     const now = teamNow(config.teamTz);
     const closesAt = parsed.data.closesAt ?? closesAtFromTime(parsed.data.closesTime ?? null, now.date);
     // Срок в прошлом рождает заказ уже закрытым: письма уйдут с погашенными

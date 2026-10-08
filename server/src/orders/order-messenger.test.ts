@@ -6,7 +6,7 @@ import type { Db } from "../db/client";
 import { archivePlace, createPlace } from "./place-service";
 import { addCustomItem, addMenuItem, closeOrder, createOrder, declineOrder, getOrder } from "./order-service";
 import { formatMoney } from "@planer/shared";
-import { finishOrderMessages, orderHeading, orderMenu, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "./order-messenger";
+import { finishOrderMessages, orderMenu, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "./order-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
 const URL = "https://example.com";
@@ -73,6 +73,7 @@ describe("рассылка заказа", () => {
     const cancelBot = silentBot().bot;
     const cancelApi = recordApi(cancelBot);
     await finishOrderMessages(cancelBot, db, { ...order, cancelledAt: new Date() }, "cancelled", URL);
+    expect(cancelApi.sent).toHaveLength(2);
     expect(cancelApi.sent.every((m) => m.text === "🚫 Сбор «Икра, 09.10» отменён.")).toBe(true);
     const remindBot = silentBot().bot;
     const remindApi = recordApi(remindBot);
@@ -162,16 +163,5 @@ describe("перерисовка письма заказа", () => {
     closeOrder(db, order, anya);
     await redrawOrderMessage(bot, db, getOrder(db, order.id)!, igor.id, now, URL);
     expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(1);
-  });
-});
-
-describe("заголовок заказа", () => {
-  it("название, иначе место, иначе null", () => {
-    const { db, anya, place, order } = stage();
-    expect(orderHeading(db, order)).toBe("Шаурмечная");
-    expect(orderHeading(db, { ...order, title: "Икра, 09.10" })).toBe("Икра, 09.10");
-    const free = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id] });
-    expect(orderHeading(db, free)).toBeNull();
-    void place;
   });
 });

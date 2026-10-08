@@ -52,11 +52,6 @@ export function placeName(db: Db, order: FoodOrder): string | null {
   return order.placeId == null ? null : db.select({ n: foodPlaces.name }).from(foodPlaces).where(eq(foodPlaces.id, order.placeId)).get()?.n ?? null;
 }
 
-/** Заголовок заказа в письмах: название сбора, иначе место; `null` — заказ без меню. */
-export function orderHeading(db: Db, order: FoodOrder): string | null {
-  return order.title ?? placeName(db, order);
-}
-
 export function orderTextFor(db: Db, order: FoodOrder, employeeId: number, today: string): string {
   const { byId } = names(db, order);
   return orderInviteText({
