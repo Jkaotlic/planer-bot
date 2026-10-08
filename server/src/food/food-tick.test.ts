@@ -28,7 +28,7 @@ describe("runFoodTick", () => {
     const db = makeTestDb();
     const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-a" });
     linkTelegramAccount(db, "inv-a", 100);
-    const order = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: "2026-09-29T11:00", recipientIds: [anya.id] });
+    const order = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-29T11:00", recipientIds: [anya.id] });
     const { bot } = silentBot();
     const api = recordApi(bot);
     const now = { date: "2026-09-29", time: "12:00" };
@@ -42,5 +42,20 @@ describe("runFoodTick", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.actorEmployeeId).toBeNull();
     expect(entries[0]!.payload).toMatchObject({ orderId: order.id, byTick: true });
+  });
+
+  it("заказ со сроком на завтра не закрывается сегодняшним тиком, а завтра — ровно одной сводкой", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-a" });
+    linkTelegramAccount(db, "inv-a", 100);
+    const order = createOrder(db, { createdBy: anya.id, placeId: null, title: "Икра", allowCustom: true, note: null, payHint: null, closesAt: "2026-09-30T10:00", recipientIds: [anya.id] });
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    expect(await runFoodTick(db, bot, { date: "2026-09-29", time: "23:59" }, URL)).toBe(0);
+    expect(getOrder(db, order.id)!.closedAt).toBeNull();
+    expect(api.sent).toHaveLength(0);
+    expect(await runFoodTick(db, bot, { date: "2026-09-30", time: "10:00" }, URL)).toBe(1);
+    expect(await runFoodTick(db, bot, { date: "2026-09-30", time: "10:01" }, URL)).toBe(0);
+    expect(api.sent.filter((m) => m.text.includes("закрыт"))).toHaveLength(1);
   });
 });

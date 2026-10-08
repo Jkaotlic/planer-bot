@@ -73,7 +73,7 @@ async function stage() {
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   const mark = person(db, "Марк", 102);
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya);
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }, anya);
   return {
     db, app, sent, failFor, hold, api, anya, igor, mark, placeId: place.id,
     anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102),
@@ -186,6 +186,86 @@ describe("заказы по HTTP", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("Время уже прошло — поставь позже или оставь пустым.");
     expect(sent).toHaveLength(0);
+  });
+
+  // Часы подделаны на 2026-09-29 12:00 команды, поэтому «завтра» — 09-30, а 15-й день — 10-14.
+  const createBody = (placeId: number, igor: number, extra: Record<string, unknown>) =>
+    ({ placeId, note: null, payHint: null, audience: { kind: "picked", employeeIds: [igor] }, ...extra });
+
+  it("сбор на завтра с названием и запретом своих", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, {
+      title: "Икра, доставка 09.10", allowCustom: false, closesAt: "2026-09-30T16:00",
+    }))));
+    expect(res.status).toBe(201);
+    const { order } = await res.json();
+    expect(order).toMatchObject({ title: "Икра, доставка 09.10", allowCustom: false, closesAt: "2026-09-30T16:00" });
+  });
+
+  it("старое поле closesTime работает как раньше: сегодня в это время", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { closesTime: "23:59" }))));
+    expect(res.status).toBe(201);
+    expect((await res.json()).order.closesAt).toBe("2026-09-29T23:59");
+  });
+
+  it("closesAt и closesTime вместе — 400", async () => {
+    const { app, sent, igor, anyaT, placeId } = await stage();
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { closesAt: "2026-09-30T16:00", closesTime: "23:59" }))));
+    expect(res.status).toBe(400);
+    expect((await res.json()).issues.map((i: { message: string }) => i.message)).toContain("Срок — одним полем.");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("без меню и без своих позиций — 400: заказать было бы нечего", async () => {
+    const { app, sent, igor, anyaT } = await stage();
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(null as unknown as number, igor, { allowCustom: false }))));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("место с пустым меню и без своих позиций — 400; со своими позициями принимается", async () => {
+    const { db, app, sent, igor, anya, anyaT } = await stage();
+    const empty = createPlace(db, { name: "Пустое", menu: [] }, anya);
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(empty.id, igor, { allowCustom: false }))));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    expect(sent).toHaveLength(0);
+    const ok = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(empty.id, igor, { allowCustom: true }))));
+    expect(ok.status).toBe(201);
+  });
+
+  it("несуществующая дата срока (31 сентября) — 400", async () => {
+    const { app, sent, igor, anyaT, placeId } = await stage();
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { closesAt: "2026-09-31T10:00" }))));
+    expect(res.status).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("дальше 14 дней — 400 с текстом, ничего не уходит; ровно 14-й день — можно", async () => {
+    const { app, sent, igor, anyaT, placeId } = await stage();
+    const far = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { closesAt: "2026-10-14T00:00" }))));
+    expect(far.status).toBe(400);
+    expect((await far.json()).error).toBe("Срок — не дальше 14 дней.");
+    expect(sent).toHaveLength(0);
+    const edge = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { closesAt: "2026-10-13T23:59" }))));
+    expect(edge.status).toBe(201);
+  });
+
+  it("без title и allowCustom — как раньше: null и true", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    expect(body.order).toMatchObject({ title: null, allowCustom: true });
+  });
+
+  it("«Своё блюдо» в сборе без своих — 409 с причиной от сервиса", async () => {
+    const { app, igor, anyaT, igorT, placeId } = await stage();
+    const made = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { allowCustom: false, closesAt: "2026-09-30T16:00" }))));
+    const { order } = await made.json();
+    const res = await app.request(new Request(`http://x/api/orders/${order.id}/items`, send(igorT, { name: "Суп", price: 280 })));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("В этом сборе только позиции из списка.");
   });
 
   it("голое null вместо тела создания — 400, а не падение (решение ревью, п.2)", async () => {

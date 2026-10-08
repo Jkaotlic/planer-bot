@@ -19,4 +19,9 @@ describe("food-* CSS: ловушки каскада и переноса", () => 
     expect(rule(".food-card")).toMatch(/overflow-wrap:\s*anywhere/);
     expect(rule(".food-buttons .btn")).toMatch(/white-space:\s*normal/);
   });
+
+  it("дата и время срока — одной высоты, а не по собственному росту нативного поля", () => {
+    expect(rule(".food-when input")).toMatch(/height:\s*var\(--control-h\)/);
+  });
 });
+

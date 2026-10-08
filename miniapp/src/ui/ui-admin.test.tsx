@@ -242,6 +242,12 @@ describe("ui.css: что нельзя потерять", () => {
     expect(css.slice(start, css.indexOf("}", start))).toContain("padding-inline: 0");
   });
 
+  it("обёртка Input в строке блюда (вне карточки) теряет отступ 22px — иначе поле шага в 80px схлопывается", () => {
+    const start = css.indexOf(".food-dish-row div:has(> label > input");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(css.slice(start, css.indexOf("}", start))).toContain("padding-inline: 0");
+  });
+
   it("danger красит текст токеном destructive_text_color", () => {
     expect(rule(".ui-btn--danger")).toContain("--tgui--destructive_text_color");
   });

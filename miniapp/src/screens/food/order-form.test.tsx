@@ -24,14 +24,14 @@ async function mountForm(onDone: (orderId: number) => void, onEditPlaces?: () =>
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(AppRoot, null, createElement(OrderForm, { onDone, onCancel: vi.fn(), onEditPlaces }))); });
+  await act(async () => { root!.render(createElement(AppRoot, null, createElement(OrderForm, { onDone, onCancel: vi.fn(), onEditPlaces, today: "2030-01-15" }))); });
   await settle();
   return host;
 }
 
 describe("OrderForm", () => {
   it("по умолчанию «на смене»; выбранное место и «куда сдавать» уходят в createOrder", async () => {
-    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 3, name: "Шаурмечная", menu: [{ id: 11, name: "Шаурма", price: 350 }] }]);
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 3, name: "Шаурмечная", menu: [{ id: 11, name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }]);
     vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([{ id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true }]);
     const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: { id: 7 } as never, delivered: 2, unreachable: [] });
     const onDone = vi.fn();
@@ -40,7 +40,7 @@ describe("OrderForm", () => {
     await act(async () => type(el.querySelector<HTMLInputElement>("input[name=pay-hint]")!, "Наличкой мне"));
     await act(async () => byText(el, "Разослать").click());
     await settle();
-    expect(create).toHaveBeenCalledWith({ placeId: 3, note: null, payHint: "Наличкой мне", closesTime: null, audience: { kind: "on_shift" } });
+    expect(create).toHaveBeenCalledWith({ placeId: 3, note: null, payHint: "Наличкой мне", closesAt: null, title: null, allowCustom: true, audience: { kind: "on_shift" } });
     expect(onDone).toHaveBeenCalledWith(7);
   });
 
@@ -103,5 +103,64 @@ describe("OrderForm", () => {
     vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([{ id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true }]);
     const el = await mountForm(vi.fn());
     expect(el.textContent).not.toContain("Мест пока нет");
+  });
+
+  const ONE = [{ id: 2, displayName: "Игорь", reachable: true, role: "worker" as const, onShift: true }];
+  const field = (el: HTMLElement, name: string) => el.querySelector<HTMLInputElement>(`input[name=${name}]`)!;
+  async function mountWithPlace() {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 3, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 500, unit: "pcs", stepGrams: null }] }]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue(ONE);
+    const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: { id: 7 } as never, delivered: 1, unreachable: [] });
+    const el = await mountForm(vi.fn());
+    return { el, create };
+  }
+
+  it("название, дата, время и запрет своих позиций уходят одним closesAt", async () => {
+    const { el, create } = await mountWithPlace();
+    await act(async () => byText(el, "Додо").click());
+    await act(async () => type(field(el, "order-title"), "  Икра, доставка 09.10 "));
+    await act(async () => type(field(el, "closes-date"), "2030-01-16"));
+    await act(async () => type(field(el, "closes-time"), "16:00"));
+    await act(async () => field(el, "allow-custom").click());
+    await act(async () => byText(el, "Разослать").click());
+    await settle();
+    expect(create).toHaveBeenCalledWith({
+      placeId: 3, title: "Икра, доставка 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2030-01-16T16:00", audience: { kind: "on_shift" },
+    });
+  });
+
+  it("дата без времени гасит «Разослать» с подсказкой; только время — уходит closesTime, сегодня достраивает сервер", async () => {
+    const { el, create } = await mountWithPlace();
+    await act(async () => type(field(el, "closes-date"), "2030-01-16"));
+    expect(byText(el, "Разослать").disabled).toBe(true);
+    expect(el.textContent).toContain("Укажи и время");
+    await act(async () => type(field(el, "closes-date"), ""));
+    await act(async () => type(field(el, "closes-time"), "23:30"));
+    expect(byText(el, "Разослать").disabled).toBe(false);
+    await act(async () => byText(el, "Разослать").click());
+    await settle();
+    // Только время: «сегодня» достраивает сервер, а не часы клиента (после полуночи они вчерашние).
+    const sent = create.mock.calls[0]![0];
+    expect(sent.closesTime).toBe("23:30");
+    expect(sent.closesAt).toBeNull();
+  });
+
+  it("дата ограничена сегодня..+14 дней", async () => {
+    const { el } = await mountWithPlace();
+    expect(field(el, "closes-date").min).toBe("2030-01-15");
+    expect(field(el, "closes-date").max).toBe("2030-01-29");
+  });
+
+  it("«Без меню» принудительно включает и гасит «свои позиции»", async () => {
+    const { el, create } = await mountWithPlace();
+    await act(async () => byText(el, "Додо").click());
+    await act(async () => field(el, "allow-custom").click());
+    expect(field(el, "allow-custom").checked).toBe(false);
+    await act(async () => byText(el, "Без меню").click());
+    expect(field(el, "allow-custom").checked).toBe(true);
+    expect(field(el, "allow-custom").disabled).toBe(true);
+    await act(async () => byText(el, "Разослать").click());
+    await settle();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ placeId: null, allowCustom: true }));
   });
 });

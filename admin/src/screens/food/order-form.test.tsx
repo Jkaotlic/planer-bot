@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
 import { AuthRequiredError, apiClient } from "../../api/client";
+import { TeamTodayContext } from "../../lib/team-today";
+import { FOOD_TEXT_MAX } from "@planer/shared";
 import { TEAM, orderView } from "./food-fixtures";
 import { authRequired, button, click, deferred, release, mount, type, unmount, waitFor } from "./food-test-kit";
 import { OrderForm } from "./OrderForm";
@@ -14,7 +17,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }] };
+const DODO = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200, unit: "pcs" as const, stepGrams: null }] };
+// Командное «сегодня» задаём контекстом, а не часами: тест не должен зависеть от даты запуска.
+function FormToday(p: Parameters<typeof OrderForm>[0]) {
+  return createElement(TeamTodayContext.Provider, { value: "2030-01-15" }, createElement(OrderForm, p));
+}
+const input = (el: HTMLElement, label: string) => el.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
 const props = () => ({ onDone: vi.fn(), onCancel: vi.fn() });
 
 describe("консоль: новый заказ", () => {
@@ -29,12 +37,11 @@ describe("консоль: новый заказ", () => {
     await type(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Комментарий"]')!, "  к часу  ");
     expect(el.querySelector<HTMLInputElement>('input[aria-label="Куда сдавать"]')!.getAttribute("type")).toBe("text");
     await type(el.querySelector<HTMLInputElement>('input[aria-label="Куда сдавать"]')!, "Наличкой Ане");
-    await type(el.querySelector<HTMLInputElement>('input[aria-label="Приём до"]')!, "12:30");
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Разослать"));
     await waitFor(() => expect(p.onDone).toHaveBeenCalledWith(42));
     expect(create).toHaveBeenCalledWith({
-      placeId: 1, note: "к часу", payHint: "Наличкой Ане", closesTime: "12:30", audience: { kind: "on_shift" },
+      placeId: 1, note: "к часу", payHint: "Наличкой Ане", title: null, allowCustom: true, closesAt: null, audience: { kind: "on_shift" },
     });
   });
 
@@ -93,5 +100,66 @@ describe("консоль: новый заказ", () => {
     await click(button(el, "Разослать"));
     await waitFor(() => expect(authRequired).toHaveBeenCalled());
     expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("название, дата, время и запрет своих позиций уходят одним closesAt", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([DODO]);
+    const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
+    const p = props();
+    const el = await mount(FormToday, p);
+    await waitFor(() => expect(button(el, "Додо")).toBeTruthy());
+    await click(button(el, "Додо"));
+    expect(input(el, "Название").maxLength).toBe(FOOD_TEXT_MAX);
+    await type(input(el, "Название"), "  Икра, доставка 09.10 ");
+    await type(input(el, "Дата приёма"), "2030-01-16");
+    await type(input(el, "Приём до"), "16:00");
+    await click(input(el, "Можно добавлять свои позиции"));
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Разослать"));
+    await waitFor(() => expect(p.onDone).toHaveBeenCalledWith(42));
+    expect(create).toHaveBeenCalledWith({
+      placeId: 1, title: "Икра, доставка 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2030-01-16T16:00", audience: { kind: "on_shift" },
+    });
+  });
+
+  it("дата без времени — «Разослать» погашена, подсказка просит время; только время — уходит closesTime", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
+    const el = await mount(FormToday, props());
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await type(input(el, "Дата приёма"), "2030-01-16");
+    expect(button(el, "Разослать").disabled).toBe(true);
+    expect(el.textContent).toContain("Укажи и время");
+    await type(input(el, "Дата приёма"), "");
+    await type(input(el, "Приём до"), "23:30");
+    expect(button(el, "Разослать").disabled).toBe(false);
+    await click(button(el, "Разослать"));
+    // Только время: «сегодня» достраивает сервер, а не часы клиента (после полуночи они вчерашние).
+    const sent = create.mock.calls[0]![0];
+    expect(sent.closesTime).toBe("23:30");
+    expect(sent.closesAt).toBeNull();
+  });
+
+  it("дата ограничена сегодня..+14 дней по командному календарю", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    const el = await mount(FormToday, props());
+    expect(input(el, "Дата приёма").min).toBe("2030-01-15");
+    expect(input(el, "Дата приёма").max).toBe("2030-01-29");
+  });
+
+  it("«Без меню» включает и запирает «свои позиции»: сбор, который сервер отклонит, не собрать", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([DODO]);
+    const create = vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: orderView({ id: 42 }), delivered: 2, unreachable: [] });
+    const el = await mount(FormToday, props());
+    await waitFor(() => expect(button(el, "Додо")).toBeTruthy());
+    await click(button(el, "Додо"));
+    await click(input(el, "Можно добавлять свои позиции"));
+    expect(input(el, "Можно добавлять свои позиции").checked).toBe(false);
+    await click(button(el, "Без меню"));
+    expect(input(el, "Можно добавлять свои позиции").checked).toBe(true);
+    expect(input(el, "Можно добавлять свои позиции").disabled).toBe(true);
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Разослать"));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ placeId: null, allowCustom: true }));
   });
 });

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
+import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 import { routeAuthError, useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
+import { useTeamToday } from "../../lib/team-today";
 
 /**
  * Новый заказ еды — как в мини-аппе (`miniapp/src/screens/food/OrderForm.tsx`).
@@ -23,7 +24,13 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
   const [placeId, setPlaceId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [payHint, setPayHint] = useState("");
+  const [title, setTitle] = useState("");
+  // Что человек отметил для места; «Без меню» перекрывает это принудительно (см. `allowCustom`).
+  const [allowCustomPick, setAllowCustomPick] = useState(true);
+  const [closesDate, setClosesDate] = useState("");
   const [closesTime, setClosesTime] = useState("");
+  // Командная дата, не часы браузера: граница дня не зависит от пояса машины.
+  const today = useTeamToday();
   const [audience, setAudience] = useState<TeamAudience>({ kind: "on_shift" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,13 +49,22 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
   }, []);
 
   const selected = places.find((p) => p.id === placeId) ?? null;
+  // Без меню и без своих позиций заказывать нечего — сервер такое отклоняет (400), поэтому
+  // форма не даёт его собрать, а не показывает отказ после нажатия.
+  const allowCustom = placeId === null ? true : allowCustomPick;
+  // Дата без времени срока не задаёт: молча выбрать «00:00» значило бы закрыть сбор до начала.
+  const dateWithoutTime = closesDate !== "" && closesTime === "";
+  // Без даты шлём только время (`closesTime`): «сегодня» достраивает сервер по командным
+  // часам. Своё `today` здесь — с момента открытия формы, и после полуночи оно вчерашнее.
+  const closesAt = closesTime && closesDate ? `${closesDate}T${closesTime}` : null;
+  const legacyTime = closesTime && !closesDate ? { closesTime } : {};
 
   async function submit() {
     setBusy(true);
     setError(null);
     try {
       const result = await apiClient.createOrder({
-        placeId, note: note.trim() || null, payHint: payHint.trim() || null, closesTime: closesTime || null, audience,
+        placeId, title: title.trim() || null, allowCustom, note: note.trim() || null, payHint: payHint.trim() || null, closesAt, ...legacyTime, audience,
       });
       if (result.unreachable.length > 0) setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable });
       else onDone(result.order.id);
@@ -94,6 +110,16 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
         {selected && <div className="food-meta">{menuPreview(selected.menu)}</div>}
       </div>
       <label className="birthday-label">
+        Название (необязательно)
+        <input type="text" aria-label="Название" placeholder="Например: Икра, доставка 09.10" maxLength={FOOD_TEXT_MAX} value={title} disabled={busy} onChange={(e) => setTitle(e.target.value)} />
+      </label>
+      <label className="food-check">
+        <input type="checkbox" aria-label="Можно добавлять свои позиции" checked={allowCustom} disabled={busy || placeId === null}
+          onChange={(e) => setAllowCustomPick(e.target.checked)} />
+        <span>Можно добавлять свои позиции</span>
+      </label>
+      {placeId === null && <div className="food-meta">Без меню позиции — только свои.</div>}
+      <label className="birthday-label">
         Комментарий (необязательно)
         <textarea rows={2} aria-label="Комментарий" maxLength={FOOD_NOTE_MAX} value={note} disabled={busy} onChange={(e) => setNote(e.target.value)} />
       </label>
@@ -101,14 +127,22 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
         Куда сдавать (необязательно)
         <input type="text" name="pay-hint" aria-label="Куда сдавать" maxLength={FOOD_NOTE_MAX} value={payHint} disabled={busy} onChange={(e) => setPayHint(e.target.value)} />
       </label>
-      <label className="birthday-label">
-        Приём до (необязательно)
-        <input type="time" className="food-time" aria-label="Приём до" value={closesTime} disabled={busy} onChange={(e) => setClosesTime(e.target.value)} />
-      </label>
+      <div className="food-when">
+        <label className="birthday-label">
+          Дата (необязательно)
+          <input type="date" aria-label="Дата приёма" min={today} max={addDaysIso(today, FOOD_CLOSE_HORIZON_DAYS)} value={closesDate} disabled={busy}
+            onChange={(e) => setClosesDate(e.target.value)} />
+        </label>
+        <label className="birthday-label">
+          Приём до (необязательно)
+          <input type="time" aria-label="Приём до" value={closesTime} disabled={busy} onChange={(e) => setClosesTime(e.target.value)} />
+        </label>
+      </div>
+      {dateWithoutTime && <div className="food-meta" role="status">Укажи и время — дата без времени срок не задаёт.</div>}
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div className="employees-error" role="alert">{error}</div>}
       <div className="food-buttons">
-        <button type="button" className="btn btn-primary" disabled={!audienceReady(audience) || busy} onClick={() => void submit()}>
+        <button type="button" className="btn btn-primary" disabled={!audienceReady(audience) || dateWithoutTime || busy} onClick={() => void submit()}>
           {busy ? "Отправляю…" : "Разослать"}
         </button>
         <button type="button" className="btn btn-quiet" disabled={busy} onClick={onCancel}>Отмена</button>

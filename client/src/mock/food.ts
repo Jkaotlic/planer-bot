@@ -1,7 +1,7 @@
 import {
-  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
-  isFutureClose, isOpenAt, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
-  type AudienceCandidate, type FoodSendReport, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
+  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
+  isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
+  type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
 } from "@planer/shared";
 import { delay } from "./delay";
@@ -226,6 +226,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     id: number;
     name: string;
     price: number;
+    unit: FoodUnit;
+    stepGrams: number | null;
   }
 
   interface MockPlace {
@@ -240,8 +242,8 @@ export function createFoodMock(opts: FoodMockOptions) {
       id: 1,
       name: "Шаурмечная у метро",
       menu: [
-        { id: 1, name: "Шаурма классическая", price: 350 },
-        { id: 2, name: "Лаваш с курицей", price: 300 },
+        { id: 1, name: "Шаурма классическая", price: 350, unit: "pcs", stepGrams: null },
+        { id: 2, name: "Лаваш с курицей", price: 300, unit: "pcs", stepGrams: null },
       ],
       archived: false,
     },
@@ -252,7 +254,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   async function getFoodPlaces(): Promise<PlaceView[]> {
     await wait();
     return PLACES.filter((p) => !p.archived)
-      .map((p) => ({ id: p.id, name: p.name, menu: p.menu.map((m) => ({ id: m.id, name: m.name, price: m.price })) }))
+      .map((p) => ({ id: p.id, name: p.name, menu: p.menu.map((m) => ({ ...m })) }))
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }
 
@@ -263,7 +265,7 @@ export function createFoodMock(opts: FoodMockOptions) {
     // сервере — иначе DEV пропустил бы то, что живой сервер отклонит.
     if (!parsed.success) throw new Error("Проверь название, блюда и цены (целые рубли, до 100 000).");
     if (id == null) {
-      const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: nextMenuItemId++, name: m.name, price: m.price }));
+      const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: nextMenuItemId++, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null }));
       const place: MockPlace = { id: nextPlaceId++, name: parsed.data.name, menu, archived: false };
       PLACES.push(place);
       return { id: place.id, name: place.name, menu: place.menu };
@@ -277,7 +279,13 @@ export function createFoodMock(opts: FoodMockOptions) {
     if (parsed.data.menu.some((m) => m.id != null && !currentIds.has(m.id))) {
       throw new Error("Меню уже поменяли — открой место заново.");
     }
-    const menu: MockMenuItem[] = parsed.data.menu.map((m) => ({ id: m.id ?? nextMenuItemId++, name: m.name, price: m.price }));
+    // Как в `updatePlace`: тело без единицы у существующего блюда не стирает кг.
+    const stored = new Map(place.menu.map((m) => [m.id, m]));
+    const menu: MockMenuItem[] = parsed.data.menu.map((m) => {
+      const old = m.id != null ? stored.get(m.id) : undefined;
+      if (old && m.unit === undefined) return { id: old.id, name: m.name, price: m.price, unit: old.unit, stepGrams: old.stepGrams };
+      return { id: m.id ?? nextMenuItemId++, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null };
+    });
     place.name = parsed.data.name;
     place.menu = menu;
     return { id: place.id, name: place.name, menu: place.menu };
@@ -304,6 +312,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     name: string;
     price: number;
     qty: number;
+    unit: FoodUnit;
+    stepGrams: number | null;
   }
 
   interface MockOrder {
@@ -312,6 +322,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     placeId: number | null;
     note: string | null;
     payHint: string | null;
+    title: string | null;
+    allowCustom: boolean;
     closesAt: string | null;
     closedAt: string | null;
     cancelledAt: string | null;
@@ -358,9 +370,11 @@ export function createFoodMock(opts: FoodMockOptions) {
       creatorId: o.createdBy,
       creatorName: nameOf(o.createdBy),
       placeId: o.placeId,
+      title: o.title,
       placeName: place?.name ?? null,
+      allowCustom: o.allowCustom,
       // Меню — только пока приём идёт: у закрытого заказа кнопки добавлять уже нечего.
-      menu: open && place ? place.menu.map((m) => ({ id: m.id, name: m.name, price: m.price })) : [],
+      menu: open && place ? place.menu.map((m) => ({ ...m })) : [],
       note: o.note,
       payHint: o.payHint,
       closesAt: o.closesAt,
@@ -370,7 +384,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       cancelled: o.cancelledAt != null,
       isCreator: o.createdBy === me().id,
       canManage: manage,
-      myItems: mine.map(({ id, name, price, qty }) => ({ id, name, price, qty })),
+      myItems: mine.map(({ id, name, price, qty, unit, stepGrams }) => ({ id, name, price, qty, unit, stepGrams })),
       myTotal: debtOf(o.items, me().id),
       declined: o.declines.has(me().id),
       recipientCount: o.recipients.length,
@@ -380,7 +394,9 @@ export function createFoodMock(opts: FoodMockOptions) {
       // Поимённо — только запускающему/админу, как на сервере (`orderView`):
       // сумма коллеги — не общее знание.
       people: manage
-        ? o.recipients.map((id) => ({ employeeId: id, displayName: nameOf(id), amount: debtOf(o.items, id), declined: o.declines.has(id) }))
+        ? o.recipients.map((id) => ({ employeeId: id, displayName: nameOf(id), amount: debtOf(o.items, id), declined: o.declines.has(id),
+            items: dishSummary(o.items.filter((i) => i.employeeId === id)),
+          }))
         : null,
       payment: (() => {
         const progress = orderPaymentProgress(o);
@@ -423,16 +439,29 @@ export function createFoodMock(opts: FoodMockOptions) {
   }
 
   async function createOrder(input: {
-    placeId: number | null; note: string | null; payHint: string | null; closesTime: string | null; audience: TeamAudience;
+    placeId: number | null; title?: string | null; allowCustom?: boolean; note: string | null; payHint: string | null;
+    // `closesTime` — прежнее поле мини-аппа (как у `POST /api/orders`): срок на сегодня.
+    closesAt?: string | null; closesTime?: string | null; audience: TeamAudience;
   }): Promise<{ order: OrderView } & FoodSendReport> {
     await wait();
     const now = clock();
-    const closesAt = closesAtFromTime(input.closesTime, now.date);
+    const allowCustom = input.allowCustom ?? true;
+    // Тот же отказ и тот же текст, что у `POST /api/orders`: сбор без меню и без своих позиций пуст.
+    if (input.placeId == null && !allowCustom) throw new Error("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    // Схема сервера принимает срок одним полем: оба сразу — 400 с тем же текстом.
+    if (input.closesAt != null && input.closesTime != null) throw new Error("Проверь место, срок и адресатов.");
+    // Тот же формат и тот же календарь, что у схемы `POST /api/orders`: регэксп пропускает 31 сентября.
+    if (input.closesAt != null && !(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/.test(input.closesAt) && dateStr.safeParse(input.closesAt.slice(0, 10)).success)) {
+      throw new Error("Проверь место, срок и адресатов.");
+    }
+    const closesAt = input.closesAt ?? closesAtFromTime(input.closesTime ?? null, now.date);
     // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
     if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
-    if (input.placeId != null && !PLACES.some((p) => p.id === input.placeId && !p.archived)) {
-      throw new Error("Такого места больше нет.");
-    }
+    if (!isWithinCloseHorizon(closesAt, now.date)) throw new Error(`Срок — не дальше ${FOOD_CLOSE_HORIZON_DAYS} дней.`);
+    const chosen = input.placeId == null ? null : PLACES.find((p) => p.id === input.placeId && !p.archived);
+    if (input.placeId != null && !chosen) throw new Error("Такого места больше нет.");
+    // Как на сервере: место без блюд при запрете своих позиций — пустая комната.
+    if (chosen && chosen.menu.length === 0 && !allowCustom) throw new Error("Без меню нужны свои позиции — иначе заказать будет нечего.");
     const ids = audienceIds(input.audience);
     const recipients = [...new Set([me().id, ...ids.filter((id) => id !== me().id)])];
     // Тот же отказ и тот же текст, что у `resolveAudience`/`POST /api/orders`:
@@ -445,6 +474,8 @@ export function createFoodMock(opts: FoodMockOptions) {
       id: nextOrderId++,
       createdBy: me().id,
       placeId: input.placeId,
+      title: input.title?.trim() || null,
+      allowCustom,
       note: input.note,
       payHint: input.payHint,
       closesAt,
@@ -482,14 +513,16 @@ export function createFoodMock(opts: FoodMockOptions) {
       const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
       const dish = place?.menu.find((m) => m.id === data.menuItemId);
       if (!dish) throw new Error("Этого блюда нет в меню.");
-      // Прибавляем к строке с той же ценой — как `addMenuItem` на сервере.
-      const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price);
+      // Прибавляем к строке с той же ценой, единицей и шагом — как `addMenuItem` на сервере.
+      const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price
+        && i.unit === dish.unit && i.stepGrams === dish.stepGrams);
       if (same) same.qty += 1;
       else if (tooMany) throw new Error(tooManyError);
-      else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1 });
+      else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });
     } else {
+      if (!o.allowCustom) throw new Error("В этом сборе только позиции из списка.");
       if (tooMany) throw new Error(tooManyError);
-      o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty });
+      o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty, unit: "pcs", stepGrams: null });
     }
     o.declines.delete(me().id);
     return orderViewOf(o);

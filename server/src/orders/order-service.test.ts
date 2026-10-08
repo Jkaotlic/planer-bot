@@ -7,6 +7,7 @@ import {
   itemsOf, listOrdersFor, orderView, removeItem, removeLastItem, setItemQty,
 } from "./order-service";
 import { FOOD_ITEMS_PER_PERSON_MAX, debtOf } from "@planer/shared";
+import { foodOrderItems, foodOrders } from "../db/schema";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -15,8 +16,8 @@ function stage(closesAt: string | null = null) {
   const anya = { id: createEmployee(db, { displayName: "Аня" }).id, isAdmin: false };
   const igor = { id: createEmployee(db, { displayName: "Игорь" }).id, isAdmin: false };
   const mark = { id: createEmployee(db, { displayName: "Марк" }).id, isAdmin: false };
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }, { name: "Чай", price: 50 }] }, anya.id);
-  const order = createOrder(db, { createdBy: anya.id, placeId: place.id, note: null, payHint: null, closesAt, recipientIds: [anya.id, igor.id] });
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }, { name: "Чай", price: 50, unit: "pcs", stepGrams: null }] }, anya.id);
+  const order = createOrder(db, { createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt, recipientIds: [anya.id, igor.id] });
   const [shawarma, tea] = place.menu;
   return { db, anya, igor, mark, place, order, shawarma: shawarma!, tea: tea! };
 }
@@ -32,21 +33,21 @@ describe("позиции", () => {
   it("правка цены в меню после заказа не меняет долг", () => {
     const { db, igor, order, place, shawarma, tea } = stage();
     addMenuItem(db, order, igor.id, shawarma.id, now);
-    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 999 }, { id: tea.id, name: "Чай", price: 50 }] });
+    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 999, unit: "pcs", stepGrams: null }, { id: tea.id, name: "Чай", price: 50, unit: "pcs", stepGrams: null }] });
     expect(debtOf(itemsOf(db, order.id), igor.id)).toBe(350);
   });
 
   it("после правки цены тап даёт новую строку с новой ценой — старую не переписывает", () => {
     const { db, igor, order, place, shawarma, tea } = stage();
     addMenuItem(db, order, igor.id, shawarma.id, now);
-    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 400 }, { id: tea.id, name: "Чай", price: 50 }] });
+    updatePlace(db, place.id, { name: "Шаурмечная", menu: [{ id: shawarma.id, name: "Шаурма", price: 400, unit: "pcs", stepGrams: null }, { id: tea.id, name: "Чай", price: 50, unit: "pcs", stepGrams: null }] });
     addMenuItem(db, order, igor.id, shawarma.id, now);
     expect(itemsOf(db, order.id).map((i) => [i.price, i.qty])).toEqual([[350, 1], [400, 1]]);
   });
 
   it("блюдо чужого места или из архива — отказ", () => {
     const { db, anya, igor, order, place, shawarma } = stage();
-    const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600 }] }, anya.id);
+    const other = createPlace(db, { name: "Додо", menu: [{ name: "Пицца", price: 600, unit: "pcs", stepGrams: null }] }, anya.id);
     expect(addMenuItem(db, order, igor.id, other.menu[0]!.id, now)).toEqual({ ok: false, error: "Этого блюда нет в меню." });
     updatePlace(db, place.id, { name: "Шаурмечная", menu: [] });
     expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: false, error: "Этого блюда нет в меню." });
@@ -96,7 +97,7 @@ describe("позиции", () => {
 
   it("в заказе без меню блюдо из меню не добавить", () => {
     const { db, anya, igor, shawarma } = stage();
-    const free = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id] });
+    const free = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id] });
     expect(addMenuItem(db, free, igor.id, shawarma.id, now)).toEqual({ ok: false, error: "Этого блюда нет в меню." });
   });
 });
@@ -133,16 +134,28 @@ describe("закрытие", () => {
 
   it("closeDueOrders закрывает просроченные ровно один раз; отменённые не трогает", () => {
     const { db, anya } = stage("2026-09-29T11:00");
-    const cancelled = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: "2026-09-29T10:00", recipientIds: [anya.id] });
+    const cancelled = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-29T10:00", recipientIds: [anya.id] });
     cancelOrder(db, cancelled, anya);
     expect(closeDueOrders(db, now)).toHaveLength(1);
     expect(closeDueOrders(db, now)).toHaveLength(0);
   });
 
+  it("заказ со сроком на завтра переживает сегодняшний тик и закрывается ровно один раз в свой день", () => {
+    const { db, anya } = stage();
+    const tomorrow = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-30T10:00", recipientIds: [anya.id] });
+    // Конец сегодняшнего дня: время «23:59» позже «10:00», но дата раньше — сравнивается строка целиком.
+    expect(closeDueOrders(db, { date: "2026-09-29", time: "23:59" })).toHaveLength(0);
+    expect(getOrder(db, tomorrow.id)!.closedAt).toBeNull();
+    expect(closeDueOrders(db, { date: "2026-09-30", time: "09:59" })).toHaveLength(0);
+    expect(closeDueOrders(db, { date: "2026-09-30", time: "10:00" }).map((o) => o.id)).toEqual([tomorrow.id]);
+    expect(closeDueOrders(db, { date: "2026-09-30", time: "10:01" })).toHaveLength(0);
+    expect(getOrder(db, tomorrow.id)!.closedAt).not.toBeNull();
+  });
+
   it("closeDueOrders не трогает заказ со сроком в будущем и заказ без срока", () => {
     const { db, anya } = stage();
-    const future = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: "2026-09-29T13:00", recipientIds: [anya.id] });
-    const noDeadline = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null, recipientIds: [anya.id] });
+    const future = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-09-29T13:00", recipientIds: [anya.id] });
+    const noDeadline = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id] });
     expect(closeDueOrders(db, now)).toHaveLength(0);
     expect(getOrder(db, future.id)!.closedAt).toBeNull();
     expect(getOrder(db, noDeadline.id)!.closedAt).toBeNull();
@@ -159,8 +172,8 @@ describe("вид заказа", () => {
     expect(mine.people).toBeNull();
     const boss = orderView(db, order, anya, now)!;
     expect(boss.people).toEqual([
-      { employeeId: anya.id, displayName: "Аня", amount: 0, declined: false },
-      { employeeId: igor.id, displayName: "Игорь", amount: 350, declined: false },
+      { employeeId: anya.id, displayName: "Аня", amount: 0, declined: false, items: [] },
+      { employeeId: igor.id, displayName: "Игорь", amount: 350, declined: false, items: [{ name: "Шаурма", price: 350, qty: 1, unit: "pcs", stepGrams: null }] },
     ]);
     expect(boss.menu.map((m) => m.name)).toEqual(["Шаурма", "Чай"]);
   });
@@ -182,8 +195,58 @@ describe("listOrdersFor", () => {
   it("адресат и создатель-не-адресат видят заказ, посторонний — нет", () => {
     const { db, anya, igor, mark, order } = stage();
     expect(listOrdersFor(db, igor, now).map((v) => v.id)).toContain(order.id);
-    const creatorOnly = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null, recipientIds: [igor.id] });
+    const creatorOnly = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [igor.id] });
     expect(listOrdersFor(db, anya, now).map((v) => v.id)).toContain(creatorOnly.id);
     expect(listOrdersFor(db, mark, now)).toEqual([]);
+  });
+});
+
+describe("закупка", () => {
+  function purchase() {
+    const { db, anya, igor, mark } = stage();
+    const place = createPlace(db, { name: "Икра", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const order = createOrder(db, { createdBy: anya.id, placeId: place.id, title: "Икра, 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2026-10-08T16:00", recipientIds: [anya.id, igor.id] });
+    return { db, anya, igor, mark, place, order, dishId: place.menu[0]!.id };
+  }
+
+  it("тап по кг-позиции копирует единицу и шаг; правка шага в меню старую строку не трогает", () => {
+    const { db, igor, place, order, dishId } = purchase();
+    expect(addMenuItem(db, order, igor.id, dishId, now).ok).toBe(true);
+    expect(addMenuItem(db, order, igor.id, dishId, now).ok).toBe(true);
+    updatePlace(db, place.id, { name: "Икра", menu: [{ id: dishId, name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 500 }] });
+    expect(addMenuItem(db, order, igor.id, dishId, now).ok).toBe(true);
+    expect(itemsOf(db, order.id).map((i) => [i.unit, i.stepGrams, i.qty])).toEqual([["kg", 400, 2], ["kg", 500, 1]]);
+  });
+
+  it("свои позиции запрещены — сервер отказывает, даже если экран кнопку показал", () => {
+    const { db, igor, order } = purchase();
+    expect(addCustomItem(db, order, igor.id, { name: "Сёмга", price: 900, qty: 1 }, now))
+      .toEqual({ ok: false, error: "В этом сборе только позиции из списка." });
+    expect(itemsOf(db, order.id)).toEqual([]);
+  });
+
+  it("вид заказа: название, allowCustom, единицы в меню и позициях, «кто что» у организатора", () => {
+    const { db, anya, igor, place, order, dishId } = purchase();
+    addMenuItem(db, order, igor.id, dishId, now);
+    updatePlace(db, place.id, { name: "Икра", menu: [{ id: dishId, name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 500 }] });
+    addMenuItem(db, order, igor.id, dishId, now);
+    const v = orderView(db, getOrder(db, order.id)!, anya, now)!;
+    expect(v.title).toBe("Икра, 09.10");
+    expect(v.allowCustom).toBe(false);
+    expect(v.menu[0]).toMatchObject({ unit: "kg", stepGrams: 500 });
+    expect(v.people!.find((p) => p.employeeId === igor.id)!.items.map((i) => i.stepGrams)).toEqual([400, 500]);
+    expect(orderView(db, getOrder(db, order.id)!, igor, now)!.people).toBeNull();
+    expect(orderView(db, getOrder(db, order.id)!, igor, now)!.myItems.map((i) => [i.unit, i.stepGrams])).toEqual([["kg", 400], ["kg", 500]]);
+  });
+
+  it("старые строки без новых полей читаются как штуки и «свои разрешены»", () => {
+    const { db, anya, igor } = stage();
+    // Вставка без unit/stepGrams/title/allowCustom — как строки, жившие до миграции 0043.
+    const order = db.insert(foodOrders).values({ createdBy: anya.id }).returning().get();
+    const item = db.insert(foodOrderItems).values({ orderId: order.id, employeeId: igor.id, name: "Суп", price: 280 }).returning().get();
+    expect(item.unit).toBe("pcs");
+    expect(item.stepGrams).toBeNull();
+    expect(order.allowCustom).toBe(true);
+    expect(order.title).toBeNull();
   });
 });

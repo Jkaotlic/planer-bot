@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_TEXT_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel,
-  myOrderEmptyText, myOrderPayment, orderPersonLine, orderStatusLabel, payHintLine, priceDigits, remindResultText,
+  myOrderEmptyText, myOrderPayment, orderHeadline, orderPersonBlock, orderStatusLabel, payHintLine, priceDigits, remindResultText,
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -98,7 +98,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
   const shown: Record<Area, boolean> = {
     mine: true,
     menu: order.open && order.menu.length > 0,
-    custom: order.open,
+    custom: order.open && order.allowCustom,
     payments: order.closed && order.payment.rows !== null && order.payment.total > 0,
     manage: order.canManage && order.open,
   };
@@ -109,7 +109,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
     <div className="employees-screen">
       <button type="button" className="btn btn-quiet btn-compact" onClick={onBack}>‹ Назад</button>
       <div className="employees-header">
-        <h2 className="employees-title food-card-title">🍱 {order.placeName ?? "Заказ без меню"}</h2>
+        <h2 className="employees-title food-card-title">🍱 {orderHeadline(order)}</h2>
       </div>
       <div className="food-meta">
         Собирает {order.creatorName} · {orderStatusLabel(order)} · ответили {order.respondedCount} из {order.recipientCount}
@@ -194,12 +194,17 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
                   })}>
                   Добавить
                 </button>
-                {order.myItems.length === 0 && !order.declined && (
-                  <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void run("custom", () => apiClient.declineOrder(order.id))}>🙅 Не буду</button>
-                )}
               </div>
               {errorIn("custom")}
             </section>
+          )}
+
+          {/* Вне блока «Своё блюдо»: у сбора без своих позиций тот блок не рисуется, а отказаться
+              от участия должно быть можно всегда, пока приём открыт. */}
+          {order.open && order.myItems.length === 0 && !order.declined && (
+            <div className="food-buttons" data-area="decline">
+              <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void run("mine", () => apiClient.declineOrder(order.id))}>🙅 Не буду</button>
+            </div>
           )}
         </div>
 
@@ -207,9 +212,13 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           {order.people && (
             <section className="food-card" data-area="people">
               <h3 className="food-card-title">Что заказать</h3>
-              {order.dishes.map((d) => <div key={`${d.name}-${d.price}`}>{itemLines([d])[0]}</div>)}
-              <h3 className="food-card-title">Кто сколько</h3>
-              {order.people.map((p) => <div key={p.employeeId}>{orderPersonLine(p)}</div>)}
+              {order.dishes.map((d) => <div key={`${d.name}-${d.price}-${d.unit}-${d.stepGrams ?? ""}`}>{itemLines([d])[0]}</div>)}
+              <h3 className="food-card-title">Кто что</h3>
+              {order.people.map((p) => (
+                <div key={p.employeeId}>
+                  {orderPersonBlock(p).map((line, i) => <div key={i} data-person-line className="food-person-line">{line}</div>)}
+                </div>
+              ))}
               <div className="food-total">Итого: {formatMoney(order.total)}</div>
             </section>
           )}

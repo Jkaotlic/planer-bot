@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
-  FOOD_NOTE_MAX, FOOD_QTY_MAX, closesAtFromTime, isFutureClose, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -27,11 +27,17 @@ const NOT_FOUND = "Заказ не найден.";
 const optionalText = z.string().trim().max(FOOD_NOTE_MAX).nullable().transform((s) => (s ? s : null));
 const createSchema = z.object({
   placeId: z.number().int().positive().nullable(),
+  title: z.string().trim().max(FOOD_TEXT_MAX).nullable().optional().transform((s) => (s ? s : null)),
+  allowCustom: z.boolean().optional().default(true),
   note: optionalText,
   payHint: optionalText,
-  closesTime: timeStr.nullable(),
+  // `closesTime` — прежнее поле: вкладка мини-аппа, открытая до выкатки, шлёт его.
+  closesAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/)
+    // Регэксп пропускает 31 сентября; `dateStr` проверяет настоящий календарь.
+    .refine((s) => dateStr.safeParse(s.slice(0, 10)).success, "Такой даты нет.").nullable().optional(),
+  closesTime: timeStr.nullable().optional(),
   audience: teamAudienceSchema,
-}).strict();
+}).strict().refine((b) => !(b.closesAt && b.closesTime), { message: "Срок — одним полем." });
 
 /**
  * Заказ еды. Запускает любой работник, деньги сдают ему — так он решил
@@ -74,18 +80,29 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   app.post("/api/orders", auth, async (c) => {
     const parsed = createSchema.safeParse(await jsonBody(c));
-    if (!parsed.success) return c.json({ error: "Проверь место, время и адресатов.", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json({ error: "Проверь место, срок и адресатов.", issues: parsed.error.issues }, 400);
+    // Сбор без меню и без своих позиций — пустая комната: ни выбрать, ни вписать.
+    if (parsed.data.placeId == null && !parsed.data.allowCustom) {
+      return c.json({ error: "Без меню нужны свои позиции — иначе заказать будет нечего." }, 400);
+    }
     const now = teamNow(config.teamTz);
-    const closesAt = closesAtFromTime(parsed.data.closesTime, now.date);
+    const closesAt = parsed.data.closesAt ?? closesAtFromTime(parsed.data.closesTime ?? null, now.date);
     // Срок в прошлом рождает заказ уже закрытым: письма уйдут с погашенными
     // кнопками, а тап откажет «Приём закрыт» — человек так и не поймёт, что
     // заказ вообще был его. Проверка — до отправки, той же строкой, что у
     // опросов (`isFutureClose`).
     if (!isFutureClose(closesAt, now)) return c.json({ error: "Время уже прошло — поставь позже или оставь пустым." }, 400);
+    // Дальше горизонта — почти наверняка опечатка в дате (2027 вместо 2026), а заказ
+    // с таким сроком висел бы в «Сейчас идёт» и ждал.
+    if (!isWithinCloseHorizon(closesAt, now.date)) return c.json({ error: `Срок — не дальше ${FOOD_CLOSE_HORIZON_DAYS} дней.` }, 400);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
     const viewer = viewerOf(c);
     const place = parsed.data.placeId == null ? null : getPlaceView(db, parsed.data.placeId);
     if (parsed.data.placeId != null && !place) return c.json({ error: "Такого места больше нет." }, 409);
+    // То же, что выше для «без места»: место без активных блюд при запрете своих позиций — тоже пустая комната.
+    if (place && place.menu.length === 0 && !parsed.data.allowCustom) {
+      return c.json({ error: "Без меню нужны свои позиции — иначе заказать будет нечего." }, 400);
+    }
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
     const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}`;
@@ -100,14 +117,14 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     let delivered: number;
     try {
       order = createOrder(db, {
-        createdBy: viewer.id, placeId: parsed.data.placeId, note: parsed.data.note, payHint: parsed.data.payHint,
+        createdBy: viewer.id, placeId: parsed.data.placeId, title: parsed.data.title, allowCustom: parsed.data.allowCustom, note: parsed.data.note, payHint: parsed.data.payHint,
         closesAt, recipientIds: reachable.map((e) => e.id),
       });
       delivered = await sendOrderInvites(bot, db, order, now, config.publicUrl);
     } finally {
       createsInFlight.delete(key);
     }
-    recordAudit(db, "order_created", viewer.id, { orderId: order.id, placeName: place?.name ?? null, recipients: reachable.length, delivered });
+    recordAudit(db, "order_created", viewer.id, { orderId: order.id, placeName: place?.name ?? null, title: order.title, recipients: reachable.length, delivered });
     return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable }, 201);
   });
 

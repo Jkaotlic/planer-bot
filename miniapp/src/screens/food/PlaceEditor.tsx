@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
-import { FOOD_MENU_FULL_HINT, FOOD_MENU_MAX, placeMenuFromRows, priceDigits, type PlaceEditorRow } from "@planer/shared";
+import { FOOD_MENU_FULL_HINT, FOOD_MENU_MAX, placeMenuFromRows, placeRowsFromMenu, priceDigits, type PlaceEditorRow } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { ActionButton } from "../../ui";
 
@@ -10,7 +10,7 @@ import { ActionButton } from "../../ui";
  */
 export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | null; onSaved(p: PlaceView): void; onCancel(): void }) {
   const [name, setName] = useState(place?.name ?? "");
-  const [rows, setRows] = useState<PlaceEditorRow[]>(place?.menu.map((m) => ({ id: m.id, name: m.name, price: String(m.price) })) ?? []);
+  const [rows, setRows] = useState<PlaceEditorRow[]>(place ? placeRowsFromMenu(place.menu) : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,19 +45,35 @@ export function PlaceEditor({ place, onSaved, onCancel }: { place: PlaceView | n
         // враппер telegram-ui — тот держит свою ширину независимо (замерено
         // Playwright на 320/360px, см. отчёт задачи), и без обёртки поле
         // «Блюдо» на 320px схлопывалось до 0.
-        <div key={r.id ?? `new-${i}`} data-testid="dish-row" style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Input name={`dish-name-${i}`} placeholder="Блюдо" value={r.name} onChange={(e) => patch(i, { name: e.target.value })} disabled={busy} />
+        <div key={r.id ?? `new-${i}`} data-testid="dish-row" className="food-dish-row" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Input name={`dish-name-${i}`} placeholder="Блюдо" value={r.name} onChange={(e) => patch(i, { name: e.target.value })} disabled={busy} />
+            </div>
+            <div style={{ width: 110, flex: "none" }}>
+              <Input name={`dish-price-${i}`} placeholder={r.unit === "kg" ? "₽ за шаг" : "₽ за шт"} inputMode="numeric" value={r.price}
+                onChange={(e) => patch(i, { price: priceDigits(e.target.value) })} disabled={busy} />
+            </div>
+            <ActionButton compact kind="quiet" onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))} disabled={busy}>✕</ActionButton>
           </div>
-          <div style={{ width: 110, flex: "none" }}>
-            <Input name={`dish-price-${i}`} placeholder="₽" inputMode="numeric" value={r.price}
-              onChange={(e) => patch(i, { price: priceDigits(e.target.value) })} disabled={busy} />
+          {/* Единица — вторым рядом: в один с названием, ценой и ✕ она не помещается на 320 px.
+              Переключение единицы не трогает `step`: шаг, набранный для кг, переживает «шт» и возвращается. */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <ActionButton compact kind={r.unit === "pcs" ? "secondary" : "quiet"} aria-pressed={r.unit === "pcs"} disabled={busy}
+              onClick={() => patch(i, { unit: "pcs" })}>шт</ActionButton>
+            <ActionButton compact kind={r.unit === "kg" ? "secondary" : "quiet"} aria-pressed={r.unit === "kg"} disabled={busy}
+              onClick={() => patch(i, { unit: "kg" })}>кг</ActionButton>
+            {r.unit === "kg" && (
+              <div style={{ width: 80, flex: "none" }}>
+                <Input name={`dish-step-${i}`} placeholder="шаг, кг" inputMode="decimal" value={r.step}
+                  onChange={(e) => patch(i, { step: e.target.value })} disabled={busy} />
+              </div>
+            )}
           </div>
-          <ActionButton compact kind="quiet" onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))} disabled={busy}>✕</ActionButton>
         </div>
       ))}
       {rows.length < FOOD_MENU_MAX ? (
-        <ActionButton compact onClick={() => setRows((prev) => [...prev, { name: "", price: "" }])} disabled={busy}>+ Блюдо</ActionButton>
+        <ActionButton compact onClick={() => setRows((prev) => [...prev, { name: "", price: "", unit: "pcs", step: "" }])} disabled={busy}>+ Блюдо</ActionButton>
       ) : (
         <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{FOOD_MENU_FULL_HINT}</div>
       )}

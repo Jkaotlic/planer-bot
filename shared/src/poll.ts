@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { formatDayMonth } from "./collection";
+import { FOOD_CLOSE_HORIZON_DAYS } from "./food-order";
+import { addDaysIso } from "./week-dates";
 
 /**
  * Опрос «За / Против / Воздержался».
@@ -60,6 +62,12 @@ export function closesAtFromTime(time: string | null, today: string): string | n
 export function isFutureClose(closesAt: string | null, now: { date: string; time: string }): boolean {
   if (closesAt == null) return true;
   return closesAt > `${now.date}T${now.time}`;
+}
+
+/** Срок не дальше `FOOD_CLOSE_HORIZON_DAYS` от сегодня; без срока — можно. Сравниваем даты: время в последний день не важно. */
+export function isWithinCloseHorizon(closesAt: string | null, today: string): boolean {
+  if (closesAt == null) return true;
+  return closesAt.slice(0, 10) <= addDaysIso(today, FOOD_CLOSE_HORIZON_DAYS);
 }
 
 /** «до 12:30» сегодня, «до 30 сентября, 09:00» — если срок не сегодня. */

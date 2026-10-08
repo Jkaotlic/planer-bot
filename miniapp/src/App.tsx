@@ -619,7 +619,7 @@ export function App() {
   if (foodRoute) {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--tgui--hint_color)" }}>Загружаю…</div>}>
-        <FoodScreen initial={foodRoute} onClose={() => setFoodRoute(null)} />
+        <FoodScreen initial={foodRoute} onClose={() => setFoodRoute(null)} today={data.today} />
       </Suspense>
     );
   }

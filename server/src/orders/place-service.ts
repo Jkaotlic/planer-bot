@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
-import type { PlaceInput } from "@planer/shared";
+import type { FoodMenuItemShape, PlaceInput } from "@planer/shared";
 import type { Db } from "../db/client";
 import { foodMenuItems, foodPlaces, type FoodMenuItem } from "../db/schema";
 import type { Result } from "../polls/poll-service";
@@ -7,11 +7,14 @@ import type { Result } from "../polls/poll-service";
 export interface PlaceView {
   id: number;
   name: string;
-  menu: { id: number; name: string; price: number }[];
+  menu: FoodMenuItemShape[];
 }
 
 function menuOf(db: Db, placeId: number) {
-  return db.select({ id: foodMenuItems.id, name: foodMenuItems.name, price: foodMenuItems.price })
+  return db.select({
+    id: foodMenuItems.id, name: foodMenuItems.name, price: foodMenuItems.price,
+    unit: foodMenuItems.unit, stepGrams: foodMenuItems.stepGrams,
+  })
     .from(foodMenuItems)
     .where(and(eq(foodMenuItems.placeId, placeId), isNull(foodMenuItems.archivedAt)))
     .orderBy(asc(foodMenuItems.position), asc(foodMenuItems.id))
@@ -33,7 +36,7 @@ export function createPlace(db: Db, input: PlaceInput, createdBy: number): Place
   const id = db.transaction((tx) => {
     const place = tx.insert(foodPlaces).values({ name: input.name, createdBy }).returning().get();
     input.menu.forEach((m, position) => {
-      tx.insert(foodMenuItems).values({ placeId: place.id, name: m.name, price: m.price, position }).run();
+      tx.insert(foodMenuItems).values({ placeId: place.id, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null, position }).run();
     });
     return place.id;
   });
@@ -62,9 +65,14 @@ export function updatePlace(db: Db, id: number, input: PlaceInput): Result & { p
     input.menu.forEach((m, position) => {
       if (m.id != null) {
         kept.add(m.id);
-        tx.update(foodMenuItems).set({ name: m.name, price: m.price, position }).where(eq(foodMenuItems.id, m.id)).run();
+        // Без единицы в теле — клиент старой сборки, не знающий про кг: оставляем
+        // сохранённую единицу и шаг, а не превращаем кг-позицию в штуки.
+        const stored = current.get(m.id)!;
+        const unit = m.unit ?? stored.unit;
+        const step = m.unit === undefined ? stored.stepGrams : (m.stepGrams ?? null);
+        tx.update(foodMenuItems).set({ name: m.name, price: m.price, unit, stepGrams: step, position }).where(eq(foodMenuItems.id, m.id)).run();
       } else {
-        tx.insert(foodMenuItems).values({ placeId: id, name: m.name, price: m.price, position }).run();
+        tx.insert(foodMenuItems).values({ placeId: id, name: m.name, price: m.price, unit: m.unit ?? "pcs", stepGrams: m.stepGrams ?? null, position }).run();
       }
     });
     for (const oldId of current.keys()) {
@@ -87,7 +95,7 @@ export function archivePlace(db: Db, id: number): Result {
  * не места, и вид заказа обязан показывать то же самое, что кнопки реально
  * позволяют — иначе меню в письме разойдётся с тем, что тап примет.
  */
-export function menuForOrder(db: Db, placeId: number): { id: number; name: string; price: number }[] {
+export function menuForOrder(db: Db, placeId: number): FoodMenuItemShape[] {
   return menuOf(db, placeId);
 }
 

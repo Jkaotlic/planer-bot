@@ -10,7 +10,7 @@ function stage({ close = true } = {}) {
   const db = makeTestDb();
   const who = (name: string) => ({ id: createEmployee(db, { displayName: name }).id, isAdmin: false });
   const anya = who("Аня"), igor = who("Игорь"), mark = who("Марк"), lena = who("Лена");
-  const order = createOrder(db, { createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id, mark.id, lena.id] });
+  const order = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id, mark.id, lena.id] });
   addCustomItem(db, order, anya.id, { name: "Суп", price: 200, qty: 1 }, now);
   addCustomItem(db, order, igor.id, { name: "Шаурма", price: 350, qty: 1 }, now);
   addCustomItem(db, order, mark.id, { name: "Чай", price: 50, qty: 1 }, now);

@@ -886,6 +886,10 @@ export const foodMenuItems = sqliteTable("food_menu_items", {
   name: text().notNull(),
   price: integer().notNull(),
   position: integer().notNull().default(0),
+  // Единица — 'pcs' | 'kg'. Для кг `stepGrams` — шаг одного тапа в ГРАММАХ: целые
+  // числа не плывут (0.4 * 3 в float ≠ 1.2), а печать в килограммах — дело `formatKg`.
+  unit: text().$type<"pcs" | "kg">().notNull().default("pcs"),
+  stepGrams: integer(),
   archivedAt: integer({ mode: "timestamp" }),
 });
 
@@ -902,6 +906,10 @@ export const foodOrders = sqliteTable("food_orders", {
   id: integer().primaryKey({ autoIncrement: true }),
   createdBy: integer().notNull().references(() => employees.id),
   placeId: integer().references(() => foodPlaces.id),
+  // Название сбора («Икра, доставка 09.10»); null — обычный заказ, заголовок берётся из места.
+  title: text(),
+  // false — сбор закупки: только позиции из списка, «своё блюдо» сервер не примет.
+  allowCustom: integer({ mode: "boolean" }).notNull().default(true),
   note: text(),
   payHint: text(),
   closesAt: text(),
@@ -936,6 +944,10 @@ export const foodOrderItems = sqliteTable(
     name: text().notNull(),
     price: integer().notNull(),
     qty: integer().notNull().default(1),
+    // Единица и шаг КОПИРУЮТСЯ из меню, как цена: поменяли шаг посреди приёма —
+    // уже взятые килограммы не пересчитываются задним числом.
+    unit: text().$type<"pcs" | "kg">().notNull().default("pcs"),
+    stepGrams: integer(),
     createdAt: createdAt(),
   },
   (t) => [index("food_order_items_order").on(t.orderId, t.employeeId)],

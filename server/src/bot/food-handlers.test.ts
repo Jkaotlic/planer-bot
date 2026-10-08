@@ -28,9 +28,9 @@ function stage() {
   const igor = person(db, "Игорь", 333);
   const mark = person(db, "Марк", 444);
   const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }] }, anya.id);
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }] }, anya.id);
   const order = createOrder(db, {
-    createdBy: anya.id, placeId: place.id, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+    createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
   });
   const bot = stubBotInfo(createBot({ db, config }), { id: 1, first_name: "P", username: "p_bot" });
   return { db, bot, anya, igor, mark, poll, order, shawarmaId: place.menu[0]!.id };
@@ -198,6 +198,19 @@ describe("колбэки заказа", () => {
     expect(api.calls.find((c) => c.method === "editMessageText")!.payload.text).toContain("Твой заказ:");
   });
 
+  it("тап по кг-позиции показывает вес, а не количество шагов; штуки — как раньше", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    const place = createPlace(db, { name: "Рынок", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const market = createOrder(db, {
+      createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+    });
+    const api = recordApi(bot);
+    for (let k = 0; k < 3; k++) await tap(bot, 333, `order:add:${market.id}:${place.menu[0]!.id}`);
+    expect(api.answers.at(-1)).toBe("＋ Икра кетовая (1,2 кг)");
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    expect(api.answers.at(-1)).toBe("＋ Шаурма (×1)");
+  });
+
   it("«Убрать» и «Не буду» работают; посторонний получает отказ", async () => {
     const { db, bot, order, shawarmaId } = stage();
     const api = recordApi(bot);
@@ -273,6 +286,16 @@ describe("колбэки заказа", () => {
     expect(text).toContain("🍱 Аня: Шаурмечная");
     expect(text).toContain("🗳 Пицца?");
   });
+
+  it("сбор с названием в «Сервисах» — со значком 🛒 и названием вместо места", async () => {
+    const { db, bot, anya, igor, order } = stage();
+    createOrder(db, { createdBy: anya.id, placeId: order.placeId, title: "Икра, 09.10", allowCustom: false, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id] });
+    const api = recordApi(bot);
+    await say(bot, 333, BTN_SERVICES);
+    const text = api.sent.at(-1)!.text;
+    expect(text).toContain("🛒 Аня: Икра, 09.10");
+    expect(text).toContain("🍱 Аня: Шаурмечная");
+  });
 });
 
 describe("деньги заказа в боте", () => {
@@ -336,7 +359,7 @@ describe("деньги заказа в боте", () => {
     // Своя пара получателей: Игорь (с Telegram) и Настя (без) — оба заказали.
     const nastya = createEmployee(db, { displayName: "Настя" });
     const order = createOrder(db, {
-      createdBy: anya.id, placeId: null, note: null, payHint: null, closesAt: null,
+      createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: null,
       recipientIds: [anya.id, igor.id, nastya.id],
     });
     const now = { date: "2026-09-29", time: "12:00" };

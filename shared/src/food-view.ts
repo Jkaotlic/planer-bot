@@ -1,6 +1,8 @@
 import type { FoodSendReport, OrderRemindResult, OrderView, PollView } from "./api/food";
 import { formatMoney } from "./collection";
-import { FOOD_MENU_MAX, type PlaceInput } from "./food-order";
+import {
+  FOOD_MENU_MAX, FOOD_STEP_GRAMS_MAX, FOOD_STEP_GRAMS_MIN, type FoodMenuItemShape, type FoodUnit, type PlaceInput, formatKg, itemLines, unitPart,
+} from "./food-order";
 
 /**
  * Что экран говорит про заказ еды и опрос — одними словами в мини-аппе и в консоли.
@@ -48,8 +50,8 @@ export function orderInProgress(o: Pick<OrderView, "cancelled" | "open" | "close
 }
 
 /** Кнопка блюда в открытом заказе. */
-export function menuItemLabel(m: { name: string; price: number }): string {
-  return `${m.name} · ${formatMoney(m.price)}`;
+export function menuItemLabel(m: { name: string; price: number; unit?: FoodUnit; stepGrams?: number | null }): string {
+  return [m.name, unitPart(m), formatMoney(m.price)].filter(Boolean).join(" · ");
 }
 
 /**
@@ -58,8 +60,10 @@ export function menuItemLabel(m: { name: string; price: number }): string {
  * Было две разные строки: `${m.price} ₽` в списке мест (без
  * разбивки разрядов) и `${m.name} ${formatMoney(m.price)}` в форме.
  */
-export function menuPreview(menu: readonly { name: string; price: number }[]): string {
-  return menu.length > 0 ? menu.map((m) => `${m.name} — ${formatMoney(m.price)}`).join(" · ") : "Меню пусто";
+export function menuPreview(menu: readonly { name: string; price: number; unit?: FoodUnit; stepGrams?: number | null }[]): string {
+  return menu.length > 0
+    ? menu.map((m) => [m.name, unitPart(m), formatMoney(m.price)].filter(Boolean).join(" — ")).join(" · ")
+    : "Меню пусто";
 }
 
 /** Строка «Кто сколько». */
@@ -140,6 +144,40 @@ export interface PlaceEditorRow {
   id?: number;
   name: string;
   price: string;
+  unit: FoodUnit;
+  /** Шаг в кг — строкой, как его набирает человек; у штук пуст. */
+  step: string;
+}
+
+/** Шаг в кг из поля: люди пишут и «0,4», и «0.4». Граммы — целым, см. `formatKg`. */
+export function parseStepKg(raw: string): number | null {
+  const s = raw.trim().replace(",", ".");
+  if (!/^\d*\.?\d+$/.test(s)) return null;
+  const grams = Math.round(Number(s) * 1000);
+  return grams >= FOOD_STEP_GRAMS_MIN && grams <= FOOD_STEP_GRAMS_MAX && Math.abs(grams - Number(s) * 1000) < 1e-6 ? grams : null;
+}
+
+/** Строки редактора из меню места — один путь на оба редактора (мини-апп и консоль). */
+export function placeRowsFromMenu(
+  menu: readonly FoodMenuItemShape[],
+): PlaceEditorRow[] {
+  return menu.map((m) => ({
+    id: m.id,
+    name: m.name,
+    price: String(m.price),
+    unit: m.unit,
+    step: m.stepGrams ? formatKg(m.stepGrams) : "",
+  }));
+}
+
+/** Заголовок заказа: название сбора, иначе место, иначе «Заказ без меню». */
+export function orderHeadline(o: Pick<OrderView, "title" | "placeName">): string {
+  return o.title ?? o.placeName ?? "Заказ без меню";
+}
+
+/** Человек в «Кто что»: его строка и под ней его позиции. */
+export function orderPersonBlock(p: NonNullable<OrderView["people"]>[number]): string[] {
+  return [orderPersonLine(p), ...itemLines(p.items).map((l) => `  ${l}`)];
 }
 
 /**
@@ -162,7 +200,19 @@ export function placeMenuFromRows(
     if (!name) continue;
     const price = Number(priceDigits(r.price));
     if (!price) return { ok: false, error: `У «${name}» не указана цена.` };
-    menu.push({ ...(r.id != null ? { id: r.id } : {}), name, price });
+    let stepGrams: number | null = null;
+    if (r.unit === "kg") {
+      stepGrams = parseStepKg(r.step);
+      if (stepGrams == null) {
+        return {
+          ok: false,
+          error: r.step.trim()
+            ? `У «${name}» шаг — от ${formatKg(FOOD_STEP_GRAMS_MIN)} до ${formatKg(FOOD_STEP_GRAMS_MAX)} кг.`
+            : `У «${name}» не указан шаг в кг.`,
+        };
+      }
+    }
+    menu.push({ ...(r.id != null ? { id: r.id } : {}), name, price, unit: r.unit, stepGrams });
   }
   return { ok: true, menu };
 }

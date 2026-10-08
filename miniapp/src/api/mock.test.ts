@@ -676,7 +676,7 @@ describe("места: dev-мок", () => {
   it("правка чужим id блюда отклоняется тем же текстом, что и сервер", async () => {
     const [first] = await mockGetFoodPlaces();
     await expect(
-      mockSaveFoodPlace(first!.id, { name: first!.name, menu: [{ id: 999_999, name: "Чужое блюдо", price: 100 }] }),
+      mockSaveFoodPlace(first!.id, { name: first!.name, menu: [{ id: 999_999, name: "Чужое блюдо", price: 100, unit: "pcs", stepGrams: null }] }),
     ).rejects.toThrow("Меню уже поменяли — открой место заново.");
   });
 });

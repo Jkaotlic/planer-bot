@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FOOD_TEXT_MAX, formatMoney, menuItemLabel } from "@planer/shared";
+import { FOOD_TEXT_MAX, formatMoney, menuItemLabel, orderHeadline, orderPersonBlock } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { orderView } from "./food-fixtures";
 import { AuthRequiredError } from "../../api/client";
@@ -13,19 +13,19 @@ afterEach(async () => {
 });
 
 const area = (el: HTMLElement, name: string) => el.querySelector<HTMLElement>(`[data-area="${name}"]`);
-const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200 }];
+const DODO_MENU = [{ id: 11, name: "Пицца", price: 1200, unit: "pcs" as const, stepGrams: null }];
 
 async function open(order = orderView({ menu: DODO_MENU })) {
   vi.spyOn(apiClient, "getOrder").mockResolvedValue(order);
   const el = await mount(OrderScreen, { orderId: 7, onBack: vi.fn() });
-  await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe(`🍱 ${order.placeName ?? "Заказ без меню"}`));
+  await waitFor(() => expect(el.querySelector("h2")?.textContent).toBe(`🍱 ${orderHeadline(order)}`));
   return el;
 }
 
 describe("консоль: заказ — своё", () => {
   it("блюдо из меню: кнопка с ценой как в мини-аппе, позиция уходит по id, итог — formatMoney", async () => {
     const add = vi.spyOn(apiClient, "addOrderItem").mockResolvedValue(
-      orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1 }], myTotal: 1200 }),
+      orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 1200 }),
     );
     const el = await open();
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
@@ -52,7 +52,7 @@ describe("консоль: заказ — своё", () => {
   });
 
   it("количество: «−» погашен на одной штуке, «+» шлёт qty + 1, «✕» убирает", async () => {
-    const mine = orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1 }], myTotal: 1200 });
+    const mine = orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 1200 });
     const qty = vi.spyOn(apiClient, "setOrderItemQty").mockResolvedValue(mine);
     const remove = vi.spyOn(apiClient, "removeOrderItem").mockResolvedValue(orderView({ menu: DODO_MENU }));
     const el = await open(mine);
@@ -64,7 +64,7 @@ describe("консоль: заказ — своё", () => {
   });
 
   it("закрыт и должен — «Сдать: … — Аня» и «💸 Я сдал»", async () => {
-    const owe = orderView({ open: false, closed: true, isCreator: false, canManage: false, myTotal: 600, myItems: [{ id: 5, name: "Суп", price: 600, qty: 1 }], people: null, payment: { myPaid: false, paidCount: 0, total: 2, rows: null } });
+    const owe = orderView({ open: false, closed: true, isCreator: false, canManage: false, myTotal: 600, myItems: [{ id: 5, name: "Суп", price: 600, qty: 1, unit: "pcs", stepGrams: null }], people: null, payment: { myPaid: false, paidCount: 0, total: 2, rows: null } });
     const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...owe, payment: { ...owe.payment, myPaid: true } });
     const el = await open(owe);
     expect(area(el, "mine")!.textContent).toContain("Сдать: 600\u00a0₽ — Аня");
@@ -74,7 +74,7 @@ describe("консоль: заказ — своё", () => {
   });
 
   it("длинное меню: 30 блюд по 200 знаков — все 30 кнопок на месте (Review Focus №3)", async () => {
-    const menu = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `${i + 1} ${"щ".repeat(FOOD_TEXT_MAX - 3)}`, price: 100 }));
+    const menu = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `${i + 1} ${"щ".repeat(FOOD_TEXT_MAX - 3)}`, price: 100, unit: "pcs" as const, stepGrams: null }));
     const el = await open(orderView({ menu }));
     const buttons = [...area(el, "menu")!.querySelectorAll("button")];
     expect(buttons).toHaveLength(30);
@@ -91,9 +91,9 @@ describe("консоль: заказ — своё", () => {
   it("название блюда в 200 знаков без пробела — внутри карточки, где слово переносится", async () => {
     const long = "щ".repeat(FOOD_TEXT_MAX);
     const el = await open(orderView({
-      menu: DODO_MENU, myItems: [{ id: 5, name: long, price: 100, qty: 1 }], myTotal: 100,
-      dishes: [{ name: long, price: 100, qty: 1 }], total: 100,
-      people: [{ employeeId: 2, displayName: "Игорь", amount: 100, declined: false }],
+      menu: DODO_MENU, myItems: [{ id: 5, name: long, price: 100, qty: 1, unit: "pcs", stepGrams: null }], myTotal: 100,
+      dishes: [{ name: long, price: 100, qty: 1, unit: "pcs", stepGrams: null }], total: 100,
+      people: [{ employeeId: 2, displayName: "Игорь", amount: 100, declined: false, items: [] }],
     }));
     for (const name of ["mine", "people"]) {
       const card = area(el, name)!;
@@ -153,16 +153,34 @@ describe("консоль: заказ — собирающему и админу"
     await waitFor(() => expect(close).toHaveBeenCalledWith(7));
   });
 
-  it("«Что заказать» и «Кто сколько» — строками shared; без права управлять — карточки нет", async () => {
+  it("одно блюдо с разным шагом — две строки без предупреждения React о дубле ключа", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
     const el = await open(orderView({
-      dishes: [{ name: "Пицца", price: 1200, qty: 2 }], total: 2400,
+      dishes: [
+        { name: "Икра", price: 2400, qty: 1, unit: "kg", stepGrams: 400 },
+        { name: "Икра", price: 2400, qty: 1, unit: "kg", stepGrams: 500 },
+      ],
+      total: 4800,
+      people: [{ employeeId: 3, displayName: "Марк", amount: 4800, declined: false, items: [] }],
+    }));
+    expect(area(el, "people")!.textContent).toContain("0,4 кг");
+    expect(area(el, "people")!.textContent).toContain("0,5 кг");
+    expect(err.mock.calls.flat().join(" ")).not.toContain("same key");
+    err.mockRestore();
+  });
+
+  it("«Что заказать» и «Кто что» — строками shared; без права управлять — карточки нет", async () => {
+    const el = await open(orderView({
+      dishes: [{ name: "Пицца", price: 1200, qty: 2, unit: "pcs", stepGrams: null }], total: 2400,
       people: [
-        { employeeId: 2, displayName: "Игорь", amount: 0, declined: true },
-        { employeeId: 3, displayName: "Марк", amount: 1200, declined: false },
-        { employeeId: 5, displayName: "Лена", amount: 0, declined: false },
+        { employeeId: 2, displayName: "Игорь", amount: 0, declined: true, items: [] },
+        { employeeId: 3, displayName: "Марк", amount: 1200, declined: false, items: [] },
+        { employeeId: 5, displayName: "Лена", amount: 0, declined: false, items: [] },
       ],
     }));
     const people = area(el, "people")!.textContent!;
+    expect(people).toContain("Кто что");
+    expect(people).not.toContain("Кто сколько");
     expect(people).toContain("Пицца ×2 — 2\u00a0400\u00a0₽");
     expect(people).toContain("Игорь — не будет");
     expect(people).toContain("Марк — 1\u00a0200\u00a0₽");
@@ -196,7 +214,7 @@ describe("консоль: заказ — собирающему и админу"
 });
 
 describe("консоль: заказ — действия, которые раньше не проверялись", () => {
-  const mine = (qty: number) => orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty }], myTotal: 1200 * qty });
+  const mine = (qty: number) => orderView({ menu: DODO_MENU, myItems: [{ id: 5, name: "Пицца", price: 1200, qty, unit: "pcs", stepGrams: null }], myTotal: 1200 * qty });
 
   it("«−» шлёт qty − 1", async () => {
     const qty = vi.spyOn(apiClient, "setOrderItemQty").mockResolvedValue(mine(2));
@@ -236,7 +254,7 @@ describe("консоль: заказ — действия, которые ран
   it("«Снять отметку» — после подтверждения, шлёт paid = false", async () => {
     const marked = orderView({
       open: false, closed: true, isCreator: false, canManage: false, people: null, myTotal: 600,
-      myItems: [{ id: 5, name: "Суп", price: 600, qty: 1 }], payment: { myPaid: true, paidCount: 1, total: 2, rows: null },
+      myItems: [{ id: 5, name: "Суп", price: 600, qty: 1, unit: "pcs", stepGrams: null }], payment: { myPaid: true, paidCount: 1, total: 2, rows: null },
     });
     const paid = vi.spyOn(apiClient, "setOrderPaid").mockResolvedValue({ ...marked, payment: { ...marked.payment, myPaid: false } });
     const el = await open(marked);
@@ -262,5 +280,29 @@ describe("консоль: заказ — действия, которые ран
     await waitFor(() => expect(authRequired).toHaveBeenCalled());
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(area(el, "top")).toBeNull();
+  });
+
+  it("allowCustom: false — блока «Своё блюдо» нет, меню на месте", async () => {
+    const el = await open(orderView({ menu: DODO_MENU, allowCustom: false }));
+    expect(area(el, "custom")).toBeNull();
+    expect(area(el, "menu")).not.toBeNull();
+  });
+
+  it("«Не буду» не пропадает вместе с блоком «Своё блюдо» у сбора без своих позиций", async () => {
+    const el = await open(orderView({ menu: DODO_MENU, allowCustom: false }));
+    expect(maybeButton(el, "🙅 Не буду")).toBeTruthy();
+  });
+
+  it("заголовок экрана — название сбора, иначе место", async () => {
+    const el = await open(orderView({ menu: DODO_MENU, title: "Икра, доставка 09.10" }));
+    expect(el.querySelector("h2")?.textContent).toBe("🍱 Икра, доставка 09.10");
+  });
+
+  it("у организатора «Кто что» печатает orderPersonBlock — позиции под именем", async () => {
+    const person = { employeeId: 2, displayName: "Игорь", amount: 360, declined: false, items: [{ name: "Икра", price: 900, qty: 1, unit: "kg" as const, stepGrams: 400 }] };
+    const el = await open(orderView({ menu: DODO_MENU, people: [person] }));
+    // Дословно, без trim: двухпробельный отступ позиций под именем — часть вида.
+    const lines = [...area(el, "people")!.querySelectorAll("[data-person-line]")].map((n) => n.textContent);
+    expect(lines).toEqual(orderPersonBlock(person));
   });
 });

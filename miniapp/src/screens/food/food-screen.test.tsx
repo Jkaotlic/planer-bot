@@ -20,16 +20,16 @@ async function mount(initial: FoodRoute) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => { root!.render(createElement(AppRoot, null, createElement(FoodScreen, { initial, onClose: vi.fn() }))); });
+  await act(async () => { root!.render(createElement(AppRoot, null, createElement(FoodScreen, { initial, onClose: vi.fn(), today: "2026-10-08" }))); });
   await settle();
   return host;
 }
 
-const DODO: PlaceView = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 500 }] };
+const DODO: PlaceView = { id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 500, unit: "pcs", stepGrams: null }] };
 
 const ORDER: OrderView = {
-  id: 7, creatorId: 1, creatorName: "Аня", placeId: 3, placeName: "Шаурмечная",
-  menu: [{ id: 11, name: "Шаурма", price: 350 }], note: null, payHint: null,
+  id: 7, creatorId: 1, creatorName: "Аня", placeId: 3, title: null, placeName: "Шаурмечная", allowCustom: true,
+  menu: [{ id: 11, name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }], note: null, payHint: null,
   closesAt: "2026-09-29T12:30", closes: "до 12:30", open: true, closed: false, cancelled: false,
   isCreator: false, canManage: false, myItems: [], myTotal: 0, declined: false,
   recipientCount: 3, respondedCount: 1, dishes: [], total: 0, people: null,
@@ -149,9 +149,20 @@ describe("FoodScreen — деньги меню", () => {
   // Список мест писал «1200 ₽» без разбивки разрядов, а форма
   // заказа — «1 200 ₽». Одна строка денег на обе морды — `menuPreview`.
   it("меню места — те же деньги, что везде: «1 200 ₽»", async () => {
-    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200 }] }]);
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([{ id: 1, name: "Додо", menu: [{ id: 11, name: "Пицца", price: 1200, unit: "pcs", stepGrams: null }] }]);
     const el = await mount({ view: "places" });
     // formatMoney склеивает разряды и «₽» неразрывным пробелом — литерал с обычным пробелом не совпал бы.
     expect(el.textContent).toContain("Пицца — 1\u00a0200\u00a0₽");
   });
 });
+
+describe("FoodScreen — заголовок заказа в списке", () => {
+  it("карточка называется по названию сбора, иначе по месту", async () => {
+    vi.spyOn(apiClient, "getPolls").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getOrders").mockResolvedValue([{ ...ORDER, id: 8, title: "Икра, доставка 09.10" }, ORDER]);
+    const el = await mount({ view: "list" });
+    expect(el.textContent).toContain("🍱 Икра, доставка 09.10");
+    expect(el.textContent).toContain("🍱 Шаурмечная");
+  });
+});
+

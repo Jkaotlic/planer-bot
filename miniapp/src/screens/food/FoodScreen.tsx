@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FOOD_NO_PLACES, formatMoney, menuPreview, orderPaymentProgress, orderStatusLabel } from "@planer/shared";
+import { FOOD_NO_PLACES, formatMoney, menuPreview, orderHeadline, orderPaymentProgress, orderStatusLabel } from "@planer/shared";
 import { apiClient, type OrderView, type PlaceView, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ActionButton, Card, Group, Hint } from "../../ui";
@@ -14,7 +14,7 @@ import { PollForm } from "./PollForm";
  * Экран «Заказы и опросы» — оверлей поверх вкладок, а не новая вкладка: в
  * таб-баре уже семь мест, а сюда приходят из бота по ссылке с `?screen=orders`.
  */
-export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose(): void }) {
+export function FoodScreen({ initial, onClose, today }: { initial: FoodRoute; onClose(): void; today: string }) {
   const [route, setRoute] = useState<FoodRoute>(initial);
   const [polls, setPolls] = useState<PollView[] | null | "error">(null);
   const [orders, setOrders] = useState<OrderView[] | null | "error">(null);
@@ -38,6 +38,7 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
         onDone={(orderId) => setRoute({ view: "order", orderId })}
         onCancel={toList}
         onEditPlaces={() => setRoute({ view: "places" })}
+        today={today}
       />
     );
   }
@@ -65,7 +66,7 @@ export function FoodScreen({ initial, onClose }: { initial: FoodRoute; onClose()
             const status = [orderStatusLabel(o), orderPaymentProgress(o)].filter(Boolean).join(" · ");
             return (
               <Card key={`order-${o.id}`}>
-                <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍱 {o.placeName ?? "Заказ без меню"}</div>
+                <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🍱 {orderHeadline(o)}</div>
                 <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
                   Собирает {o.creatorName} · {status}
                 </div>

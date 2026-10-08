@@ -5,7 +5,8 @@ import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { archivePlace, createPlace } from "./place-service";
 import { addCustomItem, addMenuItem, closeOrder, createOrder, declineOrder, getOrder } from "./order-service";
-import { finishOrderMessages, orderMenu, redrawOrderMessage, sendOrderInvites } from "./order-messenger";
+import { formatMoney } from "@planer/shared";
+import { finishOrderMessages, orderMenu, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "./order-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
 const URL = "https://example.com";
@@ -21,8 +22,8 @@ function stage() {
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   const mark = person(db, "Марк", 102);
-  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350 }, { name: "Чай", price: 50 }] }, anya.id);
-  const order = createOrder(db, { createdBy: anya.id, placeId: place.id, note: null, payHint: "Наличкой мне", closesAt: "2026-09-29T12:30", recipientIds: [anya.id, igor.id, mark.id] });
+  const place = createPlace(db, { name: "Шаурмечная", menu: [{ name: "Шаурма", price: 350, unit: "pcs", stepGrams: null }, { name: "Чай", price: 50, unit: "pcs", stepGrams: null }] }, anya.id);
+  const order = createOrder(db, { createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: "Наличкой мне", closesAt: "2026-09-29T12:30", recipientIds: [anya.id, igor.id, mark.id] });
   return { db, anya, igor, mark, place, order };
 }
 
@@ -40,6 +41,44 @@ describe("рассылка заказа", () => {
     // самое, что в `collection.ts`, и здесь сравнение должно это учитывать.
     expect(labels(toIgor)).toEqual(["Шаурма · 350 ₽", "Чай · 50 ₽", "✍️ Своё блюдо", "↩️ Убрать", "🙅 Не буду"]);
     expect(labels(api.sent.find((m) => m.chat_id === 100)!)).toContain("🔒 Закрыть приём");
+  });
+
+  it("сбор без своих позиций — в письме нет «✍️ Своё блюдо», кг-кнопка с шагом, заголовок — название", async () => {
+    const { db, anya, igor } = stage();
+    const place = createPlace(db, { name: "Икра", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const order = createOrder(db, { createdBy: anya.id, placeId: place.id, title: "Икра, 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2026-09-29T12:30", recipientIds: [anya.id, igor.id] });
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await sendOrderInvites(bot, db, order, now, URL);
+    const toIgor = api.sent.find((m) => m.chat_id === 101)!;
+    expect(toIgor.text.split("\n")[0]).toBe("🛒 Аня собирает: Икра, 09.10");
+    expect(labels(toIgor)).toEqual([`Икра кетовая · 0,4 кг · ${formatMoney(2400)}`, "↩️ Убрать", "🙅 Не буду"]);
+    expect(labels(api.sent.find((m) => m.chat_id === 100)!)).toContain("🔒 Закрыть приём");
+  });
+
+  it("итог закупки — «Кто что» с весом; отмена и напоминание называют сбор по названию", async () => {
+    const { db, anya, igor } = stage();
+    const place = createPlace(db, { name: "Икра", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const order = createOrder(db, { createdBy: anya.id, placeId: place.id, title: "Икра, 09.10", allowCustom: false, note: null, payHint: null, closesAt: "2026-09-29T12:30", recipientIds: [anya.id, igor.id] });
+    for (let i = 0; i < 3; i += 1) addMenuItem(db, order, igor.id, place.menu[0]!.id, now);
+    closeOrder(db, order, anya);
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    const summary = api.sent.find((m) => m.chat_id === 100)!;
+    expect(summary.text).toContain("Икра, 09.10");
+    expect(summary.text).toContain("Кто что:");
+    expect(summary.text).toContain("(1,2 кг)");
+    expect(api.sent.find((m) => m.text.startsWith("💸"))!.text).toContain("Икра, 09.10");
+    const cancelBot = silentBot().bot;
+    const cancelApi = recordApi(cancelBot);
+    await finishOrderMessages(cancelBot, db, { ...order, cancelledAt: new Date() }, "cancelled", URL);
+    expect(cancelApi.sent).toHaveLength(2);
+    expect(cancelApi.sent.every((m) => m.text === "🚫 Сбор «Икра, 09.10» отменён.")).toBe(true);
+    const remindBot = silentBot().bot;
+    const remindApi = recordApi(remindBot);
+    await remindUnpaid(remindBot, db, getOrder(db, order.id)!);
+    expect(remindApi.sent[0]!.text).toContain("«Икра, 09.10»");
   });
 
   it("при закрытии: сводка запускающему, «сдай» только должникам — не ему и не отказавшимся", async () => {
