@@ -222,7 +222,9 @@ export function organizerSummaryText(input: {
   for (const i of input.items) if (!people.includes(i.employeeId)) people.push(i.employeeId);
   for (const id of people) {
     lines.push(`${input.names.get(id) ?? "—"} — ${formatMoney(debtOf(input.items, id))}`);
-    for (const i of input.items) if (i.employeeId === id) lines.push(`  ${itemLine(i)}`);
+    // Те же склеенные строки, что на экранах (`people[].items`): иначе чат и экран
+    // показывали бы запускающему один заказ двумя разными списками.
+    for (const d of dishSummary(input.items.filter((i) => i.employeeId === id))) lines.push(`  ${itemLine(d)}`);
   }
   lines.push("", `Итого: ${formatMoney(orderTotal(input.items))}`);
   return lines.join("\n");

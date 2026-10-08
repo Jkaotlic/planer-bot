@@ -99,6 +99,10 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const viewer = viewerOf(c);
     const place = parsed.data.placeId == null ? null : getPlaceView(db, parsed.data.placeId);
     if (parsed.data.placeId != null && !place) return c.json({ error: "Такого места больше нет." }, 409);
+    // То же, что выше для «без места»: место без активных блюд при запрете своих позиций — тоже пустая комната.
+    if (place && place.menu.length === 0 && !parsed.data.allowCustom) {
+      return c.json({ error: "Без меню нужны свои позиции — иначе заказать будет нечего." }, 400);
+    }
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
     const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}`;

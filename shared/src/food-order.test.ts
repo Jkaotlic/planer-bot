@@ -207,8 +207,20 @@ describe("закупка с названием", () => {
     expect(text).not.toContain("Кто сколько:");
     const lines = text.split("\n");
     const igor = lines.findIndex((l) => l.startsWith("Игорь — "));
-    expect(lines[igor + 1]).toBe(`  ${itemLines([items[0]!])[0]}`);
-    expect(lines[igor + 2]).toBe(`  ${itemLines([items[1]!])[0]}`);
+    // Порядок и склейка — как в экранной сводке (`dishSummary`): по названию.
+    expect(lines[igor + 1]).toBe(`  ${itemLines([items[1]!])[0]}`);
+    expect(lines[igor + 2]).toBe(`  ${itemLines([items[0]!])[0]}`);
+  });
+  it("итог: свои одинаковые строки человека складываются, как на экране", () => {
+    const rows = [
+      { employeeId: 2, name: "Суп", price: 100, qty: 1 },
+      { employeeId: 2, name: "Суп", price: 100, qty: 2 },
+    ];
+    const lines = organizerSummaryText({ title: null, placeName: null, items: rows, names }).split("\n");
+    const igor = lines.findIndex((l) => l.startsWith("Игорь — "));
+    expect(lines[igor]).toBe(`Игорь — ${formatMoney(300)}`);
+    expect(lines[igor + 1]).toBe(`  Суп ×3 — ${formatMoney(300)}`);
+    expect(lines[igor + 2]).toBe("");
   });
   it("«Сдай» называет сбор по названию", () => {
     expect(payRequestText({ creatorName: "Аня", title: "Икра, доставка 09.10", placeName: "Икра", amount: 7700, payHint: null }))

@@ -111,3 +111,32 @@ describe("createFoodMock: сбор — название, срок на дату,
   });
 });
 
+describe("createFoodMock: склейка строк как на сервере", () => {
+  const base = { note: null, payHint: null, audience: { kind: "team" as const } };
+
+  it("шаг поменяли посреди приёма — новый тап даёт новую строку, а не молча переписывает вес", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const place = await mock.saveFoodPlace(null, { name: "Рынок", menu: [{ name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }] });
+    const { order } = await mock.createOrder({ ...base, placeId: place.id, closesAt: null });
+    await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
+    await mock.saveFoodPlace(place.id, { name: "Рынок", menu: [{ id: place.menu[0]!.id, name: "Икра", price: 2400, unit: "kg", stepGrams: 500 }] });
+    const view = await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
+    expect(view.dishes.map((d) => [d.qty, d.stepGrams])).toEqual([[1, 400], [1, 500]]);
+  });
+
+  it("people[].items — свёрнутая сводка, как у сервера: две одинаковые свои строки — одна с количеством", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const { order } = await mock.createOrder({ ...base, placeId: null, closesAt: null });
+    await mock.addOrderItem(order.id, { name: "Суп", price: 100 });
+    const view = await mock.addOrderItem(order.id, { name: "Суп", price: 100 });
+    const mine = view.people!.find((p) => p.employeeId === 1)!;
+    expect(mine.items).toEqual([{ name: "Суп", price: 100, qty: 2, unit: "pcs", stepGrams: null }]);
+  });
+
+  it("место с пустым меню и запрет своих позиций — сбор отклонён, как у сервера", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const place = await mock.saveFoodPlace(null, { name: "Пустое", menu: [] });
+    await expect(mock.createOrder({ ...base, placeId: place.id, allowCustom: false, closesAt: null })).rejects.toThrow("Без меню нужны свои позиции");
+    await expect(mock.createOrder({ ...base, placeId: place.id, allowCustom: true, closesAt: null })).resolves.toBeTruthy();
+  });
+});

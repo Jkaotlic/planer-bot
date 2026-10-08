@@ -395,7 +395,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       // сумма коллеги — не общее знание.
       people: manage
         ? o.recipients.map((id) => ({ employeeId: id, displayName: nameOf(id), amount: debtOf(o.items, id), declined: o.declines.has(id),
-            items: o.items.filter((i) => i.employeeId === id).map(({ name, price, qty, unit, stepGrams }) => ({ name, price, qty, unit, stepGrams })),
+            items: dishSummary(o.items.filter((i) => i.employeeId === id)),
           }))
         : null,
       payment: (() => {
@@ -458,9 +458,10 @@ export function createFoodMock(opts: FoodMockOptions) {
     // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
     if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
     if (!isWithinCloseHorizon(closesAt, now.date)) throw new Error(`Срок — не дальше ${FOOD_CLOSE_HORIZON_DAYS} дней.`);
-    if (input.placeId != null && !PLACES.some((p) => p.id === input.placeId && !p.archived)) {
-      throw new Error("Такого места больше нет.");
-    }
+    const chosen = input.placeId == null ? null : PLACES.find((p) => p.id === input.placeId && !p.archived);
+    if (input.placeId != null && !chosen) throw new Error("Такого места больше нет.");
+    // Как на сервере: место без блюд при запрете своих позиций — пустая комната.
+    if (chosen && chosen.menu.length === 0 && !allowCustom) throw new Error("Без меню нужны свои позиции — иначе заказать будет нечего.");
     const ids = audienceIds(input.audience);
     const recipients = [...new Set([me().id, ...ids.filter((id) => id !== me().id)])];
     // Тот же отказ и тот же текст, что у `resolveAudience`/`POST /api/orders`:
@@ -512,8 +513,9 @@ export function createFoodMock(opts: FoodMockOptions) {
       const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
       const dish = place?.menu.find((m) => m.id === data.menuItemId);
       if (!dish) throw new Error("Этого блюда нет в меню.");
-      // Прибавляем к строке с той же ценой — как `addMenuItem` на сервере.
-      const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price);
+      // Прибавляем к строке с той же ценой, единицей и шагом — как `addMenuItem` на сервере.
+      const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price
+        && i.unit === dish.unit && i.stepGrams === dish.stepGrams);
       if (same) same.qty += 1;
       else if (tooMany) throw new Error(tooManyError);
       else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });

@@ -225,6 +225,17 @@ describe("заказы по HTTP", () => {
     expect(sent).toHaveLength(0);
   });
 
+  it("место с пустым меню и без своих позиций — 400; со своими позициями принимается", async () => {
+    const { db, app, sent, igor, anya, anyaT } = await stage();
+    const empty = createPlace(db, { name: "Пустое", menu: [] }, anya);
+    const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(empty.id, igor, { allowCustom: false }))));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Без меню нужны свои позиции — иначе заказать будет нечего.");
+    expect(sent).toHaveLength(0);
+    const ok = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(empty.id, igor, { allowCustom: true }))));
+    expect(ok.status).toBe(201);
+  });
+
   it("несуществующая дата срока (31 сентября) — 400", async () => {
     const { app, sent, igor, anyaT, placeId } = await stage();
     const res = await app.request(new Request("http://x/api/orders", send(anyaT, createBody(placeId, igor, { closesAt: "2026-09-31T10:00" }))));
