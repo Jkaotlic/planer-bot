@@ -236,6 +236,28 @@ describe("app auth", () => {
 });
 
 describe("rate limiting", () => {
+  it("один зациклившийся клиент упирается в свою корзину (600/мин), а не отрезает команду", async () => {
+    // За релеем KeenDNS все приходят с одного адреса: пока корзина была общей по IP,
+    // чужой поток запросов давал 429 всем. Ключ — сотрудник из проверенного токена.
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    for (const [inv, tg] of [["inv-anya", 7101], ["inv-igor", 7102]] as const) {
+      createEmployee(db, { displayName: inv === "inv-anya" ? "Аня" : "Игорь", inviteToken: inv });
+      linkTelegramAccount(db, inv, tg);
+    }
+    const tokenFor = async (tg: number) => ((await (await app.request(authReq(tg))).json()) as { token: string }).token;
+    const anya = { headers: { Authorization: `Bearer ${await tokenFor(7101)}` } };
+    const igor = { headers: { Authorization: `Bearer ${await tokenFor(7102)}` } };
+
+    for (let i = 0; i < 600; i++) expect((await app.request("/api/me", anya)).status).toBe(200);
+    const blocked = await app.request("/api/me", anya);
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toEqual({ error: "too_many_requests" });
+    expect((await app.request("/api/me", igor)).status).toBe(200);
+    // Неавторизованный путь живёт в своей корзине по адресу и тоже не задет.
+    expect((await app.request("/api/health")).status).toBe(200);
+  });
+
   it("/api/auth trips its own tight limiter (1,200/min) well before the general one (8,000/min)", async () => {
     const app = createApp({ db: makeTestDb(), config });
     // A real flood still gets capped: the 1,201st POST /api/auth in the same
@@ -254,10 +276,10 @@ describe("rate limiting", () => {
     // This is the actual scenario the general limit is sized against: shift
     // reminders go out after 20:00, and that predictably lands a burst of
     // people opening the app within the same minute. Every request in this
-    // test lands on the same rate-limit key — like the real deployment
-    // behind KeenDNS, which likely presents every external client as one
-    // address (see rate-limit.ts) — so this is the realistic worst case, not
-    // an understatement of it.
+    // test comes from the same address — like the real deployment behind
+    // KeenDNS, which likely presents every external client as one address
+    // (see rate-limit.ts): the 30 logins share the address bucket, and each
+    // person's API calls land in their own bucket, which must not trip either.
     //
     // 30 employees (today's full roster), each doing exactly what
     // miniapp/src/App.tsx's bootstrap effect does — getMe + 6 parallel calls

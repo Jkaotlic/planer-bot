@@ -10,7 +10,7 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
-import { rateLimiter } from "./rate-limit";
+import { rateLimiter, teamRateLimiter } from "./rate-limit";
 import { describeClientError, CLIENT_ERROR_BODY_MAX, type ClientErrorReport } from "./client-error";
 import { apiBodyLimit, readTextCapped } from "./body-limits";
 import { redactSecrets } from "../util/safe-error";
@@ -296,24 +296,28 @@ export function createApp(deps: AppDeps): Hono<Env> {
    */
   app.use("*", compress());
 
-  // Coarse flood protection for the whole app — see rate-limit.ts for keying
-  // details and why the numbers are sized as a shared ceiling rather than a
-  // strict per-visitor budget.
+  // Flood protection for the whole app — see rate-limit.ts for how the key is
+  // chosen and why it comes only from a verified token. Two kinds of bucket:
   //
-  // Sized against the actual worst realistic minute, not a guess: opening the
-  // mini app fires 7 requests (getMe + 6 parallel — see miniapp/src/App.tsx's
-  // bootstrap effect), and every tab switch / refocus fires 6 more
-  // (reloadData). Shift reminders go out after 20:00 and predictably cause
-  // several people to open the app within the same minute — the worst
-  // plausible cluster today is the whole 30-person team, each bootstrapping
-  // and switching tabs at least once: 30 × (7 + 6) = 390 req/min. Sized for
-  // roughly double that headcount (team growth): 60 × 13 = 780 req/min. The
-  // limit below is >10x that grown worst case (~20x today's), while still
-  // capping a real flood — which runs orders of magnitude higher than
-  // this, not a few percent higher — well short of anything that could
-  // bother the same process's Telegram long-poll. See the hardening report
-  // for the full arithmetic.
-  app.use("*", rateLimiter({ windowMs: 60_000, max: 8_000 }));
+  // Per person (`/api/*` with a verified token): 600/min. The heaviest honest
+  // minute of one human is an admin clicking through console screens — each
+  // fires a dozen-odd parallel GETs, so ten screens a minute is ~150 — or a
+  // worker opening the mini app (bootstrap) and switching tabs a few times
+  // (7 + 6 per switch, see miniapp/src/App.tsx), well under 100. 600 is ~4x the
+  // console case and still 10 req/s for a full minute: only a looping client gets
+  // there, and it now stops itself instead of 429-ing the whole team, which is
+  // what the shared relay bucket used to do.
+  //
+  // Per address (everything else — SPA assets, /api/auth, /api/health, /cal,
+  // tokenless and bad-token requests): 8,000/min, unchanged. Behind KeenDNS every
+  // external client is one address, so this is still a team-wide ceiling. It was
+  // sized against the whole team opening the app in the same minute after the
+  // 20:00 shift reminder — 30 × (7 + 6) = 390 req/min today, 780 for a doubled
+  // headcount — with >10x headroom; now that authenticated API traffic counts
+  // against personal buckets, the headroom is only larger. A real flood runs
+  // orders of magnitude higher, and this still caps it well short of anything
+  // that could bother the same process's Telegram long-poll.
+  app.use("*", teamRateLimiter({ windowMs: 60_000, ipMax: 8_000, employeeMax: 600, secret: config.jwtSecret }));
 
   // API responses are live data — never let a browser / Telegram webview serve
   // a cached copy, or an admin's edits won't show up until the app is reopened.
