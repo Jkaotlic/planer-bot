@@ -150,6 +150,20 @@
   white-space: nowrap;
 }
 
+/* «Сегодня»: человек, на ком стоит смена, а его самого нет (`waitsForCover`). Кружок —
+   в той же рамке цвета нехватки, что клетка недельной сетки; слова рядом — потому что
+   легенды на этом экране нет. Флаг не сжимается: обрезается имя, а не «ждёт замены». */
+.team-person.is-awaiting-cover .team-person__avatar {
+  outline: 2px solid var(--tgui--destructive_text_color);
+  outline-offset: 1px;
+}
+
+.team-person__flag {
+  flex: 0 0 auto;
+  color: var(--tgui--destructive_text_color);
+  font-size: var(--app-text-meta);
+}
+
 .team-no-time {
   margin-top: 18px;
 }

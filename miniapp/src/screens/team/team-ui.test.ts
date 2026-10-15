@@ -531,6 +531,46 @@ describe("team schedule UI", () => {
     expect(rows.map((r) => r.title)).toEqual(["Больничный (ждёт ОК)", "Больничный"]);
   });
 
+  it("«Сегодня»: смена на отсутствующем — человек в группе помечен «ждёт замены»", () => {
+    // Тем же правилом `waitsForCover`, что и недельная сетка (200d04cb): смена стоит,
+    // а человека нет — день не закрыт, и экран должен это показать.
+    const base = { endDate: null, title: "День", templateId: null, location: null, unrecognisedCode: null };
+    const schedule: TeamSchedule = {
+      employees: [
+        { id: 1, displayName: "Аня Первая", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 2, displayName: "Игорь Второй", rosterOrder: 1, excludedFromSwaps: false },
+      ],
+      shifts: [
+        { ...base, id: 401, employeeId: 1, date: "2026-07-27", start: null, end: null, category: "sick_leave", title: null },
+        { ...base, id: 402, employeeId: 1, date: "2026-07-27", start: "09:00", end: "18:00", category: "shift" },
+        { ...base, id: 403, employeeId: 2, date: "2026-07-27", start: "09:00", end: "18:00", category: "shift" },
+      ],
+      calendar: [],
+    };
+    const model = buildTodayModel("2026-07-27", schedule, fallbackPaletteTemplates);
+    const day = model.groups[0]!;
+    expect(day.people.map((p) => [p.displayName, p.awaitsCover === true])).toEqual([["Аня Первая", true], ["Игорь Второй", false]]);
+    expect(day.entries.map((e) => e.awaitsCover === true)).toEqual([true, false]);
+
+    const markup = renderToStaticMarkup(createElement(TeamTodayView, { model, isDark: false }));
+    const people = [...markup.matchAll(/<li class="team-person([^"]*)"[^>]*>(.*?)<\/li>/g)].map((m) => [m[1], m[2]]);
+    const anya = people.find(([, inner]) => inner!.includes("Аня Первая"))!;
+    const igor = people.find(([, inner]) => inner!.includes("Игорь Второй"))!;
+    expect(anya[0]).toContain("is-awaiting-cover");
+    expect(anya[1]).toContain("ждёт замены");
+    expect(igor[0]).not.toContain("is-awaiting-cover");
+    expect(igor[1]).not.toContain("ждёт замены");
+  });
+
+  it("лист подробностей: смена на отсутствующем подписана «(ждёт замены)»", () => {
+    const base = { employeeId: 1, date: "2026-07-27", endDate: null, start: "09:00", end: "18:00", category: "shift" as const, title: null, templateId: null, location: null, unrecognisedCode: null };
+    const rows = toTeamEntryDetailRows([
+      { shift: { id: 1, ...base } as never, title: "День", palette: null, pending: false, awaitsCover: true },
+      { shift: { id: 2, ...base } as never, title: "День", palette: null, pending: false, awaitsCover: false },
+    ]);
+    expect(rows.map((r) => r.title)).toEqual(["День (ждёт замены)", "День"]);
+  });
+
   it("renders all seven dates, active rows, two-line names, exact palettes, and full cell labels", () => {
     const schedule: TeamSchedule = {
       employees: [

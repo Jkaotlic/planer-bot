@@ -6,6 +6,7 @@ import {
   isAbsence,
   splitDisplayName,
   toEntryView,
+  waitsForCover,
   type SchedulePalette,
   type SchedulePresetLike,
   type TeamEntryView as SharedTeamEntryView,
@@ -49,6 +50,10 @@ export interface TeamPerson {
   employeeId: number | null;
   displayName: string;
   rosterOrder: number;
+  /** Смена группы стоит на нём, а его в этот день нет (`waitsForCover`) — та же метка,
+   *  что рамка клетки в недельной сетке. Метится человек, а не группа: в «Дне» рядом
+   *  могут стоять и здоровые. */
+  awaitsCover?: boolean;
 }
 
 export interface TodayGroup {
@@ -131,10 +136,12 @@ function groupEntries(
   employees: readonly TeamEmployee[],
   templates: readonly ScheduleTemplate[],
   date: string,
+  /** Все записи дня: отсутствие, делающее смену дырой, лежит в другой группе («Без времени»). */
+  dayEntries: readonly Shift[],
 ): TodayGroup[] {
   const grouped = new Map<string, TodayGroup>();
   for (const shift of [...shifts].sort((a, b) => compareShifts(a, b, templates))) {
-    const entry = toEntryView(shift, templates, date);
+    const entry = { ...toEntryView(shift, templates, date), awaitsCover: waitsForCover(shift, dayEntries, date) };
     const pending = entry.pending === true;
     const key = groupingKey(shift, pending);
     const group = grouped.get(key) ?? {
@@ -148,8 +155,12 @@ function groupEntries(
       entries: [],
     };
     group.entries.push(entry);
-    const person = personFor(shift.employeeId, employees);
-    if (!group.people.some((candidate) => candidate.employeeId === person.employeeId)) {
+    const person = { ...personFor(shift.employeeId, employees), awaitsCover: entry.awaitsCover };
+    const known = group.people.find((candidate) => candidate.employeeId === person.employeeId);
+    // Две записи одного человека в группе — метка за любой из них: правило смотрит на
+    // человека и день, так что они и так совпадут.
+    if (known) known.awaitsCover = known.awaitsCover || person.awaitsCover;
+    else {
       group.people.push(person);
       group.people.sort(
         (a, b) =>
@@ -179,8 +190,8 @@ export function buildTodayModel(
     ),
   );
   return {
-    groups: groupEntries(timed, schedule.employees, templates, date),
-    noTimeGroups: groupEntries(noTime, schedule.employees, templates, date)
+    groups: groupEntries(timed, schedule.employees, templates, date, covering),
+    noTimeGroups: groupEntries(noTime, schedule.employees, templates, date, covering)
       .sort((a, b) => a.entries[0]!.shift.category.localeCompare(b.entries[0]!.shift.category)),
     workingCount: working.size,
     absentCount: absent.size,
