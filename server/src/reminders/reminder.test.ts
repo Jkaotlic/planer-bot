@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { eq } from "drizzle-orm";
 import { Bot } from "grammy";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, countTemplateByIdLookups, makeTestDb } from "../db/testdb";
 import { employees, shiftTemplates } from "../db/schema";
 import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
 import { createShift, updateShift, deleteShift } from "../repo/shifts";
@@ -1216,5 +1216,35 @@ describe("догоняющее напоминание", () => {
     await runReminderTick(db, bot, { date: TODAY, time: "02:00" });
 
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("тик напоминаний читает людей и виды смен картой, а не на каждого соседа", () => {
+  it("шесть утренних с одним видом смены: чтений по id не больше, чем писем", async () => {
+    // «Завтра с тобой» перебирает соседей для каждого письма: при запросе на соседа шесть
+    // утренних давали 6 × 6 чтений людей и столько же видов смены — квадрат от команды.
+    const db = makeTestDb();
+    const morning = db
+      .insert(shiftTemplates)
+      .values({ name: "Утро", category: "shift", start: "08:00", end: "17:00", sendReminder: true })
+      .returning()
+      .all()[0]!;
+    const names = ["Аня", "Игорь", "Марк", "Вера", "Олег", "Лена"];
+    names.forEach((name, i) => {
+      const person = linkedEmployee(db, name, 1200 + i);
+      createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", templateId: morning.id, employeeId: person.id });
+    });
+    const { bot, sent } = testBot();
+
+    let templates = 0;
+    const employeesRead = await countEmployeeByIdLookups(db, async () => {
+      templates = await countTemplateByIdLookups(db, () => runReminderTick(db, bot, { date: TODAY, time: "20:30" }));
+    });
+
+    expect(sent).toHaveLength(6);
+    // Соседи — те же, что и раньше: порядок графика, без себя.
+    expect(sent.find((s) => s.chat_id === 1200)!.text).toContain("👥 Завтра с тобой: Игорь, Марк, Вера, Олег, Лена");
+    expect(employeesRead).toBeLessThanOrEqual(6);
+    expect(templates).toBeLessThanOrEqual(6);
   });
 });

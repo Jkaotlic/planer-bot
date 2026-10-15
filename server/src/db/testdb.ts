@@ -13,12 +13,21 @@ export function makeTestDb(): Db {
  * Тесты на N+1 сравнивают это число на одной и на многих строках: если оно растёт
  * вместе со строками — имя берут запросом на строку, а не картой.
  */
-export async function countEmployeeByIdLookups(db: Db, run: () => unknown): Promise<number> {
+export function countEmployeeByIdLookups(db: Db, run: () => unknown): Promise<number> {
+  return countPrepared(db, /from "employees" where "employees"\."id" = \?/, run);
+}
+
+/** То же для вида смены по id (`getTemplate`). */
+export function countTemplateByIdLookups(db: Db, run: () => unknown): Promise<number> {
+  return countPrepared(db, /from "shift_templates" where "shift_templates"\."id" = \?/, run);
+}
+
+async function countPrepared(db: Db, pattern: RegExp, run: () => unknown): Promise<number> {
   const sqlite = (db as unknown as { $client: Database.Database }).$client;
   const prepare = sqlite.prepare;
   let count = 0;
   sqlite.prepare = function (this: Database.Database, source: string) {
-    if (/from "employees" where "employees"\."id" = \?/.test(source)) count += 1;
+    if (pattern.test(source)) count += 1;
     return prepare.call(this, source);
   } as typeof sqlite.prepare;
   try {
