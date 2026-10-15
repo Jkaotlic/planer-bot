@@ -91,6 +91,16 @@ describe("длина записи-отсутствия", () => {
     expect(getShift(db, entry.id)!.endDate).toBe(LAST_OK);
   });
 
+  it("PATCH без дат: запись, длинная ещё до предела (декрет одной строкой), правится — заметка сохраняется", async () => {
+    const { db, app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const entry = createShift(db, { employeeId: anya.id, date: START, endDate: addDaysIso(START, 500), category: "vacation", start: null, end: null });
+
+    const res = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { note: "декрет" }, "PATCH"));
+    expect(res.status).toBe(200);
+    expect(getShift(db, entry.id)!.note).toBe("декрет");
+  });
+
   it("POST /api/my/entries: работник не ставит себе больничный до 9999 года", async () => {
     const { db, app } = stage();
     createEmployee(db, { displayName: "Игорь", inviteToken: "inv-igor" });

@@ -1714,7 +1714,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const err =
       entryTimesError(merged) ??
       entryDateError(merged, loadCalendar(db, merged.date, merged.endDate ?? merged.date)) ??
-      entryRangeError(merged);
+      // Диапазон сверяется, только когда правка трогает даты: запись, ставшая длинной
+      // до появления предела, иначе не дала бы поправить даже заметку.
+      (patch.date !== undefined || patch.endDate !== undefined ? entryRangeError(merged) : null);
     if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
 
     // `unrecognisedCode` means «импорт не смог прочитать эту клетку», and every
