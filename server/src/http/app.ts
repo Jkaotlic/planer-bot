@@ -2290,6 +2290,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Worker: browse open vacant slots (with "am I interested?" flag)
   app.get("/api/weekend/slots", requireAuth(db, config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? teamNow(config.teamTz).date;
+    // Тот же довод, что у `/api/my/shifts`: строковое сравнение с мусором молча
+    // отдало бы пустой список вместо отказа.
+    if (!dateStr.safeParse(from).success) return c.json({ error: "Дата «from» должна быть в виде ГГГГ-ММ-ДД" }, 400);
     return c.json({ slots: openSlotsForWorker(db, c.get("auth").employeeId, from) });
   });
 

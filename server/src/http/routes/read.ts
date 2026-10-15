@@ -13,6 +13,7 @@ import { listUpcomingForEmployee } from "../../repo/shifts";
 import { pendingMarks } from "../../repo/sick-approvals";
 import { readTeamSchedule } from "../../repo/team-schedule";
 import { listActiveTemplates } from "../../repo/templates";
+import { teamNow } from "../../util/team-time";
 import { type Env, requireAuth } from "../middleware";
 
 /** Чтение, доступное любому работнику: пресеты, свои смены, график команды. */
@@ -46,8 +47,11 @@ export function createReadRoutes(deps: { db: Db; config: Config }): Hono<Env> {
   routes.get("/api/my/shifts", requireAuth(db, config.jwtSecret), (c) => {
     // Дата команды, а не телефона: мини-апп больше не присылает `from`, потому
     // что граница дня не должна зависеть от того, где физически человек.
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: config.teamTz }).format(new Date());
+    const today = teamNow(config.teamTz).date;
     const from = c.req.query("from") ?? today;
+    // `from` сравнивается с датами в базе как строка: «abc» больше любой даты, и
+    // ответ молча пустел — «смен нет» вместо «запрос кривой».
+    if (!dateStr.safeParse(from).success) return c.json({ error: "Дата «from» должна быть в виде ГГГГ-ММ-ДД" }, 400);
     // Поля перечислены, а не спреднуты рядом: ряд таблицы несёт ещё `note`,
     // `createdAt` и `updatedAt`. `note` — админское свободное поле, и
     // `readTeamSchedule` его уже вырезает по тому же соображению; здесь он
