@@ -40,7 +40,7 @@ import { swapsLockSetting, isSwapsLocked, reminderHour, reminderHourSetting, set
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
-import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError, entryInvalidBody } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -1486,7 +1486,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
     // Праздники живут в базе, поэтому «в какой день годится категория» спрашивается
@@ -1520,7 +1520,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    */
   app.post("/api/admin/entries/range", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = rangeEntrySchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const input = parsed.data;
     const archived = archivedTargetError(input.employeeId);
     if (archived) return c.json({ error: archived }, 400);
@@ -1665,7 +1665,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const parsed = updateEntrySchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const existing = getShift(db, id);
     if (!existing) return c.json({ error: "not_found" }, 404);
     const archived = archivedTargetError(parsed.data.employeeId);
@@ -1818,7 +1818,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/entries/bulk", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = z.object({ entries: z.array(createEntrySchema).min(1).max(200) })
       .safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     for (const input of parsed.data.entries) {
       const archived = archivedTargetError(input.employeeId);
       if (archived) return c.json({ error: archived }, 400);

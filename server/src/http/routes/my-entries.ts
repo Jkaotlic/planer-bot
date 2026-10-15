@@ -10,6 +10,9 @@ import {
   canAddOwnShifts,
   EMPTY_CALENDAR,
   sickSpanIntersection,
+  ENTRY_LOCATION_MAX,
+  ENTRY_TITLE_MAX,
+  tooLongText,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -19,7 +22,7 @@ import { listPendingSwapsForShift } from "../../repo/swaps";
 import { recordAudit } from "../../repo/audit";
 import { teamNow } from "../../util/team-time";
 import { entryAuditPayload, nameOf, swapAuditPayload } from "../../util/message-lines";
-import { entryTimesError, entryDateError, entryRangeError } from "../entry-schema";
+import { entryTimesError, entryDateError, entryRangeError, entryInvalidBody } from "../entry-schema";
 import { dayAfterLine } from "../../schedule/day-summary";
 import { notifyAdmins, notifyUser, swapExpiredText } from "../../bot/notify";
 import {
@@ -72,8 +75,8 @@ const eventBody = z.object({
   date: dateStr,
   start: timeStr,
   end: timeStr,
-  title: z.string().trim().min(1).max(200),
-  location: z.string().trim().max(200).nullish(),
+  title: z.string().trim().min(1).max(ENTRY_TITLE_MAX, tooLongText("Название", ENTRY_TITLE_MAX)),
+  location: z.string().trim().max(ENTRY_LOCATION_MAX, tooLongText("Место", ENTRY_LOCATION_MAX)).nullish(),
 });
 
 const shiftBody = z.object({
@@ -81,7 +84,7 @@ const shiftBody = z.object({
   date: dateStr,
   start: timeStr,
   end: timeStr,
-  location: z.string().trim().max(200).nullish(),
+  location: z.string().trim().max(ENTRY_LOCATION_MAX, tooLongText("Место", ENTRY_LOCATION_MAX)).nullish(),
 });
 
 const selfEntryBody = z.discriminatedUnion("category", [sickBody, eventBody, shiftBody]);
@@ -153,7 +156,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
 
   routes.post("/api/my/entries", requireAuth(db, config.jwtSecret), async (c) => {
     const parsed = selfEntryBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const body = parsed.data;
     const employeeId = c.get("auth").employeeId;
     const today = teamNow(config.teamTz).date;
@@ -209,7 +212,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
 
   routes.patch("/api/my/entries/:id", requireAuth(db, config.jwtSecret), async (c) => {
     const parsed = selfEntryBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const body = parsed.data;
     const employeeId = c.get("auth").employeeId;
     const existing = getShift(db, Number(c.req.param("id")));

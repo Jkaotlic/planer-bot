@@ -3,7 +3,7 @@ import { ActionButton, Card, Group } from "../ui";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import { Cell, IconButton, Input, Placeholder } from "@telegram-apps/telegram-ui";
-import { selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
+import { ENTRY_LOCATION_MAX, ENTRY_TITLE_MAX, selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
 import type { HandoverDraft, SelfEntryInput, Shift, Template } from "../api/client";
 import type { Category } from "../categories";
 import { DayBadge } from "../components/DayBadge";
@@ -361,6 +361,7 @@ export function SelfEntryScreen({
               <Input
                 header="Название"
                 placeholder="Например: конференция"
+                maxLength={ENTRY_TITLE_MAX}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
@@ -393,6 +394,7 @@ export function SelfEntryScreen({
                 <Input
                   header="Место (необязательно)"
                   placeholder="Адрес или площадка"
+                  maxLength={ENTRY_LOCATION_MAX}
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                 />

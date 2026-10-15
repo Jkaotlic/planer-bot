@@ -159,6 +159,25 @@ describe("POST /api/my/entries", () => {
     expect(res.status).toBe(400);
   });
 
+  it("слишком длинное название или место — отказ словами, а не «invalid»", async () => {
+    const db = makeTestDb();
+    worker(db, 509, "Аня");
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 509);
+
+    const title = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "offsite", date: day(1), start: "14:00", end: "16:00", title: "я".repeat(201),
+    })));
+    expect(title.status).toBe(400);
+    expect((await title.json()).error).toBe("Название — не длиннее 200 знаков");
+
+    const location = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "shift", date: day(1), start: "09:00", end: "18:00", location: "я".repeat(201),
+    })));
+    expect(location.status).toBe(400);
+    expect((await location.json()).error).toBe("Место — не длиннее 200 знаков");
+  });
+
   it("journals it as a self entry, not as an admin one", async () => {
     const db = makeTestDb();
     worker(db, 506, "Аня");

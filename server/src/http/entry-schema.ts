@@ -1,5 +1,36 @@
 import { z } from "zod";
-import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, type DayCalendar, type EntryCategory } from "@planer/shared";
+import {
+  entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence,
+  ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX, tooLongText,
+  type DayCalendar, type EntryCategory,
+} from "@planer/shared";
+
+/**
+ * Подпись уходит в письмо об изменении графика, место — в напоминание накануне:
+ * без потолка длинный текст рвёт письмо в Telegram. Потолки — `text-limits.ts`,
+ * общие с вакантным слотом и с формами обеих морд.
+ */
+const entryTexts = {
+  location: z.string().max(ENTRY_LOCATION_MAX, tooLongText("Место", ENTRY_LOCATION_MAX)).nullish(),
+  title: z.string().max(ENTRY_TITLE_MAX, tooLongText("Название", ENTRY_TITLE_MAX)).nullish(),
+  note: z.string().max(ENTRY_NOTE_MAX, tooLongText("Заметка", ENTRY_NOTE_MAX)).nullish(),
+};
+
+const TOO_LONG_MESSAGES = new Set([
+  tooLongText("Место", ENTRY_LOCATION_MAX),
+  tooLongText("Название", ENTRY_TITLE_MAX),
+  tooLongText("Заметка", ENTRY_NOTE_MAX),
+]);
+
+/**
+ * Тело 400 для разбора записи. Обычный отказ остаётся `invalid`: его видит только
+ * сломанный клиент. А длину человек набирает сам, и обе морды показывают `error`
+ * как есть — поэтому слишком длинное поле называется словами.
+ */
+export function entryInvalidBody(issues: readonly { message: string }[]): { error: string; issues: readonly unknown[] } {
+  const tooLong = issues.find((issue) => TOO_LONG_MESSAGES.has(issue.message));
+  return { error: tooLong?.message ?? "invalid", issues };
+}
 
 const baseEntry = z.object({
   date: dateStr,
@@ -9,9 +40,7 @@ const baseEntry = z.object({
   endDate: dateStr.nullish(),
   templateId: z.number().int().nullish(),
   employeeId: z.number().int().nullish(),
-  location: z.string().nullish(),
-  title: z.string().nullish(),
-  note: z.string().nullish(),
+  ...entryTexts,
 });
 
 /** Category↔times coherence. Returns an error message, or null if coherent. */
@@ -126,9 +155,7 @@ export const rangeEntrySchema = z
     end: timeStr.nullish(),
     templateId: z.number().int().nullish(),
     employeeId: z.number().int(),
-    location: z.string().nullish(),
-    title: z.string().nullish(),
-    note: z.string().nullish(),
+    ...entryTexts,
     /** Брать ли субботу и воскресенье. К «Работе в выходной» не относится — у неё своё правило. */
     includeWeekends: z.boolean().default(false),
     /**

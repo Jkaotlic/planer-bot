@@ -9,6 +9,7 @@ import { listRecentAudit } from "../repo/audit";
 import { NOTICE_WINDOW_MS } from "../schedule/notice-buffer";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
+import { ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX } from "@planer/shared";
 
 /** A bot that records what it was asked to send instead of talking to Telegram. */
 function fakeBot() {
@@ -834,5 +835,68 @@ describe("запись наследует место своего пресета
 
     expect(res.status).toBe(201);
     expect(listShiftsInRange(db, "2026-08-04", "2026-08-05").map((s) => s.location)).toEqual(["Поклонка", "Поклонка"]);
+  });
+});
+
+/**
+ * Подпись записи стоит в письме об изменении графика, место — в напоминании накануне.
+ * Без потолка длинный текст рвал письмо в Telegram, а ручка отвечала «готово».
+ */
+describe("тексты записи графика — с потолком и отказом по-русски", () => {
+  const FRIDAY = "2026-07-10";
+  const long = (n: number) => "я".repeat(n + 1);
+
+  async function setup() {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    return { db, anya, app, admin };
+  }
+  const shift = (employeeId: number, extra: object) =>
+    ({ date: FRIDAY, category: "shift", start: "09:00", end: "18:00", employeeId, ...extra });
+
+  it("POST: название, место и заметка сверх потолка — 400 с названием поля", async () => {
+    const { anya, app, admin } = await setup();
+    for (const [extra, text] of [
+      [{ title: long(ENTRY_TITLE_MAX) }, "Название — не длиннее 200 знаков"],
+      [{ location: long(ENTRY_LOCATION_MAX) }, "Место — не длиннее 200 знаков"],
+      [{ note: long(ENTRY_NOTE_MAX) }, "Заметка — не длиннее 1000 знаков"],
+    ] as const) {
+      const res = await app.request("/api/admin/entries", authedJson(admin, shift(anya.id, extra)));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(text);
+    }
+  });
+
+  it("POST ровно на потолке — проходит", async () => {
+    const { anya, app, admin } = await setup();
+    const res = await app.request("/api/admin/entries", authedJson(admin, shift(anya.id, {
+      title: "я".repeat(ENTRY_TITLE_MAX), location: "я".repeat(ENTRY_LOCATION_MAX), note: "я".repeat(ENTRY_NOTE_MAX),
+    })));
+    expect(res.status).toBe(201);
+  });
+
+  it("PATCH, расстановка и пачка держат тот же потолок", async () => {
+    const { db, anya, app, admin } = await setup();
+    const entry = createShift(db, { date: FRIDAY, category: "shift", start: "09:00", end: "18:00", employeeId: anya.id });
+
+    const patched = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { title: long(ENTRY_TITLE_MAX) }, "PATCH"));
+    expect(patched.status).toBe(400);
+    expect((await patched.json()).error).toBe("Название — не длиннее 200 знаков");
+    expect(getShift(db, entry.id)!.title).toBeNull();
+
+    const ranged = await app.request("/api/admin/entries/range", authedJson(admin, {
+      from: "2026-07-13", to: "2026-07-14", category: "shift", start: "09:00", end: "18:00", employeeId: anya.id,
+      location: long(ENTRY_LOCATION_MAX),
+    }));
+    expect(ranged.status).toBe(400);
+    expect((await ranged.json()).error).toBe("Место — не длиннее 200 знаков");
+
+    const bulk = await app.request("/api/admin/entries/bulk", authedJson(admin, {
+      entries: [shift(anya.id, { date: "2026-07-15", note: long(ENTRY_NOTE_MAX) })],
+    }));
+    expect(bulk.status).toBe(400);
+    expect((await bulk.json()).error).toBe("Заметка — не длиннее 1000 знаков");
   });
 });

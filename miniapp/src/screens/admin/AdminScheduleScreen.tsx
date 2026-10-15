@@ -26,6 +26,7 @@ import {
   waitsForCover,
   weekShortfall,
   workPresets,
+  ENTRY_TITLE_MAX,
 } from "@planer/shared";
 import {
   apiClient,
@@ -1039,6 +1040,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
         <Input
           header="Место / примечание"
           placeholder={category === "duty" ? "Например, Вавилова" : "Например, Ярмарка вакансий"}
+          maxLength={ENTRY_TITLE_MAX}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
