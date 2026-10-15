@@ -1012,3 +1012,76 @@ describe("письмо админам про правку наблюдателя
     expect(sent.map((m) => m.to)).toContain(615);
   });
 });
+
+/**
+ * Его правило 2026-10-15: «админы в любом случае могут менять любому что и когда
+ * захотят» — себе тоже. Роль — из базы (`me.isAdmin`), не из тела: работник,
+ * приславший `admin: true`, остаётся работником.
+ */
+describe("админ на своих записях — без правил работника", () => {
+  function scene(tgId: number, isAdmin: boolean) {
+    const db = makeTestDb();
+    const me = worker(db, tgId, isAdmin ? "Игорь" : "Аня");
+    if (isAdmin) setEmployeeAdmin(db, me.id, true);
+    const app = createApp({ db, config, bot: undefined });
+    return { db, me, app };
+  }
+
+  it("больничный за месяц назад и мероприятие вчера — 201", async () => {
+    const { db, me, app } = scene(1101, true);
+    const token = await tokenFor(app, 1101);
+    const sick = await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(-30), endDate: day(-28) })));
+    expect(sick.status).toBe(201);
+    const event = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "offsite", date: day(-1), start: "10:00", end: "12:00", title: "Конференция",
+    })));
+    expect(event.status).toBe(201);
+    expect(listShiftsInRange(db, day(-30), day(-1)).filter((s) => s.employeeId === me.id)).toHaveLength(2);
+  });
+
+  it("кончившийся больничный правится и снимается", async () => {
+    const { db, me, app } = scene(1102, true);
+    const done = createShift(db, { employeeId: me.id, date: day(-5), endDate: day(-2), category: "sick_leave" });
+    const token = await tokenFor(app, 1102);
+    const res = await app.request(new Request(`http://x/api/my/entries/${done.id}`, authed(token, {
+      // За окно работника (7 дней назад): правка обязана пройти и проверку
+      // «куда двигаем», а не только «можно ли трогать старую».
+      category: "sick_leave", date: day(-30), endDate: day(-4),
+    }, "PATCH")));
+    expect(res.status).toBe(200);
+    expect(getShift(db, done.id)!.date).toBe(day(-30));
+    expect(getShift(db, done.id)!.endDate).toBe(day(-4));
+    const del = await app.request(new Request(`http://x/api/my/entries/${done.id}`, authed(token, undefined, "DELETE")));
+    expect(del.status).toBe(200);
+    expect(getShift(db, done.id)).toBeUndefined();
+  });
+
+  it("предел длины записи держится и для админа — это целостность, не права", async () => {
+    const { app } = scene(1103, true);
+    const token = await tokenFor(app, 1103);
+    const res = await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(0), endDate: day(400) })));
+    expect(res.status).toBe(400);
+  });
+
+  it("работнику те же запросы — по-прежнему отказ, и `admin: true` в теле ничего не даёт", async () => {
+    const { db, me, app } = scene(1104, false);
+    const token = await tokenFor(app, 1104);
+    const sick = await app.request(new Request("http://x/api/my/entries", authed(token, { category: "sick_leave", date: day(-30), admin: true })));
+    expect(sick.status).toBe(400);
+    const done = createShift(db, { employeeId: me.id, date: day(-5), endDate: day(-2), category: "sick_leave" });
+    const del = await app.request(new Request(`http://x/api/my/entries/${done.id}`, authed(token, undefined, "DELETE")));
+    expect(del.status).toBe(400);
+    expect(getShift(db, done.id)).toBeDefined();
+  });
+
+  it("свой отпуск админ сокращает до одного дня админской ручкой — endDate: null доезжает до базы", async () => {
+    const { db, me, app } = scene(1105, true);
+    const vacation = createShift(db, { employeeId: me.id, date: day(-3), endDate: day(2), category: "vacation" });
+    const token = await tokenFor(app, 1105);
+    const res = await app.request(new Request(`http://x/api/admin/entries/${vacation.id}`, authed(token, {
+      category: "vacation", date: day(-3), endDate: null, employeeId: me.id,
+    }, "PATCH")));
+    expect(res.status).toBe(200);
+    expect(getShift(db, vacation.id)!.endDate).toBeNull();
+  });
+});

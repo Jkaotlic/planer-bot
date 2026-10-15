@@ -172,7 +172,10 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
       return c.json({ error: "Свой график выключен — включи его в настройках" }, 403);
     }
 
-    const refusal = selfEntryRefusal(body, today, { ownShifts });
+    // `admin` — из базы, а не из тела: флаг снимает сроки и виды целиком (его
+    // правило 2026-10-15 «админы меняют что и когда захотят»), и брать его из
+    // запроса значило бы отдать это право любому, кто допишет поле.
+    const refusal = selfEntryRefusal(body, today, { ownShifts, admin: me.isAdmin });
     if (refusal) return c.json({ error: refusal }, 400);
     const shape = shapeError(body);
     if (shape) return c.json({ error: shape }, 400);
@@ -237,9 +240,9 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     // it is being moved TO. With only the first, an entry ending today could be
     // dragged a year out; with only the second, a sick leave that ended last
     // month could be rewritten as long as the new dates look fine.
-    const editRefusal = selfEntryEditRefusal(existing, today, { ownShifts });
+    const editRefusal = selfEntryEditRefusal(existing, today, { ownShifts, admin: me.isAdmin });
     if (editRefusal) return c.json({ error: editRefusal }, 400);
-    const moveRefusal = selfEntryRefusal(body, today, { ownShifts });
+    const moveRefusal = selfEntryRefusal(body, today, { ownShifts, admin: me.isAdmin });
     if (moveRefusal) return c.json({ error: moveRefusal }, 400);
     const shape = shapeError(body);
     if (shape) return c.json({ error: shape }, 400);
@@ -311,7 +314,7 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const me = getEmployeeById(db, employeeId);
     if (!me) return c.json({ error: "not_found" }, 404);
     const ownShifts = canAddOwnShifts(me);
-    const refusal = selfEntryEditRefusal(existing, teamNow(config.teamTz).date, { ownShifts });
+    const refusal = selfEntryEditRefusal(existing, teamNow(config.teamTz).date, { ownShifts, admin: me.isAdmin });
     if (refusal) return c.json({ error: refusal }, 400);
 
     // Normally empty here: only `sick_leave`, `offsite` and (for a self-scheduling
