@@ -460,7 +460,7 @@ export function createBot(deps: BotDeps): Bot {
   bot.command("start", async (ctx) => {
     const from = ctx.from;
     if (!from) return;
-    if (await refuseOutsidePrivate(ctx, "Напиши мне в личный чат — в группе я не отвечаю.")) return;
+    if (await refuseOutsidePrivate(ctx, "Это делается в личном чате со мной — напиши мне туда.")) return;
     const token = ctx.match.trim();
 
     if (token) {

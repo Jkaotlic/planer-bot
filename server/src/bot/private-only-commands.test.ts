@@ -88,7 +88,7 @@ describe("личные команды в групповом чате", () => {
     const { bot, sent } = testBot(db);
     await bot.handleUpdate(groupCommand(600, "/start tok-g"));
     expect(getByTelegramId(db, 600)).toBeUndefined();
-    expect(sent.map((m) => m.text)).toEqual(["Напиши мне в личный чат — в группе я не отвечаю."]);
+    expect(sent.map((m) => m.text)).toEqual(["Это делается в личном чате со мной — напиши мне туда."]);
   });
 
   it("/start в группе не заводит аллоулистнутого админа", async () => {
@@ -96,6 +96,6 @@ describe("личные команды в групповом чате", () => {
     const { bot, sent } = testBot(db);
     await bot.handleUpdate(groupCommand(111, "/start"));
     expect(getByTelegramId(db, 111)).toBeUndefined();
-    expect(sent.map((m) => m.text)).toEqual(["Напиши мне в личный чат — в группе я не отвечаю."]);
+    expect(sent.map((m) => m.text)).toEqual(["Это делается в личном чате со мной — напиши мне туда."]);
   });
 });
