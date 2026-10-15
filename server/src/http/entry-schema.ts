@@ -78,6 +78,13 @@ export function entrySpanError(v: { category: EntryCategory; date: string; endDa
  */
 export function entryRangeError(v: { date: string; endDate?: string | null }): string | null {
   if (v.endDate && v.endDate < v.date) return "запись не может кончаться раньше, чем начинается";
+  // Длина — здесь же, а не только в схеме создания: этой функцией сверяют и PATCH
+  // (итог после слияния с существующей записью), и записи работника. Без предела
+  // больничный «до 9999 года» разворачивается `daysOf`/`eachDayIso` в ~36 млн
+  // дней в процессе, который держит и бота.
+  if (v.endDate && rangeDays(v.date, v.endDate) > MAX_RANGE_DAYS) {
+    return `запись не может быть длиннее ${MAX_RANGE_DAYS} дней — разбейте её на части`;
+  }
   return null;
 }
 
@@ -93,7 +100,7 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
 export const updateEntrySchema = baseEntry.partial();
 
 /**
- * Предел одной расстановки — год с небольшим.
+ * Предел одной расстановки и одной записи-отсутствия — год с небольшим.
  *
  * Не вкусовое число: один процесс обслуживает и API, и long-polling бота, и
  * «широкий» запрос задевает чат всей команды (см. `CLAUDE.md`). Здесь он вдобавок
