@@ -10,7 +10,7 @@ import { teamNow } from "../../util/team-time";
 import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
 import {
-  cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollView,
+  cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollRecipientRows, pollView,
 } from "../../polls/poll-service";
 import { finishPollMessages, redrawPollMessage, sendPollInvites } from "../../polls/poll-messenger";
 
@@ -85,7 +85,11 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
       inFlight.delete(key);
     }
     recordAudit(db, "poll_created", viewer.id, { pollId: poll.id, question: poll.question, recipients: reachable.length, delivered });
-    return c.json({ poll: pollView(db, poll, viewer, now), delivered, unreachable }, 201);
+    // В ответе — только коллеги, как у сбора: письмо самому создателю голосов не
+    // соберёт, и «Отправлено коллегам: N» с ним было бы на одного больше. Журнал выше
+    // хранит все письма — его `recipients` тоже считает создателя.
+    const deliveredToColleagues = pollRecipientRows(db, poll.id).filter((r) => r.employeeId !== viewer.id && r.messageId != null).length;
+    return c.json({ poll: pollView(db, poll, viewer, now), delivered: deliveredToColleagues, unreachable }, 201);
   });
 
   app.get("/api/polls/:id", auth, (c) => {

@@ -101,7 +101,9 @@ describe("заказы по HTTP", () => {
     const { app, sent, igor, anyaT, placeId } = await stage();
     const { status, body } = await newOrder(app, anyaT, igor, placeId);
     expect(status).toBe(201);
-    expect(body.delivered).toBe(2);
+    // Писем ушло два (Ане и Игорю), а «Отправлено» — про коллег: своё письмо создатель
+    // получает почти всегда, и с ним число обещало бы на одного больше ответов.
+    expect(body.delivered).toBe(1);
     expect(body.order.menu.map((m: { name: string }) => m.name)).toEqual(["Шаурма"]);
     expect(sent.map((m) => m.to).sort()).toEqual([100, 101]);
   });
@@ -123,7 +125,7 @@ describe("заказы по HTTP", () => {
     const { app, failFor, igor, anyaT, placeId } = await stage();
     failFor.add(101);
     const { body } = await newOrder(app, anyaT, igor, placeId);
-    expect(body.delivered).toBe(1);
+    expect(body.delivered).toBe(0);
     expect(body.deliveredToNobody).toBe(true);
   });
 

@@ -66,7 +66,7 @@ describe("PollForm", () => {
     await act(async () => type(el.querySelector("textarea")!, "Корпоратив в пятницу?"));
     await act(async () => byText(el, "Отправить").click());
     await settle();
-    expect(el.textContent).toContain("Отправлено: 2. Не дошло: Марк");
+    expect(el.textContent).toContain("Отправлено коллегам: 2. Не дошло: Марк");
     expect(onDone).not.toHaveBeenCalled();
     await act(async () => byText(el, "ОК").click());
     expect(onDone).toHaveBeenCalled();

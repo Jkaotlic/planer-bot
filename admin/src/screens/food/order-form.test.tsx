@@ -52,7 +52,7 @@ describe("консоль: новый заказ", () => {
     const el = await mount(OrderForm, p);
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Разослать"));
-    await waitFor(() => expect(el.textContent).toContain("Отправлено: 1. Не дошло: Дима"));
+    await waitFor(() => expect(el.textContent).toContain("Отправлено коллегам: 1. Не дошло: Дима"));
     expect(p.onDone).not.toHaveBeenCalled();
     await click(button(el, "ОК"));
     expect(p.onDone).toHaveBeenCalledWith(42);

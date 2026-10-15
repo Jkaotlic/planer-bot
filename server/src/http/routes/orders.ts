@@ -134,7 +134,11 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     // «дошло 1» означало бы «дошло себе», а ответов от себя не ждут.
     const colleagues = orderRecipientRows(db, order.id).filter((r) => r.employeeId !== viewer.id);
     const deliveredToNobody = colleagues.length > 0 && colleagues.every((r) => r.messageId == null);
-    return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable, deliveredToNobody }, 201);
+    // «Отправлено коллегам: N» — по той же причине без своего письма: оно обещало бы
+    // на один ответ больше. Журнал выше хранит все письма — рядом с ним `recipients`
+    // тоже считает создателя.
+    const deliveredToColleagues = colleagues.filter((r) => r.messageId != null).length;
+    return c.json({ order: orderView(db, order, viewer, now), delivered: deliveredToColleagues, unreachable, deliveredToNobody }, 201);
   });
 
   app.get("/api/orders/:id", auth, (c) => {

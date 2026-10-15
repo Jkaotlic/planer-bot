@@ -47,7 +47,7 @@ describe("консоль: новый опрос", () => {
     await type(question(el), "Обед?");
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Отправить"));
-    await waitFor(() => expect(el.textContent).toContain("Отправлено: 2. Не дошло: Дима"));
+    await waitFor(() => expect(el.textContent).toContain("Отправлено коллегам: 2. Не дошло: Дима"));
     expect(p.onDone).not.toHaveBeenCalled();
     await click(button(el, "ОК"));
     expect(p.onDone).toHaveBeenCalled();

@@ -64,7 +64,7 @@ describe("OrderForm", () => {
     const el = await mountForm(onDone);
     await act(async () => byText(el, "Разослать").click());
     await settle();
-    expect(el.textContent).toContain("Отправлено: 1. Не дошло: Марк");
+    expect(el.textContent).toContain("Отправлено коллегам: 1. Не дошло: Марк");
     expect(onDone).not.toHaveBeenCalled();
     await act(async () => byText(el, "ОК").click());
     expect(onDone).toHaveBeenCalledWith(9);

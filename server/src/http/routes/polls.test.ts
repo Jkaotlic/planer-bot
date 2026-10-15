@@ -74,7 +74,8 @@ describe("опросы по HTTP", () => {
       send(anyaT, { question: "Пицца?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] } })));
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.delivered).toBe(2);
+    // Писем два, «Отправлено коллегам» — одно: своё письмо создателя не в счёт.
+    expect(body.delivered).toBe(1);
     expect(body.poll.closes).toBe("до 18:00");
     expect(sent.map((m) => m.to).sort()).toEqual([100, 101]);
   });
