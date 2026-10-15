@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createBot, FALLBACK_TEXT } from "./bot";
+import { addAnswer, undoAnswer } from "./food-handlers";
 import { recordApi, stubBotInfo } from "./testbot";
 import { BTN_SERVICES, LEGACY_BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
@@ -501,5 +502,30 @@ describe("закрытие, когда Telegram не принял ответ н�
     expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
     expect(api.sent.some((m) => m.chat_id === 111 && m.text.includes("Что заказать:"))).toBe(true);
     expect(api.sent.some((m) => m.chat_id === 333 && m.text.startsWith("💸"))).toBe(true);
+  });
+});
+
+/**
+ * Telegram не показывает ответ на тап длиннее 200 знаков — вызов падает, и
+ * человек видит вечные часики. Имя блюда бывает в 200 знаков само по себе.
+ */
+describe("ответ на тап не длиннее 200 знаков", () => {
+  const LONG = "Ш".repeat(200);
+
+  it("«＋»: длинное имя режется с многоточием, количество остаётся целым", () => {
+    const text = addAnswer({ name: LONG, unit: "kg", stepGrams: 400, qty: 3 });
+    expect(text.length).toBeLessThanOrEqual(200);
+    expect(text).toMatch(/…\s\(1,2 кг\)$/);
+    expect(addAnswer({ name: "Шаурма", unit: "pcs", stepGrams: null, qty: 1 })).toBe("＋ Шаурма (×1)");
+  });
+
+  it("«↩️ Убрать»: то же для обоих хвостов", () => {
+    const left = undoAnswer({ name: LONG, unit: "kg", stepGrams: 400, qtyLeft: 2 });
+    expect(left.length).toBeLessThanOrEqual(200);
+    expect(left).toMatch(/…\s0,4 кг \(осталось 0,8 кг\)$/);
+    const gone = undoAnswer({ name: LONG, unit: "pcs", stepGrams: null, qtyLeft: 0 });
+    expect(gone.length).toBeLessThanOrEqual(200);
+    expect(gone).toMatch(/…\s\(убрал совсем\)$/);
+    expect(undoAnswer({ name: "Шаурма", unit: "pcs", stepGrams: null, qtyLeft: 1 })).toBe("− Шаурма (осталось ×1)");
   });
 });

@@ -53,9 +53,33 @@ export function servicesMenuKeyboard(publicUrl: string): InlineKeyboard {
  */
 export function undoAnswer(r: RemovedStep): string {
   const kg = r.unit === "kg" && r.stepGrams != null;
-  const what = kg ? `${r.name} ${formatKg(r.stepGrams!)} кг` : r.name;
-  if (r.qtyLeft <= 0) return `− ${what} (убрал совсем)`;
-  return `− ${what} (осталось ${kg ? `${formatKg(r.qtyLeft * r.stepGrams!)} кг` : `×${r.qtyLeft}`})`;
+  const step = kg ? ` ${formatKg(r.stepGrams!)} кг` : "";
+  const tail = r.qtyLeft <= 0
+    ? "(убрал совсем)"
+    : `(осталось ${kg ? `${formatKg(r.qtyLeft * r.stepGrams!)} кг` : `×${r.qtyLeft}`})`;
+  return fitName(r.name, (name) => `− ${name}${step} ${tail}`);
+}
+
+/** Ответ на тап «＋»: что добавлено и сколько теперь. У кг — вес, а не шаги. */
+export function addAnswer(i: { name: string; unit: "pcs" | "kg"; stepGrams: number | null; qty: number }): string {
+  const amount = i.unit === "kg" && i.stepGrams ? `${formatKg(i.qty * i.stepGrams)} кг` : `×${i.qty}`;
+  return fitName(i.name, (name) => `＋ ${name} (${amount})`);
+}
+
+/**
+ * Предел Telegram на текст ответа на тап. Длиннее — `answerCallbackQuery`
+ * падает, и человек видит вечные часики вместо ответа. Имя блюда (до 200
+ * знаков) одно доходит до предела, поэтому режется именно оно: количество в
+ * хвосте — то, ради чего ответ и нужен.
+ */
+const CALLBACK_ANSWER_MAX = 200;
+
+function fitName(name: string, frame: (name: string) => string): string {
+  if (frame(name).length <= CALLBACK_ANSWER_MAX) return frame(name);
+  // По кодовым точкам, а не по `slice`: эмодзи в имени не рвётся пополам.
+  const chars = Array.from(name);
+  while (chars.length > 0 && frame(`${chars.join("")}…`).length > CALLBACK_ANSWER_MAX) chars.pop();
+  return frame(`${chars.join("")}…`);
 }
 
 function inBackground(label: string, work: Promise<unknown>): void {
@@ -184,8 +208,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     const last = itemsOf(db, order.id).filter((i) => i.employeeId === who.me.id && i.menuItemId === Number(ctx.match[2])).at(-1);
     // У кг-позиции «×3» ничего не говорит человеку — он набирает вес, а не шаги.
-    const amount = last && last.unit === "kg" && last.stepGrams ? `${formatKg(last.qty * last.stepGrams)} кг` : last ? `×${last.qty}` : "";
-    await ctx.answerCallbackQuery({ text: last ? `＋ ${last.name} (${amount})` : "Добавил" });
+    await ctx.answerCallbackQuery({ text: last ? addAnswer(last) : "Добавил" });
     await redrawOrder(ctx, order.id, who.me);
   });
 
