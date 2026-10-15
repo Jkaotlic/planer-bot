@@ -30,3 +30,9 @@ export function tooLongText(label: string, max: number): string {
  */
 export const COLLECTION_TITLE_MAX = 80;
 export const COLLECTION_TEXT_MAX = 3000;
+
+/**
+ * Имя сотрудника стоит почти в каждом письме бота — «Аня просит обменяться…»,
+ * списки коллег в напоминании. Сотня знаков вмещает любое ФИО с запасом.
+ */
+export const EMPLOYEE_NAME_MAX = 100;

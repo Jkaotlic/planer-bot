@@ -10,6 +10,8 @@ import {
   type EmployeeInviteResponse,
   type EmployeesResponse,
   PREFERRED_NAME_MAX,
+  EMPLOYEE_NAME_MAX,
+  tooLongText,
   addressOf,
   canSwap,
   isAbsence,
@@ -114,6 +116,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
       return c.json({ error: "displayName is required" }, 400);
     }
+    if (body.displayName.length > EMPLOYEE_NAME_MAX) return c.json({ error: tooLongText("Имя", EMPLOYEE_NAME_MAX) }, 400);
     const clash = findActiveByDisplayName(db, body.displayName);
     if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
     const inviteToken = randomBytes(16).toString("hex");
@@ -158,6 +161,10 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
 
     if (hasName && (typeof body.displayName !== "string" || body.displayName.trim().length === 0)) {
       return c.json({ error: "displayName is required" }, 400);
+    }
+    // Имя стоит почти в каждом письме бота — потолок тот же, что при заведении.
+    if (hasName && (body.displayName as string).length > EMPLOYEE_NAME_MAX) {
+      return c.json({ error: tooLongText("Имя", EMPLOYEE_NAME_MAX) }, 400);
     }
     // null clears it — nobody is obliged to give a birthday.
     if (hasBirthday && body.birthDate !== null && (typeof body.birthDate !== "string" || !isBirthDate(body.birthDate))) {

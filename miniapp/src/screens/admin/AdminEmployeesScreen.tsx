@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
+import { EMPLOYEE_NAME_MAX, filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { Avatar, Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../../api/client";
@@ -401,7 +401,7 @@ export function EmployeeRow({
   if (editing) {
     return (
       <Card>
-        <Input header="Имя" value={draft} disabled={busy} onChange={(e) => setDraft(e.target.value)} />
+        <Input header="Имя" maxLength={EMPLOYEE_NAME_MAX} value={draft} disabled={busy} onChange={(e) => setDraft(e.target.value)} />
         <div style={{ display: "flex", gap: 8 }}>
           <ActionButton
             kind="primary"
@@ -620,6 +620,7 @@ function AddEmployeeForm({ busy, onAdd }: { busy: boolean; onAdd: (name: string)
       <Input
         header="Имя"
         placeholder="Например, Настя Волкова"
+        maxLength={EMPLOYEE_NAME_MAX}
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
