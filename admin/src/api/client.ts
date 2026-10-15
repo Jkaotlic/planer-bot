@@ -1361,7 +1361,7 @@ export const realClient: ApiClient = {
   async setCalendarDay(date, kind, note = null) {
     // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
     // про день, а не про строку, которой больше нет.
-    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "manual" | null }>(
+    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "auto" | "manual" | null }>(
       `/api/admin/calendar/${date}`,
       { kind, note },
     );

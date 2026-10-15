@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
-import { listCalendarYear, setManualDay } from "../repo/calendar-days";
+import { listCalendarYear, replaceAutoYear, setManualDay } from "../repo/calendar-days";
 import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
@@ -135,15 +135,26 @@ describe("PUT /api/admin/calendar/:date", () => {
     const { db, app } = stage();
     const token = await tokenFor(app, 111);
 
-    const set = await app.request("/api/admin/calendar/2026-12-31", send(token, { kind: "holiday", note: "Работаем до обеда" }, "PUT"));
+    // Обычный день: 31.12.2026 — праздник в зашитом календаре, и снятие вернуло бы его.
+    const set = await app.request("/api/admin/calendar/2026-10-14", send(token, { kind: "holiday", note: "Работаем до обеда" }, "PUT"));
     expect(set.status).toBe(200);
-    expect(await set.json()).toEqual({ date: "2026-12-31", kind: "holiday", note: "Работаем до обеда", source: "manual" });
+    expect(await set.json()).toEqual({ date: "2026-10-14", kind: "holiday", note: "Работаем до обеда", source: "manual" });
     expect(listRecentAudit(db, 5)[0]).toMatchObject({ type: "calendar_day_set" });
 
-    const cleared = await app.request("/api/admin/calendar/2026-12-31", send(token, { kind: null }, "PUT"));
+    const cleared = await app.request("/api/admin/calendar/2026-10-14", send(token, { kind: null }, "PUT"));
     expect(cleared.status).toBe(200);
-    expect(await cleared.json()).toEqual({ date: "2026-12-31", kind: null, note: null, source: null });
+    expect(await cleared.json()).toEqual({ date: "2026-10-14", kind: null, note: null, source: null });
     expect(listCalendarYear(db, 2026)).toHaveLength(0);
+  });
+
+  it("снятая отметка с праздника отвечает праздником из календаря, а не пустотой (F2)", async () => {
+    const { db, app } = stage();
+    const token = await tokenFor(app, 111);
+    replaceAutoYear(db, 2026, [{ date: "2026-06-12", kind: "holiday", note: "День России" }], new Date());
+    await app.request("/api/admin/calendar/2026-06-12", send(token, { kind: "workday" }, "PUT"));
+
+    const cleared = await app.request("/api/admin/calendar/2026-06-12", send(token, { kind: null }, "PUT"));
+    expect(await cleared.json()).toEqual({ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" });
   });
 
   it("перекрывает автоматическую строку, а не удаляет её вид", async () => {

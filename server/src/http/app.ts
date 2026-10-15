@@ -18,7 +18,7 @@ import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../r
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
-import { loadCalendar, setManualDay } from "../repo/calendar-days";
+import { listCalendarDays, loadCalendar, setManualDay } from "../repo/calendar-days";
 import { refreshHolidays } from "../holidays/holiday-tick";
 import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
 import { acknowledgedCoverageDates, holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
@@ -909,9 +909,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   /**
    * Ручная отметка дня: «работаем» в праздник, «отдыхаем» в обычный день.
    *
-   * `kind: null` снимает ручную строку, и день возвращается к тому, что скажет
-   * календарь на следующем обновлении. Ручное решение всегда сильнее
-   * автоматического — см. `replaceAutoYear`.
+   * `kind: null` снимает ручную строку, и день сразу возвращается к тому, что
+   * говорит календарь (`setManualDay`); ответ — про день после снятия, поэтому
+   * снятая отметка с праздника отвечает праздником. Ручное решение всегда
+   * сильнее автоматического — см. `replaceAutoYear`.
    */
   app.put("/api/admin/calendar/:date", requireAdmin(db, config.jwtSecret), async (c) => {
     const date = c.req.param("date");
@@ -926,11 +927,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : null;
     setManualDay(db, date, body.kind, note, new Date());
     recordAudit(db, "calendar_day_set", c.get("auth").employeeId, { date, kind: body.kind, note });
-    return c.json(
-      body.kind === null
-        ? { date, kind: null, note: null, source: null }
-        : { date, kind: body.kind, note, source: "manual" },
-    );
+    if (body.kind !== null) return c.json({ date, kind: body.kind, note, source: "manual" });
+    const day = listCalendarDays(db, date, date)[0];
+    return c.json(day ? { date, kind: day.kind, note: day.note, source: day.source } : { date, kind: null, note: null, source: null });
   });
 
   // --- Дни рождения ---------------------------------------------------------
