@@ -196,6 +196,16 @@ describe("своя смена админа с пресетом", () => {
     expect(h.onAdminUpdate.mock.calls[0]![1]).toMatchObject({ category: "shift", date: "2026-10-21", templateId: 1, title: "Утро" });
   });
 
+  it("ночное дежурство 20:00–08:00 через полночь сохраняется — сервер и админские формы его пускают", async () => {
+    const NIGHT = { ...MORNING, id: 80, start: "20:00", end: "08:00", category: "duty", title: "Ночь", templateId: null } as Shift;
+    const { el, h } = await render(true, [NIGHT]);
+    await act(async () => buttons(el, "Изменить")[0]!.click());
+    await setInput(dateInputs(el)[0]!, "2026-10-21");
+    await act(async () => buttons(el, "Сохранить")[0]!.click());
+    expect(el.textContent).not.toContain("Конец раньше начала");
+    expect(h.onAdminUpdate.mock.calls[0]![1]).toMatchObject({ category: "duty", date: "2026-10-21", start: "20:00", end: "08:00" });
+  });
+
   it("свои часы — уже не пресет: templateId не шлётся, подпись снимается", async () => {
     const { el, h } = await render(true, [MORNING]);
     await act(async () => buttons(el, "Изменить")[0]!.click());

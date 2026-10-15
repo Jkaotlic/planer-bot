@@ -365,7 +365,9 @@ export function SelfEntryScreen({
   const refusal = selfEntryRefusal({ category, date, endDate: absence ? endDate || null : null }, today, access);
   const titleMissing = category === "offsite" && title.trim().length === 0;
   const rangeInverted = absence && !!endDate && endDate < date;
-  const timesInverted = !absence && end <= start;
+  // Админская ручка пускает запись через полночь (ночное дежурство 20:00–08:00), как и
+  // обе админские формы; «конец раньше начала» — правило только для своей ручки работника.
+  const timesInverted = !absence && !adminRoute && end <= start;
 
   async function handleSubmit() {
     if (submitting) return;
