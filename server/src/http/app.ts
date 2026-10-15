@@ -40,7 +40,7 @@ import { swapsLockSetting, isSwapsLocked, reminderHour, reminderHourSetting, set
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
-import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError, entryInvalidBody } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError, entryInvalidBody, changedTextTooLong } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -1670,6 +1670,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!existing) return c.json({ error: "not_found" }, 404);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
+    const tooLong = changedTextTooLong(parsed.data, existing);
+    if (tooLong) return c.json(entryInvalidBody([{ message: tooLong }]), 400);
     const patch = parsed.data;
     const category = patch.category ?? existing.category;
 

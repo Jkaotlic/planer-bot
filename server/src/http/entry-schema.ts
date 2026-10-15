@@ -143,7 +143,33 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
   if (rangeErr) ctx.addIssue({ code: "custom", path: ["endDate"], message: rangeErr });
 });
 
-export const updateEntrySchema = baseEntry.partial();
+/**
+ * Правка — без потолков в схеме: их сверяет `changedTextTooLong` против записи.
+ * Формы шлют подпись, место и заметку заново в каждой правке, а записи старше
+ * потолка бывают длиннее его — правка часов не должна упираться в поле, которое
+ * никто не трогал.
+ */
+export const updateEntrySchema = baseEntry
+  .extend({ location: z.string().nullish(), title: z.string().nullish(), note: z.string().nullish() })
+  .partial();
+
+const TEXT_CAPS = [
+  ["title", "Название", ENTRY_TITLE_MAX],
+  ["location", "Место", ENTRY_LOCATION_MAX],
+  ["note", "Заметка", ENTRY_NOTE_MAX],
+] as const;
+
+/** Отказ за поле, которое правка МЕНЯЕТ и делает длиннее потолка; иначе null. */
+export function changedTextTooLong(
+  patch: { title?: string | null; location?: string | null; note?: string | null },
+  existing: { title: string | null; location: string | null; note: string | null },
+): string | null {
+  for (const [field, label, max] of TEXT_CAPS) {
+    const value = patch[field];
+    if (value != null && value !== existing[field] && value.length > max) return tooLongText(label, max);
+  }
+  return null;
+}
 
 /**
  * Тело «расставить с какого по какое».

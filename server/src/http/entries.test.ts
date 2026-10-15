@@ -877,6 +877,24 @@ describe("тексты записи графика — с потолком и о
     expect(res.status).toBe(201);
   });
 
+  it("PATCH телом формы: старая запись с длинными полями правится, пока их не меняют", async () => {
+    // Потолок появился позже записей: форма шлёт поля заново, и неизменённое
+    // длинное поле не должно запирать правку часов.
+    const { db, anya, app, admin } = await setup();
+    const title = long(ENTRY_TITLE_MAX), location = long(ENTRY_LOCATION_MAX), note = long(ENTRY_NOTE_MAX);
+    const entry = createShift(db, { date: FRIDAY, category: "shift", start: "09:00", end: "18:00", employeeId: anya.id, title, location, note });
+
+    const ok = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      category: "shift", date: FRIDAY, employeeId: anya.id, start: "10:00", end: "19:00", title, location, note,
+    }, "PATCH"));
+    expect(ok.status).toBe(200);
+    expect(getShift(db, entry.id)!.start).toBe("10:00");
+
+    const changed = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { note: `${note}!` }, "PATCH"));
+    expect(changed.status).toBe(400);
+    expect((await changed.json()).error).toBe("Заметка — не длиннее 1000 знаков");
+  });
+
   it("PATCH, расстановка и пачка держат тот же потолок", async () => {
     const { db, anya, app, admin } = await setup();
     const entry = createShift(db, { date: FRIDAY, category: "shift", start: "09:00", end: "18:00", employeeId: anya.id });
