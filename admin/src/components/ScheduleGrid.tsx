@@ -1,4 +1,4 @@
-import { SICK_LEAVE_PENDING_OUTLINE, SICK_LEAVE_PENDING_SCHEDULE_PALETTE, coverageHint, filterPeople, missingCoverage, missingCoverageUnlessAcked, toEntryView, type CoverageTemplate, type SpecialDay } from "@planer/shared";
+import { SICK_LEAVE_PENDING_OUTLINE, SICK_LEAVE_PENDING_SCHEDULE_PALETTE, coverageHint, filterPeople, missingCoverage, missingCoverageUnlessAcked, toEntryView, waitsForCover, type CoverageTemplate, type SpecialDay } from "@planer/shared";
 import type { Employee, Shift, Template } from "../api/client";
 import { categoryLabel, useEntryPalette } from "../categories";
 import { initialsOf, personPalette } from "../lib/people";
@@ -259,7 +259,9 @@ function DayCell({
         {entries.length > 0 ? (
           <>
             {entries.map((entryItem) => (
-              <EntryChip key={entryItem.id} entry={entryItem} pending={pendingOn(entryItem, templates, date)} templates={templates} onClick={() => onEntryClick(entryItem)} />
+              // Записи клетки — один человек в один день, так что его отсутствие, если
+              // оно есть, лежит здесь же: соседние клетки правилу не нужны.
+              <EntryChip key={entryItem.id} entry={entryItem} pending={pendingOn(entryItem, templates, date)} uncovered={waitsForCover(entryItem, entries, date)} templates={templates} onClick={() => onEntryClick(entryItem)} />
             ))}
             <button type="button" className="cell-add-more" onClick={onAdd} aria-label="Добавить ещё запись">
               ＋
@@ -275,16 +277,18 @@ function DayCell({
   );
 }
 
-function EntryChip({ entry, pending, templates, onClick }: { entry: Shift; pending: boolean; templates: readonly Template[]; onClick: () => void }) {
+function EntryChip({ entry, pending, uncovered, templates, onClick }: { entry: Shift; pending: boolean; uncovered: boolean; templates: readonly Template[]; onClick: () => void }) {
   const palette = useEntryPalette({ ...entry, pending }, templates);
-  const label = (entry.title ?? categoryLabel(entry.category)) + (pending ? " · ждёт ОК" : "");
+  // «ждёт замены» словами, а не одной рамкой: рамку без легенды не прочесть, а
+  // шапка дня уже красная из-за этой смены — подпись говорит, из-за какой.
+  const label = (entry.title ?? categoryLabel(entry.category)) + (pending ? " · ждёт ОК" : "") + (uncovered ? " · ждёт замены" : "");
   return (
     <button
       type="button"
-      className={`entry-chip${pending ? " is-pending" : ""}`}
+      className={`entry-chip${pending ? " is-pending" : ""}${uncovered ? " is-uncovered" : ""}`}
       style={{ background: palette.bg, color: palette.fg, ...(pending ? { outline: SICK_LEAVE_PENDING_OUTLINE, outlineOffset: "-2px" } : {}) }}
       onClick={onClick}
-      title={pending ? "Больничный ждёт ОК — открыть" : "Изменить запись"}
+      title={pending ? "Больничный ждёт ОК — открыть" : uncovered ? "Человек в этот день отсутствует — смена ждёт замены. Изменить запись" : "Изменить запись"}
     >
       {entry.unrecognisedCode ? (
         // Not «Смена»: the file said something we could not read, and the chip has

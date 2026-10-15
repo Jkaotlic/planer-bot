@@ -1195,6 +1195,14 @@ button {
   filter: brightness(1.03);
 }
 
+/* Смена на отсутствующем (`waitsForCover`): рамка цвета нехватки, как у красной
+   шапки дня, которую эта смена и вызвала. Рамка, а не заливка: заливка — цвет
+   пресета, по ней смену узнают. */
+.entry-chip.is-uncovered,
+.entry-chip.is-uncovered:hover {
+  border-color: var(--destructive);
+}
+
 .entry-chip .chip-time {
   font-weight: 700;
 }

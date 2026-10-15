@@ -22,6 +22,7 @@ import {
   shortfallStatus,
   specialDayKind,
   specialDays,
+  waitsForCover,
   weekShortfall,
   workPresets,
 } from "@planer/shared";
@@ -526,7 +527,7 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
                   </Card>
                 ) : (
                   <Card flush>
-                    {dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)}
+                    {dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} uncovered={waitsForCover(s, dayEntries, selectedDate)} onTap={() => setEditing(s)} />)}
                   </Card>
                 )}
               </>
@@ -702,7 +703,7 @@ export function badgeLabel(title: string | null, category: Category): string {
   return rest && prefix === "Дежурство" ? rest : full;
 }
 
-function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readonly Template[]; onTap: () => void }) {
+function EntryRow({ shift, templates, uncovered, onTap }: { shift: Shift; templates: readonly Template[]; uncovered: boolean; onTap: () => void }) {
   const name = shift.employeeName ?? "— не назначен —";
   const palette = personPalette(shift.employeeId);
   // The badge shows *which* preset (Утро/День/…) in that preset's own colour, so
@@ -740,6 +741,10 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
       subtitle={
         <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px 8px" }}>
           <span>{formatTimeRange(shift)}</span>
+          {/* Человек в этот день отсутствует (`waitsForCover`): нехватка эту смену
+              уже не считает закрытой, и строка без пометки спорила бы с подсказкой
+              «Не хватает» над списком. Словами — цвет без слов не прочесть. */}
+          {uncovered && <span style={{ color: "var(--tgui--destructive_text_color)", fontWeight: 600 }}>ждёт замены</span>}
           <span className="entry-badge entry-badge--below">{badge}</span>
         </span>
       }
