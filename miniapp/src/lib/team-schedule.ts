@@ -181,13 +181,15 @@ export function buildTodayModel(
   const covering = schedule.shifts.filter((shift) => coversDate(shift, date));
   const timed = covering.filter((shift) => shift.start != null);
   const noTime = covering.filter((shift) => shift.start == null);
-  const working = new Set(
-    timed.flatMap((shift) => shift.employeeId == null ? [] : [shift.employeeId]),
-  );
   const absent = new Set(
     noTime.flatMap(
       (shift) => isAbsence(shift.category) && shift.employeeId != null ? [shift.employeeId] : [],
     ),
+  );
+  // Смена отсутствующего ждёт замены (то же правило, что у метки в группах), поэтому «на
+  // работе» он не считается — иначе один человек сидел бы в обоих числах шапки.
+  const working = new Set(
+    timed.flatMap((shift) => shift.employeeId == null || absent.has(shift.employeeId) ? [] : [shift.employeeId]),
   );
   return {
     groups: groupEntries(timed, schedule.employees, templates, date, covering),

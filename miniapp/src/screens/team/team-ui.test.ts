@@ -347,7 +347,8 @@ describe("team schedule UI", () => {
     );
 
     expect(markup).toContain('aria-label="Итоги дня"');
-    expect(markup).toContain("<b>2</b> На работе");
+    // Соколов на «Дне», но в отпуске — его смена ждёт замены, «на работе» один Орлов.
+    expect(markup).toContain("<b>1</b> На работе");
     expect(markup).toContain("<b>1</b> Отсутствует");
     expect(markup).toContain("Дежурство с 07:00");
     expect(markup.indexOf("Дежурство с 07:00")).toBeLessThan(markup.indexOf(">День<"));

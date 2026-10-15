@@ -80,7 +80,9 @@ describe("team schedule model", () => {
     expect(model.groups.map((group) => group.palette?.code)).toEqual(["07", "У", "Д"]);
     expect(model.noTimeGroups.map((group) => group.title)).toEqual(["Отпуск"]);
     expect(model.noTimeGroups.map((group) => group.palette?.code)).toEqual(["О"]);
-    expect(model.workingCount).toBe(2);
+    // Соколов стоит на «Утро», но он в отпуске: его смена ждёт замены, и «на работе» он
+    // не считается — иначе один человек попадал в оба числа.
+    expect(model.workingCount).toBe(1);
     expect(model.absentCount).toBe(1);
     expect(model.groups[2]?.people.map((person) => person.displayName)).toEqual([
       "Орлов Дмитрий",
