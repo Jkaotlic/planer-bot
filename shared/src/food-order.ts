@@ -108,6 +108,18 @@ export function formatKg(grams: number): string {
   return rest ? `${whole},${rest}` : String(whole);
 }
 
+/**
+ * Отказ на потолок `FOOD_QTY_MAX` одной позиции. Потолок считает шаги, но человек в
+ * закупке набирает вес — «больше 20» про икру по 0,4 кг ничего не говорит, а «это уже не
+ * обед» в закупке нелепо. Поэтому у кг — вес потолка (20 × шаг), у штук — штуки.
+ * Один текст на тап в боте, PATCH и моки фронтов.
+ */
+export function qtyLimitText(m: { unit?: FoodUnit; stepGrams?: number | null }): string {
+  return m.unit === "kg" && m.stepGrams
+    ? `Больше ${formatKg(FOOD_QTY_MAX * m.stepGrams)} кг одной позиции не взять.`
+    : `Больше ${FOOD_QTY_MAX} шт. одной позиции не взять.`;
+}
+
 // кг без шага печатается как штуки намеренно: старые и битые данные терпим, схема их не пропускает.
 export function unitPart(m: { unit?: FoodUnit; stepGrams?: number | null }): string | null {
   return m.unit === "kg" && m.stepGrams ? `${formatKg(m.stepGrams)} кг` : null;

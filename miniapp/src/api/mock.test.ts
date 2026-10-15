@@ -630,12 +630,12 @@ describe("заказы еды: dev-мок", () => {
     await expect(mockCloseOrder(order.id)).rejects.toThrow("Заказ отменён.");
   });
 
-  it("количество своей позиции — от 1 до 20, тем же текстом, что и сервер", async () => {
+  it("количество своей позиции — от 1 до 20, теми же текстами, что и сервер", async () => {
     const { order } = await mockCreateOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } });
     const updated = await mockAddOrderItem(order.id, { name: "Суп дня", price: 200 });
     const itemId = updated.myItems[0]!.id;
     await expect(mockSetOrderItemQty(order.id, itemId, 0)).rejects.toThrow("Количество — от 1 до 20.");
-    await expect(mockSetOrderItemQty(order.id, itemId, 21)).rejects.toThrow("Количество — от 1 до 20.");
+    await expect(mockSetOrderItemQty(order.id, itemId, 21)).rejects.toThrow("Больше 20 шт. одной позиции не взять.");
   });
 
   it("несуществующий заказ отвечает по-русски, а не английским «not_found»", async () => {

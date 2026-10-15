@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
-  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, qtyLimitText, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -152,8 +152,12 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const v = visible(c);
     if (!v) return c.json({ error: NOT_FOUND }, 404);
     const body = (await jsonBody(c)) as { qty?: unknown };
-    if (!Number.isInteger(body.qty) || (body.qty as number) < 1 || (body.qty as number) > FOOD_QTY_MAX) {
-      return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
+    if (!Number.isInteger(body.qty) || (body.qty as number) < 1) return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
+    if ((body.qty as number) > FOOD_QTY_MAX) {
+      // Тот же текст, что у тапа в боте (у кг — вес). Единицу берём только у своей
+      // позиции: чужая всё равно получит отказ, и раскрывать её незачем.
+      const own = itemsOf(db, v.order.id).find((i) => i.id === Number(c.req.param("itemId")) && i.employeeId === v.viewer.id);
+      return c.json({ error: qtyLimitText(own ?? {}) }, 400);
     }
     const result = setItemQty(db, v.order, v.viewer.id, Number(c.req.param("itemId")), body.qty as number, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);

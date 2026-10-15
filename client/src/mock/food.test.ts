@@ -124,6 +124,17 @@ describe("createFoodMock: склейка строк как на сервере",
     expect(view.dishes.map((d) => [d.qty, d.stepGrams])).toEqual([[1, 400], [1, 500]]);
   });
 
+  it("потолок количества — те же тексты, что у сервера: тап и правка у кг называют вес", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const place = await mock.saveFoodPlace(null, { name: "Рынок", menu: [{ name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }] });
+    const { order } = await mock.createOrder({ ...base, placeId: place.id, closesAt: null });
+    let view = await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
+    for (let k = 1; k < 20; k += 1) view = await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
+    expect(view.myItems[0]!.qty).toBe(20);
+    await expect(mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id })).rejects.toThrow("Больше 8 кг одной позиции не взять.");
+    await expect(mock.setOrderItemQty(order.id, view.myItems[0]!.id, 21)).rejects.toThrow("Больше 8 кг одной позиции не взять.");
+  });
+
   it("people[].items — свёрнутая сводка, как у сервера: две одинаковые свои строки — одна с количеством", async () => {
     const { mock } = mockAs({ id: 1, isAdmin: true });
     const { order } = await mock.createOrder({ ...base, placeId: null, closesAt: null });

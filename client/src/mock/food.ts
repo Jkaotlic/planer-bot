@@ -1,5 +1,5 @@
 import {
-  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
+  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, qtyLimitText,
   isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
   type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
@@ -516,6 +516,8 @@ export function createFoodMock(opts: FoodMockOptions) {
       // Прибавляем к строке с той же ценой, единицей и шагом — как `addMenuItem` на сервере.
       const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price
         && i.unit === dish.unit && i.stepGrams === dish.stepGrams);
+      // Тот же потолок и текст, что у `addMenuItem` на сервере.
+      if (same && same.qty >= FOOD_QTY_MAX) throw new Error(qtyLimitText(same));
       if (same) same.qty += 1;
       else if (tooMany) throw new Error(tooManyError);
       else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });
@@ -540,10 +542,10 @@ export function createFoodMock(opts: FoodMockOptions) {
     const o = orderOrThrow(id);
     guardOpen(o);
     // Тот же отказ и тот же текст, что у `PATCH /api/orders/:id/items/:itemId`.
-    if (!Number.isInteger(qty) || qty < 1 || qty > FOOD_QTY_MAX) {
-      throw new Error(`Количество — от 1 до ${FOOD_QTY_MAX}.`);
-    }
-    ownItem(o, itemId).qty = qty;
+    if (!Number.isInteger(qty) || qty < 1) throw new Error(`Количество — от 1 до ${FOOD_QTY_MAX}.`);
+    const item = ownItem(o, itemId);
+    if (qty > FOOD_QTY_MAX) throw new Error(qtyLimitText(item));
+    item.qty = qty;
     return orderViewOf(o);
   }
 

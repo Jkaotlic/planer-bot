@@ -503,6 +503,24 @@ describe("письмо в чате перерисовывается после �
     await vi.waitFor(() => expect(editsTo(api, 101).at(-1)![2]).toContain("Ты не заказываешь."));
   });
 
+  it("PATCH сверх потолка — тот же текст, что у тапа: у кг — вес, у штук — штуки", async () => {
+    const { db, app, anya, igor, anyaT, igorT } = await stage();
+    const market = createPlace(db, { name: "Рынок", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya);
+    const { body } = await newOrder(app, anyaT, igor, market.id);
+    const added = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { menuItemId: market.menu[0]!.id })))).json();
+    const kgItem = added.order.myItems[0].id;
+    const kg = await app.request(new Request(`http://x/api/orders/${body.order.id}/items/${kgItem}`, send(igorT, { qty: 21 }, "PATCH")));
+    expect(kg.status).toBe(400);
+    expect((await kg.json()).error).toBe("Больше 8 кг одной позиции не взять.");
+    const soup = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })))).json();
+    const pcsItem = soup.order.myItems.find((i: { name: string }) => i.name === "Суп").id;
+    const pcs = await app.request(new Request(`http://x/api/orders/${body.order.id}/items/${pcsItem}`, send(igorT, { qty: 21 }, "PATCH")));
+    expect((await pcs.json()).error).toBe("Больше 20 шт. одной позиции не взять.");
+    // Чужая позиция не раскрывает свою единицу — общий текст.
+    const foreign = await app.request(new Request(`http://x/api/orders/${body.order.id}/items/${kgItem}`, send(anyaT, { qty: 21 }, "PATCH")));
+    expect((await foreign.json()).error).toBe("Больше 20 шт. одной позиции не взять.");
+  });
+
   it("отказ правки (письмо удалено) — ответ ручки всё равно 200", async () => {
     const { app, api, igorT, orderId } = await staged();
     api.editMessageText.mockRejectedValueOnce(new Error("Bad Request: message to edit not found"));

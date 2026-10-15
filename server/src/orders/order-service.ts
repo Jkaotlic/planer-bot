@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
-  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, debtOf, debtors, dishSummary, isOpenAt, orderTotal,
+  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, qtyLimitText, debtOf, debtors, dishSummary, isOpenAt, orderTotal,
   type FoodDishShape, type FoodMenuItemShape, type PaymentRow,
 } from "@planer/shared";
 import type { Db } from "../db/client";
@@ -129,7 +129,7 @@ export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuIt
     dish.stepGrams == null ? isNull(foodOrderItems.stepGrams) : eq(foodOrderItems.stepGrams, dish.stepGrams),
   )).get();
   if (same) {
-    if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: `Больше ${FOOD_QTY_MAX} одного блюда — это уже не обед.` };
+    if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: qtyLimitText(same) };
     db.update(foodOrderItems).set({ qty: same.qty + 1, changeSeq: nextChangeSeq(db, order.id, employeeId) })
       .where(eq(foodOrderItems.id, same.id)).run();
   } else {

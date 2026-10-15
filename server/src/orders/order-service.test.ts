@@ -262,6 +262,18 @@ describe("закупка", () => {
     expect(itemsOf(db, order.id).map((i) => [i.unit, i.stepGrams, i.qty])).toEqual([["kg", 400, 2], ["kg", 500, 1]]);
   });
 
+  it("21-й тап по кг-позиции — отказ, который называет вес, а не «обед»", () => {
+    const { db, igor, order, dishId } = purchase();
+    for (let k = 0; k < 20; k += 1) expect(addMenuItem(db, order, igor.id, dishId, now).ok).toBe(true);
+    expect(addMenuItem(db, order, igor.id, dishId, now)).toEqual({ ok: false, error: "Больше 8 кг одной позиции не взять." });
+  });
+
+  it("21-й тап по штучной позиции — отказ без «обеда»", () => {
+    const { db, igor, order, shawarma } = stage();
+    for (let k = 0; k < 20; k += 1) addMenuItem(db, order, igor.id, shawarma.id, now);
+    expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: false, error: "Больше 20 шт. одной позиции не взять." });
+  });
+
   it("свои позиции запрещены — сервер отказывает, даже если экран кнопку показал", () => {
     const { db, igor, order } = purchase();
     expect(addCustomItem(db, order, igor.id, { name: "Сёмга", price: 900, qty: 1 }, now))
