@@ -359,7 +359,8 @@ export interface NewEntryInput {
   category: Category;
   start?: string;
   end?: string;
-  endDate?: string;
+  /** `null` у правки — «полосы больше нет»: пропущенное поле сервер читает как «не менять». */
+  endDate?: string | null;
   templateId?: number;
   /** `null` — запись без человека; у правки так снимается назначенный (пропущенное поле — «не менять»). */
   employeeId?: number | null;

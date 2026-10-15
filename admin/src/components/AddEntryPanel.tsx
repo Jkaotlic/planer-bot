@@ -224,7 +224,11 @@ export function AddEntryPanel({
       } else {
         const input: NewEntryInput = { ...entryFields(), date: from };
         // Полоса отсутствия — единственный случай, когда `endDate` доезжает до базы.
+        // У правки однодневная полоса — явный `null`: пропущенное поле для `PATCH`
+        // значит «не менять», и отпуск 12–17, сокращённый до 12-го, оставался 12–17
+        // при ответе 200. У создания поле по-прежнему не шлётся — менять нечего.
         if (absence && to !== from) input.endDate = to;
+        else if (absence && existing) input.endDate = null;
         await onSave(input);
       }
     } catch (err) {

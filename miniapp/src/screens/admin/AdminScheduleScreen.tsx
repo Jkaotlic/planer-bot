@@ -940,7 +940,11 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
       } else {
         const input: NewEntryInput = { ...fields, date: from };
         // Полоса отсутствия — единственный случай, когда `endDate` доезжает до базы.
+        // У правки однодневная полоса — явный `null`: пропущенное поле для `PATCH`
+        // значит «не менять», и отпуск 12–17, сокращённый до 12-го, оставался 12–17
+        // при ответе 200. Зеркало десктопной `AddEntryPanel`.
         if (absence && to !== from) input.endDate = to;
+        else if (absence && existing) input.endDate = null;
         const { notified } = existing
           ? await apiClient.updateEntry(existing.id, input)
           : await apiClient.createEntry(input);
