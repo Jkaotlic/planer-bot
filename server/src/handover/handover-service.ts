@@ -11,6 +11,7 @@ import {
   getHandover,
   listDeclines,
   listHandoversForEntry,
+  shiftIdsWithLiveHandover,
   updateHandover,
 } from "../repo/handovers";
 import { getShift, listShiftsOverlapping, updateShift } from "../repo/shifts";
@@ -171,6 +172,10 @@ export async function startHandovers(
       .filter((handover) => handover.status !== "cancelled")
       .map((handover) => handover.shiftId),
   );
+  // A live hand-over opened by ANOTHER sick leave counts too: two overlapping sick
+  // leaves of one person cover the same shift, and a second offer of it would send
+  // the team «Возьмёшь смену?» twice — and the urgent tick reaches this without an admin.
+  for (const shiftId of shiftIdsWithLiveHandover(db, mine.map((shift) => shift.id))) alreadyOffered.add(shiftId);
 
   // Pass 1 is synchronous: every draft row exists before the first Telegram await. A crash
   // during the escalation letters below must not leave an approved sick leave without the

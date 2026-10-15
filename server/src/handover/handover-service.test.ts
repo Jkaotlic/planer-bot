@@ -136,6 +136,41 @@ describe("starting handovers for a sick leave", () => {
   });
 });
 
+describe("два пересекающихся больничных — одна передача на смену", () => {
+  it("второй больничный не открывает вторую передачу смены, которую уже отдаёт первый", async () => {
+    // Иначе коллеги получают «Возьмёшь смену?» про одну и ту же смену дважды,
+    // а две живые передачи потом спорят, чья она.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const first = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const second = sickLeave(db, anya, "2026-08-13", "2026-08-14");
+    const work = shift(db, anya, "2026-08-13");
+
+    const fromFirst = await startHandovers(deps(db), { sickEntry: first, employeeId: anya });
+    const fromSecond = await startHandovers(deps(db), { sickEntry: second, employeeId: anya });
+
+    expect(fromFirst.map((h) => h.shiftId)).toEqual([work.id]);
+    expect(fromSecond).toEqual([]);
+    expect(db.select().from(handoversTable).where(eq(handoversTable.shiftId, work.id)).all()).toHaveLength(1);
+  });
+
+  it("закрытая передача (отменённая) не мешает новой", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const first = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const second = sickLeave(db, anya, "2026-08-13", "2026-08-14");
+    const work = shift(db, anya, "2026-08-13");
+    const [old] = await startHandovers(deps(db), { sickEntry: first, employeeId: anya });
+    db.update(handoversTable).set({ status: "cancelled" }).where(eq(handoversTable.id, old!.id)).run();
+
+    const fromSecond = await startHandovers(deps(db), { sickEntry: second, employeeId: anya });
+
+    expect(fromSecond.map((h) => h.shiftId)).toEqual([work.id]);
+  });
+});
+
 describe("startHandovers — only shifts starting before a moment", () => {
   it("hands over only the shifts that start before `startsBefore`", async () => {
     const db = makeTestDb();

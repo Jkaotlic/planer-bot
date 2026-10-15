@@ -427,6 +427,21 @@ describe("urgent branch: a sick leave still waiting for «ОК»", () => {
     expect(getShift(db, sick.id)!.handoverForcedAt).toEqual(mark);
   });
 
+  it("два ждущих «ОК» пересекающихся больничных — коллеге «Возьмёшь смену?» приходит один раз", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const first = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    const second = pendingSick(db, anya, "2026-08-11", "2026-08-12");
+    shift(db, anya, "2026-08-12", "15:00");
+
+    await runHandoverTick(deps(db), NOW);
+
+    const live = [...listHandoversForEntry(db, first.id), ...listHandoversForEntry(db, second.id)];
+    expect(live).toHaveLength(1);
+    expect(sent.filter((m) => m.to === `employee:${igor}`)).toHaveLength(1);
+  });
+
   it("a later pass that hands over ANOTHER shift keeps the first pass's mark", async () => {
     const db = makeTestDb();
     const anya = person(db, "Аня");

@@ -26,6 +26,22 @@ export function listLiveHandovers(db: Db): Handover[] {
     .all();
 }
 
+/**
+ * Which of these shifts already have a live hand-over, whichever sick leave opened it.
+ *
+ * Asked by shift, not by sick leave: two overlapping sick leaves of one person cover
+ * the same shift, and a second live hand-over of it would ask the team twice.
+ */
+export function shiftIdsWithLiveHandover(db: Db, shiftIds: readonly number[]): Set<number> {
+  if (shiftIds.length === 0) return new Set();
+  const rows = db
+    .select({ shiftId: handovers.shiftId })
+    .from(handovers)
+    .where(and(inArray(handovers.shiftId, [...shiftIds]), inArray(handovers.status, ["offered", "fanned"])))
+    .all();
+  return new Set(rows.map((row) => row.shiftId!).filter((id) => id != null));
+}
+
 /** Every handover one «больничный» spawned — a multi-day one spawns several. */
 export function listHandoversForEntry(db: Db, sickEntryId: number): Handover[] {
   return db.select().from(handovers).where(eq(handovers.sickEntryId, sickEntryId)).orderBy(asc(handovers.id)).all();
