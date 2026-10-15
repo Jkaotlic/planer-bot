@@ -631,18 +631,14 @@ export interface CancelledHandover {
  * Telegram. Split out so a caller that must finish its DB work before the first
  * await (rejecting a sick leave) can do so and send the letters afterwards.
  *
- * `adopt: false` — не перевешивать на другой больничный. Нужно там, где смена в том же
- * заходе уходит от дающего (архивация: следом всё с сегодня становится «Не назначено»).
- * Перевешенная передача пережила бы это живой — без «отбоя» ждавшим, с эскалацией про
- * ничью смену, — а гасить её потом пришлось бы тику, уже чужим текстом. Флаг, а не
- * погашение после `archiveEmployee`: тот путь и так зовёт эту функцию на каждый
- * удаляемый больничный, а второй проход по передачам дублировал бы её правила.
+ * Архивация тоже зовёт её на каждый удаляемый больничный, и передача, перевешенная здесь
+ * на идущий больничный, этим не выживает: следом тот же путь зовёт
+ * `cancelLiveHandoversOfEmployeeDb`, и она гаснет там — одним админским «отбоем».
  */
 export function cancelHandoversForEntryDb(
   db: Db,
   sickEntryId: number,
   stillCoveredDates: readonly string[],
-  opts: { adopt?: boolean } = {},
 ): CancelledHandover[] {
   const covered = new Set(stillCoveredDates);
   const cancelled: CancelledHandover[] = [];
@@ -650,7 +646,7 @@ export function cancelHandoversForEntryDb(
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
     if (shift && covered.has(shift.date)) continue;
-    if (opts.adopt !== false && adoptByOtherSickLeave(db, handover)) continue;
+    if (adoptByOtherSickLeave(db, handover)) continue;
 
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
@@ -662,9 +658,10 @@ export function cancelHandoversForEntryDb(
 /**
  * Все живые передачи человека гаснут — путь архивации. Удалённые больничные (с сегодня)
  * гасит `cancelHandoversForEntryDb`, но идущий больничный архивация не трогает, и его
- * передачи на будущие смены оставались бы живыми над сменами, которые архивация тут же
- * отдаёт в «Не назначено»: их погасил бы тик со своим «смену закрыли» вместо админского
- * «отбоя». Без переноса — переносить не на кого, человек уходит из команды.
+ * передачи на будущие смены — вместе с перевешенными на него с удалённых — оставались бы
+ * живыми над сменами, которые архивация тут же отдаёт в «Не назначено»: их погасил бы тик
+ * со своим «смену закрыли» вместо админского «отбоя». Без переноса — переносить не на кого,
+ * человек уходит из команды.
  */
 export function cancelLiveHandoversOfEmployeeDb(db: Db, employeeId: number): CancelledHandover[] {
   const cancelled: CancelledHandover[] = [];

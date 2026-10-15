@@ -379,15 +379,15 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
         if (entry.category === "sick_leave") {
           const closed = takeRequestOutOfPending(db, entry, "🗑 Больничного уже нет — сотрудника убрали в архив");
           if (closed) closedRequests.push(closed);
-          // Без переноса на идущий больничный: смена ниже уходит в «Не назначено», и
-          // передача, перевешенная на него, осталась бы живой над ничьей сменой.
-          cancelledHandovers.push(...cancelHandoversForEntryDb(db, entry.id, [], { adopt: false }));
+          // Передачу, которую тут перевесит на идущий больничный, погасит проход ниже.
+          cancelledHandovers.push(...cancelHandoversForEntryDb(db, entry.id, []));
           detachHandoversFromEntry(db, entry.id);
         }
         if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
       }
-      // Остальные живые передачи (по идущему больничному, который мы не трогаем) — гаснут
-      // тем же админским «отбоем»: их смены ниже уходят в «Не назначено».
+      // Остальные живые передачи — по идущему больничному, который мы не трогаем, и
+      // перевешенные на него с удалённых выше — гаснут тем же админским «отбоем»: их смены
+      // ниже уходят в «Не назначено». Перевешенная гаснет только здесь, поэтому письмо одно.
       cancelledHandovers.push(...cancelLiveHandoversOfEmployeeDb(db, id));
       // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
       const freedShifts = listShiftsByEmployee(db, id).filter((s) => s.date >= today).length;

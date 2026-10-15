@@ -160,6 +160,8 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     expect(getShift(db, running.id)).toBeDefined();
     expect(getHandover(db, handover.id)!.status).toBe("cancelled");
     expectAdminCancelText(sent);
+    // One «отбой», not two: A's hand-over is moved onto C and cancelled only by the pass over C's.
+    expect(sent.filter((m) => m.to === 403)).toHaveLength(1);
   });
 
   it("archiving cancels the fan-out of the RUNNING sick leave too, with the admin «отбой», and the tick does not write again", async () => {
