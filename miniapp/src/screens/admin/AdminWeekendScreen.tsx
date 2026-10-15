@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX } from "@planer/shared";
 import { Avatar, Input, Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } from "../../api/client";
 import { formatDayLabel } from "../../lib/week";
@@ -427,9 +428,9 @@ function PostSlotForm({ onCancel, onCreated }: { onCancel: () => void; onCreated
           <Input header="Конец" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
       </div>
-      <Input header="Название (необязательно)" placeholder="Например, Ярмарка выходного дня" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <Input header="Место (необязательно)" placeholder="Например, ТЦ Авиапарк" value={location} onChange={(e) => setLocation(e.target.value)} />
-      <Input header="Заметка (необязательно)" placeholder="Например, оплата в двойном размере" value={note} onChange={(e) => setNote(e.target.value)} />
+      <Input header="Название (необязательно)" maxLength={ENTRY_TITLE_MAX} placeholder="Например, Ярмарка выходного дня" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Input header="Место (необязательно)" maxLength={ENTRY_LOCATION_MAX} placeholder="Например, ТЦ Авиапарк" value={location} onChange={(e) => setLocation(e.target.value)} />
+      <Input header="Заметка (необязательно)" maxLength={ENTRY_NOTE_MAX} placeholder="Например, оплата в двойном размере" value={note} onChange={(e) => setNote(e.target.value)} />
       {localError && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{localError}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         {/* Единственная `primary` формы: она завершает действие. */}

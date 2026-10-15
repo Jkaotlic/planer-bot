@@ -11,6 +11,7 @@ import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
 import { addInterest } from "../repo/weekend";
+import { ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX } from "@planer/shared";
 
 const config = testConfig();
 function testBot() {
@@ -671,4 +672,39 @@ describe("«Набрали, закрыть» — закрытие вакантн
     const adminSlots = (await (await app.request("/api/admin/weekend/slots", bearer(admin))).json()).slots;
     expect(adminSlots.find((s: { slot: { id: number } }) => s.slot.id === slotId)?.slot.status).toBe("closed");
   });
+});
+
+describe("тексты вакантного слота уходят всей команде — у них есть потолок", () => {
+  const cases = [
+    ["title", ENTRY_TITLE_MAX, /Название — не длиннее 200 знаков/],
+    ["location", ENTRY_LOCATION_MAX, /Место — не длиннее 200 знаков/],
+    ["note", ENTRY_NOTE_MAX, /Заметка — не длиннее 1000 знаков/],
+  ] as const;
+
+  for (const [field, max, text] of cases) {
+    it(`${field} длиннее ${max} — 400 по-русски, и никому ничего не ушло`, async () => {
+      const db = makeTestDb();
+      const { bot, sent } = testBot();
+      const app = createApp({ db, config, bot });
+      const admin = await tokenFor(app, 111);
+      const res = await app.request(
+        "/api/admin/weekend/slots",
+        authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00", [field]: "я".repeat(max + 1) }),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(text);
+      expect(sent).toHaveLength(0);
+    });
+
+    it(`${field} ровно ${max} — проходит`, async () => {
+      const db = makeTestDb();
+      const app = createApp({ db, config });
+      const admin = await tokenFor(app, 111);
+      const res = await app.request(
+        "/api/admin/weekend/slots",
+        authed(admin, { date: nextSaturday(), start: "10:00", end: "18:00", [field]: "я".repeat(max) }),
+      );
+      expect(res.status).toBe(201);
+    });
+  }
 });

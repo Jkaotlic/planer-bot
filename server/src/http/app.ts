@@ -139,6 +139,10 @@ import {
   autoSendDateFor,
   isCollectionActive,
   SWAP_MESSAGE_MAX,
+  ENTRY_TITLE_MAX,
+  ENTRY_LOCATION_MAX,
+  ENTRY_NOTE_MAX,
+  tooLongText,
   type SickApprovalRow,
 } from "@planer/shared";
 import {
@@ -2445,6 +2449,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // answer. A mistyped year is the way this happens.
     if (body.date < teamNow(config.teamTz).date) {
       return c.json({ error: "Эта дата уже прошла — вакантную смену можно открыть только на будущее" }, 400);
+    }
+    // Название и место уходят всей команде в «Нужен человек на выходной» и в
+    // письма по отклику, а при назначении переписываются в запись графика —
+    // поэтому потолки те же, что у записи (`text-limits.ts`).
+    for (const [label, value, max] of [
+      ["Название", body.title, ENTRY_TITLE_MAX],
+      ["Место", body.location, ENTRY_LOCATION_MAX],
+      ["Заметка", body.note, ENTRY_NOTE_MAX],
+    ] as const) {
+      if (typeof value === "string" && value.length > max) return c.json({ error: tooLongText(label, max) }, 400);
     }
     const title = typeof body.title === "string" ? body.title : null;
     const location = typeof body.location === "string" ? body.location : null;

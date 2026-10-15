@@ -42,3 +42,4 @@ export * from "./food-view";
 export * from "./recipient-group";
 export * from "./sick-approval";
 export * from "./qr/style";
+export * from "./text-limits";
