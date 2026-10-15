@@ -1,6 +1,6 @@
 import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
-import { listAdmins, listActive, getEmployeeById, employeesByIds } from "../repo/employees";
+import { listAdmins, listActive, employeesByIds } from "../repo/employees";
 import { isNoticeMuted } from "../repo/notice-prefs";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
