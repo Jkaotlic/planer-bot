@@ -186,6 +186,35 @@ export function itemLines(items: readonly LineItem[]): string[] {
 }
 
 /**
+ * «Что заказать» — строки сводки (`dishSummary`) и под группой одного названия итог веса.
+ * `dishSummary` честно держит разные шаг и цену отдельными строками, но закупщик звонит
+ * поставщику с одним числом — «икры 12,4 кг», и складывать его в уме из «3 × 0,4» и
+ * «2 × 0,5» значит ошибиться. Итог — только когда кг-строк у названия больше одной:
+ * одиночная строка свой вес уже печатает. Штуки весом не считаются. Одна функция на бот
+ * и обе морды — иначе чат и экран показали бы закупщику разные списки.
+ */
+export function orderDishLines(dishes: readonly LineItem[]): string[] {
+  const kgGrams = new Map<string, { rows: number; grams: number }>();
+  for (const d of dishes) {
+    if (d.unit !== "kg" || !d.stepGrams) continue;
+    const acc = kgGrams.get(d.name) ?? { rows: 0, grams: 0 };
+    acc.rows += 1;
+    acc.grams += d.qty * d.stepGrams;
+    kgGrams.set(d.name, acc);
+  }
+  const lines: string[] = [];
+  dishes.forEach((d, i) => {
+    lines.push(itemLine(d));
+    const acc = kgGrams.get(d.name);
+    // Итог — после последней строки названия; `dishSummary` сортирует по названию,
+    // так что группа идёт подряд.
+    const lastOfName = dishes.slice(i + 1).every((n) => n.name !== d.name || n.unit !== "kg" || !n.stepGrams);
+    if (acc && acc.rows > 1 && d.unit === "kg" && d.stepGrams && lastOfName) lines.push(`Итого «${d.name}»: ${formatKg(acc.grams)} кг`);
+  });
+  return lines;
+}
+
+/**
  * Письмо заказа — и оно же после каждого тапа. Свой заказ печатается в тексте:
  * кнопки меню одинаковы для всех, и без этой строки человек не видит, что
  * уже набрал.
@@ -228,7 +257,7 @@ export function organizerSummaryText(input: {
     ? `📋 Сбор «${input.title}» закрыт.`
     : `📋 Заказ${input.placeName ? ` из «${input.placeName}»` : ""} закрыт.`;
   const lines = [head, "", "Что заказать:"];
-  for (const d of dishSummary(input.items)) lines.push(itemLine(d));
+  lines.push(...orderDishLines(dishSummary(input.items)));
   lines.push("", "Кто что:");
   const people: number[] = [];
   for (const i of input.items) if (!people.includes(i.employeeId)) people.push(i.employeeId);

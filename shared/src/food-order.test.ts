@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { formatMoney } from "./collection";
 import {
   debtOf, debtors, dishSummary, formatKg, itemLines, orderInviteText, orderItemInputSchema, orderTotal, organizerSummaryText, payRequestText,
-  placeInputSchema, qtyLimitText, splitAtLines,
+  orderDishLines, placeInputSchema, qtyLimitText, splitAtLines,
 } from "./food-order";
 
 describe("placeInputSchema", () => {
@@ -259,5 +259,42 @@ describe("qtyLimitText", () => {
     expect(qtyLimitText({ unit: "pcs", stepGrams: null })).toBe("Больше 20 шт. одной позиции не взять.");
     // кг без шага — битые старые данные: печатаем штуками, как `unitPart`.
     expect(qtyLimitText({ unit: "kg", stepGrams: null })).toBe("Больше 20 шт. одной позиции не взять.");
+  });
+});
+
+describe("orderDishLines — «Что заказать» с итогом веса", () => {
+  const dishes = dishSummary([
+    { employeeId: 2, name: "Икра", price: 2400, qty: 2, unit: "kg", stepGrams: 400 },
+    { employeeId: 3, name: "Икра", price: 3000, qty: 1, unit: "kg", stepGrams: 500 },
+    { employeeId: 2, name: "Горбуша", price: 500, qty: 3 },
+    { employeeId: 3, name: "Сёмга", price: 900, qty: 1, unit: "kg", stepGrams: 1000 },
+  ]);
+
+  it("у названия с несколькими кг-строками — итог веса сразу под ними", () => {
+    expect(orderDishLines(dishes)).toEqual([
+      ...itemLines(dishes.slice(0, 3)),
+      "Итого «Икра»: 1,3 кг",
+      ...itemLines(dishes.slice(3)),
+    ]);
+  });
+
+  it("одна кг-строка вес уже показывает — лишнего итога нет; штуки весом не считаются", () => {
+    const lines = orderDishLines(dishes);
+    expect(lines.filter((l) => l.startsWith("Итого"))).toEqual(["Итого «Икра»: 1,3 кг"]);
+    const pcs = dishSummary([
+      { employeeId: 2, name: "Хлеб", price: 50, qty: 1 },
+      { employeeId: 3, name: "Хлеб", price: 60, qty: 2 },
+    ]);
+    expect(orderDishLines(pcs)).toEqual(itemLines(pcs));
+  });
+
+  it("сводка закупщику печатает итог веса в «Что заказать»", () => {
+    const items = [
+      { employeeId: 2, name: "Икра", price: 2400, qty: 2, unit: "kg" as const, stepGrams: 400 },
+      { employeeId: 3, name: "Икра", price: 3000, qty: 1, unit: "kg" as const, stepGrams: 500 },
+    ];
+    const lines = organizerSummaryText({ title: "Икра", placeName: null, items, names: new Map([[2, "Игорь"], [3, "Марк"]]) }).split("\n");
+    const head = lines.indexOf("Что заказать:");
+    expect(lines.slice(head + 1, head + 4)).toEqual([...itemLines(dishSummary(items)), "Итого «Икра»: 1,3 кг"]);
   });
 });

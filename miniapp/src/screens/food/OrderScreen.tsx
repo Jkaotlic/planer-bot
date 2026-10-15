@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Input } from "@telegram-apps/telegram-ui";
 import {
-  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, myOrderPayment,
+  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, orderDishLines, myOrderPayment,
   myOrderEmptyText, orderHeadline, orderPersonBlock, orderStatusLabel, payHintLine, priceDigits, remindResultText,
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
@@ -194,7 +194,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
         {order.people && (
           <Card>
             <div style={{ fontWeight: 600 }}>Что заказать</div>
-            {order.dishes.map((d) => <div key={`${d.name}-${d.price}-${d.unit}-${d.stepGrams ?? ""}`}>{itemLines([d])[0]}</div>)}
+            {orderDishLines(order.dishes).map((line, i) => <div key={i}>{line}</div>)}
             <div style={{ fontWeight: 600, marginTop: 6 }}>Кто что</div>
             {order.people.map((p) => (
               <div key={p.employeeId}>

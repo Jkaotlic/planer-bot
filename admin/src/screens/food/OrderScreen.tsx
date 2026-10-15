@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_TEXT_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel,
+  FOOD_CASH_MARK, FOOD_PAID_MARKED, FOOD_QTY_MAX, FOOD_TEXT_MAX, FOOD_UNMARK_QUESTION, cancelOrderQuestion, closeOrderQuestion, formatMoney, itemLines, menuItemLabel, orderDishLines,
   myOrderEmptyText, myOrderPayment, orderHeadline, orderPersonBlock, orderStatusLabel, payHintLine, priceDigits, remindResultText,
 } from "@planer/shared";
 import { apiClient, type OrderView } from "../../api/client";
@@ -212,7 +212,7 @@ export function OrderScreen({ orderId, onBack }: { orderId: number; onBack(): vo
           {order.people && (
             <section className="food-card" data-area="people">
               <h3 className="food-card-title">Что заказать</h3>
-              {order.dishes.map((d) => <div key={`${d.name}-${d.price}-${d.unit}-${d.stepGrams ?? ""}`}>{itemLines([d])[0]}</div>)}
+              {orderDishLines(order.dishes).map((line, i) => <div key={i}>{line}</div>)}
               <h3 className="food-card-title">Кто что</h3>
               {order.people.map((p) => (
                 <div key={p.employeeId}>

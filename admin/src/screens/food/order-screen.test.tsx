@@ -165,6 +165,8 @@ describe("консоль: заказ — собирающему и админу"
     }));
     expect(area(el, "people")!.textContent).toContain("0,4 кг");
     expect(area(el, "people")!.textContent).toContain("0,5 кг");
+    // Закупщику нужен общий вес названия, а не сложение в уме.
+    expect(area(el, "people")!.textContent).toContain("Итого «Икра»: 0,9 кг");
     expect(err.mock.calls.flat().join(" ")).not.toContain("same key");
     err.mockRestore();
   });

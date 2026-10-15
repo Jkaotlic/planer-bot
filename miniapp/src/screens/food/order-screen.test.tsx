@@ -99,6 +99,8 @@ describe("OrderScreen — запускающий", () => {
     const el = await mountScreen(7);
     expect(el.textContent).toContain("0,4 кг");
     expect(el.textContent).toContain("0,5 кг");
+    // Закупщику нужен общий вес названия, а не сложение в уме.
+    expect(el.textContent).toContain("Итого «Икра»: 0,9 кг");
     expect(err.mock.calls.flat().join(" ")).not.toContain("same key");
     err.mockRestore();
   });
