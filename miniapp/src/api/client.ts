@@ -26,6 +26,7 @@ import type {
   TemplateDto,
   StartTab,
   CalendarDayDto,
+  CalendarDayMarkResult,
   QrSavedStyle,
   QrStyle,
 } from "@planer/shared";
@@ -33,7 +34,7 @@ import type {
 // одинаково читают сервер и оба админских экрана.
 export type { PaymentRow };
 // Тот же довод: строка календаря описана в контракте, и мини-апп берёт её оттуда.
-export type { CalendarDayDto };
+export type { CalendarDayDto, CalendarDayMarkResult };
 import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
@@ -992,7 +993,7 @@ export interface ApiClient {
   setHolidaysAuto(enabled: boolean): Promise<void>;
   refreshHolidays(): Promise<HolidayRefreshYear[]>;
   /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
-  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
+  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayMarkResult>;
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
@@ -1014,7 +1015,7 @@ export interface ApiClient {
   /** Один опрос — карточка перечитывает его после отказа действия. */
   getPoll(id: number): Promise<PollView>;
   /** Заводит опрос и сразу шлёт приглашения адресатам. */
-  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }>;
+  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>;
   /** Свой голос — «За» / «Против» / «Воздержался». */
   votePoll(id: number, choice: PollChoice): Promise<PollView>;
   /** «Набрали, закрыть»: приём голосов останавливается, итог уходит всем. */
@@ -1035,7 +1036,7 @@ export interface ApiClient {
   getOrders(): Promise<OrderView[]>;
   getOrder(id: number): Promise<OrderView>;
   /** Заводит заказ и сразу шлёт приглашения адресатам. */
-  createOrder(input: { placeId: number | null; title?: string | null; allowCustom?: boolean; note: string | null; payHint: string | null; closesAt: string | null; closesTime?: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[] }>;
+  createOrder(input: { placeId: number | null; title?: string | null; allowCustom?: boolean; note: string | null; payHint: string | null; closesAt: string | null; closesTime?: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>;
   /** Своя позиция: из меню места или своим блюдом с ценой. */
   addOrderItem(id: number, input: { menuItemId: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
   setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;
@@ -1778,12 +1779,17 @@ export const realClient: ApiClient = {
   },
   async setCalendarDay(date, kind, note = null) {
     // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
-    // про день, а не про строку, которой больше нет.
-    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "manual" | null }>(
-      `/api/admin/calendar/${date}`,
-      { kind, note },
-    );
-    return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+    // про день после снятия: календарный праздник, если он под отметкой был,
+    // иначе пустые поля.
+    const row = await authorizedPutJson<{
+      date: string;
+      kind: "holiday" | "workday" | null;
+      note: string | null;
+      source: "auto" | "manual" | null;
+      weekendLeftovers: number;
+    }>(`/api/admin/calendar/${date}`, { kind, note });
+    const day = row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+    return { day, weekendLeftovers: row.weekendLeftovers };
   },
   getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
   setNoticePref: (kind, enabled) =>
@@ -1816,7 +1822,7 @@ export const realClient: ApiClient = {
     return (await authorizedGet<{ poll: PollView }>(`/api/polls/${id}`)).poll;
   },
   createPoll: (input) =>
-    authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[] }>("/api/polls", input),
+    authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>("/api/polls", input),
   async votePoll(id, choice) {
     return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/vote`, { choice })).poll;
   },
@@ -1847,7 +1853,7 @@ export const realClient: ApiClient = {
     return (await authorizedGet<{ order: OrderView }>(`/api/orders/${id}`)).order;
   },
   createOrder: (input) =>
-    authorizedPostJson<{ order: OrderView; delivered: number; unreachable: string[] }>("/api/orders", input),
+    authorizedPostJson<{ order: OrderView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>("/api/orders", input),
   async addOrderItem(id, input) {
     return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/items`, input)).order;
   },

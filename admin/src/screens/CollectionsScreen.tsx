@@ -7,6 +7,8 @@ import {
   formatDayMonth,
   formatMoney,
   isCollectionActive,
+  COLLECTION_TEXT_MAX,
+  COLLECTION_TITLE_MAX,
 } from "@planer/shared";
 import {
   apiClient,
@@ -444,6 +446,7 @@ function NewCollectionForm({
             type="text"
             aria-label="Повод"
             placeholder="Например, Свадьба"
+            maxLength={COLLECTION_TITLE_MAX}
             value={title}
             disabled={busy}
             onChange={(e) => setTitle(e.target.value)}
@@ -585,6 +588,7 @@ function CollectionFields({
           rows={4}
           aria-label="Свой текст"
           placeholder="Оставь пустым — уйдёт текст ниже"
+          maxLength={COLLECTION_TEXT_MAX}
           value={messageText}
           disabled={busy}
           onChange={(e) => onMessageText(e.target.value)}
@@ -856,6 +860,7 @@ function CollectionEditor({
             <input
               type="text"
               aria-label="Повод сбора"
+              maxLength={COLLECTION_TITLE_MAX}
               value={title}
               disabled={busy || subjectFrozen}
               onChange={(e) => { setTitle(e.target.value); setConfirming(false); }}
@@ -1348,6 +1353,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<RowProps, "
             <textarea
               rows={4}
               placeholder="Оставь пустым — уйдёт текст ниже"
+              maxLength={COLLECTION_TEXT_MAX}
               value={messageText}
               disabled={busy}
               onChange={(e) => {

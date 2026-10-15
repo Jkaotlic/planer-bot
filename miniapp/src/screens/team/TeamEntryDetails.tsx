@@ -12,9 +12,11 @@ export interface TeamEntryDetailRow {
 export function toTeamEntryDetailRows(
   entries: readonly TeamEntryView[],
 ): TeamEntryDetailRow[] {
-  return entries.map(({ shift, title, pending }) => ({
+  return entries.map(({ shift, title, pending, awaitsCover }) => ({
     id: shift.id,
-    title: pending ? `${title} (ждёт ОК)` : title,
+    // Те же слова, что в aria-label клетки: лист открывают тапом по клетке в рамке, и
+    // он должен назвать, что эта рамка значит.
+    title: pending ? `${title} (ждёт ОК)` : awaitsCover ? `${title} (ждёт замены)` : title,
     time: shift.start && shift.end ? `${shift.start}–${shift.end}` : "Весь день",
     location: shift.location ? `Место: ${shift.location}` : null,
     dateRange:

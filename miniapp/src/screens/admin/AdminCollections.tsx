@@ -6,6 +6,8 @@ import {
   formatDayMonth,
   formatMoney,
   isCollectionActive,
+  COLLECTION_TEXT_MAX,
+  COLLECTION_TITLE_MAX,
 } from "@planer/shared";
 import { Cell, Input, Placeholder, Spinner, Switch, Textarea } from "@telegram-apps/telegram-ui";
 import { PersonPicker } from "../../components/PersonPicker";
@@ -465,6 +467,7 @@ function NewCollectionForm({
       <Input
         header="Повод"
         placeholder="Например, Свадьба"
+        maxLength={COLLECTION_TITLE_MAX}
         value={title}
         disabled={busy}
         onChange={(e) => setTitle(e.target.value)}
@@ -641,6 +644,7 @@ function CollectionFields({
         header="Свой текст"
         rows={3}
         placeholder="Оставь пустым — уйдёт текст ниже"
+        maxLength={COLLECTION_TEXT_MAX}
         value={messageText}
         disabled={busy}
         onChange={(e) => onMessageText(e.target.value)}
@@ -974,6 +978,7 @@ function CollectionEditor({
           <>
             <Input
               header="Повод"
+              maxLength={COLLECTION_TITLE_MAX}
               value={title}
               disabled={busy || subjectFrozen}
               onChange={(e) => { setTitle(e.target.value); setConfirming(false); }}
@@ -1536,6 +1541,7 @@ function BirthdayEditor({ birthday, today, onChanged, onSent }: Omit<CardProps, 
               header="Свой текст"
               rows={3}
               placeholder="Оставь пустым — уйдёт текст ниже"
+              maxLength={COLLECTION_TEXT_MAX}
               value={messageText}
               disabled={busy}
               onChange={(e) => {

@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { formatMoney } from "./collection";
 import {
   debtOf, debtors, dishSummary, formatKg, itemLines, orderInviteText, orderItemInputSchema, orderTotal, organizerSummaryText, payRequestText,
-  placeInputSchema, splitAtLines,
+  orderDishLines, placeInputSchema, qtyLimitText, itemsLimitText, splitAtLines, FOOD_ITEMS_PER_PERSON_MAX,
 } from "./food-order";
+import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 
 describe("placeInputSchema", () => {
   it("принимает место с меню и обрезает пробелы", () => {
@@ -81,6 +82,34 @@ describe("тексты заказа", () => {
     expect(text).toContain("Без лука");
     expect(text).toContain("Куда сдавать: Перевод по номеру");
     expect(text).toContain("Твой заказ:\nШаурма ×2 — 700 ₽\nИтого: 700 ₽");
+  });
+
+  it("приглашение на пределе полей — одно письмо в лимите, хвост свёрнут, «Итого» за всё", () => {
+    // Письмо потом перерисовывают `editMessageText`, а резать его на части нельзя: длиннее
+    // 4096 знаков — и Telegram отказывает и рассылке, и каждой перерисовке целиком.
+    const myItems = Array.from({ length: FOOD_ITEMS_PER_PERSON_MAX }, (_, i) => ({
+      name: `${String(i + 1).padStart(2, "0")} ${"Икра".repeat(49)}`, price: 100_000, qty: 20, unit: "kg" as const, stepGrams: 400,
+    }));
+    const text = orderInviteText({
+      creatorName: "А".repeat(100), title: "Т".repeat(200), placeName: null, note: "З".repeat(300), payHint: "К".repeat(200),
+      closes: "до 12:30", myItems, declined: false,
+    });
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_TEXT_SAFE_MAX);
+    const shown = myItems.filter((m) => text.includes(m.name)).length;
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(FOOD_ITEMS_PER_PERSON_MAX);
+    // Показаны первые по порядку, а свёрнутые названы числом.
+    expect(myItems.slice(0, shown).every((m) => text.includes(m.name))).toBe(true);
+    expect(text).toContain(`…и ещё ${FOOD_ITEMS_PER_PERSON_MAX - shown} — полный список в мини-аппе`);
+    // «Итого» — за весь заказ, а не за видимые строки: иначе письмо называло бы чужую сумму.
+    expect(text.endsWith(`Итого: ${formatMoney(FOOD_ITEMS_PER_PERSON_MAX * 20 * 100_000)}`)).toBe(true);
+  });
+
+  it("приглашение, которое влезает, не сворачивается", () => {
+    const myItems = Array.from({ length: FOOD_ITEMS_PER_PERSON_MAX }, (_, i) => ({ name: `Блюдо ${i + 1}`, price: 100, qty: 1 }));
+    const text = orderInviteText({ creatorName: "Аня", title: null, placeName: "Шаурмечная", note: null, payHint: null, closes: null, myItems, declined: false });
+    expect(text).not.toContain("и ещё");
+    expect(myItems.every((m) => text.includes(`${m.name} — ${formatMoney(100)}`))).toBe(true);
   });
 
   it("отказавшийся видит «Ты не заказываешь»", () => {
@@ -248,5 +277,59 @@ describe("меню с единицами", () => {
     for (const stepGrams of [5, 100_001, 0.5]) {
       expect(placeInputSchema.safeParse({ ...base, menu: [{ name: "Икра", price: 1, unit: "kg", stepGrams }] }).success).toBe(false);
     }
+  });
+});
+
+describe("qtyLimitText", () => {
+  it("кг называет вес потолка с запятой, штуки — штуки, без «обеда»", () => {
+    expect(qtyLimitText({ unit: "kg", stepGrams: 400 })).toBe("Больше 8 кг одной позиции не взять.");
+    expect(qtyLimitText({ unit: "kg", stepGrams: 250 })).toBe("Больше 5 кг одной позиции не взять.");
+    expect(qtyLimitText({ unit: "kg", stepGrams: 330 })).toBe("Больше 6,6 кг одной позиции не взять.");
+    expect(qtyLimitText({ unit: "pcs", stepGrams: null })).toBe("Больше 20 шт. одной позиции не взять.");
+    // кг без шага — битые старые данные: печатаем штуками, как `unitPart`.
+    expect(qtyLimitText({ unit: "kg", stepGrams: null })).toBe("Больше 20 шт. одной позиции не взять.");
+  });
+});
+
+describe("itemsLimitText", () => {
+  it("называет потолок строк без «обеда» — сбор бывает закупкой", () => {
+    expect(itemsLimitText).toBe("Больше 20 позиций в одном заказе не взять.");
+  });
+});
+
+describe("orderDishLines — «Что заказать» с итогом веса", () => {
+  const dishes = dishSummary([
+    { employeeId: 2, name: "Икра", price: 2400, qty: 2, unit: "kg", stepGrams: 400 },
+    { employeeId: 3, name: "Икра", price: 3000, qty: 1, unit: "kg", stepGrams: 500 },
+    { employeeId: 2, name: "Горбуша", price: 500, qty: 3 },
+    { employeeId: 3, name: "Сёмга", price: 900, qty: 1, unit: "kg", stepGrams: 1000 },
+  ]);
+
+  it("у названия с несколькими кг-строками — итог веса сразу под ними", () => {
+    expect(orderDishLines(dishes)).toEqual([
+      ...itemLines(dishes.slice(0, 3)),
+      "Итого «Икра»: 1,3 кг",
+      ...itemLines(dishes.slice(3)),
+    ]);
+  });
+
+  it("одна кг-строка вес уже показывает — лишнего итога нет; штуки весом не считаются", () => {
+    const lines = orderDishLines(dishes);
+    expect(lines.filter((l) => l.startsWith("Итого"))).toEqual(["Итого «Икра»: 1,3 кг"]);
+    const pcs = dishSummary([
+      { employeeId: 2, name: "Хлеб", price: 50, qty: 1 },
+      { employeeId: 3, name: "Хлеб", price: 60, qty: 2 },
+    ]);
+    expect(orderDishLines(pcs)).toEqual(itemLines(pcs));
+  });
+
+  it("сводка закупщику печатает итог веса в «Что заказать»", () => {
+    const items = [
+      { employeeId: 2, name: "Икра", price: 2400, qty: 2, unit: "kg" as const, stepGrams: 400 },
+      { employeeId: 3, name: "Икра", price: 3000, qty: 1, unit: "kg" as const, stepGrams: 500 },
+    ];
+    const lines = organizerSummaryText({ title: "Икра", placeName: null, items, names: new Map([[2, "Игорь"], [3, "Марк"]]) }).split("\n");
+    const head = lines.indexOf("Что заказать:");
+    expect(lines.slice(head + 1, head + 4)).toEqual([...itemLines(dishSummary(items)), "Итого «Икра»: 1,3 кг"]);
   });
 });

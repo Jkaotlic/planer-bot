@@ -1,5 +1,5 @@
 import {
-  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary,
+  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, itemsLimitText, qtyLimitText,
   isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
   type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
@@ -149,6 +149,20 @@ export function createFoodMock(opts: FoodMockOptions) {
     return [...chosen, ...observers];
   }
 
+  /**
+   * «Дошло» и «не дошло ни до кого» — как в ответе `POST /api/polls` и `POST /api/orders`:
+   * только коллеги, без создателя (своё письмо ответов не соберёт, и с ним «отправлено
+   * коллегам: N» было бы на одного больше). Мок без бота не роняет отправку, поэтому
+   * «дошло» — коллеги с Telegram, а флаг всегда опущен: у сервера письма уходят только
+   * достижимым (`resolveAudience.reachable`), и «ни до кого» там значит сбой бота, которого
+   * в моке нет. Поднять его здесь значило бы сказать в DEV «проверь бота» про бота, который
+   * ничего не ронял.
+   */
+  function colleagueReport(recipients: readonly number[]): { delivered: number; deliveredToNobody: boolean } {
+    const delivered = recipients.filter((id) => id !== me().id && staff().find((e) => e.id === id)?.telegramUserId != null).length;
+    return { delivered, deliveredToNobody: false };
+  }
+
   async function createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView } & FoodSendReport> {
     await wait();
     if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
@@ -161,6 +175,12 @@ export function createFoodMock(opts: FoodMockOptions) {
 
     const ids = audienceIds(input.audience);
     const recipients = [...new Set([me().id, ...ids.filter((id) => id !== me().id)])];
+    // Тот же отказ, что у `POST /api/polls` (409) и у сбора ниже, и тоже ДО заведения:
+    // иначе DEV показал бы опрос, который на сервере не родился бы вовсе.
+    const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
+    if (recipients.filter((id) => telegramOf(id) != null).length < 2) {
+      throw new Error("Некому отправить: в списке никого, кроме тебя.");
+    }
     const poll: MockPoll = {
       id: nextPollId++,
       question: input.question.trim(),
@@ -172,16 +192,12 @@ export function createFoodMock(opts: FoodMockOptions) {
       votes: new Map<number, PollChoice>(),
     };
     POLLS.push(poll);
-    // Как на сервере: «дошло» считает только тех, у кого есть Telegram — а не
-    // всех адресатов. Мок без бота не умеет ронять отдельную отправку, поэтому
-    // «дошло» здесь равно «мог дойти технически» — тот же потолок, что у
-    // `resolveAudience.reachable`.
-    const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
-    const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+    // «Не дошло» — адресаты без Telegram, как `resolveAudience.unreachable`; «дошло» и флаг
+    // считает `colleagueReport`.
     const unreachable = recipients
       .filter((id) => telegramOf(id) == null)
       .map((id) => staff().find((e) => e.id === id)?.displayName ?? "—");
-    return { poll: pollViewOf(poll), delivered, unreachable };
+    return { poll: pollViewOf(poll), ...colleagueReport(recipients), unreachable };
   }
 
   function pollOrThrow(id: number): MockPoll {
@@ -467,9 +483,9 @@ export function createFoodMock(opts: FoodMockOptions) {
     // Тот же отказ и тот же текст, что у `resolveAudience`/`POST /api/orders`:
     // считать надо ДО заведения заказа — иначе он рождается без адресатов.
     const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
-    const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+    const reachable = recipients.filter((id) => telegramOf(id) != null).length;
     const unreachable = recipients.filter((id) => telegramOf(id) == null).map((id) => nameOf(id));
-    if (delivered < 2) throw new Error("Некому отправить: в списке никого, кроме тебя.");
+    if (reachable < 2) throw new Error("Некому отправить: в списке никого, кроме тебя.");
     const order: MockOrder = {
       id: nextOrderId++,
       createdBy: me().id,
@@ -486,7 +502,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       declines: new Set(),
     };
     ORDERS.push(order);
-    return { order: orderViewOf(order), delivered, unreachable };
+    return { order: orderViewOf(order), ...colleagueReport(recipients), unreachable };
   }
 
   /** Общий вход правки позиций: закрыт — дальше делать нечего. Мок играет
@@ -508,7 +524,6 @@ export function createFoodMock(opts: FoodMockOptions) {
     const data = parsed.data;
     // Тот же потолок строк, что `addMenuItem`/`addCustomItem` на сервере.
     const tooMany = o.items.filter((i) => i.employeeId === me().id).length >= FOOD_ITEMS_PER_PERSON_MAX;
-    const tooManyError = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
     if ("menuItemId" in data) {
       const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
       const dish = place?.menu.find((m) => m.id === data.menuItemId);
@@ -516,12 +531,14 @@ export function createFoodMock(opts: FoodMockOptions) {
       // Прибавляем к строке с той же ценой, единицей и шагом — как `addMenuItem` на сервере.
       const same = o.items.find((i) => i.employeeId === me().id && i.menuItemId === data.menuItemId && i.price === dish.price
         && i.unit === dish.unit && i.stepGrams === dish.stepGrams);
+      // Тот же потолок и текст, что у `addMenuItem` на сервере.
+      if (same && same.qty >= FOOD_QTY_MAX) throw new Error(qtyLimitText(same));
       if (same) same.qty += 1;
-      else if (tooMany) throw new Error(tooManyError);
+      else if (tooMany) throw new Error(itemsLimitText);
       else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });
     } else {
       if (!o.allowCustom) throw new Error("В этом сборе только позиции из списка.");
-      if (tooMany) throw new Error(tooManyError);
+      if (tooMany) throw new Error(itemsLimitText);
       o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty, unit: "pcs", stepGrams: null });
     }
     o.declines.delete(me().id);
@@ -540,10 +557,10 @@ export function createFoodMock(opts: FoodMockOptions) {
     const o = orderOrThrow(id);
     guardOpen(o);
     // Тот же отказ и тот же текст, что у `PATCH /api/orders/:id/items/:itemId`.
-    if (!Number.isInteger(qty) || qty < 1 || qty > FOOD_QTY_MAX) {
-      throw new Error(`Количество — от 1 до ${FOOD_QTY_MAX}.`);
-    }
-    ownItem(o, itemId).qty = qty;
+    if (!Number.isInteger(qty) || qty < 1) throw new Error(`Количество — от 1 до ${FOOD_QTY_MAX}.`);
+    const item = ownItem(o, itemId);
+    if (qty > FOOD_QTY_MAX) throw new Error(qtyLimitText(item));
+    item.qty = qty;
     return orderViewOf(o);
   }
 

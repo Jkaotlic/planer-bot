@@ -335,7 +335,7 @@ describe("метки на TabBar реагируют на действия, а н
     const getShortfall = vi.spyOn(apiClient, "getAdminShortfall").mockResolvedValue({ total: 4, firstDate: "2026-09-26" });
     vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
     vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
-    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(undefined as never);
+    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
     const el = await mount();
     await act(async () => tabItem(el, "Админ").click());
     // «Расписание» — раздел меню админки.

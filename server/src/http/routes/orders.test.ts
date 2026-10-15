@@ -80,9 +80,9 @@ async function stage() {
   };
 }
 
-async function newOrder(app: App, token: string, igor: number, placeId: number | null) {
+async function newOrder(app: App, token: string, igor: number, placeId: number | null, title?: string) {
   const res = await app.request(new Request("http://x/api/orders", send(token, {
-    placeId, note: null, payHint: "Наличкой мне", closesTime: "12:30", audience: { kind: "picked", employeeIds: [igor] },
+    placeId, ...(title === undefined ? {} : { title }), note: null, payHint: "Наличкой мне", closesTime: "12:30", audience: { kind: "picked", employeeIds: [igor] },
   })));
   return { status: res.status, body: await res.json() };
 }
@@ -101,9 +101,40 @@ describe("заказы по HTTP", () => {
     const { app, sent, igor, anyaT, placeId } = await stage();
     const { status, body } = await newOrder(app, anyaT, igor, placeId);
     expect(status).toBe(201);
-    expect(body.delivered).toBe(2);
+    // Писем ушло два (Ане и Игорю), а «Отправлено» — про коллег: своё письмо создатель
+    // получает почти всегда, и с ним число обещало бы на одного больше ответов.
+    expect(body.delivered).toBe(1);
     expect(body.order.menu.map((m: { name: string }) => m.name)).toEqual(["Шаурма"]);
     expect(sent.map((m) => m.to).sort()).toEqual([100, 101]);
+  });
+
+  it("письмо не дошло ни до кого — 201, сбор жив, в ответе deliveredToNobody", async () => {
+    const { db, app, failFor, igor, anyaT, placeId } = await stage();
+    failFor.add(100);
+    failFor.add(101);
+    const { status, body } = await newOrder(app, anyaT, igor, placeId);
+    expect(status).toBe(201);
+    expect(body.delivered).toBe(0);
+    expect(body.deliveredToNobody).toBe(true);
+    // Сбор не откатывается: письма можно дослать «Напомнить»/правкой бота, а заказ — уже факт.
+    expect(db.select().from(foodOrders).all().map((o) => o.id)).toEqual([body.order.id]);
+  });
+
+  it("дошло только самому создателю — это всё равно «ни до кого из коллег»", async () => {
+    // Своё письмо создатель получает всегда, когда бот жив; ответов оно не соберёт.
+    const { app, failFor, igor, anyaT, placeId } = await stage();
+    failFor.add(101);
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    expect(body.delivered).toBe(0);
+    expect(body.deliveredToNobody).toBe(true);
+  });
+
+  it("дошло коллеге, а создателю нет — deliveredToNobody = false", async () => {
+    const { app, failFor, igor, anyaT, placeId } = await stage();
+    failFor.add(100);
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    expect(body.delivered).toBe(1);
+    expect(body.deliveredToNobody).toBe(false);
   });
 
   it("несуществующее место — 409", async () => {
@@ -405,6 +436,33 @@ describe("заказ и дожим не рассылаются дважды", ()
     expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
   });
 
+  it("другое название сбора — не повтор: «Икра», затем «Вода» без места — оба уходят; то же название — 409", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    expect((await newOrder(app, anyaT, igor, null, "Икра")).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, null, "Вода")).status).toBe(201);
+    const again = await newOrder(app, anyaT, igor, null, "Икра");
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe("Такой уже разослан пару минут назад — проверь чат.");
+    // Без названия и с названием — тоже разные сборы; два без названия — повтор, как раньше.
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, placeId, "Икра")).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(409);
+  });
+
+  it("пока «Икра» рассылается, «Вода» из того же места не упирается в замок", async () => {
+    const { app, hold, igor, anyaT, placeId } = await stage();
+    const gate = hold();
+    const first = newOrder(app, anyaT, igor, placeId, "Икра");
+    await vi.waitFor(() => expect(gate.waiting()).toBeGreaterThan(0));
+    const second = newOrder(app, anyaT, igor, placeId, "Вода");
+    const same = await newOrder(app, anyaT, igor, placeId, "Икра");
+    expect(same.status).toBe(409);
+    expect(same.body.error).toBe("Рассылка уже идёт — подожди.");
+    gate.release();
+    expect((await first).status).toBe(201);
+    expect((await second).status).toBe(201);
+  });
+
   it("отменённый заказ повтору не мешает — его отменили нарочно", async () => {
     const { app, igor, anyaT, placeId } = await stage();
     const { body } = await newOrder(app, anyaT, igor, placeId);
@@ -474,6 +532,24 @@ describe("письмо в чате перерисовывается после �
     await vi.waitFor(() => expect(editsTo(api, 101).at(-1)![2]).not.toContain("Суп"));
     await app.request(new Request(`http://x/api/orders/${orderId}/decline`, send(igorT, {})));
     await vi.waitFor(() => expect(editsTo(api, 101).at(-1)![2]).toContain("Ты не заказываешь."));
+  });
+
+  it("PATCH сверх потолка — тот же текст, что у тапа: у кг — вес, у штук — штуки", async () => {
+    const { db, app, anya, igor, anyaT, igorT } = await stage();
+    const market = createPlace(db, { name: "Рынок", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya);
+    const { body } = await newOrder(app, anyaT, igor, market.id);
+    const added = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { menuItemId: market.menu[0]!.id })))).json();
+    const kgItem = added.order.myItems[0].id;
+    const kg = await app.request(new Request(`http://x/api/orders/${body.order.id}/items/${kgItem}`, send(igorT, { qty: 21 }, "PATCH")));
+    expect(kg.status).toBe(400);
+    expect((await kg.json()).error).toBe("Больше 8 кг одной позиции не взять.");
+    const soup = await (await app.request(new Request(`http://x/api/orders/${body.order.id}/items`, send(igorT, { name: "Суп", price: 280 })))).json();
+    const pcsItem = soup.order.myItems.find((i: { name: string }) => i.name === "Суп").id;
+    const pcs = await app.request(new Request(`http://x/api/orders/${body.order.id}/items/${pcsItem}`, send(igorT, { qty: 21 }, "PATCH")));
+    expect((await pcs.json()).error).toBe("Больше 20 шт. одной позиции не взять.");
+    // Чужая позиция не раскрывает свою единицу — общий текст.
+    const foreign = await app.request(new Request(`http://x/api/orders/${body.order.id}/items/${kgItem}`, send(anyaT, { qty: 21 }, "PATCH")));
+    expect((await foreign.json()).error).toBe("Больше 20 шт. одной позиции не взять.");
   });
 
   it("отказ правки (письмо удалено) — ответ ручки всё равно 200", async () => {

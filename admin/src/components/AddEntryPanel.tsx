@@ -9,6 +9,7 @@ import {
   planEntryRange,
   resolveShiftTimes,
   workPresets,
+  ENTRY_TITLE_MAX,
 } from "@planer/shared";
 import type { DayCalendar, EntryCategory, EntryRangeMode } from "@planer/shared";
 import type { Employee, NewEntryInput, NewEntryRangeInput, Shift, Template } from "../api/client";
@@ -394,6 +395,7 @@ export function AddEntryPanel({
             <input
               id="entry-title"
               type="text"
+              maxLength={ENTRY_TITLE_MAX}
               value={title}
               placeholder={category === "duty" ? "Например, Вавилова" : "Например, Ярмарка вакансий"}
               onChange={(e) => setTitle(e.target.value)}

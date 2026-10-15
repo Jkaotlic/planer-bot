@@ -1,6 +1,10 @@
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import {
+  CHECKLIST_DOC_URL_MAX,
+  CHECKLIST_ITEM_TITLE_MAX,
+  CHECKLIST_NAME_MAX,
+  CHECKLIST_NOTE_MAX,
   CHECKLIST_RULE_TEXT,
   checklistDayTotals,
   checklistDeliveryLabel,
@@ -111,6 +115,7 @@ export function ChecklistScreen({ templates }: { templates: readonly Template[] 
           type="text"
           aria-label="Название чек-листа"
           placeholder="Например, дежурство с 07:00"
+          maxLength={CHECKLIST_NAME_MAX}
           value={draft}
           disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
@@ -291,6 +296,7 @@ function ChecklistCard({
               type="text"
               aria-label={`Новый пункт в «${list.name}»`}
               placeholder="Например, обойти этаж"
+              maxLength={CHECKLIST_ITEM_TITLE_MAX}
               value={itemDraft}
               disabled={busy}
               onChange={(e) => setItemDraft(e.target.value)}
@@ -367,6 +373,7 @@ function InstructionEditor({
       <textarea
         id={`checklist-note-${list.id}`}
         rows={4}
+        maxLength={CHECKLIST_NOTE_MAX}
         value={note}
         disabled={busy}
         placeholder="Например: обход начинаем от лифтов, по часовой."
@@ -379,6 +386,7 @@ function InstructionEditor({
       <input
         id={`checklist-url-${list.id}`}
         type="url"
+        maxLength={CHECKLIST_DOC_URL_MAX}
         value={docUrl}
         disabled={busy}
         placeholder="https://…"
@@ -477,6 +485,7 @@ function ItemRow({
         <input
           className="employee-name-input"
           type="text"
+          maxLength={CHECKLIST_ITEM_TITLE_MAX}
           value={draft}
           autoFocus
           disabled={busy}
@@ -520,6 +529,7 @@ function ItemRow({
         <div className="checklist-item-note">
           <textarea
             rows={2}
+            maxLength={CHECKLIST_NOTE_MAX}
             value={noteDraft}
             disabled={busy}
             aria-label={`Пояснение к пункту «${item.title}»`}

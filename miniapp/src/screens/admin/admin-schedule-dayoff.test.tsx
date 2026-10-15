@@ -87,7 +87,7 @@ describe("отметка дня на экране расписания", () => {
 
   it("нажатие «Сделать выходным» шлёт отметку и перечитывает неделю", async () => {
     const schedule = vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] });
-    const setDay = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(null);
+    const setDay = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
 
     const el = await mount();
     const before = schedule.mock.calls.length;
@@ -100,5 +100,34 @@ describe("отметка дня на экране расписания", () => {
 
     expect(setDay).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), "holiday");
     expect(schedule.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  // I5 (аудит 2026-10-15): день стал рабочим, а выходные смены на нём остались.
+  async function makeWorking(weekendLeftovers: number) {
+    vi.spyOn(apiClient, "getTeamSchedule").mockImplementation(everyDay("holiday", "auto", "День России"));
+    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({
+      day: { date: TODAY, kind: "workday", note: null, source: "manual" },
+      weekendLeftovers,
+    });
+    const el = await mount();
+    const button = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Сделать рабочим"));
+    await act(async () => {
+      button!.click();
+    });
+    await settle(4);
+    return el;
+  }
+
+  it("после «Сделать рабочим» предупреждает об оставшихся выходных сменах рядом с кнопкой", async () => {
+    const el = await makeWorking(2);
+    const warning = [...el.querySelectorAll('[role="status"]')].find((n) => (n.textContent ?? "").includes("выходные смены"));
+    expect(warning?.textContent).toBe("На этот день уже стоят 2 выходные смены — проверь их.");
+    // Рядом с кнопками дня, а не в общей подсказке наверху экрана.
+    expect(warning?.closest("div")?.parentElement?.textContent ?? "").toContain("Сделать");
+  });
+
+  it("без оставшихся смен ничего не говорит", async () => {
+    const el = await makeWorking(0);
+    expect(el.textContent ?? "").not.toContain("проверь");
   });
 });

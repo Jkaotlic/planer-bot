@@ -149,6 +149,9 @@ function WeekCellButton({
     );
   }
   const pending = cell.primary.pending === true;
+  // Смена на отсутствующем: рамка цвета нехватки (CSS), а словами — в aria-label и в
+  // легенде; рамку без строки легенды не прочесть.
+  const awaitsCover = cell.primary.awaitsCover === true;
   const exactPalette = cell.primary.palette;
   const palette = exactPalette
     ?? categoryPaletteForTheme(cell.primary.shift.category, isDark);
@@ -156,11 +159,11 @@ function WeekCellButton({
     <div className="team-week__slot" role="gridcell">
       <button
         type="button"
-        className={`team-week__cell has-entry${isDayOffCell ? " is-weekend" : ""}${isToday ? " is-today" : ""}${pending ? " is-pending" : ""}`}
+        className={`team-week__cell has-entry${isDayOffCell ? " is-weekend" : ""}${isToday ? " is-today" : ""}${pending ? " is-pending" : ""}${awaitsCover ? " is-awaiting-cover" : ""}`}
         // outline, не border: рамка не меняет размер клетки, и `.is-today` (box-shadow)
         // не спорит с ней.
         style={{ background: palette.bg, color: palette.fg, ...(pending ? { outline: SICK_LEAVE_PENDING_OUTLINE, outlineOffset: -2 } : {}) }}
-        aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => (entry.pending ? `${entry.title} (ждёт ОК)` : entry.title)).join(", ")}`}
+        aria-label={`${employeeName}, ${cell.date}: ${cell.entries.map((entry) => (entry.pending ? `${entry.title} (ждёт ОК)` : entry.awaitsCover ? `${entry.title} (ждёт замены)` : entry.title)).join(", ")}`}
         onClick={onOpen}
       >
         <b>{exactPalette?.code ?? "•"}</b>

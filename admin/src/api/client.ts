@@ -1,6 +1,6 @@
 import { initDataRaw, restoreInitData } from "@telegram-apps/sdk-react";
 import { AuthRequiredError, OFFLINE_MESSAGE, createEmployeesApi, createReadApi, createTransport } from "@planer/client";
-export type { CalendarDayDto };
+export type { CalendarDayDto, CalendarDayMarkResult };
 
 import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from "@planer/shared";
 // Опросы, заказы еды и места — те же ответы и правила, что у мини-аппа (спека
@@ -25,6 +25,7 @@ import type {
   TemplateAccent,
   TemplateDto,
   CalendarDayDto,
+  CalendarDayMarkResult,
 } from "@planer/shared";
 // Реэкспорт, а не копия: строка списка отметок описана в shared, потому что её
 // одинаково читают сервер и оба админских экрана.
@@ -752,7 +753,7 @@ export interface ApiClient {
   setHolidaysAuto(enabled: boolean): Promise<void>;
   refreshHolidays(): Promise<HolidayRefreshYear[]>;
   /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
-  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
+  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayMarkResult>;
   /** Какие письма получает этот админ — адресат из токена, чужие не выключить. */
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
@@ -1360,12 +1361,17 @@ export const realClient: ApiClient = {
 
   async setCalendarDay(date, kind, note = null) {
     // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
-    // про день, а не про строку, которой больше нет.
-    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "manual" | null }>(
-      `/api/admin/calendar/${date}`,
-      { kind, note },
-    );
-    return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+    // про день после снятия: календарный праздник, если он под отметкой был,
+    // иначе пустые поля.
+    const row = await authorizedPutJson<{
+      date: string;
+      kind: "holiday" | "workday" | null;
+      note: string | null;
+      source: "auto" | "manual" | null;
+      weekendLeftovers: number;
+    }>(`/api/admin/calendar/${date}`, { kind, note });
+    const day = row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+    return { day, weekendLeftovers: row.weekendLeftovers };
   },
 
   getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),

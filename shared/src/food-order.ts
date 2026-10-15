@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatMoney } from "./collection";
+import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 
 /**
  * Лимиты заказа еды. Один процесс держит и API, и long-polling бота, поэтому
@@ -27,8 +28,6 @@ export const FOOD_CLOSE_HORIZON_DAYS = 14;
  * цикле раздула бы её до сотни.
  */
 export const FOOD_ITEMS_PER_PERSON_MAX = 20;
-/** Потолок одного письма с запасом до лимита Telegram в 4096 знаков. */
-export const TELEGRAM_TEXT_SAFE_MAX = 4000;
 
 /** Цена — целые рубли: копейки в обеде никто не сдаёт, а дробь в долге — повод для спора. */
 export const foodPriceSchema = z.number().int().min(1).max(FOOD_PRICE_MAX);
@@ -108,6 +107,25 @@ export function formatKg(grams: number): string {
   return rest ? `${whole},${rest}` : String(whole);
 }
 
+/**
+ * Отказ на потолок `FOOD_QTY_MAX` одной позиции. Потолок считает шаги, но человек в
+ * закупке набирает вес — «больше 20» про икру по 0,4 кг ничего не говорит, а «это уже не
+ * обед» в закупке нелепо. Поэтому у кг — вес потолка (20 × шаг), у штук — штуки.
+ * Один текст на тап в боте, PATCH и моки фронтов.
+ */
+export function qtyLimitText(m: { unit?: FoodUnit; stepGrams?: number | null }): string {
+  return m.unit === "kg" && m.stepGrams
+    ? `Больше ${formatKg(FOOD_QTY_MAX * m.stepGrams)} кг одной позиции не взять.`
+    : `Больше ${FOOD_QTY_MAX} шт. одной позиции не взять.`;
+}
+
+/**
+ * Отказ на потолок `FOOD_ITEMS_PER_PERSON_MAX` строк одного человека. Тот же сбор бывает
+ * закупкой на килограммы, поэтому без «обеда» — по образцу `qtyLimitText`. Одна строка на
+ * сервер и моки фронтов, чтобы мок не отставал от сервера.
+ */
+export const itemsLimitText = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций в одном заказе не взять.`;
+
 // кг без шага печатается как штуки намеренно: старые и битые данные терпим, схема их не пропускает.
 export function unitPart(m: { unit?: FoodUnit; stepGrams?: number | null }): string | null {
   return m.unit === "kg" && m.stepGrams ? `${formatKg(m.stepGrams)} кг` : null;
@@ -174,9 +192,46 @@ export function itemLines(items: readonly LineItem[]): string[] {
 }
 
 /**
+ * «Что заказать» — строки сводки (`dishSummary`) и под группой одного названия итог веса.
+ * `dishSummary` честно держит разные шаг и цену отдельными строками, но закупщик звонит
+ * поставщику с одним числом — «икры 12,4 кг», и складывать его в уме из «3 × 0,4» и
+ * «2 × 0,5» значит ошибиться. Итог — только когда кг-строк у названия больше одной:
+ * одиночная строка свой вес уже печатает. Штуки весом не считаются. Одна функция на бот
+ * и обе морды — иначе чат и экран показали бы закупщику разные списки.
+ */
+export function orderDishLines(dishes: readonly LineItem[]): string[] {
+  const kgGrams = new Map<string, { rows: number; grams: number }>();
+  for (const d of dishes) {
+    if (d.unit !== "kg" || !d.stepGrams) continue;
+    const acc = kgGrams.get(d.name) ?? { rows: 0, grams: 0 };
+    acc.rows += 1;
+    acc.grams += d.qty * d.stepGrams;
+    kgGrams.set(d.name, acc);
+  }
+  const lines: string[] = [];
+  dishes.forEach((d, i) => {
+    lines.push(itemLine(d));
+    const acc = kgGrams.get(d.name);
+    // Итог — после последней строки названия; `dishSummary` сортирует по названию,
+    // так что группа идёт подряд.
+    const lastOfName = dishes.slice(i + 1).every((n) => n.name !== d.name || n.unit !== "kg" || !n.stepGrams);
+    if (acc && acc.rows > 1 && d.unit === "kg" && d.stepGrams && lastOfName) lines.push(`Итого «${d.name}»: ${formatKg(acc.grams)} кг`);
+  });
+  return lines;
+}
+
+/**
  * Письмо заказа — и оно же после каждого тапа. Свой заказ печатается в тексте:
  * кнопки меню одинаковы для всех, и без этой строки человек не видит, что
  * уже набрал.
+ *
+ * Письмо всегда одно и не длиннее `TELEGRAM_TEXT_SAFE_MAX`: его перерисовывают
+ * `editMessageText`, и разрезать его, как сводку (`splitAtLines`), нельзя — а письмо
+ * длиннее 4096 знаков Telegram отвергает целиком, и рассылка, и каждая перерисовка
+ * молча не доходили бы. На пределе полей (20 строк по 200 знаков названия плюс
+ * заметка) такое бывает, поэтому хвост своих строк сворачивается в «…и ещё N».
+ * Обещание «полный список в мини-аппе» честное: экран заказа печатает все свои
+ * позиции («Твой заказ»). «Итого» — всегда за весь заказ.
  */
 export function orderInviteText(input: {
   creatorName: string;
@@ -198,10 +253,21 @@ export function orderInviteText(input: {
   if (input.payHint) lines.push("", `Куда сдавать: ${input.payHint}`);
   if (input.myItems.length > 0) {
     const total = input.myItems.reduce((s, i) => s + i.price * i.qty, 0);
-    lines.push("", "Твой заказ:", ...itemLines(input.myItems), `Итого: ${formatMoney(total)}`);
-  } else if (input.declined) {
-    lines.push("", "Ты не заказываешь.");
+    const all = itemLines(input.myItems);
+    const withItems = (shown: number) => {
+      const rest = all.length - shown;
+      const fold = rest > 0 ? [`…и ещё ${rest} — полный список в мини-аппе`] : [];
+      return [...lines, "", "Твой заказ:", ...all.slice(0, shown), ...fold, `Итого: ${formatMoney(total)}`].join("\n");
+    };
+    // Строк не больше 20 (`FOOD_ITEMS_PER_PERSON_MAX`) — перебор с конца дешевле любой
+    // арифметики длин и не ошибается на знаке-разделителе.
+    for (let shown = all.length; shown > 0; shown -= 1) {
+      const text = withItems(shown);
+      if (text.length <= TELEGRAM_TEXT_SAFE_MAX) return text;
+    }
+    return withItems(0);
   }
+  if (input.declined) lines.push("", "Ты не заказываешь.");
   return lines.join("\n");
 }
 
@@ -216,7 +282,7 @@ export function organizerSummaryText(input: {
     ? `📋 Сбор «${input.title}» закрыт.`
     : `📋 Заказ${input.placeName ? ` из «${input.placeName}»` : ""} закрыт.`;
   const lines = [head, "", "Что заказать:"];
-  for (const d of dishSummary(input.items)) lines.push(itemLine(d));
+  lines.push(...orderDishLines(dishSummary(input.items)));
   lines.push("", "Кто что:");
   const people: number[] = [];
   for (const i of input.items) if (!people.includes(i.employeeId)) people.push(i.employeeId);

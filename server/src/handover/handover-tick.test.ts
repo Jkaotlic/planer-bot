@@ -347,6 +347,58 @@ describe("передача гаснет сама, когда смена ушла
   });
 });
 
+describe("больничный-основание ушёл, а день покрывает второй одобренный больничный", () => {
+  // Путь мимо `cancelHandoversForEntryDb` (запись стала отпуском, даты сдвинуты прямой
+  // правкой) гасит передачу в тике — и тик обязан спросить про второй больничный так же.
+  it("основание стало отпуском — передача жива и стоит на втором больничном, «отбоя» нет", async () => {
+    const db = makeTestDb();
+    const { anya, igor, sick, handover } = await scene(db);
+    const second = sickLeave(db, anya, "2026-08-13");
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, sick.id, { category: "vacation" });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    const after = getHandover(db, handover.id)!;
+    expect(after.status).toBe("offered");
+    expect(after.sickEntryId).toBe(second.id);
+    expect(sent).toEqual([]);
+  });
+
+  it("второй больничный ждёт «ОК» и смена не срочная — передача гаснет, как раньше", async () => {
+    const db = makeTestDb();
+    const { anya, sick, handover } = await scene(db, { date: "2026-08-20" });
+    db.insert(shifts)
+      .values({ date: "2026-08-20", endDate: "2026-08-20", category: "sick_leave", employeeId: anya, approvalRequestedAt: new Date(NOW - HOUR) })
+      .run();
+    updateShift(db, sick.id, { category: "vacation" });
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+  });
+
+  it("смену переназначили, а у дающего есть второй одобренный больничный — передача гаснет и не скачет между ними", async () => {
+    // Второй больничный покрывает день, но смена уже не у Ани: перевешивать передачу некуда.
+    // Без проверки владельца тик перевешивал её с A на B, следующий — с B на A, и так вечно:
+    // ждавшие не получали «отбой», а смена Марка числилась отдаваемой.
+    const db = makeTestDb();
+    const { anya, sick, work, handover } = await scene(db);
+    sickLeave(db, anya, "2026-08-13");
+    const mark = person(db, "Марк");
+    updateShift(db, work.id, { employeeId: mark });
+
+    await runHandoverTick(deps(db), NOW);
+    await runHandoverTick(deps(db), NOW + 5 * 60 * 1000);
+
+    const after = getHandover(db, handover.id)!;
+    expect(after.status).toBe("cancelled");
+    expect(after.sickEntryId).toBe(sick.id);
+    expect(auditTypes(db).filter((t) => t === "handover_cancelled")).toHaveLength(1);
+  });
+});
+
 describe("многодневная запись и больничный посреди неё", () => {
   it("дежурство пн–вс, больничный со среды — передача жива (промежутки пересекаются)", async () => {
     const db = makeTestDb();
@@ -425,6 +477,21 @@ describe("urgent branch: a sick leave still waiting for «ОК»", () => {
     expect(listHandoversForEntry(db, sick.id)).toHaveLength(1);
     expect(sent.length).toBe(sentAfterFirst);
     expect(getShift(db, sick.id)!.handoverForcedAt).toEqual(mark);
+  });
+
+  it("два ждущих «ОК» пересекающихся больничных — коллеге «Возьмёшь смену?» приходит один раз", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const first = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    const second = pendingSick(db, anya, "2026-08-11", "2026-08-12");
+    shift(db, anya, "2026-08-12", "15:00");
+
+    await runHandoverTick(deps(db), NOW);
+
+    const live = [...listHandoversForEntry(db, first.id), ...listHandoversForEntry(db, second.id)];
+    expect(live).toHaveLength(1);
+    expect(sent.filter((m) => m.to === `employee:${igor}`)).toHaveLength(1);
   });
 
   it("a later pass that hands over ANOTHER shift keeps the first pass's mark", async () => {

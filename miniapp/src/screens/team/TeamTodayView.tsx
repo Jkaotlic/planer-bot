@@ -77,11 +77,14 @@ function TodayGroupCard({
           {group.people.map((person) => {
             const palette = personPalette(person.employeeId);
             return (
-              <li className="team-person" key={`${group.key}:${person.employeeId ?? "open"}`}>
+              <li className={`team-person${person.awaitsCover ? " is-awaiting-cover" : ""}`} key={`${group.key}:${person.employeeId ?? "open"}`}>
                 <span className="team-person__avatar" style={{ background: palette.bg, color: palette.fg }} aria-hidden="true">
                   {initialsOf(person.displayName)}
                 </span>
                 <span className="team-person__name">{person.displayName}</span>
+                {/* Здесь легенды нет, поэтому рамку у кружка дублируют слова — как
+                    «· ждёт ОК» в заголовке группы. */}
+                {person.awaitsCover && <span className="team-person__flag">ждёт замены</span>}
               </li>
             );
           })}

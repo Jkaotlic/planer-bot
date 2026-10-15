@@ -5,6 +5,7 @@ import {
   NORM_CALENDAR_HINT,
   previewReminderText,
   REMINDER_PLACEHOLDERS,
+  REMINDER_TEXT_MAX,
   exactSchedulePalette,
   filterPeople,
   rolesOfPerson,
@@ -278,6 +279,7 @@ function ReminderRow({
       <textarea
         className="kind-reminder-text"
         rows={3}
+        maxLength={REMINDER_TEXT_MAX}
         value={text}
         disabled={busy}
         placeholder="Стандартный текст по типу смены"

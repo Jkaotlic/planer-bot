@@ -1,5 +1,57 @@
 import { z } from "zod";
-import { entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence, type DayCalendar, type EntryCategory } from "@planer/shared";
+import {
+  entryCategorySchema, timeStr, dateStr, categoryFitsDate, countsForBalance, isAbsence,
+  ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX, tooLongText,
+  type DayCalendar, type EntryCategory,
+} from "@planer/shared";
+
+/**
+ * Подпись уходит в письмо об изменении графика, место — в напоминание накануне:
+ * без потолка длинный текст рвёт письмо в Telegram. Потолки — `text-limits.ts`,
+ * общие с вакантным слотом и с формами обеих морд.
+ */
+const entryTexts = {
+  location: z.string().max(ENTRY_LOCATION_MAX, tooLongText("Место", ENTRY_LOCATION_MAX)).nullish(),
+  title: z.string().max(ENTRY_TITLE_MAX, tooLongText("Название", ENTRY_TITLE_MAX)).nullish(),
+  note: z.string().max(ENTRY_NOTE_MAX, tooLongText("Заметка", ENTRY_NOTE_MAX)).nullish(),
+};
+
+/**
+ * Предел одной расстановки и одной записи-отсутствия — год с небольшим.
+ *
+ * Не вкусовое число: один процесс обслуживает и API, и long-polling бота, и
+ * «широкий» запрос задевает чат всей команды (см. `CLAUDE.md`). Здесь он вдобавок
+ * создаёт по записи на день, и без предела опечатка в году («2026» → «2126»)
+ * означала бы тридцать шесть тысяч строк в таблице смен.
+ */
+export const MAX_RANGE_DAYS = 366;
+
+/** Конец раньше начала — тоже ошибка формы («по какой день» раньше «с какого»), а не клиента. */
+export const ENDS_BEFORE_START_TEXT = "запись не может кончаться раньше, чем начинается";
+
+/**
+ * Отказ по длине записи. Его, как и длину поля, человек получает от своей же
+ * формы («по какой день» через год), а не от сломанного клиента.
+ */
+export const RANGE_TOO_LONG_TEXT = `запись не может быть длиннее ${MAX_RANGE_DAYS} дней — разбейте её на части`;
+
+const HUMAN_MESSAGES = new Set([
+  tooLongText("Место", ENTRY_LOCATION_MAX),
+  tooLongText("Название", ENTRY_TITLE_MAX),
+  tooLongText("Заметка", ENTRY_NOTE_MAX),
+  RANGE_TOO_LONG_TEXT,
+  ENDS_BEFORE_START_TEXT,
+]);
+
+/**
+ * Тело 400 для разбора записи. Обычный отказ остаётся `invalid`: его видит только
+ * сломанный клиент. А длину человек набирает сам, и обе морды показывают `error`
+ * как есть — поэтому слишком длинное поле называется словами.
+ */
+export function entryInvalidBody(issues: readonly { message: string }[]): { error: string; issues: readonly unknown[] } {
+  const human = issues.find((issue) => HUMAN_MESSAGES.has(issue.message));
+  return { error: human?.message ?? "invalid", issues };
+}
 
 const baseEntry = z.object({
   date: dateStr,
@@ -9,9 +61,7 @@ const baseEntry = z.object({
   endDate: dateStr.nullish(),
   templateId: z.number().int().nullish(),
   employeeId: z.number().int().nullish(),
-  location: z.string().nullish(),
-  title: z.string().nullish(),
-  note: z.string().nullish(),
+  ...entryTexts,
 });
 
 /** Category↔times coherence. Returns an error message, or null if coherent. */
@@ -77,7 +127,14 @@ export function entrySpanError(v: { category: EntryCategory; date: string; endDa
  * Returns an error message, or null if coherent.
  */
 export function entryRangeError(v: { date: string; endDate?: string | null }): string | null {
-  if (v.endDate && v.endDate < v.date) return "запись не может кончаться раньше, чем начинается";
+  if (v.endDate && v.endDate < v.date) return ENDS_BEFORE_START_TEXT;
+  // Длина — здесь же, а не только в схеме создания: этой функцией сверяют и PATCH
+  // (итог после слияния с существующей записью), и записи работника. Без предела
+  // больничный «до 9999 года» разворачивается `daysOf`/`eachDayIso` в ~36 млн
+  // дней в процессе, который держит и бота.
+  if (v.endDate && rangeDays(v.date, v.endDate) > MAX_RANGE_DAYS) {
+    return RANGE_TOO_LONG_TEXT;
+  }
   return null;
 }
 
@@ -90,17 +147,33 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
   if (rangeErr) ctx.addIssue({ code: "custom", path: ["endDate"], message: rangeErr });
 });
 
-export const updateEntrySchema = baseEntry.partial();
-
 /**
- * Предел одной расстановки — год с небольшим.
- *
- * Не вкусовое число: один процесс обслуживает и API, и long-polling бота, и
- * «широкий» запрос задевает чат всей команды (см. `CLAUDE.md`). Здесь он вдобавок
- * создаёт по записи на день, и без предела опечатка в году («2026» → «2126»)
- * означала бы тридцать шесть тысяч строк в таблице смен.
+ * Правка — без потолков в схеме: их сверяет `changedTextTooLong` против записи.
+ * Формы шлют подпись, место и заметку заново в каждой правке, а записи старше
+ * потолка бывают длиннее его — правка часов не должна упираться в поле, которое
+ * никто не трогал.
  */
-export const MAX_RANGE_DAYS = 366;
+export const updateEntrySchema = baseEntry
+  .extend({ location: z.string().nullish(), title: z.string().nullish(), note: z.string().nullish() })
+  .partial();
+
+const TEXT_CAPS = [
+  ["title", "Название", ENTRY_TITLE_MAX],
+  ["location", "Место", ENTRY_LOCATION_MAX],
+  ["note", "Заметка", ENTRY_NOTE_MAX],
+] as const;
+
+/** Отказ за поле, которое правка МЕНЯЕТ и делает длиннее потолка; иначе null. */
+export function changedTextTooLong(
+  patch: { title?: string | null; location?: string | null; note?: string | null },
+  existing: { title: string | null; location: string | null; note: string | null },
+): string | null {
+  for (const [field, label, max] of TEXT_CAPS) {
+    const value = patch[field];
+    if (value != null && value !== existing[field] && value.length > max) return tooLongText(label, max);
+  }
+  return null;
+}
 
 /**
  * Тело «расставить с какого по какое».
@@ -119,9 +192,7 @@ export const rangeEntrySchema = z
     end: timeStr.nullish(),
     templateId: z.number().int().nullish(),
     employeeId: z.number().int(),
-    location: z.string().nullish(),
-    title: z.string().nullish(),
-    note: z.string().nullish(),
+    ...entryTexts,
     /** Брать ли субботу и воскресенье. К «Работе в выходной» не относится — у неё своё правило. */
     includeWeekends: z.boolean().default(false),
     /**

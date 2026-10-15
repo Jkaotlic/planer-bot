@@ -4,13 +4,15 @@ import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
 import { safeErrorMessage } from "../util/safe-error";
 import { reachedNobody, scheduleLink, type AdminAction, type AdminReach } from "../bot/notify";
-import { getEmployeeById } from "../repo/employees";
+import { employeesByIds, getEmployeeById } from "../repo/employees";
 import {
   addDecline,
   createHandover,
   getHandover,
   listDeclines,
   listHandoversForEntry,
+  listLiveHandoversFrom,
+  shiftIdsWithLiveHandover,
   updateHandover,
 } from "../repo/handovers";
 import { getShift, listShiftsOverlapping, updateShift } from "../repo/shifts";
@@ -171,6 +173,10 @@ export async function startHandovers(
       .filter((handover) => handover.status !== "cancelled")
       .map((handover) => handover.shiftId),
   );
+  // A live hand-over opened by ANOTHER sick leave counts too: two overlapping sick
+  // leaves of one person cover the same shift, and a second offer of it would send
+  // the team «Возьмёшь смену?» twice — and the urgent tick reaches this without an admin.
+  for (const shiftId of shiftIdsWithLiveHandover(db, mine.map((shift) => shift.id))) alreadyOffered.add(shiftId);
 
   // Pass 1 is synchronous: every draft row exists before the first Telegram await. A crash
   // during the escalation letters below must not leave an approved sick leave without the
@@ -216,7 +222,7 @@ export async function offerTo(deps: HandoverDeps, handoverId: number, toEmployee
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
     return { ok: false, reason: "Передача уже закрыта" };
   }
-  const voided = handoverVoidReason(db, handover);
+  const voided = settleHandoverVoidReason(db, handover);
   if (voided) return { ok: false, reason: VOID_REFUSAL[voided] };
   const shift = shiftOf(db, handover)!;
   if (hasStarted(deps, shift)) return { ok: false, reason: STARTED_REFUSAL };
@@ -333,9 +339,22 @@ export async function takeHandover(
     // Смена могла уйти от дающего, пока сообщение висело в чате: админ поставил
     // её другому, обмен, укороченный больничный. Без этой проверки «Беру»
     // отбирало смену у нового хозяина молча — письма уходили дающему.
-    const voided = handoverVoidReason(db, handover);
+    const voided = settleHandoverVoidReason(db, handover);
     if (voided) return { ok: false as const, reason: VOID_REFUSAL[voided] };
     const shift = shiftOf(db, handover)!;
+
+    // Брать может только тот, кого спрашивают сейчас. Кнопка под личным
+    // предложением переживает переадресацию: без проверки прежний адресат
+    // забирал смену, которую админ уже предложил другому, — а тот ждал её.
+    // Черновик без адресата не трогаем: его кнопки ни у кого нет.
+    // В веере отказавшийся не в круге (`fanOut` его исключает) — его старая
+    // кнопка не должна возвращать его туда в обход.
+    if (handover.status === "offered" && handover.offeredToEmployeeId != null && handover.offeredToEmployeeId !== employeeId) {
+      return { ok: false as const, reason: "Это предложение уже ушло другому" };
+    }
+    if (handover.status === "fanned" && listDeclines(db, handoverId).includes(employeeId)) {
+      return { ok: false as const, reason: "Ты уже ответил(а) «Не могу» на эту смену" };
+    }
 
     // «Беру» живёт в чате вечно. Без этих двух проверок кнопка под старым
     // сообщением брала смену человеку, которого админ тем временем вывел из
@@ -401,7 +420,9 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
   if (!shift) return { ok: false, reason: "Смены больше нет" };
 
   const declinedIds = listDeclines(db, handoverId);
-  const declinedNames = declinedIds.map((id) => getEmployeeById(db, id)?.displayName ?? `работник #${id}`);
+  // Имена — одним запросом, а не на каждого отказавшегося; порядок — порядок отказов.
+  const declinedPeople = employeesByIds(db, declinedIds);
+  const declinedNames = declinedIds.map((id) => declinedPeople.get(id)?.displayName ?? `работник #${id}`);
   const silent = handoverCandidates(db, shift, { excludeIds: declinedIds }).length;
 
   // Отметка до отправки — против второго письма, если тик пересечётся сам с
@@ -533,6 +554,22 @@ export function handoverVoidReason(db: Db, handover: Handover): VoidReason | nul
   return null;
 }
 
+/**
+ * Жива ли передача — с попыткой переноса: мёртвое основание, но тот же день покрывает другой
+ * одобренный больничный дающего → передача перевешивается на него (`adoptByOtherSickLeave`) и
+ * жива. Пишет в базу, когда переносит.
+ *
+ * Одна функция для всех, кто спрашивает: тик, «Беру», «предложить», список черновиков. Пока тик
+ * переносил, а остальные смотрели только `handoverVoidReason`, между правкой записи мимо
+ * `cancelHandoversForEntryDb` и следующим тиком «Беру» отвечало «больничный сняли» про
+ * человека, который по-прежнему болен, а черновик пропадал из формы.
+ */
+export function settleHandoverVoidReason(db: Db, handover: Handover): VoidReason | null {
+  const reason = handoverVoidReason(db, handover);
+  if (reason && adoptByOtherSickLeave(db, handover)) return null;
+  return reason;
+}
+
 const STARTED_REFUSAL = "Эта смена уже началась";
 
 /** Что сказать нажавшему «Беру» или «предложить», когда передача мертва. */
@@ -593,6 +630,10 @@ export interface CancelledHandover {
  * The synchronous half of `cancelHandoversForEntry`: statuses and audit only, no
  * Telegram. Split out so a caller that must finish its DB work before the first
  * await (rejecting a sick leave) can do so and send the letters afterwards.
+ *
+ * Архивация тоже зовёт её на каждый удаляемый больничный, и передача, перевешенная здесь
+ * на идущий больничный, этим не выживает: следом тот же путь зовёт
+ * `cancelLiveHandoversOfEmployeeDb`, и она гаснет там — одним админским «отбоем».
  */
 export function cancelHandoversForEntryDb(
   db: Db,
@@ -605,12 +646,73 @@ export function cancelHandoversForEntryDb(
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
     if (shift && covered.has(shift.date)) continue;
+    if (adoptByOtherSickLeave(db, handover)) continue;
 
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
     cancelled.push({ handover, shift });
   }
   return cancelled;
+}
+
+/**
+ * Все живые передачи человека гаснут — путь архивации. Удалённые больничные (с сегодня)
+ * гасит `cancelHandoversForEntryDb`, но идущий больничный архивация не трогает, и его
+ * передачи на будущие смены — вместе с перевешенными на него с удалённых — оставались бы
+ * живыми над сменами, которые архивация тут же отдаёт в «Не назначено»: их погасил бы тик
+ * со своим «смену закрыли» вместо админского «отбоя». Без переноса — переносить не на кого,
+ * человек уходит из команды.
+ */
+export function cancelLiveHandoversOfEmployeeDb(db: Db, employeeId: number): CancelledHandover[] {
+  const cancelled: CancelledHandover[] = [];
+  for (const handover of listLiveHandoversFrom(db, employeeId)) {
+    const shift = shiftOf(db, handover);
+    const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
+    recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
+    cancelled.push({ handover, shift });
+  }
+  return cancelled;
+}
+
+/**
+ * Дни, на которые админ уже сказал «да»: весь больничный, если он ничего не ждёт; только
+ * прежний одобренный промежуток, если ждёт продление; ничего, если ждёт он целиком.
+ */
+function approvedSpanOf(sick: Shift): { date: string; endDate: string } | null {
+  if (sick.approvalRequestedAt == null) return { date: sick.date, endDate: sick.endDate ?? sick.date };
+  if (sick.approvedDate == null) return null;
+  return { date: sick.approvedDate, endDate: sick.approvedEndDate ?? sick.approvedDate };
+}
+
+/**
+ * Больничный, ради которого отдавали смену, ушёл (удалён, укорочен, отклонён, стал отпуском),
+ * а тот же день покрывает другой одобренный больничный того же человека — передача остаётся
+ * живой и переходит к нему. `true` — перешла, гасить её не нужно.
+ *
+ * Перевесить, а не погасить и открыть заново: человек болен по-прежнему, и смена всё так же
+ * ищет хозяина. Погашенная передача сказала бы ждавшим «больничный сняли — выходить не
+ * нужно», а новая через три часа спросила бы их снова о той же смене; отказы («Не могу»)
+ * и уже отправленная эскалация пропали бы вместе со старой строкой. Без этого смена
+ * оставалась на больном вовсе без лестницы: тик открывает передачи только ждущим «ОК».
+ *
+ * Только одобренные дни: больничный, ждущий «ОК», смену не отдаёт — для него срочную
+ * передачу откроет тик (`forceUrgentSickHandovers`) по своим правилам.
+ */
+export function adoptByOtherSickLeave(db: Db, handover: Handover): boolean {
+  const shift = shiftOf(db, handover);
+  if (!shift || shift.employeeId !== handover.fromEmployeeId) return false;
+  const shiftEnd = shift.endDate ?? shift.date;
+  const other = listShiftsOverlapping(db, shift.date, shiftEnd).find((sick) => {
+    if (sick.category !== "sick_leave" || sick.employeeId !== handover.fromEmployeeId || sick.id === handover.sickEntryId) {
+      return false;
+    }
+    const span = approvedSpanOf(sick);
+    // Пересечение промежутков — то же правило, что у `handoverVoidReason`.
+    return span != null && shiftEnd >= span.date && shift.date <= span.endDate;
+  });
+  if (!other) return false;
+  updateHandover(db, handover.id, { sickEntryId: other.id });
+  return true;
 }
 
 /** The asynchronous half: tell whoever was waiting that the offer is off. */

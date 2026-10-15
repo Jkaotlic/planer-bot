@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee, setEmployeeRestrictions, setEmployeeObserver } from "../repo/employees";
 import { createShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
@@ -570,5 +570,36 @@ describe("confirmOffer and being excluded/observer after the offer went out", ()
     // должен ни создать вторую, ни задним числом подтвердить эту.
     const scheduled = listShiftsByEmployee(db, mark.id).filter((s) => s.category === "weekend_work");
     expect(scheduled).toHaveLength(1);
+  });
+});
+
+describe("выходные: имена — картой, а не запросом на строку", () => {
+  // Ведомость за год и список слотов подписывают имя под каждой строкой; число чтений
+  // сотрудника по id не должно расти вместе с числом строк.
+  function stage(people: number) {
+    const db = makeTestDb();
+    const ids = Array.from({ length: people }, (_, i) => createEmployee(db, { displayName: `Аня ${i + 1}` }).id);
+    const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00", title: "Суббота" });
+    for (const id of ids) {
+      expect(expressInterest(db, slot.id, id, TEST_TODAY).ok).toBe(true);
+      const prior = createVacantSlot(db, { date: "2026-07-05", start: "09:00", end: "17:00" });
+      const a = createAssignment(db, { slotId: prior.id, employeeId: id, hours: 8 });
+      const sh = createShift(db, { date: prior.date, start: prior.start, end: prior.end, category: "weekend_work", employeeId: id });
+      confirmAssignment(db, a.id, sh.id);
+      createAssignment(db, { slotId: slot.id, employeeId: id, hours: 8 });
+    }
+    return { db, slotId: slot.id };
+  }
+
+  it("payrollRows, assigneesForSlot и interestedForSlot — без чтения по id на строку", async () => {
+    for (const people of [1, 5]) {
+      const { db, slotId } = stage(people);
+      expect(payrollRows(db, "2026-07-01", "2026-07-31")).toHaveLength(people);
+      expect(await countEmployeeByIdLookups(db, () => payrollRows(db, "2026-07-01", "2026-07-31"))).toBe(0);
+      expect(assigneesForSlot(db, slotId)).toHaveLength(people);
+      expect(await countEmployeeByIdLookups(db, () => assigneesForSlot(db, slotId))).toBe(0);
+      expect(interestedForSlot(db, slotId).map((i) => i.name)).toHaveLength(people);
+      expect(await countEmployeeByIdLookups(db, () => interestedForSlot(db, slotId))).toBe(0);
+    }
   });
 });

@@ -2,6 +2,10 @@ import { ConfirmButton } from "../../components/ConfirmButton";
 import { useEffect, useRef, useState } from "react";
 import { Input, Placeholder, Spinner, Textarea } from "@telegram-apps/telegram-ui";
 import {
+  CHECKLIST_DOC_URL_MAX,
+  CHECKLIST_ITEM_TITLE_MAX,
+  CHECKLIST_NAME_MAX,
+  CHECKLIST_NOTE_MAX,
   CHECKLIST_RULE_TEXT,
   checklistDayTotals,
   checklistDeliveryLabel,
@@ -116,6 +120,7 @@ export function AdminChecklists() {
         <Input
           header="Новый чек-лист"
           placeholder="Например, дежурство с 07:00"
+          maxLength={CHECKLIST_NAME_MAX}
           value={draft}
           disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
@@ -340,6 +345,7 @@ function ChecklistCard({
           <Input
             header={`Новый пункт в «${list.name}»`}
             placeholder="Например, обойти этаж"
+            maxLength={CHECKLIST_ITEM_TITLE_MAX}
             value={itemDraft}
             disabled={busy}
             onChange={(e) => setItemDraft(e.target.value)}
@@ -355,6 +361,7 @@ function ChecklistCard({
           <Textarea
             header="Пояснение — уходит дежурному в чат вместе со списком"
             placeholder="Например: обход начинаем от лифтов, по часовой."
+            maxLength={CHECKLIST_NOTE_MAX}
             value={note}
             disabled={busy}
             onChange={(e) => setNote(e.target.value)}
@@ -362,6 +369,7 @@ function ChecklistCard({
           <Input
             header="Ссылка на документ"
             placeholder="https://…"
+            maxLength={CHECKLIST_DOC_URL_MAX}
             value={docUrl}
             disabled={busy}
             onChange={(e) => setDocUrl(e.target.value)}
@@ -483,10 +491,11 @@ function ItemRow({
   if (editing) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Input header={`Пункт ${index + 1}`} value={title} disabled={busy} onChange={(e) => setTitle(e.target.value)} />
+        <Input header={`Пункт ${index + 1}`} maxLength={CHECKLIST_ITEM_TITLE_MAX} value={title} disabled={busy} onChange={(e) => setTitle(e.target.value)} />
         <Textarea
           header="Пояснение — как именно проверять"
           placeholder="Необязательно"
+          maxLength={CHECKLIST_NOTE_MAX}
           value={note}
           disabled={busy}
           onChange={(e) => setNote(e.target.value)}

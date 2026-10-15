@@ -74,6 +74,50 @@ describe("позиции", () => {
     expect(removeLastItem(db, order, igor.id, now)).toEqual({ ok: false, error: "Убирать нечего." });
   });
 
+  it("«Убрать» берёт шаг из последней изменённой позиции: A, B, A, «Убрать» → A×1, B×1", () => {
+    const { db, igor, order, shawarma, tea } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, tea.id, now);
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    expect(removeLastItem(db, order, igor.id, now)).toMatchObject({ ok: true });
+    expect(itemsOf(db, order.id).map((i) => [i.name, i.qty])).toEqual([["Шаурма", 1], ["Чай", 1]]);
+  });
+
+  it("правка количества в мини-аппе — тоже изменение: «Убрать» берёт из неё", () => {
+    const { db, igor, order, shawarma, tea } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, tea.id, now);
+    const shawarmaRow = itemsOf(db, order.id).find((i) => i.name === "Шаурма")!;
+    setItemQty(db, order, igor.id, shawarmaRow.id, 3, now);
+    removeLastItem(db, order, igor.id, now);
+    expect(itemsOf(db, order.id).map((i) => [i.name, i.qty])).toEqual([["Шаурма", 2], ["Чай", 1]]);
+  });
+
+  it("своё блюдо после тапа по меню — «Убрать» снимает своё, а не меню", () => {
+    const { db, igor, order, shawarma } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addCustomItem(db, order, igor.id, { name: "Суп дня", price: 280, qty: 1 }, now);
+    removeLastItem(db, order, igor.id, now);
+    expect(itemsOf(db, order.id).map((i) => [i.name, i.qty])).toEqual([["Шаурма", 2]]);
+  });
+
+  it("«Убрать» называет, что убрано и сколько осталось", () => {
+    const { db, igor, order, shawarma } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    expect(removeLastItem(db, order, igor.id, now)).toEqual({ ok: true, removed: { name: "Шаурма", unit: "pcs", stepGrams: null, qtyLeft: 1 } });
+    expect(removeLastItem(db, order, igor.id, now)).toEqual({ ok: true, removed: { name: "Шаурма", unit: "pcs", stepGrams: null, qtyLeft: 0 } });
+  });
+
+  it("строки до миграции (порядок 0) — «Убрать» по-прежнему берёт последнюю по id", () => {
+    const { db, igor, order } = stage();
+    db.insert(foodOrderItems).values({ orderId: order.id, employeeId: igor.id, name: "Суп", price: 280 }).run();
+    db.insert(foodOrderItems).values({ orderId: order.id, employeeId: igor.id, name: "Хлеб", price: 30 }).run();
+    removeLastItem(db, order, igor.id, now);
+    expect(itemsOf(db, order.id).map((i) => i.name)).toEqual(["Суп"]);
+  });
+
   it("«Не буду» снимает позиции; новый тап по блюду снимает отказ", () => {
     const { db, anya, igor, order, shawarma } = stage();
     addMenuItem(db, order, igor.id, shawarma.id, now);
@@ -103,12 +147,12 @@ describe("позиции", () => {
 });
 
 describe("не больше 20 своих позиций", () => {
-  it("21-я своя позиция — отказ «Больше 20 позиций — это уже не обед.»; прибавка к уже взятому блюду — можно", () => {
+  it("21-я своя позиция — отказ «Больше 20 позиций в одном заказе не взять.»; прибавка к уже взятому блюду — можно", () => {
     const { db, igor, order, shawarma } = stage();
     expect(FOOD_ITEMS_PER_PERSON_MAX).toBe(20);
     expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: true });
     for (let i = 1; i < 20; i += 1) expect(addCustomItem(db, order, igor.id, { name: `Блюдо ${i}`, price: 10, qty: 1 }, now)).toEqual({ ok: true });
-    const refusal = { ok: false, error: "Больше 20 позиций — это уже не обед." };
+    const refusal = { ok: false, error: "Больше 20 позиций в одном заказе не взять." };
     expect(addCustomItem(db, order, igor.id, { name: "Ещё", price: 10, qty: 1 }, now)).toEqual(refusal);
     // Та же шаурма — не новая строка, а ×2: лимит строк её не касается.
     expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: true });
@@ -118,7 +162,7 @@ describe("не больше 20 своих позиций", () => {
   it("новое блюдо из меню 21-й строкой — тоже отказ; чужие строки не считаются", () => {
     const { db, anya, igor, order, tea } = stage();
     for (let i = 0; i < 20; i += 1) addCustomItem(db, order, igor.id, { name: `Блюдо ${i}`, price: 10, qty: 1 }, now);
-    expect(addMenuItem(db, order, igor.id, tea.id, now)).toEqual({ ok: false, error: "Больше 20 позиций — это уже не обед." });
+    expect(addMenuItem(db, order, igor.id, tea.id, now)).toEqual({ ok: false, error: "Больше 20 позиций в одном заказе не взять." });
     expect(addMenuItem(db, order, anya.id, tea.id, now)).toEqual({ ok: true });
   });
 });
@@ -216,6 +260,18 @@ describe("закупка", () => {
     updatePlace(db, place.id, { name: "Икра", menu: [{ id: dishId, name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 500 }] });
     expect(addMenuItem(db, order, igor.id, dishId, now).ok).toBe(true);
     expect(itemsOf(db, order.id).map((i) => [i.unit, i.stepGrams, i.qty])).toEqual([["kg", 400, 2], ["kg", 500, 1]]);
+  });
+
+  it("21-й тап по кг-позиции — отказ, который называет вес, а не «обед»", () => {
+    const { db, igor, order, dishId } = purchase();
+    for (let k = 0; k < 20; k += 1) expect(addMenuItem(db, order, igor.id, dishId, now).ok).toBe(true);
+    expect(addMenuItem(db, order, igor.id, dishId, now)).toEqual({ ok: false, error: "Больше 8 кг одной позиции не взять." });
+  });
+
+  it("21-й тап по штучной позиции — отказ без «обеда»", () => {
+    const { db, igor, order, shawarma } = stage();
+    for (let k = 0; k < 20; k += 1) addMenuItem(db, order, igor.id, shawarma.id, now);
+    expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: false, error: "Больше 20 шт. одной позиции не взять." });
   });
 
   it("свои позиции запрещены — сервер отказывает, даже если экран кнопку показал", () => {

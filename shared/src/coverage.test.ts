@@ -64,7 +64,7 @@ const SUNDAY = "2026-08-23";
 
 describe("missingCoverage", () => {
   it("считает нехватку по дню недели", () => {
-    const entries = [{ date: MONDAY, employeeId: 1, templateId: 10 }];
+    const entries = [{ date: MONDAY, employeeId: 1, templateId: 10, category: "shift" as const }];
     expect(missingCoverage(entries, [MORNING, DUTY], MONDAY, EMPTY_CALENDAR)).toEqual([
       { templateId: 10, name: "Утро", need: 2, have: 1 },
       { templateId: 20, name: "Дежурство · Поклонка", need: 1, have: 0 },
@@ -78,30 +78,30 @@ describe("missingCoverage", () => {
 
   it("закрытую норму не показывает", () => {
     const entries = [
-      { date: MONDAY, employeeId: 1, templateId: 10 },
-      { date: MONDAY, employeeId: 2, templateId: 10 },
+      { date: MONDAY, employeeId: 1, templateId: 10, category: "shift" as const },
+      { date: MONDAY, employeeId: 2, templateId: 10, category: "shift" as const },
     ];
     expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)).toEqual([]);
   });
 
   it("пустой слот норму не закрывает", () => {
     // Строка в сетке без человека — это не вышедший на смену человек.
-    const entries = [{ date: MONDAY, employeeId: null, templateId: 10 }];
+    const entries = [{ date: MONDAY, employeeId: null, templateId: 10, category: "shift" as const }];
     expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)).toEqual([{ templateId: 10, name: "Утро", need: 2, have: 0 }]);
   });
 
   it("считает запись другого дня чужой", () => {
-    const entries = [{ date: "2026-08-25", employeeId: 1, templateId: 10 }];
+    const entries = [{ date: "2026-08-25", employeeId: 1, templateId: 10, category: "shift" as const }];
     expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)[0]!.have).toBe(0);
   });
 
   it("считает запись другого вида смены чужой", () => {
-    const entries = [{ date: MONDAY, employeeId: 1, templateId: 20 }];
+    const entries = [{ date: MONDAY, employeeId: 1, templateId: 20, category: "shift" as const }];
     expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)[0]!.have).toBe(0);
   });
 
   it("многодневная запись покрывает каждый свой день", () => {
-    const entries = [{ date: "2026-08-20", endDate: "2026-08-26", employeeId: 1, templateId: 20 }];
+    const entries = [{ date: "2026-08-20", endDate: "2026-08-26", employeeId: 1, templateId: 20, category: "shift" as const }];
     expect(missingCoverage(entries, [DUTY], MONDAY, EMPTY_CALENDAR)).toEqual([]);
   });
 
@@ -109,16 +109,78 @@ describe("missingCoverage", () => {
     // Иначе «Утро» закрывалось бы дважды одним человеком, и подсказка молчала бы
     // о дне, на который реально вышел один.
     const entries = [
-      { date: MONDAY, employeeId: 1, templateId: 10 },
-      { date: MONDAY, employeeId: 1, templateId: 10 },
+      { date: MONDAY, employeeId: 1, templateId: 10, category: "shift" as const },
+      { date: MONDAY, employeeId: 1, templateId: 10, category: "shift" as const },
     ];
     expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)).toEqual([{ templateId: 10, name: "Утро", need: 2, have: 1 }]);
   });
 
   it("запись без вида смены не закрывает ничего", () => {
     // «Своё время» ставят руками, и к норме конкретного вида оно отношения не имеет.
-    const entries = [{ date: MONDAY, employeeId: 1, templateId: null }];
+    const entries = [{ date: MONDAY, employeeId: 1, templateId: null, category: "shift" as const }];
     expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)[0]!.have).toBe(0);
+  });
+});
+
+describe("смена на отсутствующем норму не закрывает", () => {
+  // Больничный или отпуск, а смена до замены всё ещё стоит на человеке: выйти
+  // некому, и считать день закрытым значило бы молчать ровно там, где дыра.
+  const sickOn = (employeeId: number, date: string, endDate: string | null = null) =>
+    ({ date, endDate, employeeId, templateId: null, category: "sick_leave" as const });
+
+  it("смена больного не в счёт, смена здорового — в счёт", () => {
+    const entries = [
+      { date: MONDAY, employeeId: 1, templateId: 10, category: "shift" as const },
+      { date: MONDAY, employeeId: 2, templateId: 10, category: "shift" as const },
+      sickOn(1, "2026-08-20", "2026-08-25"),
+    ];
+    expect(missingCoverage(entries, [MORNING], MONDAY, EMPTY_CALENDAR)).toEqual([{ templateId: 10, name: "Утро", need: 2, have: 1 }]);
+  });
+
+  it("отпуск и командировка — тоже отсутствие", () => {
+    for (const category of ["vacation", "business_trip"] as const) {
+      const entries = [
+        { date: MONDAY, employeeId: 1, templateId: 20, category: "duty" as const },
+        { ...sickOn(1, MONDAY), category },
+      ];
+      expect(missingCoverage(entries, [DUTY], MONDAY, EMPTY_CALENDAR)[0]?.have).toBe(0);
+    }
+  });
+
+  it("недельное дежурство: дни до больничного закрыты, дни больничного — нет", () => {
+    const entries = [
+      { date: "2026-08-24", endDate: "2026-08-28", employeeId: 1, templateId: 20, category: "duty" as const },
+      sickOn(1, "2026-08-26", "2026-08-28"),
+    ];
+    expect(missingCoverage(entries, [DUTY], "2026-08-25", EMPTY_CALENDAR)).toEqual([]);
+    expect(missingCoverage(entries, [DUTY], "2026-08-26", EMPTY_CALENDAR)[0]?.have).toBe(0);
+  });
+
+  it("weekShortfall считает так же — бейдж и плашка не расходятся с советом", () => {
+    const week = ["2026-08-24", "2026-08-25"];
+    const morning = { ...MORNING, category: "shift" as const };
+    const entries = [
+      { date: "2026-08-24", employeeId: 1, templateId: 10, category: "shift" as const },
+      { date: "2026-08-24", employeeId: 2, templateId: 10, category: "shift" as const },
+      sickOn(2, "2026-08-24"),
+    ];
+    expect(weekShortfall(entries, [morning], week, EMPTY_CALENDAR).days.map((d) => [d.date, d.short])).toEqual([
+      ["2026-08-24", 1],
+      ["2026-08-25", 2],
+    ]);
+  });
+
+  it("scheduleGaps: день, где единственный в смене болеет, — пробел, но не «смен нет»", () => {
+    const entries = [{ date: "2026-09-07", employeeId: 10, templateId: 1, category: "shift" as const }, sickOn(10, "2026-09-07")];
+    expect(scheduleGaps(entries, [], ["2026-09-07"], EMPTY_CALENDAR)).toEqual([
+      { date: "2026-09-07", missing: [], empty: true, allAbsent: true },
+    ]);
+  });
+
+  it("coverageAdviceText называет такой день правдой: смены есть, выйти некому", () => {
+    const text = coverageAdviceText([{ date: "2026-09-09", missing: [], empty: true, allAbsent: true }])!;
+    expect(text).toContain("Ср 9 сентября — все, кто стоит в смене, отсутствуют");
+    expect(text).not.toContain("смен нет");
   });
 });
 
@@ -187,7 +249,7 @@ describe("scheduleGaps — пробелы недели для совета ад�
 
   it("будний день без единой смены — пробел, даже если норм нет", () => {
     const gaps = scheduleGaps([], [], ["2026-09-07"], EMPTY_CALENDAR);
-    expect(gaps).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
+    expect(gaps).toEqual([{ date: "2026-09-07", missing: [], empty: true, allAbsent: false }]);
   });
 
   it("пустые суббота и воскресенье пробелом не считаются", () => {
@@ -198,7 +260,7 @@ describe("scheduleGaps — пробелы недели для совета ад�
     const entries = [shift("2026-09-07", 10, 1), shift("2026-09-07", 11, 2)];
     const gaps = scheduleGaps(entries, [morning, duty], ["2026-09-07"], EMPTY_CALENDAR);
     expect(gaps).toEqual([
-      { date: "2026-09-07", empty: false, missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }] },
+      { date: "2026-09-07", empty: false, allAbsent: false, missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }] },
     ]);
   });
 
@@ -209,12 +271,12 @@ describe("scheduleGaps — пробелы недели для совета ад�
 
   it("отпуск и запись без человека день не заполняют", () => {
     const entries = [shift("2026-09-07", 10, null, "vacation"), shift("2026-09-07", null, 1)];
-    expect(scheduleGaps(entries, [], ["2026-09-07"], EMPTY_CALENDAR)).toEqual([{ date: "2026-09-07", missing: [], empty: true }]);
+    expect(scheduleGaps(entries, [], ["2026-09-07"], EMPTY_CALENDAR)).toEqual([{ date: "2026-09-07", missing: [], empty: true, allAbsent: false }]);
   });
 
   it("праздник в будни пустым днём не считается, рабочая суббота — считается", () => {
     const cal = calendarFrom([{ date: "2026-09-07", kind: "holiday" }, { date: "2026-09-12", kind: "workday" }]);
-    expect(scheduleGaps([], [], ["2026-09-07", "2026-09-12"], cal)).toEqual([{ date: "2026-09-12", missing: [], empty: true }]);
+    expect(scheduleGaps([], [], ["2026-09-07", "2026-09-12"], cal)).toEqual([{ date: "2026-09-12", missing: [], empty: true, allAbsent: false }]);
   });
 
   it("многодневное дежурство закрывает каждый свой день", () => {
@@ -230,8 +292,8 @@ describe("coverageAdviceText", () => {
 
   it("называет день и что именно не так, по строке на день", () => {
     const text = coverageAdviceText([
-      { date: "2026-09-09", missing: [], empty: true },
-      { date: "2026-09-11", missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }], empty: false },
+      { date: "2026-09-09", missing: [], empty: true, allAbsent: false },
+      { date: "2026-09-11", missing: [{ templateId: 1, name: "Утро", need: 2, have: 1 }], empty: false, allAbsent: false },
     ])!;
     expect(text).toContain("Ср 9 сентября — смен нет");
     expect(text).toContain("Пт 11 сентября — не хватает: Утро — 1");
@@ -247,15 +309,15 @@ describe("weekShortfall — нехватка недели одним ответ�
 
   it("закрытая неделя — ни дней, ни числа", () => {
     const entries = [
-      { date: WEEK[0]!, employeeId: 1, templateId: 10 },
-      { date: WEEK[0]!, employeeId: 2, templateId: 10 },
-      { date: WEEK[2]!, employeeId: 1, templateId: 10 },
+      { date: WEEK[0]!, employeeId: 1, templateId: 10, category: "shift" as const },
+      { date: WEEK[0]!, employeeId: 2, templateId: 10, category: "shift" as const },
+      { date: WEEK[2]!, employeeId: 1, templateId: 10, category: "shift" as const },
     ];
     expect(weekShortfall(entries, [morning], WEEK, EMPTY_CALENDAR)).toEqual({ days: [], total: 0, withoutNorm: [] });
   });
 
   it("отдаёт только дни с дырой и число людей по каждому", () => {
-    const entries = [{ date: WEEK[0]!, employeeId: 1, templateId: 10 }];
+    const entries = [{ date: WEEK[0]!, employeeId: 1, templateId: 10, category: "shift" as const }];
     const result = weekShortfall(entries, [morning, duty], WEEK, EMPTY_CALENDAR);
     expect(result.days.map((day) => [day.date, day.short])).toEqual([[WEEK[0], 2], [WEEK[2], 1]]);
     expect(result.days[0]!.missing.map((kind) => kind.name)).toEqual(["Утро", "Дежурство"]);
@@ -373,12 +435,12 @@ describe("shortfallStatus — состояние плашки над графи�
   });
 
   it("норма закрыта — closed", () => {
-    const entries = [{ date: "2026-08-24", employeeId: 7, templateId: 1 }];
+    const entries = [{ date: "2026-08-24", employeeId: 7, templateId: 1, category: "shift" as const }];
     expect(status(entries, [kind(1, [1, 0, 0, 0, 0, 0, 0])])).toEqual({ state: "closed", unsetCount: 0 });
   });
 
   it("closed помнит, сколько видов без нормы", () => {
-    const entries = [{ date: "2026-08-24", employeeId: 7, templateId: 1 }];
+    const entries = [{ date: "2026-08-24", employeeId: 7, templateId: 1, category: "shift" as const }];
     expect(status(entries, [kind(1, [1, 0, 0, 0, 0, 0, 0]), kind(2, [0, 0, 0, 0, 0, 0, 0], "duty")]))
       .toEqual({ state: "closed", unsetCount: 1 });
   });

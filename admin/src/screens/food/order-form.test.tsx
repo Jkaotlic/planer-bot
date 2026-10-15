@@ -52,7 +52,22 @@ describe("консоль: новый заказ", () => {
     const el = await mount(OrderForm, p);
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Разослать"));
-    await waitFor(() => expect(el.textContent).toContain("Отправлено: 1. Не дошло: Дима"));
+    await waitFor(() => expect(el.textContent).toContain("Отправлено коллегам: 1. Не дошло: Дима"));
+    expect(p.onDone).not.toHaveBeenCalled();
+    await click(button(el, "ОК"));
+    expect(p.onDone).toHaveBeenCalledWith(42);
+  });
+
+  it("письмо не дошло ни до кого — предупреждение и «ОК», заголовок не врёт «отправлен»", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: orderView({ id: 42 }), delivered: 0, unreachable: [], deliveredToNobody: true });
+    const p = props();
+    const el = await mount(OrderForm, p);
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Разослать"));
+    await waitFor(() => expect(el.textContent).toContain("Письмо не дошло ни до кого из коллег — проверь бота."));
+    expect(el.textContent).toContain("Заказ заведён");
+    expect(el.textContent).not.toContain("Заказ отправлен");
     expect(p.onDone).not.toHaveBeenCalled();
     await click(button(el, "ОК"));
     expect(p.onDone).toHaveBeenCalledWith(42);

@@ -64,7 +64,23 @@ describe("OrderForm", () => {
     const el = await mountForm(onDone);
     await act(async () => byText(el, "Разослать").click());
     await settle();
-    expect(el.textContent).toContain("Отправлено: 1. Не дошло: Марк");
+    expect(el.textContent).toContain("Отправлено коллегам: 1. Не дошло: Марк");
+    expect(onDone).not.toHaveBeenCalled();
+    await act(async () => byText(el, "ОК").click());
+    expect(onDone).toHaveBeenCalledWith(9);
+  });
+
+  it("письмо не дошло ни до кого — предупреждение и «ОК», заголовок не врёт «отправлен»", async () => {
+    vi.spyOn(apiClient, "getFoodPlaces").mockResolvedValue([]);
+    vi.spyOn(apiClient, "getTeamAudience").mockResolvedValue([{ id: 2, displayName: "Игорь", reachable: true, role: "worker", onShift: true }]);
+    vi.spyOn(apiClient, "createOrder").mockResolvedValue({ order: { id: 9 } as never, delivered: 0, unreachable: [], deliveredToNobody: true });
+    const onDone = vi.fn();
+    const el = await mountForm(onDone);
+    await act(async () => byText(el, "Разослать").click());
+    await settle();
+    expect(el.textContent).toContain("Письмо не дошло ни до кого из коллег — проверь бота.");
+    expect(el.textContent).toContain("Заказ заведён");
+    expect(el.textContent).not.toContain("Заказ отправлен");
     expect(onDone).not.toHaveBeenCalled();
     await act(async () => byText(el, "ОК").click());
     expect(onDone).toHaveBeenCalledWith(9);

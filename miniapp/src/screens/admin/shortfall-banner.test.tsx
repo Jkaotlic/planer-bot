@@ -165,7 +165,7 @@ describe("плашка нехватки над графиком мини-апп�
     const onScheduleChanged = vi.fn();
     vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
     vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({ shifts: [], employees: [], calendar: [] } as never);
-    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(undefined as never);
+    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);

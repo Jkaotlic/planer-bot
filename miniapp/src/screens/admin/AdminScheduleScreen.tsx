@@ -10,6 +10,7 @@ import {
   dayOfWeek,
   dayOffLabel,
   isDayOff,
+  weekendLeftoversWarning,
   missingCoverageUnlessAcked,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
@@ -22,8 +23,10 @@ import {
   shortfallStatus,
   specialDayKind,
   specialDays,
+  waitsForCover,
   weekShortfall,
   workPresets,
+  ENTRY_TITLE_MAX,
 } from "@planer/shared";
 import {
   apiClient,
@@ -331,11 +334,19 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   // пришедшую из календаря — только перекрыть своей.
   const dayOffText = dayOffLabel(selectedDate, selectedDayRow?.kind, selectedDayRow?.note ?? null);
   const [dayOffBusy, setDayOffBusy] = useState(false);
+  // Предупреждение про выходные смены, оставшиеся на дне, ставшем рабочим.
+  // Своё состояние, а не общий `notice`: тот рисуется наверху экрана, а это
+  // сказано про кнопку, которую только что нажали, и стоять должно рядом с ней.
+  // Привязано к дате: на другом дне оно было бы неправдой.
+  const [dayWarning, setDayWarning] = useState<{ date: string; text: string } | null>(null);
 
   async function markDay(kind: "holiday" | "workday" | null) {
     setDayOffBusy(true);
+    setDayWarning(null);
     try {
-      await apiClient.setCalendarDay(selectedDate, kind);
+      const { weekendLeftovers } = await apiClient.setCalendarDay(selectedDate, kind);
+      const text = weekendLeftoversWarning(weekendLeftovers);
+      if (text) setDayWarning({ date: selectedDate, text });
       await loadWeek(from, to);
       onScheduleChanged?.();
     } catch (err) {
@@ -511,6 +522,11 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
                       </ActionButton>
                     )}
                   </div>
+                  {dayWarning?.date === selectedDate && (
+                    <div role="status" style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.4 }}>
+                      {dayWarning.text}
+                    </div>
+                  )}
                   {dayHint && (
                     <div
                       role="status"
@@ -526,7 +542,7 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
                   </Card>
                 ) : (
                   <Card flush>
-                    {dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} onTap={() => setEditing(s)} />)}
+                    {dayEntries.map((s) => <EntryRow key={s.id} shift={s} templates={templates} uncovered={waitsForCover(s, dayEntries, selectedDate)} onTap={() => setEditing(s)} />)}
                   </Card>
                 )}
               </>
@@ -702,7 +718,7 @@ export function badgeLabel(title: string | null, category: Category): string {
   return rest && prefix === "Дежурство" ? rest : full;
 }
 
-function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readonly Template[]; onTap: () => void }) {
+function EntryRow({ shift, templates, uncovered, onTap }: { shift: Shift; templates: readonly Template[]; uncovered: boolean; onTap: () => void }) {
   const name = shift.employeeName ?? "— не назначен —";
   const palette = personPalette(shift.employeeId);
   // The badge shows *which* preset (Утро/День/…) in that preset's own colour, so
@@ -740,6 +756,10 @@ function EntryRow({ shift, templates, onTap }: { shift: Shift; templates: readon
       subtitle={
         <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px 8px" }}>
           <span>{formatTimeRange(shift)}</span>
+          {/* Человек в этот день отсутствует (`waitsForCover`): нехватка эту смену
+              уже не считает закрытой, и строка без пометки спорила бы с подсказкой
+              «Не хватает» над списком. Словами — цвет без слов не прочесть. */}
+          {uncovered && <span style={{ color: "var(--tgui--destructive_text_color)", fontWeight: 600 }}>ждёт замены</span>}
           <span className="entry-badge entry-badge--below">{badge}</span>
         </span>
       }
@@ -1020,6 +1040,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
         <Input
           header="Место / примечание"
           placeholder={category === "duty" ? "Например, Вавилова" : "Например, Ярмарка вакансий"}
+          maxLength={ENTRY_TITLE_MAX}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />

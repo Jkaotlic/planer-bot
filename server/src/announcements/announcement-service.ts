@@ -2,7 +2,7 @@ import type { Bot, InlineKeyboard } from "grammy";
 import { addressOf, announcementRole, type AnnouncementRecipient } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
-import { getEmployeeById, listActive } from "../repo/employees";
+import { employeesByIds, getEmployeeById, listActive } from "../repo/employees";
 import { notifyUser } from "../bot/notify";
 
 /**
@@ -64,11 +64,16 @@ export function announcementRecipients(
   // Без дедупа человек получил бы письмо дважды, а `delivered`/`intended` и имя
   // в `unreachable` задвоились бы. Дедуп здесь, а не в маршруте: тогда защита
   // действует на оба входа функции, а не только на HTTP.
+  //
+  // Выбранные — одним запросом (`employeesByIds`), а не на каждый id; порядок —
+  // порядок выбора, как и раньше.
+  const picked = audience.kind === "all" ? [] : [...new Set(audience.employeeIds)];
+  const pickedPeople = employeesByIds(db, picked);
   const pool =
     audience.kind === "all"
       ? listActive(db).filter((e) => e.id !== senderId)
-      : [...new Set(audience.employeeIds)]
-          .map((id) => getEmployeeById(db, id))
+      : picked
+          .map((id) => pickedPeople.get(id))
           .filter((e): e is Employee => e != null && e.id !== senderId);
 
   const archived = pool.filter((e) => !e.isActive);

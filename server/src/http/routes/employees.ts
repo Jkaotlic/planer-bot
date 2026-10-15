@@ -10,6 +10,8 @@ import {
   type EmployeeInviteResponse,
   type EmployeesResponse,
   PREFERRED_NAME_MAX,
+  EMPLOYEE_NAME_MAX,
+  tooLongText,
   addressOf,
   canSwap,
   isAbsence,
@@ -18,7 +20,8 @@ import {
 } from "@planer/shared";
 import { notifyUser, swapExpiredText } from "../../bot/notify";
 import { deleteShift, listShiftsByEmployee } from "../../repo/shifts";
-import { cancelHandoversForEntryDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
+import { cancelHandoversForEntryDb, cancelLiveHandoversOfEmployeeDb, detachHandoversFromEntry, fanOut, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
+import { getHandover, listOffersWaitingOn } from "../../repo/handovers";
 import { editClosedRequest, sickApprovalDeps, takeRequestOutOfPending, type ClosedRequest } from "../../sick-approval/sick-approval-service";
 import { getVacantSlot, listAssignmentsForEmployee, removeAllInterestOf } from "../../repo/weekend";
 import { unassign } from "../../weekend/weekend-service";
@@ -114,6 +117,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
       return c.json({ error: "displayName is required" }, 400);
     }
+    if (body.displayName.length > EMPLOYEE_NAME_MAX) return c.json({ error: tooLongText("Имя", EMPLOYEE_NAME_MAX) }, 400);
     const clash = findActiveByDisplayName(db, body.displayName);
     if (clash) return c.json({ error: nameTakenError(clash.displayName) }, 409);
     const inviteToken = randomBytes(16).toString("hex");
@@ -158,6 +162,10 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
 
     if (hasName && (typeof body.displayName !== "string" || body.displayName.trim().length === 0)) {
       return c.json({ error: "displayName is required" }, 400);
+    }
+    // Имя стоит почти в каждом письме бота — потолок тот же, что при заведении.
+    if (hasName && (body.displayName as string).length > EMPLOYEE_NAME_MAX) {
+      return c.json({ error: tooLongText("Имя", EMPLOYEE_NAME_MAX) }, 400);
     }
     // null clears it — nobody is obliged to give a birthday.
     if (hasBirthday && body.birthDate !== null && (typeof body.birthDate !== "string" || !isBirthDate(body.birthDate))) {
@@ -372,11 +380,16 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
         if (entry.category === "sick_leave") {
           const closed = takeRequestOutOfPending(db, entry, "🗑 Больничного уже нет — сотрудника убрали в архив");
           if (closed) closedRequests.push(closed);
+          // Передачу, которую тут перевесит на идущий больничный, погасит проход ниже.
           cancelledHandovers.push(...cancelHandoversForEntryDb(db, entry.id, []));
           detachHandoversFromEntry(db, entry.id);
         }
         if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
       }
+      // Остальные живые передачи — по идущему больничному, который мы не трогаем, и
+      // перевешенные на него с удалённых выше — гаснут тем же админским «отбоем»: их смены
+      // ниже уходят в «Не назначено». Перевешенная гаснет только здесь, поэтому письмо одно.
+      cancelledHandovers.push(...cancelLiveHandoversOfEmployeeDb(db, id));
       // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
       const freedShifts = listShiftsByEmployee(db, id).filter((s) => s.date >= today).length;
       const archived = archiveEmployee(db, id, today);
@@ -392,6 +405,15 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
     for (const closed of closedRequests) await editClosedRequest(approvalDeps, closed);
     await notifyCancelledHandovers(approvalDeps, cancelledHandovers, { byAdmin: true });
+    // Личные предложения смен, ждавшие его ответа, — сразу веером остальным. Взять смену
+    // архивный уже не может (`canSwap`), а тик ждал бы его молчания `handoverFanHours`:
+    // часы, потерянные на смене, которая скоро. Веер — тот же, что пускает тик, с тем же
+    // безличным текстом; ему самому ничего — `handoverCandidates` архивных не видит.
+    // Перечитываем перед каждым: пока уходил веер предыдущего, дающий мог выбрать другого.
+    for (const offer of listOffersWaitingOn(db, id)) {
+      const current = getHandover(db, offer.id);
+      if (current?.status === "offered" && current.offeredToEmployeeId === id) await fanOut(approvalDeps, offer.id);
+    }
     if (bot) {
       for (const request of pending) {
         const other = request.fromEmployeeId === id ? request.toEmployeeId : request.fromEmployeeId;

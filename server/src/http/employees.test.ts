@@ -15,7 +15,7 @@ import { signInitData } from "../auth/telegram";
 import type { Config } from "../config";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
-import { adminEmployeeSchema, adminEmployeesResponseSchema, employeesResponseSchema } from "@planer/shared";
+import { EMPLOYEE_NAME_MAX, adminEmployeeSchema, adminEmployeesResponseSchema, employeesResponseSchema } from "@planer/shared";
 
 const config = testConfig();
 const configWithBotUsername: Config = { ...config, botUsername: "planer_bot" };
@@ -1377,5 +1377,28 @@ describe("архивация гасит хвосты", () => {
     expect(getShift(db, ongoing.id)).toBeDefined();
     if (past.ok) expect(getAssignment(db, past.assignment.id)).toBeDefined();
     expect(listInterestedEmployeeIds(db, openSlot.id)).not.toContain(anya.id);
+  });
+});
+
+/** Имя стоит почти в каждом письме бота — у него есть потолок, как у прочих текстов. */
+describe("имя сотрудника — с потолком", () => {
+  it("POST и PATCH: длиннее EMPLOYEE_NAME_MAX — 400 словами; ровно потолок — проходит", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const tooLong = "Я".repeat(EMPLOYEE_NAME_MAX + 1);
+
+    const created = await app.request("/api/admin/employees", authedJson(admin, { displayName: tooLong }));
+    expect(created.status).toBe(400);
+    expect((await created.json()).error).toBe("Имя — не длиннее 100 знаков");
+
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const renamed = await app.request(`/api/admin/employees/${anya.id}`, authedJson(admin, { displayName: tooLong }, "PATCH"));
+    expect(renamed.status).toBe(400);
+    expect((await renamed.json()).error).toBe("Имя — не длиннее 100 знаков");
+    expect(getEmployeeById(db, anya.id)!.displayName).toBe("Аня");
+
+    const exact = await app.request("/api/admin/employees", authedJson(admin, { displayName: "Я".repeat(EMPLOYEE_NAME_MAX) }));
+    expect(exact.status).toBe(201);
   });
 });

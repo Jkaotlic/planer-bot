@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { shiftTemplates, type ShiftTemplate } from "../db/schema";
 
@@ -13,6 +13,17 @@ export function listActiveTemplates(db: Db): ShiftTemplate[] {
 
 export function getTemplate(db: Db, id: number): ShiftTemplate | undefined {
   return db.select().from(shiftTemplates).where(eq(shiftTemplates.id, id)).get();
+}
+
+/**
+ * Те же строки, что `getTemplate` (снятые с использования включены), — для многих id
+ * одним запросом: тик напоминаний смотрит вид смены у каждой записи дня, и запрос на
+ * запись рос квадратом от команды.
+ */
+export function templatesByIds(db: Db, ids: Iterable<number | null>): Map<number, ShiftTemplate> {
+  const unique = [...new Set(ids)].filter((id): id is number => id != null);
+  if (unique.length === 0) return new Map();
+  return new Map(db.select().from(shiftTemplates).where(inArray(shiftTemplates.id, unique)).all().map((t) => [t.id, t]));
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   type SchedulePalette,
 } from "./schedule-palette";
 import { addDaysIso } from "./week-dates";
+import { waitsForCover } from "./absence";
 
 /**
  * Сетка «команда × неделя»: какая запись попадает в какую клетку, какой буквой
@@ -56,6 +57,9 @@ export interface TeamEntryView<E extends ScheduleEntryLike = ScheduleEntryLike> 
   palette: SchedulePalette | null;
   /** Всегда проставляет `toEntryView`; необязательное, чтобы литералы в тестах фронтов не ломались. */
   pending?: boolean;
+  /** Работа на человеке, которого в этот день нет (`waitsForCover`). Проставляет
+   *  `buildWeekModel`; `false` всегда, если его не попросили метить. */
+  awaitsCover?: boolean;
 }
 
 export interface WeekCell<E extends ScheduleEntryLike = ScheduleEntryLike> {
@@ -139,11 +143,17 @@ function weekCell<E extends ScheduleEntryLike>(
   employeeId: number | null,
   shifts: readonly E[],
   templates: readonly SchedulePresetLike[],
+  markAwaitingCover: boolean,
 ): WeekCell<E> {
-  const entries = shifts
-    .filter((shift) => shift.employeeId === employeeId && coversDate(shift, date))
+  const mine = shifts.filter((shift) => shift.employeeId === employeeId && coversDate(shift, date));
+  // Записей одной клетки хватает правилу: отсутствие, которое делает смену дырой, —
+  // запись того же человека на тот же день, то есть в этой же клетке.
+  const entries = [...mine]
     .sort((a, b) => compareShifts(a, b, templates))
-    .map((shift) => toEntryView(shift, templates, date));
+    .map((shift) => ({
+      ...toEntryView(shift, templates, date),
+      awaitsCover: markAwaitingCover && waitsForCover(shift, mine, date),
+    }));
   return {
     date,
     entries,
@@ -156,7 +166,15 @@ export function buildWeekModel<E extends ScheduleEntryLike>(
   mondayIso: string,
   schedule: { employees: readonly TeamMemberLike[]; shifts: readonly E[] },
   templates: readonly SchedulePresetLike[],
+  /**
+   * `markAwaitingCover` — метить смену на отсутствующем «ждёт замены». Просит экран
+   * мини-аппа: там метка — рамка клетки, и легенда её объясняет. Картинка бота по
+   * /week не просит: PNG этой рамки не рисует, а строка легенды про квадрат, которого
+   * не видно, объясняла бы ничто (тот же выбор, что с «ждёт ОК» в `week-image.ts`).
+   */
+  opts: { markAwaitingCover?: boolean } = {},
 ): WeekModel<E> {
+  const mark = opts.markAwaitingCover === true;
   // Отличие от копии в мини-аппе: дни считаются строковой арифметикой, а не
   // через `new Date(iso + "T12:00:00")`. Результат тот же, но на сервере в
   // расчёт не попадает часовой пояс машины.
@@ -169,7 +187,7 @@ export function buildWeekModel<E extends ScheduleEntryLike>(
   const rows: WeekRow<E>[] = employees.map((employee) => ({
     employeeId: employee.id,
     displayName: employee.displayName,
-    cells: days.map((date) => weekCell(date, employee.id, schedule.shifts, templates)),
+    cells: days.map((date) => weekCell(date, employee.id, schedule.shifts, templates, mark)),
   }));
   if (
     schedule.shifts.some(
@@ -179,7 +197,7 @@ export function buildWeekModel<E extends ScheduleEntryLike>(
     rows.push({
       employeeId: null,
       displayName: "Не назначено",
-      cells: days.map((date) => weekCell(date, null, schedule.shifts, templates)),
+      cells: days.map((date) => weekCell(date, null, schedule.shifts, templates, mark)),
     });
   }
   return { days, rows };
@@ -198,6 +216,8 @@ export interface WeekLegendItem {
   category: EntryCategory | null;
   /** Строка про больничный, ждущий ОК: та же буква, но бледный квадрат в пунктире. */
   pending?: boolean;
+  /** Строка про смену на отсутствующем: та же буква, квадрат в рамке цвета нехватки. */
+  awaitsCover?: boolean;
 }
 
 /** A one-off entry with no preset behind it; the grid draws it as a dot. */
@@ -225,7 +245,12 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
       // Ждущий ОК — отдельная строка с той же буквой: квадрат другой (бледный,
       // в пунктире), и легенда обязана объяснить и его.
       const pendingKey = entry.pending ? ":pending" : "";
-      const key = entry.palette ? `${entry.palette.code}${pendingKey}` : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}`;
+      // «Ждёт замены» — так же: буква та же, а квадрат в рамке, и без своей строки
+      // рамку не прочесть.
+      const coverKey = entry.awaitsCover ? ":cover" : "";
+      const key = entry.palette
+        ? `${entry.palette.code}${pendingKey}${coverKey}`
+        : `${FALLBACK_LEGEND_CODE}:${entry.shift.category}${coverKey}`;
       // Квадрат категории (отпуск, командировка, мероприятие) стоит за СОСТОЯНИЕ,
       // а не за заголовок конкретной записи: у разных людей заголовки разные, и
       // легенда склеивала их через « · » — строка росла, а объясняла хуже.
@@ -237,7 +262,7 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
       const base = entry.palette && categoryExact && entry.palette.code === categoryExact.code
         ? categoryLabel(entry.shift.category)
         : entry.title;
-      const title = entry.pending ? `${base} (ждёт ОК)` : base;
+      const title = entry.pending ? `${base} (ждёт ОК)` : entry.awaitsCover ? `${base} (ждёт замены)` : base;
       const existing = seen.get(key);
       if (existing) {
         existing.titles.add(title);
@@ -250,6 +275,7 @@ export function buildWeekLegend(model: WeekModel<ScheduleEntryLike>): WeekLegend
           palette: entry.palette,
           category: entry.palette ? null : entry.shift.category,
           pending: entry.pending === true,
+          awaitsCover: entry.awaitsCover === true,
         },
         titles: new Set([title]),
       });

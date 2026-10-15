@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Bot } from "grammy";
 import { createBot, FALLBACK_TEXT } from "./bot";
+import { addAnswer, undoAnswer } from "./food-handlers";
 import { recordApi, stubBotInfo } from "./testbot";
 import { BTN_SERVICES, LEGACY_BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
@@ -12,6 +13,7 @@ import { orderPayments } from "../orders/order-payment-service";
 import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 
 const config = testConfig();
 let updateId = 1;
@@ -223,6 +225,24 @@ describe("колбэки заказа", () => {
     expect(api.answers.at(-1)).toMatch(/не приходил/);
   });
 
+  it("«Убрать» называет убранное: что и сколько осталось; кг — весом", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    await tap(bot, 333, `order:undo:${order.id}`);
+    expect(api.answers.at(-1)).toBe("− Шаурма (осталось ×1)");
+    await tap(bot, 333, `order:undo:${order.id}`);
+    expect(api.answers.at(-1)).toBe("− Шаурма (убрал совсем)");
+    const place = createPlace(db, { name: "Рынок", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const market = createOrder(db, {
+      createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+    });
+    for (let k = 0; k < 3; k++) await tap(bot, 333, `order:add:${market.id}:${place.menu[0]!.id}`);
+    await tap(bot, 333, `order:undo:${market.id}`);
+    expect(api.answers.at(-1)).toBe("− Икра кетовая 0,4 кг (осталось 0,8 кг)");
+  });
+
   it("«Закрыть приём» — только запускающему; после закрытия тап по блюду отвечает «Приём закрыт»", async () => {
     const { db, bot, order, shawarmaId } = stage();
     const api = recordApi(bot);
@@ -295,6 +315,34 @@ describe("колбэки заказа", () => {
     const text = api.sent.at(-1)!.text;
     expect(text).toContain("🛒 Аня: Икра, 09.10");
     expect(text).toContain("🍱 Аня: Шаурмечная");
+  });
+});
+
+describe("«Сервисы» при сорока открытых сборах и опросах", () => {
+  it("одно письмо в пределе: первые строки, «…и ещё N» со ссылкой на кнопку, хвост про QR на месте", async () => {
+    const { db, bot, igor, order } = stage();
+    // Имя и названия — на потолках (`EMPLOYEE_NAME_MAX`, `FOOD_TEXT_MAX`, `POLL_QUESTION_MAX`):
+    // 20 сборов и 20 опросов (столько отдают `listOrdersFor`/`listPollsFor`) — больше 10 000 знаков.
+    const boss = person(db, "Марк ".padEnd(100, "к"), 555);
+    for (let i = 0; i < 20; i += 1) {
+      createOrder(db, {
+        createdBy: boss.id, placeId: order.placeId, title: `Сбор ${String(i).padStart(2, "0")} `.padEnd(200, "с"),
+        allowCustom: false, note: null, payHint: null, closesAt: null, recipientIds: [boss.id, igor.id],
+      });
+      createPoll(db, { createdBy: boss.id, question: `Опрос ${String(i).padStart(2, "0")} `.padEnd(200, "о"), closesAt: null, recipientIds: [boss.id, igor.id] });
+    }
+    const api = recordApi(bot);
+    await say(bot, 333, BTN_SERVICES);
+    expect(api.sent).toHaveLength(1);
+    const text = api.sent.at(-1)!.text as string;
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_TEXT_SAFE_MAX);
+    const shown = text.split("\n").filter((l) => /^(🛒|🍱|🗳) /.test(l)).length;
+    const hidden = Number(text.match(/…и ещё (\d+) — все в «📋 Заказы и опросы» \(кнопка ниже\)/)?.[1]);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown + hidden).toBe(40);
+    expect(text).toContain("пришли ссылку");
+    const buttons = (api.sent.at(-1)!.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text);
+    expect(buttons).toContain("📋 Заказы и опросы");
   });
 });
 
@@ -483,5 +531,30 @@ describe("закрытие, когда Telegram не принял ответ н�
     expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
     expect(api.sent.some((m) => m.chat_id === 111 && m.text.includes("Что заказать:"))).toBe(true);
     expect(api.sent.some((m) => m.chat_id === 333 && m.text.startsWith("💸"))).toBe(true);
+  });
+});
+
+/**
+ * Telegram не показывает ответ на тап длиннее 200 знаков — вызов падает, и
+ * человек видит вечные часики. Имя блюда бывает в 200 знаков само по себе.
+ */
+describe("ответ на тап не длиннее 200 знаков", () => {
+  const LONG = "Ш".repeat(200);
+
+  it("«＋»: длинное имя режется с многоточием, количество остаётся целым", () => {
+    const text = addAnswer({ name: LONG, unit: "kg", stepGrams: 400, qty: 3 });
+    expect(text.length).toBeLessThanOrEqual(200);
+    expect(text).toMatch(/…\s\(1,2 кг\)$/);
+    expect(addAnswer({ name: "Шаурма", unit: "pcs", stepGrams: null, qty: 1 })).toBe("＋ Шаурма (×1)");
+  });
+
+  it("«↩️ Убрать»: то же для обоих хвостов", () => {
+    const left = undoAnswer({ name: LONG, unit: "kg", stepGrams: 400, qtyLeft: 2 });
+    expect(left.length).toBeLessThanOrEqual(200);
+    expect(left).toMatch(/…\s0,4 кг \(осталось 0,8 кг\)$/);
+    const gone = undoAnswer({ name: LONG, unit: "pcs", stepGrams: null, qtyLeft: 0 });
+    expect(gone.length).toBeLessThanOrEqual(200);
+    expect(gone).toMatch(/…\s\(убрал совсем\)$/);
+    expect(undoAnswer({ name: "Шаурма", unit: "pcs", stepGrams: null, qtyLeft: 1 })).toBe("− Шаурма (осталось ×1)");
   });
 });

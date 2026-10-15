@@ -41,19 +41,17 @@ describe("праздники в реальном клиенте консоли",
     expect(sent(spy)).toMatchObject({ url: "/api/admin/holidays/refresh", method: "POST" });
   });
 
-  it("отметка дня — PUT /api/admin/calendar/:date; снятая отметка отдаёт null", async () => {
-    const spy = answer({ date: "2026-12-31", kind: null, note: null, source: null });
-    await expect(realClient.setCalendarDay("2026-12-31", null)).resolves.toBeNull();
+  it("отметка дня — PUT /api/admin/calendar/:date; снятая отметка без строки отдаёт day: null", async () => {
+    const spy = answer({ date: "2026-12-31", kind: null, note: null, source: null, weekendLeftovers: 0 });
+    await expect(realClient.setCalendarDay("2026-12-31", null)).resolves.toEqual({ day: null, weekendLeftovers: 0 });
     expect(sent(spy)).toEqual({ url: "/api/admin/calendar/2026-12-31", method: "PUT", body: { kind: null, note: null } });
   });
 
-  it("поставленная отметка возвращается строкой календаря", async () => {
-    answer({ date: "2026-06-12", kind: "workday", note: null, source: "manual" });
+  it("поставленная отметка возвращается строкой календаря и числом оставшихся выходных смен", async () => {
+    answer({ date: "2026-06-12", kind: "workday", note: null, source: "manual", weekendLeftovers: 3 });
     await expect(realClient.setCalendarDay("2026-06-12", "workday")).resolves.toEqual({
-      date: "2026-06-12",
-      kind: "workday",
-      note: null,
-      source: "manual",
+      day: { date: "2026-06-12", kind: "workday", note: null, source: "manual" },
+      weekendLeftovers: 3,
     });
   });
 });

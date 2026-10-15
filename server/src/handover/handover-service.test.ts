@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { eq } from "drizzle-orm";
 import { employees, shifts, auditLog, handovers as handoversTable, type Shift } from "../db/schema";
 import { getShift, deleteShift } from "../repo/shifts";
-import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
-import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, escalate } from "./handover-service";
+import { addDecline, createHandover, getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
+import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, detachHandoversFromEntry, escalate } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
 import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
@@ -133,6 +133,41 @@ describe("starting handovers for a sick leave", () => {
     expect(handover!.status).toBe("fanned");
     expect(handover!.escalatedAt).not.toBeNull();
     expect(auditTypes(db)).toContain("handover_escalated");
+  });
+});
+
+describe("два пересекающихся больничных — одна передача на смену", () => {
+  it("второй больничный не открывает вторую передачу смены, которую уже отдаёт первый", async () => {
+    // Иначе коллеги получают «Возьмёшь смену?» про одну и ту же смену дважды,
+    // а две живые передачи потом спорят, чья она.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const first = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const second = sickLeave(db, anya, "2026-08-13", "2026-08-14");
+    const work = shift(db, anya, "2026-08-13");
+
+    const fromFirst = await startHandovers(deps(db), { sickEntry: first, employeeId: anya });
+    const fromSecond = await startHandovers(deps(db), { sickEntry: second, employeeId: anya });
+
+    expect(fromFirst.map((h) => h.shiftId)).toEqual([work.id]);
+    expect(fromSecond).toEqual([]);
+    expect(db.select().from(handoversTable).where(eq(handoversTable.shiftId, work.id)).all()).toHaveLength(1);
+  });
+
+  it("закрытая передача (отменённая) не мешает новой", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    const first = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const second = sickLeave(db, anya, "2026-08-13", "2026-08-14");
+    const work = shift(db, anya, "2026-08-13");
+    const [old] = await startHandovers(deps(db), { sickEntry: first, employeeId: anya });
+    db.update(handoversTable).set({ status: "cancelled" }).where(eq(handoversTable.id, old!.id)).run();
+
+    const fromSecond = await startHandovers(deps(db), { sickEntry: second, employeeId: anya });
+
+    expect(fromSecond.map((h) => h.shiftId)).toEqual([work.id]);
   });
 });
 
@@ -420,6 +455,46 @@ describe("taking a shift", () => {
   });
 });
 
+describe("«Беру» только у того, кого сейчас спрашивают", () => {
+  it("после переадресации Марку прежний адресат Игорь смену не берёт — она ждёт Марка", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    await offerTo(deps(db), handover!.id, mark);
+
+    const byIgor = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(byIgor).toEqual({ ok: false, reason: "Это предложение уже ушло другому" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+    expect((await takeHandover(deps(db), handover!.id, mark, TODAY)).ok).toBe(true);
+    expect(getShift(db, work.id)?.employeeId).toBe(mark);
+  });
+
+  it("веер не берёт тот, кто уже сказал «Не могу», — остальные берут", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    await declineHandover(deps(db), handover!.id, igor);
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+
+    const byIgor = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(byIgor).toEqual({ ok: false, reason: "Ты уже ответил(а) «Не могу» на эту смену" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+    expect((await takeHandover(deps(db), handover!.id, mark, TODAY)).ok).toBe(true);
+  });
+});
+
 describe("cancelling", () => {
   it("kills the handovers a removed sick leave spawned and tells the people asked", async () => {
     const db = makeTestDb();
@@ -473,6 +548,125 @@ describe("cancelling", () => {
 
     expect(getHandover(db, handover!.id)?.status).toBe("taken");
     expect(getShift(db, work.id)?.employeeId).toBe(igor);
+  });
+});
+
+describe("тот же день покрывает второй больничный — передача не гаснет", () => {
+  /** Больничные A (12–13) и B (13–14), смена 13-го, передача по A предложена Игорю. */
+  async function twoSickLeaves(db: TestDb) {
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const first = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const second = sickLeave(db, anya, "2026-08-13", "2026-08-14");
+    const work = shift(db, anya, "2026-08-13");
+    const [handover] = await startHandovers(deps(db), { sickEntry: first, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    sent = [];
+    return { anya, igor, first, second, work, handover: handover! };
+  }
+
+  function liveOn(db: TestDb, shiftId: number) {
+    return db.select().from(handoversTable).where(eq(handoversTable.shiftId, shiftId)).all()
+      .filter((h) => h.status === "offered" || h.status === "fanned");
+  }
+
+  it("удалили больничный A — живая передача смены одна, и она по B; Игорю «отбой» не пишут", async () => {
+    const db = makeTestDb();
+    const { igor, first, second, work } = await twoSickLeaves(db);
+
+    await cancelHandoversForEntry(deps(db), first.id, []);
+    detachHandoversFromEntry(db, first.id);
+    deleteShift(db, first.id);
+
+    const live = liveOn(db, work.id);
+    expect(live).toHaveLength(1);
+    expect(live[0]!.sickEntryId).toBe(second.id);
+    // Предложение Игорю живо: Аня по-прежнему больна, смена по-прежнему ищет человека.
+    expect(live[0]!.offeredToEmployeeId).toBe(igor);
+    expect(sent).toEqual([]);
+  });
+
+  it("укоротили A так, что 13-е выпало, — передача переходит к B", async () => {
+    const db = makeTestDb();
+    const { first, second, work } = await twoSickLeaves(db);
+
+    await cancelHandoversForEntry(deps(db), first.id, ["2026-08-12"]);
+
+    expect(liveOn(db, work.id).map((h) => h.sickEntryId)).toEqual([second.id]);
+  });
+
+  it("B ещё ждёт «ОК» — передача гаснет, как раньше: неодобренный больничный смену не отдаёт", async () => {
+    const db = makeTestDb();
+    const { first, second, work } = await twoSickLeaves(db);
+    db.update(shifts).set({ approvalRequestedAt: new Date(NOW) }).where(eq(shifts.id, second.id)).run();
+
+    await cancelHandoversForEntry(deps(db), first.id, []);
+
+    expect(liveOn(db, work.id)).toEqual([]);
+  });
+
+  it("у B ждёт «ОК» только продление на 13-е — одобренное 14-е его не покрывает, передача гаснет", async () => {
+    const db = makeTestDb();
+    const { first, second, work } = await twoSickLeaves(db);
+    db.update(shifts)
+      .set({ approvalRequestedAt: new Date(NOW), approvedDate: "2026-08-14", approvedEndDate: "2026-08-14" })
+      .where(eq(shifts.id, second.id)).run();
+
+    await cancelHandoversForEntry(deps(db), first.id, []);
+
+    expect(liveOn(db, work.id)).toEqual([]);
+  });
+
+  it("продление B ждёт «ОК», но 13-е в одобренной части — передача переходит к B", async () => {
+    const db = makeTestDb();
+    const { first, second, work } = await twoSickLeaves(db);
+    db.update(shifts)
+      .set({ approvalRequestedAt: new Date(NOW), approvedDate: "2026-08-13", approvedEndDate: "2026-08-13" })
+      .where(eq(shifts.id, second.id)).run();
+
+    await cancelHandoversForEntry(deps(db), first.id, []);
+
+    expect(liveOn(db, work.id).map((h) => h.sickEntryId)).toEqual([second.id]);
+  });
+
+  // Основание сменилось мимо `cancelHandoversForEntryDb` (прямая правка записи в отпуск),
+  // тик ещё не прошёл. «Беру» и «предложить» обязаны спросить про второй больничный так же,
+  // как тик: иначе до тика они отвечали «больничный сняли», хотя Аня по-прежнему больна.
+  it("основание стало отпуском мимо отмены — «Беру» до тика работает и смена переходит", async () => {
+    const db = makeTestDb();
+    const { igor, first, second, work, handover } = await twoSickLeaves(db);
+    db.update(shifts).set({ category: "vacation" }).where(eq(shifts.id, first.id)).run();
+
+    const res = await takeHandover(deps(db), handover.id, igor, TODAY);
+
+    expect(res).toEqual({ ok: true });
+    expect(getShift(db, work.id)!.employeeId).toBe(igor);
+    expect(getHandover(db, handover.id)!.sickEntryId).toBe(second.id);
+  });
+
+  it("основание стало отпуском мимо отмены — «предложить» до тика работает", async () => {
+    const db = makeTestDb();
+    const { first, handover } = await twoSickLeaves(db);
+    const mark = person(db, "Марк");
+    db.update(shifts).set({ category: "vacation" }).where(eq(shifts.id, first.id)).run();
+
+    expect(await offerTo(deps(db), handover.id, mark)).toEqual({ ok: true });
+    expect(getHandover(db, handover.id)!.offeredToEmployeeId).toBe(mark);
+  });
+
+  it("второй больничный — другого человека — не держит чужую передачу", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const mark = person(db, "Марк");
+    person(db, "Игорь");
+    const first = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    sickLeave(db, mark, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13");
+    await startHandovers(deps(db), { sickEntry: first, employeeId: anya });
+
+    await cancelHandoversForEntry(deps(db), first.id, []);
+
+    expect(liveOn(db, work.id)).toEqual([]);
   });
 });
 
@@ -681,5 +875,28 @@ describe("«Беру» после смены категории больничн
 
     expect(outcome.ok).toBe(false);
     expect(getShift(db, work.id)!.employeeId).toBe(anya);
+  });
+});
+
+describe("escalate: имена отказавшихся — одним запросом", () => {
+  async function escalateWithDeclines(names: readonly string[]) {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const handover = createHandover(db, { shiftId: work.id, fromEmployeeId: anya, sickEntryId: sick.id, status: "fanned" });
+    for (const name of names) addDecline(db, handover.id, person(db, name));
+    sent = [];
+    const reads = await countEmployeeByIdLookups(db, () => escalate(deps(db), handover.id));
+    return { reads, letter: sent.find((m) => m.to === "admins")!.text };
+  }
+
+  it("четыре отказа читают людей столько же раз, сколько один; порядок отказов тот же", async () => {
+    // Раньше — getEmployeeById на каждого отказавшегося.
+    const one = await escalateWithDeclines(["Игорь"]);
+    const four = await escalateWithDeclines(["Марк", "Игорь", "Вера", "Олег"]);
+
+    expect(four.letter).toContain("Отказались: Марк, Игорь, Вера, Олег.");
+    expect(four.reads).toBe(one.reads);
   });
 });

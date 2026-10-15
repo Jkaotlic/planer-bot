@@ -1,3 +1,4 @@
+import { COLLECTION_TEXT_MAX, COLLECTION_TITLE_MAX, tooLongText } from "@planer/shared";
 import type { CollectionPatch } from "../collections/collection-service";
 
 /**
@@ -21,7 +22,7 @@ export function parseCollectionBody(raw: unknown, opts: { requireTitle: boolean 
     if (typeof body.title !== "string") return { ok: false, error: "Повод должен быть текстом" };
     const title = body.title.trim();
     if (title.length === 0) return { ok: false, error: "Повод не может быть пустым" };
-    if (title.length > 80) return { ok: false, error: "Повод длиннее 80 символов" };
+    if (title.length > COLLECTION_TITLE_MAX) return { ok: false, error: tooLongText("Повод", COLLECTION_TITLE_MAX) };
     value.title = title;
   } else if (opts.requireTitle) {
     return { ok: false, error: "Повод обязателен" };
@@ -60,7 +61,7 @@ export function parseCollectionBody(raw: unknown, opts: { requireTitle: boolean 
       return { ok: false, error: "messageText должен быть текстом или null" };
     }
     const text = typeof body.messageText === "string" ? body.messageText.trim() : null;
-    if (text && text.length > 3000) return { ok: false, error: "Текст длиннее 3000 символов" };
+    if (text && text.length > COLLECTION_TEXT_MAX) return { ok: false, error: tooLongText("Свой текст", COLLECTION_TEXT_MAX) };
     value.messageText = text || null;
   }
 

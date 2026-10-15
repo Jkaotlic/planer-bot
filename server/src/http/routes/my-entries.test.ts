@@ -159,6 +159,25 @@ describe("POST /api/my/entries", () => {
     expect(res.status).toBe(400);
   });
 
+  it("слишком длинное название или место — отказ словами, а не «invalid»", async () => {
+    const db = makeTestDb();
+    worker(db, 509, "Аня");
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 509);
+
+    const title = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "offsite", date: day(1), start: "14:00", end: "16:00", title: "я".repeat(201),
+    })));
+    expect(title.status).toBe(400);
+    expect((await title.json()).error).toBe("Название — не длиннее 200 знаков");
+
+    const location = await app.request(new Request("http://x/api/my/entries", authed(token, {
+      category: "shift", date: day(1), start: "09:00", end: "18:00", location: "я".repeat(201),
+    })));
+    expect(location.status).toBe(400);
+    expect((await location.json()).error).toBe("Место — не длиннее 200 знаков");
+  });
+
   it("journals it as a self entry, not as an admin one", async () => {
     const db = makeTestDb();
     worker(db, 506, "Аня");
@@ -613,6 +632,27 @@ describe("DELETE /api/my/entries/:id", () => {
 
     expect(res.status).toBe(404);
     expect(getShift(db, theirs.id)).toBeDefined();
+  });
+});
+
+describe("DELETE больничного, когда тот же день покрывает второй одобренный", () => {
+  it("удалила больничный A — у смены одна живая передача, и она по B", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 561, "Аня");
+    worker(db, 562, "Игорь");
+    const work = createShift(db, { employeeId: me.id, date: day(2), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const first = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" });
+    const second = createShift(db, { employeeId: me.id, date: day(2), endDate: day(3), category: "sick_leave" });
+    await startHandovers({ db, config, messenger: { offer: async () => {}, fan: async () => {}, plain: async () => {}, admins: async () => {}, adminsAlways: async () => ({ attempted: 0, delivered: 0 }) } }, { sickEntry: first, employeeId: me.id });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 561);
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${first.id}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    expect(getShift(db, first.id)).toBeUndefined();
+    const live = listHandoversForEntry(db, second.id).filter((h) => h.status === "offered" || h.status === "fanned");
+    expect(live.map((h) => h.shiftId)).toEqual([work.id]);
   });
 });
 

@@ -7,6 +7,8 @@ import { createShift, listShiftsInRange } from "../repo/shifts";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { EMPLOYEE_NAME_MAX, addDaysIso } from "@planer/shared";
+import { MAX_RANGE_DAYS } from "./entry-schema";
 
 /** A bot that records what it was asked to send instead of talking to Telegram. */
 function fakeBot() {
@@ -481,5 +483,59 @@ describe("the «?» entry is the import's alone", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * Файл может нести то, что ручки сотрудников и записей отвергли бы: имя длиннее
+ * потолка и отпуск длиннее предела. Предпросмотр должен назвать строку, а не
+ * пропустить файл до «Применить», где он упал бы общим отказом.
+ */
+describe("импорт ростера: потолки имени и длины записи — на предпросмотре", () => {
+  const ruDate = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+  function csvOf(dates: string[], rows: [string, string][]) {
+    return [";" + dates.map(ruDate).join(";"), ...rows.map(([name, code]) => [name, ...dates.map(() => code)].join(";"))].join("\r\n");
+  }
+  async function post(path: string, body: unknown) {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const res = await app.request(path, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { db, res, body: await res.json() };
+  }
+
+  it("ФИО длиннее EMPLOYEE_NAME_MAX — 400 с номером строки и на предпросмотре, и при применении", async () => {
+    const longName = "Я".repeat(EMPLOYEE_NAME_MAX + 1);
+    const csv = csvOf(["2026-08-01"], [["Игорь Петров", "k32"], [longName, "k32"]]);
+
+    const preview = await post("/api/admin/roster/import/preview", { csv });
+    expect(preview.res.status).toBe(400);
+    expect(preview.body.error).toMatch(/^строка 3: ФИО длиннее 100 знаков/);
+
+    const applied = await post("/api/admin/roster/import/apply", { csv, resolutions: [
+      { csvName: "Игорь Петров", action: "create" }, { csvName: longName, action: "create" },
+    ] });
+    expect(applied.res.status).toBe(400);
+    expect(listActive(applied.db).map((e) => e.displayName)).not.toContain("Игорь Петров");
+  });
+
+  it("отпуск длиннее MAX_RANGE_DAYS — 400 с номером строки на предпросмотре", async () => {
+    const dates = Array.from({ length: MAX_RANGE_DAYS + 1 }, (_, i) => addDaysIso("2026-01-01", i));
+    const csv = csvOf(dates, [["Игорь Петров", "otp"]]);
+
+    const preview = await post("/api/admin/roster/import/preview", { csv });
+    expect(preview.res.status).toBe(400);
+    expect(preview.body.error).toMatch(/^строка 2 \(«Игорь Петров»\): запись с 01\.01\.2026 длиннее 366 дней/);
+  });
+
+  it("ровно на пределах — предпросмотр проходит", async () => {
+    const dates = Array.from({ length: MAX_RANGE_DAYS }, (_, i) => addDaysIso("2026-01-01", i));
+    const csv = csvOf(dates, [["Я".repeat(EMPLOYEE_NAME_MAX), "otp"]]);
+    const preview = await post("/api/admin/roster/import/preview", { csv });
+    expect(preview.res.status).toBe(200);
   });
 });

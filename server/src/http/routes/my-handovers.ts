@@ -11,7 +11,7 @@ import { getHandover, listOpenDrafts } from "../../repo/handovers";
 import { entryLineOf } from "../../util/message-lines";
 import { handoverCandidates } from "../../handover/candidates";
 import { createHandoverMessenger } from "../../handover/handover-messenger";
-import { fanOut, handoverVoidReason, offerTo, type HandoverDeps } from "../../handover/handover-service";
+import { fanOut, offerTo, settleHandoverVoidReason, type HandoverDeps } from "../../handover/handover-service";
 import { type Env, requireAuth } from "../middleware";
 
 /** What the form needs to ask «кому отдать»: the shift in words, and who is free. */
@@ -76,7 +76,9 @@ export function createMyHandoverRoutes(deps: { db: Db; config: Config; bot?: Bot
     // Filter FIRST, cap after: stale rows must not crowd the live ones out of the answer.
     const open = listOpenDrafts(db, c.get("auth").employeeId, teamNow(config.teamTz).date)
       .filter((handover) => {
-        if (handoverVoidReason(db, handover)) return false;
+        // С переносом, как у тика и «Беру»: иначе черновик, чьё основание ушло мимо отмены,
+        // пропадал бы из формы до тика, хотя день покрывает другой одобренный больничный.
+        if (settleHandoverVoidReason(db, handover)) return false;
         const shift = handover.shiftId == null ? undefined : getShift(db, handover.shiftId);
         return shift != null && shiftStartMs(shift, config.teamTz) > now;
       })

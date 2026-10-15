@@ -239,3 +239,38 @@ describe("больничный, ждущий ОК", () => {
     expect(legend.map((item) => item.label)).toEqual(["Отпуск"]);
   });
 });
+
+describe("смена на отсутствующем — «ждёт замены»", () => {
+  // Иванов болен в понедельник, а смена «День» в тот же день стоит на нём.
+  const sick = entry({ date: MONDAY, category: "sick_leave", templateId: null, start: null, end: null });
+  const work = entry({ date: MONDAY });
+  const healthy = entry({ date: MONDAY, employeeId: 2 });
+  const shifts = [sick, work, healthy];
+
+  it("клетка больного помечена, клетка здорового с той же сменой — нет", () => {
+    const model = buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS, { markAwaitingCover: true });
+    expect(model.rows[0]!.cells[0]!.primary!.shift).toBe(work);
+    expect(model.rows[0]!.cells[0]!.primary!.awaitsCover).toBe(true);
+    expect(model.rows[1]!.cells[0]!.primary!.awaitsCover).toBe(false);
+    // Сам больничный «замены» не ждёт — ждёт работа.
+    expect(model.rows[0]!.cells[0]!.entries.find((e) => e.shift === sick)!.awaitsCover).toBe(false);
+  });
+
+  it("в другой день той же недели смена больного не помечена — больничный её не покрывает", () => {
+    const tuesday = entry({ date: "2026-08-04" });
+    const model = buildWeekModel(MONDAY, { employees: TEAM, shifts: [sick, tuesday] }, PRESETS, { markAwaitingCover: true });
+    expect(model.rows[0]!.cells[1]!.primary!.awaitsCover).toBe(false);
+  });
+
+  it("легенда объясняет метку отдельной строкой с той же буквой", () => {
+    const legend = buildWeekLegend(buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS, { markAwaitingCover: true }));
+    expect(legend.map((item) => `${item.code} ${item.label}`)).toEqual(["Д День", "Д День (ждёт замены)"]);
+    expect(legend.map((item) => item.awaitsCover)).toEqual([false, true]);
+  });
+
+  it("без опции (картинка бота /week) — ни метки, ни строки легенды: PNG её не рисует", () => {
+    const model = buildWeekModel(MONDAY, { employees: TEAM, shifts }, PRESETS);
+    expect(model.rows[0]!.cells[0]!.primary!.awaitsCover).toBe(false);
+    expect(buildWeekLegend(model).map((item) => item.label)).toEqual(["День"]);
+  });
+});

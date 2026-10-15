@@ -10,14 +10,15 @@ import { validateInitData, type TelegramUser } from "../auth/telegram";
 import { issueToken } from "../auth/jwt";
 import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middleware";
 import { securityHeaders } from "./security-headers";
-import { rateLimiter } from "./rate-limit";
+import { rateLimiter, teamRateLimiter } from "./rate-limit";
 import { describeClientError, CLIENT_ERROR_BODY_MAX, type ClientErrorReport } from "./client-error";
+import { apiBodyLimit, readTextCapped } from "./body-limits";
 import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../repo/templates";
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
 import { getAllTemplateRoles, setTemplateRoles, rotationCandidatesFor, setRotationUnit, UnknownEmployeesError } from "../repo/template-roles";
 import { createShift, updateShift, deleteShift, getShift, listShiftsOverlapping, expirePendingSwapsForShift } from "../repo/shifts";
-import { loadCalendar, setManualDay } from "../repo/calendar-days";
+import { listCalendarDays, loadCalendar, setManualDay } from "../repo/calendar-days";
 import { refreshHolidays } from "../holidays/holiday-tick";
 import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
 import { acknowledgedCoverageDates, holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
@@ -25,6 +26,7 @@ import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
   getEmployeeById,
+  employeesByIds,
   createAdminEmployee,
   listActive,
   restoreEmployee,
@@ -39,7 +41,7 @@ import { swapsLockSetting, isSwapsLocked, reminderHour, reminderHourSetting, set
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
-import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError, entryInvalidBody, changedTextTooLong, MAX_RANGE_DAYS } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -138,6 +140,11 @@ import {
   autoSendDateFor,
   isCollectionActive,
   SWAP_MESSAGE_MAX,
+  ENTRY_TITLE_MAX,
+  ENTRY_LOCATION_MAX,
+  ENTRY_NOTE_MAX,
+  EMPLOYEE_NAME_MAX,
+  tooLongText,
   type SickApprovalRow,
 } from "@planer/shared";
 import {
@@ -156,9 +163,9 @@ import {
   openSlotsForWorker,
   myOffers,
 } from "../weekend/weekend-service";
-import { getVacantSlot, findOpenSlotLike, listAdminSlots } from "../repo/weekend";
+import { countWeekendLeftovers, getVacantSlot, findOpenSlotLike, listAdminSlots } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
-import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
+import { decodeRoster, parseRosterCsv, toRuDate } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
 import { upcomingBirthdays, ensureBirthdayRound, birthdayRoundDraft } from "../birthdays/birthday-service";
 import {
@@ -295,24 +302,28 @@ export function createApp(deps: AppDeps): Hono<Env> {
    */
   app.use("*", compress());
 
-  // Coarse flood protection for the whole app — see rate-limit.ts for keying
-  // details and why the numbers are sized as a shared ceiling rather than a
-  // strict per-visitor budget.
+  // Flood protection for the whole app — see rate-limit.ts for how the key is
+  // chosen and why it comes only from a verified token. Two kinds of bucket:
   //
-  // Sized against the actual worst realistic minute, not a guess: opening the
-  // mini app fires 7 requests (getMe + 6 parallel — see miniapp/src/App.tsx's
-  // bootstrap effect), and every tab switch / refocus fires 6 more
-  // (reloadData). Shift reminders go out after 20:00 and predictably cause
-  // several people to open the app within the same minute — the worst
-  // plausible cluster today is the whole 30-person team, each bootstrapping
-  // and switching tabs at least once: 30 × (7 + 6) = 390 req/min. Sized for
-  // roughly double that headcount (team growth): 60 × 13 = 780 req/min. The
-  // limit below is >10x that grown worst case (~20x today's), while still
-  // capping a real flood — which runs orders of magnitude higher than
-  // this, not a few percent higher — well short of anything that could
-  // bother the same process's Telegram long-poll. See the hardening report
-  // for the full arithmetic.
-  app.use("*", rateLimiter({ windowMs: 60_000, max: 8_000 }));
+  // Per person (`/api/*` with a verified token): 600/min. The heaviest honest
+  // minute of one human is an admin clicking through console screens — each
+  // fires a dozen-odd parallel GETs, so ten screens a minute is ~150 — or a
+  // worker opening the mini app (bootstrap) and switching tabs a few times
+  // (7 + 6 per switch, see miniapp/src/App.tsx), well under 100. 600 is ~4x the
+  // console case and still 10 req/s for a full minute: only a looping client gets
+  // there, and it now stops itself instead of 429-ing the whole team, which is
+  // what the shared relay bucket used to do.
+  //
+  // Per address (everything else — SPA assets, /api/auth, /api/health, /cal,
+  // tokenless and bad-token requests): 8,000/min, unchanged. Behind KeenDNS every
+  // external client is one address, so this is still a team-wide ceiling. It was
+  // sized against the whole team opening the app in the same minute after the
+  // 20:00 shift reminder — 30 × (7 + 6) = 390 req/min today, 780 for a doubled
+  // headcount — with >10x headroom; now that authenticated API traffic counts
+  // against personal buckets, the headroom is only larger. A real flood runs
+  // orders of magnitude higher, and this still caps it well short of anything
+  // that could bother the same process's Telegram long-poll.
+  app.use("*", teamRateLimiter({ windowMs: 60_000, ipMax: 8_000, employeeMax: 600, secret: config.jwtSecret }));
 
   // API responses are live data — never let a browser / Telegram webview serve
   // a cached copy, or an admin's edits won't show up until the app is reopened.
@@ -320,6 +331,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     await next();
     c.header("Cache-Control", "no-store");
   });
+
+  // Предел тела по прочитанным байтам — до проверки прав и до любой ручки:
+  // отказать большому телу дешевле, чем сначала его дочитать. Какой путь сколько
+  // может прислать — `body-limits.ts`.
+  app.use("/api/*", apiBodyLimit());
 
   // Defence in depth: everything under /api/admin/* is admin-only by construction,
   // so a route that forgets its inline requireAdmin still can't leak. The per-route
@@ -364,7 +380,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * приложение, и на два порядка меньше общего потолка.
    */
   app.post("/api/client-error", rateLimiter({ windowMs: 60_000, max: 120 }), async (c) => {
-    const raw = (await c.req.text().catch(() => "")).slice(0, CLIENT_ERROR_BODY_MAX);
+    const raw = await readTextCapped(c.req.raw, CLIENT_ERROR_BODY_MAX).catch(() => "");
     let report: ClientErrorReport = {};
     try {
       report = JSON.parse(raw) as ClientErrorReport;
@@ -779,11 +795,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.route("/", createOrderRoutes({ db, config, bot }));
 
   app.get("/api/admin/events", requireAdmin(db, config.jwtSecret), (c) => {
-    const events = listRecentAudit(db, 30, c.get("auth").employeeId).map((row) => ({
+    const rows = listRecentAudit(db, 30, c.get("auth").employeeId);
+    // Имена авторов — одним запросом на страницу, а не по строке.
+    const actors = employeesByIds(db, rows.flatMap((row) => (row.actorEmployeeId != null ? [row.actorEmployeeId] : [])));
+    const events = rows.map((row) => ({
       id: row.id,
       type: row.type,
       createdAt: row.createdAt,
-      actorName: row.actorEmployeeId != null ? (getEmployeeById(db, row.actorEmployeeId)?.displayName ?? null) : null,
+      actorName: row.actorEmployeeId != null ? (actors.get(row.actorEmployeeId)?.displayName ?? null) : null,
       payload: row.payload,
     }));
     return c.json({ events });
@@ -903,9 +922,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   /**
    * Ручная отметка дня: «работаем» в праздник, «отдыхаем» в обычный день.
    *
-   * `kind: null` снимает ручную строку, и день возвращается к тому, что скажет
-   * календарь на следующем обновлении. Ручное решение всегда сильнее
-   * автоматического — см. `replaceAutoYear`.
+   * `kind: null` снимает ручную строку, и день сразу возвращается к тому, что
+   * говорит календарь (`setManualDay`); ответ — про день после снятия, поэтому
+   * снятая отметка с праздника отвечает праздником. Ручное решение всегда
+   * сильнее автоматического — см. `replaceAutoYear`.
    */
   app.put("/api/admin/calendar/:date", requireAdmin(db, config.jwtSecret), async (c) => {
     const date = c.req.param("date");
@@ -920,10 +940,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : null;
     setManualDay(db, date, body.kind, note, new Date());
     recordAudit(db, "calendar_day_set", c.get("auth").employeeId, { date, kind: body.kind, note });
+    // День стал рабочим, а выходные смены на нём остались: отметку не запрещаем
+    // (админ мог как раз собираться их разобрать), но число отдаём, чтобы обе
+    // морды предупредили. Рабочим день может сделать и снятие отметки «выходной»
+    // с будня, поэтому смотрим на итог, а не на присланный `kind`.
+    const weekendLeftovers = isDayOff(date, loadCalendar(db, date, date)) ? 0 : countWeekendLeftovers(db, date);
+    if (body.kind !== null) return c.json({ date, kind: body.kind, note, source: "manual", weekendLeftovers });
+    const day = listCalendarDays(db, date, date)[0];
     return c.json(
-      body.kind === null
-        ? { date, kind: null, note: null, source: null }
-        : { date, kind: body.kind, note, source: "manual" },
+      day
+        ? { date, kind: day.kind, note: day.note, source: day.source, weekendLeftovers }
+        : { date, kind: null, note: null, source: null, weekendLeftovers },
     );
   });
 
@@ -1325,6 +1352,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId, viewerEmployeeId: c.get("auth").employeeId, teamTz: config.teamTz });
+    // Страница — до 200 строк: имена авторов одним запросом, а не по строке.
+    const actors = employeesByIds(db, page.rows.flatMap((row) => (row.actorEmployeeId != null ? [row.actorEmployeeId] : [])));
     return c.json({
       total: page.total,
       limit,
@@ -1335,7 +1364,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         id: row.id,
         type: row.type,
         createdAt: row.createdAt,
-        actorName: row.actorEmployeeId != null ? (getEmployeeById(db, row.actorEmployeeId)?.displayName ?? null) : null,
+        actorName: row.actorEmployeeId != null ? (actors.get(row.actorEmployeeId)?.displayName ?? null) : null,
         payload: row.payload,
       })),
     });
@@ -1464,7 +1493,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   app.post("/api/admin/entries", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = createEntrySchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
     // Праздники живут в базе, поэтому «в какой день годится категория» спрашивается
@@ -1498,7 +1527,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    */
   app.post("/api/admin/entries/range", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = rangeEntrySchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const input = parsed.data;
     const archived = archivedTargetError(input.employeeId);
     if (archived) return c.json({ error: archived }, 400);
@@ -1643,11 +1672,13 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
     const parsed = updateEntrySchema.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     const existing = getShift(db, id);
     if (!existing) return c.json({ error: "not_found" }, 404);
     const archived = archivedTargetError(parsed.data.employeeId);
     if (archived) return c.json({ error: archived }, 400);
+    const tooLong = changedTextTooLong(parsed.data, existing);
+    if (tooLong) return c.json(entryInvalidBody([{ message: tooLong }]), 400);
     const patch = parsed.data;
     const category = patch.category ?? existing.category;
 
@@ -1705,11 +1736,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
       start: patch.start !== undefined ? patch.start : existing.start,
       end: patch.end !== undefined ? patch.end : existing.end,
     };
+    // Диапазон сверяется, только когда даты записи и правда сдвигаются. Не «если
+    // в теле есть даты»: обе формы шлют `date`/`endDate` всегда, и запись, ставшая
+    // длинной до появления предела (декрет одной строкой), иначе не дала бы
+    // поправить даже заметку.
+    const datesMoved =
+      merged.date !== existing.date || (merged.endDate ?? merged.date) !== (existing.endDate ?? existing.date);
     const err =
       entryTimesError(merged) ??
       entryDateError(merged, loadCalendar(db, merged.date, merged.endDate ?? merged.date)) ??
-      entryRangeError(merged);
-    if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
+      (datesMoved ? entryRangeError(merged) : null);
+    if (err) return c.json(entryInvalidBody([{ message: err }]), 400);
 
     // `unrecognisedCode` means «импорт не смог прочитать эту клетку», and every
     // reader puts it above everything else: `encodeEntryCode` writes the raw text
@@ -1794,7 +1831,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/entries/bulk", requireAdmin(db, config.jwtSecret), async (c) => {
     const parsed = z.object({ entries: z.array(createEntrySchema).min(1).max(200) })
       .safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (!parsed.success) return c.json(entryInvalidBody(parsed.error.issues), 400);
     for (const input of parsed.data.entries) {
       const archived = archivedTargetError(input.employeeId);
       if (archived) return c.json({ error: archived }, 400);
@@ -2284,6 +2321,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // Worker: browse open vacant slots (with "am I interested?" flag)
   app.get("/api/weekend/slots", requireAuth(db, config.jwtSecret), (c) => {
     const from = c.req.query("from") ?? teamNow(config.teamTz).date;
+    // Тот же довод, что у `/api/my/shifts`: строковое сравнение с мусором молча
+    // отдало бы пустой список вместо отказа.
+    if (!dateStr.safeParse(from).success) return c.json({ error: "Дата «from» должна быть в виде ГГГГ-ММ-ДД" }, 400);
     return c.json({ slots: openSlotsForWorker(db, c.get("auth").employeeId, from) });
   });
 
@@ -2422,6 +2462,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // answer. A mistyped year is the way this happens.
     if (body.date < teamNow(config.teamTz).date) {
       return c.json({ error: "Эта дата уже прошла — вакантную смену можно открыть только на будущее" }, 400);
+    }
+    // Название и место уходят всей команде в «Нужен человек на выходной» и в
+    // письма по отклику, а при назначении переписываются в запись графика —
+    // поэтому потолки те же, что у записи (`text-limits.ts`).
+    for (const [label, value, max] of [
+      ["Название", body.title, ENTRY_TITLE_MAX],
+      ["Место", body.location, ENTRY_LOCATION_MAX],
+      ["Заметка", body.note, ENTRY_NOTE_MAX],
+    ] as const) {
+      if (typeof value === "string" && value.length > max) return c.json({ error: tooLongText(label, max) }, 400);
     }
     const title = typeof body.title === "string" ? body.title : null;
     const location = typeof body.location === "string" ? body.location : null;
@@ -2588,17 +2638,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.body("﻿" + csv);
   });
 
+  // Тело целиком ограничено раньше — `ROSTER_UPLOAD_MAX` в `body-limits.ts`, по
+  // прочитанным байтам. Здесь — предел самого CSV внутри JSON.
   const MAX_CSV_BYTES = 1_000_000;
-  /** JSON overhead around a 1 MB string (escaping, the wrapper object) — generous, but
-   *  a hard stop long before an upload can buffer the whole process out of memory. */
-  const MAX_UPLOAD_BYTES = 4_000_000;
-
-  /** Refuses an oversized upload from the header alone, BEFORE c.req.json() buffers it.
-   *  This process also long-polls the bot, so one giant body would stall the whole team. */
-  const oversizedUpload = (c: { req: { header(name: string): string | undefined } }): boolean => {
-    const declared = Number(c.req.header("content-length"));
-    return Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES;
-  };
 
   /** «Игорь Петров, 01.08.2026 — «wat»» — an unread cell as the admin sees it in Excel.
    *  A warning, not an error: the import goes through and marks those cells «?». */
@@ -2630,7 +2672,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
         if (seenNames.has(person.name)) throw new Error(`в CSV повторяется ФИО «${person.name}»`);
         seenNames.add(person.name);
       }
+      // Ручки сотрудников и записей держат эти потолки сами, а импорт пишет мимо них.
+      // Здесь, а не в `applyRosterImport`: предпросмотр и применение разбирают файл
+      // одной функцией, и строку называет уже предпросмотр — до «Применить», где
+      // отказ пришёл бы общим 409 после того, как админ всё сверил.
+      // Номер строки — как в таблице: шапка первая.
+      for (const [index, person] of parsed.people.entries()) {
+        if (person.name.length > EMPLOYEE_NAME_MAX) throw new Error(`строка ${index + 2}: ФИО длиннее ${EMPLOYEE_NAME_MAX} знаков`);
+      }
       const decoded = decodeRoster(parsed, listActiveTemplates(db));
+      for (const person of decoded.perPerson) {
+        const long = person.entries.find((e) => e.endDate != null && entryRangeError(e) != null);
+        if (long) {
+          const row = parsed.people.findIndex((p) => p.name === person.name) + 2;
+          throw new Error(
+            `строка ${row} («${person.name}»): запись с ${toRuDate(long.date)} длиннее ${MAX_RANGE_DAYS} дней — загрузите период короче`,
+          );
+        }
+      }
       return { ok: true as const, parsed, decoded };
     } catch (err) {
       return {
@@ -2643,7 +2702,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: parse and validate an uploaded roster without mutating the database.
   app.post("/api/admin/roster/import/preview", requireAdmin(db, config.jwtSecret), async (c) => {
-    if (oversizedUpload(c)) return c.json({ error: "Файл больше 1 МБ — загрузите месяц отдельно" }, 413);
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
@@ -2672,7 +2730,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: decode the same file again and apply the explicitly confirmed person map in one transaction.
   app.post("/api/admin/roster/import/apply", requireAdmin(db, config.jwtSecret), async (c) => {
-    if (oversizedUpload(c)) return c.json({ error: "Файл больше 1 МБ — загрузите месяц отдельно" }, 413);
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown; overwrite?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);

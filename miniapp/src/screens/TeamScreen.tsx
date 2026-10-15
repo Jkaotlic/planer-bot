@@ -192,7 +192,8 @@ function WeekView({
    *  which day is "today" (e.g. right at the midnight boundary). */
   today: string;
 }) {
-  const model = buildWeekModel(from, schedule, templates);
+  // Метка «ждёт замены» — здесь, а не в картинке бота: см. `buildWeekModel`.
+  const model = buildWeekModel(from, schedule, templates, { markAwaitingCover: true });
   return (
     <>
       {/* Название текстом над сеткой: в колонке под две цифры помещается

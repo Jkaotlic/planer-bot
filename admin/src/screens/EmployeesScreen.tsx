@@ -1,7 +1,7 @@
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import { useTeamTz } from "../lib/team-today";
-import { filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
+import { EMPLOYEE_NAME_MAX, PREFERRED_NAME_MAX, filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
@@ -377,6 +377,7 @@ function EmployeeRow({
           className="employee-name-input"
           type="text"
           value={draft}
+          maxLength={editing === "name" ? EMPLOYEE_NAME_MAX : PREFERRED_NAME_MAX}
           aria-label={editing === "name" ? "Имя" : "Обращение"}
           // Пустое поле обращения показывает, как бот зовёт сейчас.
           placeholder={editing === "address" ? employee.address : undefined}
@@ -616,6 +617,7 @@ function AddEmployeeDialog({
           <input
             id="new-employee-name"
             type="text"
+            maxLength={EMPLOYEE_NAME_MAX}
             value={name}
             placeholder="Например, Настя Волкова"
             autoFocus

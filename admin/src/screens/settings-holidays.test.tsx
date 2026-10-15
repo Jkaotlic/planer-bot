@@ -133,7 +133,7 @@ describe("«Настройки» консоли: праздники", () => {
     const getDay = vi
       .spyOn(apiClient, "getDayCalendar")
       .mockResolvedValue([{ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" }]);
-    const mark = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(null);
+    const mark = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
     const card = holidaysCard(await mount());
 
     await typeDate(card.querySelector<HTMLInputElement>("input[type='date']")!, "2026-06-12");
@@ -148,7 +148,7 @@ describe("«Настройки» консоли: праздники", () => {
   it("обычную среду можно сделать выходным", async () => {
     vi.spyOn(apiClient, "getSettings").mockResolvedValue(SETTINGS);
     vi.spyOn(apiClient, "getDayCalendar").mockResolvedValue([]);
-    const mark = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(null);
+    const mark = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
     const card = holidaysCard(await mount());
 
     await typeDate(card.querySelector<HTMLInputElement>("input[type='date']")!, "2026-06-10");
@@ -166,7 +166,7 @@ describe("«Настройки» консоли: праздники", () => {
     vi.spyOn(apiClient, "getDayCalendar").mockResolvedValue([
       { date: "2026-12-31", kind: "holiday", note: null, source: "manual" },
     ]);
-    const mark = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue(null);
+    const mark = vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
     const card = holidaysCard(await mount());
 
     await typeDate(card.querySelector<HTMLInputElement>("input[type='date']")!, "2026-12-31");
@@ -175,5 +175,35 @@ describe("«Настройки» консоли: праздники", () => {
     await act(async () => buttonWith(card, "Как в календаре").click());
     await settle();
     expect(mark).toHaveBeenCalledWith("2026-12-31", null);
+  });
+
+  // I5 (аудит 2026-10-15): день стал рабочим, а выходные смены на нём остались.
+  it("после «Сделать рабочим» предупреждает об оставшихся выходных сменах у блока отметки", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(SETTINGS);
+    vi.spyOn(apiClient, "getDayCalendar").mockResolvedValue([{ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" }]);
+    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({
+      day: { date: "2026-06-12", kind: "workday", note: null, source: "manual" },
+      weekendLeftovers: 1,
+    });
+    const card = holidaysCard(await mount());
+
+    await typeDate(card.querySelector<HTMLInputElement>("input[type='date']")!, "2026-06-12");
+    await act(async () => buttonWith(card, "Сделать рабочим").click());
+    await settle();
+
+    const day = card.querySelector<HTMLElement>(".settings-day")!;
+    expect(day.textContent).toContain("На этот день уже стоит 1 выходная смена — проверь её.");
+  });
+
+  it("без оставшихся смен ничего не говорит", async () => {
+    vi.spyOn(apiClient, "getSettings").mockResolvedValue(SETTINGS);
+    vi.spyOn(apiClient, "getDayCalendar").mockResolvedValue([{ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" }]);
+    vi.spyOn(apiClient, "setCalendarDay").mockResolvedValue({ day: null, weekendLeftovers: 0 });
+    const card = holidaysCard(await mount());
+
+    await typeDate(card.querySelector<HTMLInputElement>("input[type='date']")!, "2026-06-12");
+    await act(async () => buttonWith(card, "Сделать рабочим").click());
+    await settle();
+    expect(card.textContent).not.toContain("проверь");
   });
 });

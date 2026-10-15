@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX } from "@planer/shared";
 import { apiClient, type AdminSlotView, type PayrollRow, type SlotInterest } from "../api/client";
 import { initialsOf, personPalette, pluralizeRu } from "../lib/people";
 import { formatDayLabel, parseISODate } from "../lib/week";
@@ -484,17 +485,17 @@ function PostSlotDialog({ onCancel, onCreated, onError }: { onCancel: () => void
 
         <div className="field-group">
           <label className="field-label" htmlFor="slot-title">Название (необязательно)</label>
-          <input id="slot-title" type="text" value={title} placeholder="Например, Ярмарка выходного дня" onChange={(e) => setTitle(e.target.value)} />
+          <input id="slot-title" type="text" maxLength={ENTRY_TITLE_MAX} value={title} placeholder="Например, Ярмарка выходного дня" onChange={(e) => setTitle(e.target.value)} />
         </div>
 
         <div className="field-group">
           <label className="field-label" htmlFor="slot-location">Место (необязательно)</label>
-          <input id="slot-location" type="text" value={location} placeholder="Например, ТЦ Авиапарк" onChange={(e) => setLocation(e.target.value)} />
+          <input id="slot-location" type="text" maxLength={ENTRY_LOCATION_MAX} value={location} placeholder="Например, ТЦ Авиапарк" onChange={(e) => setLocation(e.target.value)} />
         </div>
 
         <div className="field-group">
           <label className="field-label" htmlFor="slot-note">Заметка (необязательно)</label>
-          <input id="slot-note" type="text" value={note} placeholder="Например, оплата в двойном размере" onChange={(e) => setNote(e.target.value)} />
+          <input id="slot-note" type="text" maxLength={ENTRY_NOTE_MAX} value={note} placeholder="Например, оплата в двойном размере" onChange={(e) => setNote(e.target.value)} />
         </div>
 
         {localError && <div className="error-text">{localError}</div>}

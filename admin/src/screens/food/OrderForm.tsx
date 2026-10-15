@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
+import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText, sendReportTitle, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient, type PlaceView } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 import { routeAuthError, useAuthRequired } from "../../auth-required";
@@ -66,7 +66,9 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
       const result = await apiClient.createOrder({
         placeId, title: title.trim() || null, allowCustom, note: note.trim() || null, payHint: payHint.trim() || null, closesAt, ...legacyTime, audience,
       });
-      if (result.unreachable.length > 0) setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable });
+      if (result.unreachable.length > 0 || result.deliveredToNobody) {
+        setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable, deliveredToNobody: result.deliveredToNobody });
+      }
       else onDone(result.order.id);
     } catch (err) {
       setError(failureText(err, "Не удалось отправить заказ", onAuthRequired));
@@ -78,7 +80,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces }: {
   if (summary) {
     return (
       <div className="employees-screen employees-screen-form food-form">
-        <h2 className="employees-title">Заказ отправлен</h2>
+        <h2 className="employees-title">{sendReportTitle(summary)}</h2>
         <div className="food-note">{sendReportText(summary)}</div>
         <div className="food-buttons">
           <button type="button" className="btn btn-primary" onClick={() => onDone(summary.orderId)}>ОК</button>

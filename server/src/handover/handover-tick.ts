@@ -5,7 +5,7 @@ import { listPendingSickLeavesWithin, markHandoverForced } from "../repo/sick-ap
 import { daysAsked, extensionOf } from "../sick-approval/sick-approval-service";
 import { getShift } from "../repo/shifts";
 import { safeErrorMessage } from "../util/safe-error";
-import { escalate, expireHandover, fanOut, handoverVoidReason, startHandovers, voidHandover, type HandoverDeps } from "./handover-service";
+import { escalate, expireHandover, fanOut, settleHandoverVoidReason, startHandovers, voidHandover, type HandoverDeps } from "./handover-service";
 
 export interface HandoverTickDeps extends HandoverDeps {
   config: { teamTz: string; publicUrl: string; handoverFanHours: number; handoverEscalateHours: number };
@@ -25,7 +25,8 @@ function teamDateAt(ms: number, teamTz: string): string {
  *
  * Bounded twice: pending rows come through the `shift_pending_approval` index, and
  * only those whose span touches [today, today + threshold]. Safe on every tick —
- * `startHandovers` skips shifts that already have a live hand-over, so the second pass
+ * `startHandovers` skips shifts that already have a live hand-over (from this sick leave
+ * or an overlapping one) and those this sick leave already handed over, so the second pass
  * creates nothing, sends nothing and leaves `handover_forced_at` as the first pass set it.
  * For a pending EXTENSION only the new days are unapproved; the approved days already
  * have their own hand-overs (or the admin's earlier «ОК» decided them), so they are not touched.
@@ -78,7 +79,10 @@ export async function runHandoverTick(deps: HandoverTickDeps, nowMs: number): Pr
     try {
       // Смена ушла от дающего (удалена, переназначена, больничный сняли) —
       // гасим до лестницы: веер и эскалация про такую смену — ложь.
-      const reason = handoverVoidReason(deps.db, row);
+      // Основание ушло мимо `cancelHandoversForEntryDb` (запись стала отпуском, даты
+      // сдвинуты), но день покрывает другой одобренный больничный — передача переходит
+      // к нему и идёт по лестнице дальше, а не гаснет с «отбоем» про несостоявшееся.
+      const reason = settleHandoverVoidReason(deps.db, row);
       if (reason) {
         await voidHandover(deps, row.id, reason);
         touched += 1;

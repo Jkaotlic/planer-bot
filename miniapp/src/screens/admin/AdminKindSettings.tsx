@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { coverageSummary, NORM_CALENDAR_HINT, exactSchedulePalette, previewReminderText, REMINDER_PLACEHOLDERS } from "@planer/shared";
+import { coverageSummary, NORM_CALENDAR_HINT, exactSchedulePalette, previewReminderText, REMINDER_PLACEHOLDERS, REMINDER_TEXT_MAX } from "@planer/shared";
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { apiClient, type Checklist, type TemplateQueue, type TemplateRolesView } from "../../api/client";
 import { useEntryPalette } from "../../categories";
@@ -210,6 +210,7 @@ function ReminderRow({
       />
       <textarea
         rows={3}
+        maxLength={REMINDER_TEXT_MAX}
         value={text}
         disabled={busy}
         placeholder="Стандартный текст по типу смены"

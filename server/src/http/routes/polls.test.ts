@@ -11,6 +11,7 @@ import { polls } from "../../db/schema";
 
 function fakeBot() {
   const sent: { to: number; text: string; id: number }[] = [];
+  const failFor = new Set<number>();
   let nextId = 1;
   // Задвижка «медленной сети»: пока она стоит, каждый `sendMessage` ждёт —
   // рассылка висит внутри запроса, как на обрыве релея.
@@ -20,6 +21,7 @@ function fakeBot() {
     api: {
       sendMessage: vi.fn(async (to: number, text: string) => {
         if (gate) { waiting += 1; await gate; }
+        if (failFor.has(to)) throw new Error("Forbidden: bot was blocked by the user");
         const id = nextId++;
         sent.push({ to, text, id });
         return { message_id: id };
@@ -33,7 +35,7 @@ function fakeBot() {
     gate = new Promise<void>((r) => { release = r; });
     return { release: () => { gate = null; release(); }, waiting: () => waiting };
   }
-  return { bot: bot as unknown as Bot, sent, hold, api: bot.api };
+  return { bot: bot as unknown as Bot, sent, failFor, hold, api: bot.api };
 }
 
 const config = testConfig();
@@ -59,12 +61,12 @@ afterEach(() => { vi.useRealTimers(); });
 
 async function stage() {
   const db = makeTestDb();
-  const { bot, sent, hold, api } = fakeBot();
+  const { bot, sent, failFor, hold, api } = fakeBot();
   const app = createApp({ db, config, bot });
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   person(db, "Марк", 102);
-  return { db, app, sent, hold, api, anya, igor, anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102) };
+  return { db, app, sent, failFor, hold, api, anya, igor, anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102) };
 }
 
 describe("опросы по HTTP", () => {
@@ -74,9 +76,33 @@ describe("опросы по HTTP", () => {
       send(anyaT, { question: "Пицца?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] } })));
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.delivered).toBe(2);
+    // Писем два, «Отправлено коллегам» — одно: своё письмо создателя не в счёт.
+    expect(body.delivered).toBe(1);
     expect(body.poll.closes).toBe("до 18:00");
     expect(sent.map((m) => m.to).sort()).toEqual([100, 101]);
+  });
+
+  it("опрос не дошёл ни до кого из коллег — 201, опрос жив, в ответе deliveredToNobody", async () => {
+    // Как у сбора: своё письмо создатель получает почти всегда, но голосов оно не
+    // соберёт — без флага форма сказала бы «Опрос отправлен» и «Отправлено коллегам: 0».
+    const { db, app, failFor, igor, anyaT } = await stage();
+    failFor.add(101);
+    const res = await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.delivered).toBe(0);
+    expect(body.deliveredToNobody).toBe(true);
+    expect(db.select().from(polls).all().map((p) => p.id)).toEqual([body.poll.id]);
+  });
+
+  it("дошло коллеге, а создателю нет — deliveredToNobody = false", async () => {
+    const { app, failFor, igor, anyaT } = await stage();
+    failFor.add(100);
+    const body = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    expect(body.delivered).toBe(1);
+    expect(body.deliveredToNobody).toBe(false);
   });
 
   it("пустой вопрос и вопрос длиннее 200 — 400", async () => {

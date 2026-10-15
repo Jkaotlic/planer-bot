@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
-  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, qtyLimitText, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -16,7 +16,7 @@ import { jsonBody } from "../json-body";
 import { getPlaceView } from "../../orders/place-service";
 import {
   addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, hasRecentSameOrder, itemsOf, listOrdersFor,
-  orderView, removeItem, setItemQty,
+  orderRecipientRows, orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
 import { setOrderPaid } from "../../orders/order-payment-service";
 import { finishOrderMessages, placeName, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
@@ -105,11 +105,13 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     }
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
-    const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}`;
+    // Название — часть ключа, как и в `hasRecentSameOrder`: «Икра» и «Вода» из одного
+    // места — два сбора. Пустое название схема уже свела к null, и null = null.
+    const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}\u0000${parsed.data.title ?? ""}`;
     if (createsInFlight.has(key)) return c.json({ error: "Рассылка уже идёт — подожди." }, 409);
     // Замок живёт только пока идёт рассылка; повтор ПОСЛЕ неё (ответ потерялся
     // по дороге, а письма дошли) ловит окно по базе.
-    if (hasRecentSameOrder(db, viewer.id, parsed.data.placeId)) {
+    if (hasRecentSameOrder(db, viewer.id, parsed.data.placeId, parsed.data.title)) {
       return c.json({ error: "Такой уже разослан пару минут назад — проверь чат." }, 409);
     }
     createsInFlight.add(key);
@@ -125,7 +127,18 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
       createsInFlight.delete(key);
     }
     recordAudit(db, "order_created", viewer.id, { orderId: order.id, placeName: place?.name ?? null, title: order.title, recipients: reachable.length, delivered });
-    return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable }, 201);
+    // Ни одно письмо не дошло до коллег — сбор всё равно остаётся: он уже в базе, его видно в
+    // мини-аппе, а откат после частично ушедшей рассылки опаснее. Но экран должен сказать
+    // это прямо, а не «Заказ отправлен»: иначе организатор ждёт ответов, которых не будет.
+    // Считаются только коллеги: своё письмо создатель получает почти всегда, и с ним
+    // «дошло 1» означало бы «дошло себе», а ответов от себя не ждут.
+    const colleagues = orderRecipientRows(db, order.id).filter((r) => r.employeeId !== viewer.id);
+    const deliveredToNobody = colleagues.length > 0 && colleagues.every((r) => r.messageId == null);
+    // «Отправлено коллегам: N» — по той же причине без своего письма: оно обещало бы
+    // на один ответ больше. Журнал выше хранит все письма — рядом с ним `recipients`
+    // тоже считает создателя.
+    const deliveredToColleagues = colleagues.filter((r) => r.messageId != null).length;
+    return c.json({ order: orderView(db, order, viewer, now), delivered: deliveredToColleagues, unreachable, deliveredToNobody }, 201);
   });
 
   app.get("/api/orders/:id", auth, (c) => {
@@ -150,8 +163,12 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     const v = visible(c);
     if (!v) return c.json({ error: NOT_FOUND }, 404);
     const body = (await jsonBody(c)) as { qty?: unknown };
-    if (!Number.isInteger(body.qty) || (body.qty as number) < 1 || (body.qty as number) > FOOD_QTY_MAX) {
-      return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
+    if (!Number.isInteger(body.qty) || (body.qty as number) < 1) return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
+    if ((body.qty as number) > FOOD_QTY_MAX) {
+      // Тот же текст, что у тапа в боте (у кг — вес). Единицу берём только у своей
+      // позиции: чужая всё равно получит отказ, и раскрывать её незачем.
+      const own = itemsOf(db, v.order.id).find((i) => i.id === Number(c.req.param("itemId")) && i.employeeId === v.viewer.id);
+      return c.json({ error: qtyLimitText(own ?? {}) }, 400);
     }
     const result = setItemQty(db, v.order, v.viewer.id, Number(c.req.param("itemId")), body.qty as number, v.now);
     if (!result.ok) return c.json({ error: result.error }, 409);

@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { formatKg, orderTotal, pollChoiceSchema } from "@planer/shared";
+import { formatKg, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -8,7 +8,7 @@ import { safeErrorMessage } from "../util/safe-error";
 import { recordAudit } from "../repo/audit";
 import { castVote, closePoll, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
 import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
-import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem } from "../orders/order-service";
+import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem, type RemovedStep } from "../orders/order-service";
 import { setOrderPaid, unpaidDebtors } from "../orders/order-payment-service";
 import { notifyUser } from "./notify";
 import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, payDoneKeyboard, placeName, remindUnpaid } from "../orders/order-messenger";
@@ -47,6 +47,41 @@ export function servicesMenuKeyboard(publicUrl: string): InlineKeyboard {
  * только в лог: состояние в базе уже записано, а повторный тап не
  * разошлёт второй раз (закрытие — условный UPDATE).
  */
+/**
+ * Ответ на «↩️ Убрать»: что снято и что осталось. У кг — вес шага и остаток весом,
+ * как в ответе на тап «＋» (человек набирает килограммы, а не шаги).
+ */
+export function undoAnswer(r: RemovedStep): string {
+  const kg = r.unit === "kg" && r.stepGrams != null;
+  const step = kg ? ` ${formatKg(r.stepGrams!)} кг` : "";
+  const tail = r.qtyLeft <= 0
+    ? "(убрал совсем)"
+    : `(осталось ${kg ? `${formatKg(r.qtyLeft * r.stepGrams!)} кг` : `×${r.qtyLeft}`})`;
+  return fitName(r.name, (name) => `− ${name}${step} ${tail}`);
+}
+
+/** Ответ на тап «＋»: что добавлено и сколько теперь. У кг — вес, а не шаги. */
+export function addAnswer(i: { name: string; unit: "pcs" | "kg"; stepGrams: number | null; qty: number }): string {
+  const amount = i.unit === "kg" && i.stepGrams ? `${formatKg(i.qty * i.stepGrams)} кг` : `×${i.qty}`;
+  return fitName(i.name, (name) => `＋ ${name} (${amount})`);
+}
+
+/**
+ * Предел Telegram на текст ответа на тап. Длиннее — `answerCallbackQuery`
+ * падает, и человек видит вечные часики вместо ответа. Имя блюда (до 200
+ * знаков) одно доходит до предела, поэтому режется именно оно: количество в
+ * хвосте — то, ради чего ответ и нужен.
+ */
+const CALLBACK_ANSWER_MAX = 200;
+
+function fitName(name: string, frame: (name: string) => string): string {
+  if (frame(name).length <= CALLBACK_ANSWER_MAX) return frame(name);
+  // По кодовым точкам, а не по `slice`: эмодзи в имени не рвётся пополам.
+  const chars = Array.from(name);
+  while (chars.length > 0 && frame(`${chars.join("")}…`).length > CALLBACK_ANSWER_MAX) chars.pop();
+  return frame(`${chars.join("")}…`);
+}
+
 function inBackground(label: string, work: Promise<unknown>): void {
   void work.catch((err) => console.error(`bot: ${label} failed:`, safeErrorMessage(err)));
 }
@@ -90,16 +125,27 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
       ...orders.map((o) => `${o.title ? "🛒" : "🍱"} ${o.creatorName}: ${o.title ?? o.placeName ?? "заказ без меню"}${o.closes ? ` (${o.closes})` : ""}`),
       ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`),
     ];
-    const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows];
-    const text = [
-      "🧰 Сервисы: заказы и опросы, QR-код.",
-      "",
-      ...lines,
-      "",
-      // The bot has drawn QR codes for links since 2026-09-04; this is where people learn it.
-      "QR-код можно и здесь: пришли ссылку — отвечу картинкой.",
-    ].join("\n");
-    await ctx.reply(text, { reply_markup: servicesMenuKeyboard(config.publicUrl) });
+    const compose = (shown: number) => {
+      const rest = rows.length - shown;
+      const fold = rest > 0 ? [`…и ещё ${rest} — все в «📋 Заказы и опросы» (кнопка ниже)`] : [];
+      const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows.slice(0, shown), ...fold];
+      return [
+        "🧰 Сервисы: заказы и опросы, QR-код.",
+        "",
+        ...lines,
+        "",
+        // The bot has drawn QR codes for links since 2026-09-04; this is where people learn it.
+        "QR-код можно и здесь: пришли ссылку — отвечу картинкой.",
+      ].join("\n");
+    };
+    // Одно письмо не длиннее `TELEGRAM_TEXT_SAFE_MAX`: по 20 сборов и опросов с названиями
+    // на потолке — больше 10 000 знаков, и Telegram отверг бы ответ целиком, кнопка
+    // «Сервисы» молчала бы. Хвост сворачивается; «📋 Заказы и опросы» под этим же письмом
+    // открывает экран, который печатает те же `listOrdersFor`/`listPollsFor` полностью.
+    // Строк не больше сорока — перебор с конца дешевле арифметики длин.
+    let shown = rows.length;
+    while (shown > 0 && compose(shown).length > TELEGRAM_TEXT_SAFE_MAX) shown -= 1;
+    await ctx.reply(compose(shown), { reply_markup: servicesMenuKeyboard(config.publicUrl) });
   }
 
   /**
@@ -173,26 +219,34 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     const last = itemsOf(db, order.id).filter((i) => i.employeeId === who.me.id && i.menuItemId === Number(ctx.match[2])).at(-1);
     // У кг-позиции «×3» ничего не говорит человеку — он набирает вес, а не шаги.
-    const amount = last && last.unit === "kg" && last.stepGrams ? `${formatKg(last.qty * last.stepGrams)} кг` : last ? `×${last.qty}` : "";
-    await ctx.answerCallbackQuery({ text: last ? `＋ ${last.name} (${amount})` : "Добавил" });
+    await ctx.answerCallbackQuery({ text: last ? addAnswer(last) : "Добавил" });
     await redrawOrder(ctx, order.id, who.me);
   });
 
-  for (const [pattern, run, done] of [
-    [/^order:undo:(\d+)$/, removeLastItem, "Убрал"],
-    [/^order:no:(\d+)$/, declineOrder, "Понял, без тебя"],
-  ] as const) {
-    bot.callbackQuery(pattern, async (ctx) => {
-      const who = acting(ctx.from.id);
-      if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
-      const order = getOrder(db, Number(ctx.match[1]));
-      if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
-      const result = run(db, order, who.me.id, teamNow(config.teamTz));
-      if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
-      await ctx.answerCallbackQuery({ text: done });
-      await redrawOrder(ctx, order.id, who.me);
-    });
-  }
+  bot.callbackQuery(/^order:undo:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+    const result = removeLastItem(db, order, who.me.id, teamNow(config.teamTz));
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    // Кнопка снимает шаг с последней ТРОНУТОЙ позиции, а не с последнего тапа (см.
+    // `removeLastItem`), — поэтому ответ называет, что именно снято: безликое «Убрал»
+    // оставило бы человека гадать, туда ли попало.
+    await ctx.answerCallbackQuery({ text: undoAnswer(result.removed) });
+    await redrawOrder(ctx, order.id, who.me);
+  });
+
+  bot.callbackQuery(/^order:no:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+    const result = declineOrder(db, order, who.me.id, teamNow(config.teamTz));
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    await ctx.answerCallbackQuery({ text: "Понял, без тебя" });
+    await redrawOrder(ctx, order.id, who.me);
+  });
 
   bot.callbackQuery(/^order:close:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setBirthDate, setEmployeeAdmin } from "../repo/employees";
 import { listActiveTemplates } from "../repo/templates";
 import { createShift } from "../repo/shifts";
@@ -39,6 +39,26 @@ describe("GET /api/admin/journal", () => {
     expect(body.events.map((e: { type: string }) => e.type)).toEqual(["entry_deleted", "entry_created"]);
     expect(body.events[0].actorName).toBe("Аня");
     expect(body.total).toBe(2);
+  });
+
+  it("имена авторов — картой: чтений сотрудника по id не больше, чем у одной строки", async () => {
+    // Страница журнала — до 200 строк; запрос на строку ради имени рос бы вместе с ней.
+    const lookups = async (rows: number) => {
+      const db = makeTestDb();
+      const app = createApp({ db, config });
+      const token = await tokenFor(app, 111);
+      for (let i = 0; i < rows; i += 1) recordAudit(db, "entry_created", createEmployee(db, { displayName: `Аня ${i}` }).id, {});
+      let journal: { events: { actorName: string | null }[] } = { events: [] };
+      let events: { events: { actorName: string | null }[] } = { events: [] };
+      const n = await countEmployeeByIdLookups(db, async () => {
+        journal = await (await app.request("/api/admin/journal", auth(token))).json();
+        events = await (await app.request("/api/admin/events", auth(token))).json();
+      });
+      expect(journal.events.filter((e) => e.actorName?.startsWith("Аня"))).toHaveLength(rows);
+      expect(events.events.filter((e) => e.actorName?.startsWith("Аня"))).toHaveLength(rows);
+      return n;
+    };
+    expect(await lookups(6)).toBe(await lookups(1));
   });
 
   it("filters by type, and offers only the types actually present", async () => {

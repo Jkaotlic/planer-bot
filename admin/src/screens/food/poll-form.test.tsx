@@ -47,10 +47,24 @@ describe("консоль: новый опрос", () => {
     await type(question(el), "Обед?");
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Отправить"));
-    await waitFor(() => expect(el.textContent).toContain("Отправлено: 2. Не дошло: Дима"));
+    await waitFor(() => expect(el.textContent).toContain("Отправлено коллегам: 2. Не дошло: Дима"));
     expect(p.onDone).not.toHaveBeenCalled();
     await click(button(el, "ОК"));
     expect(p.onDone).toHaveBeenCalled();
+  });
+
+  it("не дошло ни до кого из коллег — «Опрос заведён» и «проверь бота», а не «отправлен»", async () => {
+    // Недостижимых нет (все с Telegram), а письма не ушли — без флага форма закрылась бы молча.
+    vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: pollView(), delivered: 0, unreachable: [], deliveredToNobody: true });
+    const p = props();
+    const el = await mount(PollForm, p);
+    await type(question(el), "Обед?");
+    await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
+    await click(button(el, "Отправить"));
+    await waitFor(() => expect(el.textContent).toContain("Письмо не дошло ни до кого из коллег — проверь бота."));
+    expect(el.textContent).toContain("Опрос заведён");
+    expect(el.textContent).not.toContain("Опрос отправлен");
+    expect(p.onDone).not.toHaveBeenCalled();
   });
 
   it("отказ сервера — прямо над «Отправить»", async () => {

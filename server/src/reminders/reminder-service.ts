@@ -16,8 +16,8 @@ import {
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { listShiftsInRange, listShiftsOverlapping, listDatesHolding } from "../repo/shifts";
-import { getEmployeeById } from "../repo/employees";
-import { getTemplate } from "../repo/templates";
+import { employeesByIds, getEmployeeById } from "../repo/employees";
+import { getTemplate, templatesByIds } from "../repo/templates";
 import { reminderHour } from "../repo/settings";
 import { hasEveningReminder, eveningReminderKind, addReminder } from "../repo/reminders";
 import { recordAudit } from "../repo/audit";
@@ -71,7 +71,10 @@ function wantsReminder(
  */
 function remindableOn(db: Db, date: string): Shift[] {
   const dayEntries = listShiftsOverlapping(db, date, date);
-  return listShiftsInRange(db, date, date).filter(
+  const dayShifts = listShiftsInRange(db, date, date);
+  // Виды смен дня — одним запросом, а не на каждую запись.
+  const templates = templatesByIds(db, dayShifts.map((s) => s.templateId));
+  return dayShifts.filter(
     (s) =>
       s.employeeId != null &&
       !isAbsentOn(dayEntries, s.employeeId, date) &&
@@ -79,7 +82,7 @@ function remindableOn(db: Db, date: string): Shift[] {
       s.end != null &&
       wantsReminder(
         { start: s.start, end: s.end, category: s.category, templateId: s.templateId },
-        templateOf(db, s),
+        s.templateId == null ? undefined : templates.get(s.templateId),
       ),
   );
 }
@@ -184,6 +187,10 @@ function isNonShiftKind(shift: Shift, template: ShiftTemplate | undefined): bool
  */
 function coworkerNamesFor(db: Db, shift: { date: string; kind: ReminderKind; employeeId: number | null }): string[] {
   const dayShifts = listShiftsOverlapping(db, shift.date, shift.date);
+  // Люди и виды смен дня — по запросу на всех, а не на соседа: перечень строится для
+  // каждого письма, и запрос на соседа давал квадрат от команды за вечер.
+  const templates = templatesByIds(db, dayShifts.map((s) => s.templateId));
+  const people = employeesByIds(db, dayShifts.flatMap((s) => (s.employeeId == null ? [] : [s.employeeId])));
   const seen = new Set<number>();
   const names: string[] = [];
   for (const other of dayShifts) {
@@ -193,8 +200,8 @@ function coworkerNamesFor(db: Db, shift: { date: string; kind: ReminderKind; emp
     if (seen.has(other.employeeId)) continue;
     if (isAbsentOn(dayShifts, other.employeeId, shift.date)) continue;
     if (reminderKind({ start: other.start, end: other.end }) !== shift.kind) continue;
-    if (isNonShiftKind(other, templateOf(db, other))) continue;
-    const person = getEmployeeById(db, other.employeeId);
+    if (isNonShiftKind(other, other.templateId == null ? undefined : templates.get(other.templateId))) continue;
+    const person = people.get(other.employeeId);
     if (!person) continue;
     seen.add(other.employeeId);
     names.push(person.displayName);

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { stubBotInfo, type SentMessage } from "../bot/testbot";
 import { Bot, InlineKeyboard } from "grammy";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setRemindersEnabled, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
 import { ADMIN_NOTICE_KINDS } from "@planer/shared";
@@ -191,5 +191,23 @@ describe("анонс", () => {
     });
     expect(res.unreachable).not.toContain("Семён");
     expect(res.archivedCount).toBe(1);
+  });
+});
+
+describe("адресаты анонса по выбору — одним запросом", () => {
+  it("пять выбранных читаются картой: порядок выбора тот же, неизвестный id пропущен", async () => {
+    // Раньше — getEmployeeById на каждый выбранный id: запрос на адресата.
+    const db = makeTestDb();
+    const anya = linked(db, "Аня", 111, true);
+    const people = ["Игорь", "Марк", "Вера", "Олег", "Лена"].map((name, i) => linked(db, name, 500 + i));
+    const picked = [people[3]!.id, people[0]!.id, 9999, people[4]!.id, people[1]!.id, people[2]!.id, anya.id];
+
+    let result: ReturnType<typeof announcementRecipients> | undefined;
+    const reads = await countEmployeeByIdLookups(db, () => {
+      result = announcementRecipients(db, { kind: "picked", employeeIds: picked }, anya.id);
+    });
+
+    expect(result!.reachable.map((e) => e.displayName)).toEqual(["Олег", "Игорь", "Лена", "Марк", "Вера"]);
+    expect(reads).toBe(0);
   });
 });

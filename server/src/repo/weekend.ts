@@ -77,6 +77,29 @@ export function setSlotStatus(db: Db, id: number, status: "open" | "assigned" | 
   db.update(vacantSlots).set({ status }).where(eq(vacantSlots.id, id)).run();
 }
 
+/**
+ * Сколько выходных смен стоит на дате: записи «Работа в выходной» плюс ОТКРЫТЫЕ
+ * слоты выходного. Для предупреждения, когда день отметили рабочим (I5 аудита
+ * 2026-10-15).
+ *
+ * Слоты — только открытые: у занятого его люди уже стоят записями, и счёт
+ * назвал бы одну смену дважды; закрытый ничего не ждёт. Записи — тоже только
+ * той же даты: «Работа в выходной» диапазоном не пишется (`entrySpanError`).
+ */
+export function countWeekendLeftovers(db: Db, date: string): number {
+  const entries = db
+    .select({ id: shifts.id })
+    .from(shifts)
+    .where(and(eq(shifts.date, date), eq(shifts.category, "weekend_work")))
+    .all().length;
+  const slots = db
+    .select({ id: vacantSlots.id })
+    .from(vacantSlots)
+    .where(and(eq(vacantSlots.date, date), eq(vacantSlots.status, "open")))
+    .all().length;
+  return entries + slots;
+}
+
 /** Idempotent: a double "Хочу" from the same worker on the same slot is harmless. */
 export function addInterest(db: Db, slotId: number, employeeId: number): void {
   const existing = db

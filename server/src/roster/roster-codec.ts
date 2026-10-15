@@ -263,7 +263,7 @@ export function datesInRange(from: string, to: string): string[] {
 }
 
 /** "YYYY-MM-DD" -> "дд.мм.гггг" for the export header. */
-function toRuDate(iso: string): string {
+export function toRuDate(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
 }

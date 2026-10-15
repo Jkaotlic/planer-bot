@@ -42,6 +42,37 @@ describe("createFoodMock: «кто я» — из состояния морды",
   });
 });
 
+describe("createFoodMock: отчёт о рассылке — как у сервера", () => {
+  // Сервер считает «дошло» только по коллегам — своё письмо создатель ответов не соберёт —
+  // и отдаёт флаг deliveredToNobody. Мок, считавший создателя, показывал в DEV на одного
+  // больше, а без флага его ответ расходился с контрактом сервера.
+  it("опрос: «дошло» — коллеги с Telegram без создателя, флаг на месте", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const report = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    // Аня (сама) не в счёт; Игорь и Лена (копия наблюдателю) с Telegram, Марк — без.
+    expect(report.delivered).toBe(2);
+    expect(report.deliveredToNobody).toBe(false);
+  });
+
+  it("сбор: «дошло» — коллеги с Telegram без создателя, флаг на месте", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const report = await mock.createOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    expect(report.delivered).toBe(2);
+    expect(report.deliveredToNobody).toBe(false);
+  });
+
+  it("опрос, как и сбор: кроме себя достучаться не до кого — тот же отказ, что у сервера (409)", async () => {
+    // Только Аня и Марк без Telegram: наблюдателя с копией нет.
+    const state = { employees: [PEOPLE[0]!, PEOPLE[2]!], me: { id: 1, isAdmin: true } };
+    const mock = createFoodMock({ delayMs: 0, state, now: () => ({ date: "2026-10-06", time: "12:00" }) });
+    await expect(mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } }))
+      .rejects.toThrow("Некому отправить: в списке никого, кроме тебя.");
+    await expect(mock.createOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } }))
+      .rejects.toThrow("Некому отправить: в списке никого, кроме тебя.");
+    expect(await mock.getPolls()).toEqual([]);
+  });
+});
+
 describe("createFoodMock: копия наблюдателям — как resolveAudience сервера", () => {
   it("наблюдатель с Telegram получает копию при «Выбрать»; без Telegram — нет", async () => {
     const { mock } = mockAs({ id: 1, isAdmin: true });
@@ -122,6 +153,17 @@ describe("createFoodMock: склейка строк как на сервере",
     await mock.saveFoodPlace(place.id, { name: "Рынок", menu: [{ id: place.menu[0]!.id, name: "Икра", price: 2400, unit: "kg", stepGrams: 500 }] });
     const view = await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
     expect(view.dishes.map((d) => [d.qty, d.stepGrams])).toEqual([[1, 400], [1, 500]]);
+  });
+
+  it("потолок количества — те же тексты, что у сервера: тап и правка у кг называют вес", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const place = await mock.saveFoodPlace(null, { name: "Рынок", menu: [{ name: "Икра", price: 2400, unit: "kg", stepGrams: 400 }] });
+    const { order } = await mock.createOrder({ ...base, placeId: place.id, closesAt: null });
+    let view = await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
+    for (let k = 1; k < 20; k += 1) view = await mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id });
+    expect(view.myItems[0]!.qty).toBe(20);
+    await expect(mock.addOrderItem(order.id, { menuItemId: place.menu[0]!.id })).rejects.toThrow("Больше 8 кг одной позиции не взять.");
+    await expect(mock.setOrderItemQty(order.id, view.myItems[0]!.id, 21)).rejects.toThrow("Больше 8 кг одной позиции не взять.");
   });
 
   it("people[].items — свёрнутая сводка, как у сервера: две одинаковые свои строки — одна с количеством", async () => {
