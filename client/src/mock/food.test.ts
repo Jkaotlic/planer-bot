@@ -42,6 +42,26 @@ describe("createFoodMock: «кто я» — из состояния морды",
   });
 });
 
+describe("createFoodMock: отчёт о рассылке — как у сервера", () => {
+  // Сервер считает «дошло» только по коллегам — своё письмо создатель ответов не соберёт —
+  // и отдаёт флаг deliveredToNobody. Мок, считавший создателя, показывал в DEV на одного
+  // больше, а без флага его ответ расходился с контрактом сервера.
+  it("опрос: «дошло» — коллеги с Telegram без создателя, флаг на месте", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const report = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    // Аня (сама) не в счёт; Игорь и Лена (копия наблюдателю) с Telegram, Марк — без.
+    expect(report.delivered).toBe(2);
+    expect(report.deliveredToNobody).toBe(false);
+  });
+
+  it("сбор: «дошло» — коллеги с Telegram без создателя, флаг на месте", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true });
+    const report = await mock.createOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    expect(report.delivered).toBe(2);
+    expect(report.deliveredToNobody).toBe(false);
+  });
+});
+
 describe("createFoodMock: копия наблюдателям — как resolveAudience сервера", () => {
   it("наблюдатель с Telegram получает копию при «Выбрать»; без Telegram — нет", async () => {
     const { mock } = mockAs({ id: 1, isAdmin: true });

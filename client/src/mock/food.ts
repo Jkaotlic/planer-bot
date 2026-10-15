@@ -149,6 +149,20 @@ export function createFoodMock(opts: FoodMockOptions) {
     return [...chosen, ...observers];
   }
 
+  /**
+   * «Дошло» и «не дошло ни до кого» — как в ответе `POST /api/polls` и `POST /api/orders`:
+   * только коллеги, без создателя (своё письмо ответов не соберёт, и с ним «отправлено
+   * коллегам: N» было бы на одного больше). Мок без бота не роняет отправку, поэтому
+   * «дошло» — коллеги с Telegram, а флаг всегда опущен: у сервера письма уходят только
+   * достижимым (`resolveAudience.reachable`), и «ни до кого» там значит сбой бота, которого
+   * в моке нет. Поднять его здесь значило бы сказать в DEV «проверь бота» про бота, который
+   * ничего не ронял.
+   */
+  function colleagueReport(recipients: readonly number[]): { delivered: number; deliveredToNobody: boolean } {
+    const delivered = recipients.filter((id) => id !== me().id && staff().find((e) => e.id === id)?.telegramUserId != null).length;
+    return { delivered, deliveredToNobody: false };
+  }
+
   async function createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView } & FoodSendReport> {
     await wait();
     if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
@@ -172,16 +186,13 @@ export function createFoodMock(opts: FoodMockOptions) {
       votes: new Map<number, PollChoice>(),
     };
     POLLS.push(poll);
-    // Как на сервере: «дошло» считает только тех, у кого есть Telegram — а не
-    // всех адресатов. Мок без бота не умеет ронять отдельную отправку, поэтому
-    // «дошло» здесь равно «мог дойти технически» — тот же потолок, что у
-    // `resolveAudience.reachable`.
+    // «Не дошло» — адресаты без Telegram, как `resolveAudience.unreachable`; «дошло» и флаг
+    // считает `colleagueReport`.
     const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
-    const delivered = recipients.filter((id) => telegramOf(id) != null).length;
     const unreachable = recipients
       .filter((id) => telegramOf(id) == null)
       .map((id) => staff().find((e) => e.id === id)?.displayName ?? "—");
-    return { poll: pollViewOf(poll), delivered, unreachable };
+    return { poll: pollViewOf(poll), ...colleagueReport(recipients), unreachable };
   }
 
   function pollOrThrow(id: number): MockPoll {
@@ -467,9 +478,9 @@ export function createFoodMock(opts: FoodMockOptions) {
     // Тот же отказ и тот же текст, что у `resolveAudience`/`POST /api/orders`:
     // считать надо ДО заведения заказа — иначе он рождается без адресатов.
     const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
-    const delivered = recipients.filter((id) => telegramOf(id) != null).length;
+    const reachable = recipients.filter((id) => telegramOf(id) != null).length;
     const unreachable = recipients.filter((id) => telegramOf(id) == null).map((id) => nameOf(id));
-    if (delivered < 2) throw new Error("Некому отправить: в списке никого, кроме тебя.");
+    if (reachable < 2) throw new Error("Некому отправить: в списке никого, кроме тебя.");
     const order: MockOrder = {
       id: nextOrderId++,
       createdBy: me().id,
@@ -486,7 +497,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       declines: new Set(),
     };
     ORDERS.push(order);
-    return { order: orderViewOf(order), delivered, unreachable };
+    return { order: orderViewOf(order), ...colleagueReport(recipients), unreachable };
   }
 
   /** Общий вход правки позиций: закрыт — дальше делать нечего. Мок играет

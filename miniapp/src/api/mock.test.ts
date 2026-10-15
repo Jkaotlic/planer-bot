@@ -573,8 +573,9 @@ describe("опросы: dev-мок", () => {
   it("«дошло» считает только тех, у кого есть Telegram — Марк без него не входит в delivered", async () => {
     const { delivered, unreachable } = await mockCreatePoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
     // Команда: id 1,2,3,4,5,7 (6 — архивный, исключён). Без Telegram — только Марк.
+    // «Дошло» — коллегам, как у сервера: сама Аня (создатель) не в счёт.
     expect(unreachable).toEqual(["Марк Волков"]);
-    expect(delivered).toBe(5);
+    expect(delivered).toBe(4);
   });
 
   it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
@@ -597,9 +598,10 @@ describe("заказы еды: dev-мок", () => {
       placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" },
     });
     // Команда: id 1,2,3,4,5,7 (6 — архивный). Без Telegram — только Марк.
+    // «Дошло» — коллегам, как у сервера: сама Аня (создатель) не в счёт.
     expect(order.recipientCount).toBe(6);
     expect(unreachable).toEqual(["Марк Волков"]);
-    expect(delivered).toBe(5);
+    expect(delivered).toBe(4);
   });
 
   it("«некому отправить» — тот же текст, что у POST /api/orders, когда достижим только сам заказчик", async () => {
