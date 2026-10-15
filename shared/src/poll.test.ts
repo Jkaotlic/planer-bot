@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, isWithinCloseHorizon, pollInviteText, pollResultText, pollTally, pollTallyLines, POLL_CHOICES_HINT } from "./poll";
+import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -97,6 +98,37 @@ describe("pollTallyLines", () => {
   it("итог письма — те же строки под заголовком: карточка и бот не разъезжаются", () => {
     const tally = { for: ["Аня"], against: ["Игорь"], abstain: [], silent: [] };
     expect(pollResultText("Обед?", tally)).toBe(["📊 Итоги опроса: Обед?", "", ...pollTallyLines(tally)].join("\n"));
+  });
+
+  it("итог на 60 адресатов с именами по 100 знаков — одно письмо в пределе, хвосты групп свёрнуты", () => {
+    // Имя в 100 знаков — потолок `EMPLOYEE_NAME_MAX`; 60 таких без свёртки — больше 6000 знаков.
+    const names = Array.from({ length: 60 }, (_, i) => `Аня ${String(i).padStart(2, "0")} `.padEnd(100, "я"));
+    const tally = { for: names.slice(0, 20), against: names.slice(20, 30), abstain: names.slice(30, 40), silent: names.slice(40) };
+    const text = pollResultText("Пицца?", tally);
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_TEXT_SAFE_MAX);
+    // Счёт — всегда за всю группу: свёртка прячет имена, а не голоса.
+    expect(text).toContain("👍 За — 20: ");
+    expect(text).toContain("👎 Против — 10: ");
+    expect(text).toContain("🤷 Воздержались — 10: ");
+    expect(text).toContain("Не ответили — 20: ");
+    expect(text).toContain(names[0]);
+    const shown = names.filter((n) => text.includes(n)).length;
+    const hidden = [...text.matchAll(/…и ещё (\d+)/g)].reduce((s, m) => s + Number(m[1]), 0);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown + hidden).toBe(60);
+    expect(text).toContain("Все имена — в мини-аппе: «📋 Заказы и опросы».");
+  });
+
+  it("влезающий итог не свёрнут и без строки про мини-апп", () => {
+    const text = pollResultText("Обед?", { for: ["Аня", "Игорь"], against: [], abstain: [], silent: ["Марк"] });
+    expect(text).not.toContain("…и ещё");
+    expect(text).not.toContain("мини-апп");
+  });
+
+  it("карточка получает все имена: свёртка — только у письма", () => {
+    const names = Array.from({ length: 60 }, (_, i) => `Аня ${i} `.padEnd(100, "я"));
+    const lines = pollTallyLines({ for: names, against: [], abstain: [], silent: [] });
+    expect(lines).toEqual([`👍 За — 60: ${names.join(", ")}`]);
   });
 
   it("подсказка формы перечисляет ровно кнопки голоса", () => {

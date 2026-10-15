@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatMoney } from "./collection";
+import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 
 /**
  * Лимиты заказа еды. Один процесс держит и API, и long-polling бота, поэтому
@@ -27,8 +28,6 @@ export const FOOD_CLOSE_HORIZON_DAYS = 14;
  * цикле раздула бы её до сотни.
  */
 export const FOOD_ITEMS_PER_PERSON_MAX = 20;
-/** Потолок одного письма с запасом до лимита Telegram в 4096 знаков. */
-export const TELEGRAM_TEXT_SAFE_MAX = 4000;
 
 /** Цена — целые рубли: копейки в обеде никто не сдаёт, а дробь в долге — повод для спора. */
 export const foodPriceSchema = z.number().int().min(1).max(FOOD_PRICE_MAX);

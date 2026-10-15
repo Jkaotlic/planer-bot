@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { formatDayMonth } from "./collection";
 import { FOOD_CLOSE_HORIZON_DAYS } from "./food-order";
+import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 import { addDaysIso } from "./week-dates";
 
 /**
@@ -137,17 +138,48 @@ const TALLY_ROWS: readonly [keyof PollTally, string][] = [
  * Одна функция на письмо бота, карточку мини-аппа и карточку консоли: подписи
  * групп раньше жили второй копией в `PollCard.tsx` (`TALLY_LABELS`), и правка
  * одной не доезжала бы до другой.
+ *
+ * `namesMax` — сколько имён показать в группе, остальные сворачиваются в «…и ещё N».
+ * Нужен только письму (`pollResultText`); карточки зовут без него и печатают всех —
+ * на это и ссылается свёрнутое письмо. Счёт группы всегда полный: прячутся имена,
+ * а не голоса.
  */
-export function pollTallyLines(tally: PollTally): string[] {
-  return TALLY_ROWS.filter(([key]) => tally[key].length > 0).map(
-    ([key, label]) => `${label} — ${tally[key].length}: ${tally[key].join(", ")}`,
-  );
+export function pollTallyLines(tally: PollTally, namesMax = Number.POSITIVE_INFINITY): string[] {
+  return TALLY_ROWS.filter(([key]) => tally[key].length > 0).map(([key, label]) => {
+    const names = tally[key];
+    const rest = names.length - namesMax;
+    if (rest <= 0) return `${label} — ${names.length}: ${names.join(", ")}`;
+    const shown = names.slice(0, namesMax);
+    return `${label} — ${names.length}: ${[...shown, `…и ещё ${rest}`].join(", ")}`;
+  });
 }
 
-/** Итог, который уходит всем участникам при закрытии. */
+/**
+ * Итог, который уходит всем участникам при закрытии.
+ *
+ * Одно письмо и не длиннее `TELEGRAM_TEXT_SAFE_MAX`: 60 адресатов с именами в 100
+ * знаков (`EMPLOYEE_NAME_MAX`) — уже больше 6000, а такое письмо Telegram отвергает
+ * целиком, и итог не дошёл бы ни до кого. Резать на части не стали: итог читают
+ * разом, а куски одного итога вперемешку с другими письмами читаются хуже. Поэтому
+ * имён в группе показывается поровну столько, сколько влезает, остальные — «…и ещё N».
+ * Ссылка честная: карточка опроса в мини-аппе («📋 Заказы и опросы», последние 20
+ * опросов человека — только что закрытый среди них) печатает всех поимённо.
+ */
 export function pollResultText(question: string, tally: PollTally): string {
-  return [`📊 Итоги опроса: ${question}`, "", ...pollTallyLines(tally)].join("\n");
+  const head = [`📊 Итоги опроса: ${question}`, ""];
+  const full = [...head, ...pollTallyLines(tally)].join("\n");
+  if (full.length <= TELEGRAM_TEXT_SAFE_MAX) return full;
+  const biggest = Math.max(...TALLY_ROWS.map(([key]) => tally[key].length));
+  // Перебор с большего: групп четыре, имён — сотни, а арифметика длин ошибалась бы
+  // на разделителях. При нуле имён остаются вопрос (≤ 200) и счёт — это влезает всегда.
+  for (let namesMax = biggest - 1; namesMax >= 0; namesMax -= 1) {
+    const text = [...head, ...pollTallyLines(tally, namesMax), "", POLL_FULL_LIST_HINT].join("\n");
+    if (text.length <= TELEGRAM_TEXT_SAFE_MAX) return text;
+  }
+  return [...head, ...pollTallyLines(tally, 0), "", POLL_FULL_LIST_HINT].join("\n");
 }
+
+const POLL_FULL_LIST_HINT = "Все имена — в мини-аппе: «📋 Заказы и опросы».";
 
 /** Подсказка в форме опроса — из тех же подписей, что и кнопки голоса. */
 export const POLL_CHOICES_HINT = `Ответы: ${POLL_CHOICES.map((c) => POLL_CHOICE_LABEL[c]).join(" · ")}`;

@@ -47,3 +47,9 @@ export const CHECKLIST_NAME_MAX = 120;
 export const CHECKLIST_ITEM_TITLE_MAX = 200;
 export const CHECKLIST_NOTE_MAX = 2000;
 export const CHECKLIST_DOC_URL_MAX = 500;
+
+/**
+ * Потолок одного письма с запасом до лимита Telegram в 4096 знаков. Общий для всех
+ * писем, которые склеивают строки по людям или сборам: заказ, итог опроса, «Сервисы».
+ */
+export const TELEGRAM_TEXT_SAFE_MAX = 4000;

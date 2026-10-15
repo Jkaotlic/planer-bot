@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { formatMoney } from "./collection";
 import {
   debtOf, debtors, dishSummary, formatKg, itemLines, orderInviteText, orderItemInputSchema, orderTotal, organizerSummaryText, payRequestText,
-  orderDishLines, placeInputSchema, qtyLimitText, itemsLimitText, splitAtLines, TELEGRAM_TEXT_SAFE_MAX, FOOD_ITEMS_PER_PERSON_MAX,
+  orderDishLines, placeInputSchema, qtyLimitText, itemsLimitText, splitAtLines, FOOD_ITEMS_PER_PERSON_MAX,
 } from "./food-order";
+import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 
 describe("placeInputSchema", () => {
   it("принимает место с меню и обрезает пробелы", () => {
