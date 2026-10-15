@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { formatMoney } from "./collection";
 import {
   debtOf, debtors, dishSummary, formatKg, itemLines, orderInviteText, orderItemInputSchema, orderTotal, organizerSummaryText, payRequestText,
-  orderDishLines, placeInputSchema, qtyLimitText, itemsLimitText, splitAtLines,
+  orderDishLines, placeInputSchema, qtyLimitText, itemsLimitText, splitAtLines, TELEGRAM_TEXT_SAFE_MAX, FOOD_ITEMS_PER_PERSON_MAX,
 } from "./food-order";
 
 describe("placeInputSchema", () => {
@@ -81,6 +81,34 @@ describe("тексты заказа", () => {
     expect(text).toContain("Без лука");
     expect(text).toContain("Куда сдавать: Перевод по номеру");
     expect(text).toContain("Твой заказ:\nШаурма ×2 — 700 ₽\nИтого: 700 ₽");
+  });
+
+  it("приглашение на пределе полей — одно письмо в лимите, хвост свёрнут, «Итого» за всё", () => {
+    // Письмо потом перерисовывают `editMessageText`, а резать его на части нельзя: длиннее
+    // 4096 знаков — и Telegram отказывает и рассылке, и каждой перерисовке целиком.
+    const myItems = Array.from({ length: FOOD_ITEMS_PER_PERSON_MAX }, (_, i) => ({
+      name: `${String(i + 1).padStart(2, "0")} ${"Икра".repeat(49)}`, price: 100_000, qty: 20, unit: "kg" as const, stepGrams: 400,
+    }));
+    const text = orderInviteText({
+      creatorName: "А".repeat(100), title: "Т".repeat(200), placeName: null, note: "З".repeat(300), payHint: "К".repeat(200),
+      closes: "до 12:30", myItems, declined: false,
+    });
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_TEXT_SAFE_MAX);
+    const shown = myItems.filter((m) => text.includes(m.name)).length;
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(FOOD_ITEMS_PER_PERSON_MAX);
+    // Показаны первые по порядку, а свёрнутые названы числом.
+    expect(myItems.slice(0, shown).every((m) => text.includes(m.name))).toBe(true);
+    expect(text).toContain(`…и ещё ${FOOD_ITEMS_PER_PERSON_MAX - shown} — полный список в мини-аппе`);
+    // «Итого» — за весь заказ, а не за видимые строки: иначе письмо называло бы чужую сумму.
+    expect(text.endsWith(`Итого: ${formatMoney(FOOD_ITEMS_PER_PERSON_MAX * 20 * 100_000)}`)).toBe(true);
+  });
+
+  it("приглашение, которое влезает, не сворачивается", () => {
+    const myItems = Array.from({ length: FOOD_ITEMS_PER_PERSON_MAX }, (_, i) => ({ name: `Блюдо ${i + 1}`, price: 100, qty: 1 }));
+    const text = orderInviteText({ creatorName: "Аня", title: null, placeName: "Шаурмечная", note: null, payHint: null, closes: null, myItems, declined: false });
+    expect(text).not.toContain("и ещё");
+    expect(myItems.every((m) => text.includes(`${m.name} — ${formatMoney(100)}`))).toBe(true);
   });
 
   it("отказавшийся видит «Ты не заказываешь»", () => {

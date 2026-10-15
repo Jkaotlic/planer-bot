@@ -225,6 +225,14 @@ export function orderDishLines(dishes: readonly LineItem[]): string[] {
  * Письмо заказа — и оно же после каждого тапа. Свой заказ печатается в тексте:
  * кнопки меню одинаковы для всех, и без этой строки человек не видит, что
  * уже набрал.
+ *
+ * Письмо всегда одно и не длиннее `TELEGRAM_TEXT_SAFE_MAX`: его перерисовывают
+ * `editMessageText`, и разрезать его, как сводку (`splitAtLines`), нельзя — а письмо
+ * длиннее 4096 знаков Telegram отвергает целиком, и рассылка, и каждая перерисовка
+ * молча не доходили бы. На пределе полей (20 строк по 200 знаков названия плюс
+ * заметка) такое бывает, поэтому хвост своих строк сворачивается в «…и ещё N».
+ * Обещание «полный список в мини-аппе» честное: экран заказа печатает все свои
+ * позиции («Твой заказ»). «Итого» — всегда за весь заказ.
  */
 export function orderInviteText(input: {
   creatorName: string;
@@ -246,10 +254,21 @@ export function orderInviteText(input: {
   if (input.payHint) lines.push("", `Куда сдавать: ${input.payHint}`);
   if (input.myItems.length > 0) {
     const total = input.myItems.reduce((s, i) => s + i.price * i.qty, 0);
-    lines.push("", "Твой заказ:", ...itemLines(input.myItems), `Итого: ${formatMoney(total)}`);
-  } else if (input.declined) {
-    lines.push("", "Ты не заказываешь.");
+    const all = itemLines(input.myItems);
+    const withItems = (shown: number) => {
+      const rest = all.length - shown;
+      const fold = rest > 0 ? [`…и ещё ${rest} — полный список в мини-аппе`] : [];
+      return [...lines, "", "Твой заказ:", ...all.slice(0, shown), ...fold, `Итого: ${formatMoney(total)}`].join("\n");
+    };
+    // Строк не больше 20 (`FOOD_ITEMS_PER_PERSON_MAX`) — перебор с конца дешевле любой
+    // арифметики длин и не ошибается на знаке-разделителе.
+    for (let shown = all.length; shown > 0; shown -= 1) {
+      const text = withItems(shown);
+      if (text.length <= TELEGRAM_TEXT_SAFE_MAX) return text;
+    }
+    return withItems(0);
   }
+  if (input.declined) lines.push("", "Ты не заказываешь.");
   return lines.join("\n");
 }
 
