@@ -188,4 +188,35 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     await runHandoverTick(deps, Date.now());
     expect(sent.filter((m) => m.to === 403)).toHaveLength(2);
   });
+
+  it("archiving the colleague a hand-over was OFFERED to fans it out to everyone else at once, and writes him nothing", async () => {
+    // Igor can no longer take anything once archived (canSwap), yet the offer waited on him for
+    // `handoverFanHours` before the tick fanned it — hours lost on a shift that is close.
+    const db = makeTestDb();
+    const anya = worker(db, "Аня", 501);
+    const igor = worker(db, "Игорь", 502);
+    worker(db, "Марат", 503);
+    const mark = worker(db, "Марк", 504);
+    setEmployeeAdmin(db, mark.id, true);
+    const { bot, sent } = fakeBot();
+    const app = createApp({ db, config, bot });
+    const sick = createShift(db, { date: day(1), category: "sick_leave", employeeId: anya.id, approvedByEmployeeId: mark.id });
+    const work = createShift(db, { date: day(1), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const handover = createHandover(db, {
+      shiftId: work.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "offered", offeredToEmployeeId: igor.id,
+    });
+    const markToken = await tokenFor(app, 504);
+
+    const res = await app.request(new Request(`http://x/api/admin/employees/${igor.id}/archive`, authed(markToken, {})));
+    expect(res.status).toBe(200);
+
+    const after = getHandover(db, handover.id)!;
+    expect(after.status).toBe("fanned");
+    expect(after.offeredToEmployeeId).toBeNull();
+    const toMarat = sent.filter((m) => m.to === 503);
+    expect(toMarat).toHaveLength(1);
+    expect(toMarat[0]!.text).toContain("Кто может выйти?");
+    expect(sent.filter((m) => m.to === 502)).toHaveLength(0);
+    expect(getShift(db, work.id)!.employeeId).toBe(anya.id);
+  });
 });

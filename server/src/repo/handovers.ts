@@ -52,6 +52,16 @@ export function listLiveHandoversFrom(db: Db, employeeId: number): Handover[] {
     .all();
 }
 
+/** Personal offers still waiting for this person's «Беру» / «Не могу». */
+export function listOffersWaitingOn(db: Db, employeeId: number): Handover[] {
+  return db
+    .select()
+    .from(handovers)
+    .where(and(eq(handovers.offeredToEmployeeId, employeeId), eq(handovers.status, "offered")))
+    .orderBy(asc(handovers.id))
+    .all();
+}
+
 /** Every handover one «больничный» spawned — a multi-day one spawns several. */
 export function listHandoversForEntry(db: Db, sickEntryId: number): Handover[] {
   return db.select().from(handovers).where(eq(handovers.sickEntryId, sickEntryId)).orderBy(asc(handovers.id)).all();

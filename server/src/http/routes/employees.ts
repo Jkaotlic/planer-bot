@@ -20,7 +20,8 @@ import {
 } from "@planer/shared";
 import { notifyUser, swapExpiredText } from "../../bot/notify";
 import { deleteShift, listShiftsByEmployee } from "../../repo/shifts";
-import { cancelHandoversForEntryDb, cancelLiveHandoversOfEmployeeDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
+import { cancelHandoversForEntryDb, cancelLiveHandoversOfEmployeeDb, detachHandoversFromEntry, fanOut, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
+import { getHandover, listOffersWaitingOn } from "../../repo/handovers";
 import { editClosedRequest, sickApprovalDeps, takeRequestOutOfPending, type ClosedRequest } from "../../sick-approval/sick-approval-service";
 import { getVacantSlot, listAssignmentsForEmployee, removeAllInterestOf } from "../../repo/weekend";
 import { unassign } from "../../weekend/weekend-service";
@@ -404,6 +405,15 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
     const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
     for (const closed of closedRequests) await editClosedRequest(approvalDeps, closed);
     await notifyCancelledHandovers(approvalDeps, cancelledHandovers, { byAdmin: true });
+    // Личные предложения смен, ждавшие его ответа, — сразу веером остальным. Взять смену
+    // архивный уже не может (`canSwap`), а тик ждал бы его молчания `handoverFanHours`:
+    // часы, потерянные на смене, которая скоро. Веер — тот же, что пускает тик, с тем же
+    // безличным текстом; ему самому ничего — `handoverCandidates` архивных не видит.
+    // Перечитываем перед каждым: пока уходил веер предыдущего, дающий мог выбрать другого.
+    for (const offer of listOffersWaitingOn(db, id)) {
+      const current = getHandover(db, offer.id);
+      if (current?.status === "offered" && current.offeredToEmployeeId === id) await fanOut(approvalDeps, offer.id);
+    }
     if (bot) {
       for (const request of pending) {
         const other = request.fromEmployeeId === id ? request.toEmployeeId : request.fromEmployeeId;
