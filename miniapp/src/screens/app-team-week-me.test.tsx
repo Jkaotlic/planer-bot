@@ -76,3 +76,42 @@ describe("«Команда → Неделя» подсвечивает свою 
     expect(mine[0]!.textContent).toContain("Смирнова");
   });
 });
+
+describe("«Команда → Неделя» метит смену на отсутствующем", () => {
+  // `TeamWeekGrid` рисует метку, только если `TeamScreen` попросил её у `buildWeekModel`.
+  it("клетка Иванова во вторник (болен, а смена стоит на нём) — «ждёт замены»", async () => {
+    vi.spyOn(apiClient, "getBootstrap").mockResolvedValue(bootstrap() as never);
+    const base = { endDate: null, title: null, templateId: null, location: null, note: null, unrecognisedCode: null };
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
+      employees: [
+        { id: 1, displayName: "Иванов Иван", rosterOrder: 0, excludedFromSwaps: false },
+        { id: 2, displayName: "Смирнова Аня", rosterOrder: 1, excludedFromSwaps: false },
+      ],
+      shifts: [
+        { ...base, id: 10, employeeId: 1, date: "2026-08-04", start: null, end: null, category: "sick_leave" },
+        { ...base, id: 11, employeeId: 1, date: "2026-08-04", start: "08:00", end: "20:00", category: "shift", title: "День" },
+      ],
+      calendar: [],
+    } as never);
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => { root!.render(createElement(AppRoot, null, createElement(App))); });
+    await settle();
+    const teamTab = [...host.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Команда"));
+    if (!teamTab) throw new Error("нет вкладки «Команда»");
+    await act(async () => teamTab.click());
+    await settle();
+    const weekTab = [...host.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Неделя");
+    if (!weekTab) throw new Error("нет переключателя «Неделя»");
+    await act(async () => weekTab.click());
+    await settle();
+
+    const marked = [...host.querySelectorAll("button.team-week__cell.is-awaiting-cover")];
+    expect(marked.map((b) => b.getAttribute("aria-label"))).toEqual([
+      expect.stringContaining("Иванов Иван, 2026-08-04: День (ждёт замены)"),
+    ]);
+    expect(host.querySelector(".team-legend")!.textContent).toContain("(ждёт замены)");
+  });
+});

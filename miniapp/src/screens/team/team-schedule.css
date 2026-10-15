@@ -291,6 +291,16 @@
   box-shadow: inset 0 0 0 1.5px var(--tgui--link_color);
 }
 
+/* Смена на человеке, которого в этот день нет (`waitsForCover`): та же рамка цвета
+   нехватки, что у «ждёт замены» в «Админ → График» и в консоли. outline, а не border:
+   рамка не меняет размер клетки и не спорит с `.is-today` (box-shadow). Тот же класс
+   у квадрата легенды — строка «… (ждёт замены)» объясняет именно эту рамку. */
+.team-week__cell.is-awaiting-cover,
+.team-legend__code.is-awaiting-cover {
+  outline: 2px solid var(--tgui--destructive_text_color);
+  outline-offset: -2px;
+}
+
 .team-week__cell small {
   font-size: 8px;
   line-height: 1;
