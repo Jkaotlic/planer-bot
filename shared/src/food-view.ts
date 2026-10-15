@@ -82,10 +82,11 @@ export function sendReportText(r: FoodSendReport): string {
   return `Отправлено коллегам: ${r.delivered}. Не дошло: ${r.unreachable.join(", ")}`;
 }
 
-/** Заголовок отчёта: сбор заведён всегда (его не откатываем), а «отправлен» — только если
- *  хоть одно письмо дошло. */
-export function sendReportTitle(r: FoodSendReport): string {
-  return r.deliveredToNobody ? "Заказ заведён" : "Заказ отправлен";
+/** Заголовок отчёта: сбор или опрос заведён всегда (его не откатываем), а «отправлен» —
+ *  только если письмо дошло хоть до одного коллеги. */
+export function sendReportTitle(r: FoodSendReport, what: "order" | "poll" = "order"): string {
+  const noun = what === "poll" ? "Опрос" : "Заказ";
+  return r.deliveredToNobody ? `${noun} заведён` : `${noun} отправлен`;
 }
 
 /** Итог «Напомнить не сдавшим». */

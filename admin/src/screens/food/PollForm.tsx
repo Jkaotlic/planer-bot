@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, type FoodSendReport, type TeamAudience } from "@planer/shared";
+import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, sendReportTitle, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 import { useAuthRequired } from "../../auth-required";
@@ -28,9 +28,11 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
     setError(null);
     try {
       const result = await apiClient.createPoll({ question: question.trim(), closesTime: closesTime || null, audience });
-      // Дошло всем — показывать нечего, форма закрывается сразу. Не всем — держим
-      // отчёт с явным «ОК», иначе «дошло не всем» проскочило бы мимо.
-      if (result.unreachable.length > 0) setSummary({ delivered: result.delivered, unreachable: result.unreachable });
+      // Дошло всем — показывать нечего, форма закрывается сразу. Не всем или ни до кого
+      // из коллег — держим отчёт с явным «ОК», иначе это проскочило бы мимо.
+      if (result.unreachable.length > 0 || result.deliveredToNobody) {
+        setSummary({ delivered: result.delivered, unreachable: result.unreachable, deliveredToNobody: result.deliveredToNobody });
+      }
       else onDone();
     } catch (err) {
       setError(failureText(err, "Не удалось отправить опрос", onAuthRequired));
@@ -42,7 +44,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
   if (summary) {
     return (
       <div className="employees-screen employees-screen-form food-form">
-        <h2 className="employees-title">Опрос отправлен</h2>
+        <h2 className="employees-title">{sendReportTitle(summary, "poll")}</h2>
         <div className="food-note">{sendReportText(summary)}</div>
         <div className="food-buttons">
           <button type="button" className="btn btn-primary" onClick={onDone}>ОК</button>

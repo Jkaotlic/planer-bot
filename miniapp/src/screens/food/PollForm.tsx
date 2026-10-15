@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Input, Textarea } from "@telegram-apps/telegram-ui";
-import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText } from "@planer/shared";
+import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, sendReportTitle, type FoodSendReport } from "@planer/shared";
 import { apiClient, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton } from "../../ui";
@@ -19,7 +19,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
   // показывает недостижимых ДО отправки (та же строка «Не дойдёт»), но
   // список могло изменить состояние гонки (кого-то как раз отвязали от
   // Telegram) — точный ответ даёт только сервер, в самом ответе создания.
-  const [summary, setSummary] = useState<{ delivered: number; unreachable: string[] } | null>(null);
+  const [summary, setSummary] = useState<FoodSendReport | null>(null);
 
   const ready = question.trim().length > 0 && audienceReady(audience);
 
@@ -31,7 +31,11 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
       // Недостижимых нет — закрывать нечего показывать, форма закрывается
       // сразу, как раньше. Есть — держим экран с отчётом и явным «ОК», иначе
       // «дошло не всем» проскочило бы мимо того, кто как раз это должен знать.
-      if (result.unreachable.length > 0) setSummary({ delivered: result.delivered, unreachable: result.unreachable });
+      // Ни до кого из коллег не дошло — тоже держим: молча закрытая форма читалась бы
+      // как «опрос ушёл», а голосов не будет.
+      if (result.unreachable.length > 0 || result.deliveredToNobody) {
+        setSummary({ delivered: result.delivered, unreachable: result.unreachable, deliveredToNobody: result.deliveredToNobody });
+      }
       else onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось отправить опрос");
@@ -43,7 +47,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
   if (summary) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
-        <h1 className="ui-screen__title">Опрос отправлен</h1>
+        <h1 className="ui-screen__title">{sendReportTitle(summary, "poll")}</h1>
         <div style={{ fontSize: "var(--app-text-body)", lineHeight: 1.45 }}>
           {sendReportText(summary)}
         </div>

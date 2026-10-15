@@ -1015,7 +1015,7 @@ export interface ApiClient {
   /** Один опрос — карточка перечитывает его после отказа действия. */
   getPoll(id: number): Promise<PollView>;
   /** Заводит опрос и сразу шлёт приглашения адресатам. */
-  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[] }>;
+  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>;
   /** Свой голос — «За» / «Против» / «Воздержался». */
   votePoll(id: number, choice: PollChoice): Promise<PollView>;
   /** «Набрали, закрыть»: приём голосов останавливается, итог уходит всем. */
@@ -1822,7 +1822,7 @@ export const realClient: ApiClient = {
     return (await authorizedGet<{ poll: PollView }>(`/api/polls/${id}`)).poll;
   },
   createPoll: (input) =>
-    authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[] }>("/api/polls", input),
+    authorizedPostJson<{ poll: PollView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>("/api/polls", input),
   async votePoll(id, choice) {
     return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/vote`, { choice })).poll;
   },

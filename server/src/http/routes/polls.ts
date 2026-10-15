@@ -88,8 +88,12 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     // В ответе — только коллеги, как у сбора: письмо самому создателю голосов не
     // соберёт, и «Отправлено коллегам: N» с ним было бы на одного больше. Журнал выше
     // хранит все письма — его `recipients` тоже считает создателя.
-    const deliveredToColleagues = pollRecipientRows(db, poll.id).filter((r) => r.employeeId !== viewer.id && r.messageId != null).length;
-    return c.json({ poll: pollView(db, poll, viewer, now), delivered: deliveredToColleagues, unreachable }, 201);
+    const colleagues = pollRecipientRows(db, poll.id).filter((r) => r.employeeId !== viewer.id);
+    const deliveredToColleagues = colleagues.filter((r) => r.messageId != null).length;
+    // Не дошло ни до кого из коллег — опрос всё равно остаётся (он в базе и виден в
+    // мини-аппе, как сбор), но форма должна сказать это прямо, а не «Опрос отправлен».
+    const deliveredToNobody = colleagues.length > 0 && deliveredToColleagues === 0;
+    return c.json({ poll: pollView(db, poll, viewer, now), delivered: deliveredToColleagues, unreachable, deliveredToNobody }, 201);
   });
 
   app.get("/api/polls/:id", auth, (c) => {

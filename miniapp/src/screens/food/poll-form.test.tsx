@@ -71,4 +71,17 @@ describe("PollForm", () => {
     await act(async () => byText(el, "ОК").click());
     expect(onDone).toHaveBeenCalled();
   });
+
+  it("не дошло ни до кого из коллег — «Опрос заведён» и «проверь бота», а не «отправлен»", async () => {
+    // Недостижимых нет, а письма не ушли — без флага форма закрылась бы молча.
+    vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: {} as never, delivered: 0, unreachable: [], deliveredToNobody: true });
+    const { el, onDone } = await mount();
+    await act(async () => type(el.querySelector("textarea")!, "Корпоратив в пятницу?"));
+    await act(async () => byText(el, "Отправить").click());
+    await settle();
+    expect(el.textContent).toContain("Письмо не дошло ни до кого из коллег — проверь бота.");
+    expect(el.textContent).toContain("Опрос заведён");
+    expect(el.textContent).not.toContain("Опрос отправлен");
+    expect(onDone).not.toHaveBeenCalled();
+  });
 });

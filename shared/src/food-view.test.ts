@@ -106,6 +106,10 @@ describe("отчёты рассылки", () => {
       .toBe("Письмо не дошло ни до кого из коллег — проверь бота. Без Telegram: Марк");
     expect(sendReportTitle({ delivered: 0, unreachable: [], deliveredToNobody: true })).toBe("Заказ заведён");
     expect(sendReportTitle({ delivered: 1, unreachable: ["Марк"] })).toBe("Заказ отправлен");
+    // У опроса тот же отчёт, но заголовок называет опрос: «Заказ заведён» над вопросом
+    // «Корпоратив?» читалось бы как чужой экран.
+    expect(sendReportTitle({ delivered: 0, unreachable: [], deliveredToNobody: true }, "poll")).toBe("Опрос заведён");
+    expect(sendReportTitle({ delivered: 1, unreachable: ["Марк"] }, "poll")).toBe("Опрос отправлен");
   });
 
   it("дожим: все сдали / «D из N» / с недошедшими", () => {
