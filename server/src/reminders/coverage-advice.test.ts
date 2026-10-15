@@ -134,6 +134,22 @@ describe("runCoverageAdviceTick", () => {
     expect(listRecentAudit(db, 5).some((e) => e.type === "coverage_advice_sent")).toBe(false);
   });
 
+  it("смены на больном Игоре — пробел, и совет говорит правду: выйти некому, а не «смен нет»", async () => {
+    const { db, worker } = stage();
+    const { bot, sent } = testBot();
+    fillWeek(db, worker.id);
+    // Больничный начался до окна совета — и всё равно закрывает его первые дни.
+    createShift(db, { date: "2026-09-03", endDate: "2026-09-08", employeeId: worker.id, category: "sick_leave" });
+
+    await runCoverageAdviceTick(db, bot, EVENING);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("Пн 7 сентября — все, кто стоит в смене, отсутствуют");
+    expect(sent[0]!.text).toContain("Вт 8 сентября — все, кто стоит в смене, отсутствуют");
+    expect(sent[0]!.text).not.toContain("смен нет");
+    expect(sent[0]!.text).not.toContain("9 сентября");
+  });
+
   it("день ниже нормы называет вид смены и сколько не хватает", async () => {
     const { db, worker } = stage();
     const { bot, sent } = testBot();

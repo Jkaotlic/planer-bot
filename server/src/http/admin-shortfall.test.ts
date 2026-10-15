@@ -10,6 +10,7 @@ import { ackCoverageDate } from "../repo/settings";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { employees } from "../db/schema";
 
 const config = testConfig();
 const initDataFor = (id: number) =>
@@ -70,6 +71,9 @@ function fillWindow(db: Db, from: string, to: string, opts: { skip?: string } = 
   }
 }
 
+const listEmployeesNamed = (db: Db, name: string) =>
+  db.select().from(employees).all().find((e) => e.displayName === name)!.id;
+
 const shortfall = async (app: ReturnType<typeof createApp>, token: string) =>
   (await app.request("/api/admin/shortfall", bearer(token))).json();
 
@@ -100,6 +104,16 @@ describe("GET /api/admin/shortfall", () => {
       employeeId: anya.id, category: "shift", templateId: morning(db).id,
     });
     expect(await shortfall(app, admin)).toEqual({ total: 4, firstDate: "2026-08-29" });
+  });
+
+  it("смена на больном не закрывает норму — бейдж считает её дырой", async () => {
+    // Аня стоит в «Утре» каждый будний день окна; больничный с понедельника 24-го по
+    // четверг 27-го снимает её из среды и четверга — минус по человеку в каждом.
+    const { app, admin, db } = await setup();
+    fillWindow(db, FROM, TO);
+    const anya = listEmployeesNamed(db, "Аня");
+    createShift(db, { date: "2026-08-24", endDate: "2026-08-27", employeeId: anya, category: "sick_leave" });
+    expect(await shortfall(app, admin)).toEqual({ total: 2, firstDate: FROM });
   });
 
   it("a weekday holiday inside the window is counted by the Sunday norm", async () => {

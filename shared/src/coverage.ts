@@ -2,6 +2,7 @@ import { weekdayIndex, weekdayShort } from "./week-dates";
 import { countsForBalance, type EntryCategory } from "./category";
 import { formatDayMonth } from "./collection";
 import { isDayOff, type DayCalendar } from "./calendar";
+import { absentPeopleOn } from "./absence";
 
 /**
  * Норма покрытия дня: сколько людей нужно на этом виде смены в каждый день недели.
@@ -67,12 +68,19 @@ export interface CoverageTemplate {
   coverage: readonly number[];
 }
 
-/** Минимум, который расчёту нужен от записи графика. */
+/**
+ * Минимум, который расчёту нужен от записи графика.
+ *
+ * `category` обязательна: по ней видно отпуск и больничный, а смена на
+ * отсутствующем норму не закрывает (`waitsForCover`). Необязательная, она
+ * молча выключала бы это правило у морды, забывшей её передать.
+ */
 export interface CoverageEntry {
   date: string;
   endDate?: string | null;
   employeeId: number | null;
   templateId: number | null;
+  category: EntryCategory;
 }
 
 /** Вид смены, которого в дне не хватает: сколько нужно и сколько есть. */
@@ -135,7 +143,9 @@ export function normWeekday(date: string, calendar: DayCalendar): number {
  *
  * Норму закрывает ЧЕЛОВЕК, а не строка в сетке: у записи без `employeeId` некому
  * выйти. Люди считаются множеством — две записи одного вида на одного человека
- * это один вышедший, а не два.
+ * это один вышедший, а не два. И человек, который в этот день на больничном, в
+ * отпуске или командировке, тоже не выйдет, хотя смена до замены стоит на нём
+ * (то же правило, что `waitsForCover`).
  *
  * Календарь обязателен, без умолчания (как у `isDayOff`): забытый аргумент
  * молча вернул бы норму по дню недели, и праздник снова звал бы закрывать смены.
@@ -147,6 +157,7 @@ export function missingCoverage(
   calendar: DayCalendar,
 ): MissingKind[] {
   const weekday = normWeekday(date, calendar);
+  const absent = absentPeopleOn(entries, date);
   const out: MissingKind[] = [];
   for (const template of templates) {
     const need = template.coverage[weekday] ?? 0;
@@ -154,6 +165,7 @@ export function missingCoverage(
     const people = new Set<number>();
     for (const entry of entries) {
       if (entry.templateId !== template.templateId || entry.employeeId == null) continue;
+      if (absent.has(entry.employeeId)) continue;
       // Тот же охват, что у чек-листов: многодневная запись покрывает каждый свой
       // день, а не только первый.
       if (entry.date > date || (entry.endDate ?? entry.date) < date) continue;
@@ -208,17 +220,20 @@ function missingList(missing: readonly MissingKind[]): string {
   return missing.map((kind) => `${kind.name} — ${kind.need - kind.have}`).join(", ");
 }
 
-/** Запись графика, о которой совет может сказать «день пуст»: нужна категория. */
-export interface GapEntry extends CoverageEntry {
-  category: EntryCategory;
-}
+/** Запись графика, о которой совет может сказать «день пуст». */
+export type GapEntry = CoverageEntry;
 
 /** День, где график расходится с нормой или пуст вовсе. */
 export interface DayGap {
   date: string;
   missing: MissingKind[];
-  /** Ни одной рабочей записи с человеком — «смен нет», независимо от норм. */
+  /** Никто не выйдет: ни одной рабочей записи на человеке, который в этот день есть. */
   empty: boolean;
+  /**
+   * Пуст не потому, что смен нет, а потому что все, кто в них стоит, отсутствуют.
+   * Отдельно — ради текста: «смен нет» при сменах в сетке было бы неправдой.
+   */
+  allAbsent: boolean;
 }
 
 /**
@@ -247,15 +262,18 @@ export function scheduleGaps(
     // По календарю, а не по дню недели: в праздник не выходят, и пустой он
     // по праву; рабочая суббота, в которую никто не вышел, — пробел.
     const dayOff = isDayOff(date, calendar);
-    const worked = entries.some(
+    const absent = absentPeopleOn(entries, date);
+    const scheduled = entries.filter(
       (entry) =>
         entry.employeeId != null &&
         countsForBalance(entry.category) &&
         entry.date <= date &&
         (entry.endDate ?? entry.date) >= date,
     );
+    // Смена на больном — не выход (то же правило, что в `missingCoverage`).
+    const worked = scheduled.some((entry) => !absent.has(entry.employeeId!));
     const empty = !dayOff && !worked;
-    if (empty || missing.length > 0) out.push({ date, missing, empty });
+    if (empty || missing.length > 0) out.push({ date, missing, empty, allAbsent: empty && scheduled.length > 0 });
   }
   return out;
 }
@@ -272,6 +290,7 @@ export function coverageAdviceText(gaps: readonly DayGap[]): string | null {
   if (gaps.length === 0) return null;
   const lines = gaps.map((gap) => {
     const label = `${weekdayShort(gap.date)} ${formatDayMonth(gap.date)}`;
+    if (gap.allAbsent) return `${label} — все, кто стоит в смене, отсутствуют`;
     return gap.empty ? `${label} — смен нет` : `${label} — не хватает: ${missingList(gap.missing)}`;
   });
   return [
