@@ -378,6 +378,25 @@ describe("больничный-основание ушёл, а день покр
 
     expect(getHandover(db, handover.id)?.status).toBe("cancelled");
   });
+
+  it("смену переназначили, а у дающего есть второй одобренный больничный — передача гаснет и не скачет между ними", async () => {
+    // Второй больничный покрывает день, но смена уже не у Ани: перевешивать передачу некуда.
+    // Без проверки владельца тик перевешивал её с A на B, следующий — с B на A, и так вечно:
+    // ждавшие не получали «отбой», а смена Марка числилась отдаваемой.
+    const db = makeTestDb();
+    const { anya, sick, work, handover } = await scene(db);
+    sickLeave(db, anya, "2026-08-13");
+    const mark = person(db, "Марк");
+    updateShift(db, work.id, { employeeId: mark });
+
+    await runHandoverTick(deps(db), NOW);
+    await runHandoverTick(deps(db), NOW + 5 * 60 * 1000);
+
+    const after = getHandover(db, handover.id)!;
+    expect(after.status).toBe("cancelled");
+    expect(after.sickEntryId).toBe(sick.id);
+    expect(auditTypes(db).filter((t) => t === "handover_cancelled")).toHaveLength(1);
+  });
 });
 
 describe("многодневная запись и больничный посреди неё", () => {
