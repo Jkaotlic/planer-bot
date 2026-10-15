@@ -1,6 +1,17 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { checklistDelivery, checklistHasContent, checklistsDueToday, dateStr, isChecklistComplete, prevDate } from "@planer/shared";
+import {
+  CHECKLIST_DOC_URL_MAX,
+  CHECKLIST_ITEM_TITLE_MAX,
+  CHECKLIST_NAME_MAX,
+  CHECKLIST_NOTE_MAX,
+  checklistDelivery,
+  checklistHasContent,
+  checklistsDueToday,
+  dateStr,
+  isChecklistComplete,
+  prevDate,
+} from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import {
@@ -54,25 +65,25 @@ export function checklistsFor(db: Db, date: string, employeeId: number): number[
   return checklistsDueToday(listShiftsOverlapping(db, date, date), checklistByTemplate(db), date, employeeId);
 }
 
-const nameSchema = z.object({ name: z.string().trim().min(1).max(120) });
-const titleSchema = z.object({ title: z.string().trim().min(1).max(200) });
+const nameSchema = z.object({ name: z.string().trim().min(1).max(CHECKLIST_NAME_MAX) });
+const titleSchema = z.object({ title: z.string().trim().min(1).max(CHECKLIST_ITEM_TITLE_MAX) });
 
 /**
  * Правка пункта: подпись и/или пояснение, любое поле по отдельности.
  *
- * Потолок пояснения — 2000, тот же, что у багрепорта: текст уезжает в сообщение
+ * Потолок пояснения — CHECKLIST_NOTE_MAX (2000), тот же, что у багрепорта: текст уезжает в сообщение
  * Telegram, у которого предел 4096 на всё вместе со списком пунктов.
  */
 const itemPatchSchema = z
-  .object({ title: z.string().trim().min(1).max(200).optional(), note: z.string().max(2000).nullish() })
+  .object({ title: z.string().trim().min(1).max(CHECKLIST_ITEM_TITLE_MAX).optional(), note: z.string().max(CHECKLIST_NOTE_MAX).nullish() })
   .refine((v) => v.title !== undefined || v.note !== undefined, { message: "нечего менять" });
 
 /** Имя и инструкция чек-листа. Файла здесь нет — он приезжает от Telegram через бота. */
 const checklistPatchSchema = z
   .object({
-    name: z.string().trim().min(1).max(120).optional(),
-    note: z.string().max(2000).nullish(),
-    docUrl: z.string().trim().max(500).nullish(),
+    name: z.string().trim().min(1).max(CHECKLIST_NAME_MAX).optional(),
+    note: z.string().max(CHECKLIST_NOTE_MAX).nullish(),
+    docUrl: z.string().trim().max(CHECKLIST_DOC_URL_MAX).nullish(),
   })
   .refine((v) => v.name !== undefined || v.note !== undefined || v.docUrl !== undefined, { message: "нечего менять" });
 

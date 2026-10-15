@@ -36,3 +36,14 @@ export const COLLECTION_TEXT_MAX = 3000;
  * списки коллег в напоминании. Сотня знаков вмещает любое ФИО с запасом.
  */
 export const EMPLOYEE_NAME_MAX = 100;
+
+/**
+ * Чек-лист: название и подпись пункта стоят строкой в списке и в сообщении дежурному,
+ * пояснение уезжает в то же сообщение (пояснение — тот же 2000, что у багрепорта:
+ * у Telegram предел 4096 на всё письмо вместе со списком пунктов). Ссылка на документ
+ * — с запасом под длинные адреса облачных дисков.
+ */
+export const CHECKLIST_NAME_MAX = 120;
+export const CHECKLIST_ITEM_TITLE_MAX = 200;
+export const CHECKLIST_NOTE_MAX = 2000;
+export const CHECKLIST_DOC_URL_MAX = 500;
