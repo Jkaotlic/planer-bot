@@ -74,6 +74,50 @@ describe("позиции", () => {
     expect(removeLastItem(db, order, igor.id, now)).toEqual({ ok: false, error: "Убирать нечего." });
   });
 
+  it("«Убрать» берёт шаг из последней изменённой позиции: A, B, A, «Убрать» → A×1, B×1", () => {
+    const { db, igor, order, shawarma, tea } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, tea.id, now);
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    expect(removeLastItem(db, order, igor.id, now)).toMatchObject({ ok: true });
+    expect(itemsOf(db, order.id).map((i) => [i.name, i.qty])).toEqual([["Шаурма", 1], ["Чай", 1]]);
+  });
+
+  it("правка количества в мини-аппе — тоже изменение: «Убрать» берёт из неё", () => {
+    const { db, igor, order, shawarma, tea } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, tea.id, now);
+    const shawarmaRow = itemsOf(db, order.id).find((i) => i.name === "Шаурма")!;
+    setItemQty(db, order, igor.id, shawarmaRow.id, 3, now);
+    removeLastItem(db, order, igor.id, now);
+    expect(itemsOf(db, order.id).map((i) => [i.name, i.qty])).toEqual([["Шаурма", 2], ["Чай", 1]]);
+  });
+
+  it("своё блюдо после тапа по меню — «Убрать» снимает своё, а не меню", () => {
+    const { db, igor, order, shawarma } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addCustomItem(db, order, igor.id, { name: "Суп дня", price: 280, qty: 1 }, now);
+    removeLastItem(db, order, igor.id, now);
+    expect(itemsOf(db, order.id).map((i) => [i.name, i.qty])).toEqual([["Шаурма", 2]]);
+  });
+
+  it("«Убрать» называет, что убрано и сколько осталось", () => {
+    const { db, igor, order, shawarma } = stage();
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    addMenuItem(db, order, igor.id, shawarma.id, now);
+    expect(removeLastItem(db, order, igor.id, now)).toEqual({ ok: true, removed: { name: "Шаурма", unit: "pcs", stepGrams: null, qtyLeft: 1 } });
+    expect(removeLastItem(db, order, igor.id, now)).toEqual({ ok: true, removed: { name: "Шаурма", unit: "pcs", stepGrams: null, qtyLeft: 0 } });
+  });
+
+  it("строки до миграции (порядок 0) — «Убрать» по-прежнему берёт последнюю по id", () => {
+    const { db, igor, order } = stage();
+    db.insert(foodOrderItems).values({ orderId: order.id, employeeId: igor.id, name: "Суп", price: 280 }).run();
+    db.insert(foodOrderItems).values({ orderId: order.id, employeeId: igor.id, name: "Хлеб", price: 30 }).run();
+    removeLastItem(db, order, igor.id, now);
+    expect(itemsOf(db, order.id).map((i) => i.name)).toEqual(["Суп"]);
+  });
+
   it("«Не буду» снимает позиции; новый тап по блюду снимает отказ", () => {
     const { db, anya, igor, order, shawarma } = stage();
     addMenuItem(db, order, igor.id, shawarma.id, now);

@@ -91,6 +91,17 @@ function clearDecline(db: Db, orderId: number, employeeId: number): void {
     .where(and(eq(foodOrderDeclines.orderId, orderId), eq(foodOrderDeclines.employeeId, employeeId))).run();
 }
 
+/**
+ * Следующий номер изменения для строк человека в этом заказе — см. `changeSeq` в схеме.
+ * Считается внутри «заказ × человек»: «Убрать» смотрит только на свои строки, и чужие
+ * тапы не должны сдвигать его очередь.
+ */
+function nextChangeSeq(db: Db, orderId: number, employeeId: number): number {
+  const row = db.select({ top: sql<number | null>`max(${foodOrderItems.changeSeq})` }).from(foodOrderItems)
+    .where(and(eq(foodOrderItems.orderId, orderId), eq(foodOrderItems.employeeId, employeeId))).get();
+  return (row?.top ?? 0) + 1;
+}
+
 const TOO_MANY_ITEMS = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
 
 /** Сколько строк у человека уже есть — потолок `FOOD_ITEMS_PER_PERSON_MAX` считает строки, а не штуки. */
@@ -116,11 +127,12 @@ export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuIt
   )).get();
   if (same) {
     if (same.qty >= FOOD_QTY_MAX) return { ok: false, error: `Больше ${FOOD_QTY_MAX} одного блюда — это уже не обед.` };
-    db.update(foodOrderItems).set({ qty: same.qty + 1 }).where(eq(foodOrderItems.id, same.id)).run();
+    db.update(foodOrderItems).set({ qty: same.qty + 1, changeSeq: nextChangeSeq(db, order.id, employeeId) })
+      .where(eq(foodOrderItems.id, same.id)).run();
   } else {
     if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
     db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId, name: dish.name, price: dish.price, qty: 1,
-      unit: dish.unit, stepGrams: dish.stepGrams,
+      unit: dish.unit, stepGrams: dish.stepGrams, changeSeq: nextChangeSeq(db, order.id, employeeId),
     }).run();
   }
   clearDecline(db, order.id, employeeId);
@@ -136,7 +148,7 @@ export function addCustomItem(
   // и во вкладке, открытой до сбора, никто не убирает задним числом.
   if (!order.allowCustom) return { ok: false, error: "В этом сборе только позиции из списка." };
   if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
-  db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId: null, ...input }).run();
+  db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId: null, ...input, changeSeq: nextChangeSeq(db, order.id, employeeId) }).run();
   clearDecline(db, order.id, employeeId);
   return { ok: true };
 }
@@ -152,7 +164,7 @@ export function setItemQty(db: Db, order: FoodOrder, employeeId: number, itemId:
   if (!allowed.ok) return allowed;
   const item = ownItem(db, order, employeeId, itemId);
   if ("ok" in item) return item;
-  db.update(foodOrderItems).set({ qty }).where(eq(foodOrderItems.id, item.id)).run();
+  db.update(foodOrderItems).set({ qty, changeSeq: nextChangeSeq(db, order.id, employeeId) }).where(eq(foodOrderItems.id, item.id)).run();
   return { ok: true };
 }
 
@@ -165,16 +177,33 @@ export function removeItem(db: Db, order: FoodOrder, employeeId: number, itemId:
   return { ok: true };
 }
 
-export function removeLastItem(db: Db, order: FoodOrder, employeeId: number, now: TeamClock): Result {
+/** Что сняло «Убрать» — чтобы ответ на тап назвал позицию, а не говорил безликое «Убрал». */
+export type RemovedStep = { name: string; unit: "pcs" | "kg"; stepGrams: number | null; qtyLeft: number };
+
+/**
+ * «↩️ Убрать» снимает один шаг с позиции, которую человек менял последней (`changeSeq`;
+ * при равенстве — больший id, так ведут себя строки до миграции 0045).
+ *
+ * Это откат по последней ИЗМЕНЁННОЙ позиции, а не по полной истории тапов: истории в
+ * базе нет, есть только «кого трогали последним». A, B, A, «Убрать» → A×1, B×1 — как
+ * человек и ждёт. Но второе «Убрать» снова возьмёт A (уменьшение — тоже изменение, и A
+ * остаётся последней тронутой), хотя по истории следующим был бы B. Точная правка
+ * количества — в мини-аппе; в чате нужна понятная кнопка, а не машина времени.
+ */
+export function removeLastItem(
+  db: Db, order: FoodOrder, employeeId: number, now: TeamClock,
+): { ok: true; removed: RemovedStep } | { ok: false; error: string } {
   const allowed = guard(db, order, employeeId, now);
   if (!allowed.ok) return allowed;
   const last = db.select().from(foodOrderItems)
     .where(and(eq(foodOrderItems.orderId, order.id), eq(foodOrderItems.employeeId, employeeId)))
-    .orderBy(desc(foodOrderItems.id)).get();
+    .orderBy(desc(foodOrderItems.changeSeq), desc(foodOrderItems.id)).get();
   if (!last) return { ok: false, error: "Убирать нечего." };
-  if (last.qty > 1) db.update(foodOrderItems).set({ qty: last.qty - 1 }).where(eq(foodOrderItems.id, last.id)).run();
-  else db.delete(foodOrderItems).where(eq(foodOrderItems.id, last.id)).run();
-  return { ok: true };
+  if (last.qty > 1) {
+    db.update(foodOrderItems).set({ qty: last.qty - 1, changeSeq: nextChangeSeq(db, order.id, employeeId) })
+      .where(eq(foodOrderItems.id, last.id)).run();
+  } else db.delete(foodOrderItems).where(eq(foodOrderItems.id, last.id)).run();
+  return { ok: true, removed: { name: last.name, unit: last.unit, stepGrams: last.stepGrams, qtyLeft: last.qty - 1 } };
 }
 
 export function declineOrder(db: Db, order: FoodOrder, employeeId: number, now: TeamClock): Result {

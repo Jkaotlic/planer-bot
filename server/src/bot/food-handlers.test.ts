@@ -223,6 +223,24 @@ describe("колбэки заказа", () => {
     expect(api.answers.at(-1)).toMatch(/не приходил/);
   });
 
+  it("«Убрать» называет убранное: что и сколько осталось; кг — весом", async () => {
+    const { db, bot, anya, igor, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    await tap(bot, 333, `order:add:${order.id}:${shawarmaId}`);
+    await tap(bot, 333, `order:undo:${order.id}`);
+    expect(api.answers.at(-1)).toBe("− Шаурма (осталось ×1)");
+    await tap(bot, 333, `order:undo:${order.id}`);
+    expect(api.answers.at(-1)).toBe("− Шаурма (убрал совсем)");
+    const place = createPlace(db, { name: "Рынок", menu: [{ name: "Икра кетовая", price: 2400, unit: "kg", stepGrams: 400 }] }, anya.id);
+    const market = createOrder(db, {
+      createdBy: anya.id, placeId: place.id, title: null, allowCustom: true, note: null, payHint: null, closesAt: null, recipientIds: [anya.id, igor.id],
+    });
+    for (let k = 0; k < 3; k++) await tap(bot, 333, `order:add:${market.id}:${place.menu[0]!.id}`);
+    await tap(bot, 333, `order:undo:${market.id}`);
+    expect(api.answers.at(-1)).toBe("− Икра кетовая 0,4 кг (осталось 0,8 кг)");
+  });
+
   it("«Закрыть приём» — только запускающему; после закрытия тап по блюду отвечает «Приём закрыт»", async () => {
     const { db, bot, order, shawarmaId } = stage();
     const api = recordApi(bot);

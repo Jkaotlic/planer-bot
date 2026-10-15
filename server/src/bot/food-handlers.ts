@@ -8,7 +8,7 @@ import { safeErrorMessage } from "../util/safe-error";
 import { recordAudit } from "../repo/audit";
 import { castVote, closePoll, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
 import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
-import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem } from "../orders/order-service";
+import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem, type RemovedStep } from "../orders/order-service";
 import { setOrderPaid, unpaidDebtors } from "../orders/order-payment-service";
 import { notifyUser } from "./notify";
 import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, payDoneKeyboard, placeName, remindUnpaid } from "../orders/order-messenger";
@@ -47,6 +47,17 @@ export function servicesMenuKeyboard(publicUrl: string): InlineKeyboard {
  * только в лог: состояние в базе уже записано, а повторный тап не
  * разошлёт второй раз (закрытие — условный UPDATE).
  */
+/**
+ * Ответ на «↩️ Убрать»: что снято и что осталось. У кг — вес шага и остаток весом,
+ * как в ответе на тап «＋» (человек набирает килограммы, а не шаги).
+ */
+export function undoAnswer(r: RemovedStep): string {
+  const kg = r.unit === "kg" && r.stepGrams != null;
+  const what = kg ? `${r.name} ${formatKg(r.stepGrams!)} кг` : r.name;
+  if (r.qtyLeft <= 0) return `− ${what} (убрал совсем)`;
+  return `− ${what} (осталось ${kg ? `${formatKg(r.qtyLeft * r.stepGrams!)} кг` : `×${r.qtyLeft}`})`;
+}
+
 function inBackground(label: string, work: Promise<unknown>): void {
   void work.catch((err) => console.error(`bot: ${label} failed:`, safeErrorMessage(err)));
 }
@@ -178,21 +189,30 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     await redrawOrder(ctx, order.id, who.me);
   });
 
-  for (const [pattern, run, done] of [
-    [/^order:undo:(\d+)$/, removeLastItem, "Убрал"],
-    [/^order:no:(\d+)$/, declineOrder, "Понял, без тебя"],
-  ] as const) {
-    bot.callbackQuery(pattern, async (ctx) => {
-      const who = acting(ctx.from.id);
-      if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
-      const order = getOrder(db, Number(ctx.match[1]));
-      if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
-      const result = run(db, order, who.me.id, teamNow(config.teamTz));
-      if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
-      await ctx.answerCallbackQuery({ text: done });
-      await redrawOrder(ctx, order.id, who.me);
-    });
-  }
+  bot.callbackQuery(/^order:undo:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+    const result = removeLastItem(db, order, who.me.id, teamNow(config.teamTz));
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    // Кнопка снимает шаг с последней ТРОНУТОЙ позиции, а не с последнего тапа (см.
+    // `removeLastItem`), — поэтому ответ называет, что именно снято: безликое «Убрал»
+    // оставило бы человека гадать, туда ли попало.
+    await ctx.answerCallbackQuery({ text: undoAnswer(result.removed) });
+    await redrawOrder(ctx, order.id, who.me);
+  });
+
+  bot.callbackQuery(/^order:no:(\d+)$/, async (ctx) => {
+    const who = acting(ctx.from.id);
+    if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
+    const order = getOrder(db, Number(ctx.match[1]));
+    if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
+    const result = declineOrder(db, order, who.me.id, teamNow(config.teamTz));
+    if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
+    await ctx.answerCallbackQuery({ text: "Понял, без тебя" });
+    await redrawOrder(ctx, order.id, who.me);
+  });
 
   bot.callbackQuery(/^order:close:(\d+)$/, async (ctx) => {
     const who = acting(ctx.from.id);

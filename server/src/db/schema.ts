@@ -954,6 +954,12 @@ export const foodOrderItems = sqliteTable(
     // уже взятые килограммы не пересчитываются задним числом.
     unit: text().$type<"pcs" | "kg">().notNull().default("pcs"),
     stepGrams: integer(),
+    // Номер последнего изменения строки в пределах «заказ × человек»: по нему «↩️ Убрать»
+    // находит позицию, которую трогали последней. Max id для этого не годится — повторный
+    // тап прибавляет к старой строке, и A, B, A убирал бы Б. Счётчик, а не время: три тапа
+    // за секунду дали бы ничью. Строки до миграции получают 0 — ничья решается по id, как
+    // было раньше.
+    changeSeq: integer().notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [index("food_order_items_order").on(t.orderId, t.employeeId)],
