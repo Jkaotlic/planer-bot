@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { formatMoney } from "./collection";
 import {
   debtOf, debtors, dishSummary, formatKg, itemLines, orderInviteText, orderItemInputSchema, orderTotal, organizerSummaryText, payRequestText,
-  orderDishLines, placeInputSchema, qtyLimitText, splitAtLines,
+  orderDishLines, placeInputSchema, qtyLimitText, itemsLimitText, splitAtLines,
 } from "./food-order";
 
 describe("placeInputSchema", () => {
@@ -259,6 +259,12 @@ describe("qtyLimitText", () => {
     expect(qtyLimitText({ unit: "pcs", stepGrams: null })).toBe("Больше 20 шт. одной позиции не взять.");
     // кг без шага — битые старые данные: печатаем штуками, как `unitPart`.
     expect(qtyLimitText({ unit: "kg", stepGrams: null })).toBe("Больше 20 шт. одной позиции не взять.");
+  });
+});
+
+describe("itemsLimitText", () => {
+  it("называет потолок строк без «обеда» — сбор бывает закупкой", () => {
+    expect(itemsLimitText).toBe("Больше 20 позиций в одном заказе не взять.");
   });
 });
 

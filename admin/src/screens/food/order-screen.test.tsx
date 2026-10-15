@@ -105,11 +105,11 @@ describe("консоль: заказ — своё", () => {
 
 describe("консоль: заказ — отказы сервера видны рядом с действием (Review Focus №2)", () => {
   it("отказ на блюде меню — в карточке меню, когда она осталась", async () => {
-    vi.spyOn(apiClient, "addOrderItem").mockRejectedValue(new Error("Больше 20 позиций — это уже не обед."));
+    vi.spyOn(apiClient, "addOrderItem").mockRejectedValue(new Error("Больше 20 позиций в одном заказе не взять."));
     const el = await open();
     const getOrder = vi.mocked(apiClient.getOrder);
     await click(button(area(el, "menu")!, menuItemLabel(DODO_MENU[0]!)));
-    await waitFor(() => expect(area(el, "menu")!.querySelector('[role="alert"]')?.textContent).toBe("Больше 20 позиций — это уже не обед."));
+    await waitFor(() => expect(area(el, "menu")!.querySelector('[role="alert"]')?.textContent).toBe("Больше 20 позиций в одном заказе не взять."));
     expect(getOrder).toHaveBeenCalledTimes(2);
   });
 

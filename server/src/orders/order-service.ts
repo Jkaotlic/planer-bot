@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
-  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, qtyLimitText, debtOf, debtors, dishSummary, isOpenAt, orderTotal,
+  FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, closesLabel, itemsLimitText, qtyLimitText, debtOf, debtors, dishSummary, isOpenAt, orderTotal,
   type FoodDishShape, type FoodMenuItemShape, type PaymentRow,
 } from "@planer/shared";
 import type { Db } from "../db/client";
@@ -105,8 +105,6 @@ function nextChangeSeq(db: Db, orderId: number, employeeId: number): number {
   return (row?.top ?? 0) + 1;
 }
 
-const TOO_MANY_ITEMS = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
-
 /** Сколько строк у человека уже есть — потолок `FOOD_ITEMS_PER_PERSON_MAX` считает строки, а не штуки. */
 function ownRowCount(db: Db, orderId: number, employeeId: number): number {
   return db.select({ id: foodOrderItems.id }).from(foodOrderItems)
@@ -133,7 +131,7 @@ export function addMenuItem(db: Db, order: FoodOrder, employeeId: number, menuIt
     db.update(foodOrderItems).set({ qty: same.qty + 1, changeSeq: nextChangeSeq(db, order.id, employeeId) })
       .where(eq(foodOrderItems.id, same.id)).run();
   } else {
-    if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
+    if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: itemsLimitText };
     db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId, name: dish.name, price: dish.price, qty: 1,
       unit: dish.unit, stepGrams: dish.stepGrams, changeSeq: nextChangeSeq(db, order.id, employeeId),
     }).run();
@@ -150,7 +148,7 @@ export function addCustomItem(
   // Проверка здесь, а не только в экране: кнопку «Своё блюдо» в уже разосланных письмах
   // и во вкладке, открытой до сбора, никто не убирает задним числом.
   if (!order.allowCustom) return { ok: false, error: "В этом сборе только позиции из списка." };
-  if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: TOO_MANY_ITEMS };
+  if (ownRowCount(db, order.id, employeeId) >= FOOD_ITEMS_PER_PERSON_MAX) return { ok: false, error: itemsLimitText };
   db.insert(foodOrderItems).values({ orderId: order.id, employeeId, menuItemId: null, ...input, changeSeq: nextChangeSeq(db, order.id, employeeId) }).run();
   clearDecline(db, order.id, employeeId);
   return { ok: true };

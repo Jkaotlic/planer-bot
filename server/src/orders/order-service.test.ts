@@ -147,12 +147,12 @@ describe("позиции", () => {
 });
 
 describe("не больше 20 своих позиций", () => {
-  it("21-я своя позиция — отказ «Больше 20 позиций — это уже не обед.»; прибавка к уже взятому блюду — можно", () => {
+  it("21-я своя позиция — отказ «Больше 20 позиций в одном заказе не взять.»; прибавка к уже взятому блюду — можно", () => {
     const { db, igor, order, shawarma } = stage();
     expect(FOOD_ITEMS_PER_PERSON_MAX).toBe(20);
     expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: true });
     for (let i = 1; i < 20; i += 1) expect(addCustomItem(db, order, igor.id, { name: `Блюдо ${i}`, price: 10, qty: 1 }, now)).toEqual({ ok: true });
-    const refusal = { ok: false, error: "Больше 20 позиций — это уже не обед." };
+    const refusal = { ok: false, error: "Больше 20 позиций в одном заказе не взять." };
     expect(addCustomItem(db, order, igor.id, { name: "Ещё", price: 10, qty: 1 }, now)).toEqual(refusal);
     // Та же шаурма — не новая строка, а ×2: лимит строк её не касается.
     expect(addMenuItem(db, order, igor.id, shawarma.id, now)).toEqual({ ok: true });
@@ -162,7 +162,7 @@ describe("не больше 20 своих позиций", () => {
   it("новое блюдо из меню 21-й строкой — тоже отказ; чужие строки не считаются", () => {
     const { db, anya, igor, order, tea } = stage();
     for (let i = 0; i < 20; i += 1) addCustomItem(db, order, igor.id, { name: `Блюдо ${i}`, price: 10, qty: 1 }, now);
-    expect(addMenuItem(db, order, igor.id, tea.id, now)).toEqual({ ok: false, error: "Больше 20 позиций — это уже не обед." });
+    expect(addMenuItem(db, order, igor.id, tea.id, now)).toEqual({ ok: false, error: "Больше 20 позиций в одном заказе не взять." });
     expect(addMenuItem(db, order, anya.id, tea.id, now)).toEqual({ ok: true });
   });
 });

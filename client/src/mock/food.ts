@@ -1,5 +1,5 @@
 import {
-  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, qtyLimitText,
+  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, itemsLimitText, qtyLimitText,
   isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
   type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
@@ -508,7 +508,6 @@ export function createFoodMock(opts: FoodMockOptions) {
     const data = parsed.data;
     // Тот же потолок строк, что `addMenuItem`/`addCustomItem` на сервере.
     const tooMany = o.items.filter((i) => i.employeeId === me().id).length >= FOOD_ITEMS_PER_PERSON_MAX;
-    const tooManyError = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций — это уже не обед.`;
     if ("menuItemId" in data) {
       const place = o.placeId == null ? null : PLACES.find((p) => p.id === o.placeId);
       const dish = place?.menu.find((m) => m.id === data.menuItemId);
@@ -519,11 +518,11 @@ export function createFoodMock(opts: FoodMockOptions) {
       // Тот же потолок и текст, что у `addMenuItem` на сервере.
       if (same && same.qty >= FOOD_QTY_MAX) throw new Error(qtyLimitText(same));
       if (same) same.qty += 1;
-      else if (tooMany) throw new Error(tooManyError);
+      else if (tooMany) throw new Error(itemsLimitText);
       else o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: data.menuItemId, name: dish.name, price: dish.price, qty: 1, unit: dish.unit, stepGrams: dish.stepGrams });
     } else {
       if (!o.allowCustom) throw new Error("В этом сборе только позиции из списка.");
-      if (tooMany) throw new Error(tooManyError);
+      if (tooMany) throw new Error(itemsLimitText);
       o.items.push({ id: nextOrderItemId++, employeeId: me().id, menuItemId: null, name: data.name, price: data.price, qty: data.qty, unit: "pcs", stepGrams: null });
     }
     o.declines.delete(me().id);

@@ -120,6 +120,13 @@ export function qtyLimitText(m: { unit?: FoodUnit; stepGrams?: number | null }):
     : `Больше ${FOOD_QTY_MAX} шт. одной позиции не взять.`;
 }
 
+/**
+ * Отказ на потолок `FOOD_ITEMS_PER_PERSON_MAX` строк одного человека. Тот же сбор бывает
+ * закупкой на килограммы, поэтому без «обеда» — по образцу `qtyLimitText`. Одна строка на
+ * сервер и моки фронтов, чтобы мок не отставал от сервера.
+ */
+export const itemsLimitText = `Больше ${FOOD_ITEMS_PER_PERSON_MAX} позиций в одном заказе не взять.`;
+
 // кг без шага печатается как штуки намеренно: старые и битые данные терпим, схема их не пропускает.
 export function unitPart(m: { unit?: FoodUnit; stepGrams?: number | null }): string | null {
   return m.unit === "kg" && m.stepGrams ? `${formatKg(m.stepGrams)} кг` : null;
