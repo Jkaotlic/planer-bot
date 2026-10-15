@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { formatKg, orderTotal, pollChoiceSchema } from "@planer/shared";
+import { formatKg, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -125,16 +125,27 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
       ...orders.map((o) => `${o.title ? "🛒" : "🍱"} ${o.creatorName}: ${o.title ?? o.placeName ?? "заказ без меню"}${o.closes ? ` (${o.closes})` : ""}`),
       ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`),
     ];
-    const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows];
-    const text = [
-      "🧰 Сервисы: заказы и опросы, QR-код.",
-      "",
-      ...lines,
-      "",
-      // The bot has drawn QR codes for links since 2026-09-04; this is where people learn it.
-      "QR-код можно и здесь: пришли ссылку — отвечу картинкой.",
-    ].join("\n");
-    await ctx.reply(text, { reply_markup: servicesMenuKeyboard(config.publicUrl) });
+    const compose = (shown: number) => {
+      const rest = rows.length - shown;
+      const fold = rest > 0 ? [`…и ещё ${rest} — все в «📋 Заказы и опросы» (кнопка ниже)`] : [];
+      const lines = rows.length === 0 ? ["Сейчас ничего не идёт."] : ["Сейчас идёт:", ...rows.slice(0, shown), ...fold];
+      return [
+        "🧰 Сервисы: заказы и опросы, QR-код.",
+        "",
+        ...lines,
+        "",
+        // The bot has drawn QR codes for links since 2026-09-04; this is where people learn it.
+        "QR-код можно и здесь: пришли ссылку — отвечу картинкой.",
+      ].join("\n");
+    };
+    // Одно письмо не длиннее `TELEGRAM_TEXT_SAFE_MAX`: по 20 сборов и опросов с названиями
+    // на потолке — больше 10 000 знаков, и Telegram отверг бы ответ целиком, кнопка
+    // «Сервисы» молчала бы. Хвост сворачивается; «📋 Заказы и опросы» под этим же письмом
+    // открывает экран, который печатает те же `listOrdersFor`/`listPollsFor` полностью.
+    // Строк не больше сорока — перебор с конца дешевле арифметики длин.
+    let shown = rows.length;
+    while (shown > 0 && compose(shown).length > TELEGRAM_TEXT_SAFE_MAX) shown -= 1;
+    await ctx.reply(compose(shown), { reply_markup: servicesMenuKeyboard(config.publicUrl) });
   }
 
   /**

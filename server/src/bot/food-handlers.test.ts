@@ -13,6 +13,7 @@ import { orderPayments } from "../orders/order-payment-service";
 import { listRecentAudit } from "../repo/audit";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
+import { TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 
 const config = testConfig();
 let updateId = 1;
@@ -314,6 +315,34 @@ describe("колбэки заказа", () => {
     const text = api.sent.at(-1)!.text;
     expect(text).toContain("🛒 Аня: Икра, 09.10");
     expect(text).toContain("🍱 Аня: Шаурмечная");
+  });
+});
+
+describe("«Сервисы» при сорока открытых сборах и опросах", () => {
+  it("одно письмо в пределе: первые строки, «…и ещё N» со ссылкой на кнопку, хвост про QR на месте", async () => {
+    const { db, bot, igor, order } = stage();
+    // Имя и названия — на потолках (`EMPLOYEE_NAME_MAX`, `FOOD_TEXT_MAX`, `POLL_QUESTION_MAX`):
+    // 20 сборов и 20 опросов (столько отдают `listOrdersFor`/`listPollsFor`) — больше 10 000 знаков.
+    const boss = person(db, "Марк ".padEnd(100, "к"), 555);
+    for (let i = 0; i < 20; i += 1) {
+      createOrder(db, {
+        createdBy: boss.id, placeId: order.placeId, title: `Сбор ${String(i).padStart(2, "0")} `.padEnd(200, "с"),
+        allowCustom: false, note: null, payHint: null, closesAt: null, recipientIds: [boss.id, igor.id],
+      });
+      createPoll(db, { createdBy: boss.id, question: `Опрос ${String(i).padStart(2, "0")} `.padEnd(200, "о"), closesAt: null, recipientIds: [boss.id, igor.id] });
+    }
+    const api = recordApi(bot);
+    await say(bot, 333, BTN_SERVICES);
+    expect(api.sent).toHaveLength(1);
+    const text = api.sent.at(-1)!.text as string;
+    expect(text.length).toBeLessThanOrEqual(TELEGRAM_TEXT_SAFE_MAX);
+    const shown = text.split("\n").filter((l) => /^(🛒|🍱|🗳) /.test(l)).length;
+    const hidden = Number(text.match(/…и ещё (\d+) — все в «📋 Заказы и опросы» \(кнопка ниже\)/)?.[1]);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown + hidden).toBe(40);
+    expect(text).toContain("пришли ссылку");
+    const buttons = (api.sent.at(-1)!.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text);
+    expect(buttons).toContain("📋 Заказы и опросы");
   });
 });
 
