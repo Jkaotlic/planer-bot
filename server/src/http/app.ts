@@ -157,7 +157,7 @@ import {
   openSlotsForWorker,
   myOffers,
 } from "../weekend/weekend-service";
-import { getVacantSlot, findOpenSlotLike, listAdminSlots } from "../repo/weekend";
+import { countWeekendLeftovers, getVacantSlot, findOpenSlotLike, listAdminSlots } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
 import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
@@ -927,9 +927,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const note = typeof body.note === "string" && body.note.trim() ? body.note.trim() : null;
     setManualDay(db, date, body.kind, note, new Date());
     recordAudit(db, "calendar_day_set", c.get("auth").employeeId, { date, kind: body.kind, note });
-    if (body.kind !== null) return c.json({ date, kind: body.kind, note, source: "manual" });
+    // День стал рабочим, а выходные смены на нём остались: отметку не запрещаем
+    // (админ мог как раз собираться их разобрать), но число отдаём, чтобы обе
+    // морды предупредили. Рабочим день может сделать и снятие отметки «выходной»
+    // с будня, поэтому смотрим на итог, а не на присланный `kind`.
+    const weekendLeftovers = isDayOff(date, loadCalendar(db, date, date)) ? 0 : countWeekendLeftovers(db, date);
+    if (body.kind !== null) return c.json({ date, kind: body.kind, note, source: "manual", weekendLeftovers });
     const day = listCalendarDays(db, date, date)[0];
-    return c.json(day ? { date, kind: day.kind, note: day.note, source: day.source } : { date, kind: null, note: null, source: null });
+    return c.json(
+      day
+        ? { date, kind: day.kind, note: day.note, source: day.source, weekendLeftovers }
+        : { date, kind: null, note: null, source: null, weekendLeftovers },
+    );
   });
 
   // --- Дни рождения ---------------------------------------------------------

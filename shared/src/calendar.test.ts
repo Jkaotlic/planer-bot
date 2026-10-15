@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { EMPTY_CALENDAR, calendarFrom, dayOffLabel, isDayOff, specialDayKind, specialDays } from "./calendar";
+import { EMPTY_CALENDAR, calendarFrom, dayOffLabel, isDayOff, specialDayKind, specialDays, weekendLeftoversWarning } from "./calendar";
 
 // 2026-06-12 — пятница, День России; 2026-06-13 — суббота; 2024-04-27 — рабочая суббота.
 const CAL = calendarFrom([
@@ -94,5 +94,19 @@ describe("specialDayKind — какую отметку несёт день", () 
   });
   it("без записи — ничего", () => {
     expect(specialDayKind("2026-11-04", undefined)).toBeUndefined();
+  });
+});
+
+// I5 (аудит 2026-10-15): день стал рабочим, а на нём остались выходные смены.
+describe("weekendLeftoversWarning", () => {
+  it("молчит, когда оставшихся нет", () => {
+    expect(weekendLeftoversWarning(0)).toBeNull();
+  });
+  it("число и падеж согласованы", () => {
+    expect(weekendLeftoversWarning(1)).toBe("На этот день уже стоит 1 выходная смена — проверь её.");
+    expect(weekendLeftoversWarning(3)).toBe("На этот день уже стоят 3 выходные смены — проверь их.");
+    expect(weekendLeftoversWarning(5)).toBe("На этот день уже стоят 5 выходных смен — проверь их.");
+    expect(weekendLeftoversWarning(11)).toBe("На этот день уже стоят 11 выходных смен — проверь их.");
+    expect(weekendLeftoversWarning(21)).toBe("На этот день уже стоит 21 выходная смена — проверь её.");
   });
 });

@@ -1,6 +1,6 @@
 import { createEmployeesMock, createFoodMock, createReadMock } from "@planer/client";
 import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
-import type { AdminShortfall, CoverageAcks, CalendarDayDto, EntryCategory, RecipientGroupView, SickApprovalRow } from "@planer/shared";
+import type { AdminShortfall, CoverageAcks, CalendarDayDto, CalendarDayMarkResult, EntryCategory, RecipientGroupView, SickApprovalRow } from "@planer/shared";
 import type {
   AdminSettings,
   AdminSlotView,
@@ -288,14 +288,15 @@ export async function mockSetCalendarDay(
   date: string,
   kind: "holiday" | "workday" | null,
   note: string | null,
-): Promise<CalendarDayDto | null> {
+): Promise<CalendarDayMarkResult> {
   await delay(150);
   const at = mockCalendar.findIndex((day) => day.date === date);
   if (at >= 0) mockCalendar.splice(at, 1);
-  if (kind === null) return null;
+  // Мок выходные смены не считает: предупреждение видно только с настоящим сервером.
+  if (kind === null) return { day: null, weekendLeftovers: 0 };
   const row: CalendarDayDto = { date, kind, note, source: "manual" };
   mockCalendar.push(row);
-  return row;
+  return { day: row, weekendLeftovers: 0 };
 }
 
 export function mockGetTemplates(): Promise<Template[]> {

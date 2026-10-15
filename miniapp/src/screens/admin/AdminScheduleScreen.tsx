@@ -10,6 +10,7 @@ import {
   dayOfWeek,
   dayOffLabel,
   isDayOff,
+  weekendLeftoversWarning,
   missingCoverageUnlessAcked,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
@@ -332,11 +333,19 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
   // пришедшую из календаря — только перекрыть своей.
   const dayOffText = dayOffLabel(selectedDate, selectedDayRow?.kind, selectedDayRow?.note ?? null);
   const [dayOffBusy, setDayOffBusy] = useState(false);
+  // Предупреждение про выходные смены, оставшиеся на дне, ставшем рабочим.
+  // Своё состояние, а не общий `notice`: тот рисуется наверху экрана, а это
+  // сказано про кнопку, которую только что нажали, и стоять должно рядом с ней.
+  // Привязано к дате: на другом дне оно было бы неправдой.
+  const [dayWarning, setDayWarning] = useState<{ date: string; text: string } | null>(null);
 
   async function markDay(kind: "holiday" | "workday" | null) {
     setDayOffBusy(true);
+    setDayWarning(null);
     try {
-      await apiClient.setCalendarDay(selectedDate, kind);
+      const { weekendLeftovers } = await apiClient.setCalendarDay(selectedDate, kind);
+      const text = weekendLeftoversWarning(weekendLeftovers);
+      if (text) setDayWarning({ date: selectedDate, text });
       await loadWeek(from, to);
       onScheduleChanged?.();
     } catch (err) {
@@ -512,6 +521,11 @@ export function AdminScheduleScreen({ initialDate, today, onScheduleChanged, nea
                       </ActionButton>
                     )}
                   </div>
+                  {dayWarning?.date === selectedDate && (
+                    <div role="status" style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)", lineHeight: 1.4 }}>
+                      {dayWarning.text}
+                    </div>
+                  )}
                   {dayHint && (
                     <div
                       role="status"

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { calendarFrom, dayOffLabel, formatAuditMoment, isDayOff, validateReminderHour } from "@planer/shared";
+import { calendarFrom, dayOffLabel, formatAuditMoment, isDayOff, validateReminderHour, weekendLeftoversWarning } from "@planer/shared";
 import { apiClient, type AdminSettings, type CalendarDayDto, type NoticePref, type SwapLockResult } from "../api/client";
 import { withNotifyNotice } from "../lib/notify-text";
 import { routeAuthError, useAuthRequired } from "../auth-required";
@@ -217,6 +217,10 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [day, setDay] = useState("");
+  // Выходные смены, оставшиеся на дне, ставшем рабочим. Отдельно от `notice`:
+  // тот про «Обновить сейчас» и стоит над ним, а это — про отметку дня, и
+  // показывается в её блоке. Сбрасывается сменой даты: про другой день неправда.
+  const [dayWarning, setDayWarning] = useState<string | null>(null);
   // `undefined` — день ещё не прочитан; пустой массив — прочитан, отметок нет.
   const [dayRows, setDayRows] = useState<CalendarDayDto[] | undefined>(undefined);
 
@@ -273,8 +277,10 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
 
   function mark(kind: "holiday" | "workday" | null) {
     const date = day;
+    setDayWarning(null);
     void run(async () => {
-      await apiClient.setCalendarDay(date, kind);
+      const { weekendLeftovers } = await apiClient.setCalendarDay(date, kind);
+      setDayWarning(weekendLeftoversWarning(weekendLeftovers));
       await Promise.all([readDay(date), onChanged()]);
     }, "Не удалось отметить день");
   }
@@ -326,6 +332,7 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
             disabled={busy}
             onChange={(e) => {
               setDay(e.target.value);
+              setDayWarning(null);
               setError(null);
               void readDay(e.target.value).catch((err: unknown) => {
                 if (routeAuthError(err, onAuthRequired)) return;
@@ -345,6 +352,11 @@ function HolidaysCard({ settings, onChanged }: { settings: AdminSettings; onChan
                 Как в календаре
               </button>
             )}
+          </div>
+        )}
+        {dayWarning && (
+          <div className="settings-result" role="status">
+            {dayWarning}
           </div>
         )}
       </div>

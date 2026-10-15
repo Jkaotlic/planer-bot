@@ -120,3 +120,10 @@ export const teamScheduleResponseSchema = z
   .strict();
 export type TeamScheduleResponse = z.infer<typeof teamScheduleResponseSchema>;
 export type CalendarDayDto = TeamScheduleResponse["calendar"][number];
+
+/**
+ * Ответ на ручную отметку дня. `day` — день после отметки (`null`, если строки
+ * не осталось); `weekendLeftovers` — сколько выходных смен стоит на дне, ставшем
+ * рабочим, чтобы морда предупредила (I5 аудита 2026-10-15). На выходном — 0.
+ */
+export type CalendarDayMarkResult = { day: CalendarDayDto | null; weekendLeftovers: number };

@@ -4,6 +4,8 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
 import { listCalendarYear, replaceAutoYear, setManualDay } from "../repo/calendar-days";
 import { listRecentAudit } from "../repo/audit";
+import { createShift } from "../repo/shifts";
+import { createVacantSlot, setSlotStatus } from "../repo/weekend";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { FetchOutcome, FetchYear } from "../holidays/xmlcalendar";
@@ -138,12 +140,12 @@ describe("PUT /api/admin/calendar/:date", () => {
     // Обычный день: 31.12.2026 — праздник в зашитом календаре, и снятие вернуло бы его.
     const set = await app.request("/api/admin/calendar/2026-10-14", send(token, { kind: "holiday", note: "Работаем до обеда" }, "PUT"));
     expect(set.status).toBe(200);
-    expect(await set.json()).toEqual({ date: "2026-10-14", kind: "holiday", note: "Работаем до обеда", source: "manual" });
+    expect(await set.json()).toEqual({ date: "2026-10-14", kind: "holiday", note: "Работаем до обеда", source: "manual", weekendLeftovers: 0 });
     expect(listRecentAudit(db, 5)[0]).toMatchObject({ type: "calendar_day_set" });
 
     const cleared = await app.request("/api/admin/calendar/2026-10-14", send(token, { kind: null }, "PUT"));
     expect(cleared.status).toBe(200);
-    expect(await cleared.json()).toEqual({ date: "2026-10-14", kind: null, note: null, source: null });
+    expect(await cleared.json()).toEqual({ date: "2026-10-14", kind: null, note: null, source: null, weekendLeftovers: 0 });
     expect(listCalendarYear(db, 2026)).toHaveLength(0);
   });
 
@@ -154,7 +156,7 @@ describe("PUT /api/admin/calendar/:date", () => {
     await app.request("/api/admin/calendar/2026-06-12", send(token, { kind: "workday" }, "PUT"));
 
     const cleared = await app.request("/api/admin/calendar/2026-06-12", send(token, { kind: null }, "PUT"));
-    expect(await cleared.json()).toEqual({ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto" });
+    expect(await cleared.json()).toEqual({ date: "2026-06-12", kind: "holiday", note: "День России", source: "auto", weekendLeftovers: 0 });
   });
 
   it("перекрывает автоматическую строку, а не удаляет её вид", async () => {
@@ -164,6 +166,48 @@ describe("PUT /api/admin/calendar/:date", () => {
     await app.request("/api/admin/calendar/2026-06-12", send(await tokenFor(app, 111), { kind: "workday" }, "PUT"));
 
     expect(listCalendarYear(db, 2026)[0]).toMatchObject({ kind: "workday", source: "manual" });
+  });
+
+  // I5 (аудит 2026-10-15): день стал рабочим, а выходные смены на нём остались.
+  describe("выходные смены на дне, ставшем рабочим", () => {
+    const SAT = "2026-10-17";
+    function withWeekendWork(db: Db, date: string) {
+      const igor = 2; // stage(): Аня — первая, Игорь — второй
+      createShift(db, { date, start: "10:00", end: "18:00", category: "weekend_work", employeeId: igor });
+      createVacantSlot(db, { date, start: "10:00", end: "18:00" }); // открытый — считается
+      const closed = createVacantSlot(db, { date, start: "09:00", end: "12:00" });
+      setSlotStatus(db, closed.id, "closed"); // закрытый — нет
+      const assigned = createVacantSlot(db, { date, start: "12:00", end: "15:00" });
+      setSlotStatus(db, assigned.id, "assigned"); // его люди — уже записи выше, дважды не считаем
+      createShift(db, { date, start: "09:00", end: "18:00", category: "shift", employeeId: igor }); // обычная смена — нет
+      createShift(db, { date: "2026-10-18", start: "10:00", end: "18:00", category: "weekend_work", employeeId: igor }); // другой день
+    }
+
+    it("«Сделать рабочим» считает записи «Работа в выходной» и открытые слоты, отметку не запрещает", async () => {
+      const { db, app } = stage();
+      withWeekendWork(db, SAT);
+      const res = await app.request(`/api/admin/calendar/${SAT}`, send(await tokenFor(app, 111), { kind: "workday" }, "PUT"));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ date: SAT, kind: "workday", note: null, source: "manual", weekendLeftovers: 2 });
+      expect(listCalendarYear(db, 2026).find((d) => d.date === SAT)).toMatchObject({ kind: "workday" });
+    });
+
+    it("день остался выходным — предупреждать не о чем", async () => {
+      const { db, app } = stage();
+      withWeekendWork(db, SAT);
+      const res = await app.request(`/api/admin/calendar/${SAT}`, send(await tokenFor(app, 111), { kind: "holiday" }, "PUT"));
+      expect(await res.json()).toMatchObject({ weekendLeftovers: 0 });
+    });
+
+    it("снятая отметка «выходной» с будня тоже делает день рабочим и считает", async () => {
+      const { db, app } = stage();
+      const token = await tokenFor(app, 111);
+      const WED = "2026-10-14";
+      await app.request(`/api/admin/calendar/${WED}`, send(token, { kind: "holiday" }, "PUT"));
+      withWeekendWork(db, WED);
+      const res = await app.request(`/api/admin/calendar/${WED}`, send(token, { kind: null }, "PUT"));
+      expect(await res.json()).toEqual({ date: WED, kind: null, note: null, source: null, weekendLeftovers: 2 });
+    });
   });
 
   it("непонятная дата или вид — 400", async () => {

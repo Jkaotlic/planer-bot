@@ -26,6 +26,7 @@ import type {
   TemplateDto,
   StartTab,
   CalendarDayDto,
+  CalendarDayMarkResult,
   QrSavedStyle,
   QrStyle,
 } from "@planer/shared";
@@ -33,7 +34,7 @@ import type {
 // одинаково читают сервер и оба админских экрана.
 export type { PaymentRow };
 // Тот же довод: строка календаря описана в контракте, и мини-апп берёт её оттуда.
-export type { CalendarDayDto };
+export type { CalendarDayDto, CalendarDayMarkResult };
 import type { Category, TemplateAccent } from "../categories";
 import {
   mockAcceptSwap,
@@ -992,7 +993,7 @@ export interface ApiClient {
   setHolidaysAuto(enabled: boolean): Promise<void>;
   refreshHolidays(): Promise<HolidayRefreshYear[]>;
   /** Ручная отметка дня: выходной, рабочий или «как в календаре» (`null`). */
-  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayDto | null>;
+  setCalendarDay(date: string, kind: "holiday" | "workday" | null, note?: string | null): Promise<CalendarDayMarkResult>;
   getNoticePrefs(): Promise<NoticePrefs>;
   setNoticePref(kind: string, enabled: boolean): Promise<{ kind: string; enabled: boolean }>;
   /** Рассылает произвольный текст команде. Превью — на вызывающем: сервер его
@@ -1778,12 +1779,17 @@ export const realClient: ApiClient = {
   },
   async setCalendarDay(date, kind, note = null) {
     // Снятая отметка приходит тем же телом с `kind: null` — сервер отвечает
-    // про день, а не про строку, которой больше нет.
-    const row = await authorizedPutJson<{ date: string; kind: "holiday" | "workday" | null; note: string | null; source: "auto" | "manual" | null }>(
-      `/api/admin/calendar/${date}`,
-      { kind, note },
-    );
-    return row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+    // про день после снятия: календарный праздник, если он под отметкой был,
+    // иначе пустые поля.
+    const row = await authorizedPutJson<{
+      date: string;
+      kind: "holiday" | "workday" | null;
+      note: string | null;
+      source: "auto" | "manual" | null;
+      weekendLeftovers: number;
+    }>(`/api/admin/calendar/${date}`, { kind, note });
+    const day = row.kind === null || row.source === null ? null : { date: row.date, kind: row.kind, note: row.note, source: row.source };
+    return { day, weekendLeftovers: row.weekendLeftovers };
   },
   getNoticePrefs: () => authorizedGet<NoticePrefs>("/api/me/notifications"),
   setNoticePref: (kind, enabled) =>
