@@ -26,17 +26,21 @@ const entryTexts = {
  */
 export const MAX_RANGE_DAYS = 366;
 
+/** Конец раньше начала — тоже ошибка формы («по какой день» раньше «с какого»), а не клиента. */
+export const ENDS_BEFORE_START_TEXT = "запись не может кончаться раньше, чем начинается";
+
 /**
  * Отказ по длине записи. Его, как и длину поля, человек получает от своей же
  * формы («по какой день» через год), а не от сломанного клиента.
  */
 export const RANGE_TOO_LONG_TEXT = `запись не может быть длиннее ${MAX_RANGE_DAYS} дней — разбейте её на части`;
 
-const TOO_LONG_MESSAGES = new Set([
+const HUMAN_MESSAGES = new Set([
   tooLongText("Место", ENTRY_LOCATION_MAX),
   tooLongText("Название", ENTRY_TITLE_MAX),
   tooLongText("Заметка", ENTRY_NOTE_MAX),
   RANGE_TOO_LONG_TEXT,
+  ENDS_BEFORE_START_TEXT,
 ]);
 
 /**
@@ -45,8 +49,8 @@ const TOO_LONG_MESSAGES = new Set([
  * как есть — поэтому слишком длинное поле называется словами.
  */
 export function entryInvalidBody(issues: readonly { message: string }[]): { error: string; issues: readonly unknown[] } {
-  const tooLong = issues.find((issue) => TOO_LONG_MESSAGES.has(issue.message));
-  return { error: tooLong?.message ?? "invalid", issues };
+  const human = issues.find((issue) => HUMAN_MESSAGES.has(issue.message));
+  return { error: human?.message ?? "invalid", issues };
 }
 
 const baseEntry = z.object({
@@ -123,7 +127,7 @@ export function entrySpanError(v: { category: EntryCategory; date: string; endDa
  * Returns an error message, or null if coherent.
  */
 export function entryRangeError(v: { date: string; endDate?: string | null }): string | null {
-  if (v.endDate && v.endDate < v.date) return "запись не может кончаться раньше, чем начинается";
+  if (v.endDate && v.endDate < v.date) return ENDS_BEFORE_START_TEXT;
   // Длина — здесь же, а не только в схеме создания: этой функцией сверяют и PATCH
   // (итог после слияния с существующей записью), и записи работника. Без предела
   // больничный «до 9999 года» разворачивается `daysOf`/`eachDayIso` в ~36 млн

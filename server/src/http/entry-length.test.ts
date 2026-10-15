@@ -142,4 +142,14 @@ describe("длина записи-отсутствия", () => {
     const res = await app.request("/api/my/entries", authedJson(token, { category: "sick_leave", date: today, endDate: "9999-12-31" }));
     expect(res.status).toBe(400);
   });
+
+  it("конец раньше начала: PATCH называет причину в error, а не «invalid»", async () => {
+    const { db, app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const entry = createShift(db, { employeeId: anya.id, date: START, endDate: LAST_OK, category: "vacation", start: null, end: null });
+
+    const res = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { endDate: addDaysIso(START, -1) }, "PATCH"));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("запись не может кончаться раньше, чем начинается");
+  });
 });
