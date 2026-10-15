@@ -101,6 +101,38 @@ describe("длина записи-отсутствия", () => {
     expect(getShift(db, entry.id)!.note).toBe("декрет");
   });
 
+  it("PATCH телом формы (даты те же, что в записи): длинная старая запись правится — 200", async () => {
+    // Обе формы шлют date и endDate всегда, даже если меняли только заметку.
+    const { db, app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const END = addDaysIso(START, 500);
+    const entry = createShift(db, { employeeId: anya.id, date: START, endDate: END, category: "vacation", start: null, end: null });
+
+    const res = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, {
+      category: "vacation", date: START, endDate: END, employeeId: anya.id, start: null, end: null, note: "декрет",
+    }, "PATCH"));
+    expect(res.status).toBe(200);
+    expect(getShift(db, entry.id)!.note).toBe("декрет");
+  });
+
+  it("отказ по длине называет предел в error — морды показывают его как есть (POST и PATCH)", async () => {
+    const { db, app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const text = `запись не может быть длиннее ${MAX_RANGE_DAYS} дней — разбейте её на части`;
+
+    const posted = await app.request(
+      "/api/admin/entries",
+      authedJson(admin, { date: START, endDate: ONE_TOO_MANY, category: "sick_leave", employeeId: anya.id }),
+    );
+    expect(posted.status).toBe(400);
+    expect((await posted.json()).error).toBe(text);
+
+    const entry = createShift(db, { employeeId: anya.id, date: START, endDate: START, category: "sick_leave", start: null, end: null });
+    const patched = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { endDate: ONE_TOO_MANY }, "PATCH"));
+    expect(patched.status).toBe(400);
+    expect((await patched.json()).error).toBe(text);
+  });
+
   it("POST /api/my/entries: работник не ставит себе больничный до 9999 года", async () => {
     const { db, app } = stage();
     createEmployee(db, { displayName: "Игорь", inviteToken: "inv-igor" });

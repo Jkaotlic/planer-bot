@@ -16,10 +16,27 @@ const entryTexts = {
   note: z.string().max(ENTRY_NOTE_MAX, tooLongText("Заметка", ENTRY_NOTE_MAX)).nullish(),
 };
 
+/**
+ * Предел одной расстановки и одной записи-отсутствия — год с небольшим.
+ *
+ * Не вкусовое число: один процесс обслуживает и API, и long-polling бота, и
+ * «широкий» запрос задевает чат всей команды (см. `CLAUDE.md`). Здесь он вдобавок
+ * создаёт по записи на день, и без предела опечатка в году («2026» → «2126»)
+ * означала бы тридцать шесть тысяч строк в таблице смен.
+ */
+export const MAX_RANGE_DAYS = 366;
+
+/**
+ * Отказ по длине записи. Его, как и длину поля, человек получает от своей же
+ * формы («по какой день» через год), а не от сломанного клиента.
+ */
+export const RANGE_TOO_LONG_TEXT = `запись не может быть длиннее ${MAX_RANGE_DAYS} дней — разбейте её на части`;
+
 const TOO_LONG_MESSAGES = new Set([
   tooLongText("Место", ENTRY_LOCATION_MAX),
   tooLongText("Название", ENTRY_TITLE_MAX),
   tooLongText("Заметка", ENTRY_NOTE_MAX),
+  RANGE_TOO_LONG_TEXT,
 ]);
 
 /**
@@ -112,7 +129,7 @@ export function entryRangeError(v: { date: string; endDate?: string | null }): s
   // больничный «до 9999 года» разворачивается `daysOf`/`eachDayIso` в ~36 млн
   // дней в процессе, который держит и бота.
   if (v.endDate && rangeDays(v.date, v.endDate) > MAX_RANGE_DAYS) {
-    return `запись не может быть длиннее ${MAX_RANGE_DAYS} дней — разбейте её на части`;
+    return RANGE_TOO_LONG_TEXT;
   }
   return null;
 }
@@ -127,16 +144,6 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
 });
 
 export const updateEntrySchema = baseEntry.partial();
-
-/**
- * Предел одной расстановки и одной записи-отсутствия — год с небольшим.
- *
- * Не вкусовое число: один процесс обслуживает и API, и long-polling бота, и
- * «широкий» запрос задевает чат всей команды (см. `CLAUDE.md`). Здесь он вдобавок
- * создаёт по записи на день, и без предела опечатка в году («2026» → «2126»)
- * означала бы тридцать шесть тысяч строк в таблице смен.
- */
-export const MAX_RANGE_DAYS = 366;
 
 /**
  * Тело «расставить с какого по какое».

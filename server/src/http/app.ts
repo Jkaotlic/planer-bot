@@ -1727,13 +1727,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
       start: patch.start !== undefined ? patch.start : existing.start,
       end: patch.end !== undefined ? patch.end : existing.end,
     };
+    // Диапазон сверяется, только когда даты записи и правда сдвигаются. Не «если
+    // в теле есть даты»: обе формы шлют `date`/`endDate` всегда, и запись, ставшая
+    // длинной до появления предела (декрет одной строкой), иначе не дала бы
+    // поправить даже заметку.
+    const datesMoved =
+      merged.date !== existing.date || (merged.endDate ?? merged.date) !== (existing.endDate ?? existing.date);
     const err =
       entryTimesError(merged) ??
       entryDateError(merged, loadCalendar(db, merged.date, merged.endDate ?? merged.date)) ??
-      // Диапазон сверяется, только когда правка трогает даты: запись, ставшая длинной
-      // до появления предела, иначе не дала бы поправить даже заметку.
-      (patch.date !== undefined || patch.endDate !== undefined ? entryRangeError(merged) : null);
-    if (err) return c.json({ error: "invalid", issues: [{ message: err }] }, 400);
+      (datesMoved ? entryRangeError(merged) : null);
+    if (err) return c.json(entryInvalidBody([{ message: err }]), 400);
 
     // `unrecognisedCode` means «импорт не смог прочитать эту клетку», and every
     // reader puts it above everything else: `encodeEntryCode` writes the raw text
