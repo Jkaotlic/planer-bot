@@ -144,4 +144,20 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     expect(getHandover(db, handover.id)!.status).toBe("cancelled");
     expectAdminCancelText(sent);
   });
+
+  it("archiving while an approved sick leave is still running: the future one's fan-out is cancelled, not moved onto the running one", async () => {
+    // C started yesterday and survives the archive (only absences from today are deleted). Moving A's
+    // hand-over onto C would leave it live on a shift the archive is about to hand to «Не назначено» —
+    // no «отбой» for the colleagues, an escalation hanging over nobody's shift.
+    const { db, app, sent, sick, work, handover, anya, igorToken } = await scene({ pending: false });
+    const running = createShift(db, { date: day(-1), endDate: day(1), category: "sick_leave", employeeId: anya.id, approvedByEmployeeId: sick.approvedByEmployeeId });
+
+    const res = await app.request(new Request(`http://x/api/admin/employees/${anya.id}/archive`, authed(igorToken, {})));
+    expect(res.status).toBe(200);
+
+    expect(getShift(db, work.id)!.employeeId).toBeNull();
+    expect(getShift(db, running.id)).toBeDefined();
+    expect(getHandover(db, handover.id)!.status).toBe("cancelled");
+    expectAdminCancelText(sent);
+  });
 });

@@ -379,7 +379,9 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
         if (entry.category === "sick_leave") {
           const closed = takeRequestOutOfPending(db, entry, "🗑 Больничного уже нет — сотрудника убрали в архив");
           if (closed) closedRequests.push(closed);
-          cancelledHandovers.push(...cancelHandoversForEntryDb(db, entry.id, []));
+          // Без переноса на идущий больничный: смена ниже уходит в «Не назначено», и
+          // передача, перевешенная на него, осталась бы живой над ничьей сменой.
+          cancelledHandovers.push(...cancelHandoversForEntryDb(db, entry.id, [], { adopt: false }));
           detachHandoversFromEntry(db, entry.id);
         }
         if (deleteShift(db, entry.id).deleted) removedAbsences += 1;

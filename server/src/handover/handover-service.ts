@@ -611,11 +611,19 @@ export interface CancelledHandover {
  * The synchronous half of `cancelHandoversForEntry`: statuses and audit only, no
  * Telegram. Split out so a caller that must finish its DB work before the first
  * await (rejecting a sick leave) can do so and send the letters afterwards.
+ *
+ * `adopt: false` — не перевешивать на другой больничный. Нужно там, где смена в том же
+ * заходе уходит от дающего (архивация: следом всё с сегодня становится «Не назначено»).
+ * Перевешенная передача пережила бы это живой — без «отбоя» ждавшим, с эскалацией про
+ * ничью смену, — а гасить её потом пришлось бы тику, уже чужим текстом. Флаг, а не
+ * погашение после `archiveEmployee`: тот путь и так зовёт эту функцию на каждый
+ * удаляемый больничный, а второй проход по передачам дублировал бы её правила.
  */
 export function cancelHandoversForEntryDb(
   db: Db,
   sickEntryId: number,
   stillCoveredDates: readonly string[],
+  opts: { adopt?: boolean } = {},
 ): CancelledHandover[] {
   const covered = new Set(stillCoveredDates);
   const cancelled: CancelledHandover[] = [];
@@ -623,7 +631,7 @@ export function cancelHandoversForEntryDb(
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
     if (shift && covered.has(shift.date)) continue;
-    if (adoptByOtherSickLeave(db, handover)) continue;
+    if (opts.adopt !== false && adoptByOtherSickLeave(db, handover)) continue;
 
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
