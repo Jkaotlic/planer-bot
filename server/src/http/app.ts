@@ -40,7 +40,7 @@ import { swapsLockSetting, isSwapsLocked, reminderHour, reminderHourSetting, set
 import { listMutedKinds, setNoticeMuted } from "../repo/notice-prefs";
 import { setSwapLock } from "../swap/swap-lock";
 import { buildSwapLockNotices } from "../swap/swap-lock-notice";
-import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError, entryInvalidBody, changedTextTooLong } from "./entry-schema";
+import { createEntrySchema, updateEntrySchema, rangeEntrySchema, entryTimesError, entryDateError, entryRangeError, entryInvalidBody, changedTextTooLong, MAX_RANGE_DAYS } from "./entry-schema";
 import { createSwap, acceptSwap, declineSwap, cancelSwap } from "../swap/swap-service";
 import { outsidePoolFact, outsidePoolFacts } from "../swap/duty-notice";
 import { notifyScheduleChange, withScheduleDiff } from "../schedule/change-notice";
@@ -142,6 +142,7 @@ import {
   ENTRY_TITLE_MAX,
   ENTRY_LOCATION_MAX,
   ENTRY_NOTE_MAX,
+  EMPLOYEE_NAME_MAX,
   tooLongText,
   type SickApprovalRow,
 } from "@planer/shared";
@@ -163,7 +164,7 @@ import {
 } from "../weekend/weekend-service";
 import { countWeekendLeftovers, getVacantSlot, findOpenSlotLike, listAdminSlots } from "../repo/weekend";
 import { applyRosterImport, buildRosterCsv, RosterImportConflictError, type PersonResolution } from "../roster/roster-service";
-import { decodeRoster, parseRosterCsv } from "../roster/roster-codec";
+import { decodeRoster, parseRosterCsv, toRuDate } from "../roster/roster-codec";
 import { buildShiftCountsReport, shiftCountsCsv } from "../reports/shift-counts";
 import { upcomingBirthdays, ensureBirthdayRound, birthdayRoundDraft } from "../birthdays/birthday-service";
 import {
@@ -2665,7 +2666,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
         if (seenNames.has(person.name)) throw new Error(`в CSV повторяется ФИО «${person.name}»`);
         seenNames.add(person.name);
       }
+      // Ручки сотрудников и записей держат эти потолки сами, а импорт пишет мимо них.
+      // Здесь, а не в `applyRosterImport`: предпросмотр и применение разбирают файл
+      // одной функцией, и строку называет уже предпросмотр — до «Применить», где
+      // отказ пришёл бы общим 409 после того, как админ всё сверил.
+      // Номер строки — как в таблице: шапка первая.
+      for (const [index, person] of parsed.people.entries()) {
+        if (person.name.length > EMPLOYEE_NAME_MAX) throw new Error(`строка ${index + 2}: ФИО длиннее ${EMPLOYEE_NAME_MAX} знаков`);
+      }
       const decoded = decodeRoster(parsed, listActiveTemplates(db));
+      for (const person of decoded.perPerson) {
+        const long = person.entries.find((e) => e.endDate != null && entryRangeError(e) != null);
+        if (long) {
+          const row = parsed.people.findIndex((p) => p.name === person.name) + 2;
+          throw new Error(
+            `строка ${row} («${person.name}»): запись с ${toRuDate(long.date)} длиннее ${MAX_RANGE_DAYS} дней — загрузите период короче`,
+          );
+        }
+      }
       return { ok: true as const, parsed, decoded };
     } catch (err) {
       return {
