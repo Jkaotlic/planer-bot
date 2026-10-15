@@ -153,3 +153,35 @@ describe("длина записи-отсутствия", () => {
     expect(((await res.json()) as { error: string }).error).toBe("запись не может кончаться раньше, чем начинается");
   });
 });
+
+describe("отказ «работа в выходной на будний день» — словами в error", () => {
+  // START — понедельник, 2.11.2026: обычный рабочий день.
+  const WEEKDAY = START;
+  const body = { date: WEEKDAY, category: "weekend_work", start: "10:00", end: "18:00" };
+  const TEXT = "«Работа в выходной» может стоять только на выходной или праздник";
+
+  it("POST /api/admin/entries", async () => {
+    const { app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const res = await app.request("/api/admin/entries", authedJson(admin, { ...body, employeeId: anya.id }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(TEXT);
+  });
+
+  it("POST /api/admin/entries/bulk", async () => {
+    const { app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const res = await app.request("/api/admin/entries/bulk", authedJson(admin, { entries: [{ ...body, employeeId: anya.id }] }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(TEXT);
+  });
+
+  it("PATCH /api/admin/entries/:id", async () => {
+    const { db, app, anya } = stage();
+    const admin = await tokenFor(app, 111);
+    const entry = createShift(db, { employeeId: anya.id, date: "2026-11-07", category: "weekend_work", start: "10:00", end: "18:00" });
+    const res = await app.request(`/api/admin/entries/${entry.id}`, authedJson(admin, { date: WEEKDAY }, "PATCH"));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(TEXT);
+  });
+});
