@@ -94,3 +94,45 @@ describe("что может наблюдатель с включённым св�
     );
   });
 });
+
+/**
+ * Его правило 2026-10-15: «админы в любом случае могут менять любому что и когда
+ * захотят» — себе тоже. Админ не мог поправить свой идущий отпуск на экране
+ * «Записать себе»: там действовали правила работника.
+ */
+describe("админ правит себе что угодно и когда угодно", () => {
+  const admin = { admin: true };
+
+  it("любая из семи категорий ставится — и отпуск, и дежурство, и работа в выходной", () => {
+    for (const category of entryCategorySchema.options) {
+      expect(selfEntryRefusal({ category, date: TODAY }, TODAY, admin), category).toBeNull();
+    }
+  });
+
+  it("работник по-прежнему не ставит себе отпуск", () => {
+    expect(selfEntryRefusal({ category: "vacation", date: TODAY }, TODAY)).toBe("Такую запись ставит админ");
+    expect(selfEntryRefusal({ category: "vacation", date: TODAY }, TODAY, { ownShifts: true })).toBe("Такую запись ставит админ");
+    expect(selfEntryEditRefusal({ category: "vacation", date: day(-3), endDate: day(2) }, TODAY)).toBe("Такую запись правит админ");
+  });
+
+  it("прошлое и далёкое будущее — не отказ", () => {
+    expect(selfEntryRefusal({ category: "sick_leave", date: day(-SICK_BACKDATE_DAYS - 30) }, TODAY, admin)).toBeNull();
+    expect(selfEntryRefusal({ category: "offsite", date: day(-1) }, TODAY, admin)).toBeNull();
+    expect(selfEntryRefusal({ category: "vacation", date: day(SELF_ENTRY_HORIZON_DAYS + 100) }, TODAY, admin)).toBeNull();
+  });
+
+  it("длина за полгода — не отказ правила прав (предел 366 дней держит схема записи)", () => {
+    const draft = { category: "vacation" as const, date: TODAY, endDate: day(SELF_ENTRY_HORIZON_DAYS + 30) };
+    expect(selfEntryRefusal(draft, TODAY, admin)).toBeNull();
+  });
+
+  it("кончившуюся запись любой категории можно править и снимать", () => {
+    expect(selfEntryEditRefusal({ category: "vacation", date: day(-10), endDate: day(-5) }, TODAY, admin)).toBeNull();
+    expect(selfEntryEditRefusal({ category: "sick_leave", date: day(-3), endDate: day(-1) }, TODAY, admin)).toBeNull();
+    expect(selfEntryEditRefusal({ category: "duty", date: day(-40) }, TODAY, admin)).toBeNull();
+  });
+
+  it("работнику кончившаяся запись по-прежнему закрыта", () => {
+    expect(selfEntryEditRefusal({ category: "sick_leave", date: day(-3), endDate: day(-1) }, TODAY)).not.toBeNull();
+  });
+});

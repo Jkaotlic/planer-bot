@@ -1,4 +1,4 @@
-import type { EntryCategory } from "./category";
+import { entryCategorySchema, type EntryCategory } from "./category";
 import { dayNumber } from "./time";
 
 /**
@@ -29,12 +29,30 @@ export function isSelfWritable(category: EntryCategory): boolean {
  */
 const OBSERVER_SELF_WRITABLE: ReadonlySet<EntryCategory> = new Set([...SELF_WRITABLE, "shift"]);
 
+/**
+ * Всё, что админ может завести себе: семь из семи.
+ *
+ * Его правило от 2026-10-15 — «админы в любом случае могут менять любому что и
+ * когда захотят», себе тоже. Граница «что работник ставит себе сам» существует
+ * потому, что график ведёт админ; у того, кто его ведёт, отбирать нечего.
+ * Множество строится из схемы, а не набирается руками: восьмая категория
+ * попадёт сюда сама, а не останется «той, что админ себе почему-то не ставит».
+ */
+const ADMIN_SELF_WRITABLE: ReadonlySet<EntryCategory> = new Set(entryCategorySchema.options);
+
 export interface SelfEntryAccess {
   /** `canAddOwnShifts` вызывающей стороны. */
   ownShifts?: boolean;
+  /**
+   * Вызывающий — админ. Только из проверенной роли: на сервере `isAdmin` из
+   * базы, в мини-аппе — из «кто я». Никогда не из тела запроса — флаг снимает
+   * все ограничения ниже, кроме правил самой записи (`entry-schema.ts`).
+   */
+  admin?: boolean;
 }
 
 function writableFor(access: SelfEntryAccess): ReadonlySet<EntryCategory> {
+  if (access.admin) return ADMIN_SELF_WRITABLE;
   return access.ownShifts ? OBSERVER_SELF_WRITABLE : SELF_WRITABLE;
 }
 
@@ -74,6 +92,11 @@ export interface SelfEntryDraft {
  */
 export function selfEntryRefusal(draft: SelfEntryDraft, today: string, access: SelfEntryAccess = {}): string | null {
   if (!writableFor(access).has(draft.category)) return "Такую запись ставит админ";
+  // Сроки ниже — граница «сообщаю факт» против «переписываю историю», и её
+  // держат ради админа, который видит последствия. Админу, правящему себя,
+  // спрашивать некого. Предел длины записи (366 дней) остаётся — он в
+  // `entryRangeError` и про целостность данных, а не про права.
+  if (access.admin) return null;
 
   const offset = dayNumber(draft.date) - dayNumber(today);
   // Задним числом — только больничный: он сообщает о факте, который уже
@@ -115,6 +138,8 @@ export function selfEntryEditRefusal(
   access: SelfEntryAccess = {},
 ): string | null {
   if (!writableFor(access).has(entry.category)) return "Такую запись правит админ";
+  // Кончившаяся запись — отчётность, и трогать её должен админ. Он и трогает.
+  if (access.admin) return null;
   if ((entry.endDate ?? entry.date) < today) return "Запись уже кончилась — если что-то не так, напиши админу";
   return null;
 }
