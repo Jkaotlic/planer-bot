@@ -347,6 +347,39 @@ describe("передача гаснет сама, когда смена ушла
   });
 });
 
+describe("больничный-основание ушёл, а день покрывает второй одобренный больничный", () => {
+  // Путь мимо `cancelHandoversForEntryDb` (запись стала отпуском, даты сдвинуты прямой
+  // правкой) гасит передачу в тике — и тик обязан спросить про второй больничный так же.
+  it("основание стало отпуском — передача жива и стоит на втором больничном, «отбоя» нет", async () => {
+    const db = makeTestDb();
+    const { anya, igor, sick, handover } = await scene(db);
+    const second = sickLeave(db, anya, "2026-08-13");
+    await offerTo(deps(db), handover.id, igor);
+    updateShift(db, sick.id, { category: "vacation" });
+    sent = [];
+
+    await runHandoverTick(deps(db), NOW);
+
+    const after = getHandover(db, handover.id)!;
+    expect(after.status).toBe("offered");
+    expect(after.sickEntryId).toBe(second.id);
+    expect(sent).toEqual([]);
+  });
+
+  it("второй больничный ждёт «ОК» и смена не срочная — передача гаснет, как раньше", async () => {
+    const db = makeTestDb();
+    const { anya, sick, handover } = await scene(db, { date: "2026-08-20" });
+    db.insert(shifts)
+      .values({ date: "2026-08-20", endDate: "2026-08-20", category: "sick_leave", employeeId: anya, approvalRequestedAt: new Date(NOW - HOUR) })
+      .run();
+    updateShift(db, sick.id, { category: "vacation" });
+
+    await runHandoverTick(deps(db), NOW);
+
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+  });
+});
+
 describe("многодневная запись и больничный посреди неё", () => {
   it("дежурство пн–вс, больничный со среды — передача жива (промежутки пересекаются)", async () => {
     const db = makeTestDb();

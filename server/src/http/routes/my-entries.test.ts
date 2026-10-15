@@ -635,6 +635,27 @@ describe("DELETE /api/my/entries/:id", () => {
   });
 });
 
+describe("DELETE больничного, когда тот же день покрывает второй одобренный", () => {
+  it("удалила больничный A — у смены одна живая передача, и она по B", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 561, "Аня");
+    worker(db, 562, "Игорь");
+    const work = createShift(db, { employeeId: me.id, date: day(2), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
+    const first = createShift(db, { employeeId: me.id, date: day(1), endDate: day(2), category: "sick_leave" });
+    const second = createShift(db, { employeeId: me.id, date: day(2), endDate: day(3), category: "sick_leave" });
+    await startHandovers({ db, config, messenger: { offer: async () => {}, fan: async () => {}, plain: async () => {}, admins: async () => {}, adminsAlways: async () => ({ attempted: 0, delivered: 0 }) } }, { sickEntry: first, employeeId: me.id });
+    const app = createApp({ db, config, bot: undefined });
+    const token = await tokenFor(app, 561);
+
+    const res = await app.request(new Request(`http://x/api/my/entries/${first.id}`, authed(token, undefined, "DELETE")));
+
+    expect(res.status).toBe(200);
+    expect(getShift(db, first.id)).toBeUndefined();
+    const live = listHandoversForEntry(db, second.id).filter((h) => h.status === "offered" || h.status === "fanned");
+    expect(live.map((h) => h.shiftId)).toEqual([work.id]);
+  });
+});
+
 describe("своя смена наблюдателя", () => {
   it("с выключенным тумблером — 403 и ни одной записи", async () => {
     const db = makeTestDb();

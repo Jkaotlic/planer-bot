@@ -623,12 +623,54 @@ export function cancelHandoversForEntryDb(
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
     if (shift && covered.has(shift.date)) continue;
+    if (adoptByOtherSickLeave(db, handover)) continue;
 
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
     cancelled.push({ handover, shift });
   }
   return cancelled;
+}
+
+/**
+ * Дни, на которые админ уже сказал «да»: весь больничный, если он ничего не ждёт; только
+ * прежний одобренный промежуток, если ждёт продление; ничего, если ждёт он целиком.
+ */
+function approvedSpanOf(sick: Shift): { date: string; endDate: string } | null {
+  if (sick.approvalRequestedAt == null) return { date: sick.date, endDate: sick.endDate ?? sick.date };
+  if (sick.approvedDate == null) return null;
+  return { date: sick.approvedDate, endDate: sick.approvedEndDate ?? sick.approvedDate };
+}
+
+/**
+ * Больничный, ради которого отдавали смену, ушёл (удалён, укорочен, отклонён, стал отпуском),
+ * а тот же день покрывает другой одобренный больничный того же человека — передача остаётся
+ * живой и переходит к нему. `true` — перешла, гасить её не нужно.
+ *
+ * Перевесить, а не погасить и открыть заново: человек болен по-прежнему, и смена всё так же
+ * ищет хозяина. Погашенная передача сказала бы ждавшим «больничный сняли — выходить не
+ * нужно», а новая через три часа спросила бы их снова о той же смене; отказы («Не могу»)
+ * и уже отправленная эскалация пропали бы вместе со старой строкой. Без этого смена
+ * оставалась на больном вовсе без лестницы: тик открывает передачи только ждущим «ОК».
+ *
+ * Только одобренные дни: больничный, ждущий «ОК», смену не отдаёт — для него срочную
+ * передачу откроет тик (`forceUrgentSickHandovers`) по своим правилам.
+ */
+export function adoptByOtherSickLeave(db: Db, handover: Handover): boolean {
+  const shift = shiftOf(db, handover);
+  if (!shift || shift.employeeId !== handover.fromEmployeeId) return false;
+  const shiftEnd = shift.endDate ?? shift.date;
+  const other = listShiftsOverlapping(db, shift.date, shiftEnd).find((sick) => {
+    if (sick.category !== "sick_leave" || sick.employeeId !== handover.fromEmployeeId || sick.id === handover.sickEntryId) {
+      return false;
+    }
+    const span = approvedSpanOf(sick);
+    // Пересечение промежутков — то же правило, что у `handoverVoidReason`.
+    return span != null && shiftEnd >= span.date && shift.date <= span.endDate;
+  });
+  if (!other) return false;
+  updateHandover(db, handover.id, { sickEntryId: other.id });
+  return true;
 }
 
 /** The asynchronous half: tell whoever was waiting that the offer is off. */
