@@ -364,7 +364,8 @@ export interface NewEntryInput {
   templateId?: number;
   /** `null` — запись без человека; у правки так снимается назначенный (пропущенное поле — «не менять»). */
   employeeId?: number | null;
-  location?: string;
+  /** `null` у правки снимает место: пропущенное поле сервер читает как «не менять». */
+  location?: string | null;
   /** `null` clears the stored title (e.g. switching a preset shift to custom times). */
   title?: string | null;
 }
@@ -385,7 +386,7 @@ export interface NewEntryRangeInput {
   start?: string;
   end?: string;
   templateId?: number;
-  location?: string;
+  location?: string | null;
   title?: string | null;
   includeWeekends?: boolean;
   /**

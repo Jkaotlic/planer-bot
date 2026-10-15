@@ -1,11 +1,21 @@
 import { useTelegramBack } from "../lib/telegram-back";
-import { ActionButton, Card, Group } from "../ui";
+import { ActionButton, Card, Group, SelectField } from "../ui";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import { Cell, IconButton, Input, Placeholder } from "@telegram-apps/telegram-ui";
-import { ENTRY_LOCATION_MAX, ENTRY_TITLE_MAX, selfEntryEditRefusal, selfEntryRefusal } from "@planer/shared";
-import type { HandoverDraft, SelfEntryInput, Shift, Template } from "../api/client";
-import type { Category } from "../categories";
+import {
+  ENTRY_LOCATION_MAX,
+  ENTRY_TITLE_MAX,
+  categoryAccusative,
+  entryCategorySchema,
+  isAbsence,
+  isSelfWritable,
+  selfEntryEditRefusal,
+  selfEntryRefusal,
+  type SelfEntryAccess,
+} from "@planer/shared";
+import type { HandoverDraft, NewEntryInput, SelfEntryInput, Shift, Template } from "../api/client";
+import { categoryLabel, type Category } from "../categories";
 import { DayBadge } from "../components/DayBadge";
 import { EntryChip } from "../components/EntryChip";
 import { formatTimeRange } from "../lib/shift";
@@ -88,12 +98,60 @@ export function selfEntryFormFolded({ draftsLink, expanded }: { draftsLink: bool
 export function mySelfEntries<T extends { category: Category; date: string; endDate: string | null }>(
   shifts: readonly T[],
   today: string,
-  access: { ownShifts?: boolean } = {},
+  access: SelfEntryAccess = {},
 ): T[] {
   return shifts
     .filter((entry) => selfEntryEditRefusal(entry, today, access) === null)
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Какой ручкой уходит запись админа самому себе.
+ *
+ * Больничный и мероприятие (и своя смена наблюдателя) — своей, `/api/my/entries`:
+ * у неё есть то, чего у админской нет, — лестница передачи смен с черновиками
+ * «кому предложить» и письмо остальным админам. Её правила админа больше не
+ * держат (`admin` в `SelfEntryAccess`). Всё остальное — отпуск, командировка,
+ * дежурство, смена, работа в выходной — у своей ручки нет даже схемы, и вести
+ * себя оно обязано ровно как правка из «Админ → График»: тот же журнал, те же
+ * письма, та же уборка обменов. Поэтому оно идёт админской ручкой, а не второй
+ * её копией внутри `/api/my`.
+ */
+export function usesAdminRoute(category: Category, access: SelfEntryAccess): boolean {
+  if (!access.admin) return false;
+  if (isSelfWritable(category)) return false;
+  return !(category === "shift" && access.ownShifts);
+}
+
+/** Первое число месяца команды — начало окна прошедших записей админа. */
+export function monthStartOf(today: string): string {
+  return `${today.slice(0, 8)}01`;
+}
+
+/**
+ * Свои записи админа: уже кончившиеся из графика команды плюс то, что ещё идёт.
+ *
+ * «Мои смены» приезжают с сегодняшнего дня, и кончившегося в них нет — а админ
+ * правит себе и прошедшее. Отдельный запрос графика за месяц, а не `from` у
+ * «Моих смен»: тот же ответ рисует экран «Мои смены», и прошлое там лишнее.
+ * Окно — с начала месяца: дальше назад — это уже закрытый месяц, и его удобнее
+ * править в «Админ → График», где видна вся команда.
+ */
+export function withOwnPast<T extends { id: number; employeeId: number | null; date: string; endDate: string | null }>(
+  upcoming: readonly T[],
+  schedule: readonly T[],
+  meId: number,
+  today: string,
+): T[] {
+  // Дублей с `upcoming` не бывает: там конец не раньше сегодня, здесь — раньше.
+  const past = schedule.filter((entry) => entry.employeeId === meId && (entry.endDate ?? entry.date) < today);
+  return [...past, ...upcoming];
+}
+
+/** Заголовок формы и подпись записи без названия. */
+function entryName(category: Category): string {
+  return categoryLabel(category);
 }
 
 /**
@@ -128,8 +186,15 @@ export interface SelfEntryScreenProps {
    *  просто нет, но тот же расчёт отказа не должен молча решать за него иначе,
    *  чем решит сервер. */
   ownShifts: boolean;
-  /** Больничный админа подтверждается сразу (сервер: `needsOk` только у не-админа): подпись про письмо ему врёт. */
+  /** Больничный админа подтверждается сразу (сервер: `needsOk` только у не-админа): подпись про письмо ему врёт.
+   *  Он же снимает правила работника (`SelfEntryAccess.admin`): админ ставит себе что угодно и когда угодно. */
   isAdmin?: boolean;
+  /** `id` из «кто я» — адресат записи на админской ручке, где человека называют явно. */
+  myId?: number;
+  /** Админская ручка для того, что своей не ставится (`usesAdminRoute`). */
+  onAdminCreate?: (input: NewEntryInput) => Promise<void>;
+  onAdminUpdate?: (id: number, input: NewEntryInput) => Promise<void>;
+  onAdminDelete?: (id: number) => Promise<void>;
   onCancel: () => void;
   /** Возвращает смены, оставшиеся без человека, — про них форма спросит вторым шагом. */
   onCreate: (input: SelfEntryInput) => Promise<HandoverDraft[]>;
@@ -156,10 +221,14 @@ export function SelfEntryScreen({
   templates,
   ownShifts,
   isAdmin = false,
+  myId,
   onCancel,
   onCreate,
   onUpdate,
   onDelete,
+  onAdminCreate,
+  onAdminUpdate,
+  onAdminDelete,
   onOfferHandover,
   onSkipHandover,
   loadDrafts,
@@ -209,6 +278,10 @@ export function SelfEntryScreen({
   const [formExpanded, setFormExpanded] = useState(false);
   const formFolded = selfEntryFormFolded({ draftsLink: !!loadDrafts, expanded: formExpanded });
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Пресет правящейся записи и часы, с которыми он пришёл. Форма пресетов не
+  // выбирает, а сервер, получив часы без `templateId`, пресет снимает — то есть
+  // правка одной даты у «Утра» стёрла бы ему цвет и код в выгрузке.
+  const [editingPreset, setEditingPreset] = useState<{ templateId: number; title: string | null; start: string | null; end: string | null } | null>(null);
   // Категория формы: у правки — та, что у самой записи, иначе та, ради которой
   // экран открыли. Иначе, начав править мероприятие из формы больничного,
   // человек увидел бы поля не от той записи.
@@ -225,10 +298,14 @@ export function SelfEntryScreen({
 
   const isSick = category === "sick_leave";
   const isShift = category === "shift";
-  const mine = mySelfEntries(shifts, today, { ownShifts });
+  const absence = isAbsence(category);
+  const access: SelfEntryAccess = { ownShifts, admin: isAdmin };
+  const adminRoute = usesAdminRoute(category, access);
+  const mine = mySelfEntries(shifts, today, access);
 
   function resetForm() {
     setEditingId(null);
+    setEditingPreset(null);
     setCategory(categoryOf(mode));
     setDate(today);
     setEndDate("");
@@ -243,6 +320,7 @@ export function SelfEntryScreen({
     // Правка без полей невозможна — раскрываем.
     setFormExpanded(true);
     setEditingId(entry.id);
+    setEditingPreset(entry.templateId != null ? { templateId: entry.templateId, title: entry.title, start: entry.start, end: entry.end } : null);
     setCategory(entry.category);
     setDate(entry.date);
     setEndDate(entry.endDate ?? "");
@@ -259,14 +337,35 @@ export function SelfEntryScreen({
     return { category: "offsite", date, start, end, title: title.trim(), location: location.trim() || null };
   }
 
+  /** Тело для админской ручки — то, что прислала бы форма «Админ → График». */
+  function adminDraft(): NewEntryInput {
+    const base = { category, date, employeeId: myId };
+    if (absence) {
+      // Однодневная полоса у правки — явный `null`: пропуск для `PATCH` значит
+      // «не менять», и отпуск 12–17, сокращённый до 12-го, остался бы 12–17.
+      if (endDate && endDate !== date) return { ...base, endDate };
+      return editingId != null ? { ...base, endDate: null } : base;
+    }
+    const keepsPreset = editingPreset != null && editingPreset.start === start && editingPreset.end === end;
+    return {
+      ...base,
+      start,
+      end,
+      ...(keepsPreset
+        ? { templateId: editingPreset.templateId, title: editingPreset.title }
+        : { title: category === "offsite" ? title.trim() : null }),
+      location: location.trim() || null,
+    };
+  }
+
   /** Причина отказа до запроса — та же функция, что решит на сервере. Тот же
    *  `ownShifts`, что открывает категорию «shift» в списке ниже: без него
    *  своя смена наблюдателя получила бы «Такую запись ставит админ» даже с
    *  включённым тумблером. */
-  const refusal = selfEntryRefusal({ category, date, endDate: isSick ? endDate || null : null }, today, { ownShifts });
+  const refusal = selfEntryRefusal({ category, date, endDate: absence ? endDate || null : null }, today, access);
   const titleMissing = category === "offsite" && title.trim().length === 0;
-  const rangeInverted = isSick && !!endDate && endDate < date;
-  const timesInverted = !isSick && end <= start;
+  const rangeInverted = absence && !!endDate && endDate < date;
+  const timesInverted = !absence && end <= start;
 
   async function handleSubmit() {
     if (submitting) return;
@@ -277,7 +376,11 @@ export function SelfEntryScreen({
     setSubmitting(true);
     setError(null);
     try {
-      if (editingId != null) {
+      if (adminRoute) {
+        if (!onAdminCreate || !onAdminUpdate) throw new Error("Не получилось сохранить. Попробуй ещё раз.");
+        if (editingId != null) await onAdminUpdate(editingId, adminDraft());
+        else await onAdminCreate(adminDraft());
+      } else if (editingId != null) {
         await onUpdate(editingId, draft());
       } else {
         const uncovered = await onCreate(draft());
@@ -313,12 +416,18 @@ export function SelfEntryScreen({
     }
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(entry: Shift) {
+    const id = entry.id;
     if (busyId != null) return;
     setBusyId(id);
     setError(null);
     try {
-      await onDelete(id);
+      if (usesAdminRoute(entry.category, access)) {
+        if (!onAdminDelete) throw new Error("Не получилось снять запись. Попробуй ещё раз.");
+        await onAdminDelete(id);
+      } else {
+        await onDelete(id);
+      }
       if (editingId === id) resetForm();
     } catch (err) {
       console.error("Self entry delete failed:", err);
@@ -338,25 +447,49 @@ export function SelfEntryScreen({
           <BackIcon />
         </IconButton>
         <h1 className="ui-screen__title">
-          {isSick ? "Больничный" : isShift ? "Смена" : "Мероприятие"}
+          {entryName(category)}
         </h1>
       </header>
 
       {!formFolded && (
         <>
         <Group
-          header={editingId != null ? "Меняем запись" : isSick ? "Когда болеешь" : isShift ? "Когда и где" : "Что и когда"}
+          header={
+            editingId != null
+              ? "Меняем запись"
+              : isSick
+                ? "Когда болеешь"
+                : absence
+                  ? "Когда"
+                  : category === "offsite"
+                    ? "Что и когда"
+                    : "Когда и где"
+          }
           footer={
             isSick
               ? isAdmin
                 ? undefined
                 : "Админам уйдёт письмо: они подтвердят больничный и увидят, какие смены остались без человека."
-              : isShift
-                ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
-                : "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
+              : category === "offsite"
+                ? "Место заполняют, если мероприятие выездное. В офисе — можно не заполнять."
+                : isShift && !adminRoute
+                  ? "Смена появится в общем графике команды — как обычная, просто её поставил не админ."
+                  : undefined
           }
         >
           <Card>
+            {/* Выбор вида — только админу и только у новой записи: работнику ставить
+                себе, кроме формы, по которой он пришёл, нечего, а вид записи при
+                правке не меняется (у своей ручки — «Вид записи менять нельзя»). */}
+            {isAdmin && editingId == null && (
+              <SelectField stretched label="Что ставишь себе" value={category} onChange={(value) => setCategory(value as Category)}>
+                {entryCategorySchema.options.map((c) => (
+                  <option key={c} value={c}>
+                    {categoryLabel(c)}
+                  </option>
+                ))}
+              </SelectField>
+            )}
             {category === "offsite" && (
               <Input
                 header="Название"
@@ -366,10 +499,10 @@ export function SelfEntryScreen({
                 onChange={(e) => setTitle(e.target.value)}
               />
             )}
-            <Input header={isSick ? "С какого" : "Дата"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            {isSick ? (
+            <Input header={absence ? "С какого" : "Дата"} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            {absence ? (
               <Input
-                header="По какое (если знаешь)"
+                header={isSick ? "По какое (если знаешь)" : "По какое"}
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
@@ -413,7 +546,13 @@ export function SelfEntryScreen({
             </div>
           )}
           <ActionButton stretched kind="primary" loading={submitting} disabled={submitting || !!refusal} onClick={() => void handleSubmit()}>
-            {editingId != null ? "Сохранить" : isSick ? "Поставить больничный" : isShift ? "Поставить себе смену" : "Записать мероприятие"}
+            {editingId != null
+              ? "Сохранить"
+              : isSick
+                ? "Поставить больничный"
+                : category === "offsite"
+                  ? "Записать мероприятие"
+                  : `Поставить себе ${categoryAccusative(category)}`}
           </ActionButton>
           {editingId != null && (
             <ActionButton stretched kind="quiet" onClick={resetForm}>
@@ -500,7 +639,14 @@ export function SelfEntryScreen({
         </div>
       )}
 
-      <Group header="Что ты уже записал себе" footer="Здесь только то, что ещё не кончилось: прошедшее правит админ.">
+      <Group
+        header="Что ты уже записал себе"
+        footer={
+          isAdmin
+            ? "Твои записи с начала месяца и вперёд — любую можно поправить или снять."
+            : "Здесь только то, что ещё не кончилось: прошедшее правит админ."
+        }
+      >
         <Card flush>
           {mine.length === 0 ? (
             <Placeholder description={formFolded ? "Пока ничего." : "Пока ничего. Заполни форму выше."} />
@@ -527,18 +673,18 @@ export function SelfEntryScreen({
                       </ActionButton>
                       <ConfirmButton
                         label="Снять"
-                        question="Снять эту запись? Админам придёт письмо."
+                        question={usesAdminRoute(entry.category, access) ? "Снять эту запись?" : "Снять эту запись? Админам придёт письмо."}
                         confirmLabel="Да, снять"
                         mode="plain"
                         loading={busyId === entry.id}
                         disabled={busyId != null}
-                        onConfirm={() => void handleDelete(entry.id)}
+                        onConfirm={() => void handleDelete(entry)}
                       />
                     </span>
                   </span>
                 }
               >
-                {entry.title ?? (entry.category === "sick_leave" ? "Больничный" : entry.category === "shift" ? "Смена" : "Мероприятие")}
+                {entry.title ?? entryName(entry.category)}
               </Cell>
             ))
           )}
