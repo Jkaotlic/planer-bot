@@ -42,6 +42,16 @@ export function shiftIdsWithLiveHandover(db: Db, shiftIds: readonly number[]): S
   return new Set(rows.map((row) => row.shiftId!).filter((id) => id != null));
 }
 
+/** Live hand-overs one person is giving away, whichever sick leave opened them. */
+export function listLiveHandoversFrom(db: Db, employeeId: number): Handover[] {
+  return db
+    .select()
+    .from(handovers)
+    .where(and(eq(handovers.fromEmployeeId, employeeId), inArray(handovers.status, ["offered", "fanned"])))
+    .orderBy(asc(handovers.id))
+    .all();
+}
+
 /** Every handover one «больничный» spawned — a multi-day one spawns several. */
 export function listHandoversForEntry(db: Db, sickEntryId: number): Handover[] {
   return db.select().from(handovers).where(eq(handovers.sickEntryId, sickEntryId)).orderBy(asc(handovers.id)).all();

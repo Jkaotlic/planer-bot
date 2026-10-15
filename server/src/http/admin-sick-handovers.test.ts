@@ -10,6 +10,7 @@ import { createShift, getShift } from "../repo/shifts";
 import { createHandover, getHandover } from "../repo/handovers";
 import { addApprovalMessage } from "../repo/sick-approvals";
 import { takeHandover } from "../handover/handover-service";
+import { runHandoverTick } from "../handover/handover-tick";
 import { createHandoverMessenger } from "../handover/handover-messenger";
 import { signInitData } from "../auth/telegram";
 import { teamNow } from "../util/team-time";
@@ -159,5 +160,30 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     expect(getShift(db, running.id)).toBeDefined();
     expect(getHandover(db, handover.id)!.status).toBe("cancelled");
     expectAdminCancelText(sent);
+  });
+
+  it("archiving cancels the fan-out of the RUNNING sick leave too, with the admin «отбой», and the tick does not write again", async () => {
+    // C began yesterday, so the archive keeps it (only absences from today are deleted) — and its
+    // hand-over of the day(2) shift used to stay live until the tick voided it as «смену закрыли»:
+    // the worker's wording on a path where only the admin acted.
+    const { db, app, sent, sick, anya, deps, igorToken } = await scene({ pending: false });
+    const running = createShift(db, { date: day(-1), endDate: day(3), category: "sick_leave", employeeId: anya.id, approvedByEmployeeId: sick.approvedByEmployeeId });
+    const later = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const runningHandover = createHandover(db, { shiftId: later.id, fromEmployeeId: anya.id, sickEntryId: running.id, status: "fanned", escalatedAt: new Date() });
+
+    const res = await app.request(new Request(`http://x/api/admin/employees/${anya.id}/archive`, authed(igorToken, {})));
+    expect(res.status).toBe(200);
+
+    expect(getShift(db, running.id)).toBeDefined();
+    expect(getHandover(db, runningHandover.id)!.status).toBe("cancelled");
+    const toMarat = sent.filter((m) => m.to === 403);
+    expect(toMarat).toHaveLength(2);
+    for (const letter of toMarat) {
+      expect(letter.text).toContain("админ");
+      expect(letter.text).not.toContain("Аня");
+    }
+
+    await runHandoverTick(deps, Date.now());
+    expect(sent.filter((m) => m.to === 403)).toHaveLength(2);
   });
 });

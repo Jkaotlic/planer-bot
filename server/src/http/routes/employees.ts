@@ -20,7 +20,7 @@ import {
 } from "@planer/shared";
 import { notifyUser, swapExpiredText } from "../../bot/notify";
 import { deleteShift, listShiftsByEmployee } from "../../repo/shifts";
-import { cancelHandoversForEntryDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
+import { cancelHandoversForEntryDb, cancelLiveHandoversOfEmployeeDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../../handover/handover-service";
 import { editClosedRequest, sickApprovalDeps, takeRequestOutOfPending, type ClosedRequest } from "../../sick-approval/sick-approval-service";
 import { getVacantSlot, listAssignmentsForEmployee, removeAllInterestOf } from "../../repo/weekend";
 import { unassign } from "../../weekend/weekend-service";
@@ -386,6 +386,9 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
         }
         if (deleteShift(db, entry.id).deleted) removedAbsences += 1;
       }
+      // Остальные живые передачи (по идущему больничному, который мы не трогаем) — гаснут
+      // тем же админским «отбоем»: их смены ниже уходят в «Не назначено».
+      cancelledHandovers.push(...cancelLiveHandoversOfEmployeeDb(db, id));
       // 4. Рабочие смены с сегодня — «Не назначено», как и раньше.
       const freedShifts = listShiftsByEmployee(db, id).filter((s) => s.date >= today).length;
       const archived = archiveEmployee(db, id, today);

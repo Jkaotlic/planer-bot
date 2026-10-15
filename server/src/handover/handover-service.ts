@@ -11,6 +11,7 @@ import {
   getHandover,
   listDeclines,
   listHandoversForEntry,
+  listLiveHandoversFrom,
   shiftIdsWithLiveHandover,
   updateHandover,
 } from "../repo/handovers";
@@ -649,6 +650,24 @@ export function cancelHandoversForEntryDb(
     if (shift && covered.has(shift.date)) continue;
     if (opts.adopt !== false && adoptByOtherSickLeave(db, handover)) continue;
 
+    const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
+    recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
+    cancelled.push({ handover, shift });
+  }
+  return cancelled;
+}
+
+/**
+ * Все живые передачи человека гаснут — путь архивации. Удалённые больничные (с сегодня)
+ * гасит `cancelHandoversForEntryDb`, но идущий больничный архивация не трогает, и его
+ * передачи на будущие смены оставались бы живыми над сменами, которые архивация тут же
+ * отдаёт в «Не назначено»: их погасил бы тик со своим «смену закрыли» вместо админского
+ * «отбоя». Без переноса — переносить не на кого, человек уходит из команды.
+ */
+export function cancelLiveHandoversOfEmployeeDb(db: Db, employeeId: number): CancelledHandover[] {
+  const cancelled: CancelledHandover[] = [];
+  for (const handover of listLiveHandoversFrom(db, employeeId)) {
+    const shift = shiftOf(db, handover);
     const updated = updateHandover(db, handover.id, { status: "cancelled", resolvedAt: new Date() })!;
     recordAudit(db, "handover_cancelled", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
     cancelled.push({ handover, shift });
