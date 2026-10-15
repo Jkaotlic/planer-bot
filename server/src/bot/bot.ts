@@ -442,9 +442,25 @@ export function createBot(deps: BotDeps): Bot {
     });
   }
 
+  /**
+   * Отказ по существу вне личного чата. Возвращает `true`, если отказал.
+   *
+   * Ответ бота уходит туда, откуда пришла команда, а в группе его читают все:
+   * `/admin` публиковал бы админский токен на 12 часов, `/start` — привязку и
+   * строку расписания, `/notifications` и `/instruction` — личные кнопки, нажатие
+   * которых сделало бы дело от имени нажавшего. В отличие от `/week` здесь бот
+   * не молчит, а говорит, куда идти: человек сам позвал команду и ждёт ответа.
+   */
+  async function refuseOutsidePrivate(ctx: Context, text: string): Promise<boolean> {
+    if (ctx.chat?.type === "private") return false;
+    await ctx.reply(text);
+    return true;
+  }
+
   bot.command("start", async (ctx) => {
     const from = ctx.from;
     if (!from) return;
+    if (await refuseOutsidePrivate(ctx, "Напиши мне в личный чат — в группе я не отвечаю.")) return;
     const token = ctx.match.trim();
 
     if (token) {
@@ -525,6 +541,7 @@ export function createBot(deps: BotDeps): Bot {
   async function sendAdminLink(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
+    if (await refuseOutsidePrivate(ctx, "Админку открывают только в личном чате с ботом.")) return;
     const isAllowlisted = config.adminTelegramIds.includes(from.id);
     let admin = getByTelegramId(db, from.id);
     // Кем он был ДО этого обращения — чтобы после всех веток ниже одним
@@ -610,6 +627,7 @@ export function createBot(deps: BotDeps): Bot {
   async function sendReminders(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
+    if (await refuseOutsidePrivate(ctx, "Напоминания настраивают в личном чате с ботом.")) return;
     const who = acting(from.id);
     if (!who.ok) {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
@@ -937,6 +955,9 @@ export function createBot(deps: BotDeps): Bot {
   async function startInstructionUpload(ctx: Context): Promise<void> {
     const from = ctx.from;
     if (!from) return;
+    // Файл инструкции бот всё равно принимает только в личке (`message:document`):
+    // окно ожидания, открытое из группы, ждало бы того, что никогда не придёт.
+    if (await refuseOutsidePrivate(ctx, "Инструкцию прикладывают в личном чате с ботом.")) return;
     const who = acting(from.id);
     if (!who.ok) {
       await ctx.reply(who.text === "Ты не в системе" ? "Сначала отправь /start." : `${who.text}.`);
