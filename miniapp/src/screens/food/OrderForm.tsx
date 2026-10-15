@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Cell, Input, Switch, Textarea } from "@telegram-apps/telegram-ui";
-import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText, sendReportTitle } from "@planer/shared";
+import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_NOTE_MAX, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText, sendReportTitle } from "@planer/shared";
 import { apiClient, type PlaceView, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton, Card } from "../../ui";
@@ -131,8 +131,8 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, today }: {
       <Card>
         <Input header="Название (необязательно)" name="order-title" placeholder="Например: Икра, доставка 09.10" maxLength={FOOD_TEXT_MAX}
           value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy} />
-        <Textarea header="Комментарий (необязательно)" value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
-        <Input header="Куда сдавать (необязательно)" name="pay-hint" value={payHint} onChange={(e) => setPayHint(e.target.value)} disabled={busy} />
+        <Textarea header="Комментарий (необязательно)" maxLength={FOOD_NOTE_MAX} value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
+        <Input header="Куда сдавать (необязательно)" name="pay-hint" maxLength={FOOD_NOTE_MAX} value={payHint} onChange={(e) => setPayHint(e.target.value)} disabled={busy} />
         {/* Друг под другом, а не рядом: две половинки по ~95px на 320px обрезали и подпись, и саму
             дату (замер 2026-10-08), а у даты формат `дд.мм.гггг` не сжимается. */}
         <Input header="Дата (необязательно)" name="closes-date" type="date" min={today} max={addDaysIso(today, FOOD_CLOSE_HORIZON_DAYS)}
