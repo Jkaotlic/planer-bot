@@ -65,7 +65,7 @@ describe("консоль: новый заказ", () => {
     const el = await mount(OrderForm, p);
     await waitFor(() => expect(el.textContent).toContain("Уйдёт:"));
     await click(button(el, "Разослать"));
-    await waitFor(() => expect(el.textContent).toContain("Письмо не дошло ни до кого — проверь бота."));
+    await waitFor(() => expect(el.textContent).toContain("Письмо не дошло ни до кого из коллег — проверь бота."));
     expect(el.textContent).toContain("Заказ заведён");
     expect(el.textContent).not.toContain("Заказ отправлен");
     expect(p.onDone).not.toHaveBeenCalled();

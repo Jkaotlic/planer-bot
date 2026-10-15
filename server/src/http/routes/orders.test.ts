@@ -118,9 +118,18 @@ describe("заказы по HTTP", () => {
     expect(db.select().from(foodOrders).all().map((o) => o.id)).toEqual([body.order.id]);
   });
 
-  it("дошло хоть кому-то — deliveredToNobody = false", async () => {
+  it("дошло только самому создателю — это всё равно «ни до кого из коллег»", async () => {
+    // Своё письмо создатель получает всегда, когда бот жив; ответов оно не соберёт.
     const { app, failFor, igor, anyaT, placeId } = await stage();
     failFor.add(101);
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    expect(body.delivered).toBe(1);
+    expect(body.deliveredToNobody).toBe(true);
+  });
+
+  it("дошло коллеге, а создателю нет — deliveredToNobody = false", async () => {
+    const { app, failFor, igor, anyaT, placeId } = await stage();
+    failFor.add(100);
     const { body } = await newOrder(app, anyaT, igor, placeId);
     expect(body.delivered).toBe(1);
     expect(body.deliveredToNobody).toBe(false);

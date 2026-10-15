@@ -81,8 +81,9 @@ export interface OrderView {
 export interface FoodSendReport {
   delivered: number;
   unreachable: string[];
-  /** Адресаты были, а письмо не дошло ни до кого (обычно бот не может достучаться до
-   *  Telegram). Только у заказа; у опроса поля нет — читается как false. */
+  /** Коллеги-адресаты были, а письмо не дошло ни до кого из них (создатель не в счёт;
+   *  обычно бот не может достучаться до Telegram). Только у заказа; у опроса поля нет —
+   *  читается как false. */
   deliveredToNobody?: boolean;
 }
 

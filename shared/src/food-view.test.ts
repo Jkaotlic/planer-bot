@@ -100,9 +100,9 @@ describe("отчёты рассылки", () => {
   it("создание: «Отправлено: N. Не дошло: …»", () => {
     expect(sendReportText({ delivered: 2, unreachable: ["Марк", "Дима"] })).toBe("Отправлено: 2. Не дошло: Марк, Дима");
     // Ни одного письма — «Отправлено: 0» читалось бы как успех с оговоркой; говорим прямо.
-    expect(sendReportText({ delivered: 0, unreachable: [], deliveredToNobody: true })).toBe("Письмо не дошло ни до кого — проверь бота.");
+    expect(sendReportText({ delivered: 0, unreachable: [], deliveredToNobody: true })).toBe("Письмо не дошло ни до кого из коллег — проверь бота.");
     expect(sendReportText({ delivered: 0, unreachable: ["Марк"], deliveredToNobody: true }))
-      .toBe("Письмо не дошло ни до кого — проверь бота. Без Telegram: Марк");
+      .toBe("Письмо не дошло ни до кого из коллег — проверь бота. Без Telegram: Марк");
     expect(sendReportTitle({ delivered: 0, unreachable: [], deliveredToNobody: true })).toBe("Заказ заведён");
     expect(sendReportTitle({ delivered: 1, unreachable: ["Марк"] })).toBe("Заказ отправлен");
   });

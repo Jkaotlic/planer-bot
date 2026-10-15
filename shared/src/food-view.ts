@@ -77,7 +77,7 @@ export function sendReportText(r: FoodSendReport): string {
   // «Отправлено: 0» читалось бы как успех с оговоркой, а сбор, о котором никто не знает,
   // ничего не соберёт. Говорим прямо и куда смотреть.
   if (r.deliveredToNobody) {
-    return "Письмо не дошло ни до кого — проверь бота." + (r.unreachable.length > 0 ? ` Без Telegram: ${r.unreachable.join(", ")}` : "");
+    return "Письмо не дошло ни до кого из коллег — проверь бота." + (r.unreachable.length > 0 ? ` Без Telegram: ${r.unreachable.join(", ")}` : "");
   }
   return `Отправлено: ${r.delivered}. Не дошло: ${r.unreachable.join(", ")}`;
 }

@@ -16,7 +16,7 @@ import { jsonBody } from "../json-body";
 import { getPlaceView } from "../../orders/place-service";
 import {
   addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, hasRecentSameOrder, itemsOf, listOrdersFor,
-  orderView, removeItem, setItemQty,
+  orderRecipientRows, orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
 import { setOrderPaid } from "../../orders/order-payment-service";
 import { finishOrderMessages, placeName, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
@@ -127,10 +127,13 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
       createsInFlight.delete(key);
     }
     recordAudit(db, "order_created", viewer.id, { orderId: order.id, placeName: place?.name ?? null, title: order.title, recipients: reachable.length, delivered });
-    // Ни одно письмо не дошло — сбор всё равно остаётся: он уже в базе, его видно в
+    // Ни одно письмо не дошло до коллег — сбор всё равно остаётся: он уже в базе, его видно в
     // мини-аппе, а откат после частично ушедшей рассылки опаснее. Но экран должен сказать
     // это прямо, а не «Заказ отправлен»: иначе организатор ждёт ответов, которых не будет.
-    const deliveredToNobody = delivered === 0 && reachable.length > 0;
+    // Считаются только коллеги: своё письмо создатель получает почти всегда, и с ним
+    // «дошло 1» означало бы «дошло себе», а ответов от себя не ждут.
+    const colleagues = orderRecipientRows(db, order.id).filter((r) => r.employeeId !== viewer.id);
+    const deliveredToNobody = colleagues.length > 0 && colleagues.every((r) => r.messageId == null);
     return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable, deliveredToNobody }, 201);
   });
 
