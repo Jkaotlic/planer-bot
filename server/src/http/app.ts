@@ -26,6 +26,7 @@ import type { Shift, SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
   getEmployeeById,
+  employeesByIds,
   createAdminEmployee,
   listActive,
   restoreEmployee,
@@ -794,11 +795,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.route("/", createOrderRoutes({ db, config, bot }));
 
   app.get("/api/admin/events", requireAdmin(db, config.jwtSecret), (c) => {
-    const events = listRecentAudit(db, 30, c.get("auth").employeeId).map((row) => ({
+    const rows = listRecentAudit(db, 30, c.get("auth").employeeId);
+    // Имена авторов — одним запросом на страницу, а не по строке.
+    const actors = employeesByIds(db, rows.flatMap((row) => (row.actorEmployeeId != null ? [row.actorEmployeeId] : [])));
+    const events = rows.map((row) => ({
       id: row.id,
       type: row.type,
       createdAt: row.createdAt,
-      actorName: row.actorEmployeeId != null ? (getEmployeeById(db, row.actorEmployeeId)?.displayName ?? null) : null,
+      actorName: row.actorEmployeeId != null ? (actors.get(row.actorEmployeeId)?.displayName ?? null) : null,
       payload: row.payload,
     }));
     return c.json({ events });
@@ -1348,6 +1352,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     const page = queryAudit(db, { types, from, to, limit, offset, actorEmployeeId, viewerEmployeeId: c.get("auth").employeeId, teamTz: config.teamTz });
+    // Страница — до 200 строк: имена авторов одним запросом, а не по строке.
+    const actors = employeesByIds(db, page.rows.flatMap((row) => (row.actorEmployeeId != null ? [row.actorEmployeeId] : [])));
     return c.json({
       total: page.total,
       limit,
@@ -1358,7 +1364,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         id: row.id,
         type: row.type,
         createdAt: row.createdAt,
-        actorName: row.actorEmployeeId != null ? (getEmployeeById(db, row.actorEmployeeId)?.displayName ?? null) : null,
+        actorName: row.actorEmployeeId != null ? (actors.get(row.actorEmployeeId)?.displayName ?? null) : null,
         payload: row.payload,
       })),
     });

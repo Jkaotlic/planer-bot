@@ -1,5 +1,5 @@
 import type { QrSavedStyle } from "@planer/shared";
-import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { employees, shifts, type Employee } from "../db/schema";
 import type { DbOrTx } from "./settings";
@@ -201,6 +201,18 @@ export function createAdminEmployee(
 
 export function getEmployeeById(db: Db, id: number): Employee | undefined {
   return db.select().from(employees).where(eq(employees.id, id)).get();
+}
+
+/**
+ * Те же строки, что `getEmployeeById`, — для многих id одним запросом. Ручки и тики,
+ * которые подписывают имя под каждой строкой (журнал, ведомость выходных), иначе
+ * делали запрос на строку. Архивные включены, как и у `getEmployeeById`: строка
+ * журнала от уволенного должна по-прежнему называть его по имени.
+ */
+export function employeesByIds(db: Db, ids: Iterable<number>): Map<number, Employee> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+  return new Map(db.select().from(employees).where(inArray(employees.id, unique)).all().map((e) => [e.id, e]));
 }
 
 /**

@@ -26,7 +26,7 @@ import {
   setAssignmentShift,
 } from "../repo/weekend";
 import { createShift, deleteShift, listShiftsOverlapping } from "../repo/shifts";
-import { getEmployeeById } from "../repo/employees";
+import { employeesByIds, getEmployeeById } from "../repo/employees";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
 /** Every refusal `assignSlot` actually returns — narrowed so a typo on either
@@ -169,7 +169,10 @@ export function interestedForSlot(
   for (const entry of listShiftsOverlapping(db, slot.date, slot.date)) {
     if (entry.employeeId != null && isAbsence(entry.category)) awayThatDay.set(entry.employeeId, entry.category);
   }
-  return listInterestedEmployeeIds(db, slotId)
+  const interestedIds = listInterestedEmployeeIds(db, slotId);
+  // One read for everyone on the list, not one per name (twice, before).
+  const people = employeesByIds(db, interestedIds);
+  return interestedIds
     // Somebody who volunteered and has since been archived, or excluded from
     // assignment, is not a candidate; showing the name unmarked invites the admin
     // to pick it. The exclusion flag can be set AFTER someone taps «🙋 Хочу», so a
@@ -178,12 +181,13 @@ export function interestedForSlot(
     // 2026-08-07: drop them from the list rather than mark them — the flag means
     // «не участвует в выходных».
     .filter((employeeId) => {
-      const person = getEmployeeById(db, employeeId);
-      return isOnStaff(db, employeeId) && person != null && takesPartInAssignment(person);
+      const person = people.get(employeeId);
+      // `isOnStaff` by hand: the row is already in the map, and calling it would read it again.
+      return person?.isActive === true && takesPartInAssignment(person);
     })
     .map((employeeId) => ({
       employeeId,
-      name: getEmployeeById(db, employeeId)?.displayName ?? "Неизвестно",
+      name: people.get(employeeId)?.displayName ?? "Неизвестно",
       confirmedThisMonth: countConfirmedByEmployeeInMonth(db, employeeId, month),
       passedOver: countPassedOver(db, employeeId),
       absence: awayThatDay.get(employeeId) ?? null,
@@ -277,12 +281,14 @@ export function assigneesForSlot(
   db: Db,
   slotId: number,
 ): { assignmentId: number; employeeId: number; name: string; status: "offered" | "confirmed" }[] {
-  return listAssignmentsForSlot(db, slotId)
-    .filter((a) => a.status !== "declined")
+  const live = listAssignmentsForSlot(db, slotId).filter((a) => a.status !== "declined");
+  // The slot list calls this once per slot: names in one read, not one per assignee.
+  const people = employeesByIds(db, live.map((a) => a.employeeId));
+  return live
     .map((a) => ({
       assignmentId: a.id,
       employeeId: a.employeeId,
-      name: getEmployeeById(db, a.employeeId)?.displayName ?? "Неизвестно",
+      name: people.get(a.employeeId)?.displayName ?? "Неизвестно",
       status: a.status as "offered" | "confirmed",
     }));
 }
@@ -363,9 +369,12 @@ export function payrollRows(
   from: string,
   to: string,
 ): { employeeId: number; employeeName: string; date: string; hours: number }[] {
-  const rows = listConfirmedWorkInRange(db, from, to).map((work) => ({
+  const confirmed = listConfirmedWorkInRange(db, from, to);
+  // A year of weekends is hundreds of rows: names in one read, not one per row.
+  const people = employeesByIds(db, confirmed.map((w) => w.employeeId));
+  const rows = confirmed.map((work) => ({
     employeeId: work.employeeId,
-    employeeName: getEmployeeById(db, work.employeeId)?.displayName ?? "Неизвестно",
+    employeeName: people.get(work.employeeId)?.displayName ?? "Неизвестно",
     date: work.date,
     // A weekend entry always carries times (both write paths insist on it), so a
     // null here would be a row nobody can price — count it as nothing rather than NaN.
