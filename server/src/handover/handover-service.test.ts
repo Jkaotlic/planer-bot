@@ -455,6 +455,46 @@ describe("taking a shift", () => {
   });
 });
 
+describe("«Беру» только у того, кого сейчас спрашивают", () => {
+  it("после переадресации Марку прежний адресат Игорь смену не берёт — она ждёт Марка", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    await offerTo(deps(db), handover!.id, mark);
+
+    const byIgor = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(byIgor).toEqual({ ok: false, reason: "Это предложение уже ушло другому" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+    expect((await takeHandover(deps(db), handover!.id, mark, TODAY)).ok).toBe(true);
+    expect(getShift(db, work.id)?.employeeId).toBe(mark);
+  });
+
+  it("веер не берёт тот, кто уже сказал «Не могу», — остальные берут", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    await declineHandover(deps(db), handover!.id, igor);
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+
+    const byIgor = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(byIgor).toEqual({ ok: false, reason: "Ты уже ответил(а) «Не могу» на эту смену" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+    expect((await takeHandover(deps(db), handover!.id, mark, TODAY)).ok).toBe(true);
+  });
+});
+
 describe("cancelling", () => {
   it("kills the handovers a removed sick leave spawned and tells the people asked", async () => {
     const db = makeTestDb();

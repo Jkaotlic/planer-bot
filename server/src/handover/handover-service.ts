@@ -342,6 +342,19 @@ export async function takeHandover(
     if (voided) return { ok: false as const, reason: VOID_REFUSAL[voided] };
     const shift = shiftOf(db, handover)!;
 
+    // Брать может только тот, кого спрашивают сейчас. Кнопка под личным
+    // предложением переживает переадресацию: без проверки прежний адресат
+    // забирал смену, которую админ уже предложил другому, — а тот ждал её.
+    // Черновик без адресата не трогаем: его кнопки ни у кого нет.
+    // В веере отказавшийся не в круге (`fanOut` его исключает) — его старая
+    // кнопка не должна возвращать его туда в обход.
+    if (handover.status === "offered" && handover.offeredToEmployeeId != null && handover.offeredToEmployeeId !== employeeId) {
+      return { ok: false as const, reason: "Это предложение уже ушло другому" };
+    }
+    if (handover.status === "fanned" && listDeclines(db, handoverId).includes(employeeId)) {
+      return { ok: false as const, reason: "Ты уже ответил(а) «Не могу» на эту смену" };
+    }
+
     // «Беру» живёт в чате вечно. Без этих двух проверок кнопка под старым
     // сообщением брала смену человеку, которого админ тем временем вывел из
     // обменов, или переносила во «взято» смену, которая уже прошла.
