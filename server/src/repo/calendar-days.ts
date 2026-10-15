@@ -28,7 +28,7 @@ export function listCalendarYear(db: Db, year: number): CalendarDay[] {
  * Только `source = 'auto'`: день, поставленный админом руками, — его решение,
  * и перечитанный календарь его не отменяет. На дату с ручной строкой авто не
  * вставляется — первичный ключ один, и побеждает человек, — но её `auto_*`
- * обновляются (и обнуляются, если даты в новом наборе нет): иначе снятие
+ * обновляются (и становятся `none`, если даты в новом наборе нет): иначе снятие
  * отметки вернуло бы день к тому, что календарь говорил раньше, а не сейчас.
  * Транзакция, потому что между «снял» и «положил» читатель увидел бы год без
  * праздников.
@@ -52,7 +52,9 @@ export function replaceAutoYear(
     const removed = tx.delete(calendarDays).where(and(inYear, eq(calendarDays.source, "auto"))).run().changes;
     // Сначала обнулить у всех ручных: дата, которой нет в новом наборе, больше
     // не праздник по календарю, и снятие отметки не должно его воскресить.
-    tx.update(calendarDays).set({ autoKind: null, autoNote: null }).where(and(inYear, eq(calendarDays.source, "manual"))).run();
+    // `none`, а не NULL: NULL значит «строка до миграции» и отправил бы снятие
+    // к зашитому календарю — тому самому, из которого дату только что убрали.
+    tx.update(calendarDays).set({ autoKind: "none", autoNote: null }).where(and(inYear, eq(calendarDays.source, "manual"))).run();
     let added = 0;
     for (const day of days) {
       if (manual.has(day.date)) {
@@ -75,19 +77,28 @@ export function replaceAutoYear(
  * 2026-10-15, когда праздник всё это время считался буднем). Снятие на
  * авто-строке ничего не делает: снимать там нечего.
  *
- * Ручные строки до миграции 0044 не знают, что было под ними (`auto_kind`
- * пуст). Для них запасной источник — зашитый календарь года, если он есть:
- * иначе снятие отметки с настоящего праздника опять дало бы будень на месяц.
- * Ошибётся он только если источник поправил дату задним числом, — и это
- * исправит ближайшее обновление, как исправило бы и раньше. Обычный день в
- * зашитом календаре отсутствует, и строка просто удаляется.
+ * Ручная отметка на пустой дате пишет `auto_kind = 'none'`: «календарь про
+ * дату молчит», и снятие просто удаляет строку. Пустой таблица бывает и при
+ * выключенном автообновлении — праздник оттуда доставать нельзя.
+ *
+ * Ручные строки до миграции 0044 не знают, что было под ними (`auto_kind` =
+ * NULL). Только для них запасной источник — зашитый календарь года, если он
+ * есть: иначе снятие отметки с настоящего праздника опять дало бы будень на
+ * месяц. Ошибётся он, если источник поправил дату задним числом, — это
+ * исправит ближайшее обновление. Обычный день в зашитом календаре
+ * отсутствует, и строка просто удаляется.
  */
 export function setManualDay(db: Db, date: string, kind: DayKind | null, note: string | null, when: Date): void {
   db.transaction((tx) => {
     const current = tx.select().from(calendarDays).where(eq(calendarDays.date, date)).get();
     if (kind === null) {
       if (!current || current.source === "auto") return;
-      const auto = current.autoKind ? { kind: current.autoKind, note: current.autoNote } : bundledDay(date);
+      const auto =
+        current.autoKind === null
+          ? bundledDay(date)
+          : current.autoKind === "none"
+            ? null
+            : { kind: current.autoKind, note: current.autoNote };
       if (!auto) {
         tx.delete(calendarDays).where(eq(calendarDays.date, date)).run();
         return;
@@ -98,10 +109,16 @@ export function setManualDay(db: Db, date: string, kind: DayKind | null, note: s
         .run();
       return;
     }
+    // Пустая дата — известно, что под отметкой ничего нет (`none`). Таблица
+    // может быть пуста и потому, что автообновление выключено: тогда снятие
+    // отметки не должно доставать праздник из зашитого календаря, которого
+    // админ не включал.
     const under =
       current?.source === "auto"
         ? { autoKind: current.kind, autoNote: current.note }
-        : { autoKind: current?.autoKind ?? null, autoNote: current?.autoNote ?? null };
+        : current
+          ? { autoKind: current.autoKind, autoNote: current.autoNote }
+          : { autoKind: "none" as const, autoNote: null };
     tx.insert(calendarDays)
       .values({ date, kind, note, source: "manual", updatedAt: when, ...under })
       .onConflictDoUpdate({ target: calendarDays.date, set: { kind, note, source: "manual", updatedAt: when, ...under } })

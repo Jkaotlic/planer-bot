@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
+import { calendarDays } from "../db/schema";
 import { listCalendarYear, loadCalendar, replaceAutoYear, setManualDay } from "./calendar-days";
 
 const NOW = new Date("2026-09-04T10:00:00Z");
@@ -101,16 +102,19 @@ describe("setManualDay: авто-значение под ручной отмет
     replaceAutoYear(db, 2027, [{ date: "2027-06-12", kind: "holiday", note: "День России" }], NOW);
     setManualDay(db, "2027-06-12", "workday", null, NOW);
     replaceAutoYear(db, 2027, [], NOW);
-    expect(row(db, "2027-06-12")).toMatchObject({ source: "manual", autoKind: null, autoNote: null });
+    expect(row(db, "2027-06-12")).toMatchObject({ source: "manual", autoKind: "none", autoNote: null });
     setManualDay(db, "2027-06-12", null, null, NOW);
     expect(row(db, "2027-06-12")).toBeUndefined();
   });
 
+  // Так выглядит строка, поставленная руками до миграции 0044: auto_* = NULL,
+  // хотя под ней мог быть праздник. Теперь писатели так не пишут — только вставкой.
+  const legacyManual = (db: ReturnType<typeof makeTestDb>, date: string, kind: "holiday" | "workday") =>
+    db.insert(calendarDays).values({ date, kind, note: null, source: "manual", updatedAt: NOW }).run();
+
   it("старая ручная строка без авто-значения (до миграции 0044) берёт его из зашитого календаря", () => {
     const db = makeTestDb();
-    // Так выглядит строка, поставленная руками до миграции: auto_* пусты,
-    // хотя под ней был праздник.
-    setManualDay(db, "2026-11-04", "workday", null, NOW);
+    legacyManual(db, "2026-11-04", "workday");
     expect(row(db, "2026-11-04")).toMatchObject({ autoKind: null });
     setManualDay(db, "2026-11-04", null, null, NOW);
     expect(row(db, "2026-11-04")).toMatchObject({ kind: "holiday", note: "День народного единства", source: "auto" });
@@ -118,11 +122,29 @@ describe("setManualDay: авто-значение под ручной отмет
 
   it("запасной источник не выдумывает: обычный день и сокращённый уходят без строки", () => {
     const db = makeTestDb();
-    setManualDay(db, "2026-10-14", "holiday", null, NOW);
-    setManualDay(db, "2026-11-03", "holiday", null, NOW); // в зашитом — `short`, в таблицу не едет
+    legacyManual(db, "2026-10-14", "holiday");
+    legacyManual(db, "2026-11-03", "holiday"); // в зашитом — `short`, в таблицу не едет
     setManualDay(db, "2026-10-14", null, null, NOW);
     setManualDay(db, "2026-11-03", null, null, NOW);
     expect(row(db, "2026-10-14")).toBeUndefined();
     expect(row(db, "2026-11-03")).toBeUndefined();
+  });
+
+  it("источник убрал дату из года — снятие отметки не воскрешает праздник из зашитого календаря", () => {
+    const db = makeTestDb();
+    replaceAutoYear(db, 2026, [{ date: "2026-01-02", kind: "holiday", note: "Новогодние каникулы" }], NOW);
+    setManualDay(db, "2026-01-02", "workday", null, NOW);
+    replaceAutoYear(db, 2026, [], NOW);
+    setManualDay(db, "2026-01-02", null, null, NOW);
+    expect(row(db, "2026-01-02")).toBeUndefined();
+  });
+
+  it("пустая таблица (автообновление выключено): отметка и её снятие таблицу не наполняют", () => {
+    const db = makeTestDb();
+    // 05.01.2026 в зашитом календаре — праздник, но таблица его не знает.
+    setManualDay(db, "2026-01-05", "workday", null, NOW);
+    setManualDay(db, "2026-01-05", null, null, NOW);
+    expect(row(db, "2026-01-05")).toBeUndefined();
+    expect(loadCalendar(db, "2026-01-01", "2026-12-31").size).toBe(0);
   });
 });
