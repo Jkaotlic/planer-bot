@@ -7,6 +7,8 @@ import { makeTestDb } from "../db/testdb";
 import { createChecklist } from "../repo/checklists";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
+import { createEmployee } from "../repo/employees";
+import { ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX, addDaysIso } from "@planer/shared";
 
 /**
  * Предел тела считается по прочитанным байтам, а не по заголовку.
@@ -120,6 +122,23 @@ describe("предел тела /api/*", () => {
       chunkedPost("/api/admin/entries/bulk", chunkedBody(200 * KB).stream, { Authorization: `Bearer ${token}` }),
     );
     expect(res.status).not.toBe(413);
+  });
+
+  it("полная пачка: 200 записей с подписью, местом и заметкой по потолку кириллицей — проходит и пишется", async () => {
+    const { db, app } = stage();
+    const token = await adminToken(app);
+    const anya = createEmployee(db, { displayName: "Аня" });
+    // Кириллица — два байта в UTF-8: (200 + 200 + 1000) × 2 ≈ 2,8 КБ на запись,
+    // × 200 ≈ 560 КБ — больше прежних 512 КБ.
+    const entries = Array.from({ length: 200 }, (_, i) => ({
+      date: addDaysIso("2026-11-02", i), category: "vacation", employeeId: anya.id,
+      title: "я".repeat(ENTRY_TITLE_MAX), location: "я".repeat(ENTRY_LOCATION_MAX), note: "я".repeat(ENTRY_NOTE_MAX),
+    }));
+    const bytes = new TextEncoder().encode(JSON.stringify({ entries }));
+    expect(bytes.byteLength).toBeGreaterThan(512 * KB);
+    const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes); c.close(); } });
+    const res = await app.request(chunkedPost("/api/admin/entries/bulk", stream, { Authorization: `Bearer ${token}` }));
+    expect(res.status).toBe(201);
   });
 
   it("файл инструкции чек-листа — 1 МБ проходит к ручке, больше 5 МБ с запасом — 413", async () => {
