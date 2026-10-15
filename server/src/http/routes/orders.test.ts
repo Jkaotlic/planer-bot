@@ -80,9 +80,9 @@ async function stage() {
   };
 }
 
-async function newOrder(app: App, token: string, igor: number, placeId: number | null) {
+async function newOrder(app: App, token: string, igor: number, placeId: number | null, title?: string) {
   const res = await app.request(new Request("http://x/api/orders", send(token, {
-    placeId, note: null, payHint: "Наличкой мне", closesTime: "12:30", audience: { kind: "picked", employeeIds: [igor] },
+    placeId, ...(title === undefined ? {} : { title }), note: null, payHint: "Наличкой мне", closesTime: "12:30", audience: { kind: "picked", employeeIds: [igor] },
   })));
   return { status: res.status, body: await res.json() };
 }
@@ -403,6 +403,33 @@ describe("заказ и дожим не рассылаются дважды", ()
     // «прошло две минуты» — это состаренные строки, а не подделанный Date.
     db.update(foodOrders).set({ createdAt: sql`unixepoch() - 121` }).run();
     expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
+  });
+
+  it("другое название сбора — не повтор: «Икра», затем «Вода» без места — оба уходят; то же название — 409", async () => {
+    const { app, igor, anyaT, placeId } = await stage();
+    expect((await newOrder(app, anyaT, igor, null, "Икра")).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, null, "Вода")).status).toBe(201);
+    const again = await newOrder(app, anyaT, igor, null, "Икра");
+    expect(again.status).toBe(409);
+    expect(again.body.error).toBe("Такой уже разослан пару минут назад — проверь чат.");
+    // Без названия и с названием — тоже разные сборы; два без названия — повтор, как раньше.
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, placeId, "Икра")).status).toBe(201);
+    expect((await newOrder(app, anyaT, igor, placeId)).status).toBe(409);
+  });
+
+  it("пока «Икра» рассылается, «Вода» из того же места не упирается в замок", async () => {
+    const { app, hold, igor, anyaT, placeId } = await stage();
+    const gate = hold();
+    const first = newOrder(app, anyaT, igor, placeId, "Икра");
+    await vi.waitFor(() => expect(gate.waiting()).toBeGreaterThan(0));
+    const second = newOrder(app, anyaT, igor, placeId, "Вода");
+    const same = await newOrder(app, anyaT, igor, placeId, "Икра");
+    expect(same.status).toBe(409);
+    expect(same.body.error).toBe("Рассылка уже идёт — подожди.");
+    gate.release();
+    expect((await first).status).toBe(201);
+    expect((await second).status).toBe(201);
   });
 
   it("отменённый заказ повтору не мешает — его отменили нарочно", async () => {

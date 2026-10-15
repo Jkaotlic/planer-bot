@@ -105,11 +105,13 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     }
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);
     if (reachable.length < 2) return c.json({ error: "Некому отправить: в списке никого, кроме тебя." }, 409);
-    const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}`;
+    // Название — часть ключа, как и в `hasRecentSameOrder`: «Икра» и «Вода» из одного
+    // места — два сбора. Пустое название схема уже свела к null, и null = null.
+    const key = `${viewer.id}\u0000${parsed.data.placeId ?? "none"}\u0000${parsed.data.title ?? ""}`;
     if (createsInFlight.has(key)) return c.json({ error: "Рассылка уже идёт — подожди." }, 409);
     // Замок живёт только пока идёт рассылка; повтор ПОСЛЕ неё (ответ потерялся
     // по дороге, а письма дошли) ловит окно по базе.
-    if (hasRecentSameOrder(db, viewer.id, parsed.data.placeId)) {
+    if (hasRecentSameOrder(db, viewer.id, parsed.data.placeId, parsed.data.title)) {
       return c.json({ error: "Такой уже разослан пару минут назад — проверь чат." }, 409);
     }
     createsInFlight.add(key);

@@ -28,14 +28,17 @@ export function createOrder(db: Db, input: {
 }
 
 /**
- * Был ли заказ из того же места (или тоже без места) от того же человека за
- * последние `FOOD_REPEAT_WINDOW_SEC` — повтор, а не новый заказ. Правила те
- * же, что у `hasRecentSamePoll`: часы базы, отменённый не считается.
+ * Был ли заказ из того же места (или тоже без места) и с тем же названием (или тоже
+ * без названия) от того же человека за последние `FOOD_REPEAT_WINDOW_SEC` — повтор,
+ * а не новый заказ. Правила те же, что у `hasRecentSamePoll`: часы базы, отменённый
+ * не считается. Название входит в ключ: закупщик подряд запускает «Икра» и «Вода» без
+ * места — это два разных сбора, а не потерянный ответ.
  */
-export function hasRecentSameOrder(db: Db, createdBy: number, placeId: number | null): boolean {
+export function hasRecentSameOrder(db: Db, createdBy: number, placeId: number | null, title: string | null): boolean {
   return db.select({ id: foodOrders.id }).from(foodOrders).where(and(
     eq(foodOrders.createdBy, createdBy), isNull(foodOrders.cancelledAt),
     placeId == null ? isNull(foodOrders.placeId) : eq(foodOrders.placeId, placeId),
+    title == null ? isNull(foodOrders.title) : eq(foodOrders.title, title),
     gte(foodOrders.createdAt, sql`unixepoch() - ${FOOD_REPEAT_WINDOW_SEC}`),
   )).get() != null;
 }
