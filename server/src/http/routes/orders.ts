@@ -127,7 +127,11 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
       createsInFlight.delete(key);
     }
     recordAudit(db, "order_created", viewer.id, { orderId: order.id, placeName: place?.name ?? null, title: order.title, recipients: reachable.length, delivered });
-    return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable }, 201);
+    // Ни одно письмо не дошло — сбор всё равно остаётся: он уже в базе, его видно в
+    // мини-аппе, а откат после частично ушедшей рассылки опаснее. Но экран должен сказать
+    // это прямо, а не «Заказ отправлен»: иначе организатор ждёт ответов, которых не будет.
+    const deliveredToNobody = delivered === 0 && reachable.length > 0;
+    return c.json({ order: orderView(db, order, viewer, now), delivered, unreachable, deliveredToNobody }, 201);
   });
 
   app.get("/api/orders/:id", auth, (c) => {

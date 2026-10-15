@@ -1036,7 +1036,7 @@ export interface ApiClient {
   getOrders(): Promise<OrderView[]>;
   getOrder(id: number): Promise<OrderView>;
   /** Заводит заказ и сразу шлёт приглашения адресатам. */
-  createOrder(input: { placeId: number | null; title?: string | null; allowCustom?: boolean; note: string | null; payHint: string | null; closesAt: string | null; closesTime?: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[] }>;
+  createOrder(input: { placeId: number | null; title?: string | null; allowCustom?: boolean; note: string | null; payHint: string | null; closesAt: string | null; closesTime?: string | null; audience: TeamAudience }): Promise<{ order: OrderView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>;
   /** Своя позиция: из меню места или своим блюдом с ценой. */
   addOrderItem(id: number, input: { menuItemId: number } | { name: string; price: number; qty?: number }): Promise<OrderView>;
   setOrderItemQty(id: number, itemId: number, qty: number): Promise<OrderView>;
@@ -1853,7 +1853,7 @@ export const realClient: ApiClient = {
     return (await authorizedGet<{ order: OrderView }>(`/api/orders/${id}`)).order;
   },
   createOrder: (input) =>
-    authorizedPostJson<{ order: OrderView; delivered: number; unreachable: string[] }>("/api/orders", input),
+    authorizedPostJson<{ order: OrderView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>("/api/orders", input),
   async addOrderItem(id, input) {
     return (await authorizedPostJson<{ order: OrderView }>(`/api/orders/${id}/items`, input)).order;
   },

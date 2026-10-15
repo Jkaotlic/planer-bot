@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Cell, Input, Switch, Textarea } from "@telegram-apps/telegram-ui";
-import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText } from "@planer/shared";
+import { FOOD_CLOSE_HORIZON_DAYS, FOOD_NO_PLACES_HINT, FOOD_TEXT_MAX, addDaysIso, audienceReady, menuPreview, sendReportText, sendReportTitle } from "@planer/shared";
 import { apiClient, type PlaceView, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton, Card } from "../../ui";
@@ -41,7 +41,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, today }: {
   // Отчёт после отправки — та же причина, что в PollForm: `AudiencePicker`
   // уже показывает недостижимых ДО отправки, но точный ответ даёт только
   // сервер в самом ответе создания — состояние могло смениться гонкой.
-  const [summary, setSummary] = useState<{ orderId: number; delivered: number; unreachable: string[] } | null>(null);
+  const [summary, setSummary] = useState<{ orderId: number; delivered: number; unreachable: string[]; deliveredToNobody?: boolean } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -74,7 +74,9 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, today }: {
       const result = await apiClient.createOrder({
         placeId, title: title.trim() || null, allowCustom, note: note.trim() || null, payHint: payHint.trim() || null, closesAt, ...legacyTime, audience,
       });
-      if (result.unreachable.length > 0) setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable });
+      if (result.unreachable.length > 0 || result.deliveredToNobody) {
+        setSummary({ orderId: result.order.id, delivered: result.delivered, unreachable: result.unreachable, deliveredToNobody: result.deliveredToNobody });
+      }
       else onDone(result.order.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось отправить заказ");
@@ -86,7 +88,7 @@ export function OrderForm({ onDone, onCancel, onEditPlaces, today }: {
   if (summary) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "16px var(--app-gutter) calc(24px + var(--app-inset-bottom))" }}>
-        <h1 className="ui-screen__title">Заказ отправлен</h1>
+        <h1 className="ui-screen__title">{sendReportTitle(summary)}</h1>
         <div style={{ fontSize: "var(--app-text-body)", lineHeight: 1.45 }}>
           {sendReportText(summary)}
         </div>

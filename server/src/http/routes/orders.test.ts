@@ -106,6 +106,26 @@ describe("заказы по HTTP", () => {
     expect(sent.map((m) => m.to).sort()).toEqual([100, 101]);
   });
 
+  it("письмо не дошло ни до кого — 201, сбор жив, в ответе deliveredToNobody", async () => {
+    const { db, app, failFor, igor, anyaT, placeId } = await stage();
+    failFor.add(100);
+    failFor.add(101);
+    const { status, body } = await newOrder(app, anyaT, igor, placeId);
+    expect(status).toBe(201);
+    expect(body.delivered).toBe(0);
+    expect(body.deliveredToNobody).toBe(true);
+    // Сбор не откатывается: письма можно дослать «Напомнить»/правкой бота, а заказ — уже факт.
+    expect(db.select().from(foodOrders).all().map((o) => o.id)).toEqual([body.order.id]);
+  });
+
+  it("дошло хоть кому-то — deliveredToNobody = false", async () => {
+    const { app, failFor, igor, anyaT, placeId } = await stage();
+    failFor.add(101);
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    expect(body.delivered).toBe(1);
+    expect(body.deliveredToNobody).toBe(false);
+  });
+
   it("несуществующее место — 409", async () => {
     const { app, igor, anyaT } = await stage();
     expect((await newOrder(app, anyaT, igor, 999)).status).toBe(409);

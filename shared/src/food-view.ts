@@ -74,7 +74,18 @@ export function orderPersonLine(p: { displayName: string; amount: number; declin
 
 /** Отчёт после рассылки, когда дошло не всем. */
 export function sendReportText(r: FoodSendReport): string {
+  // «Отправлено: 0» читалось бы как успех с оговоркой, а сбор, о котором никто не знает,
+  // ничего не соберёт. Говорим прямо и куда смотреть.
+  if (r.deliveredToNobody) {
+    return "Письмо не дошло ни до кого — проверь бота." + (r.unreachable.length > 0 ? ` Без Telegram: ${r.unreachable.join(", ")}` : "");
+  }
   return `Отправлено: ${r.delivered}. Не дошло: ${r.unreachable.join(", ")}`;
+}
+
+/** Заголовок отчёта: сбор заведён всегда (его не откатываем), а «отправлен» — только если
+ *  хоть одно письмо дошло. */
+export function sendReportTitle(r: FoodSendReport): string {
+  return r.deliveredToNobody ? "Заказ заведён" : "Заказ отправлен";
 }
 
 /** Итог «Напомнить не сдавшим». */

@@ -81,6 +81,9 @@ export interface OrderView {
 export interface FoodSendReport {
   delivered: number;
   unreachable: string[];
+  /** Адресаты были, а письмо не дошло ни до кого (обычно бот не может достучаться до
+   *  Telegram). Только у заказа; у опроса поля нет — читается как false. */
+  deliveredToNobody?: boolean;
 }
 
 /** Итог «Напомнить не сдавшим»: `unpaid` — знаменатель «D из N». */
