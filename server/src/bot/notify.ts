@@ -1,6 +1,6 @@
 import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import type { Db } from "../db/client";
-import { listAdmins, listActive, getEmployeeById } from "../repo/employees";
+import { listAdmins, listActive, getEmployeeById, employeesByIds } from "../repo/employees";
 import { isNoticeMuted } from "../repo/notice-prefs";
 import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
@@ -338,8 +338,10 @@ export async function notifyHandoverFan(
   text: string,
 ): Promise<void> {
   const kb = new InlineKeyboard().text("✅ Беру", `handover:take:${handoverId}`);
+  // Адресаты — одним запросом: веер идёт почти всей команде, запрос на каждого лишний.
+  const people = employeesByIds(db, employeeIds);
   for (const employeeId of employeeIds) {
-    const telegramUserId = getEmployeeById(db, employeeId)?.telegramUserId;
+    const telegramUserId = people.get(employeeId)?.telegramUserId;
     if (telegramUserId == null) continue;
     try {
       await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });

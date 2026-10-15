@@ -4,7 +4,7 @@ import type { Handover, Shift } from "../db/schema";
 import { recordAudit } from "../repo/audit";
 import { safeErrorMessage } from "../util/safe-error";
 import { reachedNobody, scheduleLink, type AdminAction, type AdminReach } from "../bot/notify";
-import { getEmployeeById } from "../repo/employees";
+import { employeesByIds, getEmployeeById } from "../repo/employees";
 import {
   addDecline,
   createHandover,
@@ -420,7 +420,9 @@ export async function escalate(deps: HandoverDeps, handoverId: number): Promise<
   if (!shift) return { ok: false, reason: "Смены больше нет" };
 
   const declinedIds = listDeclines(db, handoverId);
-  const declinedNames = declinedIds.map((id) => getEmployeeById(db, id)?.displayName ?? `работник #${id}`);
+  // Имена — одним запросом, а не на каждого отказавшегося; порядок — порядок отказов.
+  const declinedPeople = employeesByIds(db, declinedIds);
+  const declinedNames = declinedIds.map((id) => declinedPeople.get(id)?.displayName ?? `работник #${id}`);
   const silent = handoverCandidates(db, shift, { excludeIds: declinedIds }).length;
 
   // Отметка до отправки — против второго письма, если тик пересечётся сам с

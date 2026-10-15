@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { eq } from "drizzle-orm";
 import { employees, shifts, auditLog, handovers as handoversTable, type Shift } from "../db/schema";
 import { getShift, deleteShift } from "../repo/shifts";
-import { getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
+import { addDecline, createHandover, getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
 import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, detachHandoversFromEntry, escalate } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
 import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
@@ -875,5 +875,28 @@ describe("«Беру» после смены категории больничн
 
     expect(outcome.ok).toBe(false);
     expect(getShift(db, work.id)!.employeeId).toBe(anya);
+  });
+});
+
+describe("escalate: имена отказавшихся — одним запросом", () => {
+  async function escalateWithDeclines(names: readonly string[]) {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    const work = shift(db, anya, "2026-08-12");
+    const handover = createHandover(db, { shiftId: work.id, fromEmployeeId: anya, sickEntryId: sick.id, status: "fanned" });
+    for (const name of names) addDecline(db, handover.id, person(db, name));
+    sent = [];
+    const reads = await countEmployeeByIdLookups(db, () => escalate(deps(db), handover.id));
+    return { reads, letter: sent.find((m) => m.to === "admins")!.text };
+  }
+
+  it("четыре отказа читают людей столько же раз, сколько один; порядок отказов тот же", async () => {
+    // Раньше — getEmployeeById на каждого отказавшегося.
+    const one = await escalateWithDeclines(["Игорь"]);
+    const four = await escalateWithDeclines(["Марк", "Игорь", "Вера", "Олег"]);
+
+    expect(four.letter).toContain("Отказались: Марк, Игорь, Вера, Олег.");
+    expect(four.reads).toBe(one.reads);
   });
 });

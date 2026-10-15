@@ -6,6 +6,7 @@ import {
   notifyAdmins,
   notifyAdminsAlways,
   notifyVacantSlot,
+  notifyHandoverFan,
   swapProposalText,
   swapCancelledText,
   swapExpiredText,
@@ -14,7 +15,7 @@ import {
   dutyNoticeForAdmins,
   scheduleLink,
 } from "./notify";
-import { makeTestDb } from "../db/testdb";
+import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, archiveEmployee, setEmployeeRestrictions } from "../repo/employees";
 import type { Db } from "../db/client";
 
@@ -287,5 +288,26 @@ describe("scheduleLink", () => {
     expect(scheduleLink("https://example.com", "2026-10-07")).toBe(
       "https://example.com/app/?screen=schedule&date=2026-10-07",
     );
+  });
+});
+
+describe("notifyHandoverFan", () => {
+  it("читает адресатов веера одним запросом: порядок тот же, без Telegram — пропуск", async () => {
+    // Веер идёт почти всей команде, и раньше на каждого адресата был свой getEmployeeById.
+    const db = makeTestDb();
+    const ids = ["Игорь", "Марк", "Вера", "Олег"].map((name, i) => {
+      const e = createEmployee(db, { displayName: name, inviteToken: `fan-${i}` });
+      linkTelegramAccount(db, `fan-${i}`, 700 + i);
+      return e.id;
+    });
+    const unlinked = createEmployee(db, { displayName: "Лена", inviteToken: "fan-none" });
+    const { bot, sent } = testBot();
+
+    const reads = await countEmployeeByIdLookups(db, () =>
+      notifyHandoverFan(bot, db, 1, [ids[2]!, unlinked.id, ids[0]!, ids[3]!, ids[1]!], "Возьмёшь смену?"),
+    );
+
+    expect(sent.map((m) => m.chat_id)).toEqual([702, 700, 703, 701]);
+    expect(reads).toBe(0);
   });
 });
