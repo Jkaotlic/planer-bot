@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { TOO_MANY_REQUESTS_TEXT } from "./rate-limit";
 import { eq } from "drizzle-orm";
 import { Bot } from "grammy";
 import { createApp } from "./app";
@@ -252,7 +253,7 @@ describe("rate limiting", () => {
     for (let i = 0; i < 600; i++) expect((await app.request("/api/me", anya)).status).toBe(200);
     const blocked = await app.request("/api/me", anya);
     expect(blocked.status).toBe(429);
-    expect(await blocked.json()).toEqual({ error: "too_many_requests" });
+    expect(await blocked.json()).toEqual({ error: TOO_MANY_REQUESTS_TEXT });
     expect((await app.request("/api/me", igor)).status).toBe(200);
     // Неавторизованный путь живёт в своей корзине по адресу и тоже не задет.
     expect((await app.request("/api/health")).status).toBe(200);
@@ -268,7 +269,7 @@ describe("rate limiting", () => {
     let last!: Response;
     for (let i = 0; i < 1_201; i++) last = await app.request(authReq(111 + i));
     expect(last.status).toBe(429);
-    expect(await last.json()).toEqual({ error: "too_many_requests" });
+    expect(await last.json()).toEqual({ error: TOO_MANY_REQUESTS_TEXT });
     expect(last.headers.get("Retry-After")).toBeTruthy();
   });
 

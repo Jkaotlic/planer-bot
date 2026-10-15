@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { TOO_MANY_REQUESTS_TEXT } from "./rate-limit";
 import { Hono } from "hono";
 import { rateLimiter, teamRateLimiter } from "./rate-limit";
 import { issueToken } from "../auth/jwt";
@@ -27,7 +28,7 @@ describe("rateLimiter", () => {
     for (let i = 0; i < 3; i++) await app.request("/x");
     const res = await app.request("/x");
     expect(res.status).toBe(429);
-    expect(await res.json()).toEqual({ error: "too_many_requests" });
+    expect(await res.json()).toEqual({ error: TOO_MANY_REQUESTS_TEXT });
     expect(res.headers.get("Retry-After")).toBeTruthy();
   });
 
@@ -127,5 +128,11 @@ describe("teamRateLimiter", () => {
     expect(blocked.headers.get("Retry-After")).toBeTruthy();
     advance(60_000);
     expect((await app.request("/api/me", anya)).status).toBe(200);
+  });
+});
+
+describe("текст отказа 429", () => {
+  it("по-русски и с тем, что делать: обе морды показывают error как есть", () => {
+    expect(TOO_MANY_REQUESTS_TEXT).toBe("Слишком много запросов — подожди минуту и повтори.");
   });
 });

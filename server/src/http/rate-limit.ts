@@ -12,6 +12,14 @@ export interface RateLimitOptions {
   now?: () => number;
 }
 
+/**
+ * Текст отказа 429. Обе морды показывают `error` из тела как есть, и машинное
+ * `too_many_requests` доезжало до человека. «Минуту» — правда: окно у всех
+ * ограничителей 60 секунд (`app.ts`, `calendar.ts`). Вход в мини-апп (`/api/auth`)
+ * клиент переводит сам по коду (`refusalText`), и этот текст ему не мешает.
+ */
+export const TOO_MANY_REQUESTS_TEXT = "Слишком много запросов — подожди минуту и повтори.";
+
 interface Bucket {
   count: number;
   resetAt: number;
@@ -79,7 +87,7 @@ function fixedWindow(windowMs: number, now: () => number) {
     if (bucket.count <= max) return null;
     const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - t) / 1000));
     c.header("Retry-After", String(retryAfterSec));
-    return c.json({ error: "too_many_requests" }, 429);
+    return c.json({ error: TOO_MANY_REQUESTS_TEXT }, 429);
   };
 }
 
