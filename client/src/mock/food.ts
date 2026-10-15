@@ -175,6 +175,12 @@ export function createFoodMock(opts: FoodMockOptions) {
 
     const ids = audienceIds(input.audience);
     const recipients = [...new Set([me().id, ...ids.filter((id) => id !== me().id)])];
+    // Тот же отказ, что у `POST /api/polls` (409) и у сбора ниже, и тоже ДО заведения:
+    // иначе DEV показал бы опрос, который на сервере не родился бы вовсе.
+    const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
+    if (recipients.filter((id) => telegramOf(id) != null).length < 2) {
+      throw new Error("Некому отправить: в списке никого, кроме тебя.");
+    }
     const poll: MockPoll = {
       id: nextPollId++,
       question: input.question.trim(),
@@ -188,7 +194,6 @@ export function createFoodMock(opts: FoodMockOptions) {
     POLLS.push(poll);
     // «Не дошло» — адресаты без Telegram, как `resolveAudience.unreachable`; «дошло» и флаг
     // считает `colleagueReport`.
-    const telegramOf = (id: number) => staff().find((e) => e.id === id)?.telegramUserId;
     const unreachable = recipients
       .filter((id) => telegramOf(id) == null)
       .map((id) => staff().find((e) => e.id === id)?.displayName ?? "—");

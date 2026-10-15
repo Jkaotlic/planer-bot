@@ -60,6 +60,17 @@ describe("createFoodMock: отчёт о рассылке — как у серв�
     expect(report.delivered).toBe(2);
     expect(report.deliveredToNobody).toBe(false);
   });
+
+  it("опрос, как и сбор: кроме себя достучаться не до кого — тот же отказ, что у сервера (409)", async () => {
+    // Только Аня и Марк без Telegram: наблюдателя с копией нет.
+    const state = { employees: [PEOPLE[0]!, PEOPLE[2]!], me: { id: 1, isAdmin: true } };
+    const mock = createFoodMock({ delayMs: 0, state, now: () => ({ date: "2026-10-06", time: "12:00" }) });
+    await expect(mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } }))
+      .rejects.toThrow("Некому отправить: в списке никого, кроме тебя.");
+    await expect(mock.createOrder({ placeId: null, note: null, payHint: null, closesTime: null, audience: { kind: "team" } }))
+      .rejects.toThrow("Некому отправить: в списке никого, кроме тебя.");
+    expect(await mock.getPolls()).toEqual([]);
+  });
 });
 
 describe("createFoodMock: копия наблюдателям — как resolveAudience сервера", () => {
