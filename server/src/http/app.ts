@@ -12,6 +12,7 @@ import { requireAuth, requireAdmin, requireAnnouncer, type Env } from "./middlew
 import { securityHeaders } from "./security-headers";
 import { rateLimiter } from "./rate-limit";
 import { describeClientError, CLIENT_ERROR_BODY_MAX, type ClientErrorReport } from "./client-error";
+import { apiBodyLimit, readTextCapped } from "./body-limits";
 import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../repo/templates";
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
@@ -321,6 +322,11 @@ export function createApp(deps: AppDeps): Hono<Env> {
     c.header("Cache-Control", "no-store");
   });
 
+  // Предел тела по прочитанным байтам — до проверки прав и до любой ручки:
+  // отказать большому телу дешевле, чем сначала его дочитать. Какой путь сколько
+  // может прислать — `body-limits.ts`.
+  app.use("/api/*", apiBodyLimit());
+
   // Defence in depth: everything under /api/admin/* is admin-only by construction,
   // so a route that forgets its inline requireAdmin still can't leak. The per-route
   // guards below stay as belt-and-suspenders.
@@ -364,7 +370,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * приложение, и на два порядка меньше общего потолка.
    */
   app.post("/api/client-error", rateLimiter({ windowMs: 60_000, max: 120 }), async (c) => {
-    const raw = (await c.req.text().catch(() => "")).slice(0, CLIENT_ERROR_BODY_MAX);
+    const raw = await readTextCapped(c.req.raw, CLIENT_ERROR_BODY_MAX).catch(() => "");
     let report: ClientErrorReport = {};
     try {
       report = JSON.parse(raw) as ClientErrorReport;
@@ -2588,17 +2594,9 @@ export function createApp(deps: AppDeps): Hono<Env> {
     return c.body("﻿" + csv);
   });
 
+  // Тело целиком ограничено раньше — `ROSTER_UPLOAD_MAX` в `body-limits.ts`, по
+  // прочитанным байтам. Здесь — предел самого CSV внутри JSON.
   const MAX_CSV_BYTES = 1_000_000;
-  /** JSON overhead around a 1 MB string (escaping, the wrapper object) — generous, but
-   *  a hard stop long before an upload can buffer the whole process out of memory. */
-  const MAX_UPLOAD_BYTES = 4_000_000;
-
-  /** Refuses an oversized upload from the header alone, BEFORE c.req.json() buffers it.
-   *  This process also long-polls the bot, so one giant body would stall the whole team. */
-  const oversizedUpload = (c: { req: { header(name: string): string | undefined } }): boolean => {
-    const declared = Number(c.req.header("content-length"));
-    return Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES;
-  };
 
   /** «Игорь Петров, 01.08.2026 — «wat»» — an unread cell as the admin sees it in Excel.
    *  A warning, not an error: the import goes through and marks those cells «?». */
@@ -2643,7 +2641,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: parse and validate an uploaded roster without mutating the database.
   app.post("/api/admin/roster/import/preview", requireAdmin(db, config.jwtSecret), async (c) => {
-    if (oversizedUpload(c)) return c.json({ error: "Файл больше 1 МБ — загрузите месяц отдельно" }, 413);
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
@@ -2672,7 +2669,6 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: decode the same file again and apply the explicitly confirmed person map in one transaction.
   app.post("/api/admin/roster/import/apply", requireAdmin(db, config.jwtSecret), async (c) => {
-    if (oversizedUpload(c)) return c.json({ error: "Файл больше 1 МБ — загрузите месяц отдельно" }, 413);
     const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown; overwrite?: unknown };
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
