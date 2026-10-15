@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { COLLECTION_TEXT_MAX, COLLECTION_TITLE_MAX } from "@planer/shared";
 import { parseCollectionBody, scheduledSendOnError } from "./collection-body";
 
 describe("parseCollectionBody", () => {
@@ -11,6 +12,17 @@ describe("parseCollectionBody", () => {
     const ok = parseCollectionBody({ title: "  Кофемашина  " }, { requireTitle: true });
     expect(ok).toEqual({ ok: true, value: { title: "Кофемашина" } });
     expect(parseCollectionBody({ title: "x".repeat(81) }, { requireTitle: true }).ok).toBe(false);
+  });
+
+  it("повод и свой текст уходят письмом всей команде — потолок общий с формами", () => {
+    expect(COLLECTION_TITLE_MAX).toBe(80);
+    expect(COLLECTION_TEXT_MAX).toBe(3000);
+    expect(parseCollectionBody({ title: "я".repeat(COLLECTION_TITLE_MAX) }, { requireTitle: true }).ok).toBe(true);
+    expect(parseCollectionBody({ title: "я".repeat(COLLECTION_TITLE_MAX + 1) }, { requireTitle: true }))
+      .toEqual({ ok: false, error: "Повод — не длиннее 80 знаков" });
+    expect(parseCollectionBody({ messageText: "я".repeat(COLLECTION_TEXT_MAX) }, { requireTitle: false }).ok).toBe(true);
+    expect(parseCollectionBody({ messageText: "я".repeat(COLLECTION_TEXT_MAX + 1) }, { requireTitle: false }))
+      .toEqual({ ok: false, error: "Свой текст — не длиннее 3000 знаков" });
   });
 
   it("only lets an http(s) link through — it travels to the whole team", () => {

@@ -23,3 +23,10 @@ export const ENTRY_NOTE_MAX = 1000;
 export function tooLongText(label: string, max: number): string {
   return `${label} — не длиннее ${max} знаков`;
 }
+
+/**
+ * Сбор: повод стоит в заголовке письма всей команде, свой текст — тело того же
+ * письма. Вместе со ссылкой и строкой о сумме письмо остаётся под пределом Telegram.
+ */
+export const COLLECTION_TITLE_MAX = 80;
+export const COLLECTION_TEXT_MAX = 3000;
