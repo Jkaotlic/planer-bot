@@ -5,7 +5,7 @@ import { listPendingSickLeavesWithin, markHandoverForced } from "../repo/sick-ap
 import { daysAsked, extensionOf } from "../sick-approval/sick-approval-service";
 import { getShift } from "../repo/shifts";
 import { safeErrorMessage } from "../util/safe-error";
-import { adoptByOtherSickLeave, escalate, expireHandover, fanOut, handoverVoidReason, startHandovers, voidHandover, type HandoverDeps } from "./handover-service";
+import { escalate, expireHandover, fanOut, settleHandoverVoidReason, startHandovers, voidHandover, type HandoverDeps } from "./handover-service";
 
 export interface HandoverTickDeps extends HandoverDeps {
   config: { teamTz: string; publicUrl: string; handoverFanHours: number; handoverEscalateHours: number };
@@ -79,14 +79,10 @@ export async function runHandoverTick(deps: HandoverTickDeps, nowMs: number): Pr
     try {
       // Смена ушла от дающего (удалена, переназначена, больничный сняли) —
       // гасим до лестницы: веер и эскалация про такую смену — ложь.
-      const reason = handoverVoidReason(deps.db, row);
       // Основание ушло мимо `cancelHandoversForEntryDb` (запись стала отпуском, даты
       // сдвинуты), но день покрывает другой одобренный больничный — передача переходит
-      // к нему и ждёт следующего тика, а не гаснет с «отбоем» про несостоявшееся.
-      if (reason && adoptByOtherSickLeave(deps.db, row)) {
-        touched += 1;
-        continue;
-      }
+      // к нему и идёт по лестнице дальше, а не гаснет с «отбоем» про несостоявшееся.
+      const reason = settleHandoverVoidReason(deps.db, row);
       if (reason) {
         await voidHandover(deps, row.id, reason);
         touched += 1;

@@ -629,6 +629,31 @@ describe("тот же день покрывает второй больничн�
     expect(liveOn(db, work.id).map((h) => h.sickEntryId)).toEqual([second.id]);
   });
 
+  // Основание сменилось мимо `cancelHandoversForEntryDb` (прямая правка записи в отпуск),
+  // тик ещё не прошёл. «Беру» и «предложить» обязаны спросить про второй больничный так же,
+  // как тик: иначе до тика они отвечали «больничный сняли», хотя Аня по-прежнему больна.
+  it("основание стало отпуском мимо отмены — «Беру» до тика работает и смена переходит", async () => {
+    const db = makeTestDb();
+    const { igor, first, second, work, handover } = await twoSickLeaves(db);
+    db.update(shifts).set({ category: "vacation" }).where(eq(shifts.id, first.id)).run();
+
+    const res = await takeHandover(deps(db), handover.id, igor, TODAY);
+
+    expect(res).toEqual({ ok: true });
+    expect(getShift(db, work.id)!.employeeId).toBe(igor);
+    expect(getHandover(db, handover.id)!.sickEntryId).toBe(second.id);
+  });
+
+  it("основание стало отпуском мимо отмены — «предложить» до тика работает", async () => {
+    const db = makeTestDb();
+    const { first, handover } = await twoSickLeaves(db);
+    const mark = person(db, "Марк");
+    db.update(shifts).set({ category: "vacation" }).where(eq(shifts.id, first.id)).run();
+
+    expect(await offerTo(deps(db), handover.id, mark)).toEqual({ ok: true });
+    expect(getHandover(db, handover.id)!.offeredToEmployeeId).toBe(mark);
+  });
+
   it("второй больничный — другого человека — не держит чужую передачу", async () => {
     const db = makeTestDb();
     const anya = person(db, "Аня");

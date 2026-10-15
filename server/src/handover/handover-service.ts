@@ -221,7 +221,7 @@ export async function offerTo(deps: HandoverDeps, handoverId: number, toEmployee
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
     return { ok: false, reason: "Передача уже закрыта" };
   }
-  const voided = handoverVoidReason(db, handover);
+  const voided = settleHandoverVoidReason(db, handover);
   if (voided) return { ok: false, reason: VOID_REFUSAL[voided] };
   const shift = shiftOf(db, handover)!;
   if (hasStarted(deps, shift)) return { ok: false, reason: STARTED_REFUSAL };
@@ -338,7 +338,7 @@ export async function takeHandover(
     // Смена могла уйти от дающего, пока сообщение висело в чате: админ поставил
     // её другому, обмен, укороченный больничный. Без этой проверки «Беру»
     // отбирало смену у нового хозяина молча — письма уходили дающему.
-    const voided = handoverVoidReason(db, handover);
+    const voided = settleHandoverVoidReason(db, handover);
     if (voided) return { ok: false as const, reason: VOID_REFUSAL[voided] };
     const shift = shiftOf(db, handover)!;
 
@@ -549,6 +549,22 @@ export function handoverVoidReason(db: Db, handover: Handover): VoidReason | nul
   // `shift.date` у него остаётся понедельником всю неделю.
   if ((shift.endDate ?? shift.date) < sick.date || shift.date > (sick.endDate ?? sick.date)) return "uncovered";
   return null;
+}
+
+/**
+ * Жива ли передача — с попыткой переноса: мёртвое основание, но тот же день покрывает другой
+ * одобренный больничный дающего → передача перевешивается на него (`adoptByOtherSickLeave`) и
+ * жива. Пишет в базу, когда переносит.
+ *
+ * Одна функция для всех, кто спрашивает: тик, «Беру», «предложить», список черновиков. Пока тик
+ * переносил, а остальные смотрели только `handoverVoidReason`, между правкой записи мимо
+ * `cancelHandoversForEntryDb` и следующим тиком «Беру» отвечало «больничный сняли» про
+ * человека, который по-прежнему болен, а черновик пропадал из формы.
+ */
+export function settleHandoverVoidReason(db: Db, handover: Handover): VoidReason | null {
+  const reason = handoverVoidReason(db, handover);
+  if (reason && adoptByOtherSickLeave(db, handover)) return null;
+  return reason;
 }
 
 const STARTED_REFUSAL = "Эта смена уже началась";

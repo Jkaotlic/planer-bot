@@ -324,6 +324,18 @@ describe("GET /api/my/handovers/drafts — which drafts are shown", () => {
     expect((await list()).map((d) => d.id)).toEqual([futureDraft.id]);
   });
 
+  it("keeps a draft whose sick leave turned into a vacation while a second approved sick leave covers the day", async () => {
+    // The basis changed past `cancelHandoversForEntryDb` and the tick has not run yet: the list must
+    // ask the same question the tick and «Беру» ask, or the draft vanishes from the form until the next tick.
+    const { db, me, sick, draft, list } = sceneWithSick();
+    createShift(db, { date: today(), endDate: day(30), category: "sick_leave", employeeId: me.id });
+    const future = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
+    const kept = draft(future.id);
+    updateShift(db, sick.id, { category: "vacation" });
+
+    expect((await list()).map((d) => d.id)).toEqual([kept.id]);
+  });
+
   it("leaves out a void draft (shift handed to somebody else)", async () => {
     const { db, me, igor, draft, list } = sceneWithSick();
     const given = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: me.id });
