@@ -2,12 +2,12 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Placeholder, Spinner } from "@telegram-apps/telegram-ui";
 import { ActionButton, Screen } from "./ui";
 import { canAddOwnShifts, DEFAULT_QR_STYLE, startTabFor, startTabScreen, startTabTeamWeek, type StartTab } from "@planer/shared";
-import { apiClient, type Me, type MyShifts, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
+import { apiClient, type Me, type MyShifts, type NewEntryInput, type SelfEntryInput, type Shift, type SwapRequest, type Template, type TeamEmployee, type WeekendSlotView, type WeekendOffer, type WorkerCollection } from "./api/client";
 import { TabBar, type TabKey } from "./components/TabBar";
 import { MyShiftsScreen } from "./screens/MyShiftsScreen";
 import { ProposeSwapScreen } from "./screens/ProposeSwapScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
-import { SelfEntryScreen, handoverDraftsFromSearch, screenFromSearch, type SelfEntryMode } from "./screens/SelfEntryScreen";
+import { SelfEntryScreen, handoverDraftsFromSearch, monthStartOf, screenFromSearch, withOwnPast, type SelfEntryMode } from "./screens/SelfEntryScreen";
 import { SwapsScreen } from "./screens/SwapsScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { CollectionsTabScreen } from "./screens/CollectionsTabScreen";
@@ -104,6 +104,8 @@ export function App() {
   // Ссылка «🤝 Выбрать коллег» из письма об ОК: форме надо поднять черновики
   // передачи с сервера. Читается один раз, как и сам режим формы.
   const [draftsLink] = useState(() => handoverDraftsFromSearch(window.location.search));
+  // Кончившиеся свои записи админа за месяц — грузятся, только пока открыта форма.
+  const [ownPast, setOwnPast] = useState<Shift[]>([]);
   // «Настройки» — оверлей, как форма больничного: без таб-бара, с системной
   // «Назад». Из ссылки бота не открывается (таких ссылок нет), поэтому
   // начальное значение — всегда `false`.
@@ -419,6 +421,30 @@ export function App() {
   async function refreshMyShifts() {
     const myShifts = await apiClient.getMyShifts();
     setData((prev) => (prev ? { ...prev, myShifts: myShifts.shifts, myCalendar: myShifts.calendar ?? [], today: myShifts.today } : prev));
+    if (data?.me.isAdmin) await refreshOwnPast(data.me.id, myShifts.today);
+  }
+
+  /** Кончившиеся записи админа за этот месяц — он правит себе и прошедшее (`withOwnPast`). */
+  async function refreshOwnPast(meId: number, today: string) {
+    const schedule = await apiClient.getTeamSchedule(monthStartOf(today), today);
+    setOwnPast(withOwnPast([], schedule.shifts, meId, today));
+  }
+
+  // Админская ручка — для того, что своей не ставится (`usesAdminRoute`). Ошибку
+  // ловит форма, как и у своей ручки.
+  async function handleAdminCreateSelf(input: NewEntryInput) {
+    await apiClient.createEntry(input);
+    await refreshMyShifts();
+  }
+
+  async function handleAdminUpdateSelf(id: number, input: NewEntryInput) {
+    await apiClient.updateEntry(id, input);
+    await refreshMyShifts();
+  }
+
+  async function handleAdminDeleteSelf(id: number) {
+    await apiClient.deleteEntry(id);
+    await refreshMyShifts();
   }
 
   /** Ошибку показывает сама форма — она её и ловит, поэтому здесь ничего не
@@ -518,6 +544,16 @@ export function App() {
       console.error("Collections refresh failed:", err);
     }
   }
+
+  // Прошедшее админа — на открытие формы, а не на старт: остальным экранам оно
+  // не нужно, а лишний запрос графика на каждом открытии мини-аппа — нужен ещё меньше.
+  const selfEntryForAdmin = selfEntryMode != null && data?.me.isAdmin === true;
+  useEffect(() => {
+    if (!selfEntryForAdmin || !data) return;
+    refreshOwnPast(data.me.id, data.today).catch((err: unknown) => console.error("Own past entries load failed:", err));
+    // Один раз на открытие формы; дальше — после каждой правки (`refreshMyShifts`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selfEntryForAdmin]);
 
   // Refresh when the mini app comes back to the foreground (e.g. after the admin
   // edited shifts, or a reminder pulled the worker back in).
@@ -665,14 +701,18 @@ export function App() {
       <SelfEntryScreen
         mode={selfEntryMode}
         today={data.today}
-        shifts={data.myShifts}
+        shifts={data.me.isAdmin ? withOwnPast(data.myShifts, ownPast, data.me.id, data.today) : data.myShifts}
         templates={data.templates}
         ownShifts={canAddOwnShifts(data.me)}
         isAdmin={data.me.isAdmin}
+        myId={data.me.id}
         onCancel={() => setSelfEntryMode(null)}
         onCreate={handleCreateSelfEntry}
         onUpdate={handleUpdateSelfEntry}
         onDelete={handleDeleteSelfEntry}
+        onAdminCreate={handleAdminCreateSelf}
+        onAdminUpdate={handleAdminUpdateSelf}
+        onAdminDelete={handleAdminDeleteSelf}
         onOfferHandover={handleOfferHandover}
         onSkipHandover={handleSkipHandover}
         loadDrafts={draftsLink ? () => apiClient.getMyHandoverDrafts() : undefined}

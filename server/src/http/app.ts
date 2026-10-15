@@ -1499,7 +1499,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // Праздники живут в базе, поэтому «в какой день годится категория» спрашивается
     // здесь, а не в схеме разбора: она синхронна и базы не видит.
     const dateErr = entryDateError(parsed.data, loadCalendar(db, parsed.data.date, parsed.data.endDate ?? parsed.data.date));
-    if (dateErr) return c.json({ error: "invalid", issues: [{ path: ["date"], message: dateErr }] }, 400);
+    if (dateErr) return c.json(entryInvalidBody([{ path: ["date"], message: dateErr }]), 400);
     const entry = createShift(db, withPresetLocation(parsed.data));
     recordAudit(db, "entry_created", c.get("auth").employeeId, entryAuditPayload(db, entry));
     const notified = noticeBuffer.register({
@@ -1842,7 +1842,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const bulkCalendar = loadCalendar(db, dates[0]!, dates.at(-1)!);
     for (const input of parsed.data.entries) {
       const dateErr = entryDateError(input, bulkCalendar);
-      if (dateErr) return c.json({ error: "invalid", issues: [{ path: ["date"], message: dateErr }] }, 400);
+      if (dateErr) return c.json(entryInvalidBody([{ path: ["date"], message: dateErr }]), 400);
     }
     const { result: entries, diffs } = withScheduleDiff(db, { from: dates[0]!, to: dates.at(-1)! }, () =>
       db.transaction(() => parsed.data.entries.map((input) => createShift(db, withPresetLocation(input)))),

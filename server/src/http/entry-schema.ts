@@ -26,6 +26,9 @@ const entryTexts = {
  */
 export const MAX_RANGE_DAYS = 366;
 
+/** Работа в выходной на будний день — админ ставит её из формы, причина нужна словами. */
+export const WEEKEND_WORK_DAY_TEXT = "«Работа в выходной» может стоять только на выходной или праздник";
+
 /** Конец раньше начала — тоже ошибка формы («по какой день» раньше «с какого»), а не клиента. */
 export const ENDS_BEFORE_START_TEXT = "запись не может кончаться раньше, чем начинается";
 
@@ -41,6 +44,7 @@ const HUMAN_MESSAGES = new Set([
   tooLongText("Заметка", ENTRY_NOTE_MAX),
   RANGE_TOO_LONG_TEXT,
   ENDS_BEFORE_START_TEXT,
+  WEEKEND_WORK_DAY_TEXT,
 ]);
 
 /**
@@ -48,7 +52,7 @@ const HUMAN_MESSAGES = new Set([
  * сломанный клиент. А длину человек набирает сам, и обе морды показывают `error`
  * как есть — поэтому слишком длинное поле называется словами.
  */
-export function entryInvalidBody(issues: readonly { message: string }[]): { error: string; issues: readonly unknown[] } {
+export function entryInvalidBody<T extends { message: string }>(issues: readonly T[]): { error: string; issues: readonly T[] } {
   const human = issues.find((issue) => HUMAN_MESSAGES.has(issue.message));
   return { error: human?.message ?? "invalid", issues };
 }
@@ -101,7 +105,7 @@ export function entryDateError(
   // отсутствия» проверяет схема (`entrySpanError`), а «в какой день годится
   // категория» — маршрут, который умеет прочитать праздники.
   if (!categoryFitsDate(v.category, v.date, calendar)) {
-    return "«Работа в выходной» может стоять только на выходной или праздник";
+    return WEEKEND_WORK_DAY_TEXT;
   }
   return entrySpanError(v);
 }

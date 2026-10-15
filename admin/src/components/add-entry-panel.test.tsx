@@ -449,3 +449,31 @@ describe("AddEntryPanel — «— не назначен —»", () => {
     expect(saved).toMatchObject({ employeeId: 1 });
   });
 });
+
+/**
+ * Отпуск 12–17, сокращённый до одного дня. Форма слала тело без `endDate`, а для
+ * `PATCH` пропущенное поле — «не менять»: сервер отвечал 200 и оставлял 12–17.
+ * Однодневную полосу у правки называют явным `null`.
+ */
+describe("AddEntryPanel — отсутствие, сокращённое до одного дня", () => {
+  it("у правки шлёт endDate: null, а не пропускает поле", async () => {
+    let saved: NewEntryInput | null = null;
+    const el = await mount({ existing: longVacation, onSave: async (input) => { saved = input; } });
+
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-08");
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+
+    expect(saved).not.toBeNull();
+    expect(saved!).toHaveProperty("endDate", null);
+    expect(saved!.date).toBe("2026-06-08");
+  });
+
+  it("у новой однодневной записи endDate по-прежнему не шлётся", async () => {
+    let saved: NewEntryInput | null = null;
+    const el = await mount({ onSave: async (input) => { saved = input; } });
+    await act(async () => optionByText(el, "Отпуск").click());
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+    expect(saved).toMatchObject({ category: "vacation", date: "2026-06-08" });
+    expect(saved!).not.toHaveProperty("endDate");
+  });
+});

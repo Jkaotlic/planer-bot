@@ -873,6 +873,8 @@ export async function mockCreateSelfEntry(input: SelfEntryInput): Promise<{ entr
   const refusal = selfEntryRefusal(
     { category: input.category, date: input.date, endDate: input.category === "sick_leave" ? input.endDate : null },
     today,
+    // Как сервер: роль снимает правила работника (`admin: me.isAdmin` в `my-entries.ts`).
+    { admin: MOCK_ME.isAdmin },
   );
   if (refusal) throw new Error(refusal);
   const created: Shift = {
@@ -911,11 +913,12 @@ export async function mockUpdateSelfEntry(id: number, input: SelfEntryInput): Pr
   // Чужая и несуществующая — один ответ, как на сервере: подтверждать, что
   // чужая запись существует, здесь тоже нечем.
   if (!shift) throw new Error("not_found");
-  const editRefusal = selfEntryEditRefusal(shift, today);
+  const editRefusal = selfEntryEditRefusal(shift, today, { admin: MOCK_ME.isAdmin });
   if (editRefusal) throw new Error(editRefusal);
   const moveRefusal = selfEntryRefusal(
     { category: input.category, date: input.date, endDate: input.category === "sick_leave" ? input.endDate : null },
     today,
+    { admin: MOCK_ME.isAdmin },
   );
   if (moveRefusal) throw new Error(moveRefusal);
   if (shift.category !== input.category) throw new Error("Вид записи менять нельзя");
@@ -933,7 +936,7 @@ export async function mockDeleteSelfEntry(id: number): Promise<void> {
   await delay(150);
   const index = ALL_ENTRIES.findIndex((s) => s.id === id && s.employeeId === MOCK_ME.id);
   if (index === -1) throw new Error("not_found");
-  const refusal = selfEntryEditRefusal(ALL_ENTRIES[index]!, toISODate(new Date()));
+  const refusal = selfEntryEditRefusal(ALL_ENTRIES[index]!, toISODate(new Date()), { admin: MOCK_ME.isAdmin });
   if (refusal) throw new Error(refusal);
   ALL_ENTRIES.splice(index, 1);
 }
