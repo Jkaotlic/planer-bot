@@ -52,8 +52,8 @@ import {
   compareCollections,
   planEntryRange,
   EMPTY_CALENDAR,
-  type DayOccupancy,
-  eachDayIso,
+  entryRangeOccupancy,
+  cutDaysFromSpan,
   isAbsence,
   REMINDER_HOUR_DEFAULT,
   validateReminderHour,
@@ -359,21 +359,12 @@ export async function mockCreateEntries(inputs: NewEntryInput[]): Promise<{ crea
  */
 export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<EntryRangeResult> {
   await delay(300);
-  // Занятость с ВИДОМ, как на сервере: перезаписи мало знать «занят» — рабочую
-  // запись она заменит, отпуск оставит, а день с двумя записями пропустит.
-  const occupied: Record<string, DayOccupancy> = {};
-  const holder = new Map<string, Shift>();
-  for (const row of ENTRIES.filter((s) => s.employeeId === input.employeeId)) {
-    for (const day of eachDayIso(row.date, endOf(row))) {
-      if (occupied[day]) {
-        occupied[day] = "ambiguous";
-        holder.delete(day);
-        continue;
-      }
-      occupied[day] = isAbsence(row.category) ? "absence" : "work";
-      holder.set(day, row);
-    }
-  }
+  // Занятость с ВИДОМ — та же `entryRangeOccupancy`, что на сервере: рабочую
+  // запись перезапись заменит, отпуск оставит (или вырежет по флагу), а день с
+  // двумя записями пропустит.
+  const { occupied, work: holder, absence: absenceOn } = entryRangeOccupancy(
+    ENTRIES.filter((s) => s.employeeId === input.employeeId),
+  );
   const mode = input.mode ?? "fill";
   const plan = planEntryRange({
     from: input.from,
@@ -381,6 +372,7 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     category: input.category,
     includeWeekends: input.includeWeekends ?? false,
     mode,
+    replaceAbsences: input.replaceAbsences ?? false,
     occupied,
     // DEV-мок живёт без базы: праздников у него нет, и это честнее выдуманных.
     calendar: EMPTY_CALENDAR,
@@ -398,6 +390,23 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     employeeId: input.employeeId,
   });
 
+  // Отсутствие режется по тем же кускам, что на сервере: первый — та же
+  // запись, остальные — новые с теми же полями, ничего не осталось — удаляется.
+  const cutDays = new Map<Shift, string[]>();
+  for (const date of plan.replacedAbsence) {
+    const row = absenceOn.get(date)!;
+    cutDays.set(row, [...(cutDays.get(row) ?? []), date]);
+  }
+  for (const [row, days] of cutDays) {
+    const [first, ...rest] = cutDaysFromSpan(row, days);
+    if (!first) {
+      ENTRIES.splice(ENTRIES.indexOf(row), 1);
+      continue;
+    }
+    Object.assign(row, first);
+    for (const piece of rest) ENTRIES.push({ ...row, ...piece, id: nextId++ });
+  }
+
   const created: Shift[] = [];
   const updated: Shift[] = [];
   for (const date of plan.days) {
@@ -411,7 +420,10 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
   }
   ENTRIES.push(...created);
   const touched = created.length + updated.length;
-  return { created, updated, skipped: plan.skipped, notified: mockReach(touched > 0 ? [input.employeeId] : []) };
+  return {
+    created, updated, skipped: plan.skipped, replacedAbsence: plan.replacedAbsence,
+    notified: mockReach(touched > 0 ? [input.employeeId] : []),
+  };
 }
 
 export async function mockUpdateEntry(id: number, input: NewEntryInput): Promise<{ entry: Shift; notified: { delivered: number; intended: number } }> {

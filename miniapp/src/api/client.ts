@@ -397,6 +397,11 @@ export interface NewEntryRangeInput {
    * чем может кончиться эта ручка.
    */
   mode?: EntryRangeMode;
+  /**
+   * Заменить отпуск, больничный и командировку там, где встанет запись. На
+   * сервере умолчание «нет»: молча снести отпуск — худший исход этой ручки.
+   */
+  replaceAbsences?: boolean;
 }
 
 /** Пункт чек-листа. */
@@ -470,6 +475,8 @@ export interface EntryRangeResult {
   /** Записи, которые перезапись заменила на месте. У расстановки всегда пусто. */
   updated: Shift[];
   skipped: EntryRangeSkip[];
+  /** Дни, из которых вырезано отсутствие. Необязательное: сервер до замены его не шлёт. */
+  replacedAbsence?: string[];
   notified: NotifyReach;
 }
 
