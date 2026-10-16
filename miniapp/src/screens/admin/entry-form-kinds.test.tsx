@@ -225,3 +225,140 @@ describe("форма записи в мини-аппе — правка отре
     expect(text).not.toContain("пропустятся");
   });
 });
+
+/**
+ * Замена отсутствия (прод, 2026-10-16): админ открыл свой отпуск, сменил вид на
+ * «День» и сохранил — перезапись пропустила все дни, и не поменялось ничего.
+ * Правка отсутствия в рабочий вид — явное намерение заменить, и форма шлёт
+ * `replaceAbsences`; обычная расстановка заменяет только по переключателю.
+ */
+describe("форма записи в мини-аппе — замена отсутствия", () => {
+  const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  const VACATION: Shift = {
+    id: 88, date: day(0), endDate: day(5), start: null, end: null, category: "vacation",
+    title: null, location: null, unrecognisedCode: null, templateId: null,
+    employeeId: EMPLOYEE.id, employeeName: EMPLOYEE.displayName,
+  };
+
+  async function openEditOf(entry: Shift) {
+    vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([EMPLOYEE]);
+    vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
+    vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
+      employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [entry], calendar: [],
+    });
+    vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(createElement(AppRoot, null, createElement(AdminScheduleScreen, { today: day(0) })));
+    });
+    await settle();
+    const named = [...host.querySelectorAll<HTMLElement>("*")]
+      .filter((el) => (el.textContent ?? "").includes("Иванов Иван") && !(el.textContent ?? "").includes("Добавить"));
+    const row = named.at(-1);
+    if (!row) throw new Error("не нашёл запись в списке дня");
+    await act(async () => row.click());
+    await settle(2);
+    return host;
+  }
+
+  const spyRange = () => {
+    const calls: NewEntryRangeInput[] = [];
+    vi.spyOn(apiClient, "createEntryRange").mockImplementation(async (input) => {
+      calls.push(input);
+      return { created: [], updated: [], skipped: [], replacedAbsence: [], notified: { delivered: 0, intended: 0 } };
+    });
+    return calls;
+  };
+  const save = async (el: HTMLElement, label: string) => {
+    await act(async () => {
+      [...el.querySelectorAll("button")].find((b) => b.textContent === label)!.click();
+    });
+    await settle(2);
+  };
+  const checkbox = (el: HTMLElement, label: string) => {
+    const found = [...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+      .find((box) => (box.closest("label")?.textContent ?? box.parentElement?.parentElement?.textContent ?? "").includes(label));
+    if (!found) throw new Error(`не нашёл галочку «${label}»`);
+    return found;
+  };
+
+  it("отпуск, переведённый в «День», уходит заменой, а не правкой", async () => {
+    const calls = spyRange();
+    const update = vi.spyOn(apiClient, "updateEntry");
+    const el = await openEditOf(VACATION);
+
+    await setValue(kindSelect(el), "p:3");
+    expect(el.textContent).toContain("Отпуск в эти дни заменится новой записью");
+    await save(el, "Сохранить");
+
+    expect(update).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      employeeId: EMPLOYEE.id, from: day(0), to: day(5), mode: "rewrite", replaceAbsences: true, templateId: 3,
+    });
+  });
+
+  // Один день из отпуска: «С» и «По» сужаются до пятницы — и уходит отрезок из
+  // одного дня, а не правка всей записи, которая перенесла бы весь отпуск в смену.
+  it("один день из отпуска: суженные «С/По» шлют замену одного дня", async () => {
+    const calls = spyRange();
+    const update = vi.spyOn(apiClient, "updateEntry");
+    const el = await openEditOf(VACATION);
+
+    await setValue(kindSelect(el), "p:3");
+    const dates = [...el.querySelectorAll<HTMLInputElement>('input[type="date"]')];
+    expect(dates).toHaveLength(2);
+    await setValue(dates[0]!, day(2));
+    await setValue(dates[1]!, day(2));
+    // Выходные включаются, чтобы тест не зависел от дня недели запуска.
+    await act(async () => checkbox(el, "Включая выходные").click());
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("1 день отсутствия заменится");
+    await save(el, "Сохранить");
+
+    expect(update).not.toHaveBeenCalled();
+    expect(calls[0]).toMatchObject({ from: day(2), to: day(2), replaceAbsences: true, includeWeekends: true });
+  });
+
+  it("отпуск, оставшийся отпуском, правится как раньше — одной записью", async () => {
+    const calls = spyRange();
+    const update = vi.spyOn(apiClient, "updateEntry").mockResolvedValue({ entry: VACATION, notified: { delivered: 0, intended: 0 } });
+    const el = await openEditOf(VACATION);
+
+    await setValue([...el.querySelectorAll<HTMLInputElement>('input[type="date"]')][1]!, day(3));
+    await save(el, "Сохранить");
+
+    expect(calls).toHaveLength(0);
+    expect(update).toHaveBeenCalledWith(VACATION.id, expect.objectContaining({ category: "vacation", date: day(0), endDate: day(3) }));
+  });
+
+  async function rangeForm() {
+    const el = await openForm();
+    const dates = [...el.querySelectorAll<HTMLInputElement>('input[type="date"]')];
+    await setValue(dates[0]!, "2026-06-08");
+    await setValue(dates[1]!, "2026-06-12");
+    const personRow = [...el.querySelectorAll("button")].find((b) => (b.textContent ?? "").includes("Иванов Иван"))!;
+    await act(async () => personRow.click());
+    return el;
+  }
+
+  it("обычная расстановка по умолчанию отпуск не заменяет", async () => {
+    const calls = spyRange();
+    const el = await rangeForm();
+    expect(checkbox(el, "Заменить отпуск и больничный").checked).toBe(false);
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("пропустятся.");
+    await save(el, "Добавить");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.replaceAbsences).toBeUndefined();
+  });
+
+  it("с переключателем расстановка шлёт замену и говорит об этом", async () => {
+    const calls = spyRange();
+    const el = await rangeForm();
+    await act(async () => checkbox(el, "Заменить отпуск и больничный").click());
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("уступят место новой записи");
+    await save(el, "Добавить");
+    expect(calls[0]).toMatchObject({ replaceAbsences: true, mode: "fill" });
+  });
+});

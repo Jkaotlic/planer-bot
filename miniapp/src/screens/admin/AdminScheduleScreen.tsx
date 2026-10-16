@@ -15,6 +15,8 @@ import {
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   describeEntryRangeResult,
+  absenceReplaceHint,
+  eachDayIso,
   entryRangeHint,
   isAbsence,
   planEntryRange,
@@ -37,7 +39,7 @@ import {
   type Template,
   type TemplateRolesView,
 } from "../../api/client";
-import type { DayCalendar, EntryRangeMode } from "@planer/shared";
+import type { DayCalendar, DayOccupancy, EntryRangeMode } from "@planer/shared";
 import { categoryLabel, useEntryPalette, type Category } from "../../categories";
 import { BackToTodayButton } from "../../components/BackToTodayButton";
 import { ActionButton, Card, CheckRow, Group, Hint, MenuRow, SelectField, ShortfallBanner, SpecialDaysLine } from "../../ui";
@@ -833,6 +835,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
   const [end, setEnd] = useState<string>(existing?.end ?? "18:00");
   const [title, setTitle] = useState<string>(existing?.title ?? "");
   const [includeWeekends, setIncludeWeekends] = useState(false);
+  const [replaceToggle, setReplaceToggle] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -858,7 +861,23 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
   const rangeAllowed = !(existing && absence);
   const isRange = rangeAllowed && to > from;
   const showTo = rangeAllowed || absence;
-  const plan = planEntryRange({ from, to, category, includeWeekends, mode, calendar });
+  /**
+   * Отсутствие, которому сменили вид на рабочий, — явное намерение заменить
+   * (прод, 2026-10-16: отпуск, сохранённый «Днём», не менялся вовсе). Уходит
+   * отрезком с `replaceAbsences` даже на один день: правка строки перенесла бы
+   * в смену ВЕСЬ отпуск, а суженные «С/По» значат «только эти дни». Человек тот
+   * же — иначе это уже не замена его отпуска, а запись другому.
+   */
+  const replacingEdited =
+    existing != null && isAbsence(existing.category) && !absence && employeeId === existing.employeeId;
+  const viaRange = isRange || replacingEdited;
+  const replaceAbsences = replacingEdited || replaceToggle;
+  // Про правимое отсутствие форма знает всё, и предпросмотр честно считает его
+  // дни; занятость за пределами недели ей по-прежнему неизвестна.
+  const occupied: Record<string, DayOccupancy> | undefined = replacingEdited
+    ? Object.fromEntries(eachDayIso(existing.date, existing.endDate ?? existing.date).map((d) => [d, "absence" as const]))
+    : undefined;
+  const plan = planEntryRange({ from, to, category, includeWeekends, mode, replaceAbsences, occupied, calendar });
 
   /** Значение списка «Что ставим»: пресет по id, «своё время» или отсутствие по категории. */
   const choiceValue = choice.kind === "preset" ? `p:${choice.templateId}` : choice.kind === "custom" ? "custom" : `a:${choice.category}`;
@@ -921,7 +940,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
       setFormError("«По» не может быть раньше, чем «с»");
       return;
     }
-    if (isRange && plan.days.length === 0) {
+    if (viaRange && plan.days.length === 0) {
       setFormError("В этом диапазоне не остаётся ни одного дня");
       return;
     }
@@ -930,12 +949,16 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
 
     setSaving(true);
     try {
-      if (isRange) {
+      if (viaRange) {
         if (!employeeId) {
           setFormError("Выберите работника");
           return;
         }
-        const result = await apiClient.createEntryRange({ ...fields, employeeId, from, to, includeWeekends, mode });
+        const result = await apiClient.createEntryRange({
+          ...fields, employeeId, from, to, includeWeekends, mode,
+          // Поле только когда «да»: тело без него — то, что сервер понимает как «нет».
+          ...(replaceAbsences ? { replaceAbsences: true } : {}),
+        });
         await onSaved(result.notified, describeEntryRangeResult(result));
       } else {
         const input: NewEntryInput = { ...fields, date: from };
@@ -1050,11 +1073,18 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
         />
       )}
 
-      {isRange && !absence && (
+      {viaRange && !absence && (
         <>
           <CheckRow checked={includeWeekends} onChange={setIncludeWeekends} label="Включая выходные" />
+          {/* Выключен по умолчанию: массовая расстановка, молча сносящая отпуска, —
+              не то, чего ждут от «Добавить». При правке отсутствия переключателя
+              нет — намерение уже сказано сменой вида. */}
+          {!replacingEdited && (
+            <CheckRow checked={replaceToggle} onChange={setReplaceToggle} label="Заменить отпуск и больничный" />
+          )}
           <div data-testid="range-preview" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
-            Поставится {describeEntryRangePlan(plan)}. {entryRangeHint(mode)}
+            Поставится {describeEntryRangePlan(plan)}.{" "}
+            {replacingEdited && existing ? absenceReplaceHint(existing.category) : entryRangeHint(mode, replaceAbsences)}
           </div>
         </>
       )}
