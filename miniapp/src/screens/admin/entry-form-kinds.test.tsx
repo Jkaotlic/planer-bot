@@ -230,7 +230,7 @@ describe("форма записи в мини-аппе — правка отре
  * Замена отсутствия (прод, 2026-10-16): админ открыл свой отпуск, сменил вид на
  * «День» и сохранил — перезапись пропустила все дни, и не поменялось ничего.
  * Правка отсутствия в рабочий вид — явное намерение заменить, и форма шлёт
- * `replaceAbsences`; обычная расстановка заменяет только по переключателю.
+ * `replaceAbsenceEntryId`; обычная расстановка заменяет только по переключателю.
  */
 describe("форма записи в мини-аппе — замена отсутствия", () => {
   const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
@@ -240,11 +240,11 @@ describe("форма записи в мини-аппе — замена отсу
     employeeId: EMPLOYEE.id, employeeName: EMPLOYEE.displayName,
   };
 
-  async function openEditOf(entry: Shift) {
+  async function openEditOf(entry: Shift, others: Shift[] = []) {
     vi.spyOn(apiClient, "getAdminEmployees").mockResolvedValue([EMPLOYEE]);
     vi.spyOn(apiClient, "getTemplates").mockResolvedValue(TEMPLATES);
     vi.spyOn(apiClient, "getTeamSchedule").mockResolvedValue({
-      employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [entry], calendar: [],
+      employees: [{ ...EMPLOYEE, rosterOrder: 0 }], shifts: [entry, ...others], calendar: [],
     });
     vi.spyOn(apiClient, "getTemplateRoles").mockResolvedValue([]);
     host = document.createElement("div");
@@ -296,8 +296,9 @@ describe("форма записи в мини-аппе — замена отсу
     expect(update).not.toHaveBeenCalled();
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      employeeId: EMPLOYEE.id, from: day(0), to: day(5), mode: "rewrite", replaceAbsences: true, templateId: 3,
+      employeeId: EMPLOYEE.id, from: day(0), to: day(5), mode: "rewrite", replaceAbsenceEntryId: VACATION.id, templateId: 3,
     });
+    expect(calls[0]).not.toHaveProperty("replaceAbsences");
   });
 
   // Один день из отпуска: «С» и «По» сужаются до пятницы — и уходит отрезок из
@@ -318,7 +319,24 @@ describe("форма записи в мини-аппе — замена отсу
     await save(el, "Сохранить");
 
     expect(update).not.toHaveBeenCalled();
-    expect(calls[0]).toMatchObject({ from: day(2), to: day(2), replaceAbsences: true, includeWeekends: true });
+    expect(calls[0]).toMatchObject({ from: day(2), to: day(2), replaceAbsenceEntryId: VACATION.id, includeWeekends: true });
+  });
+
+  // Проверка ветки: «По», заехавшее на второй отпуск, не должно его срезать —
+  // форма о нём молчит. Из правки заменяется только правимая запись.
+  it("«По» за правимым отпуском: в запросе id правимого, а не общая замена", async () => {
+    const calls = spyRange();
+    const second: Shift = { ...VACATION, id: 89, date: day(8), endDate: day(13) };
+    const el = await openEditOf(VACATION, [second]);
+
+    await setValue(kindSelect(el), "p:3");
+    await setValue([...el.querySelectorAll<HTMLInputElement>('input[type="date"]')][1]!, day(12));
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("Другие отсутствия в этих днях останутся на месте");
+    await save(el, "Сохранить");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ from: day(0), to: day(12), replaceAbsenceEntryId: VACATION.id });
+    expect(calls[0]).not.toHaveProperty("replaceAbsences");
   });
 
   it("отпуск, оставшийся отпуском, правится как раньше — одной записью", async () => {
