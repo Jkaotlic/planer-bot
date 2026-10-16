@@ -1,4 +1,4 @@
-import { addressOf, categoryAccusative, categoryPossessive } from "@planer/shared";
+import { addressOf, categoryAccusative, categoryPossessive, isAbsence } from "@planer/shared";
 import type { Bot } from "grammy";
 
 import { notifyUser } from "../bot/notify";
@@ -103,7 +103,13 @@ export function scheduleSummaryText(actorName: string, cause: ChangeCause, diff:
   }
 
   const counts: string[] = [];
-  if (diff.added.length) counts.push(`+${diff.added.length} ${plural(diff.added.length, "смена", "смены", "смен")}`);
+  // «Смены» — только когда добавлены одни смены: замена отпуска сменой добавляет и хвост
+  // отпуска, и «+2 смены» назвало бы сменой отпуск.
+  const allWork = diff.added.every((s) => !isAbsence(s.category));
+  if (diff.added.length) {
+    const n = diff.added.length;
+    counts.push(`+${n} ${allWork ? plural(n, "смена", "смены", "смен") : plural(n, "запись", "записи", "записей")}`);
+  }
   if (diff.removed.length) counts.push(`−${diff.removed.length}`);
   if (diff.changed.length) counts.push(`изменено ${diff.changed.length}`);
 

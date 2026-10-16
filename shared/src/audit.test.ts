@@ -614,6 +614,22 @@ describe("describeAuditEvent — расстановка диапазоном", (
     });
     expect(view.lines.join(" ")).not.toContain("пропущено");
   });
+  // Замена отсутствия — та часть, ради которой журнал откроют: «куда делся отпуск».
+  it("называет, сколько дней отсутствия заменено", () => {
+    const view = describeAuditEvent({
+      type: "entries_range_rewritten",
+      payload: { employeeName: "Аня", from: "2026-10-16", to: "2026-10-16", label: "День", created: 1, updated: 0, skipped: 0, absenceDaysReplaced: 1 },
+    });
+    expect(view.lines[1]).toBe("День · 1 поставлено · отсутствие заменено: 1 дн.");
+  });
+
+  it("без замены про отсутствие молчит", () => {
+    const view = describeAuditEvent({
+      type: "entries_range_rewritten",
+      payload: { employeeName: "Аня", from: "2026-10-16", to: "2026-10-16", label: "День", created: 1, skipped: 0, absenceDaysReplaced: 0 },
+    });
+    expect(view.lines.join(" ")).not.toContain("отсутств");
+  });
 });
 
 describe("отметки о сдаче в журнале", () => {

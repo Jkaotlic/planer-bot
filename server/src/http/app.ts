@@ -91,6 +91,7 @@ import {
   listSickApprovals,
   reconcilePendingDateEdit,
   rejectSickLeave,
+  requestApproval,
   sickApprovalDeps,
   takeRequestOutOfPending,
 } from "../sick-approval/sick-approval-service";
@@ -119,7 +120,11 @@ import {
   categoryLabel,
   resolveShiftTimes,
   planEntryRange,
-  type DayOccupancy,
+  entryRangeOccupancy,
+  absenceDaysOf,
+  replaceAbsenceTargetError,
+  cutDaysFromSpan,
+  sickSpanIntersection,
   eachDayIso,
   dateStr,
   timeStr,
@@ -1538,21 +1543,23 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // `from`, второй не видит вовсе, и смена встала бы посреди него.
     //
     // Занятость хранится с ВИДОМ, а не флагом: перезаписи мало знать «занят» —
-    // рабочую запись она заменит, отпуск оставит, а день, где записей две,
-    // пропустит, потому что какую из них переписывать, знать неоткуда.
-    const occupied: Record<string, DayOccupancy> = {};
-    const holder = new Map<string, Shift>();
-    for (const row of listShiftsOverlapping(db, input.from, input.to)) {
-      if (row.employeeId !== input.employeeId) continue;
-      for (const day of eachDayIso(row.date, row.endDate ?? row.date)) {
-        if (occupied[day]) {
-          occupied[day] = "ambiguous";
-          holder.delete(day);
-          continue;
-        }
-        occupied[day] = isAbsence(row.category) ? "absence" : "work";
-        holder.set(day, row);
-      }
+    // рабочую запись она заменит, отпуск оставит (или вырежет, если просили), а
+    // день, где записей две, пропустит, потому что какую из них переписывать,
+    // знать неоткуда. Правило одно на сервер и оба мока — `entryRangeOccupancy`.
+    const occupancy = entryRangeOccupancy(
+      listShiftsOverlapping(db, input.from, input.to).filter((row) => row.employeeId === input.employeeId),
+    );
+    const { occupied, work: holder, absence: absenceOn } = occupancy;
+
+    // Замена одного отсутствия проверяется ДО плана: id пришёл из формы, и
+    // запись могли удалить, или форма спутала человека — молча расставить без
+    // замены значило бы снова «сохранил, а ничего не поменялось».
+    let replaceAbsenceDays: Set<string> | undefined;
+    if (input.replaceAbsenceEntryId != null) {
+      const target = getShift(db, input.replaceAbsenceEntryId);
+      const refused = replaceAbsenceTargetError(target, input.employeeId);
+      if (refused || !target) return c.json({ error: refused }, 400);
+      replaceAbsenceDays = absenceDaysOf(occupancy, target.id);
     }
 
     const plan = planEntryRange({
@@ -1561,11 +1568,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
       category: input.category,
       includeWeekends: input.includeWeekends,
       mode: input.mode,
+      replaceAbsences: input.replaceAbsences,
+      replaceAbsenceDays,
       occupied,
       calendar: loadCalendar(db, input.from, input.to),
     });
 
-    const { from, to, includeWeekends, mode, ...entryFields } = input;
+    const { from, to, includeWeekends, mode, replaceAbsences, replaceAbsenceEntryId, ...entryFields } = input;
+    const actorId = c.get("auth").employeeId;
     const now = teamNow(config.teamTz);
     // Часы считаются НА КАЖДЫЙ ДЕНЬ, а не берутся из тела один раз: у пресета
     // своя пятница, и смена, растянутая на неделю одними часами, ставит в
@@ -1595,7 +1605,21 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // так же, как у одиночной правки, письмо должно назвать смену, о которой
     // договаривались, а не ту, что получилась.
     const swapsBeforeByShiftId = new Map<number, { request: SwapRequest; payload: SwapAuditPayload }[]>();
+    // Дни, из которых вырезается отсутствие, — по самому отсутствию: отпуск
+    // 12–17 с заменённой пятницей режется один раз, а не по разу на день.
+    const replacedByAbsence = new Map<number, { row: Shift; days: string[] }>();
+    for (const date of plan.replacedAbsence) {
+      const row = absenceOn.get(date)!;
+      const slot = replacedByAbsence.get(row.id);
+      if (slot) slot.days.push(date);
+      else replacedByAbsence.set(row.id, { row, days: [date] });
+    }
+    const cuts: AbsenceCut[] = [];
     db.transaction(() => {
+      // Сначала отсутствие, потом смены: всё в одной транзакции, и смена не
+      // может встать, если отпуск из её дня не ушёл, — иначе в дне оказались бы
+      // обе записи, ровно «две записи на день», которую перезапись потом не тронет.
+      for (const { row, days } of replacedByAbsence.values()) cuts.push(cutAbsenceDb(row, days, actorId));
       for (const date of plan.days) {
         const before = rewrites.has(date) ? holder.get(date) : undefined;
         if (!before) {
@@ -1643,6 +1667,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     });
 
     let notified = { delivered: 0, intended: 0 };
+    for (const cut of cuts) {
+      const reach = await announceAbsenceCut(cut, actorId, now);
+      if (reach) notified = reach;
+    }
     for (const entry of created) {
       notified = noticeBuffer.register({ actorEmployeeId: c.get("auth").employeeId, before: null, after: entry, now });
     }
@@ -1664,9 +1692,15 @@ export function createApp(deps: AppDeps): Hono<Env> {
       created: created.length,
       ...(mode === "rewrite" ? { updated: updated.length } : {}),
       skipped: plan.skipped.length,
+      // Дни, а не записи: отпуск 12–17 с заменённой неделей — одна строка, но
+      // админ спросит «сколько дней отпуска ушло», и ответ — пять.
+      ...(replaceAbsences || replaceAbsenceEntryId != null ? { absenceDaysReplaced: plan.replacedAbsence.length } : {}),
     });
 
-    return c.json({ created, updated: updated.map((u) => u.after), skipped: plan.skipped, notified }, 201);
+    return c.json(
+      { created, updated: updated.map((u) => u.after), skipped: plan.skipped, replacedAbsence: plan.replacedAbsence, notified },
+      201,
+    );
   });
 
   app.patch("/api/admin/entries/:id", requireAdmin(db, config.jwtSecret), async (c) => {
@@ -1858,19 +1892,43 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const id = Number(c.req.param("id"));
     // Read it before it's gone — the feed has to be able to say what was deleted.
     const existing = getShift(db, id);
-    // A pending sick leave has a request out to every admin. The CASCADE would drop the
-    // message ids with the row and leave live buttons behind, so they are replaced first.
-    // The database part (leave «pending», cancel and detach hand-overs the urgent branch may have
-    // started, and the delete below) runs before the first await; the letters are edited from the
-    // snapshot afterwards, so a restart cannot strand a half-deleted row.
-    const closing = existing?.category === "sick_leave"
-      ? takeRequestOutOfPending(db, existing, "🗑 Больничного уже нет — запись удалил админ")
-      : null;
-    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    if (!existing) return c.json({ error: "not_found" }, 404);
+    const removal = deleteEntryDb(existing, "🗑 Больничного уже нет — запись удалил админ");
+    if (!removal.deleted) return c.json({ error: "not_found" }, 404);
+    await announceEntryDeleted(existing, removal, c.get("auth").employeeId);
+    const notified = noticeBuffer.register({
+      actorEmployeeId: c.get("auth").employeeId, before: existing, after: null, now: teamNow(config.teamTz),
+    });
+    return c.json({ ok: true, notified });
+  });
+
+  /** What the database half of an admin delete leaves for the letters half. */
+  type EntryRemoval = {
+    deleted: boolean;
+    closing: ReturnType<typeof takeRequestOutOfPending>;
+    cancelledNow: CancelledHandover[];
+    expiredSwaps: SwapRequest[];
+    linesBefore: Map<number, SwapAuditPayload>;
+  };
+
+  /**
+   * The database half of an admin removing an entry. Shared by `DELETE` and by the
+   * range replacing an absence whole, so both leave the same trail; it runs with no
+   * await inside, so a caller can put it in its own transaction.
+   *
+   * A pending sick leave has a request out to every admin. The CASCADE would drop the
+   * message ids with the row and leave live buttons behind, so they are replaced first.
+   * The database part (leave «pending», cancel and detach hand-overs the urgent branch may have
+   * started, and the delete below) runs before the first await; the letters are edited from the
+   * snapshot afterwards, so a restart cannot strand a half-deleted row.
+   */
+  const deleteEntryDb = (existing: Shift, closingLine: string): EntryRemoval => {
+    const id = existing.id;
+    const closing = existing.category === "sick_leave" ? takeRequestOutOfPending(db, existing, closingLine) : null;
     // Any sick leave, approved or not: an approved one can carry a fan-out too, and leaving it for
     // the tick makes «Беру» answer «Смены больше нет» with no «отбой» to the colleagues.
     let cancelledNow: CancelledHandover[] = [];
-    if (existing?.category === "sick_leave") {
+    if (existing.category === "sick_leave") {
       cancelledNow = cancelHandoversForEntryDb(db, id, []);
       detachHandoversFromEntry(db, id);
     }
@@ -1878,28 +1936,119 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // their pointer at this entry, so a line naming the shift can only be built now.
     const linesBefore = new Map(listPendingSwapsForShift(db, id).map((r) => [r.id, swapAuditPayload(r)]));
     const { deleted, expiredSwaps } = deleteShift(db, id);
-    if (!deleted) return c.json({ error: "not_found" }, 404);
-    if (existing) recordAudit(db, "entry_deleted", c.get("auth").employeeId, entryAuditPayload(db, existing));
-    if (closing) await editClosedRequest(approvalDeps, closing);
-    await notifyCancelledHandovers(approvalDeps, cancelledNow, { byAdmin: true });
-    for (const request of expiredSwaps) {
-      const payload = linesBefore.get(request.id) ?? swapAuditPayload(request);
+    return { deleted, closing, cancelledNow, expiredSwaps, linesBefore };
+  };
+
+  /** The letters half of `deleteEntryDb`: journal, closed approval letters, «отбой», swaps. */
+  const announceEntryDeleted = async (existing: Shift, removal: EntryRemoval, actorEmployeeId: number): Promise<void> => {
+    recordAudit(db, "entry_deleted", actorEmployeeId, entryAuditPayload(db, existing));
+    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    if (removal.closing) await editClosedRequest(approvalDeps, removal.closing);
+    await notifyCancelledHandovers(approvalDeps, removal.cancelledNow, { byAdmin: true });
+    for (const request of removal.expiredSwaps) {
+      const payload = removal.linesBefore.get(request.id) ?? swapAuditPayload(request);
       // The admin who deleted the entry is the actor — nobody involved in the swap
       // did anything, which is exactly why they both have to be told.
-      recordAudit(db, "swap_expired", c.get("auth").employeeId, payload);
+      recordAudit(db, "swap_expired", actorEmployeeId, payload);
       if (!bot) continue;
       for (const employeeId of [request.fromEmployeeId, request.toEmployeeId]) {
         const tg = tgOf(employeeId);
         if (tg != null) await notifyUser(bot, tg, swapExpiredText(payload, "entry_deleted"));
       }
     }
-    const notified = existing
-      ? noticeBuffer.register({
-          actorEmployeeId: c.get("auth").employeeId, before: existing, after: null, now: teamNow(config.teamTz),
-        })
-      : { delivered: 0, intended: 0 };
-    return c.json({ ok: true, notified });
-  });
+  };
+
+  /** What cutting days out of one absence did — for the letters half. */
+  type AbsenceCut = {
+    before: Shift;
+    /** Первый уцелевший кусок — та же строка. `null` — отсутствие ушло целиком. */
+    after: Shift | null;
+    /** Куски после разреза, новые строки. */
+    split: { entry: Shift; asksApproval: { date: string; endDate: string | null } | null | false }[];
+    removal: EntryRemoval | null;
+    cancelledNow: CancelledHandover[];
+  };
+
+  /**
+   * Вырезать дни из отсутствия — база, без единого await, внутри транзакции
+   * диапазона. Целиком вырезанное удаляется тем же путём, что `DELETE`;
+   * укороченное правится тем же правилом, что `PATCH` сдвигает срок больничного:
+   * передачи выпавших дней гаснут сразу и с админским текстом, а не тиком,
+   * который сказал бы коллегам «снял(а) больничный» про то, чего человек не делал.
+   *
+   * Кусок после разреза — новая строка с теми же полями. Передачи его дней
+   * переходят на неё сами (`adoptByOtherSickLeave` внутри гашения): человек
+   * болен по-прежнему, и смена всё так же ищет хозяина. Поэтому кусок создаётся
+   * ДО гашения — иначе перевешивать было бы не на что.
+   */
+  const cutAbsenceDb = (row: Shift, days: readonly string[], actorEmployeeId: number): AbsenceCut => {
+    const pieces = cutDaysFromSpan(row, days);
+    const [first, ...rest] = pieces;
+    if (!first) {
+      const by = nameOfDb(db, actorEmployeeId) ?? "админ";
+      return {
+        before: row, after: null, split: [], cancelledNow: [],
+        removal: deleteEntryDb(row, `🗑 Больничного уже нет — ${by} поставил(а) на эти дни работу`),
+      };
+    }
+    const pending = row.category === "sick_leave" && row.approvalRequestedAt != null;
+    const { id: _id, createdAt: _created, updatedAt: _updated, ...fields } = row;
+    const split = rest.map((piece) => {
+      if (!pending) return { entry: createShift(db, { ...fields, ...piece }), asksApproval: false as const };
+      // Заявка, ждущая «ОК», режется по тем же правилам, что продление: уже
+      // одобренные дни куска остаются одобренными, и если кусок весь из них —
+      // спрашивать про него нечего. Иначе у куска своя заявка и свои кнопки:
+      // решение по первому куску не должно решать и его.
+      const approved = row.approvedDate == null
+        ? null
+        : sickSpanIntersection({ date: row.approvedDate, endDate: row.approvedEndDate }, piece);
+      const wholly = approved != null && approved.date === piece.date && (approved.endDate ?? approved.date) === (piece.endDate ?? piece.date);
+      const entry = createShift(db, {
+        ...fields,
+        ...piece,
+        ...(wholly
+          ? { approvalRequestedAt: null, approvedDate: null, approvedEndDate: null }
+          : { approvedDate: approved?.date ?? null, approvedEndDate: approved?.endDate ?? null }),
+      });
+      return { entry, asksApproval: wholly ? (false as const) : approved };
+    });
+    const after = updateShift(db, row.id, { date: first.date, endDate: first.endDate })!;
+    const cancelledNow = row.category === "sick_leave"
+      ? cancelHandoversForEntryDb(db, row.id, eachDayIso(after.date, after.endDate ?? after.date))
+      : [];
+    return { before: row, after, split, removal: null, cancelledNow };
+  };
+
+  /**
+   * Письма и журнал после `cutAbsenceDb` — те же, что у `PATCH`/`DELETE` записи:
+   * строка в журнале на каждую тронутую запись, письмо работнику через общий
+   * буфер (одно на всю расстановку), «отбой» коллегам, правка писем админам.
+   */
+  const announceAbsenceCut = async (
+    cut: AbsenceCut,
+    actorEmployeeId: number,
+    now: { date: string; time: string },
+  ): Promise<{ delivered: number; intended: number } | null> => {
+    if (cut.removal) {
+      await announceEntryDeleted(cut.before, cut.removal, actorEmployeeId);
+      return noticeBuffer.register({ actorEmployeeId, before: cut.before, after: null, now });
+    }
+    const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
+    if (cut.before.category === "sick_leave" && cut.before.approvalRequestedAt != null && cut.after) {
+      await reconcilePendingDateEdit(approvalDeps, cut.before, cut.after);
+    }
+    await notifyCancelledHandovers(approvalDeps, cut.cancelledNow, { byAdmin: true });
+    recordAudit(db, "entry_updated", actorEmployeeId, {
+      before: entryAuditPayload(db, cut.before), after: entryAuditPayload(db, cut.after!),
+    });
+    let reach = noticeBuffer.register({ actorEmployeeId, before: cut.before, after: cut.after, now });
+    for (const { entry, asksApproval } of cut.split) {
+      recordAudit(db, "entry_created", actorEmployeeId, entryAuditPayload(db, entry));
+      if (asksApproval !== false) await requestApproval(approvalDeps, entry, asksApproval);
+      reach = noticeBuffer.register({ actorEmployeeId, before: null, after: entry, now });
+    }
+    return reach;
+  };
 
   const tgOf = (employeeId: number): number | null => getEmployeeById(db, employeeId)?.telegramUserId ?? null;
 

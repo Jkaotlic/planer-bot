@@ -4,6 +4,8 @@ import {
   ABSENCE_CATEGORIES,
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
+  absenceReplaceHint,
+  eachDayIso,
   entryRangeHint,
   isAbsence,
   planEntryRange,
@@ -11,7 +13,7 @@ import {
   workPresets,
   ENTRY_TITLE_MAX,
 } from "@planer/shared";
-import type { DayCalendar, EntryCategory, EntryRangeMode } from "@planer/shared";
+import type { DayCalendar, DayOccupancy, EntryCategory, EntryRangeMode } from "@planer/shared";
 import type { Employee, NewEntryInput, NewEntryRangeInput, Shift, Template } from "../api/client";
 import { categoryLabel } from "../categories";
 import { PersonPicker } from "./PersonPicker";
@@ -110,6 +112,7 @@ export function AddEntryPanel({
   const [end, setEnd] = useState(existing?.end ?? "18:00");
   const [title, setTitle] = useState(existing?.title ?? "");
   const [includeWeekends, setIncludeWeekends] = useState(false);
+  const [replaceToggle, setReplaceToggle] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deciding, setDeciding] = useState(false);
@@ -136,6 +139,26 @@ export function AddEntryPanel({
   const isRange = to > from;
 
   /**
+   * Отсутствие, которому сменили вид на рабочий, — явное намерение заменить
+   * (прод, 2026-10-16: отпуск, сохранённый «Днём», не менялся вовсе). Уходит
+   * отрезком с заменой даже на один день: правка строки перенесла бы в смену
+   * ВЕСЬ отпуск, а суженные «С/По» значат «только эти дни». Человек тот же —
+   * иначе это уже не замена его отпуска, а запись другому. Зеркало мини-аппа.
+   *
+   * Заменяется только ЭТА запись (`replaceAbsenceEntryId`), а не любое
+   * отсутствие в «С/По»: «По», заехавшее на соседний отпуск, срезало бы и его,
+   * а панель о нём не знает и предпросмотр промолчал бы (решение владельца).
+   */
+  const replacingEdited =
+    rangeAllowed && existing != null && isAbsence(existing.category) && !absence && employeeId === existing.employeeId;
+  const viaRange = (rangeAllowed && isRange) || replacingEdited;
+  // Про правимое отсутствие панель знает всё, и предпросмотр честно считает его дни.
+  const editedDays = replacingEdited ? eachDayIso(existing.date, existing.endDate ?? existing.date) : [];
+  const occupied: Record<string, DayOccupancy> | undefined = replacingEdited
+    ? Object.fromEntries(editedDays.map((d) => [d, "absence" as const]))
+    : undefined;
+
+  /**
    * Предпросмотр считается той же `planEntryRange`, что применит сервер, но без
    * занятых дней: панель не знает расписание за пределами показанной недели, а
    * догадка «наверное, свободно» врала бы ровно там, где человек ей поверит.
@@ -145,7 +168,11 @@ export function AddEntryPanel({
    * обязан считать праздник выходным ровно так же, как посчитает сервер, иначе
    * он пообещает пять дней там, где встанет четыре.
    */
-  const plan = planEntryRange({ from, to, category, includeWeekends, mode, calendar });
+  const plan = planEntryRange({
+    from, to, category, includeWeekends, mode, occupied, calendar,
+    replaceAbsences: !replacingEdited && replaceToggle,
+    replaceAbsenceDays: replacingEdited ? new Set(editedDays) : undefined,
+  });
 
   function selectPreset(template: Template) {
     setChoice({ kind: "preset", templateId: template.id });
@@ -204,7 +231,7 @@ export function AddEntryPanel({
       setError("«По» не может быть раньше, чем «с»");
       return;
     }
-    if (rangeAllowed && isRange && plan.days.length === 0) {
+    if (viaRange && plan.days.length === 0) {
       setError("В этом диапазоне не остаётся ни одного дня");
       return;
     }
@@ -212,15 +239,19 @@ export function AddEntryPanel({
     // Расстановка без человека — нет: сервер требует его (`rangeEntrySchema`), а
     // «какие дни заняты» без человека спросить не у кого. Мини-апп говорит то же
     // и теми же словами; одиночная запись и отсутствие без человека допустимы.
-    if (rangeAllowed && isRange && !employeeId) {
+    if (viaRange && !employeeId) {
       setError("Выберите работника");
       return;
     }
 
     setSaving(true);
     try {
-      if (rangeAllowed && isRange) {
-        await onSaveRange!({ ...entryFields(), employeeId, from, to, includeWeekends, mode });
+      if (viaRange) {
+        await onSaveRange!({
+          ...entryFields(), employeeId, from, to, includeWeekends, mode,
+          // Поле только когда «да»: тело без него — то, что сервер понимает как «нет».
+          ...(replacingEdited ? { replaceAbsenceEntryId: existing.id } : replaceToggle ? { replaceAbsences: true } : {}),
+        });
       } else {
         const input: NewEntryInput = { ...entryFields(), date: from };
         // Полоса отсутствия — единственный случай, когда `endDate` доезжает до базы.
@@ -407,7 +438,7 @@ export function AddEntryPanel({
           </div>
         )}
 
-        {rangeAllowed && isRange && !absence && (
+        {viaRange && !absence && (
           <div className="field-group">
             <label className="range-weekends">
               <input
@@ -417,8 +448,18 @@ export function AddEntryPanel({
               />
               Включая выходные
             </label>
+            {/* Выключена по умолчанию: массовая расстановка, молча сносящая отпуска, —
+                не то, чего ждут от «Сохранить». При правке отсутствия галочки нет —
+                намерение уже сказано сменой вида. */}
+            {!replacingEdited && (
+              <label className="range-weekends">
+                <input type="checkbox" checked={replaceToggle} onChange={(e) => setReplaceToggle(e.target.checked)} />
+                Заменить отпуск и больничный
+              </label>
+            )}
             <div className="range-preview" data-testid="range-preview">
-              Поставится {describeEntryRangePlan(plan)}. {entryRangeHint(mode)}
+              Поставится {describeEntryRangePlan(plan)}.{" "}
+              {replacingEdited && existing ? absenceReplaceHint(existing.category, plan.replacedAbsence.length) : entryRangeHint(mode, replaceToggle)}
             </div>
           </div>
         )}

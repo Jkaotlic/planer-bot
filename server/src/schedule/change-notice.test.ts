@@ -132,6 +132,13 @@ describe("сводное письмо", () => {
     ],
   };
 
+  it("смена и хвост отпуска вместе — «записи», а не «смены» (замена отпуска сменой)", () => {
+    const tail = shift({ id: 107, date: "2026-09-17", start: null, end: null, category: "vacation", title: null });
+    const text = scheduleSummaryText("Аня", "manual", { added: [a1, tail], removed: [], changed: [] });
+    expect(text).toContain("+2 записи");
+    expect(text).not.toContain("смены");
+  });
+
   it("считает и перечисляет", () => {
     const text = scheduleSummaryText("Аня", "file", diff);
     expect(text).toContain("Аня обновил(а) твой график (загрузка файла)");

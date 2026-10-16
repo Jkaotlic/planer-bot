@@ -5,6 +5,7 @@ import { addDays, mondayOf, toISODate } from "../lib/week";
 import {
   employeesMock,
   mockCreateEntry,
+  mockCreateEntryRange,
   mockDeleteEntry,
   mockGetTeamSchedule,
   mockGetTemplates,
@@ -702,5 +703,100 @@ describe("мок QR-кода", () => {
 
   it("длиннее 1000 знаков — отказ словами, как у сервера", async () => {
     await expect(mockSendQrToMe("a".repeat(1001), { shape: "classic", color: "black" })).rejects.toThrow("1000");
+  });
+});
+
+/**
+ * Замена отсутствия диапазоном — так же, как сервер: мок, расходящийся с продом,
+ * показывал бы в DEV «отпуск остался», а в проде он ушёл бы, и наоборот.
+ */
+describe("мок диапазона с заменой отсутствия — как сервер", () => {
+  // 2099-03-02 — понедельник, 06-е — пятница.
+  const vacations = async () =>
+    (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).shifts
+      .filter((s) => s.employeeId === 1 && s.category === "vacation")
+      .map((s) => ({ date: s.date, endDate: s.endDate }));
+
+  it("день посреди отпуска: смена встаёт, отпуск делится на до и после", async () => {
+    const { entry } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    createdEntryIds.push(entry.id);
+
+    const result = await mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-04", to: "2099-03-04", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsences: true,
+    });
+    createdEntryIds.push(...result.created.map((s) => s.id));
+    const all = (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).shifts.filter((s) => s.employeeId === 1);
+    createdEntryIds.push(...all.filter((s) => s.id !== entry.id && s.category === "vacation").map((s) => s.id));
+
+    expect(result.created.map((s) => s.date)).toEqual(["2099-03-04"]);
+    expect(result.replacedAbsence).toEqual(["2099-03-04"]);
+    expect(await vacations()).toEqual([
+      { date: "2099-03-02", endDate: "2099-03-03" },
+      { date: "2099-03-05", endDate: "2099-03-06" },
+    ]);
+  });
+
+  it("без флага отпуск остаётся, день пропущен", async () => {
+    const { entry } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    createdEntryIds.push(entry.id);
+
+    const result = await mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-04", to: "2099-03-04", category: "shift", start: "09:00", end: "18:00", mode: "rewrite",
+    });
+
+    expect(result.created).toEqual([]);
+    expect(result.skipped).toEqual([{ date: "2099-03-04", reason: "absence" }]);
+    expect(await vacations()).toEqual([{ date: "2099-03-02", endDate: "2099-03-06" }]);
+  });
+
+  it("отпуск целиком внутри уходит", async () => {
+    // В уборку не кладётся: мок удаляет отпуск сам, это и проверяется.
+    await mockCreateEntry({ date: "2099-03-03", category: "vacation", employeeId: 1 });
+    const result = await mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-02", to: "2099-03-04", category: "shift", start: "09:00", end: "18:00",
+      mode: "fill", replaceAbsences: true,
+    });
+    createdEntryIds.push(...result.created.map((s) => s.id));
+    expect(result.created).toHaveLength(3);
+    expect(await vacations()).toEqual([]);
+  });
+});
+
+/** Замена одного отсутствия — так же, как сервер (entries-range.test.ts). */
+describe("мок диапазона с заменой одного отсутствия — как сервер", () => {
+  // 2099-03-02 — понедельник, 06-е — пятница.
+  const vacations = async () =>
+    (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).shifts
+      .filter((s) => s.employeeId === 1 && s.category === "vacation")
+      .map((s) => ({ date: s.date, endDate: s.endDate }));
+
+  it("режет только названный отпуск, второй пропущен по отсутствию", async () => {
+    const { entry: first } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-03", category: "vacation", employeeId: 1 });
+    const { entry: second } = await mockCreateEntry({ date: "2099-03-05", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    createdEntryIds.push(second.id);
+
+    const result = await mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-02", to: "2099-03-06", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsenceEntryId: first.id,
+    });
+    createdEntryIds.push(...result.created.map((s) => s.id));
+
+    expect(result.created.map((s) => s.date)).toEqual(["2099-03-02", "2099-03-03", "2099-03-04"]);
+    expect(result.replacedAbsence).toEqual(["2099-03-02", "2099-03-03"]);
+    expect(result.skipped).toEqual([
+      { date: "2099-03-05", reason: "absence" },
+      { date: "2099-03-06", reason: "absence" },
+    ]);
+    expect(await vacations()).toEqual([{ date: "2099-03-05", endDate: "2099-03-06" }]);
+  });
+
+  it("чужое отсутствие — ошибка тем же текстом, что у сервера", async () => {
+    const { entry } = await mockCreateEntry({ date: "2099-03-02", category: "vacation", employeeId: 2 });
+    createdEntryIds.push(entry.id);
+    await expect(mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-02", to: "2099-03-02", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsenceEntryId: entry.id,
+    })).rejects.toThrow("Заменяемое отсутствие принадлежит другому человеку");
   });
 });

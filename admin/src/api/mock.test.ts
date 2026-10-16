@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   employeesMock,
+  mockCreateEntry,
+  mockCreateEntryRange,
+  mockDeleteEntry,
+  mockGetTeamSchedule,
   TEMPLATES,
   mockCreateCollection,
   mockGetCollectionPayments,
@@ -133,5 +137,64 @@ describe("демо «На подтверждение»", () => {
     expect(before.length).toBeGreaterThan(0);
     await mockApproveSickLeave(before[0]!.id);
     expect((await mockGetSickApprovals()).map((r) => r.id)).not.toContain(before[0]!.id);
+  });
+});
+
+/** Замена отсутствия диапазоном — так же, как сервер (см. entries-range.test.ts). */
+describe("мок консоли: диапазон с заменой отсутствия", () => {
+  it("день посреди отпуска: смена встаёт, отпуск делится; без флага — пропуск", async () => {
+    // 2099-03-02 — понедельник, 06-е — пятница.
+    const { entry } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    const vacations = async () =>
+      (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).filter((s) => s.employeeId === 1 && s.category === "vacation");
+    try {
+      const kept = await mockCreateEntryRange({
+        employeeId: 1, from: "2099-03-04", to: "2099-03-04", category: "shift", start: "09:00", end: "18:00", mode: "rewrite",
+      });
+      expect(kept.skipped).toEqual([{ date: "2099-03-04", reason: "absence" }]);
+
+      const result = await mockCreateEntryRange({
+        employeeId: 1, from: "2099-03-04", to: "2099-03-04", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsences: true,
+      });
+      expect(result.created.map((s) => s.date)).toEqual(["2099-03-04"]);
+      expect(result.replacedAbsence).toEqual(["2099-03-04"]);
+      expect((await vacations()).map((s) => ({ date: s.date, endDate: s.endDate }))).toEqual([
+        { date: "2099-03-02", endDate: "2099-03-03" },
+        { date: "2099-03-05", endDate: "2099-03-06" },
+      ]);
+    } finally {
+      const left = (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).filter((s) => s.employeeId === 1);
+      await Promise.all([entry.id, ...left.map((s) => s.id)].map((id) => mockDeleteEntry(id)));
+    }
+  });
+});
+
+/** Замена одного отсутствия — так же, как сервер (entries-range.test.ts). */
+describe("мок консоли: диапазон с заменой одного отсутствия", () => {
+  it("режет только названный отпуск, второй пропущен по отсутствию; чужой — ошибка", async () => {
+    // 2099-03-02 — понедельник, 06-е — пятница.
+    const { entry: first } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-03", category: "vacation", employeeId: 1 });
+    const { entry: second } = await mockCreateEntry({ date: "2099-03-05", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    const { entry: foreign } = await mockCreateEntry({ date: "2099-03-02", category: "vacation", employeeId: 2 });
+    try {
+      await expect(mockCreateEntryRange({
+        employeeId: 1, from: "2099-03-02", to: "2099-03-06", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsenceEntryId: foreign.id,
+      })).rejects.toThrow("Заменяемое отсутствие принадлежит другому человеку");
+
+      const result = await mockCreateEntryRange({
+        employeeId: 1, from: "2099-03-02", to: "2099-03-06", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsenceEntryId: first.id,
+      });
+      expect(result.created.map((s) => s.date)).toEqual(["2099-03-02", "2099-03-03", "2099-03-04"]);
+      expect(result.skipped.map((s) => s.reason)).toEqual(["absence", "absence"]);
+      const left = (await mockGetTeamSchedule("2099-03-01", "2099-03-08"))
+        .filter((s) => s.employeeId === 1 && s.category === "vacation").map((s) => s.id);
+      expect(left).toEqual([second.id]);
+    } finally {
+      const left = (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).filter((s) => s.employeeId === 1 || s.employeeId === 2);
+      await Promise.all(left.filter((s) => s.date >= "2099-03-01").map((s) => mockDeleteEntry(s.id)));
+    }
   });
 });
