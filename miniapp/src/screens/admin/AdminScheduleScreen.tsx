@@ -1092,7 +1092,7 @@ function EntryForm({ employees, templates, existing, defaultDate, calendar, onCa
           )}
           <div data-testid="range-preview" style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
             Поставится {describeEntryRangePlan(plan)}.{" "}
-            {replacingEdited && existing ? absenceReplaceHint(existing.category) : entryRangeHint(mode, replaceToggle)}
+            {replacingEdited && existing ? absenceReplaceHint(existing.category, plan.replacedAbsence.length) : entryRangeHint(mode, replaceToggle)}
           </div>
         </>
       )}

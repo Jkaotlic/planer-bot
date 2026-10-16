@@ -293,7 +293,10 @@ export function entryRangeHint(mode: EntryRangeMode, replaceAbsences = false): s
  * прочитать про него. «Только там, куда она не встанет» — это и выходные без
  * галочки, и дни за пределами «С/По»: отпуск режется ровно по новой записи.
  */
-export function absenceReplaceHint(absence: EntryCategory): string {
+export function absenceReplaceHint(absence: EntryCategory, replacedDays: number): string {
+  // «С/По» могут вовсе не задеть правимую запись — тогда обещать замену было бы враньём:
+  // смена встанет рядом, а отсутствие останется целым.
+  if (replacedDays === 0) return `${categoryLabel(absence)} выбранных дней не касается и останется как есть.`;
   // Вторая фраза — потому что сервер заменяет только правимую запись: соседний
   // отпуск, на который заехали «По», останется, и день с ним пропустится.
   return `${categoryLabel(absence)} в эти дни заменится новой записью и останется только там, куда она не встанет. Другие отсутствия в этих днях останутся на месте.`;

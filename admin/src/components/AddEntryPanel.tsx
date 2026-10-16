@@ -459,7 +459,7 @@ export function AddEntryPanel({
             )}
             <div className="range-preview" data-testid="range-preview">
               Поставится {describeEntryRangePlan(plan)}.{" "}
-              {replacingEdited && existing ? absenceReplaceHint(existing.category) : entryRangeHint(mode, replaceToggle)}
+              {replacingEdited && existing ? absenceReplaceHint(existing.category, plan.replacedAbsence.length) : entryRangeHint(mode, replaceToggle)}
             </div>
           </div>
         )}
